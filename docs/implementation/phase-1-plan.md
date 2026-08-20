@@ -92,7 +92,9 @@ PK везде — `uuid` (генерация `gen_random_uuid()`, несекве
 - `user_id FK CASCADE`, `level entitlement_level` (v1 всегда `ARI_CORE`), `status subscription_status`
 - `valid_from`, `valid_until`, `auto_renew bool`
 - `billing_provider text` (v1: `'TELEGRAM_STARS'`), `provider_subscription_ref text`, `plan_version text`, `price_stars_at_purchase int` — снапшот цены/плана в момент покупки
-- Партиальный уникальный индекс: максимум одна `status='ACTIVE'` подписка на пользователя
+- **Понятие entitling-статуса:** подписка даёт CORE-entitlement, пока `status IN ('ACTIVE','CANCEL_AT_PERIOD_END') AND now() < valid_until`. Семантика `CANCEL_AT_PERIOD_END`: пользователь отключил продление, но оплаченный период дослуживается — доступ сохраняется до `valid_until`, немедленное прекращение возможно только через refund (LOCKED §4). Это согласуется и с механикой Telegram Stars (отмена = не продлевать; оплаченный период не возвращается без refund).
+- Партиальный уникальный индекс: **максимум одна entitling-подписка на пользователя** — `UNIQUE (user_id) WHERE status IN ('ACTIVE','CANCEL_AT_PERIOD_END')`. Ограничение только по `ACTIVE` недостаточно: две одновременно действующие entitlement-строки не должны быть возможны.
+- ⚠️ **Открытый продуктовый пункт (мини-STRATEGY REVIEW):** LOCKED §4 напрямую описывает refund и неуспешное продление, но не отмену с дослуживанием периода. Рекомендация выше («entitling до valid_until») — вывод из refund-правила и механики Stars, не догадка о новой фиче; требуется явное «да» владельца при утверждении этого плана. Если владелец решит иначе (отмена = немедленная потеря CORE), меняется только условие entitling-статуса — схема не меняется.
 - Refund — событие поверх статуса (`CANCELLED` + `cancelled_reason text`), Proof'ы и запущенные job не трогаются (неретроактивность — B1)
 
 ### 4.2 Каталог знаний
@@ -120,12 +122,30 @@ PK везде — `uuid` (генерация `gen_random_uuid()`, несекве
 - `original_question text`, `normalized_task jsonb`, `normalized_task_hash text` (sha256 канонизированной задачи)
 - **Снапшот entitlement (B1):** `entitlement_at_start entitlement_level`, `capability_at_start research_capability`, `budget_at_start jsonb` (плоские значения: max_search_queries, max_source_opens, max_model_cost_micro, max_wall_clock_sec, reserved_recovery_budget — все int)
 - `idempotency_key text`, `UNIQUE (user_id, idempotency_key)` — retry клиента возвращает тот же job
-- **Dedupe активных job (B10):** `UNIQUE (user_id, normalized_task_hash) WHERE state IN ('QUEUED','RUNNING','AWAITING_CLARIFICATION')` — конфликт при INSERT обрабатывается как «вернуть существующий job», не ошибка
+- **Определение active-состояний (фиксируется здесь и используется всеми инвариантами):** `ACTIVE_STATES = QUEUED, RUNNING, AWAITING_CLARIFICATION`. Терминальные: `SUCCEEDED, FAILED, CANCELLED, BUDGET_LIMIT_REACHED`.
+- **Dedupe активных job (B10):** `UNIQUE (user_id, normalized_task_hash) WHERE state IN (ACTIVE_STATES)` — конфликт при INSERT обрабатывается как «вернуть существующий job», не ошибка
+- **Один активный job на пользователя — инвариант БД, не правило worker:** партиальный уникальный индекс `UNIQUE (user_id) WHERE state IN (ACTIVE_STATES)`. Два конкурентных API-запроса физически не создадут два активных job. Это v1-ограничение инженерного уровня (в LOCKED не зафиксировано): если CORE позже захочет параллельные исследования, индекс снимается одной миграцией, ничего не переписывая.
 - `clarification_attempts smallint default 0 CHECK (<= 2)` — жёсткий лимит уточнений на уровне БД
 - `unread bool default false` (серверный completion/unread state — B11)
 - `started_at`, `finished_at`, `error_code text NULL` (без stack trace и внутренностей — пользователю не протекает)
 
-**research_job_transitions** — append-only журнал: `job_id FK CASCADE`, `from_state`, `to_state`, `at`, `note text`. Без UPDATE/DELETE (правкой не занимаемся — только вставка).
+**research_job_transitions** — append-only журнал: `job_id FK CASCADE`, `from_state`, `to_state`, `at`, `note text`.
+
+**State machine — разрешённые переходы (граф фиксируется здесь):**
+
+```
+QUEUED                 → RUNNING | CANCELLED
+RUNNING                → AWAITING_CLARIFICATION | SUCCEEDED | FAILED |
+                         CANCELLED | BUDGET_LIMIT_REACHED
+AWAITING_CLARIFICATION → RUNNING | FAILED | CANCELLED
+терминальные (SUCCEEDED, FAILED, CANCELLED, BUDGET_LIMIT_REACHED) → переходов нет
+```
+
+Механика энфорсмента — на уровне БД, не только приложения:
+- Триггер `BEFORE UPDATE OF state ON research_jobs` валидирует пару (OLD.state → NEW.state) по графу; запрещённый переход (в т.ч. любой выход из терминального состояния) → exception.
+- Триггер `AFTER UPDATE OF state` автоматически пишет строку в `research_job_transitions` — смена состояния и журнальная запись физически неразделимы (одна транзакция, один механизм; забыть записать журнал невозможно).
+- Append-only журнала гарантируется триггером `BEFORE UPDATE OR DELETE ON research_job_transitions` → exception.
+- `transitionJobState()` остаётся единственной точкой входа в приложении (читаемые ошибки, note), но корректность держат триггеры.
 
 **interpretations** — результат Question Interpreter (B3), существует ДО job (невалидный ввод не создаёт job и не трогает квоту):
 - `user_id FK CASCADE`, `research_job_id FK CASCADE NULL`
@@ -139,7 +159,8 @@ PK везде — `uuid` (генерация `gen_random_uuid()`, несекве
 - `user_id FK CASCADE`, `research_job_id FK CASCADE UNIQUE` — максимум одна резервация на job
 - `state quota_reservation_state default 'RESERVED'`, `resolved_at`
 - Инвариант перехода: `RESERVED → CONSUMED` (успешный Proof) | `RESERVED → RELEASED` (invalid, unsupported, техническая ошибка, отмена). Терминальные состояния не меняются (CHECK + прикладной код).
-- **Транзакция создания DEMO-job:** `SELECT id FROM users WHERE id=$1 FOR UPDATE` → подсчёт RESERVED+CONSUMED → если < limit (из config, сейчас 3) → INSERT job + INSERT reservation + enqueue pg-boss — всё в одном коммите. Гонка двух устройств упирается в блокировку строки user.
+- **Формула admission (фиксируется явно):** новый DEMO-job допускается, только если `COUNT(state IN ('RESERVED','CONSUMED')) < demo_lifetime_proof_limit`. Активные резервации занимают слот наравне с потраченными — три «висящих» RESERVED блокируют четвёртый запуск, даже пока CONSUMED = 0. При этом **израсходованной lifetime-квотой** (то, что видит пользователь: «использовано X из 3») считаются только `CONSUMED`; RELEASED слот возвращают.
+- **Транзакция создания DEMO-job:** `SELECT id FROM users WHERE id=$1 FOR UPDATE` (сериализация конкурентных стартов) → подсчёт RESERVED+CONSUMED → если < limit (из config, сейчас 3) → INSERT job + INSERT reservation + enqueue pg-boss — всё в одном коммите. FOR UPDATE лишь сериализует; корректность даёт именно формула admission выше.
 - CORE-job резервацию не создаёт (лимита нет), счётчик DEMO не трогается — «lifetime живёт на уровне User», история сохраняется при смене плана.
 
 ### 4.5 Proof (скелет — наполняется Фазой 7, схема сейчас: цепочка владения и ON DELETE решаются в первых миграциях — B6/B7)
@@ -159,6 +180,7 @@ PK везде — `uuid` (генерация `gen_random_uuid()`, несекве
 - `proof_id FK CASCADE NOT NULL`, `source_id FK RESTRICT NOT NULL` — provenance обязателен
 - `relationship evidence_relationship`, `fragment text` (оригинал, не переводится), `summary text` (локализуемое краткое описание), `does_not_prove text`
 - `fetched_at`, `observed_at`, `data_as_of`, `freshness_class text CHECK IN ('LOW','MEDIUM','HIGH_CHANGE')`
+- **Неизменяемый provenance на момент исследования** (source-строка глобальна и мутабельна — health, canonical URL могут меняться; Proof обязан ссылаться на то, что видел ARI тогда): `retrieved_url text NOT NULL` (точный локатор в момент fetch, включая anchor/параметры), `content_hash text NOT NULL` (sha256 нормализованного полученного фрагмента), `snapshot_ref text NULL` (ссылка на сохранённый снапшот контента — заполнение возможно с Фазы 6, колонка с первого дня). Строка evidence после создания не обновляется (append-only по конвенции; правка = новая версия Proof в Фазе 7).
 
 **proof_gaps** — `proof_id FK CASCADE`, `description`, `kind text`
 
@@ -194,7 +216,7 @@ budget_demo / budget_core   = профили бюджетов job (целые ч
 ## 6. Job-модель (pg-boss)
 
 - pg-boss в том же PostgreSQL (schema `pgboss`), очередь `research`.
-- **Enqueue транзакционен:** вставка задачи pg-boss выполняется тем же коммитом, что и INSERT research_jobs + резервация квоты (pg-boss поддерживает insert через клиентскую транзакцию). Нет коммита — нет задачи; есть задача — есть job. Outbox не нужен.
+- **Enqueue транзакционен — через тот же connection:** pg-boss получает transaction-aware db adapter (`options.db`), привязанный к КЛИЕНТУ ТЕКУЩЕЙ транзакции Drizzle/pg, — не отдельный вызов через собственный пул pg-boss. INSERT research_jobs + INSERT reservation + `boss.send(...)` исполняются одним `BEGIN…COMMIT`. Нет коммита — нет задачи; есть задача — есть job. Outbox не нужен. Тест §9.9 доказывает именно это (rollback после send → задачи нет).
 - Worker (`worker.ts`): отдельный процесс; конкурентность v1 = 1 job на пользователя (проверка при взятии), глобально — конфигурируемо (старт: 2).
 - Ретраи pg-boss ограничены (retryLimit 2, backoff); идемпотентность гарантируют констрейнты (`proofs.research_job_id UNIQUE`, reservation UNIQUE), а не дисциплина кода.
 - Рестарт worker: при старте — подхват задач pg-boss (встроенно); job, зависший в RUNNING дольше `max_wall_clock_sec` × 1.5 — переводится в FAILED с `RELEASED` резервацией (честный сбой вместо вечного RUNNING).
@@ -228,11 +250,15 @@ Vitest + PGlite (in-memory Postgres) либо локальный Postgres — о
 2. `UNIQUE (provider, provider_user_id)` — второй identity отклоняется.
 3. Idempotency: два INSERT job с одним `(user_id, idempotency_key)` → один job.
 4. Dedupe: два активных job с одним `normalized_task_hash` → второй INSERT конфликтует; после SUCCEEDED — новый создаётся.
-5. Квота: параллельные транзакции резервации при лимите 3 → максимум 3 RESERVED+CONSUMED (тест гонки через FOR UPDATE).
-6. RELEASED не считается в лимите; CONSUMED не освобождается.
+5. **Admission-гонка:** 4 параллельные попытки резервации при лимите 3 и CONSUMED=0 → приняты ровно 3, четвёртая отклонена (RESERVED занимает слот до завершения job).
+6. RELEASED не считается в лимите (после RELEASE четвёртая попытка проходит); CONSUMED не освобождается.
 7. `proofs.research_job_id UNIQUE` — второй Proof на job отклоняется.
 8. Удаление user каскадит все user-owned таблицы и НЕ трогает projects/sources/topics.
-9. Enqueue-транзакция: rollback после INSERT job → задача в pg-boss не появляется.
+9. Enqueue-транзакция: rollback после INSERT job + boss.send → задача в pg-boss не появляется; commit → появляется ровно одна.
+10. **Один активный job:** два конкурентных INSERT разных задач одного user → второй упирается в партиальный индекс; после перевода первого в терминальное состояние — создаётся.
+11. **State machine:** запрещённый переход (`SUCCEEDED → RUNNING`, `CANCELLED → QUEUED`) → exception из триггера; разрешённая цепочка `QUEUED → RUNNING → SUCCEEDED` проходит и оставляет ровно 2 строки журнала.
+12. **Append-only журнал:** UPDATE и DELETE на research_job_transitions → exception; смена state без строки журнала невозможна (проверка автозаписи триггером).
+13. **Entitling-подписка:** вторая строка со статусом ACTIVE или CANCEL_AT_PERIOD_END для того же user → отклонена индексом; ACTIVE + EXPIRED сосуществуют.
 
 ## 10. Порядок выполнения
 
