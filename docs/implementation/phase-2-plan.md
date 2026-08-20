@@ -1,6 +1,6 @@
 # Фаза 2 — Telegram identity + App shell + Onboarding + Motion System. План
 
-Статус: **ожидает утверждения владельца. Код не пишется до подтверждения.**
+Статус: **утверждён владельцем 2026-08-20** (после трёх раундов ревью: rate-limit хранилище, HMAC-вектор, CSRF/Origin, verified-TG bucket, bootstrap-исключение auth).
 
 Основания: `01_LOCKED_DECISIONS.md` §9–10, `02_ARCHITECTURE_AND_PHASES.md` (Фаза 2 + security DoD), skill `atlas-product-ui`, canonical v3 §2A/§58A/§58B (identity, платформенный адаптер), фундамент Фазы 1.
 

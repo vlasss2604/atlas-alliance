@@ -1,26 +1,140 @@
 @import "tailwindcss";
 
+/* ATLAS PROOF — визуальный язык и Motion System (phase-2-plan §5).
+   Тёмная research-intelligence атмосфера: near-black/navy фон, cyan/teal
+   акцент только для активного элемента и primary CTA, glass-панели,
+   pill-кнопки. Единый источник токенов — здесь. */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Палитра */
+  --atlas-bg: #060b12; /* near-black / navy-black */
+  --atlas-bg-raised: #0a1220;
+  --atlas-glass: rgba(16, 28, 44, 0.6);
+  --atlas-border: rgba(94, 234, 212, 0.14); /* тонкий светящийся border */
+  --atlas-text: #e6edf5;
+  --atlas-text-dim: #8b9bb0;
+  --atlas-cyan: #22d3ee; /* активный элемент / primary CTA */
+  --atlas-teal: #14b8a6;
+  --atlas-green: #34d399; /* supported */
+  --atlas-amber: #fbbf24; /* nuance */
+  --atlas-red: #f87171; /* conflict */
+
+  /* Motion System: durations в канонных диапазонах (100–180/150–250/200–350),
+     навигации 500ms+ нет. */
+  --motion-micro: 140ms;
+  --motion-transition: 200ms;
+  --motion-large: 280ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--atlas-bg);
+  --color-foreground: var(--atlas-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--atlas-bg);
+  color: var(--atlas-text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  /* Telegram viewport: динамическая высота, без прыжков клавиатуры */
+  min-height: 100dvh;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Glass-панель */
+.glass {
+  background: var(--atlas-glass);
+  border: 1px solid var(--atlas-border);
+  border-radius: 1.25rem; /* очень большие радиусы */
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* Pill-кнопки. Только transform/opacity в анимации. */
+.pill {
+  border-radius: 9999px;
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    opacity var(--motion-micro) var(--ease-out),
+    background-color var(--motion-micro) var(--ease-out);
+}
+.pill:active {
+  transform: scale(0.97);
+}
+
+.cta {
+  background: var(--atlas-cyan);
+  color: #04222b;
+  font-weight: 600;
+}
+.cta:disabled {
+  opacity: 0.45;
+}
+
+/* Motion-примитивы: enter/exit */
+@keyframes atlas-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.enter {
+  animation: atlas-fade-up var(--motion-transition) var(--ease-out) both;
+}
+@keyframes atlas-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.sheet-enter {
+  animation: atlas-sheet-up var(--motion-large) var(--ease-out) both;
+}
+
+/* Индикатор unread на ARI-кнопке */
+.unread-dot::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--atlas-cyan);
+  box-shadow: 0 0 8px var(--atlas-cyan);
+}
+
+/* Reduced motion: упрощение, не потеря функциональности */
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .sheet-enter {
+    animation: none;
+  }
+  .pill,
+  .pill:active {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* Safe areas Telegram */
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
 }

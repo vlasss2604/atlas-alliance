@@ -1,9 +1,18 @@
 import { eq, sql } from "drizzle-orm";
 
+import { deleteStaleRateLimits } from "../auth/rate-limit";
+import { deleteExpiredSessions } from "../auth/session";
 import { createDatabase, type Database } from "../db/client";
 import { researchJobs } from "../db/schema";
 import { createBoss, RESEARCH_QUEUE } from "./queue";
 import { resolveDemoReservation, transitionJobState } from "./research-jobs";
+
+// Periodic-обслуживание (phase-2-plan §2.1, §6): истёкшие сессии и
+// устаревшие rate-limit-бакеты.
+export async function runMaintenance(db: Database): Promise<void> {
+  await deleteExpiredSessions(db);
+  await deleteStaleRateLimits(db, 24 * 60 * 60);
+}
 
 // Зависший RUNNING (дольше бюджета × 1.5) — честный сбой вместо вечного
 // RUNNING: FAILED + освобождение резервации квоты (phase-1-plan §6).
@@ -39,6 +48,11 @@ export async function startWorker() {
   await boss.createQueue(RESEARCH_QUEUE);
 
   await sweepStaleRunningJobs(db);
+  await runMaintenance(db);
+  const maintenanceTimer = setInterval(
+    () => runMaintenance(db).catch((e) => console.error("[maintenance]", e)),
+    10 * 60 * 1000,
+  );
 
   await boss.work<{ jobId: string }>(RESEARCH_QUEUE, async ([task]) => {
     const { jobId } = task.data;
@@ -66,6 +80,7 @@ export async function startWorker() {
   });
 
   const shutdown = async () => {
+    clearInterval(maintenanceTimer);
     await boss.stop({ graceful: true });
     await pool.end();
     process.exit(0);

@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  index,
   boolean,
   integer,
   jsonb,
@@ -50,17 +51,32 @@ export const userIdentities = pgTable(
   ],
 );
 
-export const sessions = pgTable("sessions", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  // Хэш токена, не сырой токен. Наполнение — Фаза 2.
-  tokenHash: text("token_hash").notNull().unique(),
-  expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
+export const sessions = pgTable(
+  "sessions",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Хэш токена, не сырой токен.
+    tokenHash: text("token_hash").notNull().unique(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("idx_sessions_expires_at").on(t.expiresAt)],
+);
+
+// Служебная таблица rate limit аутентификации (phase-2-plan §2.1).
+// Не доменная сущность: не user-owned, живёт по TTL, чистится worker'ом.
+// bucket_key: 'ip:<addr>' | 'tg:<verified provider_user_id>'.
+export const authRateLimits = pgTable("auth_rate_limits", {
+  bucketKey: text("bucket_key").primaryKey(),
+  windowStartedAt: timestamp("window_started_at", {
+    withTimezone: true,
+  }).notNull(),
+  attempts: integer("attempts").notNull(),
 });
 
 export const subscriptions = pgTable(

@@ -1,0 +1,105 @@
+"use client";
+
+import { getPlatform } from "./platform";
+
+// API-клиент (phase-2-plan §5, B11): мгновенный UI-отклик, наблюдение
+// состояния; CSRF-токен держится в памяти модуля, не в storage.
+
+let csrfToken: string | null = null;
+
+export interface MeResponse {
+  language: "RU" | "EN";
+  onboardingCompleted: boolean;
+  entitlement: {
+    level: "DEMO" | "ARI_CORE";
+    demoUsed: number;
+    demoLimit: number;
+    priceStars: number;
+  };
+  unreadCount: number;
+  csrfToken: string;
+}
+
+export async function authenticate(): Promise<{
+  onboardingCompleted: boolean;
+} | null> {
+  const platform = getPlatform();
+  const initData = platform.getInitData();
+  const body = initData ? { initData } : { dev: true };
+  const res = await fetch("/api/auth/telegram", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    credentials: "include",
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    csrfToken: string;
+    onboardingCompleted: boolean;
+  };
+  csrfToken = data.csrfToken;
+  return { onboardingCompleted: data.onboardingCompleted };
+}
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(csrfToken ? { "X-Atlas-CSRF": csrfToken } : {}),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (res.status === 401) {
+    // Сессия истекла — тихая переаутентификация через initData и один повтор.
+    const re = await authenticate();
+    if (re) {
+      return request<T>(path, init);
+    }
+  }
+  if (!res.ok) throw new Error(`API ${path}: ${res.status}`);
+  return (await res.json()) as T;
+}
+
+export async function getMe(): Promise<MeResponse> {
+  const me = await request<MeResponse>("/api/me");
+  csrfToken = me.csrfToken;
+  return me;
+}
+
+export const api = {
+  setLanguage: (language: "RU" | "EN") =>
+    request<{ language: string }>("/api/me/language", {
+      method: "PATCH",
+      body: JSON.stringify({ language }),
+    }),
+  completeOnboarding: () =>
+    request<{ onboardingCompleted: boolean }>("/api/me/onboarding", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  getProjects: () =>
+    request<{
+      projects: { slug: string; name: string; ticker: string | null; researchable: boolean }[];
+    }>("/api/projects"),
+  getResearchJobs: () =>
+    request<{
+      jobs: {
+        id: string;
+        state: string;
+        progressStage: number;
+        originalQuestion: string;
+        unread: boolean;
+        createdAt: string;
+        finishedAt: string | null;
+      }[];
+    }>("/api/research-jobs"),
+  markRead: (id: string) =>
+    request<{ read: true }>(`/api/research-jobs/${id}/read`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  deleteAccount: () =>
+    request<{ deleted: true }>("/api/me", { method: "DELETE" }),
+};

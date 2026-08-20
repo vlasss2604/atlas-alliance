@@ -24,6 +24,7 @@ export async function setupTestDatabase(): Promise<TestContext> {
   const { db, pool } = createDatabase(TEST_DATABASE_URL);
 
   await db.execute(sql`DROP SCHEMA IF EXISTS pgboss CASCADE`);
+  await db.execute(sql`DROP SCHEMA IF EXISTS drizzle CASCADE`); // журнал миграций
   await db.execute(sql`DROP SCHEMA public CASCADE`);
   await db.execute(sql`CREATE SCHEMA public`);
 
