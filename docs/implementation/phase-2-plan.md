@@ -74,7 +74,19 @@ ON CONFLICT (bucket_key) DO UPDATE SET
 RETURNING attempts, window_started_at;
 ```
 
-Фиксированное окно: `attempts > AUTH_RATE_LIMIT` (env, старт: 20 попыток / 10 мин на ключ) → `429` + `Retry-After`. Два ключа: по IP (защита от перебора) и по telegram id из **непроверенного** initData (защита от долбёжки одним аккаунтом; ключ используется только для лимита, никакой авторизации на нём). Очистка старых строк — periodic-задача worker'а (та же, что чистит сессии). Таблица служебная: не user-owned, при удалении аккаунта не участвует, персональных данных не хранит (только telegram id и IP в bucket-ключе с TTL).
+Фиксированное окно: `attempts > AUTH_RATE_LIMIT` (env, старт: 20 попыток / 10 мин на ключ) → `429` + `Retry-After`.
+
+**Порядок применения ключей — строго после проверки подписи** (иначе злоумышленник подставляет чужой telegram id в невалидный initData и выжигает лимит жертвы — lockout чужого аккаунта):
+
+```
+1. IP-bucket   ('ip:<addr>')   → инкремент и проверка ДО валидации
+2. валидация initData (HMAC + auth_date)   → при провале выход, шаг 3 НЕ выполняется
+3. TG-bucket   ('tg:<verified provider_user_id>') → инкремент и проверка
+   ТОЛЬКО для подтверждённого подписью id
+4. login / создание сессии
+```
+
+Непроверенный `provider_user_id` не используется как ключ лимита ни при каких условиях. Оба инкремента — тем же атомарным UPSERT (конкурентно-безопасны независимо друг от друга). Очистка старых строк — periodic-задача worker'а (та же, что чистит сессии). Таблица служебная: не user-owned, при удалении аккаунта не участвует, хранит только bucket-ключ со счётчиком и TTL.
 
 ## 3. App shell
 
@@ -106,9 +118,24 @@ app/onboarding/           ← 3 экрана до первого входа
 1. **Session-bound CSRF-токен.** Выводится из сессии без новых колонок и без хранения:
    `csrfToken = HMAC_SHA256(key=CSRF_SECRET, msg=session.token_hash)` (base64url).
    Отдаётся в теле ответа `POST /api/auth/telegram` и `GET /api/me` (не в cookie — иначе double-submit теряет смысл), клиент шлёт его в заголовке `X-Atlas-CSRF`. Сервер пересчитывает от найденной сессии и сравнивает constant-time. Стороннему сайту токен недоступен: cookie `HttpOnly`, а чтобы прочитать тело `/api/me`, нужен CORS-доступ, которого нет.
-2. **Origin/Referer allowlist.** `Origin` (или `Referer` при отсутствии) обязан входить в `ALLOWED_ORIGINS` (собственный домен + домены Telegram-клиентов). Отсутствующий/чужой Origin на state-changing запросе → `403`.
+2. **Origin/Referer allowlist — только собственные frontend-origins ATLAS PROOF.** Домены Telegram в доверенные origins **не добавляются**: Mini App грузится с нашего домена, поэтому у fetch-запросов из его страницы `Origin` — наш собственный, даже когда страница открыта внутри iframe Telegram Web (домен Telegram там — родительский фрейм, а не источник запроса). Расширять allowlist доменами Telegram — только при подтверждённой технической необходимости, доказанной на реальном клиенте, и отдельным решением. Отсутствующий или чужой `Origin` (при отсутствии — `Referer`) на state-changing запросе → `403`.
 
-GET-запросы остаются без CSRF-требования, но не изменяют состояние (в т.ч. `/api/me` не помечает ничего прочитанным). CORS: `Access-Control-Allow-Origin` только для allowlist, `credentials: true`; wildcard запрещён.
+**Требование ко всем state-changing endpoints (POST / PATCH / DELETE) — три условия одновременно:** валидная сессия + валидный CSRF-токен + разрешённый Origin. Ни одно не заменяет другое.
+
+GET-запросы остаются без CSRF-требования, но не изменяют состояние (в т.ч. `/api/me` не помечает ничего прочитанным). CORS: `Access-Control-Allow-Origin` только явный allowlist, `credentials: true`; wildcard запрещён.
+
+### 3.2 Compatibility check на реальных Telegram-клиентах (обязателен до public release)
+
+Поведение cookie в embedded WebView нельзя подтвердить в эмуляторе — требуется прогон на живых клиентах. Матрица (каждая ячейка — ручная проверка, результат фиксируется в `docs/implementation/phase-2-compat.md`):
+
+| Клиент | Что проверяем |
+|---|---|
+| Telegram **Android** | auth (initData доходит и валидируется) · session cookie ставится и переживает переоткрытие · CSRF-заголовок проходит · навигация после auth |
+| Telegram **iOS** | то же (отдельно: ITP/ограничения third-party cookie) |
+| Telegram **Web** | то же в iframe-контексте (SameSite=None фактически работает) |
+| Telegram **Desktop** | то же |
+
+Если на каком-то клиенте cookie в стороннем контексте блокируется, запасной путь — Authorization-заголовок с session-токеном в памяти клиента вместо cookie (архитектура к этому готова: сервер и так сверяет `token_hash`). Решение принимается по результатам проверки, не заранее.
 
 API фазы: `POST /api/auth/telegram`, `GET /api/me` (профиль+entitlement+onboarding+language+unreadCount), `PATCH /api/me/language`, `POST /api/me/onboarding`, `GET /api/projects`, `GET /api/research-jobs` (свои), `POST /api/research-jobs/:id/read` (сброс unread), `DELETE /api/me`. Все — за `requireSession`; ownership-проверки на сервере.
 
@@ -157,9 +184,9 @@ API фазы: `POST /api/auth/telegram`, `GET /api/me` (профиль+entitleme
 1. initData валидируется **только на сервере**: HMAC (constant-time сравнение), `auth_date` с двух сторон (устаревшее + из будущего сверх skew), привязка к BOT_TOKEN. `initDataUnsafe` не используется как authority нигде. Точный состав `data_check_string` (какие поля исключаются помимо `hash` — в частности `signature` из схемы третьесторонней валидации) сверяется с актуальной документацией Telegram **в момент реализации**, а не по памяти, и пиннится тестом §9.1.
 2. `BOT_TOKEN`, `CSRF_SECRET` — только env; в логи не попадают ни initData, ни токены сессий, ни CSRF-токены (logger-фильтр из Фазы 1 расширяется).
 3. Сессии: только хэш в БД; cookie `HttpOnly; Secure; SameSite=None; Path=/`; TTL 7 дней; ротация при повторном входе; серверная инвалидация при удалении аккаунта.
-4. CSRF: session-bound токен в `X-Atlas-CSRF` + Origin/Referer allowlist на всех state-changing endpoints (§3.1); CORS без wildcard.
+4. CSRF: на каждом state-changing endpoint (POST/PATCH/DELETE) одновременно требуются сессия + session-bound токен `X-Atlas-CSRF` + разрешённый Origin (§3.1). Allowlist — только собственные frontend-origins; домены Telegram не доверяются без подтверждённой необходимости. CORS без wildcard, `credentials: true`.
 5. Разделение ролей USER/ADMIN с первого дня: `requireRole` middleware; admin-поверхностей в UI нет.
-6. Rate limit на `POST /api/auth/telegram` — таблица `auth_rate_limits`, атомарный UPSERT, два ключа (IP и telegram id), `429 + Retry-After`. Redis не вводим.
+6. Rate limit на `POST /api/auth/telegram` — таблица `auth_rate_limits`, атомарный UPSERT. IP-bucket применяется до валидации, telegram-bucket — **только для подтверждённого подписью** `provider_user_id` (§2.1): непроверенным id чужой лимит выжечь нельзя. `429 + Retry-After`. Redis не вводим.
 7. Каждый endpoint проверяет ownership на сервере (`GET /api/research-jobs` — только свои; `/read` — только свой job).
 8. `DELETE /api/me` — двойное подтверждение в UI + сессия + CSRF-токен + Origin-проверка; выполняется одним DELETE (каскады Фазы 1), сессия гасится.
 9. Dev-bypass исключён из production-кода условной компиляцией по `NODE_ENV`.
@@ -169,8 +196,8 @@ API фазы: `POST /api/auth/telegram`, `GET /api/me` (профиль+entitleme
 Юнит/интеграционные (vitest + PostgreSQL, продолжение сьюта Фазы 1):
 1. **initData — известный вектор + мутационный тест** (защита от перепутанных key/message и неверной сборки data-check-string):
    - Вектор строится **независимой референс-реализацией**, написанной в тесте напрямую по шагам документации Telegram (сортировка полей, `\n`-разделитель, `secret = HMAC(key="WebAppData", msg=BOT_TOKEN)`), а не вызовом продакшн-функции. Тест сверяет две независимые реализации — ошибка в одной не «самоподтвердится». Честная оговорка: подписать образец настоящим ботом я не могу, поэтому вектор синтетический, но строится по спецификации независимо и на реалистичной строке (URL-encoding, вложенный JSON `user`, поля `chat_instance`, `auth_date`, `hash`).
-   - Мутационные кейсы, каждый обязан давать `401`: изменён один символ в `hash`; изменён один символ в `user` при исходном `hash`; изменён `auth_date`; поля переставлены местами (проверяет, что сортировка, а не порядок прихода); подпись тем же алгоритмом, но с другим BOT_TOKEN; отсутствует `hash`; пустой initData.
-   - Позитивные кейсы: валидный вектор проходит; неизвестное дополнительное поле включается в data-check-string и не ломает валидацию.
+   - **Позитивные кейсы** (`200`): валидный вектор проходит; **тот же валидный initData с переставленными query-параметрами проходит тоже** — валидатор обязан сам строить canonical data-check-string (сортировка полей по спецификации), а не полагаться на порядок прихода; неизвестное дополнительное поле включается в data-check-string и не ломает валидацию.
+   - **Мутационные кейсы** (`401`) — везде меняется содержимое при сохранении старого `hash`: изменён один символ в `hash`; изменён один символ в `user`; изменён `auth_date`; подпись тем же алгоритмом, но с другим BOT_TOKEN; отсутствует `hash`; пустой initData.
    - Сравнение `hash` — constant-time (проверяется вызовом `timingSafeEqual`, а не `===`).
 1b. `auth_date`: старше `AUTH_MAX_AGE_SEC` → 401; из будущего сверх `AUTH_CLOCK_SKEW_SEC` → 401; в пределах skew → проходит.
 2. Первый вход создаёт users + user_identities; повторный вход того же telegram id возвращает того же user (дублей нет); гонка двух первых входов → один user.
@@ -182,7 +209,8 @@ API фазы: `POST /api/auth/telegram`, `GET /api/me` (профиль+entitleme
 7. Unread: терминальный переход job выставляет unread (Фаза 1) → `unreadCount` в `/api/me`; `POST :id/read` сбрасывает; чужой job сбросить нельзя.
 8. RBAC: USER на admin-guarded endpoint → 403.
 9. Удаление аккаунта: user-owned каскадится, знания целы, сессия невалидна.
-10. Rate limit: N+1-й запрос auth в окно → 429 с `Retry-After`; после истечения окна счётчик стартует заново; **конкурентная серия** запросов не пробивает лимит (атомарность UPSERT); лимит по IP и по telegram id независимы.
+10. Rate limit: N+1-й запрос auth в окно → 429 с `Retry-After`; после истечения окна счётчик стартует заново; **конкурентная серия** запросов не пробивает лимит (атомарность UPSERT); лимиты по IP и по telegram id независимы.
+10b. **Lockout-защита:** серия запросов с невалидной подписью, но с чужим `provider_user_id` внутри, **не расходует** telegram-bucket этого пользователя (проверяется прямым чтением `auth_rate_limits`: строки `tg:<victim>` не появилось) — жертва после этого логинится штатно; при валидной подписи telegram-bucket применяется нормально и его исчерпание даёт 429.
 
 E2E (Playwright, предустановленный Chromium, viewport 390×844, dev-режим с WebPlatformAdapter):
 11. Первый вход → onboarding (3 экрана, «Пропустить» вторичен) → shell; повторный вход → onboarding не показывается.
@@ -204,6 +232,6 @@ E2E (Playwright, предустановленный Chromium, viewport 390×844,
 
 ---
 
-Оценка: 1.5–2 нед из плана фаз. Порядок: auth+sessions → API `/me` → shell+nav+adapter → i18n → onboarding → экраны → motion-полировка → тесты → e2e.
+Оценка: 1.5–2 нед из плана фаз. Порядок: auth+sessions → CSRF/rate limit → API `/me` → shell+nav+adapter → i18n → onboarding → экраны → motion-полировка → тесты → e2e. Compatibility-check на реальных Telegram-клиентах (§3.2) — до public release, вне кодовой части фазы.
 
 **Ожидает подтверждения владельца. После «подтверждаю» — реализация строго по этому документу.**
