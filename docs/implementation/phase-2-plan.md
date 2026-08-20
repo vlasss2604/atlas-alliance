@@ -120,7 +120,19 @@ app/onboarding/           ← 3 экрана до первого входа
    Отдаётся в теле ответа `POST /api/auth/telegram` и `GET /api/me` (не в cookie — иначе double-submit теряет смысл), клиент шлёт его в заголовке `X-Atlas-CSRF`. Сервер пересчитывает от найденной сессии и сравнивает constant-time. Стороннему сайту токен недоступен: cookie `HttpOnly`, а чтобы прочитать тело `/api/me`, нужен CORS-доступ, которого нет.
 2. **Origin/Referer allowlist — только собственные frontend-origins ATLAS PROOF.** Домены Telegram в доверенные origins **не добавляются**: Mini App грузится с нашего домена, поэтому у fetch-запросов из его страницы `Origin` — наш собственный, даже когда страница открыта внутри iframe Telegram Web (домен Telegram там — родительский фрейм, а не источник запроса). Расширять allowlist доменами Telegram — только при подтверждённой технической необходимости, доказанной на реальном клиенте, и отдельным решением. Отсутствующий или чужой `Origin` (при отсутствии — `Referer`) на state-changing запросе → `403`.
 
-**Требование ко всем state-changing endpoints (POST / PATCH / DELETE) — три условия одновременно:** валидная сессия + валидный CSRF-токен + разрешённый Origin. Ни одно не заменяет другое.
+**Требование ко всем authenticated state-changing endpoints (POST / PATCH / DELETE) — три условия одновременно:** валидная сессия + валидный CSRF-токен + разрешённый Origin. Ни одно не заменяет другое.
+
+**Bootstrap-исключение — `POST /api/auth/telegram`.** Этот endpoint сессию и CSRF-токен *создаёт*, поэтому требовать их от него невозможно (иначе авторизоваться было бы нечем). Его собственная цепочка защиты:
+
+```
+1. разрешённый Origin (allowlist — тот же)
+2. IP rate limit
+3. валидный Telegram initData: HMAC + auth_date (обе границы)
+4. verified Telegram-ID rate limit (только для подтверждённого подписью id)
+5. → создание сессии, Set-Cookie, выдача CSRF-токена в теле ответа
+```
+
+Роль CSRF-токена здесь играет сама подпись initData: подделать её без BOT_TOKEN нельзя, поэтому сторонний сайт не может «залогинить» жертву. Это **единственное** исключение; список endpoints с ним закрыт и зафиксирован здесь — любой новый state-changing endpoint по умолчанию требует все три условия.
 
 GET-запросы остаются без CSRF-требования, но не изменяют состояние (в т.ч. `/api/me` не помечает ничего прочитанным). CORS: `Access-Control-Allow-Origin` только явный allowlist, `credentials: true`; wildcard запрещён.
 
@@ -184,7 +196,7 @@ API фазы: `POST /api/auth/telegram`, `GET /api/me` (профиль+entitleme
 1. initData валидируется **только на сервере**: HMAC (constant-time сравнение), `auth_date` с двух сторон (устаревшее + из будущего сверх skew), привязка к BOT_TOKEN. `initDataUnsafe` не используется как authority нигде. Точный состав `data_check_string` (какие поля исключаются помимо `hash` — в частности `signature` из схемы третьесторонней валидации) сверяется с актуальной документацией Telegram **в момент реализации**, а не по памяти, и пиннится тестом §9.1.
 2. `BOT_TOKEN`, `CSRF_SECRET` — только env; в логи не попадают ни initData, ни токены сессий, ни CSRF-токены (logger-фильтр из Фазы 1 расширяется).
 3. Сессии: только хэш в БД; cookie `HttpOnly; Secure; SameSite=None; Path=/`; TTL 7 дней; ротация при повторном входе; серверная инвалидация при удалении аккаунта.
-4. CSRF: на каждом state-changing endpoint (POST/PATCH/DELETE) одновременно требуются сессия + session-bound токен `X-Atlas-CSRF` + разрешённый Origin (§3.1). Allowlist — только собственные frontend-origins; домены Telegram не доверяются без подтверждённой необходимости. CORS без wildcard, `credentials: true`.
+4. CSRF: на каждом **authenticated** state-changing endpoint (POST/PATCH/DELETE) одновременно требуются сессия + session-bound токен `X-Atlas-CSRF` + разрешённый Origin (§3.1). Единственное исключение — bootstrap `POST /api/auth/telegram` (создаёт сессию и CSRF-токен; защищён Origin + IP-лимитом + подписью initData + verified-TG-лимитом). Allowlist — только собственные frontend-origins; домены Telegram не доверяются без подтверждённой необходимости. CORS без wildcard, `credentials: true`.
 5. Разделение ролей USER/ADMIN с первого дня: `requireRole` middleware; admin-поверхностей в UI нет.
 6. Rate limit на `POST /api/auth/telegram` — таблица `auth_rate_limits`, атомарный UPSERT. IP-bucket применяется до валидации, telegram-bucket — **только для подтверждённого подписью** `provider_user_id` (§2.1): непроверенным id чужой лимит выжечь нельзя. `429 + Retry-After`. Redis не вводим.
 7. Каждый endpoint проверяет ownership на сервере (`GET /api/research-jobs` — только свои; `/read` — только свой job).
@@ -202,7 +214,8 @@ API фазы: `POST /api/auth/telegram`, `GET /api/me` (профиль+entitleme
 1b. `auth_date`: старше `AUTH_MAX_AGE_SEC` → 401; из будущего сверх `AUTH_CLOCK_SKEW_SEC` → 401; в пределах skew → проходит.
 2. Первый вход создаёт users + user_identities; повторный вход того же telegram id возвращает того же user (дублей нет); гонка двух первых входов → один user.
 3. Сессия: в БД только хэш; истёкшая → 401; повторная аутентификация ротирует (старый токен перестаёт работать); Set-Cookie содержит `HttpOnly`, `Secure`, `SameSite=None`, `Path=/` (проверка строки заголовка).
-3b. CSRF: state-changing запрос без `X-Atlas-CSRF` → 403; с чужим/битым токеном → 403; с валидным → проходит; чужой `Origin` при валидном токене → 403; отсутствующий Origin на POST → 403; GET без токена → 200.
+3b. CSRF: authenticated state-changing запрос без `X-Atlas-CSRF` → 403; с чужим/битым токеном → 403; с валидным → проходит; чужой `Origin` при валидном токене → 403; отсутствующий Origin на POST → 403; GET без токена → 200.
+3c. **Граница bootstrap-исключения:** `POST /api/auth/telegram` с валидным initData и разрешённым Origin проходит **без** существующих сессии и CSRF-токена (200 + Set-Cookie + csrfToken в теле); он же с чужим Origin → 403. Все остальные state-changing endpoints (`PATCH /api/me/language`, `POST /api/me/onboarding`, `POST /api/research-jobs/:id/read`, `DELETE /api/me`) без сессии → 401, с сессией но без CSRF → 403 (проверяется по списку, а не на одном примере — чтобы исключение не расползлось).
 4. Onboarding: двойной POST → `completedAt` не меняется, ошибок нет; `version` фиксируется.
 5. Язык: default EN; PATCH сохраняет RU на backend; `GET /api/me` отражает.
 6. `GET /api/projects`: 3 проекта из сида; `demoAvailable` вычислен из product_config (смена config меняет ответ без деплоя).
