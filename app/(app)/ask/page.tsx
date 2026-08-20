@@ -202,7 +202,7 @@ export default function AskPage() {
               <p className="text-xs uppercase tracking-wide text-[var(--atlas-cyan)]">
                 {dict.ask.understoodTitle}
               </p>
-              <p className="text-base">{interp.understood.researchTask}</p>
+              <p className="text-base">{interp.understood.summary}</p>
               {interp.understood.assumptions.length > 0 && (
                 <div>
                   <p className="mb-1 text-xs text-[var(--atlas-text-dim)]">

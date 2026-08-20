@@ -107,7 +107,12 @@ interface InterpretBody {
     clarificationQuestion: string | null;
     provisionalTask: string | null;
     quickAnswer: string | null;
-    understood: { researchTask: string; projectSlug: string | null; assumptions: string[] } | null;
+    understood: {
+      summary: string;
+      researchTask: string;
+      projectSlug: string | null;
+      assumptions: string[];
+    } | null;
   };
   gates: {
     scope: string;
@@ -138,6 +143,7 @@ function modelSays(patch: Record<string, unknown>) {
     topic: "Token Value Capture",
     task_type: "TOKEN_VALUE",
     research_task: "Determine how value reaches token holders.",
+    understood_summary: "Вы хотите понять, доходит ли ценность до держателей токена.",
     user_assumptions: [],
     ambiguities: [],
     clarification_question: null,
@@ -610,6 +616,29 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
     const unused = await ask(c, "Hyperliquid: holder что получает?");
     // Скрипт всё ещё в очереди — значит clarify модель не вызывал.
     expect(unused.body.interpretation.understood?.projectSlug).toBe("uniswap");
+  });
+
+  it("12f. наружу идёт человеческая формулировка, а не вход Research Engine", async () => {
+    const c = await makeAuthedClient();
+    // READY: карточка «вот что я буду исследовать».
+    const ready = await ask(c, "Uniswap много зарабатывает, а холдеру что с этого?");
+    const understood = ready.body.interpretation.understood!;
+    expect(understood.summary).toBeTruthy();
+    // research_task — английский вход движка; он не должен быть тем, что
+    // показывают человеку (иначе «Понял: Determine whether and how…»).
+    expect(understood.summary).not.toBe(understood.researchTask);
+    expect(/^[\x00-\x7F]*$/.test(understood.summary)).toBe(false);
+
+    // Уточнение: понимание показывается ДО вопроса и тоже по-человечески.
+    const vague = await ask(c, "Они много зарабатывают, а holder что получает?");
+    expect(vague.body.interpretation.provisionalTask).toBeTruthy();
+    expect(/^[\x00-\x7F]*$/.test(vague.body.interpretation.provisionalTask!)).toBe(false);
+
+    // Контракт схемы: маршрут исследования без человеческой формулировки
+    // не проходит — модель не может «забыть» объясниться.
+    expect(() =>
+      parseInterpreterResult(modelSays({ understood_summary: null })()),
+    ).toThrow(InterpreterContractError);
   });
 
   it("13. схема результата: enum, границы, лишние поля, кросс-полевая связность", async () => {

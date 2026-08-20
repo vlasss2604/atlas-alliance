@@ -66,6 +66,10 @@ export const interpreterResultSchema = z
     topic: z.string().max(120).nullable(),
     task_type: z.enum(TASK_TYPES).nullable(),
     research_task: z.string().max(MAX_RESEARCH_TASK_CHARS).nullable(),
+    // То же понимание, но НА ЯЗЫКЕ ПОЛЬЗОВАТЕЛЯ и человеческими словами.
+    // research_task — вход Research Engine (английский research language);
+    // показывать его человеку значит вывалить наружу внутреннюю кухню.
+    understood_summary: z.string().max(300).nullable(),
     user_assumptions: z.array(z.string().max(200)).max(MAX_LIST_ITEMS),
     ambiguities: z.array(z.string().max(200)).max(MAX_LIST_ITEMS),
     clarification_question: z.string().max(MAX_CLARIFICATION_CHARS).nullable(),
@@ -122,6 +126,13 @@ export function assertConsistent(r: InterpreterModelResult): void {
     !r.quick_answer?.trim()
   ) {
     fail("explanation route without quick_answer");
+  }
+  // Понимание обязано быть предъявимо человеку везде, где мы его показываем.
+  if (
+    (r.route === "DEEP_RESEARCH" || r.route === "CLARIFICATION_REQUIRED") &&
+    !r.understood_summary?.trim()
+  ) {
+    fail("missing understood_summary");
   }
   // Сравнение без второй сущности — не сравнение (канон atlas-intent).
   if (r.task_type === "COMPARISON" && r.related_entities.length === 0) {

@@ -56,6 +56,8 @@ export interface InterpretationView {
   provisionalTask: string | null;
   quickAnswer: string | null;
   understood: {
+    // Человеческая формулировка — это то, что видит пользователь.
+    summary: string;
     researchTask: string;
     projectSlug: string | null;
     projectOrAsset: string | null;
@@ -263,7 +265,7 @@ function toView(row: {
     clarificationQuestion:
       row.status === "NEEDS_CLARIFICATION" ? r.clarification_question : null,
     provisionalTask:
-      row.status === "NEEDS_CLARIFICATION" ? (r.research_task?.trim() || null) : null,
+      row.status === "NEEDS_CLARIFICATION" ? (r.understood_summary?.trim() || null) : null,
     quickAnswer:
       r.route === "QUICK_EXPLANATION" || r.route === "NO_RESEARCH_NEEDED"
         ? r.quick_answer
@@ -271,6 +273,9 @@ function toView(row: {
     understood:
       row.status === "READY" && r.research_task
         ? {
+            // Показываем человеческую формулировку; research_task —
+            // внутренний вход движка, он наружу не идёт.
+            summary: r.understood_summary?.trim() || r.research_task,
             researchTask: r.research_task,
             projectSlug: r.project_slug,
             projectOrAsset: r.project_or_asset,

@@ -108,7 +108,9 @@ async function main(): Promise<void> {
       say(`сущности: ${result.project_or_asset ?? "—"}${
         result.related_entities.length ? ` + [${result.related_entities.join(", ")}]` : ""
       }`);
-      say(`задача:   ${short(result.research_task)}`);
+      // Главная строка отчёта: это то, что увидит человек.
+      say(`ПОНЯЛ:    ${short(result.understood_summary, 220)}`);
+      say(`задача:   ${short(result.research_task)}   (внутренний вход движка)`);
       if (result.clarification_question) say(`вопрос:   ${short(result.clarification_question)}`);
       if (result.quick_answer) say(`ответ:    ${short(result.quick_answer, 300)}`);
       if (result.user_assumptions.length) say(`допущения: ${result.user_assumptions.join("; ")}`);

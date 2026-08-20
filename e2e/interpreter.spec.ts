@@ -39,6 +39,11 @@ test("14a. вопрос без проекта → уточнение → пон�
     page.getByText(/Here is what I will research|Вот что я буду исследовать/),
   ).toBeVisible({ timeout: 15_000 });
 
+  // Понимание предъявлено человеческим языком: внутренний research task
+  // (английский вход движка) наружу не выходит.
+  await expect(page.getByText(/держателей токена|token holders/)).toBeVisible();
+  await expect(page.getByText(/^Determine whether and how/)).toHaveCount(0);
+
   // Запуск Proof закрыт честно: движок исследований появится в Фазе 6
   const start = page.getByRole("button", { name: /Start Proof|Начать Proof/ });
   await expect(start).toBeDisabled();

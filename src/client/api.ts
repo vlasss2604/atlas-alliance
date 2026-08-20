@@ -90,6 +90,7 @@ export interface InterpretationView {
   provisionalTask: string | null;
   quickAnswer: string | null;
   understood: {
+    summary: string;
     researchTask: string;
     projectSlug: string | null;
     projectOrAsset: string | null;
