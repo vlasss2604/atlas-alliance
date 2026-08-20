@@ -12,6 +12,7 @@
     "db:seed": "tsx scripts/seed.ts",
     "worker:dev": "tsx src/server/jobs/worker.ts",
     "test": "vitest run",
+    "smoke:interpreter": "tsx scripts/smoke-interpreter.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
