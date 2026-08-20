@@ -23,7 +23,13 @@ async function ensureListener(): Promise<void> {
       if (!msg.payload) return;
       try {
         const { job_id } = JSON.parse(msg.payload) as { job_id: string };
-        subscribers.get(job_id)?.forEach((fn) => fn());
+        subscribers.get(job_id)?.forEach((fn) => {
+          try {
+            fn();
+          } catch {
+            /* подписчик не должен ронять слушателя */
+          }
+        });
       } catch {
         /* мусор в канале игнорируем — истина в БД */
       }
@@ -40,19 +46,36 @@ async function ensureListener(): Promise<void> {
   }
 }
 
+let restarting = false;
+
 async function restartListener(): Promise<void> {
+  if (restarting) return;
+  restarting = true;
   const old = client;
   client = null;
   old?.removeAllListeners();
   await old?.end().catch(() => {});
-  if (subscribers.size === 0) return;
-  await new Promise((r) => setTimeout(r, reconnectDelayMs));
-  reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000);
-  // Падение LISTEN не роняет API: подписчики продолжают жить, клиент
-  // деградирует в собственный polling; после reconnect сигналим всем —
-  // пусть перечитают состояние (могли пропустить события).
-  await ensureListener().catch(() => {});
-  for (const subs of subscribers.values()) subs.forEach((fn) => fn());
+  try {
+    // Ретраим до успеха, пока есть подписчики (adversarial review, HIGH-1:
+    // одна проглоченная неудача оставляла слушателя мёртвым навсегда,
+    // а heartbeat маскировал это от клиентов).
+    while (subscribers.size > 0 && !client) {
+      await new Promise((r) => setTimeout(r, reconnectDelayMs));
+      reconnectDelayMs = Math.min(reconnectDelayMs * 2, 30_000);
+      await ensureListener().catch(() => {});
+    }
+  } finally {
+    restarting = false;
+  }
+  // После reconnect сигналим всем — могли пропустить события; истина в БД.
+  for (const subs of subscribers.values())
+    subs.forEach((fn) => {
+      try {
+        fn();
+      } catch {
+        /* noop */
+      }
+    });
 }
 
 export async function subscribeJobEvents(

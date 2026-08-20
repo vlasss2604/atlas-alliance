@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 
-import { errorResponse, HttpError, requireMutation } from "@/src/server/auth/guards";
+import { errorResponse, HttpError, requireMutation,
+  requireUuid,
+} from "@/src/server/auth/guards";
 import { researchJobs } from "@/src/server/db/schema";
 import {
   resolveDemoReservation,
@@ -26,6 +28,7 @@ export async function POST(
     const db = getDb();
     const session = await requireMutation(db, req);
     const { id } = await params;
+    requireUuid(id);
 
     const [job] = await db
       .select()

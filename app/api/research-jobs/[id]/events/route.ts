@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 
-import { errorResponse, HttpError, requireSession } from "@/src/server/auth/guards";
+import { errorResponse, HttpError, requireSession,
+  requireUuid,
+} from "@/src/server/auth/guards";
 import { researchJobs } from "@/src/server/db/schema";
 import { subscribeJobEvents } from "@/src/server/events/job-events";
 import { getDb } from "@/src/server/runtime";
@@ -10,6 +12,11 @@ export const dynamic = "force-dynamic";
 const TERMINAL = ["SUCCEEDED", "FAILED", "CANCELLED", "BUDGET_LIMIT_REACHED"];
 const HEARTBEAT_MS = 15_000;
 const MAX_STREAMS_PER_USER = 2;
+// Периодическая сверка с БД независимо от NOTIFY: даже при глухом
+// LISTEN-слушателе поток сходится к истине, а удалённый job закрывает
+// поток (adversarial review: HIGH-1, LOW-6). Тестам нужен короткий период.
+const refreshMs = () => Number(process.env.SSE_REFRESH_MS ?? 30_000);
+const MAX_CONSECUTIVE_READ_FAILURES = 3;
 
 // Реестр активных SSE процесса: не более 2 на пользователя,
 // третье подключение вытесняет старейшее (phase-3-plan §3).
@@ -43,6 +50,7 @@ export async function GET(
     const db = getDb();
     const session = await requireSession(db, req);
     const { id } = await params;
+    requireUuid(id);
 
     const readJob = async () => {
       const [job] = await db
@@ -89,8 +97,12 @@ export async function GET(
 
         // Сериализация конкурентных уведомлений: одно чтение за раз + один
         // отложенный повтор — последнее состояние никогда не теряется.
+        // Ошибка чтения не роняет процесс (adversarial review, MEDIUM-3):
+        // транзиентный сбой переживаем (сверка REFRESH_MS догонит истину),
+        // серию сбоев — честно закрываем поток, клиент уйдёт в reconnect/poll.
         let reading = false;
         let pending = false;
+        let readFailures = 0;
         const emit = async () => {
           if (closed) return;
           if (reading) {
@@ -100,9 +112,14 @@ export async function GET(
           reading = true;
           try {
             const job = await readJob();
+            readFailures = 0;
             if (!job) return close(); // job удалён (удаление аккаунта)
             send(job);
             if (TERMINAL.includes(job.state)) close();
+          } catch (e) {
+            readFailures += 1;
+            console.error("[sse] job read failed", e instanceof Error ? e.message : e);
+            if (readFailures >= MAX_CONSECUTIVE_READ_FAILURES) close();
           } finally {
             reading = false;
             if (pending && !closed) {
@@ -121,12 +138,14 @@ export async function GET(
             close();
           }
         }, HEARTBEAT_MS);
+        const refresh = setInterval(() => void emit(), refreshMs());
         const unregister = registerStream(session.userId, close);
         const onAbort = () => close();
         req.signal.addEventListener("abort", onAbort);
 
         cleanup = () => {
           clearInterval(heartbeat);
+          clearInterval(refresh);
           unsubscribe();
           unregister();
           req.signal.removeEventListener("abort", onAbort);

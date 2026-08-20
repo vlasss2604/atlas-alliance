@@ -450,3 +450,111 @@ describe("Phase 3 DoD", () => {
     });
   });
 });
+
+describe("Phase 3 — adversarial review regressions", () => {
+  it("R2. replaying an old idempotency key with a NEW interpretation is rejected, interpretation stays reusable", async () => {
+    const c = await makeAuthedClient();
+    const interpA = await makeReadyInterpretation(c.userId);
+    const key = uniq("idem");
+    const first = await jobsPOST(
+      req("/api/research-jobs", "POST", c, { interpretationId: interpA, idempotencyKey: key }),
+    );
+    expect(first.status).toBe(201);
+    const job1 = ((await first.json()) as { job: { id: string } }).job;
+
+    // Новая interpretation + старый ключ → 409, НЕ приваривается к job1
+    const interpB = await makeReadyInterpretation(c.userId);
+    const captured = await jobsPOST(
+      req("/api/research-jobs", "POST", c, { interpretationId: interpB, idempotencyKey: key }),
+    );
+    expect(captured.status).toBe(409);
+    expect(((await captured.json()) as { error: string }).error).toBe("IDEMPOTENCY_KEY_REUSED");
+    const [b] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, interpB));
+    expect(b.researchJobId).toBeNull(); // interpretation B не потеряна
+
+    // B остаётся полноценно используемой со свежим ключом (после終 job1)
+    await cancelPOST(req(`/api/research-jobs/${job1.id}/cancel`, "POST", c), {
+      params: Promise.resolve({ id: job1.id }),
+    });
+    const fresh = await jobsPOST(
+      req("/api/research-jobs", "POST", c, { interpretationId: interpB, idempotencyKey: uniq("idem") }),
+    );
+    expect(fresh.status).toBe(201);
+    const job2 = ((await fresh.json()) as { job: { id: string } }).job;
+    expect(job2.id).not.toBe(job1.id);
+    await cancelPOST(req(`/api/research-jobs/${job2.id}/cancel`, "POST", c), {
+      params: Promise.resolve({ id: job2.id }),
+    });
+  });
+
+  it("R2b. self-heal: job created but link crashed — same interpretation + same key relinks and returns the job", async () => {
+    const c = await makeAuthedClient();
+    const interpId = await makeReadyInterpretation(c.userId);
+    const key = uniq("idem");
+    const first = await jobsPOST(
+      req("/api/research-jobs", "POST", c, { interpretationId: interpId, idempotencyKey: key }),
+    );
+    const job = ((await first.json()) as { job: { id: string } }).job;
+    // Имитация сбоя между созданием и связкой
+    await ctx.db
+      .update(interpretations)
+      .set({ researchJobId: null })
+      .where(eq(interpretations.id, interpId));
+
+    const replay = await jobsPOST(
+      req("/api/research-jobs", "POST", c, { interpretationId: interpId, idempotencyKey: key }),
+    );
+    expect(replay.status).toBe(200);
+    expect(((await replay.json()) as { job: { id: string } }).job.id).toBe(job.id);
+    const [relinked] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, interpId));
+    expect(relinked.researchJobId).toBe(job.id);
+    await cancelPOST(req(`/api/research-jobs/${job.id}/cancel`, "POST", c), {
+      params: Promise.resolve({ id: job.id }),
+    });
+  });
+
+  it("R4. malformed job id → 404 on cancel, events and read (not 500)", async () => {
+    const c = await makeAuthedClient();
+    const bad = "not-a-uuid";
+    const cancel = await cancelPOST(req(`/api/research-jobs/${bad}/cancel`, "POST", c), {
+      params: Promise.resolve({ id: bad }),
+    });
+    expect(cancel.status).toBe(404);
+    const events = await eventsGET(req(`/api/research-jobs/${bad}/events`, "GET", c), {
+      params: Promise.resolve({ id: bad }),
+    });
+    expect(events.status).toBe(404);
+    const { POST: readPOST } = await import("../app/api/research-jobs/[id]/read/route");
+    const read = await readPOST(req(`/api/research-jobs/${bad}/read`, "POST", c), {
+      params: Promise.resolve({ id: bad }),
+    });
+    expect(read.status).toBe(404);
+  });
+
+  it("R6. periodic DB refresh closes the stream of a deleted job even without NOTIFY", async () => {
+    process.env.SSE_REFRESH_MS = "400";
+    try {
+      const c = await makeAuthedClient();
+      const { res } = await startJob(c);
+      const { job } = (await res.json()) as { job: { id: string } };
+
+      const sse = await eventsGET(req(`/api/research-jobs/${job.id}/events`, "GET", c), {
+        params: Promise.resolve({ id: job.id }),
+      });
+      const collected = readSse(sse, { timeoutMs: 5000 });
+      await new Promise((r) => setTimeout(r, 200));
+      // Удаление в обход NOTIFY-триггера (как каскад при удалении аккаунта)
+      await ctx.db.delete(researchJobs).where(eq(researchJobs.id, job.id));
+      const { closed } = await collected;
+      expect(closed).toBe(true); // сверка с БД закрыла поток
+    } finally {
+      delete process.env.SSE_REFRESH_MS;
+    }
+  });
+});

@@ -44,6 +44,16 @@ export function requireAllowedOrigin(req: Request): void {
   }
 }
 
+// Невалидный UUID в path → 404 (а не 500 из БД): неизвестный и
+// синтаксически невозможный id неразличимы для клиента.
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function requireUuid(value: string): string {
+  if (!UUID_RE.test(value)) throw new HttpError(404, "NOT_FOUND");
+  return value;
+}
+
 export function readSessionToken(req: Request): string | null {
   const cookie = req.headers.get("cookie") ?? "";
   for (const part of cookie.split(";")) {

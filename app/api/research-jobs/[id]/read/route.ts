@@ -1,6 +1,8 @@
 import { and, eq } from "drizzle-orm";
 
-import { errorResponse, HttpError, requireMutation } from "@/src/server/auth/guards";
+import { errorResponse, HttpError, requireMutation,
+  requireUuid,
+} from "@/src/server/auth/guards";
 import { researchJobs } from "@/src/server/db/schema";
 import { getDb } from "@/src/server/runtime";
 
@@ -13,6 +15,7 @@ export async function POST(
     const db = getDb();
     const session = await requireMutation(db, req);
     const { id } = await params;
+    requireUuid(id);
     const rows = await db
       .update(researchJobs)
       .set({ unread: false })

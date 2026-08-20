@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import type { PgBoss } from "pg-boss";
 
 import { HttpError } from "../auth/guards";
@@ -11,6 +11,8 @@ import {
   ActiveJobExistsError,
   createResearchJob,
   DemoQuotaExceededError,
+  resolveDemoReservation,
+  transitionJobState,
   type ResearchJobRow,
 } from "../jobs/research-jobs";
 import { resolveEntitlement } from "./entitlement";
@@ -116,11 +118,54 @@ export async function startResearch(
       entitlement: entitlement.snapshot,
       demoLifetimeProofLimit: entitlement.demoLimit,
     });
+
+    // Adversarial review, MEDIUM-2: replay ключа с ЧУЖОЙ interpretation
+    // не должен приваривать её к старому job. created=false означает
+    // idempotency-replay — job легитимен для этой interpretation, только
+    // если он ещё ни к какой другой не привязан (self-heal после сбоя
+    // между созданием и связкой) — иначе это переиспользование ключа.
+    if (!created.created) {
+      const [linkedElsewhere] = await db
+        .select({ id: interpretations.id })
+        .from(interpretations)
+        .where(eq(interpretations.researchJobId, created.job.id));
+      if (linkedElsewhere && linkedElsewhere.id !== interp.id) {
+        throw new HttpError(409, "IDEMPOTENCY_KEY_REUSED");
+      }
+    }
+
     // Цепочка Original Question → Interpretation → Job (LOCKED §5).
-    await db
+    // Guarded update (LOW-5): связываем только свободную interpretation —
+    // конкурентная связка с другим job не перезаписывается молча.
+    const linked = await db
       .update(interpretations)
       .set({ researchJobId: created.job.id })
-      .where(eq(interpretations.id, interp.id));
+      .where(
+        and(
+          eq(interpretations.id, interp.id),
+          sql`${interpretations.researchJobId} IS NULL`,
+        ),
+      )
+      .returning({ id: interpretations.id });
+    if (linked.length === 0) {
+      // Кто-то успел связать эту interpretation с другим job (TOCTOU).
+      const [current] = await db
+        .select({ researchJobId: interpretations.researchJobId })
+        .from(interpretations)
+        .where(eq(interpretations.id, interp.id));
+      if (current?.researchJobId !== created.job.id) {
+        // Компенсация: только что созданный лишний job гасим и возвращаем слот.
+        if (created.created) {
+          await db.transaction(async (tx) => {
+            await transitionJobState(tx, created.job.id, "CANCELLED", "interpretation TOCTOU compensation");
+            if (entitlement.snapshot.level === "DEMO") {
+              await resolveDemoReservation(tx, created.job.id, "RELEASED");
+            }
+          });
+        }
+        throw new HttpError(409, "INTERPRETATION_ALREADY_USED");
+      }
+    }
     return created;
   } catch (e) {
     if (e instanceof DemoQuotaExceededError) {

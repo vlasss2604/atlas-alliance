@@ -32,7 +32,8 @@ export const en = {
   research: {
     title: "Research",
     empty: "No research yet. Ask ARI your first question.",
-    // Human-readable состояния (phase-3-plan §6, утверждено с планом).
+    // Human-readable состояния: предложены планом Фазы 3 §6; финальное
+    // утверждение copy — за владельцем до public release.
     states: {
       QUEUED: "Atlas is picking this up",
       AWAITING_CLARIFICATION: "Needs a clarification",

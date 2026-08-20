@@ -20,9 +20,14 @@ export function getDb(): Database {
 // pg-boss на стороне API: только транзакционный enqueue, без maintenance
 // (обслуживанием занимается worker-процесс).
 let _boss: PgBoss | null = null;
+let _bossStarting: Promise<PgBoss> | null = null;
 
+// Single-flight (adversarial review, LOW-7): конкурентные первые вызовы
+// не должны запускать и терять второй экземпляр с его подключениями.
 export async function getBoss(): Promise<PgBoss> {
-  if (!_boss) {
+  if (_boss) return _boss;
+  if (_bossStarting) return _bossStarting;
+  _bossStarting = (async () => {
     const boss = new PgBoss({
       connectionString: process.env.DATABASE_URL,
       supervise: false,
@@ -31,8 +36,11 @@ export async function getBoss(): Promise<PgBoss> {
     boss.on("error", (e) => console.error("[pg-boss api]", e));
     await boss.start();
     _boss = boss;
-  }
-  return _boss;
+    return boss;
+  })().finally(() => {
+    _bossStarting = null;
+  });
+  return _bossStarting;
 }
 
 let _config: { value: ProductConfig; loadedAt: number } | null = null;
