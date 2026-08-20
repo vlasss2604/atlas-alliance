@@ -49,6 +49,11 @@ export const en = {
     activeJob: "One research is already running. It will finish shortly.",
     error: "Couldn't process the question. Please try again.",
     newQuestion: "Ask another question",
+    provisionalPrefix: "Understood so far:",
+    clarifyAnswered: "This clarification was already answered in another window.",
+    clarifyStale: "This question is already resolved. Ask a new one to continue.",
+    checkOnProject: "Check this on a specific project",
+    checkOnProjectDraft: "Check this on ",
   },
   research: {
     title: "Research",

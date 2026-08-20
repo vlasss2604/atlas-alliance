@@ -22,6 +22,7 @@ export default function AskPage() {
   const [answer, setAnswer] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [limitReached, setLimitReached] = useState(false);
+  const [clarifyClosed, setClarifyClosed] = useState(false);
 
   const interp = result?.interpretation ?? null;
   const gates: GateView | null = result?.gates ?? null;
@@ -33,6 +34,7 @@ export default function AskPage() {
     setAnswer("");
     setError(null);
     setLimitReached(false);
+    setClarifyClosed(false);
   };
 
   const submit = async () => {
@@ -60,6 +62,14 @@ export default function AskPage() {
       if (e instanceof ApiError && e.code === "CLARIFICATION_LIMIT") {
         setLimitReached(true);
       } else {
+        if (
+          e instanceof ApiError &&
+          (e.code === "CLARIFICATION_ALREADY_ANSWERED" ||
+            e.code === "CLARIFICATION_NOT_EXPECTED")
+        ) {
+          // Форма уточнения больше не имеет смысла — убираем её.
+          setClarifyClosed(true);
+        }
         setError(errorText(e, dict.ask.error));
       }
       setPhase("result");
@@ -86,6 +96,10 @@ export default function AskPage() {
       if (e.code === "DEMO_QUOTA_EXHAUSTED") return dict.ask.quotaExhausted;
       if (e.code === "ACTIVE_JOB_EXISTS") return dict.ask.activeJob;
       if (e.code === "OUT_OF_SCOPE") return dict.ask.outOfScope;
+      // Постоянные состояния не выдаём за временный сбой: «попробуйте ещё
+      // раз» на них не сработает никогда (adversarial review, LOW-7).
+      if (e.code === "CLARIFICATION_ALREADY_ANSWERED") return dict.ask.clarifyAnswered;
+      if (e.code === "CLARIFICATION_NOT_EXPECTED") return dict.ask.clarifyStale;
     }
     return fallback;
   }
@@ -93,6 +107,10 @@ export default function AskPage() {
   // Причина, по которой Proof запустить нельзя. null = можно.
   const blockedNote = (): string | null => {
     if (!gates || !interp || interp.status !== "READY") return null;
+    // Объяснение и «исследовать нечего» — не заблокированный Proof,
+    // а другой род ответа: кнопки там быть не должно вовсе
+    // (plan §4.6, adversarial review MEDIUM-2).
+    if (interp.route !== "DEEP_RESEARCH") return null;
     if (gates.scope === "OUT_OF_SCOPE") return dict.ask.outOfScope;
     if (gates.entitlement === "CORE_REQUIRED") return dict.ask.coreRequired;
     if (gates.research === "DEMO_QUOTA_EXHAUSTED") return dict.ask.quotaExhausted;
@@ -201,19 +219,37 @@ export default function AskPage() {
           )}
 
           {interp.quickAnswer && (
-            <div className="glass sheet-enter flex flex-col gap-2 px-4 py-4">
+            <div className="glass sheet-enter flex flex-col gap-3 px-4 py-4">
               <p className="text-xs uppercase tracking-wide text-[var(--atlas-cyan)]">
                 {dict.ask.quickTitle}
               </p>
               <p className="text-base">{interp.quickAnswer}</p>
+              {/* Быстрый ответ не тупик: предлагаем проверить это на
+                  конкретном проекте. Это НОВАЯ интерпретация — гейт
+                  route=DEEP_RESEARCH остаётся нетронутым. */}
+              <button
+                type="button"
+                onClick={() => {
+                  reset();
+                  setQuestion(dict.ask.checkOnProjectDraft);
+                }}
+                className="pill glass w-full py-2 text-sm text-[var(--atlas-cyan)]"
+              >
+                {dict.ask.checkOnProject}
+              </button>
             </div>
           )}
 
-          {interp.status === "NEEDS_CLARIFICATION" && !limitReached && (
+          {interp.status === "NEEDS_CLARIFICATION" && !limitReached && !clarifyClosed && (
             <div className="glass sheet-enter flex flex-col gap-3 px-4 py-4">
               <p className="text-xs uppercase tracking-wide text-[var(--atlas-cyan)]">
                 {dict.ask.clarifyTitle}
               </p>
+              {interp.provisionalTask && (
+                <p className="text-sm text-[var(--atlas-text-dim)]">
+                  {dict.ask.provisionalPrefix} {interp.provisionalTask}
+                </p>
+              )}
               <p className="text-base">
                 {interp.clarificationQuestion ?? dict.ask.clarifyProjectFallback}
               </p>

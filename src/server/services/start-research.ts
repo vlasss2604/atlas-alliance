@@ -22,6 +22,7 @@ import { evaluateGates } from "./gates";
 // зависит запуск исследования.
 interface InterpretationResult {
   project_slug?: string;
+  project_slugs?: string[];
   research_task?: string;
   route?: string;
 }
@@ -88,11 +89,17 @@ export async function startResearch(
   // Scope и Entitlement — тем же кодом, что и превью Interpreter
   // (phase-4-plan §3.1): показанное пользователю решение и реальное
   // решение не могут разойтись.
+  // Все сущности задачи (для старых строк без project_slugs — основная).
+  const projectSlugs =
+    result.project_slugs && result.project_slugs.length > 0
+      ? result.project_slugs
+      : [result.project_slug];
+
   const gates = await evaluateGates(db, config, {
     userId: input.userId,
     status: interp.status,
     route: result.route,
-    projectSlug: result.project_slug,
+    projectSlugs,
   });
   if (gates.scope === "OUT_OF_SCOPE") throw new HttpError(403, "OUT_OF_SCOPE");
   if (gates.entitlement === "CORE_REQUIRED") throw new HttpError(403, "CORE_REQUIRED");
@@ -100,8 +107,11 @@ export async function startResearch(
   const topic = { id: gates.topicId! };
   const project = { id: gates.projectId!, slug: result.project_slug };
 
+  // Задача несёт ВСЕ сущности: усечение сравнения до одного проекта
+  // израсходовало бы Proof на задачу, которую пользователь не задавал.
   const normalizedTask = {
     project_slug: project.slug,
+    project_slugs: projectSlugs,
     task: result.research_task,
   };
   const normalizedTaskHash = createHash("sha256")

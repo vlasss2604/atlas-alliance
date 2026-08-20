@@ -11,10 +11,15 @@ import { resolveEntitlement, type EntitlementView } from "./entitlement";
 //   Entitlement — доступна ли она на текущем уровне пользователя.
 export type ScopeGate = "SUPPORTED" | "OUT_OF_SCOPE";
 export type EntitlementGate = "OK" | "CORE_REQUIRED";
+// research === "AVAILABLE" означает ровно одно: startResearch сейчас
+// пропустит запуск. Любая другая причина названа явно, чтобы превью не
+// расходилось с enforcement (adversarial review, LOW-4).
 export type ResearchGate =
   | "AVAILABLE"
-  | "DISABLED"
   | "NOT_DEEP_RESEARCH"
+  | "OUT_OF_SCOPE"
+  | "CORE_REQUIRED"
+  | "DISABLED"
   | "ACTIVE_JOB_EXISTS"
   | "DEMO_QUOTA_EXHAUSTED";
 
@@ -22,7 +27,8 @@ export interface GateSubject {
   userId: string;
   status: string;
   route: string | null;
-  projectSlug: string | null;
+  // ВСЕ сущности задачи. Доступна задача целиком или недоступна целиком.
+  projectSlugs: string[];
 }
 
 export interface GateDecision {
@@ -52,31 +58,45 @@ export async function evaluateGates(
       : null;
 
   const [topic] = await db.select().from(topics).where(eq(topics.isActive, true));
-  const [project] = subject.projectSlug
-    ? await db.select().from(projects).where(eq(projects.slug, subject.projectSlug))
+  const rows = subject.projectSlugs.length
+    ? await db
+        .select()
+        .from(projects)
+        .where(inArray(projects.slug, subject.projectSlugs))
     : [];
 
-  // Scope: тема активна И проект существует в исследуемом статусе.
+  // Scope: тема активна И КАЖДАЯ названная сущность существует
+  // в исследуемом статусе. Сущность потерялась — задача вне scope.
   const inScope =
     subject.status === "READY" &&
     !!topic &&
-    !!project &&
-    project.status === "ACTIVE_CORE";
+    subject.projectSlugs.length > 0 &&
+    rows.length === subject.projectSlugs.length &&
+    rows.every((p) => p.status === "ACTIVE_CORE");
   const scope: ScopeGate = inScope ? "SUPPORTED" : "OUT_OF_SCOPE";
 
   // Entitlement: проект может быть внутри scope ATLAS и при этом
-  // недоступен DEMO — это замок, а не «вне области».
+  // недоступен DEMO — это замок, а не «вне области». Проверяется КАЖДАЯ
+  // сущность: половина сравнения не выполняется (канон atlas-intent).
   const entitlement: EntitlementGate =
-    inScope && level === "DEMO" && !config.demo_project_slugs.includes(project.slug)
+    inScope &&
+    level === "DEMO" &&
+    !subject.projectSlugs.every((s) => config.demo_project_slugs.includes(s))
       ? "CORE_REQUIRED"
       : "OK";
 
+  // Порядок причин — от свойства самой задачи к состоянию системы:
+  // маршрут и scope не зависят от рубильника research_enabled, иначе при
+  // выключенном движке «объяснение» неотличимо от «исследование выключено».
   let research: ResearchGate = "AVAILABLE";
-  if (!config.research_enabled) {
-    research = "DISABLED";
-  } else if (subject.route !== "DEEP_RESEARCH") {
-    // QUICK_EXPLANATION / NO_RESEARCH_NEEDED не превращаются в Proof.
+  if (subject.route !== "DEEP_RESEARCH") {
     research = "NOT_DEEP_RESEARCH";
+  } else if (scope === "OUT_OF_SCOPE") {
+    research = "OUT_OF_SCOPE";
+  } else if (entitlement === "CORE_REQUIRED") {
+    research = "CORE_REQUIRED";
+  } else if (!config.research_enabled) {
+    research = "DISABLED";
   } else if (demo && demo.used >= demo.limit) {
     research = "DEMO_QUOTA_EXHAUSTED";
   } else {
@@ -93,13 +113,14 @@ export async function evaluateGates(
     if (active.length > 0) research = "ACTIVE_JOB_EXISTS";
   }
 
+  const primary = rows.find((p) => p.slug === subject.projectSlugs[0]);
   return {
     scope,
     entitlement,
     research,
     demo,
     topicId: topic?.id ?? null,
-    projectId: project?.id ?? null,
+    projectId: primary?.id ?? null,
     entitlementView,
   };
 }

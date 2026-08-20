@@ -47,6 +47,36 @@ test("14a. вопрос без проекта → уточнение → пон�
   ).toBeVisible();
 });
 
+test("14c. простой вопрос → объяснение без кнопки Proof и без противоречий", async ({
+  page,
+}) => {
+  await openAsk(page);
+
+  await page
+    .locator("textarea")
+    .fill("Если у Uniswap есть staking, значит проект безопасный?");
+  await page.getByRole("button", { name: /Start Proof|Начать Proof/ }).click();
+
+  await expect(
+    page.getByText(/Understood\. This is an explanation|Понял вопрос\. Это объяснение/),
+  ).toBeVisible({ timeout: 15_000 });
+
+  // Кнопки Proof на этом маршруте быть не должно вовсе (plan §4.6),
+  // и экран не должен одновременно отвечать и отказывать.
+  await expect(page.getByRole("button", { name: /Start Proof|Начать Proof/ })).toHaveCount(0);
+  await expect(page.getByText(/ARI is being connected|ARI подключается/)).toHaveCount(0);
+  await expect(
+    page.getByText(/outside what it can verify|вне того, что он может проверить/),
+  ).toHaveCount(0);
+
+  // Быстрый ответ не тупик: есть продолжение к настоящему исследованию.
+  await expect(
+    page.getByRole("button", {
+      name: /Check this on a specific project|Проверить это на конкретном проекте/,
+    }),
+  ).toBeVisible();
+});
+
 test("14b. вопрос вне области → мягкое объяснение, без ошибки", async ({ page }) => {
   await openAsk(page);
 

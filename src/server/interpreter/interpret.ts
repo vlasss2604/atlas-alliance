@@ -38,6 +38,9 @@ export type ServerAdjustment = "NONE" | "PROJECT_UNRESOLVED" | "PROJECT_AMBIGUOU
 
 export interface StoredInterpretation extends InterpreterModelResult {
   project_slug: string | null;
+  // Все сущности задачи после резолюции по каталогу (первая — основная).
+  // Гейты проверяют каждую: половина сравнения — не сравнение.
+  project_slugs: string[];
   server_adjustment: ServerAdjustment;
 }
 
@@ -48,6 +51,9 @@ export interface InterpretationView {
   route: string;
   adjustment: ServerAdjustment;
   clarificationQuestion: string | null;
+  // Что уже понято, когда задача ещё не полна: экран уточнения показывает
+  // понимание ДО вопроса — «Atlas разобрался», а не «Atlas классифицировал».
+  provisionalTask: string | null;
   quickAnswer: string | null;
   understood: {
     researchTask: string;
@@ -123,10 +129,11 @@ async function callModel(
 export async function resolveProjectSlug(
   db: Database,
   freeText: string | null,
-): Promise<{ slug: string | null; adjustment: ServerAdjustment }> {
-  if (!freeText?.trim()) return { slug: null, adjustment: "PROJECT_UNRESOLVED" };
+): Promise<{ slug: string | null; adjustment: ServerAdjustment; candidates: string[] }> {
+  const miss = { slug: null, adjustment: "PROJECT_UNRESOLVED" as const, candidates: [] };
+  if (!freeText?.trim()) return miss;
   const key = looseKey(freeText);
-  if (!key) return { slug: null, adjustment: "PROJECT_UNRESOLVED" };
+  if (!key) return miss;
 
   const rows = (
     await db.execute(sql`
@@ -141,34 +148,103 @@ export async function resolveProjectSlug(
     `)
   ).rows as { slug: string }[];
 
-  if (rows.length === 1) return { slug: rows[0].slug, adjustment: "NONE" };
+  if (rows.length === 1) {
+    return { slug: rows[0].slug, adjustment: "NONE", candidates: [rows[0].slug] };
+  }
   // Несколько разных проектов под одним написанием — сервер не выбирает
-  // за пользователя; спрашиваем, какой именно.
-  if (rows.length > 1) return { slug: null, adjustment: "PROJECT_AMBIGUOUS" };
-  return { slug: null, adjustment: "PROJECT_UNRESOLVED" };
+  // за пользователя; спрашиваем, какой именно, и НАЗЫВАЕМ варианты,
+  // иначе уточнение не может привести ни к какому ответу.
+  if (rows.length > 1) {
+    return {
+      slug: null,
+      adjustment: "PROJECT_AMBIGUOUS",
+      candidates: rows.map((r) => r.slug),
+    };
+  }
+  return miss;
 }
 
-// Применение серверных решений к выводу модели.
+// Резолюция ВСЕХ названных сущностей (основная + related_entities).
+// Задача целиком доступна ровно тогда, когда доступна каждая её сущность.
+async function resolveAllEntities(
+  db: Database,
+  result: InterpreterModelResult,
+): Promise<{
+  slug: string | null;
+  slugs: string[];
+  adjustment: ServerAdjustment;
+  candidates: string[];
+}> {
+  const primary = await resolveProjectSlug(db, result.project_or_asset);
+  const slugs: string[] = primary.slug ? [primary.slug] : [];
+  let adjustment = primary.adjustment;
+  let candidates = primary.candidates;
+
+  for (const entity of result.related_entities) {
+    const other = await resolveProjectSlug(db, entity);
+    if (other.slug) {
+      if (!slugs.includes(other.slug)) slugs.push(other.slug);
+      continue;
+    }
+    // Нерезолвенная вторая сущность делает недоступной всю задачу:
+    // «сравню Pump.fun, а второй проект не буду» — это уже не сравнение.
+    if (adjustment === "NONE") {
+      adjustment = other.adjustment;
+      candidates = other.candidates;
+    }
+  }
+  return { slug: primary.slug, slugs, adjustment, candidates };
+}
+
+// Применение серверных решений к выводу модели. Сохранённая строка обязана
+// оставаться самосогласованной: статус и маршрут понижаются вместе, иначе
+// в журнале LOCKED §5 оседает комбинация, которую схема не допускает
+// (adversarial review, LOW-4).
 function applyServerDecisions(
   result: InterpreterModelResult,
-  slug: string | null,
-  adjustment: ServerAdjustment,
+  resolution: {
+    slug: string | null;
+    slugs: string[];
+    adjustment: ServerAdjustment;
+    candidates: string[];
+  },
+  language: "RU" | "EN",
 ): { stored: StoredInterpretation; status: InterpreterStatus } {
   const stored: StoredInterpretation = {
     ...result,
-    project_slug: slug,
-    server_adjustment: adjustment,
+    project_slug: resolution.slug,
+    project_slugs: resolution.slugs,
+    server_adjustment: resolution.adjustment,
   };
   let status = result.status;
 
   // Понижение статуса — только для маршрута, который может привести
   // к исследованию. QUICK_EXPLANATION / NO_RESEARCH_NEEDED проекта
   // в каталоге не требуют: они и не запускают Proof.
-  if (status === "READY" && result.route === "DEEP_RESEARCH" && !slug) {
-    status = adjustment === "PROJECT_AMBIGUOUS" ? "NEEDS_CLARIFICATION" : "OUT_OF_SCOPE";
+  const allResolved =
+    !!resolution.slug && resolution.slugs.length === result.related_entities.length + 1;
+  if (status === "READY" && result.route === "DEEP_RESEARCH" && !allResolved) {
+    if (resolution.adjustment === "PROJECT_AMBIGUOUS") {
+      status = "NEEDS_CLARIFICATION";
+      stored.route = "CLARIFICATION_REQUIRED";
+      // Вопрос от сервера, а не от модели: без названных вариантов
+      // уточнение не может привести ни к какому ответу.
+      stored.clarification_question = ambiguityQuestion(resolution.candidates, language);
+    } else {
+      status = "OUT_OF_SCOPE";
+      stored.route = "OUTSIDE_CURRENT_DOMAIN";
+    }
     stored.status = status;
   }
   return { stored, status };
+}
+
+// Серверная копия — не текст модели. Финальное утверждение — за владельцем.
+function ambiguityQuestion(candidates: string[], language: "RU" | "EN"): string {
+  const list = candidates.join(", ");
+  return language === "RU"
+    ? `Под этим названием у нас несколько проектов: ${list}. О каком из них речь?`
+    : `Several projects match that name: ${list}. Which one do you mean?`;
 }
 
 function toView(row: {
@@ -186,6 +262,8 @@ function toView(row: {
     adjustment: r.server_adjustment,
     clarificationQuestion:
       row.status === "NEEDS_CLARIFICATION" ? r.clarification_question : null,
+    provisionalTask:
+      row.status === "NEEDS_CLARIFICATION" ? (r.research_task?.trim() || null) : null,
     quickAnswer:
       r.route === "QUICK_EXPLANATION" || r.route === "NO_RESEARCH_NEEDED"
         ? r.quick_answer
@@ -214,7 +292,7 @@ async function gatesFor(
     userId,
     status,
     route: stored.route,
-    projectSlug: stored.project_slug,
+    projectSlugs: stored.project_slugs,
   });
   return {
     scope: decision.scope,
@@ -239,8 +317,8 @@ export async function createInterpretation(
     config.interpreter_model,
   );
 
-  const { slug, adjustment } = await resolveProjectSlug(db, result.project_or_asset);
-  const { stored, status } = applyServerDecisions(result, slug, adjustment);
+  const resolution = await resolveAllEntities(db, result);
+  const { stored, status } = applyServerDecisions(result, resolution, language);
 
   const [row] = await db
     .insert(interpretations)
@@ -287,6 +365,14 @@ export async function clarifyInterpretation(
     // Вторая неудачная попытка — конец flow (канон atlas-intent).
     throw new HttpError(409, "CLARIFICATION_LIMIT");
   }
+  // Дешёвая проверка ДО платного вызова модели: двойное нажатие и вторая
+  // вкладка не должны оплачивать вызов, который БД всё равно отвергнет
+  // (adversarial review, LOW-6). Настоящий барьер — уникальный индекс ниже.
+  const [existingChild] = await db
+    .select({ id: interpretations.id })
+    .from(interpretations)
+    .where(eq(interpretations.parentId, parent.id));
+  if (existingChild) throw new HttpError(409, "CLARIFICATION_ALREADY_ANSWERED");
 
   await hitRateLimit(db, `interp:${input.userId}`, RATE_LIMIT, RATE_WINDOW_SEC);
 
@@ -308,9 +394,16 @@ export async function clarifyInterpretation(
     const answered = chain[i + 1].clarificationAnswer;
     if (asked && answered) turns.push({ question: asked, answer: answered });
   }
+  // Ответ пользователя передаётся модели ВСЕГДА, даже если вопрос задал
+  // сервер и текста вопроса в строке модели нет: иначе вход повторного
+  // вызова совпадает с предыдущим и уточнение не может ничего изменить
+  // (adversarial review, MEDIUM-3).
   const parentQuestion = (parent.result as StoredInterpretation | null)
     ?.clarification_question;
-  if (parentQuestion) turns.push({ question: parentQuestion, answer });
+  turns.push({
+    question: parentQuestion ?? "Which project or asset do you mean?",
+    answer,
+  });
 
   const language = await userLanguage(db, input.userId);
   const { result, meta } = await callModel(
@@ -318,8 +411,8 @@ export async function clarifyInterpretation(
     config.interpreter_model,
   );
 
-  const { slug, adjustment } = await resolveProjectSlug(db, result.project_or_asset);
-  const { stored, status } = applyServerDecisions(result, slug, adjustment);
+  const resolution = await resolveAllEntities(db, result);
+  const { stored, status } = applyServerDecisions(result, resolution, language);
 
   const attempt = parent.attempt + 1;
   let row: { id: string } | undefined;

@@ -59,6 +59,10 @@ export const interpreterResultSchema = z
   .object({
     status: z.enum(INTERPRETER_STATUSES),
     project_or_asset: z.string().max(120).nullable(),
+    // ВСЕ остальные названные сущности задачи (сравнение, «X против Y»).
+    // Entitlement Gate обязан проверять каждую из них, а не только
+    // основную (канон atlas-intent: «не делать половину сравнения»).
+    related_entities: z.array(z.string().max(120)).max(4),
     topic: z.string().max(120).nullable(),
     task_type: z.enum(TASK_TYPES).nullable(),
     research_task: z.string().max(MAX_RESEARCH_TASK_CHARS).nullable(),
@@ -118,6 +122,13 @@ export function assertConsistent(r: InterpreterModelResult): void {
     !r.quick_answer?.trim()
   ) {
     fail("explanation route without quick_answer");
+  }
+  // Сравнение без второй сущности — не сравнение (канон atlas-intent).
+  if (r.task_type === "COMPARISON" && r.related_entities.length === 0) {
+    fail("COMPARISON without a second entity");
+  }
+  if (r.related_entities.length > 0 && !r.project_or_asset?.trim()) {
+    fail("related_entities without a primary entity");
   }
 }
 

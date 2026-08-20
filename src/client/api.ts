@@ -87,6 +87,7 @@ export interface InterpretationView {
   route: string;
   adjustment: "NONE" | "PROJECT_UNRESOLVED" | "PROJECT_AMBIGUOUS";
   clarificationQuestion: string | null;
+  provisionalTask: string | null;
   quickAnswer: string | null;
   understood: {
     researchTask: string;
@@ -104,6 +105,8 @@ export interface GateView {
     | "AVAILABLE"
     | "DISABLED"
     | "NOT_DEEP_RESEARCH"
+    | "OUT_OF_SCOPE"
+    | "CORE_REQUIRED"
     | "ACTIVE_JOB_EXISTS"
     | "DEMO_QUOTA_EXHAUSTED";
   demo: { used: number; limit: number } | null;
