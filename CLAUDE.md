@@ -54,6 +54,14 @@ The current paid level is **ARI • CORE**. The free entry level is **DEMO**.
 - If a change requires altering the locked product concept:
   output **STRATEGY REVIEW REQUIRED** and stop.
 
+## Development workflow
+
+`docs/DEVELOPMENT_WORKFLOW.md` — утверждённый цикл фазы: план → ревью владельца
+→ реализация (один Main Claude) → тесты → независимый adversarial review со
+свежим контекстом (только дефекты с конкретным failure scenario) → разбор
+находок → отчёт. С Фаз 5–6 добавляется Blind Evaluator для Research Engine.
+Параллельная реализация несколькими subagents не используется.
+
 ## Before major changes
 
 1. Inspect.
