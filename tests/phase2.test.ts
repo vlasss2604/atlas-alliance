@@ -456,6 +456,12 @@ describe("Phase 2 DoD", () => {
       contentHash: "sha256:x",
     });
 
+    // Регрессия Фазы 3: у job есть записи журнала переходов — удаление
+    // аккаунта обязано проходить сквозь append-only-триггер (каскад).
+    const { transitionJobState: tjs } = await import("../src/server/jobs/research-jobs");
+    await tjs(ctx.db, r.job.id, "RUNNING");
+    await tjs(ctx.db, r.job.id, "SUCCEEDED");
+
     const projectsBefore = (await ctx.db.select().from(projects)).length;
     const del = await meDELETE(apiRequest("/api/me", "DELETE", client));
     expect(del.status).toBe(200);

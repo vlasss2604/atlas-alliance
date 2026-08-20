@@ -13,6 +13,9 @@ const jobBudgetSchema = z.object({
 });
 
 const productConfigSchema = z.object({
+  // Калитка запуска исследований (phase-3-plan §2). Аварийное отключение
+  // без деплоя; включается только с появлением Interpreter (Фаза 4).
+  research_enabled: z.boolean(),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -29,6 +32,7 @@ export type JobBudgetConfig = z.infer<typeof jobBudgetSchema>;
 // Значения по умолчанию для сида (LOCKED §2, §4). После сида источник
 // истины — таблица product_config, не этот объект.
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
+  research_enabled: false,
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,

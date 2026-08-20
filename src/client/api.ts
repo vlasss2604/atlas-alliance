@@ -20,25 +20,37 @@ export interface MeResponse {
   csrfToken: string;
 }
 
-export async function authenticate(): Promise<{
-  onboardingCompleted: boolean;
-} | null> {
-  const platform = getPlatform();
-  const initData = platform.getInitData();
-  const body = initData ? { initData } : { dev: true };
-  const res = await fetch("/api/auth/telegram", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    credentials: "include",
-  });
-  if (!res.ok) return null;
-  const data = (await res.json()) as {
-    csrfToken: string;
-    onboardingCompleted: boolean;
-  };
-  csrfToken = data.csrfToken;
-  return { onboardingCompleted: data.onboardingCompleted };
+// Single-flight: конкурентные вызовы (AppProvider + onboarding + retry
+// из request) делят ОДНУ аутентификацию. Иначе ротация сессий на сервере
+// обесценивает cookie/CSRF первого запроса вторым — гонка, ловившаяся
+// e2e как «Skip зацикливает onboarding».
+let authInFlight: Promise<{ onboardingCompleted: boolean } | null> | null = null;
+
+export function authenticate(): Promise<{ onboardingCompleted: boolean } | null> {
+  if (authInFlight) return authInFlight;
+  authInFlight = (async () => {
+    try {
+      const platform = getPlatform();
+      const initData = platform.getInitData();
+      const body = initData ? { initData } : { dev: true };
+      const res = await fetch("/api/auth/telegram", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as {
+        csrfToken: string;
+        onboardingCompleted: boolean;
+      };
+      csrfToken = data.csrfToken;
+      return { onboardingCompleted: data.onboardingCompleted };
+    } finally {
+      authInFlight = null;
+    }
+  })();
+  return authInFlight;
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -100,6 +112,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({}),
     }),
+  cancelJob: (id: string) =>
+    request<{ cancelled: true; already?: boolean }>(
+      `/api/research-jobs/${id}/cancel`,
+      { method: "POST", body: JSON.stringify({}) },
+    ),
   deleteAccount: () =>
     request<{ deleted: true }>("/api/me", { method: "DELETE" }),
 };

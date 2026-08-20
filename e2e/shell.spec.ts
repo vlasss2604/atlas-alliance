@@ -1,7 +1,23 @@
 import { expect, test } from "@playwright/test";
+import { Pool } from "pg";
 
 // Тесты §9.11–13 плана Фазы 2. Последовательность важна (workers: 1):
 // первый прогон проходит onboarding, дальше он не показывается.
+
+// Спек сам готовит своё состояние: dev-пользователь сбрасывается, чтобы
+// onboarding-флоу был воспроизводим независимо от порядка спеков.
+test.beforeAll(async () => {
+  const pool = new Pool({
+    connectionString:
+      process.env.DATABASE_URL ?? "postgres://atlas:atlas@localhost:5432/atlas_dev",
+  });
+  await pool.query(
+    `DELETE FROM users WHERE id IN (
+       SELECT user_id FROM user_identities
+       WHERE provider = 'TELEGRAM_DEV' AND provider_user_id = 'dev_user_1')`,
+  );
+  await pool.end();
+});
 
 test("11. first visit shows onboarding once, skip is secondary", async ({ page }) => {
   await page.goto("/home");

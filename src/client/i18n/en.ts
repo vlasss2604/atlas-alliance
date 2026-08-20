@@ -32,6 +32,16 @@ export const en = {
   research: {
     title: "Research",
     empty: "No research yet. Ask ARI your first question.",
+    // Human-readable состояния (phase-3-plan §6, утверждено с планом).
+    states: {
+      QUEUED: "Atlas is picking this up",
+      AWAITING_CLARIFICATION: "Needs a clarification",
+      SUCCEEDED: "Proof is ready",
+      CANCELLED: "Stopped by you",
+      FAILED: "Couldn't finish this research. Your attempt wasn't spent",
+      BUDGET_LIMIT_REACHED: "Research hit its budget limit — showing an honest result",
+    } as Record<string, string>,
+    cancel: "Stop",
     stages: [
       "Understanding the question",
       "Checking accumulated experience",

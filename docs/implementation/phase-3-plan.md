@@ -1,6 +1,6 @@
 # Фаза 3 — Job-инфраструктура: SSE-прогресс, cancel, запуск исследования. План
 
-Статус: **ожидает утверждения владельца. Код не пишется до подтверждения.**
+Статус: **утверждён владельцем 2026-08-20.** Зафиксированный принцип реализации: **PostgreSQL — единственный source of truth состояния research job; SSE — транспорт уведомлений о прогрессе.** Reconnect всегда восстанавливает актуальную картину из БД и не зависит от доставки всех SSE-событий.
 
 Основания: `phase-1-plan.md` (state machine, reservation model, pg-boss — уже построены), `01_LOCKED_DECISIONS.md` §5–6, §9, `PRODUCT_QUALITY_DIRECTIVE.md` (§2 Invisible Complexity, §5 Immediate Feedback, §7 Simple Language), canonical v3 §42/§61–63.
 

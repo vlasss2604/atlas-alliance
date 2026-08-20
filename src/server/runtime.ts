@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { PgBoss } from "pg-boss";
 
 import { createDatabase, type Database } from "./db/client";
 import { loadProductConfig, type ProductConfig } from "./config/product";
@@ -16,6 +17,24 @@ export function getDb(): Database {
   return _db;
 }
 
+// pg-boss на стороне API: только транзакционный enqueue, без maintenance
+// (обслуживанием занимается worker-процесс).
+let _boss: PgBoss | null = null;
+
+export async function getBoss(): Promise<PgBoss> {
+  if (!_boss) {
+    const boss = new PgBoss({
+      connectionString: process.env.DATABASE_URL,
+      supervise: false,
+      schedule: false,
+    });
+    boss.on("error", (e) => console.error("[pg-boss api]", e));
+    await boss.start();
+    _boss = boss;
+  }
+  return _boss;
+}
+
 let _config: { value: ProductConfig; loadedAt: number } | null = null;
 const CONFIG_TTL_MS = 60_000;
 
@@ -28,8 +47,10 @@ export async function getProductConfig(): Promise<ProductConfig> {
 
 // Для тестов: сбросить синглтоны (смена DATABASE_URL, кэш конфига).
 export async function __resetRuntime(): Promise<void> {
+  await _boss?.stop({ graceful: false }).catch(() => {});
   await _pool?.end().catch(() => {});
   _db = null;
   _pool = null;
+  _boss = null;
   _config = null;
 }
