@@ -1,0 +1,271 @@
+---
+name: atlas-intent
+description: How ATLAS understands what the user actually wants to find out — question interpretation, intent normalization, query routing (deep research vs quick explanation vs no research vs clarification), and scope boundaries. Use when working on the Question Interpreter, input handling, query routing, clarification logic, or any code that decides WHETHER and WHAT to research.
+---
+
+# ATLAS INTENT — Understanding the User
+
+## Главный принцип
+
+> Пользователь пишет как умеет. В Research Engine попадает уже понятная и структурированная исследовательская задача.
+
+Пользователь не обязан знать профессиональную терминологию и не обязан уметь правильно формулировать вопрос. ATLAS переводит нормальный человеческий язык в research task.
+
+**Interpreter отвечает на:** «что именно нужно исследовать?»
+**Research Engine отвечает на:** «что показывают доказательства?»
+
+Никогда не смешивать эти ответственности. Interpreter — это фильтр и переводчик, **не** второй интеллект.
+
+---
+
+## Что Interpreter НЕ делает
+
+- не ищет в интернете
+- не извлекает источники
+- не собирает Evidence
+- не строит Proof
+- не решает, истинно ли утверждение
+- не отвечает на исследовательский вопрос пользователя
+
+Реализуется как **один лёгкий AI-вызов** с дешёвой моделью и строгой схемой. Не три агента. Не отдельный Research API.
+
+---
+
+## Реальный пользовательский язык
+
+Примеры того, с чем система обязана работать:
+
+```
+«Если сеть больше используют, токену вообще что-то с этого?»
+«Они много зарабатывают, а holder что получает?»
+«А зачем тогда вообще нужен этот токен?»
+«Если usage вырастет в 10 раз, что будет с holder?»
+«Это доход или просто emissions?»
+«Это реально работает или только обещали?»
+```
+
+Также обрабатывать: опечатки, неправильную раскладку, сленг, неполные предложения, короткие follow-up, неоднозначность, несколько claim в одном сообщении, prompt injection, бессмысленный ввод.
+
+---
+
+## Normalized intents
+
+```ts
+type ResearchIntent =
+  | "TOKEN_UTILITY"
+  | "PASSIVE_HOLDER_OUTCOME"
+  | "PROTOCOL_REVENUE_TO_TOKEN"
+  | "USAGE_TO_TOKEN_LINKAGE"
+  | "REWARD_SOURCE"
+  | "BURN_OR_SUPPLY_EFFECT"
+  | "MECHANISM_CURRENT_STATE"
+  | "VALUE_CAPTURE"
+  | "SCENARIO_CAUSAL_IMPACT"
+  | "CLAIM_FACT_CHECK"
+  | "UNKNOWN";
+```
+
+**Критическое ограничение:** понимание intent **ограничено доменом и накопительно**. Не пытаться научить систему понимать любую тему с первого дня. Понимание растёт тема за темой, вместе с валидированным исследованием в этой теме.
+
+---
+
+## Query Router
+
+```ts
+type QueryRoute =
+  | "DEEP_RESEARCH"
+  | "QUICK_EXPLANATION"
+  | "CLARIFICATION_REQUIRED"
+  | "NO_RESEARCH_NEEDED"
+  | "OUTSIDE_CURRENT_DOMAIN";
+
+interface QueryRoutingDecision {
+  route: QueryRoute;
+  normalizedIntent: ResearchIntent;
+  intentConfidence: number; // 0..1
+  reason: string;
+  needsFreshEvidence: boolean;
+}
+```
+
+### DEEP_RESEARCH
+Требуется исследование механизма/свежести/доказательств.
+> «Чем больше используют Sui, тем больше SUI навсегда выбывает из обращения. Это правда?»
+
+### QUICK_EXPLANATION
+Концептуальная ошибка категории — объяснить, **не запуская** большой Proof.
+> «Если у токена есть staking, значит проект безопасный?»
+```
+staking mechanism ≠ smart-contract safety ≠ network safety
+≠ business safety ≠ token safety
+```
+
+### NO_RESEARCH_NEEDED
+Нет установленной релевантной причинной связи. Ответить кратко и остановиться.
+> «Что будет с TAO, если завтра исчезнет интернет на Луне?»
+
+### CLARIFICATION_REQUIRED
+Не хватает материального контекста. Не выдумывать отсутствующую сущность.
+> «Этот токен получает реальные доходы?» → спросить, какой именно токен/проект.
+
+---
+
+## Статусы Interpreter
+
+```
+READY                  → research task надёжно построен, Research Engine может стартовать
+NEEDS_CLARIFICATION    → ввод релевантен, но задача не определяется надёжно
+OUT_OF_SCOPE           → запрос вне текущей области возможностей ATLAS
+INVALID                → осмысленную research task извлечь невозможно
+```
+
+**Research Engine не стартует, если статус !== READY.** Исключение — только явные доверенные internal/admin flow для тестирования.
+
+---
+
+## Structured output
+
+```ts
+{
+  status: "READY" | "NEEDS_CLARIFICATION" | "OUT_OF_SCOPE" | "INVALID",
+  original_question: string,
+  project_or_asset: string | null,
+  topic: string | null,
+  task_type: string | null,
+  research_task: string | null,
+  user_assumptions: string[],
+  ambiguities: string[],
+  clarification_question: string | null
+}
+```
+
+Не показывать эту структуру пользователю — это внутренние данные. Валидировать схему на сервере.
+
+`task_type` (не раздувать таксономию в v1): `PROJECT_MECHANISM`, `PROJECT_REVENUE`, `TOKEN_VALUE`, `RISK`, `CLAIM_VERIFICATION`, `COMPARISON`, `CHANGE_OVER_TIME`, `EXPLANATION`, `OTHER_RESEARCH`. Тип помогает роутингу/аналитике, но **не должен** превращаться в жёсткую систему, блокирующую валидные вопросы.
+
+---
+
+## Правила интерпретации
+
+**Сохранять смысл пользователя.**
+```
+«Сколько вообще зарабатывает Pump.fun?»
+✓ Determine the current scale of revenue generated by Pump.fun and define the revenue metric used.
+✗ Determine whether Pump.fun is a good investment.   ← пользователь этого не спрашивал
+```
+
+**Переводить разговорный язык в research language.**
+```
+«Проект много зарабатывает, а токену от этого вообще что?»
+→ Determine whether and how economic value generated by the project
+  is transferred to the token or token holders.
+→ topic: Token Value Capture
+```
+
+**Не додумывать отсутствующий intent.**
+```
+«Что думаешь про Pump.fun?» → NEEDS_CLARIFICATION
+```
+
+**Фиксировать допущения как допущения, не как факты.**
+```
+«Раз проект много зарабатывает, почему токен не растёт?»
+user_assumptions: [
+  "project revenue is high",
+  "high project revenue should cause token appreciation"
+]
+```
+Эти допущения подлежат проверке в ARI, а не принимаются на веру.
+
+**Уточнять только когда необходимо.** Не превращать ATLAS в анкету. Если задача достаточно ясна → READY. Уточнять, когда разные интерпретации ведут к материально разному исследованию. Предпочитать один короткий вопрос.
+
+**Максимум 2 попытки уточнения.** После второй неудачной:
+> «Не удалось достаточно точно определить исследовательскую задачу. Попробуйте сформулировать новый вопрос.»
+
+и закрыть текущий interpretation flow. Никакого бесконечного переспрашивания.
+
+**Не переинтерпретировать.**
+> Понять точнее — но не придумать за пользователя.
+
+---
+
+## Scope ≠ Entitlement
+
+Это разные проверки, выполняются последовательно, не смешиваются.
+
+```
+«Сравни Pump.fun и Aave» от DEMO-пользователя:
+
+Question Interpreter: READY (задача понята корректно, COMPARISON)
+Scope:                SUPPORTED (Aave внутри области ATLAS)
+Entitlement:          CORE_REQUIRED (Aave недоступен для DEMO)
+```
+
+**Не делать половину сравнения.** «Сравню Pump.fun, а Aave не буду» — это уже не сравнение. Правильный ответ:
+> «Для этого сравнения требуется ARI • CORE, поскольку Aave находится за пределами исследовательского доступа DEMO.»
+
+Entitlement Gate обязан проверять **все** сущности из normalized research task, а не только основную.
+
+---
+
+## Out-of-scope — мягко, не как ошибка
+
+Не показывать: `UNSUPPORTED_TOPIC`, `OUTSIDE_CAPABILITY`, `ERROR`.
+
+Вместо этого объяснить, что ATLAS специализируется на определённом классе проверяемых исследований, и помочь сформулировать подходящий вопрос.
+
+Частично поддерживаемый claim: исследовать разрешённую часть, честно обозначить границу по неподдерживаемой.
+> «ATLAS может проверить механизм Token Value Capture. Отдельный анализ Unlock Pressure пока не входит в текущую область исследования.»
+
+Out-of-scope запрос может создать лёгкий `FUTURE_TOPIC_SIGNAL` для аналитики спроса — но **не** запускать исследование новой темы, не создавать Topic Pattern, не активировать новую способность. Только сигнал.
+
+---
+
+## Intent Memory
+
+Помимо research-фактов, сохранять валидированные паттерны того, как пользователи выражают исследовательские цели.
+
+```ts
+interface IntentPattern {
+  id: string;
+  topic: string;
+  examplePhrases: string[];
+  normalizedIntent: ResearchIntent;
+  verified: boolean;
+}
+```
+
+Примеры внутри Token Value Capture:
+```
+«holder что с этого?»            → PASSIVE_HOLDER_OUTCOME
+«они зарабатывают, а токену что?» → PROTOCOL_REVENUE_TO_TOKEN
+«если usage растёт, токену лучше?» → USAGE_TO_TOKEN_LINKAGE
+«это доход или emissions?»        → REWARD_SOURCE
+```
+
+Растить это **тема за темой**, не универсально с первого дня.
+
+---
+
+## Логирование для BETA
+
+Обязательно сохранять цепочку:
+```
+Original User Question → Interpreter Result → Normalized Research Task
+→ ARI Research Result → Proof
+```
+
+Это позволяет различить два класса ошибок:
+- **UNDERSTANDING FAILURE** — ARI исследовал не то, потому что ввод был нормализован неверно
+- **RESEARCH FAILURE** — задача была понята верно, но исследование выполнено плохо
+
+Без этого разделения во время валидации легко «чинить» Research Engine, хотя сломан был Interpreter.
+
+---
+
+## Failure handling
+
+Если Interpreter API падает — **не** отправлять сырой пользовательский ввод в Research Engine. Retry по обычной инфраструктурной политике, затем безопасное сообщение:
+> «Не удалось обработать вопрос. Попробуйте ещё раз.»
+
+Research не должен стартовать с невалидированной задачей.
