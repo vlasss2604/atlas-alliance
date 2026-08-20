@@ -9,6 +9,13 @@ The current paid level is **ARI • CORE**. The free entry level is **DEMO**.
 
 ---
 
+## Product Quality Directive
+
+`docs/PRODUCT_QUALITY_DIRECTIVE.md` — обязательная верхнеуровневая установка
+для всей реализации: мощный интеллект внутри → предельно простой опыт снаружи.
+Приоритет: correctness → reliability → performance → simplicity → visual polish.
+Целевое ощущение продукта: «Я просто спросил — Atlas разобрался.»
+
 ## Product rules
 
 - CORE is **not** a fixed catalog of projects. CORE is cumulative Research Intelligence.
