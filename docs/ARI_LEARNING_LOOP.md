@@ -4,10 +4,24 @@
 направление.** Реализация текущих утверждённых фаз из-за этого не меняется;
 механика встраивается в будущие Фазы 4–10 (интеграционная карта ниже).
 
-⚠️ Директива владельца дошла с обрывом: раздел 3 обрывается на примере
-«"Protocol earns revenue. Does the token actually capture any…». Разделы после
-него (предположительно: правила lesson extraction, validation, controlled CORE
-evolution) ожидаются отдельным сообщением и будут дополнены здесь.
+Полный текст директивы: разделы 0–3 — в этом документе; разделы 4–34 —
+`docs/handoff/ARI_LEARNING_LOOP_DIRECTIVE_SECTIONS_4_34.md` (дословный
+источник). Ключевые принципы хвоста интегрированы в §9–§12 ниже.
+
+**Решения владельца по границам v1 (2026-08-20):**
+- lesson extraction — автоматически; новый lesson сохраняется **только как
+  candidate/observation**; CANDIDATE → ACTIVE подтверждает человек;
+  CORE evolution полностью human-controlled; перед новой версией CORE —
+  обязательная blind/adversarial regression validation. Полностью
+  автоматическую validation/promotion в v1 НЕ вводим. Граница LOCKED §11
+  сохраняется.
+- **Extraction ≠ promotion.** Извлечение candidate-урока НЕ ограничено
+  VERIFIED-исходами: качественно завершённый trace с достаточным provenance
+  (в т.ч. честный INSUFFICIENT_EVIDENCE / unresolved gap) может дать урок.
+  Требования к promotion — намного строже, чем к extraction.
+- **Semantic retrieval не фиксируем.** На плане Фазы 5 сравнить
+  (1) structured-only и (2) structured+embeddings hybrid; pgvector — только
+  при измеримой пользе с учётом операционной стоимости.
 
 ---
 
@@ -163,12 +177,82 @@ intent/entities из Interpreter; расширение — embedding-колон�
 - **Фаза 10 (Regression):** ворота эволюции CORE: смена ACTIVE-паттерна
   требует blind 5/5 + TAO/SUI/TIA + robustness.
 
-## 8. Открытые пункты
+## 9. Принципы из полного текста (Sections 4–34) — существенные дополнения
 
-1. **Хвост директивы владельца** (после «Does the token actually capture
-   any…») — дослать; документ будет дополнен.
-2. Порог «качественно завершённого Proof», дающего право на lesson
-   extraction (предложение: только VERIFIED-исходы, не каждый DRAFT) —
-   утвердить при плане Фазы 5.
-3. Механика semantic retrieval v1 (структурные ключи vs +pgvector) —
-   инженерное решение в phase-5-plan.
+- **Knowledge Base — отдельный актив** (§6): цепочка claim → source →
+  evidence → mechanism → date → Proof; человек должен уметь проследить
+  вывод до доказательств. «100 сильных Proof ценнее 10 000 слабых ответов».
+- **Память обязана менять ПЛАН исследования** (§7, §18): retrieval уроков —
+  до построения плана; урок «Abstraction ≠ Removal» меняет, ЧТО проверяется.
+  Иначе это архив, а не интеллект.
+- **«Ничего нового» — хороший исход** (§10): память НЕ растёт после каждого
+  Proof; рост без нужды = загрязнение дубликатами.
+- **Расширенный lifecycle урока** (§11): OBSERVATION → CANDIDATE → SUPPORTED
+  → CORE PROPOSAL → HUMAN DECISION → CORE. Принцип важнее имён enum'ов;
+  маппинг на канонический OBSERVED→CANDIDATE→ACTIVE — при плане Фазы 5.
+- **Многомерная оценка урока, не счётчик** (§12): repeatability + diversity
+  (3 разных архитектуры сильнее 3 клонов) + counterexamples (контрпример →
+  уточнение формулировки, не удаление: «Utility ≠ VC» → «Utility alone does
+  not prove VC») + evidence strength + blind/adversarial validation.
+  Числа §13 (1/2–3/4–5/5+) — эвристика для обсуждения, НЕ хардкодить.
+- **CORE proposal — карточка, не вопрос** (§14): pattern, supporting Proofs,
+  diversity, evidence strength, counterexamples, validation result,
+  recommendation; действия ревьюера APPROVE / NEEDS MORE DATA / REFINE RULE /
+  REJECT.
+- **Защита от плохого обучения** (§15): ввод пользователя — не знание;
+  вывод LLM — не знание; опасная петля bad Proof → bad lesson → worse Proof
+  блокируется provenance + validation state (любой урок инспектируем).
+- **Временнóе разделение** (§16): durable-принципы vs time-sensitive факты
+  (verified_at, freshness, revalidation). «Старый опыт подсказывает, где
+  искать; current-state перепроверяется».
+- **Research Narrative** (§19): внутренний Learning Loop ≠ пользовательский
+  рассказ; в будущем UI рассказывает реальную историю исследования
+  («источник найден… один шаг не хватает… два источника противоречат») —
+  без фейковой драмы; события только настоящие. Copy — через владельца.
+- **Будущие агенты внутри ARI** (§20–22): Main ARI — единственный
+  оркестратор и финальный решатель; Research/Mechanism/Critic — узкие роли,
+  добавляются только по измеренной пользе (A/B §21). Не путать с Claude Code
+  subagents (наш DEVELOPMENT_WORKFLOW §22 директивы это дублирует).
+- **Бизнес-слой** (§23–26): накопленный интеллект — причина апгрейда
+  DEMO→CORE («Atlas doesn't start from zero»); DEMO не делаем «глупым» —
+  один развивающийся ARI, тиры отличаются бюджетом/глубиной/доступом;
+  возможный третий тир — стратегическая опция, НЕ реализовывать; гипотеза
+  снижения marginal cost — измерять, не предполагать.
+- **Критерий успеха** (§27–28): controlled eval «memory OFF vs memory ON» —
+  если одинаково, построен архив, а не интеллект. Рост CORE тестируется на
+  породивших кейсах + unseen + adversarial; правило, ухудшающее reasoning,
+  уточняется или удаляется.
+- **V1 маленький** (§29–30): Structured CORE v0.1 + Proof Memory + Lesson
+  Candidate + retrieval + provenance + human promotion (+ простой post-Proof
+  extraction). Без: обучения сетей, авто-promotion, knowledge graph,
+  RL-replay, «dreaming», сложной confidence-математики, роя агентов.
+- **Safety-правила** (§31): сохранять provenance, uncertainty, time context,
+  claim-vs-fact, mechanism/token state; «Unknown must remain a valid state»;
+  ATLAS умеет сказать «видел раньше, но текущее состояние надо перепроверить»
+  и «это candidate-урок, не проверенное правило».
+- **Финальный принцип** (§34): ATLAS умнеет не от объёма текста, а от
+  проверенного опыта, меняющего следующий research. Для пользователя всё
+  это — просто «Atlas doesn't start from zero».
+
+## 10. Архитектурное ревью по §32–33
+
+Полный 17-секционный architecture review (что есть / чего не хватает /
+данные / retrieval / lifecycle / оценка / фаза внедрения) — выполняется как
+пре-работа плана Фазы 5 и входит в phase-5-plan.md. До того реализация не
+начинается (§32: «Do not implement until approved»).
+
+## 11. Открытые пункты (решаются при плане Фазы 5)
+
+1. Механика retrieval: сравнение structured-only vs hybrid (+embeddings) с
+   измеримой пользой и операционной стоимостью; что именно эмбеддится, когда,
+   правила re-embedding, индексация, Top-K (старт 3–5 — не жёсткое правило).
+2. Формальные критерии «качественного trace» для extraction и (строже) для
+   promotion.
+3. Имена статусов lifecycle и маппинг на канонический OBSERVED→CANDIDATE→ACTIVE.
+4. Какая часть автоматизаций §14 (подсчёт поддержки, similarity-дедуп, поиск
+   контрпримеров, подготовка proposal) входит в v1, а какая остаётся за
+   границей LOCKED §11 (моя рекомендация: в v1 — extraction + similarity-дедуп
+   + подсчёт; поиск контрпримеров и авто-подготовка proposal — после BETA).
+5. Дизайн eval «memory OFF vs ON» (стыкуется с Blind Evaluator из
+   DEVELOPMENT_WORKFLOW).
+6. Карточка CORE proposal в Admin (Фаза 9) — UI четырёх действий.
