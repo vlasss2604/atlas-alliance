@@ -32,6 +32,9 @@ const RATE_WINDOW_SEC = 600;
 // попытки 2 и 3 — уточнения. CHECK в БД держит тот же предел.
 export const MAX_ATTEMPT = 3;
 
+// Пауза перед повтором после транзиентного сбоя провайдера.
+const RETRY_DELAY_MS = Number(process.env.INTERPRETER_RETRY_DELAY_MS ?? 800);
+
 // Серверная поправка к выводу модели. Модель предполагает — сервер решает
 // (phase-4-plan §2.6): каталог проектов, а не LLM, определяет scope.
 export type ServerAdjustment = "NONE" | "PROJECT_UNRESOLVED" | "PROJECT_AMBIGUOUS";
@@ -106,13 +109,25 @@ async function callModel(
 ): Promise<{ result: InterpreterModelResult; meta: ModelMeta }> {
   const gateway = await resolveInterpreterGateway();
   let lastError: unknown = null;
+  let violation: string | undefined;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     try {
-      const call = await gateway.interpret(input, model);
+      const call = await gateway.interpret(
+        violation ? { ...input, contractViolation: violation } : input,
+        model,
+      );
       return { result: call.result, meta: { ...call.meta, attempts: attempt } };
     } catch (e) {
       if (e instanceof InterpreterUnavailableError || e instanceof InterpreterContractError) {
         lastError = e;
+        // Нарушение контракта поправимо самой моделью; инфраструктурный
+        // сбой — нет, там повтор остаётся простым повтором.
+        violation = e instanceof InterpreterContractError ? e.message : undefined;
+        // Мгновенный повтор в перегруженный провайдер попадает в ту же
+        // перегрузку — короткая пауза даёт ему шанс (живой прогон: 529).
+        if (e instanceof InterpreterUnavailableError && e.transient) {
+          await new Promise((r) => setTimeout(r, RETRY_DELAY_MS));
+        }
         continue;
       }
       throw e;

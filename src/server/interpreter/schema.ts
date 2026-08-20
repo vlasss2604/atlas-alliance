@@ -102,8 +102,22 @@ export function assertConsistent(r: InterpreterModelResult): void {
   };
 
   if (r.status === "READY") {
-    if (!r.research_task?.trim()) fail("READY without research_task");
+    // research_task — вход движка, поэтому обязателен ровно там, где
+    // движок может стартовать. Объяснение исследовательской задачи
+    // не имеет, и требовать её значило бы заставлять модель выдумывать.
+    if (r.route === "DEEP_RESEARCH" && !r.research_task?.trim()) {
+      fail("DEEP_RESEARCH without research_task");
+    }
     if (r.route === "CLARIFICATION_REQUIRED") fail("READY with CLARIFICATION_REQUIRED");
+  }
+  // Короткий ответ — это ответ, а не отказ: маршруты-объяснения обязаны
+  // приходить со статусом READY, иначе UI покажет «не понял» рядом
+  // с готовым ответом (найдено живым прогоном, кейс «интернет на Луне»).
+  if (
+    (r.route === "QUICK_EXPLANATION" || r.route === "NO_RESEARCH_NEEDED") &&
+    r.status !== "READY"
+  ) {
+    fail("explanation route requires READY status");
   }
   if (r.status === "NEEDS_CLARIFICATION") {
     if (!r.clarification_question?.trim()) fail("NEEDS_CLARIFICATION without question");
@@ -127,11 +141,12 @@ export function assertConsistent(r: InterpreterModelResult): void {
   ) {
     fail("explanation route without quick_answer");
   }
-  // Понимание обязано быть предъявимо человеку везде, где мы его показываем.
-  if (
-    (r.route === "DEEP_RESEARCH" || r.route === "CLARIFICATION_REQUIRED") &&
-    !r.understood_summary?.trim()
-  ) {
+  // Понимание обязано быть предъявимо человеку на главном экране —
+  // карточке «вот что я буду исследовать». На экране уточнения оно
+  // желательно (промпт требует), но его отсутствие обедняет экран,
+  // а не ломает запрос: 502 вместо вопроса — заведомо худший исход
+  // (живой прогон: «сравни вот этот и вот этот» — не названо ничего).
+  if (r.route === "DEEP_RESEARCH" && !r.understood_summary?.trim()) {
     fail("missing understood_summary");
   }
   // Сравнение без второй сущности — не сравнение (канон atlas-intent).
@@ -143,8 +158,59 @@ export function assertConsistent(r: InterpreterModelResult): void {
   }
 }
 
+// Нормализация ДО строгой проверки. Канон atlas-intent прямо требует:
+// task_type «не должен превращаться в жёсткую систему, блокирующую валидные
+// вопросы». То же для справочных текстов: если модель написала на десяток
+// символов длиннее, это не повод отказать пользователю в интерпретации.
+// Всё, что решает поведение (status/route/сущности/quick_answer), остаётся
+// строгим — там подгонка недопустима.
+const EXPLANATION_ROUTES = ["QUICK_EXPLANATION", "NO_RESEARCH_NEEDED"];
+
+function clamp(v: unknown, max: number): unknown {
+  return typeof v === "string" && v.length > max ? v.slice(0, max).trimEnd() : v;
+}
+
+export function normalizeModelOutput(raw: unknown): unknown {
+  if (!raw || typeof raw !== "object") return raw;
+  const r = { ...(raw as Record<string, unknown>) };
+
+  // Неизвестный тип задачи — справочное поле: не блокируем вопрос.
+  if (r.task_type != null && !TASK_TYPES.includes(r.task_type as never)) {
+    r.task_type = "OTHER_RESEARCH";
+  }
+  // Таблица статусов — наше собственное механическое отображение маршрута,
+  // а не суждение модели: маршрут-объяснение по определению READY.
+  if (typeof r.route === "string" && EXPLANATION_ROUTES.includes(r.route)) {
+    r.status = "READY";
+  }
+  // Объяснение без самого объяснения показывать нечего. Это не повод
+  // отдать пользователю «сервис недоступен»: честный ответ здесь —
+  // «не удалось выделить задачу» (живой прогон: бессмысленный ввод).
+  if (
+    typeof r.route === "string" &&
+    EXPLANATION_ROUTES.includes(r.route) &&
+    !(typeof r.quick_answer === "string" && r.quick_answer.trim())
+  ) {
+    r.route = "OUTSIDE_CURRENT_DOMAIN";
+    r.status = "INVALID";
+  }
+  r.route_reason = clamp(r.route_reason, 300);
+  r.research_task = clamp(r.research_task, MAX_RESEARCH_TASK_CHARS);
+  r.understood_summary = clamp(r.understood_summary, 300);
+  r.clarification_question = clamp(r.clarification_question, MAX_CLARIFICATION_CHARS);
+  r.quick_answer = clamp(r.quick_answer, MAX_QUICK_ANSWER_CHARS);
+  for (const key of ["user_assumptions", "ambiguities", "related_entities"]) {
+    const list = r[key];
+    if (Array.isArray(list)) {
+      const max = key === "related_entities" ? 120 : 200;
+      r[key] = list.slice(0, MAX_LIST_ITEMS).map((v) => clamp(v, max));
+    }
+  }
+  return r;
+}
+
 export function parseInterpreterResult(raw: unknown): InterpreterModelResult {
-  const parsed = interpreterResultSchema.safeParse(raw);
+  const parsed = interpreterResultSchema.safeParse(normalizeModelOutput(raw));
   if (!parsed.success) {
     throw new InterpreterContractError(
       `schema: ${parsed.error.issues.map((i) => i.path.join(".")).join(",")}`,

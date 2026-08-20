@@ -13,6 +13,10 @@ export interface InterpreterInput {
   question: string;
   clarificationTurns: ClarificationTurn[];
   language: "RU" | "EN";
+  // Чем именно был плох предыдущий ответ модели. Повтор с тем же входом
+  // даёт тот же результат, поэтому на второй попытке нарушение контракта
+  // передаётся явно (найдено живым прогоном: пропущенный understood_summary).
+  contractViolation?: string;
 }
 
 export interface ModelMeta {
@@ -41,6 +45,9 @@ export class InterpreterUnavailableError extends Error {
   constructor(
     message: string,
     public readonly cause?: unknown,
+    // Перегрузка провайдера (429/5xx) проходит сама: повтор с паузой имеет
+    // смысл. Неверный ключ или битый запрос — нет (живой прогон: 529).
+    public readonly transient = false,
   ) {
     super(message);
     this.name = "InterpreterUnavailableError";

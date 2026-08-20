@@ -34,7 +34,12 @@ export const anthropicGateway: InterpreterGateway = {
     const startedAt = Date.now();
     let message;
     try {
-      message = await client().messages.parse({
+      // messages.create, а не messages.parse: SDK валидирует схему внутри
+      // себя и падает раньше, чем мы успеваем поправить справочные поля
+      // (нормализация в schema.ts). Схема всё равно передаётся модели как
+      // output format — она ведёт декодирование, — но решение о годности
+      // ответа принимает наш контракт.
+      message = await client().messages.create({
         model,
         max_tokens: MAX_TOKENS,
         system: SYSTEM_PROMPT,
@@ -42,14 +47,35 @@ export const anthropicGateway: InterpreterGateway = {
         output_config: { format: zodOutputFormat(interpreterResultSchema) },
       });
     } catch (e) {
-      throw new InterpreterUnavailableError(
-        e instanceof Anthropic.APIError ? `api ${e.status}` : "api call failed",
-        e,
-      );
+      // Причина обязана быть видна в логе: «api call failed» не позволяет
+      // отличить перегрузку от неверного ключа (найдено живым прогоном).
+      const status = e instanceof Anthropic.APIError ? e.status : undefined;
+      const detail =
+        e instanceof Anthropic.APIError
+          ? `api ${status ?? "?"} ${e.name}: ${String(e.message).slice(0, 200)}`
+          : `api call failed: ${e instanceof Error ? e.message : String(e)}`;
+      const transient =
+        status === 429 || status === undefined || (status >= 500 && status < 600);
+      throw new InterpreterUnavailableError(detail, e, transient);
     }
-    // parsed_output === null означает, что вывод не разобрался в схему —
-    // для нас это тот же класс сбоя, что и сетевая ошибка.
-    const result = parseInterpreterResult(message.parsed_output);
+    // Обрезание по лимиту токенов даёт невалидный JSON: это отдельный
+    // класс сбоя, и в логе он должен называться своим именем.
+    if (message.stop_reason === "max_tokens") {
+      throw new InterpreterUnavailableError("model output truncated (max_tokens)");
+    }
+    // Вывод модели — текстовый JSON; невалидный JSON для нас тот же класс
+    // сбоя, что и сетевая ошибка: ответа нет.
+    const text = message.content
+      .map((b) => (b.type === "text" ? b.text : ""))
+      .join("")
+      .trim();
+    let raw: unknown;
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw new InterpreterUnavailableError("model output is not valid JSON");
+    }
+    const result = parseInterpreterResult(raw);
     return {
       result,
       meta: {

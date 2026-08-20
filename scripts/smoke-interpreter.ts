@@ -4,7 +4,10 @@ import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 import { anthropicGateway } from "../src/server/interpreter/anthropic";
 import { fakeGateway } from "../src/server/interpreter/fake";
 import type { InterpreterGateway } from "../src/server/interpreter/gateway";
-import type { InterpreterModelResult } from "../src/server/interpreter/schema";
+import {
+  InterpreterContractError,
+  type InterpreterModelResult,
+} from "../src/server/interpreter/schema";
 
 // Closed Smoke Test Интерпретатора (директива владельца после Фазы 4).
 // Смотрим НЕ на красоту ответа, а на четыре вещи:
@@ -86,6 +89,32 @@ async function main(): Promise<void> {
   }
   say("");
 
+  let retried = 0;
+
+  // Повтор с задержкой: перегрузка провайдера — не свойство понимания,
+  // и отчёт не должен путать одно с другим.
+  async function callWithRetry(g: InterpreterGateway, question: string, m: string) {
+    let violation: string | undefined;
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const call = await g.interpret(
+          { question, clarificationTurns: [], language: "RU", contractViolation: violation },
+          m,
+        );
+        if (attempt > 1) retried += 1;
+        return call;
+      } catch (e) {
+        lastError = e;
+        violation = e instanceof InterpreterContractError ? e.message : undefined;
+        // Перегрузка провайдера переживается паузой, а не считается
+        // свойством понимания.
+        await new Promise((r) => setTimeout(r, 2500));
+      }
+    }
+    throw lastError;
+  }
+
   let mismatches = 0;
   let failures = 0;
   let inTokens = 0;
@@ -95,10 +124,10 @@ async function main(): Promise<void> {
     say(`## ${i + 1}. «${c.q}»`);
     say(`ожидание: ${c.expect.join(" | ")}  (${c.why})`);
     try {
-      const { result, meta } = await gateway.interpret(
-        { question: c.q, clarificationTurns: [], language: "RU" },
-        model,
-      );
+      // Та же политика, что в проде (interpret.ts): две попытки, причём
+      // нарушение контракта возвращается модели как замечание. Иначе
+      // прогон измеряет не тот опыт, который получит пользователь.
+      const { result, meta } = await callWithRetry(gateway, c.q, model);
       inTokens += meta.inputTokens ?? 0;
       outTokens += meta.outputTokens ?? 0;
       const hit = c.expect.includes(result.route);
@@ -118,7 +147,9 @@ async function main(): Promise<void> {
       say(`причина:  ${short(result.route_reason, 120)}`);
     } catch (e) {
       failures += 1;
-      say(`СБОЙ: ${e instanceof Error ? e.message : String(e)}`);
+      // Причина сбоя — часть отчёта: «api call failed» ничего не говорит
+      // о том, перегрузка это, обрезание ответа или нарушение контракта.
+      say(`СБОЙ: ${e instanceof Error ? `${e.name}: ${e.message}` : String(e)}`);
     }
     say("");
   }
@@ -126,6 +157,7 @@ async function main(): Promise<void> {
   say(`---`);
   say(`Расхождений с ожиданием: ${mismatches} из ${CASES.length}`);
   say(`Сбоев вызова/схемы:      ${failures}`);
+  say(`Выправлено со второй попытки: ${retried}`);
   if (inTokens || outTokens) {
     // Стоимость claude-haiku-4-5: $1 / $5 за 1M токенов.
     const usd = (inTokens / 1e6) * 1 + (outTokens / 1e6) * 5;

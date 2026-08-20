@@ -654,13 +654,52 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       { ...valid, status: "NEEDS_CLARIFICATION", route: "CLARIFICATION_REQUIRED" }, // без вопроса
       { ...valid, status: "OUT_OF_SCOPE" }, // OUT_OF_SCOPE с DEEP_RESEARCH
       { ...valid, quick_answer: "текст" }, // quick_answer на DEEP_RESEARCH
-      { ...valid, route: "QUICK_EXPLANATION" }, // маршрут-объяснение без ответа
       { ...valid, task_type: "COMPARISON" }, // сравнение без второй сущности
       { ...valid, project_or_asset: null, related_entities: ["Aave"] }, // сущность без основной
     ];
     for (const c of cases) {
       expect(() => parseInterpreterResult(c)).toThrow(InterpreterContractError);
     }
+  });
+
+  it("13b. терпимость там, где строгость только вредит (живой прогон)", async () => {
+    const valid = modelSays({ project_or_asset: "Uniswap" })();
+
+    // Незнакомый тип задачи — справочное поле: канон запрещает ему
+    // блокировать валидный вопрос.
+    expect(parseInterpreterResult({ ...valid, task_type: "MECHANISM" }).task_type).toBe(
+      "OTHER_RESEARCH",
+    );
+    // Слишком длинный служебный текст обрезается, а не роняет запрос.
+    const long = parseInterpreterResult({ ...valid, route_reason: "д".repeat(500) });
+    expect(long.route_reason.length).toBe(300);
+    // Статус маршрута-объяснения — наше механическое отображение, не мнение
+    // модели: он выправляется, а не отвергается.
+    const explained = parseInterpreterResult({
+      ...valid,
+      status: "INVALID",
+      route: "NO_RESEARCH_NEEDED",
+      quick_answer: "Такой связи не существует.",
+    });
+    expect(explained.status).toBe("READY");
+    // Объяснение без объяснения показывать нечего → честный INVALID,
+    // а не «сервис недоступен».
+    const empty = parseInterpreterResult({ ...valid, route: "QUICK_EXPLANATION" });
+    expect(empty.status).toBe("INVALID");
+    expect(empty.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+    // Экран уточнения без человеческой формулировки обедняется, но живёт.
+    const bare = parseInterpreterResult({
+      ...valid,
+      status: "NEEDS_CLARIFICATION",
+      route: "CLARIFICATION_REQUIRED",
+      clarification_question: "О каком проекте речь?",
+      understood_summary: null,
+    });
+    expect(bare.status).toBe("NEEDS_CLARIFICATION");
+    // А вот главная карточка без понимания — по-прежнему отказ.
+    expect(() =>
+      parseInterpreterResult({ ...valid, understood_summary: null }),
+    ).toThrow(InterpreterContractError);
   });
 });
 
