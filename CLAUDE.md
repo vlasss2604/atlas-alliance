@@ -34,6 +34,13 @@ The current paid level is **ARI • CORE**. The free entry level is **DEMO**.
 - Scope and Entitlement are different concepts. A project can be inside ATLAS research scope while being unavailable to DEMO.
 - Proof is **private by default**. No public Proof URLs in v1.
 
+## ARI Learning Loop
+
+`docs/ARI_LEARNING_LOOP.md` — зафиксированное направление развития ARI:
+стартовый CORE v0.1 → Proof/Lesson/CORE уровни знаний → retrieval-first →
+lesson extraction → human validation → controlled CORE evolution. Без
+изменения LLM weights. Границы автоматизации — по LOCKED §11.
+
 ## Research rules
 
 - Research Memory guides. Fresh Evidence verifies.
