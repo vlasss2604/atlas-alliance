@@ -5,7 +5,7 @@ import type { PgBoss } from "pg-boss";
 
 import { HttpError } from "../auth/guards";
 import type { Database } from "../db/client";
-import { interpretations, projects, researchJobs, topics } from "../db/schema";
+import { interpretations, researchJobs } from "../db/schema";
 import type { ProductConfig } from "../config/product";
 import {
   ActiveJobExistsError,
@@ -15,13 +15,15 @@ import {
   transitionJobState,
   type ResearchJobRow,
 } from "../jobs/research-jobs";
-import { resolveEntitlement } from "./entitlement";
+import { evaluateGates } from "./gates";
 
-// Контракт structured-результата Interpreter (минимум Фазы 3; Фаза 4
-// наполняет его настоящим Interpreter'ом).
+// Контракт structured-результата Interpreter. Полная схема — в
+// src/server/interpreter/schema.ts; здесь нужны только поля, от которых
+// зависит запуск исследования.
 interface InterpretationResult {
   project_slug?: string;
   research_task?: string;
+  route?: string;
 }
 
 export interface StartResearchInput {
@@ -76,27 +78,27 @@ export async function startResearch(
   if (!result.project_slug || !result.research_task) {
     throw new HttpError(409, "INTERPRETATION_REQUIRED");
   }
-
-  const entitlement = await resolveEntitlement(db, input.userId, config);
-
-  // Scope: тема активна, проект существует и находится в исследуемом статусе.
-  const [topic] = await db.select().from(topics).where(eq(topics.isActive, true));
-  if (!topic) throw new HttpError(403, "OUT_OF_SCOPE");
-  const [project] = await db
-    .select()
-    .from(projects)
-    .where(eq(projects.slug, result.project_slug));
-  if (!project || project.status !== "ACTIVE_CORE") {
-    throw new HttpError(403, "OUT_OF_SCOPE");
+  // Только DEEP_RESEARCH ведёт к Proof (phase-4-plan §3.4):
+  // QUICK_EXPLANATION и NO_RESEARCH_NEEDED не создают job даже прямым
+  // вызовом API в обход UI.
+  if (result.route !== "DEEP_RESEARCH") {
+    throw new HttpError(409, "INTERPRETATION_REQUIRED");
   }
 
-  // Scope ≠ Entitlement: проект в scope ATLAS, но DEMO видит замок.
-  if (
-    entitlement.snapshot.level === "DEMO" &&
-    !config.demo_project_slugs.includes(project.slug)
-  ) {
-    throw new HttpError(403, "CORE_REQUIRED");
-  }
+  // Scope и Entitlement — тем же кодом, что и превью Interpreter
+  // (phase-4-plan §3.1): показанное пользователю решение и реальное
+  // решение не могут разойтись.
+  const gates = await evaluateGates(db, config, {
+    userId: input.userId,
+    status: interp.status,
+    route: result.route,
+    projectSlug: result.project_slug,
+  });
+  if (gates.scope === "OUT_OF_SCOPE") throw new HttpError(403, "OUT_OF_SCOPE");
+  if (gates.entitlement === "CORE_REQUIRED") throw new HttpError(403, "CORE_REQUIRED");
+  const entitlement = gates.entitlementView;
+  const topic = { id: gates.topicId! };
+  const project = { id: gates.projectId!, slug: result.project_slug };
 
   const normalizedTask = {
     project_slug: project.slug,

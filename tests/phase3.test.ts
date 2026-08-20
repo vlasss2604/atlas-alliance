@@ -94,7 +94,11 @@ async function makeReadyInterpretation(
       userId,
       originalQuestion: "Does the token capture value?",
       status: "READY",
-      result: { project_slug: projectSlug, research_task: uniq("task") },
+      result: {
+        project_slug: projectSlug,
+        research_task: uniq("task"),
+        route: "DEEP_RESEARCH",
+      },
     })
     .returning();
   return row.id;

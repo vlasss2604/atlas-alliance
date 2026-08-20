@@ -121,11 +121,37 @@ body {
   box-shadow: 0 0 8px var(--atlas-cyan);
 }
 
+/* Честное ожидание: пульс живого запроса, без фейковых стадий прогресса */
+@keyframes atlas-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.pulse-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--atlas-cyan);
+  box-shadow: 0 0 8px var(--atlas-cyan);
+  animation: atlas-pulse 1.2s var(--ease-out) infinite;
+}
+
 /* Reduced motion: упрощение, не потеря функциональности */
 @media (prefers-reduced-motion: reduce) {
   .enter,
   .sheet-enter {
     animation: none;
+  }
+  .pulse-dot {
+    animation: none;
+    opacity: 1;
   }
   .pill,
   .pill:active {

@@ -16,6 +16,12 @@ const productConfigSchema = z.object({
   // Калитка запуска исследований (phase-3-plan §2). Аварийное отключение
   // без деплоя; включается только с появлением Interpreter (Фаза 4).
   research_enabled: z.boolean(),
+  // Калитка Interpreter — отдельно от research_enabled (phase-4-plan §3.3,
+  // решение владельца №3): Ask-экран понимает вопрос уже с Фазы 4,
+  // но Proof запустить нельзя до Фазы 6.
+  interpreter_enabled: z.boolean(),
+  // Модель Interpreter (решение владельца №2). Смена — без деплоя.
+  interpreter_model: z.string().min(1),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -33,6 +39,8 @@ export type JobBudgetConfig = z.infer<typeof jobBudgetSchema>;
 // истины — таблица product_config, не этот объект.
 export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   research_enabled: false,
+  interpreter_enabled: true,
+  interpreter_model: "claude-haiku-4-5",
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,

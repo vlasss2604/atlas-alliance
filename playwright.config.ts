@@ -35,6 +35,9 @@ export default defineConfig({
       BOT_TOKEN: "123456:E2E_TOKEN",
       CSRF_SECRET: "e2e-csrf-secret",
       ALLOWED_ORIGINS: "http://localhost:3100",
+      // Детерминированный Interpreter: e2e проверяет поведение продукта,
+      // а не вывод модели (и не тратит бюджет на прогонах).
+      MODEL_GATEWAY: "fake",
     },
   },
 });

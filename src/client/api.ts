@@ -80,7 +80,89 @@ export async function getMe(): Promise<MeResponse> {
   return me;
 }
 
+export interface InterpretationView {
+  id: string;
+  status: "READY" | "NEEDS_CLARIFICATION" | "OUT_OF_SCOPE" | "INVALID";
+  attempt: number;
+  route: string;
+  adjustment: "NONE" | "PROJECT_UNRESOLVED" | "PROJECT_AMBIGUOUS";
+  clarificationQuestion: string | null;
+  quickAnswer: string | null;
+  understood: {
+    researchTask: string;
+    projectSlug: string | null;
+    projectOrAsset: string | null;
+    taskType: string | null;
+    assumptions: string[];
+  } | null;
+}
+
+export interface GateView {
+  scope: "SUPPORTED" | "OUT_OF_SCOPE";
+  entitlement: "OK" | "CORE_REQUIRED";
+  research:
+    | "AVAILABLE"
+    | "DISABLED"
+    | "NOT_DEEP_RESEARCH"
+    | "ACTIVE_JOB_EXISTS"
+    | "DEMO_QUOTA_EXHAUSTED";
+  demo: { used: number; limit: number } | null;
+}
+
+export interface InterpretResult {
+  interpretation: InterpretationView;
+  gates: GateView;
+}
+
+// Код ошибки сервера — отдельно от сетевого сбоя: UI обязан различать
+// «лимит уточнений» и «сервис недоступен».
+export class ApiError extends Error {
+  constructor(
+    public readonly status: number,
+    public readonly code: string,
+  ) {
+    super(code);
+    this.name = "ApiError";
+  }
+}
+
+async function requestChecked<T>(path: string, init: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(csrfToken ? { "X-Atlas-CSRF": csrfToken } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401) {
+    const re = await authenticate();
+    if (re) return requestChecked<T>(path, init);
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new ApiError(res.status, body.error ?? "UNKNOWN");
+  }
+  return (await res.json()) as T;
+}
+
 export const api = {
+  interpret: (question: string) =>
+    requestChecked<InterpretResult>("/api/interpretations", {
+      method: "POST",
+      body: JSON.stringify({ question }),
+    }),
+  clarify: (id: string, answer: string) =>
+    requestChecked<InterpretResult>(`/api/interpretations/${id}/clarify`, {
+      method: "POST",
+      body: JSON.stringify({ answer }),
+    }),
+  startResearch: (interpretationId: string, idempotencyKey: string) =>
+    requestChecked<{ job: { id: string; state: string } }>("/api/research-jobs", {
+      method: "POST",
+      body: JSON.stringify({ interpretationId, idempotencyKey }),
+    }),
   setLanguage: (language: "RU" | "EN") =>
     request<{ language: string }>("/api/me/language", {
       method: "PATCH",

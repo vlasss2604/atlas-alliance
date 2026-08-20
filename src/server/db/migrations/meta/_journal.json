@@ -36,6 +36,13 @@
       "when": 1787237616362,
       "tag": "0004_journal_cascade_delete",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787251277734,
+      "tag": "0005_interpretation_chain",
+      "breakpoints": true
     }
   ]
 }

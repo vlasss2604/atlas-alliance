@@ -28,6 +28,27 @@ export const en = {
     submit: "Start Proof",
     disabledNote:
       "ARI is being connected — research will be available in an upcoming update.",
+    // Фаза 4. Copy предложен реализацией; финальное утверждение — за
+    // владельцем после просмотра реальных состояний UI.
+    thinking: "ARI is reading your question…",
+    understoodTitle: "Here is what I will research",
+    assumptionsTitle: "Your assumptions I will test",
+    clarifyTitle: "One question before I start",
+    clarifyProjectFallback: "Which project or token do you mean?",
+    clarifyPlaceholder: "Your answer…",
+    clarifySubmit: "Send",
+    clarifyLimit:
+      "I couldn't define the research task precisely enough. Try asking a new question.",
+    quickTitle: "Understood. This is an explanation, not a Proof.",
+    outOfScope:
+      "ATLAS researches how digital assets capture value — that question is outside what it can verify today. Try asking about a token's value mechanism.",
+    invalid:
+      "I couldn't find a research task in that. Try describing what you want to understand.",
+    coreRequired: "This research requires ARI • CORE.",
+    quotaExhausted: "Your DEMO research is used up. ARI • CORE removes the limit.",
+    activeJob: "One research is already running. It will finish shortly.",
+    error: "Couldn't process the question. Please try again.",
+    newQuestion: "Ask another question",
   },
   research: {
     title: "Research",

@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   boolean,
   check,
+  index,
   jsonb,
   pgTable,
   smallint,
@@ -9,6 +10,7 @@ import {
   timestamp,
   uniqueIndex,
   uuid,
+  type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 
 import { projects, topics } from "./catalog";
@@ -118,7 +120,15 @@ export const interpretations = pgTable(
     researchJobId: uuid("research_job_id").references(() => researchJobs.id, {
       onDelete: "cascade",
     }),
+    // Цепочка уточнений (phase-4-plan §3.3): попытка 1 — исходный вопрос,
+    // попытки 2–3 — уточнения 1–2. Полная цепочка Original Question →
+    // Interpreter Result восстановима (LOCKED §5).
+    parentId: uuid("parent_id").references((): AnyPgColumn => interpretations.id, {
+      onDelete: "cascade",
+    }),
     originalQuestion: text("original_question").notNull(),
+    // Ответ пользователя на clarification_question родителя (для attempt > 1).
+    clarificationAnswer: text("clarification_answer"),
     status: interpreterStatus("status").notNull(),
     attempt: smallint("attempt").notNull().default(1),
     result: jsonb("result"),
@@ -127,7 +137,15 @@ export const interpretations = pgTable(
       .notNull()
       .defaultNow(),
   },
-  (t) => [check("ck_interpretations_attempt", sql`${t.attempt} BETWEEN 1 AND 3`)],
+  (t) => [
+    check("ck_interpretations_attempt", sql`${t.attempt} BETWEEN 1 AND 3`),
+    // Один ребёнок на родителя: двойной clarify (double-tap, две вкладки)
+    // не создаёт две ветки интерпретации — инвариант БД, не код (DoD-4).
+    uniqueIndex("uq_interpretations_one_child")
+      .on(t.parentId)
+      .where(sql`parent_id IS NOT NULL`),
+    index("ix_interpretations_user_created").on(t.userId, t.createdAt.desc()),
+  ],
 );
 
 // Reservation model DEMO-квоты (LOCKED §2, B10).

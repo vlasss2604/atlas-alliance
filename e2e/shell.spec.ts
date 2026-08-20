@@ -68,8 +68,9 @@ test("12. bottom nav walks all tabs; ARI opens ask; example fills input; submit 
   await example.click();
   await expect(page.locator("textarea")).toHaveValue(exampleText);
 
-  // Честное disabled-состояние отправки (Фаза 4 ещё не подключена)
-  await expect(page.getByRole("button", { name: /Start Proof|Начать Proof/ })).toBeDisabled();
+  // С Фазы 4 отправка вопроса включена: кнопка активна при непустом вводе
+  // (запускается интерпретация, не исследование).
+  await expect(page.getByRole("button", { name: /Start Proof|Начать Proof/ })).toBeEnabled();
 });
 
 test("13. prefers-reduced-motion keeps the app fully functional", async ({ browser }) => {
