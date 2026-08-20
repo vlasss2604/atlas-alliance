@@ -219,8 +219,10 @@ describe("Phase 2 DoD", () => {
     const initData = makeInitData({ __tgId: tgId });
     const res = await authPOST(authRequest({ initData }));
     const setCookie = res.headers.get("set-cookie")!;
+    // Точный разбор атрибутов (не подстроки): каждый — отдельный элемент.
+    const attrs = setCookie.split("; ").slice(1);
     for (const attr of ["HttpOnly", "Secure", "SameSite=None", "Path=/", "Max-Age=604800"]) {
-      expect(setCookie).toContain(attr);
+      expect(attrs).toContain(attr);
     }
     const rawToken = setCookie.split(";")[0].split("=").slice(1).join("=");
 

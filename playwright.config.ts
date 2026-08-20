@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig } from "@playwright/test";
 
 // E2E Фазы 2 (phase-2-plan §9.11–13): dev-режим, WebPlatformAdapter +
 // AUTH_DEV_BYPASS. Viewport — канонный mobile-first 390×844.
@@ -11,12 +11,17 @@ export default defineConfig({
   globalSetup: "./e2e/global-setup.ts",
   use: {
     baseURL: "http://localhost:3100",
+    // Канонный mobile-first viewport; НЕ спредить devices["Desktop Chrome"]
+    // поверх — project-level use перекрывает этот блок (был баг: e2e шли 1280×720).
     viewport: { width: 390, height: 844 },
+    hasTouch: true,
+    isMobile: true,
+    deviceScaleFactor: 2,
     // Предустановленный Chromium окружения (версия пиннована не нами):
     // не скачиваем браузеры, используем существующий бинарь.
     launchOptions: { executablePath: "/opt/pw-browsers/chromium-1194/chrome-linux/chrome" },
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [{ name: "chromium" }],
   webServer: {
     command: "npx next dev -p 3100",
     url: "http://localhost:3100",
