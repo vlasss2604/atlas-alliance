@@ -57,6 +57,13 @@
       "when": 1787310019135,
       "tag": "0007_memory_lifecycle_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787318054485,
+      "tag": "0008_step_components_admin_barrier",
+      "breakpoints": true
     }
   ]
 }

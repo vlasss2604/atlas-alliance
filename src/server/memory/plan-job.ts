@@ -96,8 +96,10 @@ export async function runMemoryPlanningStage(
       hits: hits.map((h) => ({
         memoryId: h.memoryId,
         step: h.patternStep,
+        component: h.component,
         claimKey: h.claimKey,
         matchedVia: h.matchedVia,
+        health: h.health,
         confidence: h.confidence,
       })),
       retrievedCount: hits.length,

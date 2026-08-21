@@ -47,6 +47,12 @@ async function makeUser() {
   return u;
 }
 
+// D-065: промоушен в ACTIVE санкционирует ADMIN — и на уровне БД тоже.
+async function makeAdmin() {
+  const [u] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();
+  return u;
+}
+
 async function activeTopicId(): Promise<string> {
   const [t] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
   return t.id;
@@ -86,6 +92,7 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
         projectId: project.id,
         topicId,
         patternStep: 3,
+        component: "MECHANISM_SPEC",
         claimKey: "allocation_mechanism",
         statement: "test",
         freshnessClass: "LOW_CHANGE",
@@ -110,6 +117,7 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
         projectId: project.id,
         topicId,
         patternStep: 1,
+        component: "SOURCE_OF_VALUE",
         claimKey: "economic_source",
         statement: "test observed",
         freshnessClass: "LOW_CHANGE",
@@ -142,6 +150,7 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
         projectId: project.id,
         topicId,
         patternStep: 2,
+        component: "FLOW_PATH",
         claimKey: "revenue_waterfall",
         statement: "test candidate",
         freshnessClass: "MEDIUM_CHANGE",
@@ -168,16 +177,17 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
     expect(pgError(error).message).toMatch(/requires promoted_by/);
   });
 
-  it("5. lifecycle: полный путь OBSERVED -> CANDIDATE -> ACTIVE с promoted_by проходит", async () => {
+  it("5. lifecycle: полный путь OBSERVED -> CANDIDATE -> ACTIVE с promoted_by-ADMIN проходит", async () => {
     const topicId = await activeTopicId();
     const project = await firstDemoProject();
-    const admin = await makeUser();
+    const admin = await makeAdmin();
     const [row] = await ctx.db
       .insert(researchMemory)
       .values({
         projectId: project.id,
         topicId,
         patternStep: 4,
+        component: "EXECUTION_EVIDENCE",
         claimKey: "actual_execution",
         statement: "buybacks executed monthly per governance record",
         freshnessClass: "MEDIUM_CHANGE",
@@ -197,6 +207,97 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       .returning();
     expect(promoted.lifecycleState).toBe("ACTIVE");
     expect(promoted.promotedBy).toBe(admin.id);
+  });
+
+  it("5a. D-065: прямой SQL-промоушен с обычным (не-ADMIN) пользователем в promoted_by отклоняется БД", async () => {
+    const topicId = await activeTopicId();
+    const project = await firstDemoProject();
+    const normalUser = await makeUser(); // role = USER
+    const [row] = await ctx.db
+      .insert(researchMemory)
+      .values({
+        projectId: project.id,
+        topicId,
+        patternStep: 4,
+        component: "EXECUTION_EVIDENCE",
+        claimKey: "actual_execution_d065",
+        statement: "attacker tries to promote via direct SQL",
+        freshnessClass: "MEDIUM_CHANGE",
+        verifiedAt: sql`now()`,
+        confidence: 92,
+        originKind: "TEST",
+      })
+      .returning();
+    await ctx.db
+      .update(researchMemory)
+      .set({ lifecycleState: "CANDIDATE" })
+      .where(eq(researchMemory.id, row.id));
+
+    // Ровно атака из ревью MEDIUM-5: promoted_by непустой, но актёр не ADMIN.
+    // Раньше проходило — роль проверял только assertAdmin в приложении.
+    let error: unknown;
+    try {
+      await ctx.db
+        .update(researchMemory)
+        .set({ lifecycleState: "ACTIVE", promotedBy: normalUser.id, promotedAt: sql`now()` })
+        .where(eq(researchMemory.id, row.id));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeDefined();
+    expect(pgError(error).message).toMatch(/ADMIN/);
+    const [after] = await ctx.db
+      .select()
+      .from(researchMemory)
+      .where(eq(researchMemory.id, row.id));
+    expect(after.lifecycleState).toBe("CANDIDATE"); // переход не произошёл
+  });
+
+  it("5b. D-060: пара (pattern_step, component), не принадлежащая активному Pattern, отклоняется при записи", async () => {
+    const topicId = await activeTopicId();
+    const project = await firstDemoProject();
+    // Ровно атака из ревью MEDIUM-4, теперь на уровне компонента: попытка
+    // записать компонент шага 1 в шаг 8 («Durability»).
+    let error: unknown;
+    try {
+      await ctx.db.insert(researchMemory).values({
+        projectId: project.id,
+        topicId,
+        patternStep: 8,
+        component: "SOURCE_OF_VALUE",
+        claimKey: "economic_source",
+        statement: "wrong mapping attack",
+        freshnessClass: "LOW_CHANGE",
+        verifiedAt: sql`now()`,
+        confidence: 90,
+        originKind: "TEST",
+      });
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeDefined();
+    expect(pgError(error).message).toMatch(/does not belong to pattern step/);
+
+    // Неизвестный компонент отклоняется тоже.
+    let error2: unknown;
+    try {
+      await ctx.db.insert(researchMemory).values({
+        projectId: project.id,
+        topicId,
+        patternStep: 8,
+        component: "MADE_UP_COMPONENT",
+        claimKey: "durability",
+        statement: "unknown component attack",
+        freshnessClass: "LOW_CHANGE",
+        verifiedAt: sql`now()`,
+        confidence: 90,
+        originKind: "TEST",
+      });
+    } catch (e) {
+      error2 = e;
+    }
+    expect(error2).toBeDefined();
+    expect(pgError(error2).message).toMatch(/does not belong to pattern step/);
   });
 
   it("6. lifecycle: project_memory_items — та же защита от прямой ACTIVE-вставки", async () => {
@@ -219,13 +320,14 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
   it("7. удаление пользователя не ломается системной Research Memory (D-048)", async () => {
     const topicId = await activeTopicId();
     const project = await firstDemoProject();
-    const admin = await makeUser();
+    const admin = await makeAdmin();
     const [row] = await ctx.db
       .insert(researchMemory)
       .values({
         projectId: project.id,
         topicId,
         patternStep: 5,
+        component: "CURRENT_STATE",
         claimKey: "current_status",
         statement: "status verified via governance dashboard",
         freshnessClass: "HIGH_CHANGE",
@@ -426,6 +528,7 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
       projectId: project.id,
       topicId,
       patternStep: 3,
+      component: "MECHANISM_SPEC",
       claimKey: "allocation_mechanism",
       statement: "Buyback executed per governance record",
       freshnessClass: "MEDIUM_CHANGE",
@@ -474,6 +577,7 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
       projectId: project.id,
       topicId,
       patternStep: 6,
+      component: "DESTINATION",
       claimKey: "token_destination",
       statement: "test",
       freshnessClass: "LOW_CHANGE",
@@ -545,6 +649,7 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
       projectId: projectA.id,
       topicId,
       patternStep: 1,
+      component: "SOURCE_OF_VALUE",
       claimKey: "economic_source",
       statement: "Protocol charges a 0.3% swap fee as its economic source",
       freshnessClass: "LOW_CHANGE",
@@ -575,6 +680,7 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
       projectId: project.id,
       topicId,
       patternStep: 7,
+      component: "NET_EFFECT",
       claimKey: "net_token_effect",
       statement: "Half of protocol revenue is used to burn the token every epoch",
       freshnessClass: "MEDIUM_CHANGE",
@@ -615,6 +721,7 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
         projectId: project.id,
         topicId,
         patternStep: 8,
+        component: "DURABILITY_BASIS",
         claimKey: `durability_${i}`,
         statement: `Durability note ${i}`,
         freshnessClass: "LOW_CHANGE",
@@ -632,6 +739,163 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
     expect(step8.length).toBe(2);
     // Top-K оставляет наиболее уверенные записи.
     expect(step8.every((h) => h.confidence >= 62)).toBe(true);
+  });
+
+  it("16a. D-059: health='DEPRECATED' исключён из retrieval целиком, но запись сохраняется в хранилище", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("depr"), name: "Deprecated Health Project", status: "ACTIVE_CORE" })
+      .returning();
+    const memId = await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 7,
+      component: "NET_EFFECT",
+      claimKey: "net_token_effect",
+      statement: "net effect claim later proven wrong",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 95,
+      originKind: "TEST",
+    });
+    // health — не lifecycle-переход; прямое выставление допустимо.
+    await ctx.db
+      .update(researchMemory)
+      .set({ health: "DEPRECATED" })
+      .where(eq(researchMemory.id, memId));
+
+    const hits = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId },
+      { topKPerStep: 5 },
+    );
+    expect(hits.some((h) => h.memoryId === memId)).toBe(false); // исключён из retrieval
+
+    const [stored] = await ctx.db
+      .select()
+      .from(researchMemory)
+      .where(eq(researchMemory.id, memId));
+    expect(stored).toBeTruthy(); // история сохранена, не удалена
+    expect(stored.health).toBe("DEPRECATED");
+    expect(stored.lifecycleState).toBe("ACTIVE");
+  });
+
+  it("16b. D-059: QUESTIONABLE/REVERIFY/STALE извлекаются (направляют перепроверку) и несут health в hit", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("health"), name: "Health Project", status: "ACTIVE_CORE" })
+      .returning();
+    const memId = await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 2,
+      component: "FLOW_PATH",
+      claimKey: "revenue_waterfall",
+      statement: "flow path, questionable now",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 95,
+      originKind: "TEST",
+    });
+    await ctx.db
+      .update(researchMemory)
+      .set({ health: "QUESTIONABLE" })
+      .where(eq(researchMemory.id, memId));
+
+    const hits = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId },
+      { topKPerStep: 5 },
+    );
+    const hit = hits.find((h) => h.memoryId === memId);
+    expect(hit).toBeTruthy();
+    expect(hit?.health).toBe("QUESTIONABLE");
+  });
+
+  it("16c. MEDIUM-1: stale_after '36 hours' и '3 months' читаются целиком, а не усекаются в 0 дней", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("interval"), name: "Interval Project", status: "ACTIVE_CORE" })
+      .returning();
+    const hoursId = await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 5,
+      component: "CURRENT_STATE",
+      claimKey: "current_status_36h",
+      statement: "policy of 36 hours",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      staleAfter: { hours: 36 },
+      confidence: 95,
+      originKind: "TEST",
+    });
+    const monthsId = await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 8,
+      component: "DURABILITY_BASIS",
+      claimKey: "durability_3mo",
+      statement: "policy of 3 months",
+      freshnessClass: "HIGH_CHANGE",
+      verifiedAt: new Date(),
+      staleAfter: { months: 3 },
+      confidence: 95,
+      originKind: "TEST",
+    });
+
+    const hits = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId },
+      { topKPerStep: 5 },
+    );
+    const hours = hits.find((h) => h.memoryId === hoursId);
+    const months = hits.find((h) => h.memoryId === monthsId);
+    // Прежний код давал 0 для обоих ('36 hours' -> 0 дней, '3 months' -> 0
+    // дней), делая записи вечно просроченными.
+    expect(hours?.staleAfterSeconds).toBe(36 * 60 * 60);
+    expect(months?.staleAfterSeconds).toBe(90 * 24 * 60 * 60); // Postgres: месяц = 30 дней
+  });
+
+  it("16d. L-1 (D-052): порядок и состав retrieval детерминированы при равной уверенности", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("determ"), name: "Determinism Project", status: "ACTIVE_CORE" })
+      .returning();
+    // Четыре записи одного шага с РАВНОЙ уверенностью — прежний ORDER BY
+    // без tiebreaker'а позволял составу Top-K меняться между прогонами.
+    for (let i = 0; i < 4; i += 1) {
+      await activateMemory(ctx, {
+        projectId: project.id,
+        topicId,
+        patternStep: 8,
+        component: "DURABILITY_BASIS",
+        claimKey: `durability_eq_${i}`,
+        statement: `Equal-confidence durability note ${i}`,
+        freshnessClass: "LOW_CHANGE",
+        verifiedAt: new Date(),
+        confidence: 80,
+        originKind: "TEST",
+      });
+    }
+    const run1 = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId },
+      { topKPerStep: 2 },
+    );
+    const run2 = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId },
+      { topKPerStep: 2 },
+    );
+    expect(run1.map((h) => h.memoryId)).toEqual(run2.map((h) => h.memoryId));
+    // Tiebreaker — id по возрастанию: состав воспроизводим, не «какие успели».
+    const ids = run1.filter((h) => h.patternStep === 8).map((h) => h.memoryId);
+    expect(ids).toEqual([...ids].sort());
   });
 });
 
@@ -673,6 +937,7 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
       projectId: project.id,
       topicId,
       patternStep: 1,
+      component: "SOURCE_OF_VALUE",
       claimKey: "economic_source",
       statement: "0.3% swap fee is the economic source",
       freshnessClass: "LOW_CHANGE",
@@ -680,15 +945,30 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
       confidence: 95,
       originKind: "TEST",
     });
+    // Шаг 3 многокомпонентен (D-060) — закрывается только покрытием ОБОИХ
+    // компонентов: механизм описан И санкционирован.
     await activateMemory(ctx, {
       projectId: project.id,
       topicId,
       patternStep: 3,
+      component: "MECHANISM_SPEC",
       claimKey: "allocation_mechanism",
       statement: "governance-approved buyback mechanism",
       freshnessClass: "MEDIUM_CHANGE",
       verifiedAt: new Date(),
       confidence: 92,
+      originKind: "TEST",
+    });
+    await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 3,
+      component: "GOVERNANCE_BASIS",
+      claimKey: "allocation_governance",
+      statement: "buyback sanctioned by governance vote #42",
+      freshnessClass: "MEDIUM_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 91,
       originKind: "TEST",
     });
 
@@ -710,7 +990,10 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
     expect(contractOn.alreadySatisfiedSteps.sort()).toEqual([1, 3]);
     expect(contractOff.alreadySatisfiedSteps).toEqual([]);
     expect(contractOff.missingSteps.length).toBe(8);
-    expect(planOn.mode).toBe("TARGETED_REFRESH");
+    // D-058: остальные шаги подлинно MISSING -> режим FRESH_RESEARCH
+    // (тип оставшейся работы); закрытые шаги при этом остаются закрытыми
+    // в контракте — объём работы описывает контракт, не режим.
+    expect(planOn.mode).toBe("FRESH_RESEARCH");
     expect(planOff.mode).toBe("FRESH_RESEARCH");
     expect(withMemory.memoryUsed).toBe(true);
     expect(withoutMemory.memoryUsed).toBe(false);
@@ -761,6 +1044,7 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
           projectId: project.id,
           topicId,
           patternStep: 5,
+          component: "CURRENT_STATE",
           claimKey: "current_status_reverify_test",
           statement: "status checked long ago",
           freshnessClass: "HIGH_CHANGE",

@@ -31,17 +31,29 @@ export async function assertAdmin(db: Database | Transaction, userId: string): P
   }
 }
 
+// MEDIUM-1: политика свежести записи — полноценный интервал (месяцы, дни,
+// часы), не только целые дни. '36 hours' и '3 months' — валидные политики
+// и обязаны сохранять смысл.
+export interface StaleAfterInput {
+  months?: number;
+  days?: number;
+  hours?: number;
+}
+
 export interface ObserveMemoryInput {
   projectId: string;
   topicId: string;
   patternStep: number;
+  // D-060: компонент шага Pattern; пара (pattern_step, component)
+  // валидируется триггером БД против активного Pattern.
+  component: string;
   claimKey: string;
   statement: string;
   mechanismState?: string | null;
   freshnessClass: "LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE";
   verifiedAt: Date;
   dataAsOf?: Date | null;
-  staleAfterDays?: number | null;
+  staleAfter?: StaleAfterInput | null;
   confidence: number;
   originKind: string;
 }
@@ -58,6 +70,7 @@ export async function observeMemoryCandidate(
       projectId: input.projectId,
       topicId: input.topicId,
       patternStep: input.patternStep,
+      component: input.component,
       claimKey: input.claimKey,
       statement: input.statement,
       mechanismState: input.mechanismState ?? null,
@@ -65,7 +78,9 @@ export async function observeMemoryCandidate(
       verifiedAt: input.verifiedAt,
       dataAsOf: input.dataAsOf ?? null,
       staleAfter:
-        input.staleAfterDays != null ? sql`make_interval(days => ${input.staleAfterDays})` : null,
+        input.staleAfter != null
+          ? sql`make_interval(months => ${input.staleAfter.months ?? 0}, days => ${input.staleAfter.days ?? 0}, hours => ${input.staleAfter.hours ?? 0})`
+          : null,
       confidence: input.confidence,
       originKind: input.originKind,
     })

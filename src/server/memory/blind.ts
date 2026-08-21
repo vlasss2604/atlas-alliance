@@ -1,15 +1,22 @@
 import type { ResearchBoundaryContract } from "./contract";
 
-// Blind Evaluator (phase-5-plan.md §7.5, D-049). Судит, хороший ли это
-// план — не зная, была ли включена память. Слепота — из контракта
-// удаляются поля memory_used и происхождение шагов; research_plans.
-// memory_used — отдельная колонка БД, сюда никогда не передаётся.
+// Blind Evaluator (phase-5-plan.md §7.5, D-063). Судит КАЧЕСТВО плана без
+// утечки происхождения решений. Оценщик НЕ обязан не знать, была ли
+// включена память (при memory_enabled=false все 8 шагов всегда MISSING —
+// OFF-контракт опознаётся структурно, ревью MEDIUM-3); он обязан не знать,
+// ОТКУДА взялось каждое решение по шагу. Пара OFF/ON остаётся
+// количественным сравнением метрик, слепая оценка — сравнение ON-планов.
+//
+// Из вида удаляются: reason, memoryIds, memory_used (колонка БД, сюда
+// не передаётся), components (несут memoryIds и причины), и
+// knownInformation — оно содержит ТЕКСТЫ памяти и выдаёт происхождение
+// прямо (memory-derived statement text).
 
 export interface BlindStepView {
   step: number;
   stepName: string;
-  // Только ЧТО решено, не ПОЧЕМУ (reason и memoryIds выдали бы, что это
-  // память — "active memory covers…" / "stale…" вслепую недопустимо).
+  // Только ЧТО решено, не ПОЧЕМУ (reason, memoryIds и components выдали бы
+  // происхождение — "active memory covers…" / "stale…" вслепую недопустимо).
   covered: boolean;
   needsFreshEvidence: boolean;
 }
@@ -21,7 +28,6 @@ export interface BlindContractView {
   missingSteps: number[];
   excludedScopeCount: number;
   stopConditionsCount: number;
-  knownInformation: string[];
   researchBudget: ResearchBoundaryContract["researchBudget"];
   stepDecisions: BlindStepView[];
   // noveltyState остаётся — это оценка полноты покрытия задачи, а не
@@ -37,10 +43,6 @@ export function stripForBlindEvaluation(contract: ResearchBoundaryContract): Bli
     missingSteps: [...contract.missingSteps].sort((a, b) => a - b),
     excludedScopeCount: contract.excludedScope.length,
     stopConditionsCount: contract.stopConditions.length,
-    // knownInformation — предметные утверждения (что известно), не
-    // provenance ("откуда"): допустимо показать судье, что план ЗНАЕТ,
-    // не выдавая, что это пришло из памяти, а не из свежего поиска.
-    knownInformation: contract.knownInformation,
     researchBudget: contract.researchBudget,
     stepDecisions: contract.stepDecisions.map((d) => ({
       step: d.step,

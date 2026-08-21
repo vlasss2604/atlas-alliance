@@ -45,6 +45,12 @@ export const researchMemory = pgTable(
       .notNull()
       .references(() => topics.id, { onDelete: "restrict" }),
     patternStep: smallint("pattern_step").notNull(),
+    // D-060: компонент шага Pattern. Пара (pattern_step, component)
+    // валидируется триггером против активного Pattern (0008) — произвольная
+    // пара (claim_key, pattern_step) больше не может закрыть чужой шаг.
+    // claim_key остаётся свободным идентификатором утверждения и валидность
+    // покрытия шага НЕ определяет.
+    component: text("component").notNull(),
     claimKey: text("claim_key").notNull(),
     statement: text("statement").notNull(),
     mechanismState: text("mechanism_state"),

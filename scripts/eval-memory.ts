@@ -60,20 +60,39 @@ function fmtSteps(steps: number[]): string {
   return steps.length ? steps.join(", ") : "(none)";
 }
 
+// D-066: метрика может быть не определена для сценария (пустое ожидаемое
+// или пустое предсказанное множество) — печатаем это честно, а не 1.
+function fmtMetric(value: number | null, why: string): string {
+  return value === null ? `n/a (${why})` : String(value);
+}
+
 async function printScenario(db: TestContext["db"], result: ScenarioResult): Promise<void> {
   console.log(line("="));
   console.log(`SCENARIO: ${result.scenario}  [angle: ${result.angle}]`);
+  if (result.metricValidationOnly) {
+    console.log(
+      "  [METRIC SELF-CHECK — deliberately unsafe seed; EXCLUDED from the acceptance aggregate;\n" +
+        "   a NON-zero false reuse count here is the expected, correct outcome (D-061)]",
+    );
+  }
   console.log(line());
   console.log(`Memory OFF mode : ${result.modeOff}`);
   console.log(`Memory ON  mode : ${result.modeOn}`);
   console.log(
     `Capability ceiling: ${result.capabilityCeilingHit ? `HIT — ${result.capabilityCeilingNote}` : "not hit"}`,
   );
+  // D-061: счёт по шагам против независимой контрольной истины
+  // (reusable/invalidReason в сценарии), не против правил планировщика.
   console.log(
-    `False reuse: ${result.falseReuseCount}/${result.reuseCount} reused steps were NOT backed by a promoted (ACTIVE) fact${
-      result.falseReuseCount === 0 ? "  [OK]" : "  [!!]"
+    `False reuse: ${result.falseReuseStepCount}/${result.satisfiedStepCount} satisfied steps relied on memory the ground truth marks NOT reusable${
+      result.falseReuseStepCount === 0 ? "  [OK]" : result.metricValidationOnly ? "  [expected for this self-check]" : "  [!!]"
     }`,
   );
+  for (const d of result.falseReuseDetails) {
+    console.log(
+      `  step ${d.step}: unsafe element(s) ${d.memoryIds.join(", ")} — ground truth: ${d.invalidReasons.join(", ")}`,
+    );
+  }
   console.log("");
   console.log(`Already satisfied steps (ON): ${fmtSteps(result.contractOn.alreadySatisfiedSteps)}`);
   console.log(`Refreshed steps (ON)        : ${fmtSteps(result.contractOn.requiredFreshEvidence)}`);
@@ -116,8 +135,13 @@ async function printScenario(db: TestContext["db"], result: ScenarioResult): Pro
 
   console.log("");
   console.log(
-    `recall=${result.recall}  precision=${result.precision}  noise_rate=${result.noiseRate}  search_delta=${result.searchDelta}`,
+    `recall=${fmtMetric(result.recall, "no expected positives")}  precision=${fmtMetric(result.precision, "nothing predicted positive")}  noise_rate=${result.noiseRate}  search_delta=${result.searchDelta}`,
   );
+  if (result.noFalsePositives !== null) {
+    console.log(
+      `negative-safety (no false positives): ${result.noFalsePositives ? "PASS" : "FAIL"}  — negative scenario, recall/precision are undefined here by design (D-066)`,
+    );
+  }
 
   // Слепой вид — что увидел бы Blind Evaluator (D-049, §7.5): без memoryId,
   // без "почему" (никаких упоминаний памяти/свежести), только результат.
@@ -148,17 +172,31 @@ async function main() {
     }
 
     const agg = aggregateGoldenResults(results);
+    const selfChecks = results.filter((r) => r.metricValidationOnly);
     console.log(line("="));
     console.log("AGGREGATE (Memory ON vs OFF, controlled acceptance set)");
     console.log(line());
-    console.log(`scenarios            : ${agg.scenarioCount}`);
-    console.log(`mean recall          : ${agg.meanRecall}`);
-    console.log(`mean precision       : ${agg.meanPrecision}`);
+    console.log(`acceptance scenarios : ${agg.scenarioCount}  (+${selfChecks.length} metric self-check, excluded)`);
+    // D-066: усреднение только там, где метрика определена; знаменатель
+    // предъявляется рядом со значением — никакого завышения синтетическими 1.
+    console.log(`mean recall          : ${fmtMetric(agg.meanRecall, "no scenario had expected positives")}  (over ${agg.recallDefinedCount} scenarios where recall is defined)`);
+    console.log(`mean precision       : ${fmtMetric(agg.meanPrecision, "no scenario predicted positives")}  (over ${agg.precisionDefinedCount} scenarios where precision is defined)`);
+    console.log(`negative safety      : ${fmtMetric(agg.noFalsePositiveRate, "no negative scenarios")}  (share of ${agg.negativeScenarioCount} negative-only scenarios with NO false positives)`);
     console.log(`mean noise_rate      : ${agg.meanNoiseRate}`);
-    console.log(`false_reuse_rate     : ${agg.falseReuseRate}  ${agg.falseReuseRate === 0 ? "[acceptance condition MET]" : "[!! BLOCKS PHASE 5 ACCEPTANCE]"}`);
+    console.log(`false_reuse_rate     : ${agg.falseReuseRate}  (${agg.falseReuseStepCount}/${agg.satisfiedStepCount} satisfied steps)  ${agg.falseReuseRate === 0 ? "[acceptance condition MET]" : "[!! BLOCKS PHASE 5 ACCEPTANCE]"}`);
     console.log(`total steps skipped  : ${agg.totalStepsSkipped}`);
     console.log(`total steps refreshed: ${agg.totalStepsRefreshed}`);
     console.log(`mean search_delta    : ${agg.meanSearchDelta}`);
+    if (selfChecks.length > 0) {
+      console.log(line());
+      console.log("METRIC SELF-CHECK (D-061): can false_reuse_rate become non-zero?");
+      for (const r of selfChecks) {
+        const detected = r.falseReuseStepCount > 0;
+        console.log(
+          `  ${r.scenario}: ${r.falseReuseStepCount}/${r.satisfiedStepCount} unsafe steps detected  ${detected ? "[metric CAN detect unsafe reuse — self-check PASS]" : "[!! metric failed to detect deliberate unsafe reuse]"}`,
+        );
+      }
+    }
     console.log(line("="));
     console.log("");
     console.log(
