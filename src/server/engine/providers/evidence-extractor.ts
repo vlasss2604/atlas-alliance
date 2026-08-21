@@ -41,11 +41,22 @@ export function __setEvidenceExtractor(e: EvidenceExtractor | null): void {
   _override = e;
 }
 
-// P3 not resolved yet — same no-silent-fallback rule as query-proposer.ts.
-export function resolveEvidenceExtractor(): EvidenceExtractor {
+export const DEFAULT_EVIDENCE_EXTRACTOR_MODEL = "claude-haiku-4-5";
+
+// P3 resolved (S4) — same shape as resolveQueryProposer(): async,
+// MODEL_GATEWAY-driven, lazy-failure (no credentials -> the live
+// implementation's first real call throws, not this resolver).
+export async function resolveEvidenceExtractor(model?: string): Promise<EvidenceExtractor> {
   if (_override) return _override;
-  throw new EvidenceExtractorUnavailableError(
-    "no EvidenceExtractor model role is configured for production (P3 not yet resolved) — " +
-      "tests must call __setEvidenceExtractor() with a fixture-backed implementation",
+  const kind = process.env.MODEL_GATEWAY ?? "anthropic";
+  if (kind === "fake") {
+    throw new EvidenceExtractorUnavailableError(
+      "MODEL_GATEWAY=fake has no built-in EvidenceExtractor fixture — " +
+        "tests must call __setEvidenceExtractor() with a fixture-backed implementation",
+    );
+  }
+  const { createAnthropicEvidenceExtractor } = await import("./evidence-extractor-anthropic");
+  return createAnthropicEvidenceExtractor(
+    model ?? process.env.EVIDENCE_EXTRACTOR_MODEL ?? DEFAULT_EVIDENCE_EXTRACTOR_MODEL,
   );
 }

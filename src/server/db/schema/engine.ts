@@ -34,6 +34,15 @@ export const researchAttempts = pgTable(
     // Детерминированная причина остановки/пропуска этой попытки —
     // человекочитаемая строка кода (D-070), не свободный текст модели.
     reason: text("reason"),
+    // Фаза 6, S4 (§13) — сколько этой ОДНОЙ попытки стоило по каждому
+    // измерению бюджета job'а. Контроллер клэмпит то, что вернул executor,
+    // к оставшейся ёмкости ПЕРЕД записью сюда (executor не может поднять
+    // потолок, отчитавшись о большем) — см. controller.ts. Job-lifetime
+    // расход — это SUM этих колонок по всем строкам job'а, тот же паттерн,
+    // что recoveryAttemptsUsedLifetime (HIGH-1/R-1), не второй бюджет.
+    searchQueriesSpent: integer("search_queries_spent").notNull().default(0),
+    sourceOpensSpent: integer("source_opens_spent").notNull().default(0),
+    modelCostMicroSpent: integer("model_cost_micro_spent").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

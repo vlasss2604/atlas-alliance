@@ -22,6 +22,10 @@ const productConfigSchema = z.object({
   interpreter_enabled: z.boolean(),
   // Модель Interpreter (решение владельца №2). Смена — без деплоя.
   interpreter_model: z.string().min(1),
+  // Фаза 6, S4 (D-032/D-026 continuation, P3): роли модели движка меняются
+  // ключом, не кодом — тот же принцип, что interpreter_model.
+  query_proposer_model: z.string().min(1),
+  evidence_extractor_model: z.string().min(1),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -57,6 +61,9 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   research_enabled: false,
   interpreter_enabled: true,
   interpreter_model: "claude-haiku-4-5",
+  // D-032: механическая генерация/извлечение — Haiku.
+  query_proposer_model: "claude-haiku-4-5",
+  evidence_extractor_model: "claude-haiku-4-5",
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,

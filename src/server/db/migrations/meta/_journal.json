@@ -78,6 +78,13 @@
       "when": 1787341759460,
       "tag": "0010_r2_evidence_contract_version",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787344199008,
+      "tag": "0011_s4_attempt_spend_and_evidence_version_check",
+      "breakpoints": true
     }
   ]
 }

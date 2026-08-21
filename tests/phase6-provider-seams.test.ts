@@ -69,11 +69,23 @@ describe("Фаза 6, S1 — SearchGateway: без provider'а production пад
   });
 });
 
-describe("Фаза 6, S1 — QueryProposer: без provider'а production падает явно, тесты подставляют фикстуру", () => {
+describe("Фаза 6, S1/S4 — QueryProposer: без ключа production падает явно (лениво), тесты подставляют фикстуру", () => {
   afterEach(() => __setQueryProposer(null));
 
-  it("без конфигурации resolveQueryProposer() бросает, а не тихо использует fake", () => {
-    expect(() => resolveQueryProposer()).toThrow(QueryProposerUnavailableError);
+  // S4 resolved P3: resolveQueryProposer() itself no longer throws for
+  // "no credentials" (it resolves to the live Anthropic-backed
+  // implementation, same lazy-failure discipline as
+  // resolveInterpreterGateway/anthropic.ts) — the throw now happens on
+  // the first real call, when ANTHROPIC_API_KEY turns out to be unset.
+  it("без ключа первый реальный вызов .proposeQueries() бросает, а не тихо использует fake", async () => {
+    const proposer = await resolveQueryProposer();
+    await expect(
+      proposer.proposeQueries({
+        target: { step: 1, stepName: "Economic Source", component: "SOURCE_OF_VALUE" },
+        hint: "no memory for this component",
+        maxQueries: 3,
+      }),
+    ).rejects.toThrow(QueryProposerUnavailableError);
   });
 
   it("тестовая фикстура возвращает НЕ БОЛЬШЕ maxQueries формулировок", async () => {
@@ -87,7 +99,8 @@ describe("Фаза 6, S1 — QueryProposer: без provider'а production пад
       },
     };
     __setQueryProposer(fixture);
-    const queries = await resolveQueryProposer().proposeQueries({
+    const proposer = await resolveQueryProposer();
+    const queries = await proposer.proposeQueries({
       target: {
         step: 1,
         stepName: "Economic Source",
@@ -100,13 +113,26 @@ describe("Фаза 6, S1 — QueryProposer: без provider'а production пад
   });
 });
 
-describe("Фаза 6, S1 — EvidenceExtractor: без provider'а production падает явно, тесты подставляют фикстуру", () => {
+describe("Фаза 6, S1/S4 — EvidenceExtractor: без ключа production падает явно (лениво), тесты подставляют фикстуру", () => {
   afterEach(() => __setEvidenceExtractor(null));
 
-  it("без конфигурации resolveEvidenceExtractor() бросает, а не тихо использует fake", () => {
-    expect(() => resolveEvidenceExtractor()).toThrow(
-      EvidenceExtractorUnavailableError,
-    );
+  it("без ключа первый реальный вызов .extract() бросает, а не тихо использует fake", async () => {
+    const extractor = await resolveEvidenceExtractor();
+    await expect(
+      extractor.extract({
+        target: { step: 4, stepName: "Actual Execution", component: "EXECUTION_EVIDENCE" },
+        document: {
+          finalUrl: "https://example.com/doc",
+          requestedUrl: "https://example.com/doc",
+          httpStatus: 200,
+          contentType: "text/html",
+          normalizedText: "the buyback executed on-chain",
+          contentHash: "sha256:deadbeef",
+          fetchedAt: new Date(),
+          byteLength: 100,
+        },
+      }),
+    ).rejects.toThrow(EvidenceExtractorUnavailableError);
   });
 
   it("тестовая фикстура извлекает факты по заданной схеме", async () => {
@@ -118,8 +144,12 @@ describe("Фаза 6, S1 — EvidenceExtractor: без provider'а production п
             step: input.target.step,
             component: input.target.component,
             statement: "extracted from fixture document",
+            supportFragment: "the buyback executed on-chain",
             mechanismState: null,
             directness: "DIRECT",
+            sourceClass: "OFFICIAL_DOCS",
+            officiality: "CONFIRMED",
+            publishedAt: null,
             doesNotProve: "does not prove current execution",
             relationship: "SUPPORTS",
           },
@@ -127,7 +157,8 @@ describe("Фаза 6, S1 — EvidenceExtractor: без provider'а production п
       },
     };
     __setEvidenceExtractor(fixture);
-    const facts = await resolveEvidenceExtractor().extract({
+    const extractor = await resolveEvidenceExtractor();
+    const facts = await extractor.extract({
       target: {
         step: 4,
         stepName: "Actual Execution",

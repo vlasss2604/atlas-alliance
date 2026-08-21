@@ -39,12 +39,30 @@ export function __setQueryProposer(p: QueryProposer | null): void {
   _override = p;
 }
 
-// P3 (model role selection + config key, D-032/D-026 continuation) is not
-// resolved yet — same no-silent-fallback rule as search-gateway.ts.
-export function resolveQueryProposer(): QueryProposer {
+export const DEFAULT_QUERY_PROPOSER_MODEL = "claude-haiku-4-5";
+
+// P3 resolved (S4): same MODEL_GATEWAY-driven kind switch and lazy-
+// failure discipline as resolveInterpreterGateway() — this function
+// itself no longer throws for "no credentials"; it resolves to a live
+// implementation whose first real call fails honestly with
+// QueryProposerUnavailableError if ANTHROPIC_API_KEY is unset. Async
+// (like resolveInterpreterGateway, unlike resolveContentFetcher) so the
+// Anthropic SDK module is dynamically imported and never loads on a path
+// that doesn't need it. `model` lets a caller that already loaded
+// product_config.query_proposer_model pass it through; omitted, it falls
+// back to QUERY_PROPOSER_MODEL / the D-026-style default — config key,
+// not deploy.
+export async function resolveQueryProposer(model?: string): Promise<QueryProposer> {
   if (_override) return _override;
-  throw new QueryProposerUnavailableError(
-    "no QueryProposer model role is configured for production (P3 not yet resolved) — " +
-      "tests must call __setQueryProposer() with a fixture-backed implementation",
+  const kind = process.env.MODEL_GATEWAY ?? "anthropic";
+  if (kind === "fake") {
+    throw new QueryProposerUnavailableError(
+      "MODEL_GATEWAY=fake has no built-in QueryProposer fixture — " +
+        "tests must call __setQueryProposer() with a fixture-backed implementation",
+    );
+  }
+  const { createAnthropicQueryProposer } = await import("./query-proposer-anthropic");
+  return createAnthropicQueryProposer(
+    model ?? process.env.QUERY_PROPOSER_MODEL ?? DEFAULT_QUERY_PROPOSER_MODEL,
   );
 }

@@ -42,12 +42,45 @@ export interface FetchedDocument {
   byteLength: number;
 }
 
+// S4 additive extension (phase-6-plan.md §19 S4, D-077/D-076): S1 shipped
+// only the fields needed to typecheck the seam; S4 is where a real
+// extraction actually happens and the model's output must carry enough
+// to satisfy evidence's DB-enforced classification (ck_evidence_contract_
+// v2_complete: pattern_step/component/directness/source_class/officiality
+// all NOT NULL for a version-2 row). Adding fields here is additive, not
+// breaking — no existing field's meaning changes.
+export type EvidenceSourceClass =
+  | "ONCHAIN_VERIFIABLE"
+  | "OFFICIAL_DOCS"
+  | "GOVERNANCE"
+  | "OFFICIAL_REPORT"
+  | "DATA_PROVIDER"
+  | "RESEARCH_MEDIA"
+  | "SOCIAL";
+
+export type EvidenceOfficiality = "CONFIRMED" | "CLAIMED";
+
 export interface ExtractedFact {
   step: number;
   component: string;
+  // Normalized, model-composed summary — localizable, may paraphrase.
   statement: string;
+  // The literal quoted excerpt from the fetched document that supports
+  // `statement` — this is evidence.fragment ("оригинал, не переводится"),
+  // kept distinct from `statement` precisely because the DB field is not
+  // translated/normalized. A fact with no traceable excerpt here is not
+  // extraction, it is invention (§7 "A model assertion without traceable
+  // fetched-source support must not become persisted Evidence").
+  supportFragment: string;
   mechanismState: string | null;
   directness: "DIRECT" | "INDIRECT" | "INFERRED";
+  // Two-axis authority (§7.2) — deterministic from the source, not from
+  // how many times something like it was said (no repetition-as-authority).
+  sourceClass: EvidenceSourceClass;
+  officiality: EvidenceOfficiality;
+  // Applicability time, where the document states one — optional, since
+  // not every fetched page carries a publish date.
+  publishedAt: Date | null;
   // What this fact explicitly does NOT establish — Proof Filter checkpoint
   // 6 (§12.2) requires every SUPPORTS-leaning extraction to carry this.
   doesNotProve: string;

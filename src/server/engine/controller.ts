@@ -39,7 +39,24 @@ export interface WorkExecutionResult {
 export interface WorkExecutor {
   execute(
     item: ComponentWorkItem,
-    ctx: { jobId: string; attemptNumber: number; isRecoveryAttempt: boolean },
+    ctx: {
+      jobId: string;
+      attemptNumber: number;
+      isRecoveryAttempt: boolean;
+      // Phase 6, S4 (§13) — job-lifetime remaining capacity for the two
+      // dimensional ceilings beyond the attempt-count gate itself
+      // (maxSourceOpens, maxModelCostMicro), as of the moment this
+      // attempt was claimed. The executor MUST treat this as a hard cap
+      // on what it may do this attempt — the controller additionally
+      // clamps whatever `spent` is reported against this same snapshot
+      // before persisting (see runResearchController), so even a
+      // misbehaving/compromised executor cannot make the persisted
+      // job-lifetime total exceed the frozen ceiling. This is a
+      // conservative, not perfectly race-free-under-concurrency,
+      // accounting policy — see the module comment on dimensional
+      // budget below.
+      remainingBudget: { sourceOpens: number; modelCostMicro: number };
+    },
   ): Promise<WorkExecutionResult>;
 }
 
@@ -141,6 +158,13 @@ async function loadAttemptState(
   latestAttemptByKey: Map<string, LatestAttempt>;
   recoveryAttemptsUsedLifetime: number;
   normalAttemptsUsedLifetime: number;
+  // Phase 6, S4 (§13) — job-lifetime sum of what every attempt (any
+  // status) has reported spending, straight from the persisted columns.
+  // Same derivation principle as the recovery/normal counts above: SUM
+  // over all rows, never an in-memory counter, so it is naturally
+  // correct across restarts/redeliveries and immune to a gapped history.
+  sourceOpensSpentLifetime: number;
+  modelCostMicroSpentLifetime: number;
 }> {
   const rows = await db
     .select()
@@ -152,6 +176,8 @@ async function loadAttemptState(
   const latestAttemptByKey = new Map<string, LatestAttempt>();
   let recoveryAttemptsUsedLifetime = 0;
   let normalAttemptsUsedLifetime = 0;
+  let sourceOpensSpentLifetime = 0;
+  let modelCostMicroSpentLifetime = 0;
   for (const row of rows) {
     const key = componentKey(row.patternStep, row.component);
     if (row.status === "SUCCEEDED") succeededKeys.add(key);
@@ -170,6 +196,8 @@ async function loadAttemptState(
     // normal counter would carry the identical defect.
     if (row.attemptNumber > 1) recoveryAttemptsUsedLifetime += 1;
     else normalAttemptsUsedLifetime += 1;
+    sourceOpensSpentLifetime += row.sourceOpensSpent;
+    modelCostMicroSpentLifetime += row.modelCostMicroSpent;
   }
   return {
     succeededKeys,
@@ -177,6 +205,8 @@ async function loadAttemptState(
     latestAttemptByKey,
     recoveryAttemptsUsedLifetime,
     normalAttemptsUsedLifetime,
+    sourceOpensSpentLifetime,
+    modelCostMicroSpentLifetime,
   };
 }
 
@@ -192,10 +222,31 @@ async function loadAttemptState(
 // "abandoned" and allow reclaim as the next attempt (recovery-budget-
 // bounded like any other retry). This is an operational reclaim
 // mechanism, not a new research/product semantic state.
-const ATTEMPT_LEASE_MS = 5 * 60 * 1000;
+//
+// S4 fix (final S0-S3 review note): a FIXED 5-minute lease was too tight
+// once real provider/model work can legitimately run for the job's own
+// maxWallClockSec (CORE: 20 minutes) — a slow-but-healthy attempt could
+// be reclaimed out from under itself well before it was actually
+// abandoned. The lease is now derived from the job's own frozen
+// maxWallClockSec with a fixed safety margin, floored at the old default
+// (never LESS generous than before) and capped at an absolute outer
+// bound (never unbounded, per the review's explicit requirement).
+const ATTEMPT_LEASE_MARGIN_MS = 60_000; // grace beyond the job's own wall-clock ceiling
+const ATTEMPT_LEASE_FLOOR_MS = 5 * 60_000; // never less generous than the prior fixed default
+const ATTEMPT_LEASE_CAP_MS = 60 * 60_000; // hard outer bound — "no unbounded lease"
+
+function effectiveAttemptLeaseMs(maxWallClockSec: number): number {
+  const derived = maxWallClockSec * 1000 + ATTEMPT_LEASE_MARGIN_MS;
+  return Math.min(ATTEMPT_LEASE_CAP_MS, Math.max(ATTEMPT_LEASE_FLOOR_MS, derived));
+}
 
 type ClaimOutcome =
-  | { claimed: true; attemptNumber: number; isRecoveryAttempt: boolean }
+  | {
+      claimed: true;
+      attemptNumber: number;
+      isRecoveryAttempt: boolean;
+      remainingBudget: { sourceOpens: number; modelCostMicro: number };
+    }
   // Some OTHER attempt row for this (step, component) is already
   // SUCCEEDED or STARTED (still in flight) — this invocation must not
   // touch the executor or the budget for it at all.
@@ -236,7 +287,13 @@ async function claimAttempt(
   db: Database | Transaction,
   jobId: string,
   item: ComponentWorkItem,
-  budget: { maxSearchQueries: number; reservedRecoverySteps: number },
+  budget: {
+    maxSearchQueries: number;
+    maxSourceOpens: number;
+    maxModelCostMicro: number;
+    maxWallClockSec: number;
+    reservedRecoverySteps: number;
+  },
   now: Date,
   debugClaimDelayMs: number,
 ): Promise<ClaimOutcome> {
@@ -248,8 +305,15 @@ async function claimAttempt(
       throw new Error(`research job not found: ${jobId}`);
     }
 
-    const { maxAttemptByKey, succeededKeys, latestAttemptByKey, recoveryAttemptsUsedLifetime, normalAttemptsUsedLifetime } =
-      await loadAttemptState(tx, jobId);
+    const {
+      maxAttemptByKey,
+      succeededKeys,
+      latestAttemptByKey,
+      recoveryAttemptsUsedLifetime,
+      normalAttemptsUsedLifetime,
+      sourceOpensSpentLifetime,
+      modelCostMicroSpentLifetime,
+    } = await loadAttemptState(tx, jobId);
     // Test-only seam: widens the read-to-claim window so concurrency
     // tests can deterministically force two transactions to overlap
     // inside it, instead of depending on incidental Node/Postgres
@@ -265,7 +329,7 @@ async function claimAttempt(
     const latest = latestAttemptByKey.get(key);
     if (latest && latest.status === "STARTED") {
       const ageMs = now.getTime() - latest.createdAt.getTime();
-      if (ageMs < ATTEMPT_LEASE_MS) {
+      if (ageMs < effectiveAttemptLeaseMs(budget.maxWallClockSec)) {
         // Some other invocation's claim on this exact component is still
         // within its lease window — presumed still running. This
         // invocation reserves nothing and must not call the executor.
@@ -280,14 +344,28 @@ async function claimAttempt(
     const isRecoveryAttempt = (maxAttemptByKey.get(key) ?? 0) > 0;
     const normalCeiling = Math.max(0, budget.maxSearchQueries - budget.reservedRecoverySteps);
     const recoveryCeiling = budget.reservedRecoverySteps;
-    const wouldExceed = isRecoveryAttempt
+    const attemptSlotExhausted = isRecoveryAttempt
       ? recoveryAttemptsUsedLifetime >= recoveryCeiling
       : normalAttemptsUsedLifetime >= normalCeiling;
-    if (wouldExceed) {
+    // S4 (§13): the two dimensional ceilings beyond attempt-count also
+    // gate a NEW claim — once either is exhausted, no further attempt may
+    // even start (an attempt that has already been claimed is not
+    // retroactively invalidated; this only stops the NEXT one). This is a
+    // conservative, claim-time snapshot check, not a perfectly race-free
+    // reservation across every concurrently in-flight attempt on
+    // DIFFERENT components — see the WorkExecutor ctx doc comment above.
+    const dimensionalExhausted =
+      sourceOpensSpentLifetime >= budget.maxSourceOpens ||
+      modelCostMicroSpentLifetime >= budget.maxModelCostMicro;
+    if (attemptSlotExhausted || dimensionalExhausted) {
       return { claimed: false, reason: "BUDGET_EXHAUSTED" };
     }
 
     const attemptNumber = (maxAttemptByKey.get(key) ?? 0) + 1;
+    const remainingBudget = {
+      sourceOpens: Math.max(0, budget.maxSourceOpens - sourceOpensSpentLifetime),
+      modelCostMicro: Math.max(0, budget.maxModelCostMicro - modelCostMicroSpentLifetime),
+    };
     // The unique index (uq_research_attempts_job_step_component_attempt)
     // + onConflictDoNothing stays as a defense-in-depth backstop — under
     // correct FOR UPDATE serialization it should never actually lose,
@@ -319,7 +397,7 @@ async function claimAttempt(
       return { claimed: false, reason: "ALREADY_CLAIMED" };
     }
 
-    return { claimed: true, attemptNumber, isRecoveryAttempt };
+    return { claimed: true, attemptNumber, isRecoveryAttempt, remainingBudget };
   });
 }
 
@@ -405,7 +483,7 @@ export async function runResearchController(
       };
     }
 
-    const { attemptNumber, isRecoveryAttempt } = outcome;
+    const { attemptNumber, isRecoveryAttempt, remainingBudget } = outcome;
 
     // Residual at-least-once semantics, stated plainly: this call to
     // executor.execute() is NOT exactly-once. If this process crashes (or
@@ -423,14 +501,29 @@ export async function runResearchController(
       jobId,
       attemptNumber,
       isRecoveryAttempt,
+      remainingBudget,
     });
     attemptsThisRun += 1;
 
-    if (result.spent) {
-      budgetSpent.searchQueries += result.spent.searchQueries;
-      budgetSpent.sourceOpens += result.spent.sourceOpens;
-      budgetSpent.modelCostMicro += result.spent.modelCostMicro;
-    }
+    // S4 (§13): whatever the executor reports is clamped to the
+    // remainingBudget snapshot it was handed at claim time BEFORE it is
+    // added to this run's totals or persisted — the executor's own
+    // self-report may NOT raise the ceiling, regardless of what it
+    // claims to have spent. searchQueries has no separate dimensional
+    // ceiling (maxSearchQueries already gates attempt-count — see
+    // claimAttempt), so it is only floored at zero, not clamped to a
+    // remaining-budget figure.
+    const clampedSpent = {
+      searchQueries: Math.max(0, result.spent?.searchQueries ?? 0),
+      sourceOpens: Math.max(0, Math.min(result.spent?.sourceOpens ?? 0, remainingBudget.sourceOpens)),
+      modelCostMicro: Math.max(
+        0,
+        Math.min(result.spent?.modelCostMicro ?? 0, remainingBudget.modelCostMicro),
+      ),
+    };
+    budgetSpent.searchQueries += clampedSpent.searchQueries;
+    budgetSpent.sourceOpens += clampedSpent.sourceOpens;
+    budgetSpent.modelCostMicro += clampedSpent.modelCostMicro;
 
     await db
       .update(researchAttempts)
@@ -438,6 +531,9 @@ export async function runResearchController(
         status: result.status,
         reason: result.reason ?? null,
         completedAt: now,
+        searchQueriesSpent: clampedSpent.searchQueries,
+        sourceOpensSpent: clampedSpent.sourceOpens,
+        modelCostMicroSpent: clampedSpent.modelCostMicro,
       })
       .where(
         and(

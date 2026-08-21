@@ -685,6 +685,7 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
       items: Array<{ step: number; component: string }>,
       reservedRecoverySteps: number,
       maxSearchQueries = 10,
+      budgetOverrides: Partial<ContractView["researchBudget"]> = {},
     ): ContractView {
       const hits = items.map(({ step, component }) => hit({ patternStep: step, component, confidence: 10 }));
       const r = plan(hits);
@@ -694,7 +695,7 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
         ...view,
         workQueue: view.workQueue.filter((c) => keys.has(`${c.step}:${c.component}`)),
         excludedComponents: [],
-        researchBudget: { ...view.researchBudget, maxSearchQueries, reservedRecoverySteps },
+        researchBudget: { ...view.researchBudget, maxSearchQueries, reservedRecoverySteps, ...budgetOverrides },
       };
     }
 
@@ -870,15 +871,21 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
 
     it("6. крах после внешнего исполнения, но до терминальной персистенции -> честный at-least-once replay использует recovery-ёмкость и не превышает потолок job'а", async () => {
       const items = [{ step: 1, component: "SOURCE_OF_VALUE" }];
-      const view = multiComponentView(items, 1); // recoveryCeiling=1
+      // maxWallClockSec=60 -> derived lease (120_000ms) is below the
+      // ATTEMPT_LEASE_FLOOR_MS (5 min), so the floor governs here: the
+      // effective lease is still 5 minutes, never LESS generous than the
+      // prior fixed default regardless of how small the job's own
+      // wall-clock ceiling is.
+      const view = multiComponentView(items, 1, 10, { maxWallClockSec: 60 }); // recoveryCeiling=1
       const jobId = await makeJob(coreEntitlement());
 
       // Симулируем "крах": строка попытки застряла в STARTED — executor,
       // предположительно, уже отработал, но терминальный UPDATE так и не
-      // персистировался. createdAt намеренно старше ATTEMPT_LEASE_MS
-      // относительно `now` ниже — иначе от честного in-flight конкурента
-      // это неотличимо (и не должно быть переисполнено).
-      const staleStartedAt = new Date(NOW.getTime() - 10 * 60 * 1000); // 10 минут назад
+      // персистировался. createdAt намеренно старше эффективного lease
+      // (здесь: floor = 5 минут) относительно `now` ниже — иначе от
+      // честного in-flight конкурента это неотличимо (и не должно быть
+      // переисполнено).
+      const staleStartedAt = new Date(NOW.getTime() - 6 * 60 * 1000); // 6 минут назад > 5-минутного floor
       await ctx.db.execute(
         sql`INSERT INTO research_attempts (research_job_id, pattern_step, component, attempt_number, status, created_at)
             VALUES (${jobId}, 1, 'SOURCE_OF_VALUE', 1, 'STARTED', ${staleStartedAt.toISOString()})`,
@@ -905,6 +912,41 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
       // а не "нормальной" recovery-попыткой.
       const another = await runResearchController({ db: ctx.db, jobId, view, executor: countingExecutor, now: NOW });
       expect(another.attemptsThisRun).toBe(0);
+    });
+
+    // S4 test matrix item 17 — this is the "previous missing 'fresh
+    // STARTED blocks reclaim' test" the final S0-S3 review called out as
+    // needing teeth: a legitimate in-flight attempt inside its VALID
+    // DERIVED lease (not the old fixed 5-minute constant) must not be
+    // reclaimed. CORE's maxWallClockSec=1200s (20 minutes) means a
+    // healthy attempt started 6 minutes ago is nowhere near abandoned —
+    // under the old fixed 5-minute lease this would have been WRONGLY
+    // reclaimed and double-executed.
+    it("7. легитимная свежая STARTED-попытка внутри своего производного lease НЕ подлежит reclaim, даже когда её возраст уже превысил бы старый фиксированный 5-минутный lease", async () => {
+      const items = [{ step: 1, component: "SOURCE_OF_VALUE" }];
+      const view = multiComponentView(items, 1, 10, { maxWallClockSec: 1200 }); // CORE: 20 minutes
+      const jobId = await makeJob(coreEntitlement());
+
+      const sixMinutesAgo = new Date(NOW.getTime() - 6 * 60 * 1000); // > old fixed 5-min lease
+      await ctx.db.execute(
+        sql`INSERT INTO research_attempts (research_job_id, pattern_step, component, attempt_number, status, created_at)
+            VALUES (${jobId}, 1, 'SOURCE_OF_VALUE', 1, 'STARTED', ${sixMinutesAgo.toISOString()})`,
+      );
+
+      let executions = 0;
+      const countingExecutor: WorkExecutor = {
+        async execute() {
+          executions++;
+          return { status: "SUCCEEDED" };
+        },
+      };
+
+      const result = await runResearchController({ db: ctx.db, jobId, view, executor: countingExecutor, now: NOW });
+      expect(executions).toBe(0); // NOT reclaimed — still within its derived lease
+      expect(result.attemptsThisRun).toBe(0);
+      const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+      expect(rows.length).toBe(1); // only the original in-flight row — no replay row created
+      expect(rows[0].status).toBe("STARTED");
     });
   });
 });

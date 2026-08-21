@@ -222,6 +222,13 @@ export const evidence = pgTable(
         AND ${t.officiality} IS NOT NULL
       )`,
     ),
+    // S4 NOTE-1 cheap hardening: without this, a legacy v1 row could be
+    // hand-edited to an unsupported v3 (or any other value) and the
+    // completeness CHECK above would simply never apply to it — a second,
+    // silent way to dodge classification that isn't even the documented
+    // v1 exemption. Purely additive range restriction, no new semantic
+    // state: exactly the two contract versions that exist remain valid.
+    check("ck_evidence_contract_version_known", sql`${t.evidenceContractVersion} IN (1, 2)`),
   ],
 );
 
