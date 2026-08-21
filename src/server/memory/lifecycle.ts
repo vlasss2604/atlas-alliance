@@ -1,4 +1,4 @@
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import {
@@ -6,8 +6,10 @@ import {
   projectMemoryItems,
   researchMemory,
   researchMemoryProvenance,
+  researchPatterns,
   users,
 } from "../db/schema";
+import { patternContentSchema } from "../domain/pattern";
 
 // Фаза 5 — lifecycle-операции памяти (phase-5-plan.md §2.3, §5).
 // Переходы состояния гарантирует триггер БД (0007_memory_lifecycle_guard.sql);
@@ -24,10 +26,29 @@ export class NotAdminError extends Error {
 
 // D-055: единственная проверка «контролируемости» скрипта — актёр обязан
 // быть ADMIN. Ничего сложнее (полноценный admin UI) в Фазе 5 не строится.
-export async function assertAdmin(db: Database | Transaction, userId: string): Promise<void> {
-  const [u] = await db.select({ role: users.role }).from(users).where(eq(users.id, userId));
+export async function assertAdmin(
+  db: Database | Transaction,
+  userId: string,
+): Promise<void> {
+  const [u] = await db
+    .select({ role: users.role })
+    .from(users)
+    .where(eq(users.id, userId));
   if (!u || u.role !== "ADMIN") {
     throw new NotAdminError(userId);
+  }
+}
+
+export class InvalidPatternComponentError extends Error {
+  constructor(
+    patternStep: number,
+    component: string,
+    allowed: readonly string[],
+  ) {
+    super(
+      `component '${component}' is not valid for pattern step ${patternStep} — allowed: ${allowed.join(", ")}`,
+    );
+    this.name = "InvalidPatternComponentError";
   }
 }
 
@@ -35,13 +56,19 @@ export interface ObserveMemoryInput {
   projectId: string;
   topicId: string;
   patternStep: number;
+  // Компонент шага (D-060) — валидируется против requiredComponents
+  // активного Pattern для этого topic ниже, до вставки.
+  component: string;
   claimKey: string;
   statement: string;
   mechanismState?: string | null;
   freshnessClass: "LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE";
   verifiedAt: Date;
   dataAsOf?: Date | null;
-  staleAfterDays?: number | null;
+  // Postgres interval-литерал ('36 hours', '3 months', '10 days', …) — не
+  // только целые дни (MEDIUM-1): make_interval(days=>N) не мог выразить
+  // дробные/иные единицы, требуемые сценариями регрессии.
+  staleAfter?: string | null;
   confidence: number;
   originKind: string;
 }
@@ -52,12 +79,40 @@ export async function observeMemoryCandidate(
   db: Database | Transaction,
   input: ObserveMemoryInput,
 ): Promise<{ id: string }> {
+  // (pattern_step, component) обязана быть валидной парой против активного
+  // Pattern (D-060) — claim_key больше не решает принадлежность к шагу.
+  const [activePattern] = await db
+    .select({ content: researchPatterns.content })
+    .from(researchPatterns)
+    .where(
+      and(
+        eq(researchPatterns.topicId, input.topicId),
+        eq(researchPatterns.status, "ACTIVE"),
+      ),
+    );
+  if (!activePattern) {
+    throw new Error(`no ACTIVE research_pattern for topic ${input.topicId}`);
+  }
+  const pattern = patternContentSchema.parse(activePattern.content);
+  const step = pattern.steps.find((s) => s.step === input.patternStep);
+  if (!step) {
+    throw new Error(`pattern has no step ${input.patternStep}`);
+  }
+  if (!step.requiredComponents.includes(input.component)) {
+    throw new InvalidPatternComponentError(
+      input.patternStep,
+      input.component,
+      step.requiredComponents,
+    );
+  }
+
   const [row] = await db
     .insert(researchMemory)
     .values({
       projectId: input.projectId,
       topicId: input.topicId,
       patternStep: input.patternStep,
+      component: input.component,
       claimKey: input.claimKey,
       statement: input.statement,
       mechanismState: input.mechanismState ?? null,
@@ -65,7 +120,7 @@ export async function observeMemoryCandidate(
       verifiedAt: input.verifiedAt,
       dataAsOf: input.dataAsOf ?? null,
       staleAfter:
-        input.staleAfterDays != null ? sql`make_interval(days => ${input.staleAfterDays})` : null,
+        input.staleAfter != null ? sql`${input.staleAfter}::interval` : null,
       confidence: input.confidence,
       originKind: input.originKind,
     })
@@ -168,7 +223,11 @@ export async function promoteToActive(
     }
     const [row] = await tx
       .update(researchMemory)
-      .set({ lifecycleState: "ACTIVE", promotedBy: adminUserId, promotedAt: sql`now()` })
+      .set({
+        lifecycleState: "ACTIVE",
+        promotedBy: adminUserId,
+        promotedAt: sql`now()`,
+      })
       .where(eq(researchMemory.id, memoryId))
       .returning({
         id: researchMemory.id,

@@ -30,7 +30,9 @@ import { GOLDEN_SCENARIOS } from "../src/server/memory/golden-scenarios";
 // import time — a static top-of-file import would evaluate it (via import
 // hoisting) BEFORE we get to set the env var below. Dynamic import, inside
 // main(), guarantees our assignment runs first every time.
-type TestContext = Awaited<ReturnType<typeof import("../tests/phase1-setup").setupTestDatabase>>;
+type TestContext = Awaited<
+  ReturnType<typeof import("../tests/phase1-setup").setupTestDatabase>
+>;
 
 const line = (ch = "-") => ch.repeat(78);
 
@@ -60,7 +62,10 @@ function fmtSteps(steps: number[]): string {
   return steps.length ? steps.join(", ") : "(none)";
 }
 
-async function printScenario(db: TestContext["db"], result: ScenarioResult): Promise<void> {
+async function printScenario(
+  db: TestContext["db"],
+  result: ScenarioResult,
+): Promise<void> {
   console.log(line("="));
   console.log(`SCENARIO: ${result.scenario}  [angle: ${result.angle}]`);
   console.log(line());
@@ -70,20 +75,33 @@ async function printScenario(db: TestContext["db"], result: ScenarioResult): Pro
     `Capability ceiling: ${result.capabilityCeilingHit ? `HIT — ${result.capabilityCeilingNote}` : "not hit"}`,
   );
   console.log(
-    `False reuse: ${result.falseReuseCount}/${result.reuseCount} reused steps were NOT backed by a promoted (ACTIVE) fact${
-      result.falseReuseCount === 0 ? "  [OK]" : "  [!!]"
+    `False reuse: ${result.falseReuseStepCount}/${result.reuseStepCount} satisfied steps relied on a memory record ground truth marks NOT reusable${
+      result.falseReuseStepCount === 0 ? "  [OK]" : "  [!!]"
     }`,
   );
+  for (const d of result.falseReuseDetails) {
+    console.log(
+      `    step ${d.step}: memory ${d.memoryIds.join(", ")} — reasons: ${d.reasons.join(", ") || "(unlabeled)"}`,
+    );
+  }
   console.log("");
-  console.log(`Already satisfied steps (ON): ${fmtSteps(result.contractOn.alreadySatisfiedSteps)}`);
-  console.log(`Refreshed steps (ON)        : ${fmtSteps(result.contractOn.requiredFreshEvidence)}`);
-  console.log(`Missing steps (ON)          : ${fmtSteps(result.contractOn.missingSteps)}`);
+  console.log(
+    `Already satisfied steps (ON): ${fmtSteps(result.contractOn.alreadySatisfiedSteps)}`,
+  );
+  console.log(
+    `Refreshed steps (ON)        : ${fmtSteps(result.contractOn.requiredFreshEvidence)}`,
+  );
+  console.log(
+    `Missing steps (ON)          : ${fmtSteps(result.contractOn.missingSteps)}`,
+  );
   console.log(
     `Already satisfied steps (OFF): ${fmtSteps(result.contractOff.alreadySatisfiedSteps)}  (must always be none — memory was not consulted)`,
   );
   console.log("");
 
-  const nonMissing = result.contractOn.stepDecisions.filter((d) => d.decision !== "MISSING");
+  const nonMissing = result.contractOn.stepDecisions.filter(
+    (d) => d.decision !== "MISSING",
+  );
   if (nonMissing.length > 0) {
     console.log("Why each reused/refreshed step was classified that way:");
     for (const d of nonMissing) {
@@ -103,7 +121,9 @@ async function printScenario(db: TestContext["db"], result: ScenarioResult): Pro
       result.contractOn.reusableEvidence.map((e) => e.memoryId),
     );
     for (const e of result.contractOn.reusableEvidence) {
-      console.log(`  [step ${e.step}] ${e.claimKey} (confidence ${e.confidence}%) — memoryId ${e.memoryId}`);
+      console.log(
+        `  [step ${e.step}] ${e.claimKey} (confidence ${e.confidence}%) — memoryId ${e.memoryId}`,
+      );
       const prov = provenance.get(e.memoryId) ?? [];
       if (prov.length === 0) {
         console.log("    (no provenance row recorded)");
@@ -116,7 +136,8 @@ async function printScenario(db: TestContext["db"], result: ScenarioResult): Pro
 
   console.log("");
   console.log(
-    `recall=${result.recall}  precision=${result.precision}  noise_rate=${result.noiseRate}  search_delta=${result.searchDelta}`,
+    `recall=${result.recall ?? "n/a (empty expected set)"}  precision=${result.precision ?? "n/a (nothing satisfied)"}  ` +
+      `noFalsePositive=${result.noFalsePositive ?? "n/a"}  noise_rate=${result.noiseRate}  search_delta=${result.searchDelta}`,
   );
 
   // Слепой вид — что увидел бы Blind Evaluator (D-049, §7.5): без memoryId,
@@ -130,7 +151,9 @@ async function printScenario(db: TestContext["db"], result: ScenarioResult): Pro
 }
 
 async function main() {
-  const dbUrl = process.env.EVAL_DATABASE_URL ?? "postgres://atlas:atlas@localhost:5432/atlas_eval";
+  const dbUrl =
+    process.env.EVAL_DATABASE_URL ??
+    "postgres://atlas:atlas@localhost:5432/atlas_eval";
   process.env.TEST_DATABASE_URL = dbUrl;
   const { setupTestDatabase } = await import("../tests/phase1-setup");
 
@@ -138,11 +161,19 @@ async function main() {
   await ensureDatabaseExists(dbUrl);
   const ctx = await setupTestDatabase();
   try {
-    const [topic] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
+    const [topic] = await ctx.db
+      .select()
+      .from(topics)
+      .where(eq(topics.isActive, true));
 
     const results: ScenarioResult[] = [];
     for (const scenario of GOLDEN_SCENARIOS) {
-      const result = await runGoldenScenario(ctx.db, ctx.boss, topic.id, scenario);
+      const result = await runGoldenScenario(
+        ctx.db,
+        ctx.boss,
+        topic.id,
+        scenario,
+      );
       results.push(result);
       await printScenario(ctx.db, result);
     }
@@ -152,10 +183,19 @@ async function main() {
     console.log("AGGREGATE (Memory ON vs OFF, controlled acceptance set)");
     console.log(line());
     console.log(`scenarios            : ${agg.scenarioCount}`);
-    console.log(`mean recall          : ${agg.meanRecall}`);
-    console.log(`mean precision       : ${agg.meanPrecision}`);
+    console.log(
+      `mean recall          : ${agg.meanRecall ?? "n/a"}  (over ${agg.recallScenarioCount} scenario(s) with a non-empty expected set)`,
+    );
+    console.log(
+      `mean precision       : ${agg.meanPrecision ?? "n/a"}  (over ${agg.precisionScenarioCount} scenario(s) with at least one satisfied step)`,
+    );
+    console.log(
+      `no_false_positive_rate: ${agg.noFalsePositiveRate ?? "n/a"}  (over ${agg.negativeOnlyScenarioCount} negative-only scenario(s))`,
+    );
     console.log(`mean noise_rate      : ${agg.meanNoiseRate}`);
-    console.log(`false_reuse_rate     : ${agg.falseReuseRate}  ${agg.falseReuseRate === 0 ? "[acceptance condition MET]" : "[!! BLOCKS PHASE 5 ACCEPTANCE]"}`);
+    console.log(
+      `false_reuse_rate     : ${agg.falseReuseRate}  ${agg.falseReuseRate === 0 ? "[acceptance condition MET]" : "[!! BLOCKS PHASE 5 ACCEPTANCE]"}`,
+    );
     console.log(`total steps skipped  : ${agg.totalStepsSkipped}`);
     console.log(`total steps refreshed: ${agg.totalStepsRefreshed}`);
     console.log(`mean search_delta    : ${agg.meanSearchDelta}`);

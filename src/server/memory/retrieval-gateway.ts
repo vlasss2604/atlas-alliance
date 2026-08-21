@@ -8,17 +8,29 @@ import type { Database, Transaction } from "../db/client";
 
 export type MatchedVia = "ontology" | "fts" | "trgm";
 
+export type MemoryHealth =
+  | "OK"
+  | "QUESTIONABLE"
+  | "REVERIFY"
+  | "STALE"
+  | "DEPRECATED";
+
 export interface RetrievalHit {
   memoryId: string;
   patternStep: number;
+  component: string;
   claimKey: string;
   statement: string;
   mechanismState: string | null;
   freshnessClass: "LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE";
   verifiedAt: Date;
   dataAsOf: Date | null;
-  staleAfterDays: number | null;
+  // Полная длительность интервала в секундах (MEDIUM-1): EXTRACT(DAY FROM …)
+  // обнулял месяцы/годы/часы. EXTRACT(EPOCH FROM …) — единственный способ
+  // корректно перенести произвольный interval (e.g. '36 hours', '3 months').
+  staleAfterSeconds: number | null;
   confidence: number;
+  health: MemoryHealth;
   matchedVia: MatchedVia;
 }
 
@@ -45,20 +57,23 @@ export interface MemoryRetrievalGateway {
 interface Row {
   id: string;
   pattern_step: number;
+  component: string;
   claim_key: string;
   statement: string;
   mechanism_state: string | null;
   freshness_class: "LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE";
   verified_at: Date;
   data_as_of: Date | null;
-  stale_after_days: number | null;
+  stale_after_seconds: number | null;
   confidence: number;
+  health: MemoryHealth;
 }
 
 function toHit(r: Row, matchedVia: MatchedVia): RetrievalHit {
   return {
     memoryId: r.id,
     patternStep: r.pattern_step,
+    component: r.component,
     claimKey: r.claim_key,
     statement: r.statement,
     mechanismState: r.mechanism_state,
@@ -67,8 +82,10 @@ function toHit(r: Row, matchedVia: MatchedVia): RetrievalHit {
     // типизированного select()); приводим явно.
     verifiedAt: new Date(r.verified_at),
     dataAsOf: r.data_as_of ? new Date(r.data_as_of) : null,
-    staleAfterDays: r.stale_after_days,
+    staleAfterSeconds:
+      r.stale_after_seconds != null ? Number(r.stale_after_seconds) : null,
     confidence: r.confidence,
+    health: r.health,
     matchedVia,
   };
 }
@@ -88,15 +105,16 @@ export const structuredMemoryRetrievalGateway: MemoryRetrievalGateway = {
 
     const ontologyRows = (
       await db.execute(sql`
-        SELECT id, pattern_step, claim_key, statement, mechanism_state,
+        SELECT id, pattern_step, component, claim_key, statement, mechanism_state,
                freshness_class, verified_at, data_as_of,
-               EXTRACT(DAY FROM stale_after)::int AS stale_after_days, confidence
+               EXTRACT(EPOCH FROM stale_after) AS stale_after_seconds, confidence, health
         FROM research_memory
         WHERE project_id = ${query.projectId}
           AND topic_id = ${query.topicId}
           AND lifecycle_state = 'ACTIVE'
+          AND health <> 'DEPRECATED'
           ${claimFilter}
-        ORDER BY pattern_step, confidence DESC
+        ORDER BY pattern_step, confidence DESC, id
       `)
     ).rows as unknown as Row[];
 
@@ -110,18 +128,19 @@ export const structuredMemoryRetrievalGateway: MemoryRetrievalGateway = {
     if (query.statementQuery?.trim()) {
       const textRows = (
         await db.execute(sql`
-          SELECT id, pattern_step, claim_key, statement, mechanism_state,
+          SELECT id, pattern_step, component, claim_key, statement, mechanism_state,
                  freshness_class, verified_at, data_as_of,
-                 EXTRACT(DAY FROM stale_after)::int AS stale_after_days, confidence
+                 EXTRACT(EPOCH FROM stale_after) AS stale_after_seconds, confidence, health
           FROM research_memory
           WHERE project_id = ${query.projectId}
             AND topic_id = ${query.topicId}
             AND lifecycle_state = 'ACTIVE'
+            AND health <> 'DEPRECATED'
             AND (
               to_tsvector('simple', statement) @@ plainto_tsquery('simple', ${query.statementQuery})
               OR similarity(statement, ${query.statementQuery}) > 0.3
             )
-          ORDER BY pattern_step, confidence DESC
+          ORDER BY pattern_step, confidence DESC, id
         `)
       ).rows as unknown as Row[];
       for (const r of textRows) {
@@ -148,7 +167,9 @@ export const structuredMemoryRetrievalGateway: MemoryRetrievalGateway = {
 let _override: MemoryRetrievalGateway | null = null;
 
 // Только для тестов: подмена gateway (тот же приём, что interpreter/gateway.ts).
-export function __setMemoryRetrievalGateway(g: MemoryRetrievalGateway | null): void {
+export function __setMemoryRetrievalGateway(
+  g: MemoryRetrievalGateway | null,
+): void {
   _override = g;
 }
 

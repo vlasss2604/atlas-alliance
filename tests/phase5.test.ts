@@ -30,7 +30,13 @@ import {
 import { markProofVerified } from "../src/server/memory/verification";
 import { structuredMemoryRetrievalGateway } from "../src/server/memory/retrieval-gateway";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
-import { coreEntitlement, demoEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import {
+  coreEntitlement,
+  demoEntitlement,
+  setupTestDatabase,
+  uniq,
+  type TestContext,
+} from "./phase1-setup";
 
 let ctx: TestContext;
 
@@ -48,7 +54,10 @@ async function makeUser() {
 }
 
 async function activeTopicId(): Promise<string> {
-  const [t] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
+  const [t] = await ctx.db
+    .select()
+    .from(topics)
+    .where(eq(topics.isActive, true));
   return t.id;
 }
 
@@ -74,7 +83,9 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
     expect(active.length).toBe(1);
     expect(active[0].version).toBe(1);
     expect(active[0].content).toEqual(PATTERN_V1_CONTENT);
-    expect((active[0].content as typeof PATTERN_V1_CONTENT).steps.length).toBe(8);
+    expect((active[0].content as typeof PATTERN_V1_CONTENT).steps.length).toBe(
+      8,
+    );
   });
 
   it("2. lifecycle: прямая вставка ACTIVE в research_memory отклоняется триггером", async () => {
@@ -86,6 +97,7 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
         projectId: project.id,
         topicId,
         patternStep: 3,
+        component: "MECHANISM_SPEC",
         claimKey: "allocation_mechanism",
         statement: "test",
         freshnessClass: "LOW_CHANGE",
@@ -110,6 +122,7 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
         projectId: project.id,
         topicId,
         patternStep: 1,
+        component: "SOURCE_OF_VALUE",
         claimKey: "economic_source",
         statement: "test observed",
         freshnessClass: "LOW_CHANGE",
@@ -130,7 +143,9 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       error = e;
     }
     expect(error).toBeDefined();
-    expect(pgError(error).message).toMatch(/forbidden research_memory lifecycle transition/);
+    expect(pgError(error).message).toMatch(
+      /forbidden research_memory lifecycle transition/,
+    );
   });
 
   it("4. lifecycle: переход в ACTIVE без promoted_by отклоняется — переход только человеком", async () => {
@@ -142,6 +157,7 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
         projectId: project.id,
         topicId,
         patternStep: 2,
+        component: "FLOW_PATH",
         claimKey: "revenue_waterfall",
         statement: "test candidate",
         freshnessClass: "MEDIUM_CHANGE",
@@ -168,16 +184,72 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
     expect(pgError(error).message).toMatch(/requires promoted_by/);
   });
 
+  it("4a. D-065: прямая попытка через SQL промоутнуть в ACTIVE, указав ordinary user в promoted_by, отклоняется триггером (не только assertAdmin в коде)", async () => {
+    const topicId = await activeTopicId();
+    const project = await firstDemoProject();
+    // Обычный пользователь — role по умолчанию НЕ ADMIN.
+    const ordinaryUser = await makeUser();
+    const [row] = await ctx.db
+      .insert(researchMemory)
+      .values({
+        projectId: project.id,
+        topicId,
+        patternStep: 2,
+        component: "FLOW_PATH",
+        claimKey: "d065_direct_sql",
+        statement: "attempted direct SQL promotion by non-admin",
+        freshnessClass: "MEDIUM_CHANGE",
+        verifiedAt: sql`now()`,
+        confidence: 85,
+        originKind: "TEST",
+      })
+      .returning();
+    await ctx.db
+      .update(researchMemory)
+      .set({ lifecycleState: "CANDIDATE" })
+      .where(eq(researchMemory.id, row.id));
+
+    let error: unknown;
+    try {
+      // Обход lifecycle.ts / assertAdmin() ПОЛНОСТЬЮ — прямой UPDATE тем же
+      // клиентом БД, которым пользовался бы кто угодно с доступом к SQL.
+      await ctx.db
+        .update(researchMemory)
+        .set({
+          lifecycleState: "ACTIVE",
+          promotedBy: ordinaryUser.id,
+          promotedAt: sql`now()`,
+        })
+        .where(eq(researchMemory.id, row.id));
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeDefined();
+    expect(pgError(error).message).toMatch(
+      /requires promoted_by to reference an ADMIN user/,
+    );
+
+    const [after] = await ctx.db
+      .select({ lifecycleState: researchMemory.lifecycleState })
+      .from(researchMemory)
+      .where(eq(researchMemory.id, row.id));
+    expect(after.lifecycleState).toBe("CANDIDATE"); // откат — ACTIVE не проскочило
+  });
+
   it("5. lifecycle: полный путь OBSERVED -> CANDIDATE -> ACTIVE с promoted_by проходит", async () => {
     const topicId = await activeTopicId();
     const project = await firstDemoProject();
-    const admin = await makeUser();
+    const [admin] = await ctx.db
+      .insert(users)
+      .values({ role: "ADMIN" })
+      .returning();
     const [row] = await ctx.db
       .insert(researchMemory)
       .values({
         projectId: project.id,
         topicId,
         patternStep: 4,
+        component: "EXECUTION_EVIDENCE",
         claimKey: "actual_execution",
         statement: "buybacks executed monthly per governance record",
         freshnessClass: "MEDIUM_CHANGE",
@@ -192,7 +264,11 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       .where(eq(researchMemory.id, row.id));
     const [promoted] = await ctx.db
       .update(researchMemory)
-      .set({ lifecycleState: "ACTIVE", promotedBy: admin.id, promotedAt: sql`now()` })
+      .set({
+        lifecycleState: "ACTIVE",
+        promotedBy: admin.id,
+        promotedAt: sql`now()`,
+      })
       .where(eq(researchMemory.id, row.id))
       .returning();
     expect(promoted.lifecycleState).toBe("ACTIVE");
@@ -219,13 +295,17 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
   it("7. удаление пользователя не ломается системной Research Memory (D-048)", async () => {
     const topicId = await activeTopicId();
     const project = await firstDemoProject();
-    const admin = await makeUser();
+    const [admin] = await ctx.db
+      .insert(users)
+      .values({ role: "ADMIN" })
+      .returning();
     const [row] = await ctx.db
       .insert(researchMemory)
       .values({
         projectId: project.id,
         topicId,
         patternStep: 5,
+        component: "CURRENT_STATE",
         claimKey: "current_status",
         statement: "status verified via governance dashboard",
         freshnessClass: "HIGH_CHANGE",
@@ -240,15 +320,21 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       .where(eq(researchMemory.id, row.id));
     await ctx.db
       .update(researchMemory)
-      .set({ lifecycleState: "ACTIVE", promotedBy: admin.id, promotedAt: sql`now()` })
+      .set({
+        lifecycleState: "ACTIVE",
+        promotedBy: admin.id,
+        promotedAt: sql`now()`,
+      })
       .where(eq(researchMemory.id, row.id));
 
     // Пользователь, который своим Proof породил трассировку provenance —
     // отдельный от admin, чтобы проверить именно копию, а не promoted_by.
     const originUser = await makeUser();
-    await ctx.db
-      .insert(userIdentities)
-      .values({ userId: originUser.id, provider: "TELEGRAM", providerUserId: uniq("tg") });
+    await ctx.db.insert(userIdentities).values({
+      userId: originUser.id,
+      provider: "TELEGRAM",
+      providerUserId: uniq("tg"),
+    });
     const [src] = await ctx.db
       .insert(sources)
       .values({ url: "https://example.com/gov", urlHash: uniq("srch") })
@@ -309,7 +395,9 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       SELECT indexname FROM pg_indexes
       WHERE tablename IN ('proofs', 'evidence', 'proof_gaps', 'interpretations')
     `);
-    const names = (rows.rows as { indexname: string }[]).map((r) => r.indexname);
+    const names = (rows.rows as { indexname: string }[]).map(
+      (r) => r.indexname,
+    );
     for (const expected of [
       "ix_proofs_project_topic",
       "ix_proofs_owner",
@@ -369,7 +457,9 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       expect(row.freshnessClass).toBe(cls);
     }
     await ctx.db.delete(researchJobs).where(eq(researchJobs.id, jobRow.job.id));
-    await ctx.db.delete(demoQuotaReservations).where(eq(demoQuotaReservations.userId, user.id));
+    await ctx.db
+      .delete(demoQuotaReservations)
+      .where(eq(demoQuotaReservations.userId, user.id));
   });
 });
 
@@ -378,7 +468,10 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
     const topicId = await activeTopicId();
     const project = await firstDemoProject();
     const admin = await makeUser();
-    await ctx.db.update(users).set({ role: "ADMIN" }).where(eq(users.id, admin.id));
+    await ctx.db
+      .update(users)
+      .set({ role: "ADMIN" })
+      .where(eq(users.id, admin.id));
 
     const user = await makeUser();
     const jobRow = await createResearchJob(ctx.db, ctx.boss, {
@@ -426,6 +519,7 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
       projectId: project.id,
       topicId,
       patternStep: 3,
+      component: "MECHANISM_SPEC",
       claimKey: "allocation_mechanism",
       statement: "Buyback executed per governance record",
       freshnessClass: "MEDIUM_CHANGE",
@@ -474,6 +568,7 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
       projectId: project.id,
       topicId,
       patternStep: 6,
+      component: "DESTINATION",
       claimKey: "token_destination",
       statement: "test",
       freshnessClass: "LOW_CHANGE",
@@ -481,7 +576,9 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
       confidence: 70,
       originKind: "TEST",
     });
-    await expect(promoteToActive(ctx.db, memoryId, notAdmin.id)).rejects.toThrow(NotAdminError);
+    await expect(
+      promoteToActive(ctx.db, memoryId, notAdmin.id),
+    ).rejects.toThrow(NotAdminError);
     const [row] = await ctx.db
       .select()
       .from(researchMemory)
@@ -493,7 +590,10 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
     const topicId = await activeTopicId();
     const project = await firstDemoProject();
     const admin = await makeUser();
-    await ctx.db.update(users).set({ role: "ADMIN" }).where(eq(users.id, admin.id));
+    await ctx.db
+      .update(users)
+      .set({ role: "ADMIN" })
+      .where(eq(users.id, admin.id));
     const notAdmin = await makeUser();
     const user = await makeUser();
     const jobRow = await createResearchJob(ctx.db, ctx.boss, {
@@ -520,9 +620,9 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
       .returning();
     expect(proofRow.verificationStatus).toBe("DRAFT"); // никакого автопромоушена моделью
 
-    await expect(markProofVerified(ctx.db, proofRow.id, notAdmin.id)).rejects.toThrow(
-      NotAdminError,
-    );
+    await expect(
+      markProofVerified(ctx.db, proofRow.id, notAdmin.id),
+    ).rejects.toThrow(NotAdminError);
     const verified = await markProofVerified(ctx.db, proofRow.id, admin.id);
     expect(verified.verificationStatus).toBe("VERIFIED");
   });
@@ -532,7 +632,10 @@ async function activateMemory(
   ctx2: TestContext,
   input: Parameters<typeof observeMemoryCandidate>[1],
 ): Promise<string> {
-  const [admin] = await ctx2.db.insert(users).values({ role: "ADMIN" }).returning();
+  const [admin] = await ctx2.db
+    .insert(users)
+    .values({ role: "ADMIN" })
+    .returning();
   const { id } = await observeMemoryCandidate(ctx2.db, input);
   return (await promoteToActive(ctx2.db, id, admin.id)).id;
 }
@@ -545,6 +648,7 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
       projectId: projectA.id,
       topicId,
       patternStep: 1,
+      component: "SOURCE_OF_VALUE",
       claimKey: "economic_source",
       statement: "Protocol charges a 0.3% swap fee as its economic source",
       freshnessClass: "LOW_CHANGE",
@@ -575,8 +679,10 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
       projectId: project.id,
       topicId,
       patternStep: 7,
+      component: "NET_EFFECT",
       claimKey: "net_token_effect",
-      statement: "Half of protocol revenue is used to burn the token every epoch",
+      statement:
+        "Half of protocol revenue is used to burn the token every epoch",
       freshnessClass: "MEDIUM_CHANGE",
       verifiedAt: new Date(),
       confidence: 88,
@@ -615,6 +721,7 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
         projectId: project.id,
         topicId,
         patternStep: 8,
+        component: "DURABILITY_BASIS",
         claimKey: `durability_${i}`,
         statement: `Durability note ${i}`,
         freshnessClass: "LOW_CHANGE",
@@ -625,7 +732,16 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
     }
     const hits = await structuredMemoryRetrievalGateway.retrieve(
       ctx.db,
-      { projectId: project.id, topicId, claimKeys: ["durability_0", "durability_1", "durability_2", "durability_3"] },
+      {
+        projectId: project.id,
+        topicId,
+        claimKeys: [
+          "durability_0",
+          "durability_1",
+          "durability_2",
+          "durability_3",
+        ],
+      },
       { topKPerStep: 2 },
     );
     const step8 = hits.filter((h) => h.patternStep === 8);
@@ -635,7 +751,10 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
   });
 });
 
-async function setMemoryConfig(ctx2: TestContext, patch: Record<string, unknown>) {
+async function setMemoryConfig(
+  ctx2: TestContext,
+  patch: Record<string, unknown>,
+) {
   for (const [key, value] of Object.entries(patch)) {
     await ctx2.db
       .insert(productConfig)
@@ -646,15 +765,27 @@ async function setMemoryConfig(ctx2: TestContext, patch: Record<string, unknown>
 
 async function makeJob(
   ctx2: TestContext,
-  opts: { projectId: string; topicId: string; entitlement: ReturnType<typeof coreEntitlement> },
+  opts: {
+    projectId: string;
+    topicId: string;
+    entitlement: ReturnType<typeof coreEntitlement>;
+  },
 ) {
-  const user = await ctx2.db.insert(users).values({}).returning().then((r) => r[0]);
+  const user = await ctx2.db
+    .insert(users)
+    .values({})
+    .returning()
+    .then((r) => r[0]);
   return createResearchJob(ctx2.db, ctx2.boss, {
     userId: user.id,
     topicId: opts.topicId,
     projectId: opts.projectId,
     originalQuestion: "does protocol revenue reach token holders?",
-    normalizedTask: { project_slug: "x", project_slugs: ["x"], task: "value capture investigation" },
+    normalizedTask: {
+      project_slug: "x",
+      project_slugs: ["x"],
+      task: "value capture investigation",
+    },
     normalizedTaskHash: uniq("hash"),
     idempotencyKey: uniq("idem"),
     entitlement: opts.entitlement,
@@ -667,12 +798,17 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
     const topicId = await activeTopicId();
     const [project] = await ctx.db
       .insert(projects)
-      .values({ slug: uniq("proj17"), name: "Test Project 17", status: "ACTIVE_CORE" })
+      .values({
+        slug: uniq("proj17"),
+        name: "Test Project 17",
+        status: "ACTIVE_CORE",
+      })
       .returning();
     await activateMemory(ctx, {
       projectId: project.id,
       topicId,
       patternStep: 1,
+      component: "SOURCE_OF_VALUE",
       claimKey: "economic_source",
       statement: "0.3% swap fee is the economic source",
       freshnessClass: "LOW_CHANGE",
@@ -684,6 +820,7 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
       projectId: project.id,
       topicId,
       patternStep: 3,
+      component: "MECHANISM_SPEC",
       claimKey: "allocation_mechanism",
       statement: "governance-approved buyback mechanism",
       freshnessClass: "MEDIUM_CHANGE",
@@ -691,26 +828,63 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
       confidence: 92,
       originKind: "TEST",
     });
+    // Шаг 3 требует ДВА компонента (D-060) — без GOVERNANCE_BASIS он
+    // остался бы REQUIRED_FRESH (частичное покрытие), а не ALREADY_SATISFIED.
+    await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 3,
+      component: "GOVERNANCE_BASIS",
+      claimKey: "allocation_governance",
+      statement: "buyback approved by on-chain governance vote",
+      freshnessClass: "MEDIUM_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 92,
+      originKind: "TEST",
+    });
 
     await setMemoryConfig(ctx, { memory_enabled: true });
-    const jobOn = await makeJob(ctx, { projectId: project.id, topicId, entitlement: coreEntitlement() });
+    const jobOn = await makeJob(ctx, {
+      projectId: project.id,
+      topicId,
+      entitlement: coreEntitlement(),
+    });
     const withMemory = await runMemoryPlanningStage(ctx.db, jobOn.job.id);
 
     await setMemoryConfig(ctx, { memory_enabled: false });
-    const jobOff = await makeJob(ctx, { projectId: project.id, topicId, entitlement: coreEntitlement() });
+    const jobOff = await makeJob(ctx, {
+      projectId: project.id,
+      topicId,
+      entitlement: coreEntitlement(),
+    });
     const withoutMemory = await runMemoryPlanningStage(ctx.db, jobOff.job.id);
     await setMemoryConfig(ctx, { memory_enabled: true }); // восстановить для следующих тестов
 
-    const [planOn] = await ctx.db.select().from(researchPlans).where(eq(researchPlans.id, withMemory.planId));
-    const [planOff] = await ctx.db.select().from(researchPlans).where(eq(researchPlans.id, withoutMemory.planId));
-    const contractOn = planOn.contract as { alreadySatisfiedSteps: number[]; missingSteps: number[] };
-    const contractOff = planOff.contract as { alreadySatisfiedSteps: number[]; missingSteps: number[] };
+    const [planOn] = await ctx.db
+      .select()
+      .from(researchPlans)
+      .where(eq(researchPlans.id, withMemory.planId));
+    const [planOff] = await ctx.db
+      .select()
+      .from(researchPlans)
+      .where(eq(researchPlans.id, withoutMemory.planId));
+    const contractOn = planOn.contract as {
+      alreadySatisfiedSteps: number[];
+      missingSteps: number[];
+    };
+    const contractOff = planOff.contract as {
+      alreadySatisfiedSteps: number[];
+      missingSteps: number[];
+    };
 
     // Структурно разные, поимённо — не просто "разный текст".
     expect(contractOn.alreadySatisfiedSteps.sort()).toEqual([1, 3]);
     expect(contractOff.alreadySatisfiedSteps).toEqual([]);
     expect(contractOff.missingSteps.length).toBe(8);
-    expect(planOn.mode).toBe("TARGETED_REFRESH");
+    // D-058: шаги 2,4,5,6,7,8 остаются MISSING -> FRESH_RESEARCH, не
+    // TARGETED_REFRESH (тот режим требует ноль MISSING шагов); уже закрытые
+    // шаги 1 и 3 при этом остаются ALREADY_SATISFIED (проверено выше).
+    expect(planOn.mode).toBe("FRESH_RESEARCH");
     expect(planOff.mode).toBe("FRESH_RESEARCH");
     expect(withMemory.memoryUsed).toBe(true);
     expect(withoutMemory.memoryUsed).toBe(false);
@@ -730,7 +904,11 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
     const topicId = await activeTopicId();
     const [freshProject] = await ctx.db
       .insert(projects)
-      .values({ slug: uniq("proj18"), name: "Test Project 18", status: "ACTIVE_CORE" })
+      .values({
+        slug: uniq("proj18"),
+        name: "Test Project 18",
+        status: "ACTIVE_CORE",
+      })
       .returning();
     await setMemoryConfig(ctx, { memory_enabled: true });
     // Ничего не засеяно для этого проекта -> desiredMode был бы FRESH_RESEARCH.
@@ -742,17 +920,26 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
     const result = await runMemoryPlanningStage(ctx.db, job.job.id);
     expect(result.mode).toBe("TARGETED_REFRESH");
 
-    const [plan] = await ctx.db.select().from(researchPlans).where(eq(researchPlans.id, result.planId));
+    const [plan] = await ctx.db
+      .select()
+      .from(researchPlans)
+      .where(eq(researchPlans.id, result.planId));
     expect(plan.mode).toBe("TARGETED_REFRESH");
     const contract = plan.contract as { stopConditions: string[] };
-    expect(contract.stopConditions.some((s) => s.includes("capability ceiling"))).toBe(true);
+    expect(
+      contract.stopConditions.some((s) => s.includes("capability ceiling")),
+    ).toBe(true);
   });
 
   it("19. memory_status доезжает до job и отражает реальность (USED_AND_REVERIFIED при просроченном факте)", async () => {
     const topicId = await activeTopicId();
     const [project] = await ctx.db
       .insert(projects)
-      .values({ slug: uniq("proj19"), name: "Test Project 19", status: "ACTIVE_CORE" })
+      .values({
+        slug: uniq("proj19"),
+        name: "Test Project 19",
+        status: "ACTIVE_CORE",
+      })
       .returning();
     const staleMemId = (
       await ctx.db
@@ -761,6 +948,7 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
           projectId: project.id,
           topicId,
           patternStep: 5,
+          component: "CURRENT_STATE",
           claimKey: "current_status_reverify_test",
           statement: "status checked long ago",
           freshnessClass: "HIGH_CHANGE",
@@ -770,16 +958,61 @@ describe("Фаза 5 — планировщик поверх job'ов: runMemory
         })
         .returning()
     )[0].id;
-    const admin = await ctx.db.insert(users).values({ role: "ADMIN" }).returning().then((r) => r[0]);
+    const admin = await ctx.db
+      .insert(users)
+      .values({ role: "ADMIN" })
+      .returning()
+      .then((r) => r[0]);
     await promoteToActive(ctx.db, staleMemId, admin.id);
 
     await setMemoryConfig(ctx, { memory_enabled: true });
-    const job = await makeJob(ctx, { projectId: project.id, topicId, entitlement: coreEntitlement() });
+    const job = await makeJob(ctx, {
+      projectId: project.id,
+      topicId,
+      entitlement: coreEntitlement(),
+    });
     const result = await runMemoryPlanningStage(ctx.db, job.job.id);
     expect(result.memoryStatus).toBe("USED_AND_REVERIFIED");
 
-    const [jobRow] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, job.job.id));
+    const [jobRow] = await ctx.db
+      .select()
+      .from(researchJobs)
+      .where(eq(researchJobs.id, job.job.id));
     expect(jobRow.memoryStatus).toBe("USED_AND_REVERIFIED");
     expect(jobRow.progressStage).toBe(2);
+  });
+
+  it("20. LOW-4: повторная доставка того же job'а (pg-boss at-least-once) идемпотентна, а не падает на уникальном индексе", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({
+        slug: uniq("proj20_idem"),
+        name: "Test Project 20 idempotent",
+        status: "ACTIVE_CORE",
+      })
+      .returning();
+    const job = await makeJob(ctx, {
+      projectId: project.id,
+      topicId,
+      entitlement: coreEntitlement(),
+    });
+
+    const first = await runMemoryPlanningStage(ctx.db, job.job.id);
+    // Повторная доставка того же jobId — pg-boss гарантирует at-least-once,
+    // не exactly-once; вторая доставка обязана вернуть тот же персистентный
+    // план, а не бросить unique_violation по (research_job_id, version).
+    const second = await runMemoryPlanningStage(ctx.db, job.job.id);
+
+    expect(second.planId).toBe(first.planId);
+    expect(second.mode).toBe(first.mode);
+    expect(second.memoryUsed).toBe(first.memoryUsed);
+    expect(second.memoryStatus).toBe(first.memoryStatus);
+
+    const plans = await ctx.db
+      .select()
+      .from(researchPlans)
+      .where(eq(researchPlans.researchJobId, job.job.id));
+    expect(plans.length).toBe(1); // одна строка, не дубликат
   });
 });

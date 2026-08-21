@@ -2,7 +2,12 @@ import { eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { loadProductConfig } from "../config/product";
-import { researchJobs, researchPatterns, researchPlans, memoryRetrievals } from "../db/schema";
+import {
+  researchJobs,
+  researchPatterns,
+  researchPlans,
+  memoryRetrievals,
+} from "../db/schema";
 import { patternContentSchema, type PatternContent } from "../domain/pattern";
 import { planResearch, type PlanResult } from "./planner";
 import { resolveMemoryRetrievalGateway } from "./retrieval-gateway";
@@ -39,9 +44,13 @@ export async function runMemoryPlanningStage(
   db: Database,
   jobId: string,
 ): Promise<MemoryPlanningResult> {
-  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  const [job] = await db
+    .select()
+    .from(researchJobs)
+    .where(eq(researchJobs.id, jobId));
   if (!job) throw new Error(`research job not found: ${jobId}`);
-  if (!job.projectId) throw new Error(`research job has no projectId: ${jobId}`);
+  if (!job.projectId)
+    throw new Error(`research job has no projectId: ${jobId}`);
 
   const config = await loadProductConfig(db);
   const pattern = await loadActivePattern(db, job.topicId);
@@ -78,7 +87,12 @@ export async function runMemoryPlanningStage(
       : "USED";
 
   return db.transaction(async (tx) => {
-    const [plan] = await tx
+    // LOW-4 (tech debt, cheap to close while already touching this file):
+    // pg-boss can redeliver a job more than once (at-least-once delivery).
+    // Without this, a second delivery would hit uq_research_plans_job_version
+    // and crash the worker instead of behaving idempotently. onConflictDoNothing
+    // + fallback select makes a duplicate delivery a no-op read, not a retry storm.
+    const inserted = await tx
       .insert(researchPlans)
       .values({
         researchJobId: jobId,
@@ -87,12 +101,42 @@ export async function runMemoryPlanningStage(
         contract: validatedContract,
         memoryUsed: result.memoryUsed,
       })
+      .onConflictDoNothing({
+        target: [researchPlans.researchJobId, researchPlans.version],
+      })
       .returning({ id: researchPlans.id });
+
+    if (inserted.length === 0) {
+      // Уже спланировано более ранней доставкой того же job'а — читаем
+      // персистентный результат, а не планируем и не пишем повторно.
+      const [existing] = await tx
+        .select()
+        .from(researchPlans)
+        .where(eq(researchPlans.researchJobId, jobId));
+      const existingMemoryStatus: MemoryPlanningResult["memoryStatus"] =
+        !existing.memoryUsed
+          ? "NOT_USED"
+          : (existing.contract as { requiredFreshEvidence: number[] })
+                .requiredFreshEvidence.length > 0
+            ? "USED_AND_REVERIFIED"
+            : "USED";
+      return {
+        planId: existing.id,
+        mode: existing.mode,
+        memoryUsed: existing.memoryUsed,
+        memoryStatus: existingMemoryStatus,
+      };
+    }
+    const [plan] = inserted;
 
     await tx.insert(memoryRetrievals).values({
       researchJobId: jobId,
       planId: plan.id,
-      queryKeys: { projectId: job.projectId, topicId: job.topicId, statementQuery: statementQuery ?? null },
+      queryKeys: {
+        projectId: job.projectId,
+        topicId: job.topicId,
+        statementQuery: statementQuery ?? null,
+      },
       hits: hits.map((h) => ({
         memoryId: h.memoryId,
         step: h.patternStep,
@@ -110,6 +154,11 @@ export async function runMemoryPlanningStage(
       .set({ memoryStatus, progressStage: 2 })
       .where(eq(researchJobs.id, jobId));
 
-    return { planId: plan.id, mode: result.mode, memoryUsed: result.memoryUsed, memoryStatus };
+    return {
+      planId: plan.id,
+      mode: result.mode,
+      memoryUsed: result.memoryUsed,
+      memoryStatus,
+    };
   });
 }

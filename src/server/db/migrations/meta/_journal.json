@@ -57,6 +57,20 @@
       "when": 1787310019135,
       "tag": "0007_memory_lifecycle_guard",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787317870927,
+      "tag": "0008_pattern_components",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787317870928,
+      "tag": "0009_memory_admin_promotion_guard",
+      "breakpoints": true
     }
   ]
 }

@@ -8,7 +8,11 @@ import { z } from "zod";
 export const NOVELTY_STATES = ["KNOWN", "PARTIALLY_KNOWN", "NOVEL"] as const;
 export type NoveltyState = (typeof NOVELTY_STATES)[number];
 
-export const STEP_DECISIONS = ["ALREADY_SATISFIED", "REQUIRED_FRESH", "MISSING"] as const;
+export const STEP_DECISIONS = [
+  "ALREADY_SATISFIED",
+  "REQUIRED_FRESH",
+  "MISSING",
+] as const;
 export type StepDecisionKind = (typeof STEP_DECISIONS)[number];
 
 const jobBudgetSchema = z.object({
@@ -24,6 +28,9 @@ const jobBudgetSchema = z.object({
 const reusableEvidenceSchema = z.object({
   memoryId: z.string(),
   step: z.number().int().min(1).max(8),
+  // D-060: компонент, который эта запись закрывает — обязателен для аудита
+  // "все ли requiredComponents шага действительно покрыты".
+  component: z.string(),
   claimKey: z.string(),
   statement: z.string(),
   confidence: z.number().int().min(0).max(100),
@@ -57,7 +64,9 @@ export const researchBoundaryContractSchema = z.object({
 
 export type ReusableEvidence = z.infer<typeof reusableEvidenceSchema>;
 export type StepDecision = z.infer<typeof stepDecisionSchema>;
-export type ResearchBoundaryContract = z.infer<typeof researchBoundaryContractSchema>;
+export type ResearchBoundaryContract = z.infer<
+  typeof researchBoundaryContractSchema
+>;
 
 export function parseContract(raw: unknown): ResearchBoundaryContract {
   return researchBoundaryContractSchema.parse(raw);

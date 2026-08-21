@@ -63,6 +63,7 @@ describe("Фаза 5 — настоящий end-to-end через pg-boss worker
         projectId: project.id,
         topicId,
         patternStep: 1,
+        component: "SOURCE_OF_VALUE",
         claimKey: "economic_source",
         statement: "worker e2e: swap fee is the economic source",
         freshnessClass: "LOW_CHANGE",
@@ -123,7 +124,9 @@ describe("Фаза 5 — настоящий end-to-end через pg-boss worker
         .from(researchPlans)
         .where(eq(researchPlans.researchJobId, job.id));
       expect(plan).toBeTruthy();
-      expect(plan.mode).toBe("TARGETED_REFRESH");
+      // D-058: только шаг 1 закрыт, остальные 7 — MISSING -> FRESH_RESEARCH
+      // (не TARGETED_REFRESH: тот режим требует ноль MISSING шагов).
+      expect(plan.mode).toBe("FRESH_RESEARCH");
       // Контракт, записанный настоящим worker-проходом, обязан остаться
       // валиден по той же строгой схеме, что использует планировщик.
       const parsed = researchBoundaryContractSchema.parse(plan.contract);

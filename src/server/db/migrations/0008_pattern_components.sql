@@ -1,0 +1,1 @@
+ALTER TABLE "research_memory" ADD COLUMN "component" text NOT NULL;

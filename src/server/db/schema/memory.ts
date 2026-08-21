@@ -37,7 +37,9 @@ import { sources } from "./proof";
 export const researchMemory = pgTable(
   "research_memory",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
@@ -45,6 +47,11 @@ export const researchMemory = pgTable(
       .notNull()
       .references(() => topics.id, { onDelete: "restrict" }),
     patternStep: smallint("pattern_step").notNull(),
+    // Компонент шага (D-060): claim_key остаётся конкретным идентификатором
+    // утверждения, но БОЛЬШЕ НЕ решает принадлежность к шагу — эту роль
+    // берёт на себя component, валидируемый против requiredComponents
+    // активного Pattern (src/server/memory/lifecycle.ts, observeMemoryCandidate).
+    component: text("component").notNull(),
     claimKey: text("claim_key").notNull(),
     statement: text("statement").notNull(),
     mechanismState: text("mechanism_state"),
@@ -92,13 +99,23 @@ export const researchMemory = pgTable(
       .where(sql`${t.lifecycleState} = 'ACTIVE'`),
     // Вторичный recall (§3.4.2): полнотекстовый поиск по statement,
     // 'simple'-конфигурация — контент смешан RU/EN, без языкового стемминга.
-    index("ix_research_memory_statement_fts")
-      .using("gin", sql`to_tsvector('simple', ${t.statement})`),
+    index("ix_research_memory_statement_fts").using(
+      "gin",
+      sql`to_tsvector('simple', ${t.statement})`,
+    ),
     // pg_trgm fallback для случаев, не покрытых claim_key/FTS.
-    index("ix_research_memory_statement_trgm")
-      .using("gin", sql`${t.statement} gin_trgm_ops`),
-    check("ck_research_memory_pattern_step", sql`${t.patternStep} BETWEEN 1 AND 8`),
-    check("ck_research_memory_confidence", sql`${t.confidence} BETWEEN 0 AND 100`),
+    index("ix_research_memory_statement_trgm").using(
+      "gin",
+      sql`${t.statement} gin_trgm_ops`,
+    ),
+    check(
+      "ck_research_memory_pattern_step",
+      sql`${t.patternStep} BETWEEN 1 AND 8`,
+    ),
+    check(
+      "ck_research_memory_confidence",
+      sql`${t.confidence} BETWEEN 0 AND 100`,
+    ),
   ],
 );
 
@@ -110,7 +127,9 @@ export const researchMemory = pgTable(
 export const researchMemoryProvenance = pgTable(
   "research_memory_provenance",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
     memoryId: uuid("memory_id")
       .notNull()
       .references(() => researchMemory.id, { onDelete: "cascade" }),
@@ -136,7 +155,9 @@ export const researchMemoryProvenance = pgTable(
 export const projectMemoryItems = pgTable(
   "project_memory_items",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
     projectId: uuid("project_id")
       .notNull()
       .references(() => projects.id, { onDelete: "restrict" }),
@@ -171,7 +192,9 @@ export const projectMemoryItems = pgTable(
 export const researchPlans = pgTable(
   "research_plans",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
     researchJobId: uuid("research_job_id")
       .notNull()
       .references(() => researchJobs.id, { onDelete: "cascade" }),
@@ -192,7 +215,9 @@ export const researchPlans = pgTable(
 export const memoryRetrievals = pgTable(
   "memory_retrievals",
   {
-    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
     researchJobId: uuid("research_job_id")
       .notNull()
       .references(() => researchJobs.id, { onDelete: "cascade" }),
