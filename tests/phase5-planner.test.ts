@@ -292,6 +292,30 @@ describe("Фаза 5 — deterministic planner (unit, без БД)", () => {
     expect(r2.contract.requiredFreshEvidence).toEqual([5]);
   });
 
+  it("20. D-058, средняя ветвь: missing=0 и requiredFresh>0 -> TARGETED_REFRESH (выведен из памяти, не зажат потолком)", () => {
+    // Канонический пример plan §4.3: всё покрыто, просрочен ТОЛЬКО
+    // динамический шаг 5 — исследуется только он. Ни FRESH_RESEARCH
+    // (MISSING-шагов нет), ни MEMORY (свежесть не отменяется
+    // переиспользованием, D-057).
+    const hits = fullCoverageHits().map((h) =>
+      h.patternStep === 5
+        ? {
+            ...h,
+            freshnessClass: "HIGH_CHANGE" as const,
+            verifiedAt: new Date(NOW.getTime() - 30 * 24 * 60 * 60 * 1000),
+          }
+        : h,
+    );
+    const r = plan(hits);
+    expect(r.contract.missingSteps).toEqual([]);
+    expect(r.contract.requiredFreshEvidence).toEqual([5]);
+    expect(r.contract.alreadySatisfiedSteps).toEqual([1, 2, 3, 4, 6, 7, 8]);
+    expect(r.desiredMode).toBe("TARGETED_REFRESH");
+    expect(r.mode).toBe("TARGETED_REFRESH");
+    expect(r.capabilityCeilingHit).toBe(false); // режим выведен памятью, потолок ни при чём
+    expect(r.contract.noveltyState).toBe("PARTIALLY_KNOWN");
+  });
+
   it("19. MEDIUM-1: политика '3 months' сохраняет смысл — запись 30 дней от роду с HIGH_CHANGE-классом свежа", () => {
     const r = plan([
       hit({

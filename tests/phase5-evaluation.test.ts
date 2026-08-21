@@ -225,6 +225,16 @@ describe("Фаза 5 — Golden set: Memory OFF vs ON (chunk H)", () => {
     expect(agg.recallDefinedCount).toBeLessThan(agg.scenarioCount);
   });
 
+  it("34. D-058, средняя ветвь end-to-end: полное покрытие с одним просроченным шагом даёт режим TARGETED_REFRESH", () => {
+    const result = allResults.find((r) => r.scenario.includes("targeted refresh"))!;
+    expect(result.contractOn.missingSteps).toEqual([]);
+    expect(result.contractOn.requiredFreshEvidence).toEqual([5]);
+    // Режим выведен из памяти (не зажат потолком): missing=0, requiredFresh>0.
+    expect(result.modeOn).toBe("TARGETED_REFRESH");
+    expect(result.capabilityCeilingHit).toBe(false);
+    expect(result.stepsSkipped).toBe(7);
+  });
+
   it("33. D-060: claim_key не определяет валидность шага — факт закрывает только свой (step, component)", () => {
     const result = byAngle("component_mapping")[0];
     // claim_key 'economic_source' на шаге 8 закрывает ТОЛЬКО шаг 8.

@@ -61,6 +61,30 @@ export const GOLDEN_SCENARIOS: GoldenScenario[] = [
     expectedRequiredFreshSteps: [5],
   },
   {
+    // D-058, средняя ветвь (missing=0, requiredFresh>0) end-to-end —
+    // канонический пример plan §4.3: всё покрыто, просрочен ТОЛЬКО
+    // динамический шаг 5 -> режим TARGETED_REFRESH, исследуется только он.
+    name: "targeted refresh (D-058): всё покрыто, просрочен только динамический шаг 5",
+    angle: "freshness",
+    capability: "FRESH_RESEARCH",
+    statementQuery: "is the buyback still active and does value reach the token",
+    seedFacts: [
+      { patternStep: 1, component: "SOURCE_OF_VALUE", claimKey: "tr_step_1", statement: "tr: source verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 2, component: "FLOW_PATH", claimKey: "tr_step_2", statement: "tr: flow verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 3, component: "MECHANISM_SPEC", claimKey: "tr_step_3", statement: "tr: mechanism verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 3, component: "GOVERNANCE_BASIS", claimKey: "tr_step_3_gov", statement: "tr: governance verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 4, component: "EXECUTION_EVIDENCE", claimKey: "tr_step_4", statement: "tr: execution verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "tr_step_5", statement: "tr: status checked a month ago", freshnessClass: "HIGH_CHANGE", verifiedAt: STALE_HIGH_CHANGE, confidence: 95, promote: true, reusable: false, invalidReason: "STALE" },
+      { patternStep: 6, component: "DESTINATION", claimKey: "tr_step_6", statement: "tr: destination verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 6, component: "RECIPIENT", claimKey: "tr_step_6_rec", statement: "tr: recipient verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 7, component: "NET_EFFECT", claimKey: "tr_step_7", statement: "tr: net effect verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 8, component: "DURABILITY_BASIS", claimKey: "tr_step_8", statement: "tr: durability verified", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+    ],
+    expectedSatisfiedSteps: [1, 2, 3, 4, 6, 7, 8],
+    expectedRequiredFreshSteps: [5],
+    expectedMissingSteps: [],
+  },
+  {
     name: "sufficiency: всё свежо и покрыто",
     angle: "sufficiency",
     capability: "FRESH_RESEARCH",
