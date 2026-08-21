@@ -18,6 +18,13 @@ import {
   users,
 } from "../src/server/db/schema";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
+import {
+  copyProvenanceFromEvidence,
+  NotAdminError,
+  observeMemoryCandidate,
+  promoteToActive,
+} from "../src/server/memory/lifecycle";
+import { markProofVerified } from "../src/server/memory/verification";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 
 let ctx: TestContext;
@@ -358,5 +365,160 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
     }
     await ctx.db.delete(researchJobs).where(eq(researchJobs.id, jobRow.job.id));
     await ctx.db.delete(demoQuotaReservations).where(eq(demoQuotaReservations.userId, user.id));
+  });
+});
+
+describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/C)", () => {
+  it("11. observeMemoryCandidate + copyProvenanceFromEvidence + promoteToActive — полный путь прикладным кодом", async () => {
+    const topicId = await activeTopicId();
+    const project = await firstDemoProject();
+    const admin = await makeUser();
+    await ctx.db.update(users).set({ role: "ADMIN" }).where(eq(users.id, admin.id));
+
+    const user = await makeUser();
+    const jobRow = await createResearchJob(ctx.db, ctx.boss, {
+      userId: user.id,
+      topicId,
+      projectId: project.id,
+      originalQuestion: "x",
+      normalizedTaskHash: uniq("hash"),
+      idempotencyKey: uniq("idem"),
+      entitlement: coreEntitlement(),
+      demoLifetimeProofLimit: 3,
+    });
+    const [proofRow] = await ctx.db
+      .insert(proofs)
+      .values({
+        researchJobId: jobRow.job.id,
+        ownerUserId: user.id,
+        projectId: project.id,
+        topicId,
+        verdict: "SUPPORTED",
+        confidence: 90,
+        layers: {},
+        verificationStatus: "VERIFIED",
+      })
+      .returning();
+    const [src] = await ctx.db
+      .insert(sources)
+      .values({ url: "https://example.com/e2e", urlHash: uniq("srch") })
+      .returning();
+    const [evidenceRow] = await ctx.db
+      .insert(evidence)
+      .values({
+        proofId: proofRow.id,
+        sourceId: src.id,
+        relationship: "SUPPORTS",
+        fragment: "governance record: buyback executed",
+        fetchedAt: sql`now()`,
+        retrievedUrl: "https://example.com/e2e#buyback",
+        contentHash: "sha256:e2e",
+        freshnessClass: "MEDIUM_CHANGE",
+      })
+      .returning();
+
+    const { id: memoryId } = await observeMemoryCandidate(ctx.db, {
+      projectId: project.id,
+      topicId,
+      patternStep: 3,
+      claimKey: "allocation_mechanism",
+      statement: "Buyback executed per governance record",
+      freshnessClass: "MEDIUM_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 90,
+      originKind: "PROOF_TRACE",
+    });
+    const [observed] = await ctx.db
+      .select()
+      .from(researchMemory)
+      .where(eq(researchMemory.id, memoryId));
+    expect(observed.lifecycleState).toBe("OBSERVED");
+
+    await copyProvenanceFromEvidence(ctx.db, memoryId, evidenceRow.id);
+    const [prov] = await ctx.db
+      .select()
+      .from(researchMemoryProvenance)
+      .where(eq(researchMemoryProvenance.memoryId, memoryId));
+    expect(prov.originEvidenceId).toBe(evidenceRow.id);
+    expect(prov.fragment).toBe("governance record: buyback executed");
+
+    const promoted = await promoteToActive(ctx.db, memoryId, admin.id);
+    expect(promoted.lifecycleState).toBe("ACTIVE");
+    expect(promoted.promotedBy).toBe(admin.id);
+
+    // Удаление исходного evidence/пользователя не трогает копию.
+    await ctx.db.delete(users).where(eq(users.id, user.id));
+    const [survivingProv] = await ctx.db
+      .select()
+      .from(researchMemoryProvenance)
+      .where(eq(researchMemoryProvenance.memoryId, memoryId));
+    expect(survivingProv).toBeTruthy();
+    expect(survivingProv.originEvidenceId).toBe(evidenceRow.id); // след остался, строки уже нет
+    const [survivedRow] = await ctx.db
+      .select()
+      .from(evidence)
+      .where(eq(evidence.id, evidenceRow.id));
+    expect(survivedRow).toBeUndefined(); // исходный evidence действительно удалён каскадом
+  });
+
+  it("12. promoteToActive отклоняется для не-ADMIN пользователя", async () => {
+    const topicId = await activeTopicId();
+    const project = await firstDemoProject();
+    const notAdmin = await makeUser();
+    const { id: memoryId } = await observeMemoryCandidate(ctx.db, {
+      projectId: project.id,
+      topicId,
+      patternStep: 6,
+      claimKey: "token_destination",
+      statement: "test",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 70,
+      originKind: "TEST",
+    });
+    await expect(promoteToActive(ctx.db, memoryId, notAdmin.id)).rejects.toThrow(NotAdminError);
+    const [row] = await ctx.db
+      .select()
+      .from(researchMemory)
+      .where(eq(researchMemory.id, memoryId));
+    expect(row.lifecycleState).toBe("OBSERVED"); // отказ ДО любой мутации состояния
+  });
+
+  it("13. markProofVerified: только ADMIN, и только контролируемым действием (D-055)", async () => {
+    const topicId = await activeTopicId();
+    const project = await firstDemoProject();
+    const admin = await makeUser();
+    await ctx.db.update(users).set({ role: "ADMIN" }).where(eq(users.id, admin.id));
+    const notAdmin = await makeUser();
+    const user = await makeUser();
+    const jobRow = await createResearchJob(ctx.db, ctx.boss, {
+      userId: user.id,
+      topicId,
+      projectId: project.id,
+      originalQuestion: "x",
+      normalizedTaskHash: uniq("hash"),
+      idempotencyKey: uniq("idem"),
+      entitlement: coreEntitlement(),
+      demoLifetimeProofLimit: 3,
+    });
+    const [proofRow] = await ctx.db
+      .insert(proofs)
+      .values({
+        researchJobId: jobRow.job.id,
+        ownerUserId: user.id,
+        projectId: project.id,
+        topicId,
+        verdict: "SUPPORTED",
+        confidence: 80,
+        layers: {},
+      })
+      .returning();
+    expect(proofRow.verificationStatus).toBe("DRAFT"); // никакого автопромоушена моделью
+
+    await expect(markProofVerified(ctx.db, proofRow.id, notAdmin.id)).rejects.toThrow(
+      NotAdminError,
+    );
+    const verified = await markProofVerified(ctx.db, proofRow.id, admin.id);
+    expect(verified.verificationStatus).toBe("VERIFIED");
   });
 });
