@@ -22,21 +22,43 @@ const patternStepSchema = z.object({
   step: z.number().int().min(1).max(8),
   name: z.string().min(1),
   question: z.string().min(1),
-  // Компонент шага (D-060, ревью MEDIUM-4): claim_key сам по себе не
-  // связан со степенью — запись claim_key='economic_source' с
-  // pattern_step=8 закрывала «Durability». Список живёт здесь, то есть
-  // внутри CORE (D-022, ручной v1→v2), не в универсальной онтологии.
-  requiredComponents: z.array(z.string().min(1)).min(1),
 });
+
+// D-060: компоненты шага живут в research_patterns.content — внутри CORE,
+// который меняет человек (D-022). Ключ — номер шага строкой (jsonb),
+// значение — фиксированный список компонентов, каждый из которых обязан
+// быть покрыт пригодной памятью, чтобы шаг стал ALREADY_SATISFIED.
+// Это контракт ТОЛЬКО Token Value Capture Pattern v1 — универсальная
+// онтология не вводится.
+const requiredComponentsSchema = z
+  .record(z.string(), z.array(z.string().min(1)).min(1))
+  .superRefine((rec, ctx) => {
+    const keys = Object.keys(rec).sort();
+    const expected = ["1", "2", "3", "4", "5", "6", "7", "8"];
+    if (keys.length !== 8 || keys.some((k, i) => k !== expected[i])) {
+      ctx.addIssue({
+        code: "custom",
+        message: `requiredComponents must cover exactly steps 1..8, got: ${keys.join(",")}`,
+      });
+    }
+  });
 
 // zod-контракт на content (phase-5-plan.md §5.2) — без него blind-регрессия
 // будущей Фазы 10 непроверяема: Pattern v1 обязан оставаться ровно 8 шагами
 // в фиксированном порядке.
 export const patternContentSchema = z.object({
   steps: z.array(patternStepSchema).length(8),
+  requiredComponents: requiredComponentsSchema,
 });
 
 export type PatternContent = z.infer<typeof patternContentSchema>;
+
+export function requiredComponentsForStep(
+  pattern: PatternContent,
+  step: number,
+): string[] {
+  return pattern.requiredComponents[String(step)] ?? [];
+}
 
 export const PATTERN_V1_CONTENT: PatternContent = {
   steps: [
@@ -44,60 +66,57 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       step: 1,
       name: "Economic Source",
       question: "Where does the economic value the project claims come from?",
-      requiredComponents: ["SOURCE_OF_VALUE"],
     },
     {
       step: 2,
       name: "Revenue Waterfall",
-      question:
-        "How does that value flow through the protocol before it reaches anyone?",
-      requiredComponents: ["FLOW_PATH"],
+      question: "How does that value flow through the protocol before it reaches anyone?",
     },
     {
       step: 3,
       name: "Allocation Mechanism",
-      question:
-        "What mechanism decides how much of that value goes to the token?",
-      // "Механизм описан" и "механизм санкционирован" — разные факты (§4.1a).
-      requiredComponents: ["MECHANISM_SPEC", "GOVERNANCE_BASIS"],
+      question: "What mechanism decides how much of that value goes to the token?",
     },
     {
       step: 4,
       name: "Actual Execution",
-      question:
-        "Has that mechanism actually been executed, not just specified?",
-      requiredComponents: ["EXECUTION_EVIDENCE"],
+      question: "Has that mechanism actually been executed, not just specified?",
     },
     {
       step: 5,
       name: "Current Status + Freshness",
-      question:
-        "Is the mechanism currently active, and how recently was that verified?",
-      requiredComponents: ["CURRENT_STATE"],
+      question: "Is the mechanism currently active, and how recently was that verified?",
     },
     {
       step: 6,
       name: "Token Destination + Recipient",
-      question:
-        "Where does the value land once it reaches the token — burn, buyback, staking, treasury?",
-      // "Куда ушла ценность" и "кто в итоге её держит" — разные факты (§4.1a).
-      requiredComponents: ["DESTINATION", "RECIPIENT"],
+      question: "Where does the value land once it reaches the token — burn, buyback, staking, treasury?",
     },
     {
       step: 7,
       name: "Net Token Effect",
-      question:
-        "What is the net effect on the token after accounting for emissions and dilution?",
-      requiredComponents: ["NET_EFFECT"],
+      question: "What is the net effect on the token after accounting for emissions and dilution?",
     },
     {
       step: 8,
       name: "Durability",
-      question:
-        "Is this mechanism durable, or contingent on conditions that could reverse it?",
-      requiredComponents: ["DURABILITY_BASIS"],
+      question: "Is this mechanism durable, or contingent on conditions that could reverse it?",
     },
   ],
+  // D-060: два многокомпонентных шага — намеренное содержательное суждение
+  // (phase-5-plan.md §4.1a): «механизм описан» и «механизм санкционирован» —
+  // разные факты (шаг 3); «куда ушла ценность» и «кто её держит» — тоже
+  // разные (шаг 6). Остальные шесть шагов однокомпонентны.
+  requiredComponents: {
+    "1": ["SOURCE_OF_VALUE"],
+    "2": ["FLOW_PATH"],
+    "3": ["MECHANISM_SPEC", "GOVERNANCE_BASIS"],
+    "4": ["EXECUTION_EVIDENCE"],
+    "5": ["CURRENT_STATE"],
+    "6": ["DESTINATION", "RECIPIENT"],
+    "7": ["NET_EFFECT"],
+    "8": ["DURABILITY_BASIS"],
+  },
 };
 
 // Валидируется на модуле, а не только в сиде: искажённая константа не

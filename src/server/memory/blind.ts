@@ -1,18 +1,22 @@
 import type { ResearchBoundaryContract } from "./contract";
 
-// Blind Evaluator (phase-5-plan.md §7.5, D-049, corrected by D-063). Судит
-// КАЧЕСТВО плана, не зная, ПОЧЕМУ каждый шаг был так решён — включено ли
-// это переиспользование памяти (reason/memoryIds/memory-derived текст) или
-// свежий поиск. Это НЕ заявка на то, что судья не знает, был ли ВООБЩЕ
-// включён memory_enabled=ON/OFF для прогона — OFF vs ON остаётся
-// количественным сравнением (evaluation.ts), не слепым. research_plans.
-// memory_used — отдельная колонка БД, сюда никогда не передаётся.
+// Blind Evaluator (phase-5-plan.md §7.5, D-063). Судит КАЧЕСТВО плана без
+// утечки происхождения решений. Оценщик НЕ обязан не знать, была ли
+// включена память (при memory_enabled=false все 8 шагов всегда MISSING —
+// OFF-контракт опознаётся структурно, ревью MEDIUM-3); он обязан не знать,
+// ОТКУДА взялось каждое решение по шагу. Пара OFF/ON остаётся
+// количественным сравнением метрик, слепая оценка — сравнение ON-планов.
+//
+// Из вида удаляются: reason, memoryIds, memory_used (колонка БД, сюда
+// не передаётся), components (несут memoryIds и причины), и
+// knownInformation — оно содержит ТЕКСТЫ памяти и выдаёт происхождение
+// прямо (memory-derived statement text).
 
 export interface BlindStepView {
   step: number;
   stepName: string;
-  // Только ЧТО решено, не ПОЧЕМУ (reason и memoryIds выдали бы, что это
-  // память — "active memory covers…" / "stale…" вслепую недопустимо).
+  // Только ЧТО решено, не ПОЧЕМУ (reason, memoryIds и components выдали бы
+  // происхождение — "active memory covers…" / "stale…" вслепую недопустимо).
   covered: boolean;
   needsFreshEvidence: boolean;
 }
@@ -31,21 +35,14 @@ export interface BlindContractView {
   noveltyState: ResearchBoundaryContract["noveltyState"];
 }
 
-export function stripForBlindEvaluation(
-  contract: ResearchBoundaryContract,
-): BlindContractView {
+export function stripForBlindEvaluation(contract: ResearchBoundaryContract): BlindContractView {
   return {
     patternVersion: contract.patternVersion,
     coveredSteps: [...contract.alreadySatisfiedSteps].sort((a, b) => a - b),
-    needsFreshEvidenceSteps: [...contract.requiredFreshEvidence].sort(
-      (a, b) => a - b,
-    ),
+    needsFreshEvidenceSteps: [...contract.requiredFreshEvidence].sort((a, b) => a - b),
     missingSteps: [...contract.missingSteps].sort((a, b) => a - b),
     excludedScopeCount: contract.excludedScope.length,
     stopConditionsCount: contract.stopConditions.length,
-    // knownInformation НАМЕРЕННО удалено (D-063/MEDIUM-3): это дословный
-    // текст statement из памяти — сам его состав/формулировка выдаёт
-    // происхождение шага так же, как reason/memoryIds.
     researchBudget: contract.researchBudget,
     stepDecisions: contract.stepDecisions.map((d) => ({
       step: d.step,

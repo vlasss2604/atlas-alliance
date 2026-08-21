@@ -124,8 +124,8 @@ describe("Фаза 5 — настоящий end-to-end через pg-boss worker
         .from(researchPlans)
         .where(eq(researchPlans.researchJobId, job.id));
       expect(plan).toBeTruthy();
-      // D-058: только шаг 1 закрыт, остальные 7 — MISSING -> FRESH_RESEARCH
-      // (не TARGETED_REFRESH: тот режим требует ноль MISSING шагов).
+      // D-058: 7 шагов подлинно MISSING -> FRESH_RESEARCH (CORE-потолок
+      // это позволяет); закрытый шаг 1 остаётся закрытым в контракте.
       expect(plan.mode).toBe("FRESH_RESEARCH");
       // Контракт, записанный настоящим worker-проходом, обязан остаться
       // валиден по той же строгой схеме, что использует планировщик.

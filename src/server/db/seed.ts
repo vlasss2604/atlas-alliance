@@ -11,11 +11,7 @@ import { PATTERN_V1_CONTENT } from "../domain/pattern";
 export async function seed(db: Database): Promise<void> {
   await db
     .insert(topics)
-    .values({
-      slug: "token_value_capture",
-      name: "Token Value Capture",
-      isActive: true,
-    })
+    .values({ slug: "token_value_capture", name: "Token Value Capture", isActive: true })
     .onConflictDoNothing({ target: topics.slug });
 
   const [topic] = await db
@@ -44,11 +40,7 @@ export async function seed(db: Database): Promise<void> {
   }
 
   // Pattern v1 (D-022, D-052): без этой строки CORE v0.1 отсутствует в БД
-  // и планировщик Фазы 5 не может раскладывать память по шагам. Версия
-  // (v1) не меняется — это по-прежнему ручной переход, требуемый D-022 —
-  // но CONTENT синхронизируется при повторном сиде (onConflictDoUpdate):
-  // без этого добавление requiredComponents (D-060) в PATTERN_V1_CONTENT
-  // не долетело бы до уже засеянной БД до ручного bump'а версии.
+  // и планировщик Фазы 5 не может раскладывать память по шагам.
   await db
     .insert(researchPatterns)
     .values({
@@ -57,8 +49,5 @@ export async function seed(db: Database): Promise<void> {
       status: "ACTIVE",
       content: PATTERN_V1_CONTENT,
     })
-    .onConflictDoUpdate({
-      target: [researchPatterns.topicId, researchPatterns.version],
-      set: { content: PATTERN_V1_CONTENT },
-    });
+    .onConflictDoNothing({ target: [researchPatterns.topicId, researchPatterns.version] });
 }

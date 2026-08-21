@@ -19,19 +19,18 @@ import {
   copyProvenance,
   observeMemoryCandidate,
   promoteToActive,
+  type StaleAfterInput,
 } from "./lifecycle";
 import { runMemoryPlanningStage } from "./plan-job";
-import type { MemoryHealth } from "./retrieval-gateway";
 
-// Golden set (phase-5-plan.md §7.2–7.3, D-049, corrected D-061/D-066).
-// Память сеется нами — значит правильный ответ retrieval известен заранее,
-// и метрику можно посчитать объективно, а не оценкой на глаз.
+// Golden set (phase-5-plan.md §7.2–7.3, D-049, D-061, D-066). Память сеется
+// нами — значит правильный ответ retrieval известен заранее, и метрику
+// можно посчитать объективно, а не оценкой на глаз. Контрольная истина
+// (reusable/invalidReason) объявляется НЕЗАВИСИМО в сценарии и никогда
+// не выводится из вывода планировщика.
 
-// D-061: причины, по которым КОНТРОЛИРУЕМАЯ истина сценария считает факт
-// НЕ переиспользуемым. Ground truth — то, что задал автор сценария, а не
-// то, что решил планировщик; см. requirement "Do not tailor expected truth
-// labels from planner output."
-export const INVALID_REUSE_REASONS = [
+// D-061: семь причин непригодности элемента памяти по контрольной истине.
+export const INVALID_REASONS = [
   "STALE",
   "LOW_CONFIDENCE",
   "WRONG_PROJECT",
@@ -40,34 +39,32 @@ export const INVALID_REUSE_REASONS = [
   "WRONG_STEP_MAPPING",
   "CONTRADICTED",
 ] as const;
-export type InvalidReuseReason = (typeof INVALID_REUSE_REASONS)[number];
+export type InvalidReason = (typeof INVALID_REASONS)[number];
 
 export interface GoldenMemoryFact {
   patternStep: number;
-  // D-060: компонент шага — обязателен, наравне с production-путём
-  // observeMemoryCandidate. wrong_step_mapping-сценарии заполняют его
-  // компонентом, НЕ входящим в requiredComponents шага (invalidReason
-  // WRONG_STEP_MAPPING), а не искажают patternStep.
+  // D-060: компонент шага Pattern (валидируется триггером БД при сиде).
   component: string;
   claimKey: string;
   statement: string;
   mechanismState?: string | null;
   freshnessClass: "LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE";
   verifiedAt: Date;
-  // Postgres interval-литерал (MEDIUM-1 regression: '36 hours', '3 months', …).
-  staleAfter?: string | null;
+  // MEDIUM-1: политика свежести записи — полный интервал (часы/дни/месяцы).
+  staleAfter?: StaleAfterInput | null;
+  // D-059: health выставляется ПОСЛЕ промоушена прямым update (health —
+  // не lifecycle-переход): запись честно прошла жизненный цикл и лишь
+  // потом была помечена сомнительной/устаревшей/неверной.
+  health?: "OK" | "QUESTIONABLE" | "REVERIFY" | "STALE" | "DEPRECATED";
   confidence: number;
-  // health по умолчанию OK; сценарии D-059 задают QUESTIONABLE/REVERIFY/
-  // STALE/DEPRECATED явно.
-  health?: MemoryHealth;
   // false => остаётся CANDIDATE (не промоутится) — сценарий отравления:
   // непроверенный кандидат структурно недоступен retrieval (D-021/D-025).
   promote: boolean;
-  // D-061 ground truth: реально ли БЕЗОПАСНО переиспользовать этот факт,
-  // если бы он оказался задействован в решении шага. Устанавливается
-  // автором сценария, НЕЗАВИСИМО от того, что вернёт планировщик.
+  // ===== Контрольная истина (D-061) — независимая, не производная =====
+  // Может ли этот элемент памяти легитимно закрывать компонент шага.
   reusable: boolean;
-  invalidReason?: InvalidReuseReason;
+  // Обязательна, когда reusable=false: почему элемент непригоден.
+  invalidReason?: InvalidReason;
 }
 
 export type ScenarioAngle =
@@ -79,12 +76,14 @@ export type ScenarioAngle =
   | "wording"
   | "poisoning"
   | "cross_project"
-  | "health"
-  | "stale_after_interval"
-  | "component_mapping"
-  | "partial_coverage"
-  | "contradiction"
-  | "false_reuse";
+  // Пакет исправлений ревью: новые углы приёмки.
+  | "mode_boundary" // D-058: DEMO, 1 закрыт + 7 MISSING -> граница доступа
+  | "health" // D-059: QUESTIONABLE/REVERIFY/STALE/DEPRECATED
+  | "stale_policy" // MEDIUM-1: stale_after в часах и месяцах
+  | "component_mapping" // D-060: claim_key не определяет валидность шага
+  | "partial_component" // D-060: частичное покрытие многокомпонентного шага
+  | "contradiction" // D-062: конфликт mechanism_state
+  | "unsafe_reuse"; // D-061: контролируемое небезопасное переиспользование
 
 export interface GoldenScenario {
   name: string;
@@ -97,34 +96,48 @@ export interface GoldenScenario {
   capability: ResearchCapability;
   // Правда сида: какие шаги ОБЯЗАНЫ быть already_satisfied на выходе.
   expectedSatisfiedSteps: number[];
+  // Дополнительная объявленная истина для новых углов (проверяется тестом,
+  // когда задана).
+  expectedRequiredFreshSteps?: number[];
+  expectedMissingSteps?: number[];
+  // D-061: сценарий-проверка метрики — намеренно небезопасное
+  // переиспользование, ДОКАЗЫВАЮЩЕЕ, что false_reuse_rate может стать
+  // ненулевой. В acceptance-агрегат не входит (агрегат фильтрует).
+  metricValidationOnly?: boolean;
 }
 
 export interface FalseReuseDetail {
   step: number;
   memoryIds: string[];
-  reasons: InvalidReuseReason[];
+  invalidReasons: InvalidReason[];
 }
 
 export interface ScenarioResult {
   scenario: string;
   angle: ScenarioAngle;
+  metricValidationOnly: boolean;
   contractOn: ResearchBoundaryContract;
   contractOff: ResearchBoundaryContract;
   modeOn: string;
   modeOff: string;
-  // D-066: undefined когда expectedSatisfiedSteps пуст — recall/precision
-  // математически не определены на сценарии без положительных ожиданий,
-  // синтетическая единица их больше не подменяет.
-  recall: number | undefined;
-  precision: number | undefined;
-  // Отдельная метрика для negative-only сценариев (D-066): не было ли
-  // ложных срабатываний, когда ожидаемое множество пусто.
-  noFalsePositive: boolean | undefined;
-  noiseRate: number;
-  // D-061: считается по ШАГАМ (не по memory-записям).
-  reuseStepCount: number;
+  // D-066: метрики считаются только там, где определены. null — метрика
+  // математически не определена для этого сценария (пустое ожидаемое или
+  // пустое предсказанное множество), а не синтетическая единица.
+  // noise_rate — дополнение precision: при пустом предсказанном множестве
+  // не определён так же, как precision (синтетический 0 приукрашивал бы
+  // агрегат тем же приёмом, что изгнан из recall/precision).
+  recall: number | null;
+  precision: number | null;
+  noiseRate: number | null;
+  // Негативные сценарии (пустое ожидание): отдельная метрика отсутствия
+  // ложных срабатываний. null для сценариев с непустым ожиданием.
+  noFalsePositives: boolean | null;
+  // D-061: счёт по ШАГАМ — шаг закрыт с участием элемента, объявленного
+  // контрольной истиной непригодным.
   falseReuseStepCount: number;
+  satisfiedStepCount: number;
   falseReuseDetails: FalseReuseDetail[];
+  reuseCount: number;
   stepsSkipped: number;
   stepsRefreshed: number;
   searchDelta: number;
@@ -141,9 +154,7 @@ function readCapabilityCeiling(contract: ResearchBoundaryContract): {
   hit: boolean;
   note: string | null;
 } {
-  const note =
-    contract.stopConditions.find((s) => s.includes("capability ceiling")) ??
-    null;
+  const note = contract.stopConditions.find((s) => s.includes("capability ceiling")) ?? null;
   return { hit: note !== null, note };
 }
 
@@ -154,28 +165,23 @@ async function setMemoryEnabled(db: Database, value: boolean): Promise<void> {
     .onConflictDoUpdate({ target: productConfig.key, set: { value } });
 }
 
-// Возвращает memoryId каждого посеянного факта (в исходном порядке) — нужно
-// для сборки ground-truth карты memoryId -> reusable (D-061), т.к.
-// стабильно связать её можно только по факту вставки, не по claimKey
-// (несколько записей могут делить claimKey/component в contradiction-сценариях).
+// Возвращает карту memoryId -> факт сида: по ней false reuse считается из
+// КОНТРОЛЬНОЙ истины, а не из вывода планировщика (D-061).
 async function seedFacts(
   db: Database,
   projectId: string,
   topicId: string,
   facts: GoldenMemoryFact[],
   adminId: string,
-): Promise<string[]> {
-  if (facts.length === 0) return [];
+): Promise<Map<string, GoldenMemoryFact>> {
+  const byMemoryId = new Map<string, GoldenMemoryFact>();
+  if (facts.length === 0) return byMemoryId;
   // Один системный source на сценарий — provenance должна быть предъявима
   // (CLI/владелец хочет видеть, откуда факт), не только memoryId.
   const [source] = await db
     .insert(sources)
-    .values({
-      url: `https://example.com/golden-set/${uid("src")}`,
-      urlHash: uid("srchash"),
-    })
+    .values({ url: `https://example.com/golden-set/${uid("src")}`, urlHash: uid("srchash") })
     .returning();
-  const memoryIds: string[] = [];
   for (const f of facts) {
     const { id } = await observeMemoryCandidate(db, {
       projectId,
@@ -191,7 +197,7 @@ async function seedFacts(
       confidence: f.confidence,
       originKind: "GOLDEN_SET",
     });
-    memoryIds.push(id);
+    byMemoryId.set(id, f);
     if (f.promote) {
       await promoteToActive(db, id, adminId);
       // Copied-provenance path (§5.1) — тот же код, что использует
@@ -205,17 +211,14 @@ async function seedFacts(
         fetchedAt: f.verifiedAt,
       });
     }
-    // health по умолчанию из observeMemoryCandidate/промоушена — 'OK'; для
-    // сценариев D-059/D-062 явно задаём другое значение здесь одной строкой
-    // после вставки, не изобретая отдельный path записи в lifecycle.ts.
+    // health — не lifecycle-переход: выставляется прямым update после
+    // (возможного) промоушена. История записи сохраняется (D-059:
+    // DEPRECATED исключается из retrieval, но не удаляется).
     if (f.health && f.health !== "OK") {
-      await db
-        .update(researchMemory)
-        .set({ health: f.health })
-        .where(eq(researchMemory.id, id));
+      await db.update(researchMemory).set({ health: f.health }).where(eq(researchMemory.id, id));
     }
   }
-  return memoryIds;
+  return byMemoryId;
 }
 
 function uid(prefix: string): string {
@@ -238,25 +241,15 @@ async function planOnce(
     topicId,
     projectId,
     originalQuestion: statementQuery,
-    normalizedTask: {
-      project_slug: projectId,
-      project_slugs: [projectId],
-      task: statementQuery,
-    },
+    normalizedTask: { project_slug: projectId, project_slugs: [projectId], task: statementQuery },
     normalizedTaskHash: uid("hash"),
     idempotencyKey: uid("idem"),
     entitlement,
     demoLifetimeProofLimit: 1000,
   });
   const result = await runMemoryPlanningStage(db, job.id);
-  const [plan] = await db
-    .select()
-    .from(researchPlans)
-    .where(eq(researchPlans.id, result.planId));
-  return {
-    contract: plan.contract as ResearchBoundaryContract,
-    mode: plan.mode,
-  };
+  const [plan] = await db.select().from(researchPlans).where(eq(researchPlans.id, result.planId));
+  return { contract: plan.contract as ResearchBoundaryContract, mode: plan.mode };
 }
 
 export async function runGoldenScenario(
@@ -270,42 +263,26 @@ export async function runGoldenScenario(
     .insert(projects)
     .values({ slug: uid("golden"), name: scenario.name, status: "ACTIVE_CORE" })
     .returning();
-  const ownMemoryIds = await seedFacts(
-    db,
-    project.id,
-    topicId,
-    scenario.seedFacts,
-    admin.id,
-  );
-
-  // Ground truth (D-061): memoryId -> факт, независимо от того, что решит
-  // планировщик. Чужой проект тоже попадает в карту — если бы структурная
-  // изоляция когда-нибудь сломалась, метрика обязана это заметить, а не
-  // молчать, потому что "по архитектуре так не бывает".
-  const groundTruth = new Map<string, GoldenMemoryFact>();
-  scenario.seedFacts.forEach((f, i) => groundTruth.set(ownMemoryIds[i], f));
+  const factById = await seedFacts(db, project.id, topicId, scenario.seedFacts, admin.id);
 
   // Отравленный/непромоутнутый кандидат остаётся CANDIDATE — здесь ничего
   // дополнительно не нужно: promote=false в seedFacts уже это гарантирует.
   if (scenario.foreignProjectSeedFacts?.length) {
     const [foreignProject] = await db
       .insert(projects)
-      .values({
-        slug: uid("foreign"),
-        name: `${scenario.name} (foreign)`,
-        status: "ACTIVE_CORE",
-      })
+      .values({ slug: uid("foreign"), name: `${scenario.name} (foreign)`, status: "ACTIVE_CORE" })
       .returning();
-    const foreignMemoryIds = await seedFacts(
+    const foreignById = await seedFacts(
       db,
       foreignProject.id,
       topicId,
       scenario.foreignProjectSeedFacts,
       admin.id,
     );
-    scenario.foreignProjectSeedFacts.forEach((f, i) =>
-      groundTruth.set(foreignMemoryIds[i], f),
-    );
+    // Чужие факты попадают в ту же карту истины: если изоляция D-042
+    // когда-нибудь сломается и чужой факт закроет шаг, false reuse обязан
+    // это увидеть (истина сценария помечает их WRONG_PROJECT).
+    for (const [id, f] of foreignById) factById.set(id, f);
   }
 
   const entitlement: EntitlementSnapshot = {
@@ -318,75 +295,50 @@ export async function runGoldenScenario(
   };
   const statementQuery = scenario.statementQuery ?? scenario.name;
 
-  const on = await planOnce(
-    db,
-    boss,
-    project.id,
-    topicId,
-    entitlement,
-    statementQuery,
-    true,
-  );
-  const off = await planOnce(
-    db,
-    boss,
-    project.id,
-    topicId,
-    entitlement,
-    statementQuery,
-    false,
-  );
+  const on = await planOnce(db, boss, project.id, topicId, entitlement, statementQuery, true);
+  const off = await planOnce(db, boss, project.id, topicId, entitlement, statementQuery, false);
   await setMemoryEnabled(db, true); // восстановить дефолт для следующего сценария
 
   const actualSatisfied = new Set(on.contract.alreadySatisfiedSteps);
   const expectedSatisfied = new Set(scenario.expectedSatisfiedSteps);
 
-  const truePositives = [...actualSatisfied].filter((s) =>
-    expectedSatisfied.has(s),
-  );
-  // D-066: recall/precision считаются ТОЛЬКО там, где математически
-  // определены — пустое ожидаемое множество больше не подменяется на 1.
+  const truePositives = [...actualSatisfied].filter((s) => expectedSatisfied.has(s));
+  // D-066: recall определён только при непустом ожидаемом множестве,
+  // precision — только при непустом предсказанном. Никаких синтетических
+  // единиц: неопределённая метрика — null и в агрегат не входит.
   const recall =
-    expectedSatisfied.size === 0
-      ? undefined
-      : truePositives.length / expectedSatisfied.size;
+    expectedSatisfied.size === 0 ? null : truePositives.length / expectedSatisfied.size;
   const precision =
-    actualSatisfied.size === 0
-      ? undefined
-      : truePositives.length / actualSatisfied.size;
+    actualSatisfied.size === 0 ? null : truePositives.length / actualSatisfied.size;
   const noise = [...actualSatisfied].filter((s) => !expectedSatisfied.has(s));
-  const noiseRate =
-    actualSatisfied.size === 0 ? 0 : noise.length / actualSatisfied.size;
-  // Отдельная метрика для negative-only сценариев (D-066): ожидали пусто —
-  // проверяем буквально "не срабатывал ли план ложноположительно".
-  const noFalsePositive =
-    expectedSatisfied.size === 0 ? actualSatisfied.size === 0 : undefined;
+  const noiseRate = actualSatisfied.size === 0 ? null : noise.length / actualSatisfied.size;
+  // Негативные сценарии: явная метрика отсутствия ложных срабатываний.
+  const noFalsePositives = expectedSatisfied.size === 0 ? actualSatisfied.size === 0 : null;
 
-  // D-061: false reuse считается ПО ШАГУ. Шаг ALREADY_SATISFIED — false,
-  // если хотя бы один memoryId, на который опирается это решение, помечен
-  // контролируемой истиной сценария как НЕ переиспользуемый.
-  const satisfiedDecisions = on.contract.stepDecisions.filter(
-    (d) => d.decision === "ALREADY_SATISFIED",
-  );
+  // D-061: false reuse по ШАГАМ. Шаг ложно переиспользован, если он
+  // ALREADY_SATISFIED и хотя бы один элемент памяти, обеспечивший это
+  // решение (memoryIds решения по шагу), контрольная истина объявила
+  // непригодным. Элемент вне контрольного набора тоже считается
+  // непригодным — доверять можно только тому, что сеяли сами.
   const falseReuseDetails: FalseReuseDetail[] = [];
-  for (const d of satisfiedDecisions) {
-    const badReasons: InvalidReuseReason[] = [];
-    const badMemoryIds: string[] = [];
-    for (const memoryId of d.memoryIds) {
-      const fact = groundTruth.get(memoryId);
-      // Неизвестный планировщику memoryId (не из golden-set) не должен
-      // происходить — но если случится, это тоже небезопасное решение.
-      if (!fact || fact.reusable === false) {
-        badMemoryIds.push(memoryId);
-        if (fact?.invalidReason) badReasons.push(fact.invalidReason);
+  for (const d of on.contract.stepDecisions) {
+    if (d.decision !== "ALREADY_SATISFIED") continue;
+    const badIds: string[] = [];
+    const reasons = new Set<InvalidReason>();
+    for (const id of d.memoryIds) {
+      const fact = factById.get(id);
+      if (!fact) {
+        badIds.push(id);
+        reasons.add("WRONG_PROJECT"); // элемент не из контролируемого сида
+        continue;
+      }
+      if (!fact.reusable) {
+        badIds.push(id);
+        if (fact.invalidReason) reasons.add(fact.invalidReason);
       }
     }
-    if (badMemoryIds.length > 0) {
-      falseReuseDetails.push({
-        step: d.step,
-        memoryIds: badMemoryIds,
-        reasons: badReasons,
-      });
+    if (badIds.length > 0) {
+      falseReuseDetails.push({ step: d.step, memoryIds: badIds, invalidReasons: [...reasons] });
     }
   }
 
@@ -395,22 +347,22 @@ export async function runGoldenScenario(
   return {
     scenario: scenario.name,
     angle: scenario.angle,
+    metricValidationOnly: scenario.metricValidationOnly ?? false,
     contractOn: on.contract,
     contractOff: off.contract,
     modeOn: on.mode,
     modeOff: off.mode,
     recall,
     precision,
-    noFalsePositive,
     noiseRate,
-    reuseStepCount: satisfiedDecisions.length,
+    noFalsePositives,
     falseReuseStepCount: falseReuseDetails.length,
+    satisfiedStepCount: actualSatisfied.size,
     falseReuseDetails,
+    reuseCount: on.contract.reusableEvidence.length,
     stepsSkipped: on.contract.alreadySatisfiedSteps.length,
     stepsRefreshed: on.contract.requiredFreshEvidence.length,
-    searchDelta:
-      off.contract.researchBudget.maxSearchQueries -
-      on.contract.researchBudget.maxSearchQueries,
+    searchDelta: off.contract.researchBudget.maxSearchQueries - on.contract.researchBudget.maxSearchQueries,
     capabilityCeilingHit: ceiling.hit,
     capabilityCeilingNote: ceiling.note,
   };
@@ -418,18 +370,22 @@ export async function runGoldenScenario(
 
 export interface AggregateMetrics {
   scenarioCount: number;
-  // D-066: усредняется только по сценариям, где значение определено
-  // (непустое ожидаемое множество) — количество таких сценариев указано
-  // отдельно, чтобы 0/0 было видно, а не молчаливо пропало в делении.
-  recallScenarioCount: number;
-  precisionScenarioCount: number;
-  meanRecall: number | undefined;
-  meanPrecision: number | undefined;
-  // Доля negative-only сценариев без ложных срабатываний.
-  negativeOnlyScenarioCount: number;
-  noFalsePositiveRate: number | undefined;
-  meanNoiseRate: number;
-  falseReuseRate: number; // ГЛАВНАЯ метрика — 0 = условие приёмки (D-049/D-061)
+  // D-066: усреднение только по сценариям, где метрика определена; счётчики
+  // делают знаменатель предъявимым.
+  recallDefinedCount: number;
+  meanRecall: number | null;
+  precisionDefinedCount: number;
+  meanPrecision: number | null;
+  noiseDefinedCount: number;
+  meanNoiseRate: number | null;
+  // Негативные сценарии — отдельная метрика: доля без ложных срабатываний.
+  negativeScenarioCount: number;
+  noFalsePositiveRate: number | null;
+  // ГЛАВНАЯ метрика (D-049/D-061): шаги, закрытые с участием непригодного
+  // элемента / все закрытые шаги набора. 0 = условие приёмки.
+  falseReuseRate: number;
+  falseReuseStepCount: number;
+  satisfiedStepCount: number;
   totalStepsSkipped: number;
   totalStepsRefreshed: number;
   meanSearchDelta: number;
@@ -462,56 +418,55 @@ export async function fetchProvenanceByMemoryId(
   const map = new Map<string, ProvenanceView[]>();
   for (const r of rows) {
     const list = map.get(r.memoryId) ?? [];
-    list.push({
-      sourceId: r.sourceId,
-      retrievedUrl: r.retrievedUrl,
-      contentHash: r.contentHash,
-      fragment: r.fragment,
-    });
+    list.push({ sourceId: r.sourceId, retrievedUrl: r.retrievedUrl, contentHash: r.contentHash, fragment: r.fragment });
     map.set(r.memoryId, list);
   }
   return map;
 }
 
-export function aggregateGoldenResults(
-  results: ScenarioResult[],
-): AggregateMetrics {
-  const n = results.length || 1;
-  const totalReuseSteps = results.reduce((s, r) => s + r.reuseStepCount, 0);
-  const totalFalseReuseSteps = results.reduce(
-    (s, r) => s + r.falseReuseStepCount,
-    0,
-  );
+function mean(values: number[]): number | null {
+  return values.length === 0 ? null : values.reduce((s, v) => s + v, 0) / values.length;
+}
 
-  const withRecall = results.filter((r) => r.recall !== undefined);
-  const withPrecision = results.filter((r) => r.precision !== undefined);
-  const negativeOnly = results.filter((r) => r.noFalsePositive !== undefined);
+// Acceptance-агрегат. Сценарии metricValidationOnly (контролируемое
+// небезопасное переиспользование, D-061) сюда НЕ входят: они проверяют,
+// что метрика способна стать ненулевой, а не что система прошла приёмку.
+export function aggregateGoldenResults(results: ScenarioResult[]): AggregateMetrics {
+  const acceptance = results.filter((r) => !r.metricValidationOnly);
+  const n = acceptance.length || 1;
+
+  const recallValues = acceptance
+    .map((r) => r.recall)
+    .filter((v): v is number => v !== null);
+  const precisionValues = acceptance
+    .map((r) => r.precision)
+    .filter((v): v is number => v !== null);
+  const noiseValues = acceptance
+    .map((r) => r.noiseRate)
+    .filter((v): v is number => v !== null);
+  const negative = acceptance.filter((r) => r.noFalsePositives !== null);
+
+  const falseReuseSteps = acceptance.reduce((s, r) => s + r.falseReuseStepCount, 0);
+  const satisfiedSteps = acceptance.reduce((s, r) => s + r.satisfiedStepCount, 0);
 
   return {
-    scenarioCount: results.length,
-    recallScenarioCount: withRecall.length,
-    precisionScenarioCount: withPrecision.length,
-    meanRecall:
-      withRecall.length === 0
-        ? undefined
-        : withRecall.reduce((s, r) => s + (r.recall ?? 0), 0) /
-          withRecall.length,
-    meanPrecision:
-      withPrecision.length === 0
-        ? undefined
-        : withPrecision.reduce((s, r) => s + (r.precision ?? 0), 0) /
-          withPrecision.length,
-    negativeOnlyScenarioCount: negativeOnly.length,
+    scenarioCount: acceptance.length,
+    recallDefinedCount: recallValues.length,
+    meanRecall: mean(recallValues),
+    precisionDefinedCount: precisionValues.length,
+    meanPrecision: mean(precisionValues),
+    noiseDefinedCount: noiseValues.length,
+    meanNoiseRate: mean(noiseValues),
+    negativeScenarioCount: negative.length,
     noFalsePositiveRate:
-      negativeOnly.length === 0
-        ? undefined
-        : negativeOnly.filter((r) => r.noFalsePositive === true).length /
-          negativeOnly.length,
-    meanNoiseRate: results.reduce((s, r) => s + r.noiseRate, 0) / n,
-    falseReuseRate:
-      totalReuseSteps === 0 ? 0 : totalFalseReuseSteps / totalReuseSteps,
-    totalStepsSkipped: results.reduce((s, r) => s + r.stepsSkipped, 0),
-    totalStepsRefreshed: results.reduce((s, r) => s + r.stepsRefreshed, 0),
-    meanSearchDelta: results.reduce((s, r) => s + r.searchDelta, 0) / n,
+      negative.length === 0
+        ? null
+        : negative.filter((r) => r.noFalsePositives === true).length / negative.length,
+    falseReuseRate: satisfiedSteps === 0 ? 0 : falseReuseSteps / satisfiedSteps,
+    falseReuseStepCount: falseReuseSteps,
+    satisfiedStepCount: satisfiedSteps,
+    totalStepsSkipped: acceptance.reduce((s, r) => s + r.stepsSkipped, 0),
+    totalStepsRefreshed: acceptance.reduce((s, r) => s + r.stepsRefreshed, 0),
+    meanSearchDelta: acceptance.reduce((s, r) => s + r.searchDelta, 0) / n,
   };
 }

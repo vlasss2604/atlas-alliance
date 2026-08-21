@@ -1,12 +1,21 @@
-import { PATTERN_STEP_NAMES, type PatternContent } from "../domain/pattern";
+import {
+  PATTERN_STEP_NAMES,
+  requiredComponentsForStep,
+  type PatternContent,
+} from "../domain/pattern";
 import type { JobBudgetConfig, ProductConfig } from "../config/product";
 import type { ResearchCapability } from "../domain/types";
 import type { RetrievalHit } from "./retrieval-gateway";
-import type { ResearchBoundaryContract, StepDecision } from "./contract";
+import type {
+  ComponentDecision,
+  ResearchBoundaryContract,
+  StepDecision,
+} from "./contract";
 
 // Детерминированный планировщик (D-052, phase-5-plan.md §4). Чистая
-// функция: раскладка памяти по шагам решает код, не модель. Воспроизводимо,
-// объяснимо (stepDecisions[].reason), не зависит от провайдера.
+// функция: раскладка памяти по шагам и компонентам решает код, не модель.
+// Воспроизводимо, объяснимо (stepDecisions[].reason + components[]),
+// не зависит от провайдера.
 
 const CAPABILITY_RANK: Record<ResearchCapability, number> = {
   MEMORY: 0,
@@ -14,28 +23,24 @@ const CAPABILITY_RANK: Record<ResearchCapability, number> = {
   FRESH_RESEARCH: 2,
 };
 
-function effectiveStaleAfterMs(
+// MEDIUM-1: интервал считается целиком, в секундах. Фолбэк из конфига —
+// ТОЛЬКО когда запись не несёт собственного stale_after (NULL); явно
+// сохранённая политика записи никогда молча не подменяется.
+function effectiveStaleAfterSeconds(
   hit: RetrievalHit,
   config: Pick<ProductConfig, "memory_stale_after_days">,
 ): number {
-  // Полная длительность интервала (MEDIUM-1): stale_after — произвольный
-  // Postgres interval (часы/дни/месяцы), не только целые дни.
-  if (hit.staleAfterSeconds != null) return hit.staleAfterSeconds * 1000;
   return (
-    config.memory_stale_after_days[hit.freshnessClass] * 24 * 60 * 60 * 1000
+    hit.staleAfterSeconds ??
+    config.memory_stale_after_days[hit.freshnessClass] * 24 * 60 * 60
   );
 }
 
 // REUSE DOES NOT OVERRIDE FRESHNESS (§4.4) — единственное место, где это
 // решается, чистая функция времени и конфига, без места для интерпретации.
-export function isStale(
-  hit: RetrievalHit,
-  now: Date,
-  config: ProductConfig,
-): boolean {
-  const ms = effectiveStaleAfterMs(hit, config);
+export function isStale(hit: RetrievalHit, now: Date, config: ProductConfig): boolean {
   const ageMs = now.getTime() - hit.verifiedAt.getTime();
-  return ageMs > ms;
+  return ageMs > effectiveStaleAfterSeconds(hit, config) * 1000;
 }
 
 export interface PlanInput {
@@ -56,216 +61,164 @@ export interface PlanResult {
   capabilityCeilingHit: boolean;
 }
 
-// Годна ли запись, чтобы В ПРИНЦИПЕ участвовать в закрытии компонента —
-// health='OK' (D-059: QUESTIONABLE/REVERIFY/STALE отправляют на reverify,
-// но не закрывают шаг сами; DEPRECATED уже отфильтрован retrieval-gateway,
-// но планировщик не полагается на это молча — фильтр повторён здесь для
-// случаев, когда hits собраны напрямую, в обход gateway, например в тестах).
-function isHealthOk(hit: RetrievalHit): boolean {
-  return hit.health === "OK";
+function unique(ids: string[]): string[] {
+  return [...new Set(ids)];
 }
 
-interface ComponentOutcome {
-  component: string;
-  status: "SATISFIED" | "UNSATISFIED" | "MISSING" | "CONTRADICTED";
-  satisfyingHits: RetrievalHit[];
-  coveringHits: RetrievalHit[];
-  contradictingMemoryIds: string[];
-}
-
-// Раскладка одного компонента шага (D-060, D-062, D-059). Компонент —
-// единица закрытия, не сам шаг: шаг ALREADY_SATISFIED только когда ВСЕ его
-// requiredComponents SATISFIED.
-function evaluateComponent(
+// Решение по одному компоненту шага (D-059, D-060, D-062).
+// Закрывать компонент может только health='OK', свежая и достаточно
+// уверенная память без конфликта mechanism_state; всё остальное —
+// направляет перепроверку, но компонент не закрывает.
+function decideComponent(
   component: string,
-  hits: RetrievalHit[],
+  stepHits: RetrievalHit[],
   now: Date,
   config: ProductConfig,
-): ComponentOutcome {
-  // DEPRECATED уже не должен доходить сюда через gateway, но исключается
-  // явно на случай прямой сборки hits (D-059: «исключается из retrieval
-  // полностью» — планировщик не должен уметь его закрыть даже при обходе).
-  const coveringHits = hits.filter((h) => h.health !== "DEPRECATED");
-  if (coveringHits.length === 0) {
-    return {
-      component,
-      status: "MISSING",
-      satisfyingHits: [],
-      coveringHits: [],
-      contradictingMemoryIds: [],
-    };
+): ComponentDecision {
+  const cHits = stepHits.filter((h) => h.component === component);
+  if (cHits.length === 0) {
+    return { component, state: "NO_MEMORY", blockers: [], memoryIds: [], conflictingMemoryIds: [] };
   }
 
-  const okHits = coveringHits.filter(isHealthOk);
-  const freshEnoughOk = okHits.filter(
+  const reusable = cHits.filter(
     (h) =>
+      h.health === "OK" &&
       !isStale(h, now, config) &&
       h.confidence >= config.memory_min_confidence_reuse,
   );
 
-  // D-062: контрадикция решается ТОЛЬКО по machine-readable mechanism_state,
-  // никогда по семантике свободного текста statement.
-  const distinctMechanismStates = new Set(
-    freshEnoughOk
-      .map((h) => h.mechanismState)
-      .filter((v): v is string => v != null),
-  );
-  if (distinctMechanismStates.size > 1) {
+  if (reusable.length > 0) {
+    // D-062: конфликт только среди записей, прошедших health и свежесть.
+    // Обнаруживается конфликт СОСТОЯНИЙ (различный machine-readable
+    // mechanism_state); расхождение свободного текста statement конфликтом
+    // не считается (парафраз).
+    const distinctStates = new Set(
+      reusable
+        .map((h) => h.mechanismState)
+        .filter((s): s is string => s !== null),
+    );
+    if (distinctStates.size > 1) {
+      return {
+        component,
+        state: "CONTRADICTED",
+        blockers: [],
+        memoryIds: unique(cHits.map((h) => h.memoryId)),
+        conflictingMemoryIds: unique(
+          reusable.filter((h) => h.mechanismState !== null).map((h) => h.memoryId),
+        ),
+      };
+    }
     return {
       component,
-      status: "CONTRADICTED",
-      satisfyingHits: [],
-      coveringHits,
-      contradictingMemoryIds: freshEnoughOk
-        .filter((h) => h.mechanismState != null)
-        .map((h) => h.memoryId),
+      state: "SATISFIED",
+      blockers: [],
+      memoryIds: unique(reusable.map((h) => h.memoryId)),
+      conflictingMemoryIds: [],
     };
   }
 
-  if (freshEnoughOk.length > 0) {
-    return {
-      component,
-      status: "SATISFIED",
-      satisfyingHits: freshEnoughOk,
-      coveringHits,
-      contradictingMemoryIds: [],
-    };
+  // Память есть, но закрывать компонент не может — blockers объясняют
+  // почему (аудируемость, D-052/D-061).
+  const blockers = new Set<string>();
+  for (const h of cHits) {
+    if (h.health !== "OK") blockers.add(`HEALTH_${h.health}`);
+    if (isStale(h, now, config)) blockers.add("STALE");
+    if (h.confidence < config.memory_min_confidence_reuse) blockers.add("LOW_CONFIDENCE");
   }
-
   return {
     component,
-    status: "UNSATISFIED",
-    satisfyingHits: [],
-    coveringHits,
-    contradictingMemoryIds: [],
+    state: "UNUSABLE",
+    blockers: [...blockers].sort(),
+    memoryIds: unique(cHits.map((h) => h.memoryId)),
+    conflictingMemoryIds: [],
   };
 }
 
-export function planResearch(input: PlanInput): PlanResult {
-  const {
-    memoryEnabled,
-    hits,
-    pattern,
-    capabilityAtStart,
-    budgetAtStart,
-    config,
-    now,
-  } = input;
+function describeComponentProblem(c: ComponentDecision): string {
+  if (c.state === "NO_MEMORY") return `${c.component}: no memory`;
+  if (c.state === "CONTRADICTED") {
+    return `${c.component}: CONTRADICTED — active memory records disagree on mechanism_state (${c.conflictingMemoryIds.join(", ")})`;
+  }
+  return `${c.component}: unusable (${c.blockers.join(", ")})`;
+}
 
-  const hitsByStepComponent = new Map<number, Map<string, RetrievalHit[]>>();
+export function planResearch(input: PlanInput): PlanResult {
+  const { memoryEnabled, hits, pattern, capabilityAtStart, budgetAtStart, config, now } = input;
+
+  const hitsByStep = new Map<number, RetrievalHit[]>();
   if (memoryEnabled) {
     for (const hit of hits) {
-      const byComponent =
-        hitsByStepComponent.get(hit.patternStep) ??
-        new Map<string, RetrievalHit[]>();
-      const list = byComponent.get(hit.component) ?? [];
+      const list = hitsByStep.get(hit.patternStep) ?? [];
       list.push(hit);
-      byComponent.set(hit.component, list);
-      hitsByStepComponent.set(hit.patternStep, byComponent);
+      hitsByStep.set(hit.patternStep, list);
     }
   }
 
   const stepDecisions: StepDecision[] = pattern.steps.map((step) => {
-    const byComponent =
-      hitsByStepComponent.get(step.step) ?? new Map<string, RetrievalHit[]>();
-    const outcomes = step.requiredComponents.map((component) =>
-      evaluateComponent(
-        component,
-        byComponent.get(component) ?? [],
-        now,
-        config,
-      ),
-    );
+    const stepHits = hitsByStep.get(step.step) ?? [];
+    const required = requiredComponentsForStep(pattern, step.step);
 
-    const anyCoverage = outcomes.some((o) => o.status !== "MISSING");
-    if (!anyCoverage) {
+    // Ни одна извлекаемая запись не касается шага — подлинно MISSING.
+    // (DEPRECATED не доезжает сюда вовсе — исключён retrieval'ом, D-059:
+    // шаг, чьё единственное знание признано неверным, становится MISSING.)
+    if (stepHits.length === 0) {
       return {
         step: step.step,
         stepName: step.name,
-        decision: "MISSING",
+        decision: "MISSING" as const,
         reason: memoryEnabled
-          ? `no active memory for any required component of this step (${step.requiredComponents.join(", ")})`
+          ? "no active memory for this step"
           : "memory disabled for this run (memory_enabled=false)",
         memoryIds: [],
+        components: required.map((component) => ({
+          component,
+          state: "NO_MEMORY" as const,
+          blockers: [],
+          memoryIds: [],
+          conflictingMemoryIds: [],
+        })),
       };
     }
 
-    const allSatisfied = outcomes.every((o) => o.status === "SATISFIED");
-    if (allSatisfied) {
-      const memoryIds = [
-        ...new Set(
-          outcomes.flatMap((o) => o.satisfyingHits.map((h) => h.memoryId)),
-        ),
-      ];
+    const components = required.map((c) => decideComponent(c, stepHits, now, config));
+
+    // D-060: шаг закрыт только когда КАЖДЫЙ его компонент покрыт пригодной
+    // памятью. Частичное покрытие → REQUIRED_FRESH с перечислением
+    // непокрытых/непригодных компонентов.
+    if (components.every((c) => c.state === "SATISFIED")) {
+      const ids = unique(components.flatMap((c) => c.memoryIds));
+      const topConfidence = Math.max(
+        ...stepHits.filter((h) => ids.includes(h.memoryId)).map((h) => h.confidence),
+      );
       return {
         step: step.step,
         stepName: step.name,
-        decision: "ALREADY_SATISFIED",
-        reason: `all required components covered by active, fresh, sufficiently confident memory (${step.requiredComponents.join(", ")})`,
-        memoryIds,
+        decision: "ALREADY_SATISFIED" as const,
+        reason: `all required components (${required.join(", ")}) covered by healthy active memory (top confidence ${topConfidence}%, within freshness window)`,
+        memoryIds: ids,
+        components,
       };
     }
 
-    // Частичное или испорченное покрытие (D-060 partial coverage, D-062
-    // contradiction, D-059 non-OK health) — всё сводится к REQUIRED_FRESH,
-    // с именованием причины по каждому непокрытому/спорному компоненту.
-    const missingComponents = outcomes
-      .filter((o) => o.status === "MISSING")
-      .map((o) => o.component);
-    const unsatisfiedComponents = outcomes
-      .filter((o) => o.status === "UNSATISFIED")
-      .map((o) => o.component);
-    const contradicted = outcomes.filter((o) => o.status === "CONTRADICTED");
-
-    const reasonParts: string[] = [];
-    if (missingComponents.length > 0) {
-      reasonParts.push(`missing components: ${missingComponents.join(", ")}`);
-    }
-    if (unsatisfiedComponents.length > 0) {
-      reasonParts.push(
-        `components covered but not reusable (stale/unhealthy/below confidence threshold): ${unsatisfiedComponents.join(", ")}`,
-      );
-    }
-    if (contradicted.length > 0) {
-      reasonParts.push(
-        `CONTRADICTED components (conflicting mechanism_state among ACTIVE memory): ${contradicted
-          .map((o) => `${o.component} [${o.contradictingMemoryIds.join(", ")}]`)
-          .join("; ")}`,
-      );
-    }
-
-    const memoryIds = [
-      ...new Set(
-        outcomes.flatMap((o) =>
-          o.status === "CONTRADICTED"
-            ? o.contradictingMemoryIds
-            : o.coveringHits.map((h) => h.memoryId),
-        ),
-      ),
-    ];
-
+    const problems = components.filter((c) => c.state !== "SATISFIED");
     return {
       step: step.step,
       stepName: step.name,
-      decision: "REQUIRED_FRESH",
-      reason: `partial or unsafe component coverage — ${reasonParts.join("; ")}`,
-      memoryIds,
+      decision: "REQUIRED_FRESH" as const,
+      reason: `memory informs this step but cannot satisfy it — ${problems.map(describeComponentProblem).join("; ")} — fresh verification required, memory guides where to look`,
+      memoryIds: unique(stepHits.map((h) => h.memoryId)),
+      components,
     };
   });
 
-  const satisfied = stepDecisions.filter(
-    (d) => d.decision === "ALREADY_SATISFIED",
-  );
-  const requiredFresh = stepDecisions.filter(
-    (d) => d.decision === "REQUIRED_FRESH",
-  );
+  const satisfied = stepDecisions.filter((d) => d.decision === "ALREADY_SATISFIED");
+  const requiredFresh = stepDecisions.filter((d) => d.decision === "REQUIRED_FRESH");
   const missing = stepDecisions.filter((d) => d.decision === "MISSING");
 
-  // D-058: производный режим определяется наличием MISSING/REQUIRED_FRESH
-  // шагов, а НЕ количеством уже закрытых. FRESH_RESEARCH не означает
-  // «выбросить память и переисследовать все 8 шагов» — already_satisfied_steps
-  // остаются закрытыми независимо от режима (см. reusableEvidence ниже,
-  // который строится от satisfied, а не от mode).
+  // D-058: режим выводится из наличия MISSING-шагов, а не из числа
+  // закрытых. FRESH_RESEARCH описывает ТИП оставшейся работы (нужны новые
+  // доказательства) и НЕ отменяет already_satisfied_steps — объём работы
+  // описывает контракт (Research Boundary Contract), не режим.
   const desiredMode: ResearchCapability =
     missing.length > 0
       ? "FRESH_RESEARCH"
@@ -273,26 +226,28 @@ export function planResearch(input: PlanInput): PlanResult {
         ? "TARGETED_REFRESH"
         : "MEMORY";
 
-  const capabilityCeilingHit =
-    CAPABILITY_RANK[desiredMode] > CAPABILITY_RANK[capabilityAtStart];
-  const mode: ResearchCapability = capabilityCeilingHit
-    ? capabilityAtStart
-    : desiredMode;
+  const capabilityCeilingHit = CAPABILITY_RANK[desiredMode] > CAPABILITY_RANK[capabilityAtStart];
+  const mode: ResearchCapability = capabilityCeilingHit ? capabilityAtStart : desiredMode;
 
   const reusableEvidence = satisfied.flatMap((d) => {
-    const byComponent =
-      hitsByStepComponent.get(d.step) ?? new Map<string, RetrievalHit[]>();
-    const stepHits = [...byComponent.values()]
-      .flat()
-      .filter((h) => d.memoryIds.includes(h.memoryId));
-    return stepHits.map((h) => ({
-      memoryId: h.memoryId,
-      step: h.patternStep,
-      component: h.component,
-      claimKey: h.claimKey,
-      statement: h.statement,
-      confidence: h.confidence,
-    }));
+    const stepHits = hitsByStep.get(d.step) ?? [];
+    return d.components.flatMap((c) =>
+      c.memoryIds.flatMap((id) => {
+        const h = stepHits.find((sh) => sh.memoryId === id);
+        return h
+          ? [
+              {
+                memoryId: h.memoryId,
+                step: h.patternStep,
+                component: h.component,
+                claimKey: h.claimKey,
+                statement: h.statement,
+                confidence: h.confidence,
+              },
+            ]
+          : [];
+      }),
+    );
   });
 
   const noveltyState =
@@ -304,21 +259,16 @@ export function planResearch(input: PlanInput): PlanResult {
 
   const stopConditions: string[] = [];
   if (mode === "MEMORY") {
-    stopConditions.push(
-      "sufficient verified memory covers all steps — no fresh research needed",
-    );
+    stopConditions.push("sufficient verified memory covers all steps — no fresh research needed");
   }
   const excludedScope: string[] = [];
+  // D-058: при зажатии потолком excludedScope и stopConditions заполняются
+  // ВСЕГДА — независимо от того, 0, 1 или несколько шагов уже закрыты.
   if (capabilityCeilingHit) {
     const note = `capability ceiling reached: plan would need ${desiredMode}, entitlement allows only ${capabilityAtStart}`;
     stopConditions.push(note);
-    // Заполняется ВСЕГДА для заблокированной работы, независимо от того,
-    // сколько шагов уже закрыто (D-058 regression: DEMO + 1 satisfied +
-    // 7 MISSING всё ещё обязан упереться в потолок capability).
     for (const d of [...requiredFresh, ...missing]) {
-      excludedScope.push(
-        `step ${d.step} (${d.stepName}): not researched — ${note}`,
-      );
+      excludedScope.push(`step ${d.step} (${d.stepName}): not researched — ${note}`);
     }
   }
 
@@ -342,8 +292,7 @@ export function planResearch(input: PlanInput): PlanResult {
   // факт не переиспользуется (REUSE DOES NOT OVERRIDE FRESHNESS), но он
   // всё равно СПРАВОЧНО повлиял на план — это и есть USED_AND_REVERIFIED,
   // а не «память вообще не смотрели».
-  const memoryUsed =
-    memoryEnabled && satisfied.length + requiredFresh.length > 0;
+  const memoryUsed = memoryEnabled && satisfied.length + requiredFresh.length > 0;
 
   const contract: ResearchBoundaryContract = {
     patternVersion: 1,

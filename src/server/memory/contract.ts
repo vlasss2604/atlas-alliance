@@ -3,17 +3,31 @@ import { z } from "zod";
 // Research Boundary Contract (phase-5-plan.md §4.2, D-050, D-056). Место,
 // где память СТАНОВИТСЯ планом — не текст в промпте, а структура,
 // проверяемая кодом. Строится детерминированным планировщиком (D-052),
-// раскладывающим найденное памятью по 8 шагам Pattern v1.
+// раскладывающим найденное памятью по 8 шагам Pattern v1 и их компонентам
+// (D-060).
 
 export const NOVELTY_STATES = ["KNOWN", "PARTIALLY_KNOWN", "NOVEL"] as const;
 export type NoveltyState = (typeof NOVELTY_STATES)[number];
 
-export const STEP_DECISIONS = [
-  "ALREADY_SATISFIED",
-  "REQUIRED_FRESH",
-  "MISSING",
-] as const;
+export const STEP_DECISIONS = ["ALREADY_SATISFIED", "REQUIRED_FRESH", "MISSING"] as const;
 export type StepDecisionKind = (typeof STEP_DECISIONS)[number];
+
+// Решение по компоненту шага (D-060):
+// SATISFIED     — покрыт пригодной памятью (health=OK, свежо, уверенно,
+//                 без конфликта mechanism_state);
+// NO_MEMORY     — памяти для компонента нет вовсе;
+// UNUSABLE      — память есть, но закрывать компонент не может (health,
+//                 свежесть или уверенность); blockers объясняют почему;
+// CONTRADICTED  — иначе пригодные ACTIVE-записи несут различный
+//                 mechanism_state (D-062); конфликтующие memoryId
+//                 предъявимы в conflictingMemoryIds.
+export const COMPONENT_STATES = [
+  "SATISFIED",
+  "NO_MEMORY",
+  "UNUSABLE",
+  "CONTRADICTED",
+] as const;
+export type ComponentState = (typeof COMPONENT_STATES)[number];
 
 const jobBudgetSchema = z.object({
   maxSearchQueries: z.number().int().positive(),
@@ -28,23 +42,34 @@ const jobBudgetSchema = z.object({
 const reusableEvidenceSchema = z.object({
   memoryId: z.string(),
   step: z.number().int().min(1).max(8),
-  // D-060: компонент, который эта запись закрывает — обязателен для аудита
-  // "все ли requiredComponents шага действительно покрыты".
   component: z.string(),
   claimKey: z.string(),
   statement: z.string(),
   confidence: z.number().int().min(0).max(100),
 });
 
+const componentDecisionSchema = z.object({
+  component: z.string().min(1),
+  state: z.enum(COMPONENT_STATES),
+  // Машиночитаемые причины непригодности (UNUSABLE): STALE,
+  // LOW_CONFIDENCE, HEALTH_QUESTIONABLE, HEALTH_REVERIFY, HEALTH_STALE.
+  blockers: z.array(z.string()),
+  memoryIds: z.array(z.string()),
+  // D-062: аудит конфликта — какие именно записи противоречат друг другу.
+  conflictingMemoryIds: z.array(z.string()),
+});
+
 // Решение по шагу — объяснимо: «почему шаг переиспользован/обновлён»
 // (DoD, phase-5-plan.md §10). reason — детерминированная строка кода,
-// не свободная генерация модели (D-052).
+// не свободная генерация модели (D-052). components — покрытие по D-060:
+// шаг закрыт только когда КАЖДЫЙ его компонент SATISFIED.
 const stepDecisionSchema = z.object({
   step: z.number().int().min(1).max(8),
   stepName: z.string(),
   decision: z.enum(STEP_DECISIONS),
   reason: z.string(),
   memoryIds: z.array(z.string()),
+  components: z.array(componentDecisionSchema),
 });
 
 export const researchBoundaryContractSchema = z.object({
@@ -63,10 +88,9 @@ export const researchBoundaryContractSchema = z.object({
 });
 
 export type ReusableEvidence = z.infer<typeof reusableEvidenceSchema>;
+export type ComponentDecision = z.infer<typeof componentDecisionSchema>;
 export type StepDecision = z.infer<typeof stepDecisionSchema>;
-export type ResearchBoundaryContract = z.infer<
-  typeof researchBoundaryContractSchema
->;
+export type ResearchBoundaryContract = z.infer<typeof researchBoundaryContractSchema>;
 
 export function parseContract(raw: unknown): ResearchBoundaryContract {
   return researchBoundaryContractSchema.parse(raw);
