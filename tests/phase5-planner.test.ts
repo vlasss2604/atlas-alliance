@@ -328,4 +328,96 @@ describe("Фаза 5 — deterministic planner (unit, без БД)", () => {
     ]);
     expect(r.contract.alreadySatisfiedSteps).toEqual([8]);
   });
+
+  it("21. D-062 (финальный блокер ревью): низкая уверенность НЕ стирает текущее противоречие — 5 согласных ACTIVE + 1 конфликтующий PAUSED ниже порога reuse", () => {
+    // Ровно воспроизведённый сценарий: 5 свежих здоровых ACTIVE-записей
+    // mechanism_state='ACTIVE' с confidence 95..91, плюс одна свежая
+    // здоровая ACTIVE-запись mechanism_state='PAUSED' с confidence 65 —
+    // НИЖЕ memory_min_confidence_reuse (70). Прежний код строил множество
+    // конфликта только из `reusable` (confidence >= порога), поэтому
+    // PAUSED-запись выпадала из проверки ДО обнаружения конфликта, и шаг
+    // ошибочно становился ALREADY_SATISFIED — противоречие "разрешалось"
+    // выбором более уверенной записи, что D-062 прямо запрещает.
+    const agreeing = [95, 94, 93, 92, 91].map((confidence) =>
+      hit({ patternStep: 5, mechanismState: "ACTIVE", confidence }),
+    );
+    const conflictingLowConfidence = hit({
+      patternStep: 5,
+      mechanismState: "PAUSED",
+      confidence: 65,
+    });
+    const r = plan([...agreeing, conflictingLowConfidence]);
+    const step5 = r.contract.stepDecisions.find((d) => d.step === 5)!;
+
+    // Низкая уверенность НЕ дала бы этой записи закрыть компонент сама
+    // по себе (это остаётся верным) — но она обязана предотвратить
+    // ALREADY_SATISFIED, потому что текущее состояние не разрешено.
+    expect(step5.decision).toBe("REQUIRED_FRESH");
+    expect(step5.reason).toContain("CONTRADICTED");
+    expect(r.contract.alreadySatisfiedSteps).not.toContain(5);
+
+    const comp = step5.components.find((c) => c.component === "CURRENT_STATE")!;
+    expect(comp.state).toBe("CONTRADICTED");
+    // Конфликтующие ID предъявимы в аудируемом контракте — включая
+    // низкоуверенную запись, которая раньше молча исчезала.
+    expect(comp.conflictingMemoryIds).toContain(conflictingLowConfidence.memoryId);
+    expect(comp.conflictingMemoryIds.length).toBe(6); // все 5 согласных + конфликтующая
+  });
+
+  it("22. D-062: обрыв порога устранён — конфликтующая запись РОВНО на пороге и РОВНО ниже порога одинаково видны обнаружению противоречия", () => {
+    const threshold = DEFAULT_PRODUCT_CONFIG.memory_min_confidence_reuse; // 70
+    const base = hit({ patternStep: 3, component: "MECHANISM_SPEC", mechanismState: "BUYBACK_ONLY", confidence: 95 });
+
+    const atThreshold = plan([
+      base,
+      hit({ patternStep: 3, component: "MECHANISM_SPEC", mechanismState: "BUYBACK_AND_BURN", confidence: threshold }),
+    ]);
+    const belowThreshold = plan([
+      base,
+      hit({ patternStep: 3, component: "MECHANISM_SPEC", mechanismState: "BUYBACK_AND_BURN", confidence: threshold - 1 }),
+    ]);
+
+    for (const [label, r] of [["at threshold", atThreshold], ["below threshold", belowThreshold]] as const) {
+      const step3 = r.contract.stepDecisions.find((d) => d.step === 3)!;
+      expect(step3.decision, label).toBe("REQUIRED_FRESH");
+      expect(step3.reason, label).toContain("CONTRADICTED");
+      const comp = step3.components.find((c) => c.component === "MECHANISM_SPEC")!;
+      expect(comp.state, label).toBe("CONTRADICTED");
+      expect(comp.conflictingMemoryIds.length, label).toBe(2);
+    }
+  });
+
+  it("23. D-062 граница: неоднородное health по-прежнему исключает запись из проверки противоречия (не расширено этим фиксом)", () => {
+    // Неудачный health (не 'OK') остаётся блокером, а не стороной
+    // конфликта: единственная здоровая запись просто закрывает компонент.
+    const healthy = hit({ patternStep: 5, mechanismState: "ACTIVE", confidence: 95, health: "OK" });
+    const unhealthyConflicting = hit({
+      patternStep: 5,
+      mechanismState: "PAUSED",
+      confidence: 95,
+      health: "QUESTIONABLE",
+    });
+    const r = plan([healthy, unhealthyConflicting]);
+    const step5 = r.contract.stepDecisions.find((d) => d.step === 5)!;
+    expect(step5.decision).toBe("ALREADY_SATISFIED"); // не CONTRADICTED — unhealthy не участвует
+    const comp = step5.components.find((c) => c.component === "CURRENT_STATE")!;
+    expect(comp.conflictingMemoryIds).toEqual([]);
+  });
+
+  it("24. D-062 граница: просроченная конфликтующая запись не создаёт ложное противоречие (не расширено этим фиксом)", () => {
+    const staleDate = new Date(NOW.getTime() - 400 * 24 * 60 * 60 * 1000);
+    const fresh = hit({ patternStep: 5, mechanismState: "ACTIVE", confidence: 95 });
+    const staleConflicting = hit({
+      patternStep: 5,
+      mechanismState: "PAUSED",
+      freshnessClass: "HIGH_CHANGE",
+      verifiedAt: staleDate,
+      confidence: 95,
+    });
+    const r = plan([fresh, staleConflicting]);
+    const step5 = r.contract.stepDecisions.find((d) => d.step === 5)!;
+    expect(step5.decision).toBe("ALREADY_SATISFIED"); // просроченная запись не участвует в конфликте
+    const comp = step5.components.find((c) => c.component === "CURRENT_STATE")!;
+    expect(comp.conflictingMemoryIds).toEqual([]);
+  });
 });

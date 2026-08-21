@@ -184,6 +184,28 @@ describe("Фаза 5 — Golden set: Memory OFF vs ON (chunk H)", () => {
     expect(comp.conflictingMemoryIds.length).toBe(2); // оба конфликтующих ID предъявимы
   });
 
+  it("29a. D-062 (финальный блокер ревью, end-to-end): низкоуверенная конфликтующая запись не даёт шагу закрыться, но не может закрыть его сама", () => {
+    const result = allResults.find((r) => r.scenario.includes("contradiction below reuse threshold"))!;
+    // Истина сценария объявлена независимо: шаг НЕ закрыт, несмотря на то,
+    // что 5 из 6 участвующих записей согласны и высокоуверенны.
+    expect(result.contractOn.alreadySatisfiedSteps).toEqual([]);
+    expect(result.contractOn.requiredFreshEvidence).toEqual([5]);
+    const step5 = result.contractOn.stepDecisions.find((d) => d.step === 5)!;
+    expect(step5.reason).toContain("CONTRADICTED");
+    const comp = step5.components.find((c) => c.component === "CURRENT_STATE")!;
+    expect(comp.state).toBe("CONTRADICTED");
+    // Все 6 участников конфликта предъявимы — включая низкоуверенную
+    // запись, которую прежний баг молча исключал из проверки.
+    expect(comp.conflictingMemoryIds.length).toBe(6);
+    // Acceptance-агрегат остаётся независим от вывода планировщика: раз шаг
+    // не ALREADY_SATISFIED, он не входит ни в reuseCount, ни в false-reuse
+    // числитель этого сценария — расхождение проявляется через несовпадение
+    // alreadySatisfiedSteps с объявленной истиной (уже проверено выше и в
+    // тесте 20 по каждому сценарию), а не через false_reuse.
+    expect(result.satisfiedStepCount).toBe(0);
+    expect(result.falseReuseStepCount).toBe(0);
+  });
+
   it("30. D-060: частичное покрытие многокомпонентного шага не закрывает шаг; причина называет непокрытый компонент", () => {
     const result = byAngle("partial_component")[0];
     expect(result.contractOn.alreadySatisfiedSteps).toEqual([]);

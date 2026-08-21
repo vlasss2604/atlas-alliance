@@ -69,6 +69,22 @@ function unique(ids: string[]): string[] {
 // Закрывать компонент может только health='OK', свежая и достаточно
 // уверенная память без конфликта mechanism_state; всё остальное —
 // направляет перепроверку, но компонент не закрывает.
+//
+// Финальный блокер ревью (после фикса Top-K, e778885): контрадикция
+// проверялась только среди `reusable` — записей, УЖЕ прошедших порог
+// memory_min_confidence_reuse. Свежая, health=OK запись с confidence
+// НИЖЕ порога переиспользования молча выпадала из проверки конфликта,
+// и шаг закрывался единственным оставшимся (более уверенным) состоянием —
+// планировщик "разрешал" противоречие выбором более уверенной записи,
+// что D-062 прямо запрещает (демонстрировался обрыв порога: 70 -> конфликт
+// виден, 69 -> конфликт исчезает).
+//
+// Исправление: множество кандидатов на КОНФЛИКТ строится ОТДЕЛЬНО от
+// множества кандидатов на УДОВЛЕТВОРЕНИЕ. Право представлять текущее
+// состояние для целей D-062 — health='OK' и не просрочено (то же самое
+// "current validity", что уже определяет ACTIVE-пригодность записи);
+// confidence в этот набор НЕ входит — confidence остаётся порогом только
+// для того, может ли запись САМА закрыть компонент.
 function decideComponent(
   component: string,
   stepHits: RetrievalHit[],
@@ -80,34 +96,35 @@ function decideComponent(
     return { component, state: "NO_MEMORY", blockers: [], memoryIds: [], conflictingMemoryIds: [] };
   }
 
-  const reusable = cHits.filter(
-    (h) =>
-      h.health === "OK" &&
-      !isStale(h, now, config) &&
-      h.confidence >= config.memory_min_confidence_reuse,
-  );
+  // Кандидаты на конфликт (D-062): ACTIVE (уже гарантировано retrieval'ом),
+  // health='OK' (D-059: только OK говорит о ТЕКУЩЕМ состоянии — QUESTIONABLE/
+  // REVERIFY/STALE-health и DEPRECATED не являются конкурирующим текущим
+  // заявлением, они блокеры, а не сторона конфликта) и не просрочено
+  // (freshness/current validity). Confidence здесь не участвует.
+  const currentEligible = cHits.filter((h) => h.health === "OK" && !isStale(h, now, config));
 
+  // D-062: конфликт — расхождение машиночитаемого mechanism_state среди
+  // ЭТИХ кандидатов; расхождение свободного текста statement конфликтом
+  // не считается (парафраз).
+  const distinctStates = new Set(
+    currentEligible.map((h) => h.mechanismState).filter((s): s is string => s !== null),
+  );
+  if (distinctStates.size > 1) {
+    return {
+      component,
+      state: "CONTRADICTED",
+      blockers: [],
+      memoryIds: unique(cHits.map((h) => h.memoryId)),
+      conflictingMemoryIds: unique(
+        currentEligible.filter((h) => h.mechanismState !== null).map((h) => h.memoryId),
+      ),
+    };
+  }
+
+  // Нет конфликта — confidence теперь решает, может ли запись УДОВЛЕТВОРИТЬ
+  // компонент (порог переиспользования применяется только здесь).
+  const reusable = currentEligible.filter((h) => h.confidence >= config.memory_min_confidence_reuse);
   if (reusable.length > 0) {
-    // D-062: конфликт только среди записей, прошедших health и свежесть.
-    // Обнаруживается конфликт СОСТОЯНИЙ (различный machine-readable
-    // mechanism_state); расхождение свободного текста statement конфликтом
-    // не считается (парафраз).
-    const distinctStates = new Set(
-      reusable
-        .map((h) => h.mechanismState)
-        .filter((s): s is string => s !== null),
-    );
-    if (distinctStates.size > 1) {
-      return {
-        component,
-        state: "CONTRADICTED",
-        blockers: [],
-        memoryIds: unique(cHits.map((h) => h.memoryId)),
-        conflictingMemoryIds: unique(
-          reusable.filter((h) => h.mechanismState !== null).map((h) => h.memoryId),
-        ),
-      };
-    }
     return {
       component,
       state: "SATISFIED",

@@ -303,6 +303,38 @@ export const GOLDEN_SCENARIOS: GoldenScenario[] = [
     expectedRequiredFreshSteps: [5],
   },
   {
+    // D-062 (финальный блокер независимого ревью): контрадикция строится
+    // ТОЛЬКО среди записей, прошедших порог переиспользования
+    // (memory_min_confidence_reuse), поэтому свежая здоровая ACTIVE-запись
+    // с confidence НИЖЕ порога молча выпадала из проверки конфликта, и шаг
+    // закрывался единственным оставшимся (более уверенным) состоянием —
+    // планировщик разрешал противоречие выбором более уверенной записи,
+    // что D-062 прямо запрещает. Демонстрирует ОБА требуемых свойства:
+    // низкоуверенная конфликтующая запись НЕ может закрыть компонент сама
+    // (invalidReason LOW_CONFIDENCE), но её одно лишь существование не даёт
+    // шагу стать ALREADY_SATISFIED — текущее состояние не разрешено.
+    name: "contradiction below reuse threshold (D-062 review blocker): низкоуверенная конфликтующая запись не даёт шагу закрыться",
+    angle: "contradiction",
+    capability: "FRESH_RESEARCH",
+    statementQuery: "is the buyback mechanism currently active or paused",
+    seedFacts: [
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "current_status_agree_1", statement: "mechanism running, source 1", mechanismState: "ACTIVE", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 95, promote: true, reusable: true },
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "current_status_agree_2", statement: "mechanism running, source 2", mechanismState: "ACTIVE", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 94, promote: true, reusable: true },
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "current_status_agree_3", statement: "mechanism running, source 3", mechanismState: "ACTIVE", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 93, promote: true, reusable: true },
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "current_status_agree_4", statement: "mechanism running, source 4", mechanismState: "ACTIVE", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 92, promote: true, reusable: true },
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "current_status_agree_5", statement: "mechanism running, source 5", mechanismState: "ACTIVE", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 91, promote: true, reusable: true },
+      // Ниже memory_min_confidence_reuse (70) — не может закрыть компонент
+      // сама по себе (LOW_CONFIDENCE), но обязана остаться видимой проверке
+      // противоречия: она fresh + ACTIVE + health=OK, то есть представляет
+      // конкурирующее ТЕКУЩЕЕ состояние наравне с пятью согласными.
+      { patternStep: 5, component: "CURRENT_STATE", claimKey: "current_status_paused_low_conf", statement: "mechanism halted per latest governance note", mechanismState: "PAUSED", freshnessClass: "LOW_CHANGE", verifiedAt: FRESH, confidence: 65, promote: true, reusable: false, invalidReason: "LOW_CONFIDENCE" },
+    ],
+    // Истина: шаг НЕ закрывается — контрадикция неразрешена, независимо от
+    // того, что 5 из 6 записей согласны и уверены.
+    expectedSatisfiedSteps: [],
+    expectedRequiredFreshSteps: [5],
+  },
+  {
     // D-061: контролируемое НЕБЕЗОПАСНОЕ переиспользование — доказательство,
     // что метрика false_reuse МОЖЕТ стать ненулевой. Факт проходит все
     // правила планировщика (ACTIVE, OK, уверенный, в пределах фолбэка
