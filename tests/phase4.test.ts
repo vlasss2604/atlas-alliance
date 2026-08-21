@@ -682,6 +682,20 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       quick_answer: "Такой связи не существует.",
     });
     expect(explained.status).toBe("READY");
+    // Симметрично: route=CLARIFICATION_REQUIRED — тоже наше механическое
+    // отображение, не мнение модели. Живой прогон: модель оставила
+    // status=READY при верном маршруте CLARIFICATION_REQUIRED — раньше
+    // это было жёстким отказом схемы ("READY with CLARIFICATION_REQUIRED"),
+    // теперь статус выправляется, как и explanation-маршруты выше.
+    const clarifyReady = parseInterpreterResult({
+      ...valid,
+      status: "READY",
+      route: "CLARIFICATION_REQUIRED",
+      project_or_asset: null,
+      clarification_question: "Какой проект или токен вы имеете в виду?",
+    });
+    expect(clarifyReady.status).toBe("NEEDS_CLARIFICATION");
+    expect(clarifyReady.route).toBe("CLARIFICATION_REQUIRED");
     // Объяснение без объяснения показывать нечего → честный INVALID,
     // а не «сервис недоступен».
     const empty = parseInterpreterResult({ ...valid, route: "QUICK_EXPLANATION" });
@@ -700,6 +714,167 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
     expect(() =>
       parseInterpreterResult({ ...valid, understood_summary: null }),
     ).toThrow(InterpreterContractError);
+  });
+  it("13b2. D-037 (вариант 2, решение владельца): «зачем нужен токен» и «доходит ли доход до держателя» — одна задача, без уточнения", () => {
+    // phase-4-freeze.md §5: живая модель раньше уточняла здесь; владелец
+    // выбрал вариант 2 — отвечать сразу, без уточняющего вопроса.
+    expect(SYSTEM_PROMPT).toContain("are the same Token Value Capture task");
+  });
+
+  it("13c. D-039: промпт требует грамотный язык в пользовательских полях", () => {
+    // Найдено живым прогоном: модель иногда выдаёт грамматически неверное
+    // слово ("заработивает"). Правка — одна строка про грамотность
+    // (рекомендация D-039), не должна тихо исчезнуть при будущих правках.
+    expect(SYSTEM_PROMPT).toContain("grammatically correct");
+  });
+
+  it("14. D-038: пропуск understood_summary на уточнении получает один повтор, деградация — только после него", async () => {
+    const c = await makeAuthedClient();
+
+    const clarificationMissingSummary = (extra: Record<string, unknown> = {}) => ({
+      status: "NEEDS_CLARIFICATION",
+      project_or_asset: null,
+      related_entities: [],
+      topic: "Token Value Capture",
+      task_type: null,
+      research_task: null,
+      understood_summary: null,
+      user_assumptions: [],
+      ambiguities: ["project is not named"],
+      clarification_question: "О каком проекте идёт речь?",
+      route: "CLARIFICATION_REQUIRED",
+      normalized_intent: "UNKNOWN",
+      intent_confidence: 0.4,
+      route_reason: "test: missing understood_summary",
+      needs_fresh_evidence: false,
+      quick_answer: null,
+      ...extra,
+    });
+
+    // (a) модель поправляется на повторе: замечание доходит, вторая
+    // попытка приходит с понятной формулировкой — деградации нет.
+    __pushFakeScript(() => clarificationMissingSummary());
+    __pushFakeScript((input) => {
+      expect(input.contractViolation).toContain("understood_summary");
+      return clarificationMissingSummary({
+        understood_summary: "Вы хотите понять, приносит ли этот проект реальную ценность.",
+      });
+    });
+    const fixed = await ask(c, "а этот проект реально что-то приносит?");
+    expect(fixed.res.status).toBe(201);
+    expect(fixed.body.interpretation.provisionalTask).toBeTruthy();
+    const [fixedRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, fixed.body.interpretation.id));
+    expect((fixedRow.modelMeta as { attempts: number }).attempts).toBe(2);
+
+    // (b) модель повторяет тот же пропуск: деградация принимается (обеднённый
+    // экран, а не отказ 502), но повтор всё равно состоялся ровно один раз.
+    __pushFakeScript(() => clarificationMissingSummary());
+    __pushFakeScript(() => clarificationMissingSummary());
+    const degraded = await ask(c, "ну объясни мне зачем вообще нужен этот токен");
+    expect(degraded.res.status).toBe(201);
+    expect(degraded.body.interpretation.provisionalTask).toBeNull();
+    const [degradedRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, degraded.body.interpretation.id));
+    expect((degradedRow.modelMeta as { attempts: number }).attempts).toBe(2);
+  });
+
+  it("15. регрессия: инвестиционный вопрос → честный OUT_OF_SCOPE, не 502 (лишний quick_answer на OUTSIDE_CURRENT_DOMAIN)", async () => {
+    const c = await makeAuthedClient();
+
+    // Правдоподобный ответ живой модели: маршрут определён верно
+    // (OUTSIDE_CURRENT_DOMAIN), но модель дописывает объяснение «почему» —
+    // поле, которое toView() всё равно отбрасывает вне explanation-маршрутов.
+    // До правки normalizeModelOutput это било по строгому контракту
+    // (assertConsistent: "quick_answer outside explanation routes") и после
+    // одного повтора с тем же результатом заканчивалось 502 — ровно
+    // сообщение "Couldn't process the question" на экране.
+    __pushFakeScript(() => ({
+      status: "OUT_OF_SCOPE",
+      project_or_asset: "SUI",
+      related_entities: [],
+      topic: "Token Value Capture",
+      task_type: null,
+      research_task: null,
+      understood_summary: null,
+      user_assumptions: ["User is considering buying SUI"],
+      ambiguities: [],
+      clarification_question: null,
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      normalized_intent: "UNKNOWN",
+      intent_confidence: 0,
+      route_reason:
+        "This is an investment recommendation request, not a value-capture research question.",
+      needs_fresh_evidence: false,
+      quick_answer:
+        "ATLAS не даёт инвестиционных советов и не отвечает, стоит ли покупать SUI сейчас — это вопрос вне области исследования value capture.",
+    }));
+
+    const { res, body } = await ask(c, "Стоит ли покупать SUI сейчас?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("OUT_OF_SCOPE");
+    expect(body.interpretation.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+    // Декоративное поле не просачивается наружу вне explanation-маршрутов.
+    expect(body.interpretation.quickAnswer).toBeNull();
+    expect(body.gates.scope).toBe("OUT_OF_SCOPE");
+
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    // Нормализация сняла нарушение контракта до строгой проверки — повтора
+    // не потребовалось (в отличие от D-038, это не "деградация", а починка).
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
+  });
+
+  it("16. регрессия (живой прогон): READY + CLARIFICATION_REQUIRED → честное уточнение, не 502", async () => {
+    const c = await makeAuthedClient();
+
+    // Точная форма живого сбоя (лог: "[interpreter] unavailable READY with
+    // CLARIFICATION_REQUIRED", POST /api/interpretations 502 in 9.7s):
+    // маршрут определён верно (нужен проект), но модель оставила
+    // status=READY вместо NEEDS_CLARIFICATION.
+    __pushFakeScript(() => ({
+      status: "READY",
+      project_or_asset: null,
+      related_entities: [],
+      topic: "Token Value Capture",
+      task_type: null,
+      research_task: null,
+      understood_summary:
+        "Вы хотите понять, доходит ли реальный доход протокола до держателей токена.",
+      user_assumptions: ["Протокол генерирует доход"],
+      ambiguities: ["Не указан конкретный проект или токен"],
+      clarification_question: "Какой проект или токен вы имеете в виду?",
+      route: "CLARIFICATION_REQUIRED",
+      normalized_intent: "PROTOCOL_REVENUE_TO_TOKEN",
+      intent_confidence: 0.6,
+      route_reason: "Вопрос релевантен домену, но без проекта нельзя начать исследование.",
+      needs_fresh_evidence: false,
+      quick_answer: null,
+    }));
+
+    const { res, body } = await ask(c, "доход протокола реально доходит до держателей токена?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("NEEDS_CLARIFICATION");
+    expect(body.interpretation.route).toBe("CLARIFICATION_REQUIRED");
+    expect(body.interpretation.clarificationQuestion).toBe(
+      "Какой проект или токен вы имеете в виду?",
+    );
+    // Понимание показано ДО вопроса (rule 8) — деградации тоже нет.
+    expect(body.interpretation.provisionalTask).toBeTruthy();
+
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    // Починка, не деградация: контракт снят нормализацией до строгой
+    // проверки — повтора к модели не потребовалось.
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
   });
 });
 

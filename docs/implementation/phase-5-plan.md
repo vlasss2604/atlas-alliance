@@ -2,7 +2,7 @@
 
 > Статус: **УТВЕРЖДЁН владельцем** (Phase 5 Strategy Lock).
 > Код не пишется: реализация — отдельная задача отдельного чата.
-> Решения фазы зафиксированы в `docs/DECISIONS.md` (D-040…D-050).
+> Решения фазы зафиксированы в `docs/DECISIONS.md` (D-040…D-057).
 >
 > Принцип фазы, заданный владельцем: **Memory must change the research plan.**
 > Не «вопрос → поиск похожего текста → вставка в промпт», а
@@ -679,11 +679,11 @@ Token Value Capture — **первая обученная область, а н�
 | # | Решение | Статус |
 |---|---|---|
 | 1 | Retrieval v1 — structured-first по онтологии (проект, тема, интент, шаг Pattern, claim-ключи) + FTS/`pg_trgm`. pgvector не вводится. `MemoryRetrievalGateway` сохраняется как шов | LOCKED (D-040) |
-| 2 | Память обязана менять Research Boundary Contract, а не подмешивать текст в промпт | LOCKED (D-046) |
-| 3 | Режимы `MEMORY` / `TARGETED_REFRESH` / `FRESH_RESEARCH`; переиспользование не отменяет свежесть | LOCKED (D-047) |
+| 2 | Память обязана менять Research Boundary Contract, а не подмешивать текст в промпт | LOCKED (D-056) |
+| 3 | Режимы `MEMORY` / `TARGETED_REFRESH` / `FRESH_RESEARCH`; переиспользование не отменяет свежесть | LOCKED (D-057) |
 | 4 | FACT / RESEARCH / PROOF memory разделены; системная память не зависит от пользовательских данных | LOCKED (D-048) |
 | 5 | Кросс-проектное обобщение в v1 запрещено; путь в будущее сохранён | LOCKED (D-042) |
-| 6 | `proofs.verification_status` добавляется; `VERIFIED` гейтит промоушен, а не кандидата; промоушен человеком | LOCKED (D-041) |
+| 6 | `proofs.verification_status` добавляется; `VERIFIED` гейтит промоушен, а не кандидата; промоушен человеком через контролируемый аудируемый скрипт — UI Фазы 9 не ждём | LOCKED (D-041, D-055) |
 | 7 | Lifecycle `OBSERVED → CANDIDATE → ACTIVE` + health-состояния; `ACTIVE` — только человек | LOCKED (D-021) |
 | 8 | Словарь свежести нормализуется: `LOW_CHANGE` / `MEDIUM_CHANGE` / `HIGH_CHANGE` | LOCKED (D-044) |
 | 9 | Ключ `memory_enabled` для режима OFF/ON | LOCKED (D-043) |

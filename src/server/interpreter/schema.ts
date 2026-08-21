@@ -183,6 +183,16 @@ export function normalizeModelOutput(raw: unknown): unknown {
   if (typeof r.route === "string" && EXPLANATION_ROUTES.includes(r.route)) {
     r.status = "READY";
   }
+  // Симметрично: route=CLARIFICATION_REQUIRED по определению значит
+  // NEEDS_CLARIFICATION (prompt.ts, раздел STATUS) — тот же механический
+  // маппинг, что и для маршрутов-объяснений выше, просто раньше был
+  // применён только в одну сторону. Живой прогон: модель верно выбрала
+  // маршрут (нужен проект), но оставила status=READY — жёсткий отказ
+  // схемы ("READY with CLARIFICATION_REQUIRED") ронял честный уточняющий
+  // вопрос в 502 вместо показа пользователю.
+  if (r.route === "CLARIFICATION_REQUIRED") {
+    r.status = "NEEDS_CLARIFICATION";
+  }
   // Объяснение без самого объяснения показывать нечего. Это не повод
   // отдать пользователю «сервис недоступен»: честный ответ здесь —
   // «не удалось выделить задачу» (живой прогон: бессмысленный ввод).
@@ -193,6 +203,22 @@ export function normalizeModelOutput(raw: unknown): unknown {
   ) {
     r.route = "OUTSIDE_CURRENT_DOMAIN";
     r.status = "INVALID";
+  }
+  // quick_answer на OUTSIDE_CURRENT_DOMAIN — декоративное поле: продукт
+  // показывает здесь свой фиксированный текст (dict.ask.outOfScope), а не
+  // AI-текст (interpret.ts/toView() отдаёт quick_answer только на
+  // QUICK_EXPLANATION/NO_RESEARCH_NEEDED). Модель нередко дописывает
+  // «почему вне области» — это не решает поведение и не должно ронять
+  // честно понятый запрос в 502 (регрессия: «Стоит ли покупать SUI
+  // сейчас?» — маршрут определён верно, но лишнее объяснение било по
+  // строгому контракту).
+  //
+  // НЕ распространяем это на DEEP_RESEARCH: там quick_answer рядом с
+  // Proof запрещён намеренно и строго (LOCKED D-027, решение владельца
+  // №1) — это canary на спутанный вывод модели на самом дорогом
+  // маршруте, а не оформление, и его ослаблять нельзя.
+  if (r.route === "OUTSIDE_CURRENT_DOMAIN" && r.quick_answer != null) {
+    r.quick_answer = null;
   }
   r.route_reason = clamp(r.route_reason, 300);
   r.research_task = clamp(r.research_task, MAX_RESEARCH_TASK_CHARS);
