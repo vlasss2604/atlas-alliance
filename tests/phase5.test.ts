@@ -25,6 +25,7 @@ import {
   promoteToActive,
 } from "../src/server/memory/lifecycle";
 import { markProofVerified } from "../src/server/memory/verification";
+import { structuredMemoryRetrievalGateway } from "../src/server/memory/retrieval-gateway";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 
 let ctx: TestContext;
@@ -520,5 +521,112 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
     );
     const verified = await markProofVerified(ctx.db, proofRow.id, admin.id);
     expect(verified.verificationStatus).toBe("VERIFIED");
+  });
+});
+
+async function activateMemory(
+  ctx2: TestContext,
+  input: Parameters<typeof observeMemoryCandidate>[1],
+): Promise<string> {
+  const [admin] = await ctx2.db.insert(users).values({ role: "ADMIN" }).returning();
+  const { id } = await observeMemoryCandidate(ctx2.db, input);
+  return (await promoteToActive(ctx2.db, id, admin.id)).id;
+}
+
+describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)", () => {
+  it("14. ontology-путь находит засеянное знание по (project, topic); чужой проект не находит", async () => {
+    const topicId = await activeTopicId();
+    const [projectA, projectB] = await ctx.db.select().from(projects).limit(2);
+    const memId = await activateMemory(ctx, {
+      projectId: projectA.id,
+      topicId,
+      patternStep: 1,
+      claimKey: "economic_source",
+      statement: "Protocol charges a 0.3% swap fee as its economic source",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 95,
+      originKind: "TEST",
+    });
+
+    const hitsA = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: projectA.id, topicId },
+      { topKPerStep: 5 },
+    );
+    expect(hitsA.some((h) => h.memoryId === memId)).toBe(true);
+
+    const hitsB = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: projectB.id, topicId },
+      { topKPerStep: 5 },
+    );
+    expect(hitsB.some((h) => h.memoryId === memId)).toBe(false); // изоляция D-042
+  });
+
+  it("15. supplementary text recall (fts/trgm) находит по формулировке, ontology-фильтр (claimKeys) её не находит", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db.select().from(projects).limit(1);
+    const memId = await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 7,
+      claimKey: "net_token_effect",
+      statement: "Half of protocol revenue is used to burn the token every epoch",
+      freshnessClass: "MEDIUM_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 88,
+      originKind: "TEST",
+    });
+
+    // Узкий ontology-запрос по чужому claim_key не находит запись напрямую...
+    const narrow = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId, claimKeys: ["allocation_mechanism"] },
+      { topKPerStep: 5 },
+    );
+    expect(narrow.some((h) => h.memoryId === memId)).toBe(false);
+
+    // ...но находится по свободному тексту (иная формулировка того же claim, §3.2).
+    const withText = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      {
+        projectId: project.id,
+        topicId,
+        claimKeys: ["allocation_mechanism"],
+        statementQuery: "does the project burn revenue into the token",
+      },
+      { topKPerStep: 5 },
+    );
+    const hit = withText.find((h) => h.memoryId === memId);
+    expect(hit).toBeTruthy();
+    expect(hit?.matchedVia).toBe("fts");
+  });
+
+  it("16. Top-K на шаг ограничивает выдачу (порог из конфига, не хардкод)", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db.select().from(projects).limit(1);
+    for (let i = 0; i < 4; i += 1) {
+      await activateMemory(ctx, {
+        projectId: project.id,
+        topicId,
+        patternStep: 8,
+        claimKey: `durability_${i}`,
+        statement: `Durability note ${i}`,
+        freshnessClass: "LOW_CHANGE",
+        verifiedAt: new Date(),
+        confidence: 60 + i,
+        originKind: "TEST",
+      });
+    }
+    const hits = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId, claimKeys: ["durability_0", "durability_1", "durability_2", "durability_3"] },
+      { topKPerStep: 2 },
+    );
+    const step8 = hits.filter((h) => h.patternStep === 8);
+    expect(step8.length).toBe(2);
+    // Top-K оставляет наиболее уверенные записи.
+    expect(step8.every((h) => h.confidence >= 62)).toBe(true);
   });
 });
