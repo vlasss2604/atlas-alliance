@@ -194,6 +194,22 @@ export function normalizeModelOutput(raw: unknown): unknown {
     r.route = "OUTSIDE_CURRENT_DOMAIN";
     r.status = "INVALID";
   }
+  // quick_answer на OUTSIDE_CURRENT_DOMAIN — декоративное поле: продукт
+  // показывает здесь свой фиксированный текст (dict.ask.outOfScope), а не
+  // AI-текст (interpret.ts/toView() отдаёт quick_answer только на
+  // QUICK_EXPLANATION/NO_RESEARCH_NEEDED). Модель нередко дописывает
+  // «почему вне области» — это не решает поведение и не должно ронять
+  // честно понятый запрос в 502 (регрессия: «Стоит ли покупать SUI
+  // сейчас?» — маршрут определён верно, но лишнее объяснение било по
+  // строгому контракту).
+  //
+  // НЕ распространяем это на DEEP_RESEARCH: там quick_answer рядом с
+  // Proof запрещён намеренно и строго (LOCKED D-027, решение владельца
+  // №1) — это canary на спутанный вывод модели на самом дорогом
+  // маршруте, а не оформление, и его ослаблять нельзя.
+  if (r.route === "OUTSIDE_CURRENT_DOMAIN" && r.quick_answer != null) {
+    r.quick_answer = null;
+  }
   r.route_reason = clamp(r.route_reason, 300);
   r.research_task = clamp(r.research_task, MAX_RESEARCH_TASK_CHARS);
   r.understood_summary = clamp(r.understood_summary, 300);

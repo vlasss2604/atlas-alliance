@@ -42,6 +42,7 @@
 | D-017 | Исследование стартует только при `status=READY` **и** `route=DEEP_RESEARCH` | LOCKED | `phase-4-plan.md` §3.4 |
 | D-018 | Аутентификация: HMAC-проверка initData на сервере, сессия в HttpOnly-cookie, CSRF-токен, allowlist только своих origin, bootstrap-исключение для `POST /api/auth/telegram` | LOCKED | `phase-2-plan.md` |
 | D-019 | Rate limit хранится в таблице `auth_rate_limits`; бакет по Telegram-id заводится только после успешной проверки подписи (иначе — вектор блокировки чужого аккаунта) | LOCKED | `phase-2-plan.md` §2.1 |
+| D-046 | `quick_answer` на маршруте `OUTSIDE_CURRENT_DOMAIN` нормализуется в `null`, а не роняет контракт — поле декоративное там (продукт показывает свой фиксированный текст, `toView()` его всё равно отбрасывает). На `DEEP_RESEARCH` строгость сохранена намеренно (LOCKED D-027: никакого AI-текста рядом с Proof) | LOCKED | регрессия «Стоит ли покупать SUI сейчас?» → 502; `src/server/interpreter/schema.ts` (`normalizeModelOutput`) |
 
 ## ARI, память и обучение
 

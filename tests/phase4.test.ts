@@ -768,6 +768,54 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       .where(eq(interpretations.id, degraded.body.interpretation.id));
     expect((degradedRow.modelMeta as { attempts: number }).attempts).toBe(2);
   });
+
+  it("15. регрессия: инвестиционный вопрос → честный OUT_OF_SCOPE, не 502 (лишний quick_answer на OUTSIDE_CURRENT_DOMAIN)", async () => {
+    const c = await makeAuthedClient();
+
+    // Правдоподобный ответ живой модели: маршрут определён верно
+    // (OUTSIDE_CURRENT_DOMAIN), но модель дописывает объяснение «почему» —
+    // поле, которое toView() всё равно отбрасывает вне explanation-маршрутов.
+    // До правки normalizeModelOutput это било по строгому контракту
+    // (assertConsistent: "quick_answer outside explanation routes") и после
+    // одного повтора с тем же результатом заканчивалось 502 — ровно
+    // сообщение "Couldn't process the question" на экране.
+    __pushFakeScript(() => ({
+      status: "OUT_OF_SCOPE",
+      project_or_asset: "SUI",
+      related_entities: [],
+      topic: "Token Value Capture",
+      task_type: null,
+      research_task: null,
+      understood_summary: null,
+      user_assumptions: ["User is considering buying SUI"],
+      ambiguities: [],
+      clarification_question: null,
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      normalized_intent: "UNKNOWN",
+      intent_confidence: 0,
+      route_reason:
+        "This is an investment recommendation request, not a value-capture research question.",
+      needs_fresh_evidence: false,
+      quick_answer:
+        "ATLAS не даёт инвестиционных советов и не отвечает, стоит ли покупать SUI сейчас — это вопрос вне области исследования value capture.",
+    }));
+
+    const { res, body } = await ask(c, "Стоит ли покупать SUI сейчас?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("OUT_OF_SCOPE");
+    expect(body.interpretation.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+    // Декоративное поле не просачивается наружу вне explanation-маршрутов.
+    expect(body.interpretation.quickAnswer).toBeNull();
+    expect(body.gates.scope).toBe("OUT_OF_SCOPE");
+
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    // Нормализация сняла нарушение контракта до строгой проверки — повтора
+    // не потребовалось (в отличие от D-038, это не "деградация", а починка).
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
+  });
 });
 
 async function quotaCount(userId: string): Promise<number> {
