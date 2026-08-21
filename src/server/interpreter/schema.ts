@@ -183,6 +183,16 @@ export function normalizeModelOutput(raw: unknown): unknown {
   if (typeof r.route === "string" && EXPLANATION_ROUTES.includes(r.route)) {
     r.status = "READY";
   }
+  // Симметрично: route=CLARIFICATION_REQUIRED по определению значит
+  // NEEDS_CLARIFICATION (prompt.ts, раздел STATUS) — тот же механический
+  // маппинг, что и для маршрутов-объяснений выше, просто раньше был
+  // применён только в одну сторону. Живой прогон: модель верно выбрала
+  // маршрут (нужен проект), но оставила status=READY — жёсткий отказ
+  // схемы ("READY with CLARIFICATION_REQUIRED") ронял честный уточняющий
+  // вопрос в 502 вместо показа пользователю.
+  if (r.route === "CLARIFICATION_REQUIRED") {
+    r.status = "NEEDS_CLARIFICATION";
+  }
   // Объяснение без самого объяснения показывать нечего. Это не повод
   // отдать пользователю «сервис недоступен»: честный ответ здесь —
   // «не удалось выделить задачу» (живой прогон: бессмысленный ввод).

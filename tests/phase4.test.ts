@@ -682,6 +682,20 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       quick_answer: "Такой связи не существует.",
     });
     expect(explained.status).toBe("READY");
+    // Симметрично: route=CLARIFICATION_REQUIRED — тоже наше механическое
+    // отображение, не мнение модели. Живой прогон: модель оставила
+    // status=READY при верном маршруте CLARIFICATION_REQUIRED — раньше
+    // это было жёстким отказом схемы ("READY with CLARIFICATION_REQUIRED"),
+    // теперь статус выправляется, как и explanation-маршруты выше.
+    const clarifyReady = parseInterpreterResult({
+      ...valid,
+      status: "READY",
+      route: "CLARIFICATION_REQUIRED",
+      project_or_asset: null,
+      clarification_question: "Какой проект или токен вы имеете в виду?",
+    });
+    expect(clarifyReady.status).toBe("NEEDS_CLARIFICATION");
+    expect(clarifyReady.route).toBe("CLARIFICATION_REQUIRED");
     // Объяснение без объяснения показывать нечего → честный INVALID,
     // а не «сервис недоступен».
     const empty = parseInterpreterResult({ ...valid, route: "QUICK_EXPLANATION" });
@@ -814,6 +828,52 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       .where(eq(interpretations.id, body.interpretation.id));
     // Нормализация сняла нарушение контракта до строгой проверки — повтора
     // не потребовалось (в отличие от D-038, это не "деградация", а починка).
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
+  });
+
+  it("16. регрессия (живой прогон): READY + CLARIFICATION_REQUIRED → честное уточнение, не 502", async () => {
+    const c = await makeAuthedClient();
+
+    // Точная форма живого сбоя (лог: "[interpreter] unavailable READY with
+    // CLARIFICATION_REQUIRED", POST /api/interpretations 502 in 9.7s):
+    // маршрут определён верно (нужен проект), но модель оставила
+    // status=READY вместо NEEDS_CLARIFICATION.
+    __pushFakeScript(() => ({
+      status: "READY",
+      project_or_asset: null,
+      related_entities: [],
+      topic: "Token Value Capture",
+      task_type: null,
+      research_task: null,
+      understood_summary:
+        "Вы хотите понять, доходит ли реальный доход протокола до держателей токена.",
+      user_assumptions: ["Протокол генерирует доход"],
+      ambiguities: ["Не указан конкретный проект или токен"],
+      clarification_question: "Какой проект или токен вы имеете в виду?",
+      route: "CLARIFICATION_REQUIRED",
+      normalized_intent: "PROTOCOL_REVENUE_TO_TOKEN",
+      intent_confidence: 0.6,
+      route_reason: "Вопрос релевантен домену, но без проекта нельзя начать исследование.",
+      needs_fresh_evidence: false,
+      quick_answer: null,
+    }));
+
+    const { res, body } = await ask(c, "доход протокола реально доходит до держателей токена?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("NEEDS_CLARIFICATION");
+    expect(body.interpretation.route).toBe("CLARIFICATION_REQUIRED");
+    expect(body.interpretation.clarificationQuestion).toBe(
+      "Какой проект или токен вы имеете в виду?",
+    );
+    // Понимание показано ДО вопроса (rule 8) — деградации тоже нет.
+    expect(body.interpretation.provisionalTask).toBeTruthy();
+
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    // Починка, не деградация: контракт снят нормализацией до строгой
+    // проверки — повтора к модели не потребовалось.
     expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
   });
 });

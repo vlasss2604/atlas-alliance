@@ -43,6 +43,7 @@
 | D-018 | Аутентификация: HMAC-проверка initData на сервере, сессия в HttpOnly-cookie, CSRF-токен, allowlist только своих origin, bootstrap-исключение для `POST /api/auth/telegram` | LOCKED | `phase-2-plan.md` |
 | D-019 | Rate limit хранится в таблице `auth_rate_limits`; бакет по Telegram-id заводится только после успешной проверки подписи (иначе — вектор блокировки чужого аккаунта) | LOCKED | `phase-2-plan.md` §2.1 |
 | D-046 | `quick_answer` на маршруте `OUTSIDE_CURRENT_DOMAIN` нормализуется в `null`, а не роняет контракт — поле декоративное там (продукт показывает свой фиксированный текст, `toView()` его всё равно отбрасывает). На `DEEP_RESEARCH` строгость сохранена намеренно (LOCKED D-027: никакого AI-текста рядом с Proof) | LOCKED | регрессия «Стоит ли покупать SUI сейчас?» → 502; `src/server/interpreter/schema.ts` (`normalizeModelOutput`) |
+| D-047 | `route=CLARIFICATION_REQUIRED` механически форсирует `status=NEEDS_CLARIFICATION`, тем же способом, что уже применён к маршрутам-объяснениям (route → status — наша проекция, не суждение модели). До этого модель, вернувшая верный маршрут при `status=READY`, получала жёсткий отказ схемы ("READY with CLARIFICATION_REQUIRED") вместо честного уточняющего вопроса | LOCKED | регрессия (лог: `[interpreter] unavailable READY with CLARIFICATION_REQUIRED`, 502) на «доход протокола реально доходит до держателей токена?»; `src/server/interpreter/schema.ts` (`normalizeModelOutput`) |
 
 ## ARI, память и обучение
 
