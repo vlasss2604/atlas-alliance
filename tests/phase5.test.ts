@@ -458,8 +458,14 @@ describe("Фаза 5 — Research Memory: миграции, схема, инва
       const [row] = await ctx.db
         .insert(evidence)
         .values({
+          researchJobId: proofRow.researchJobId,
           proofId: proofRow.id,
           sourceId: src.id,
+          patternStep: 1,
+          component: "SOURCE_OF_VALUE",
+          directness: "DIRECT",
+          sourceClass: "OFFICIAL_DOCS",
+          officiality: "CONFIRMED",
           relationship: "SUPPORTS",
           fragment: "f",
           fetchedAt: sql`now()`,
@@ -513,8 +519,14 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
     const [evidenceRow] = await ctx.db
       .insert(evidence)
       .values({
+        researchJobId: proofRow.researchJobId,
         proofId: proofRow.id,
         sourceId: src.id,
+        patternStep: 3,
+        component: "MECHANISM_SPEC",
+        directness: "DIRECT",
+        sourceClass: "GOVERNANCE",
+        officiality: "CONFIRMED",
         relationship: "SUPPORTS",
         fragment: "governance record: buyback executed",
         fetchedAt: sql`now()`,

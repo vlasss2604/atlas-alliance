@@ -447,8 +447,14 @@ describe("Phase 2 DoD", () => {
       .values({ url: "https://example.com/p2", urlHash: uniq("h") })
       .returning();
     await ctx.db.insert(evidenceTable).values({
+      researchJobId: proofRow.researchJobId,
       proofId: proofRow.id,
       sourceId: src.id,
+      patternStep: 1,
+      component: "SOURCE_OF_VALUE",
+      directness: "DIRECT",
+      sourceClass: "OFFICIAL_DOCS",
+      officiality: "CONFIRMED",
       relationship: "SUPPORTS",
       fragment: "frag",
       fetchedAt: sql`now()`,

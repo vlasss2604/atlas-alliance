@@ -144,3 +144,38 @@ export const projectMemoryKind = pgEnum("project_memory_kind", [
   "FRESHNESS_NOTE",
   "CAVEAT",
 ]);
+
+// Фаза 6 (phase-6-plan.md §6.2). Прямота доказательства — правило
+// достаточности опирается на неё, а не на количество источников (§11.2).
+export const evidenceDirectness = pgEnum("evidence_directness", [
+  "DIRECT",
+  "INDIRECT",
+  "INFERRED",
+]);
+
+// Ось A авторитета источника — детерминирована из URL/типа (§7.2).
+export const evidenceSourceClass = pgEnum("evidence_source_class", [
+  "ONCHAIN_VERIFIABLE",
+  "OFFICIAL_DOCS",
+  "GOVERNANCE",
+  "OFFICIAL_REPORT",
+  "DATA_PROVIDER",
+  "RESEARCH_MEDIA",
+  "SOCIAL",
+]);
+
+// Ось B авторитета источника — подтверждён ли домен человеком (§7.2).
+export const evidenceOfficiality = pgEnum("evidence_officiality", [
+  "CONFIRMED",
+  "CLAIMED",
+]);
+
+// Фаза 6, S3 (phase-6-plan.md §19 S3) — статус одной попытки исполнения
+// по (job, step, component). Лексикон контроллера, не Evidence и не
+// research_component_results (та таблица — задача сопоставления, S5).
+export const researchAttemptStatus = pgEnum("research_attempt_status", [
+  "STARTED",
+  "SUCCEEDED",
+  "FAILED",
+  "SKIPPED",
+]);
