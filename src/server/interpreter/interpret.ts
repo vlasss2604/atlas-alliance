@@ -101,6 +101,17 @@ async function userLanguage(db: Database, userId: string): Promise<"RU" | "EN"> 
   return u?.language === "RU" ? "RU" : "EN";
 }
 
+// Пропуск understood_summary на маршруте уточнения не нарушает схему
+// (schema.ts терпит это намеренно — обеднённый экран лучше отказа), но
+// модель заслуживает один шанс исправиться, прежде чем мы примем
+// деградацию: до этой правки деградация срабатывала сразу же, с первой
+// попытки, и экран уточнения выходил без строки «Понял» (D-038, живой
+// прогон). Второй пропуск подряд — уже не сбой вызова, а деградация,
+// которую и предусматривает терпимость схемы.
+function missingClarificationSummary(result: InterpreterModelResult): boolean {
+  return result.status === "NEEDS_CLARIFICATION" && !result.understood_summary?.trim();
+}
+
 // Ровно один повтор (phase-4-plan §2.4). Второй сбой — честное 502:
 // строка interpretation НЕ создаётся, сырой ввод никуда не передаётся.
 async function callModel(
@@ -116,6 +127,11 @@ async function callModel(
         violation ? { ...input, contractViolation: violation } : input,
         model,
       );
+      if (attempt === 1 && missingClarificationSummary(call.result)) {
+        violation =
+          "NEEDS_CLARIFICATION requires understood_summary: say what you already understood, in the user's language, before asking the clarifying question (rule 8).";
+        continue;
+      }
       return { result: call.result, meta: { ...call.meta, attempts: attempt } };
     } catch (e) {
       if (e instanceof InterpreterUnavailableError || e instanceof InterpreterContractError) {

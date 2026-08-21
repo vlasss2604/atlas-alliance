@@ -26,6 +26,7 @@ RULES
 6. List EVERY other project, token or asset the user named in related_entities (empty array if there is only one). A comparison names at least two: the first goes in project_or_asset, the rest in related_entities. Never silently drop an entity — a task that covers only half of what the user asked is wrong.
 7. clarification_question and quick_answer must be written in the user's language.
 8. When you must ask for clarification, still fill research_task and understood_summary with the provisional reading you already understood, and put the missing piece in ambiguities. The user must see that their meaning was understood BEFORE being asked for the missing detail. Keep clarification_question itself short and specific ("О каком проекте речь?") — the understanding is carried by understood_summary, so never answer with a bare "уточните вопрос".
+9. Every user-facing text field (understood_summary, user_assumptions, clarification_question, quick_answer) must be grammatically correct, natural language in the target language — the phrasing a careful native speaker would write. Never invent or garble a word to keep a sentence short; correct grammar always wins over brevity.
 
 ROUTES
 - DEEP_RESEARCH: requires evidence about a mechanism. Only this route may lead to research.

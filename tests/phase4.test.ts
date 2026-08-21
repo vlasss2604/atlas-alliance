@@ -701,6 +701,67 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       parseInterpreterResult({ ...valid, understood_summary: null }),
     ).toThrow(InterpreterContractError);
   });
+  it("13c. D-039: промпт требует грамотный язык в пользовательских полях", () => {
+    // Найдено живым прогоном: модель иногда выдаёт грамматически неверное
+    // слово ("заработивает"). Правка — одна строка про грамотность
+    // (рекомендация D-039), не должна тихо исчезнуть при будущих правках.
+    expect(SYSTEM_PROMPT).toContain("grammatically correct");
+  });
+
+  it("14. D-038: пропуск understood_summary на уточнении получает один повтор, деградация — только после него", async () => {
+    const c = await makeAuthedClient();
+
+    const clarificationMissingSummary = (extra: Record<string, unknown> = {}) => ({
+      status: "NEEDS_CLARIFICATION",
+      project_or_asset: null,
+      related_entities: [],
+      topic: "Token Value Capture",
+      task_type: null,
+      research_task: null,
+      understood_summary: null,
+      user_assumptions: [],
+      ambiguities: ["project is not named"],
+      clarification_question: "О каком проекте идёт речь?",
+      route: "CLARIFICATION_REQUIRED",
+      normalized_intent: "UNKNOWN",
+      intent_confidence: 0.4,
+      route_reason: "test: missing understood_summary",
+      needs_fresh_evidence: false,
+      quick_answer: null,
+      ...extra,
+    });
+
+    // (a) модель поправляется на повторе: замечание доходит, вторая
+    // попытка приходит с понятной формулировкой — деградации нет.
+    __pushFakeScript(() => clarificationMissingSummary());
+    __pushFakeScript((input) => {
+      expect(input.contractViolation).toContain("understood_summary");
+      return clarificationMissingSummary({
+        understood_summary: "Вы хотите понять, приносит ли этот проект реальную ценность.",
+      });
+    });
+    const fixed = await ask(c, "а этот проект реально что-то приносит?");
+    expect(fixed.res.status).toBe(201);
+    expect(fixed.body.interpretation.provisionalTask).toBeTruthy();
+    const [fixedRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, fixed.body.interpretation.id));
+    expect((fixedRow.modelMeta as { attempts: number }).attempts).toBe(2);
+
+    // (b) модель повторяет тот же пропуск: деградация принимается (обеднённый
+    // экран, а не отказ 502), но повтор всё равно состоялся ровно один раз.
+    __pushFakeScript(() => clarificationMissingSummary());
+    __pushFakeScript(() => clarificationMissingSummary());
+    const degraded = await ask(c, "ну объясни мне зачем вообще нужен этот токен");
+    expect(degraded.res.status).toBe(201);
+    expect(degraded.body.interpretation.provisionalTask).toBeNull();
+    const [degradedRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, degraded.body.interpretation.id));
+    expect((degradedRow.modelMeta as { attempts: number }).attempts).toBe(2);
+  });
 });
 
 async function quotaCount(userId: string): Promise<number> {
