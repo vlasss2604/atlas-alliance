@@ -108,6 +108,22 @@ export const evidence = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
+    // R-2 fix (Phase 6 S0-S3 final review): a compatibility discriminator
+    // — NOT a new research/product semantic state — separating legacy
+    // Phase 1-5 Evidence (version 1, migrated in by 0009's backfill,
+    // where the five classification fields below are honestly NULL)
+    // from Evidence written under the Phase 6 contract (version 2, where
+    // those same fields are structurally required — see the CHECK below).
+    // NOT NULL with a version-2 default: every row a caller inserts from
+    // here on declares itself version 2 unless the migration's own
+    // backfill (run once, before the anti-bypass trigger below existed)
+    // set it to 1. The trigger installed in 0009 is what actually
+    // forbids a new row from claiming version 1, or an existing version-2
+    // row from being downgraded — this column alone is not the
+    // enforcement, only the label the enforcement reads.
+    evidenceContractVersion: smallint("evidence_contract_version")
+      .notNull()
+      .default(2),
     // Evidence существует независимо от Proof (D-088) — единственная
     // обязательная привязка. NOT NULL — не проекция удобства, а инвариант:
     // без него состояние ORPHAN становится представимым.
@@ -190,6 +206,21 @@ export const evidence = pgTable(
     check(
       "ck_evidence_provenance_nonempty",
       sql`length(${t.retrievedUrl}) > 0 AND length(${t.contentHash}) > 0`,
+    ),
+    // R-2 fix: version 1 (legacy, migrated in) may leave the five
+    // classification fields NULL — they cannot be honestly recovered.
+    // Version 2 (the Phase 6 contract) MUST have all five — the OR
+    // short-circuits to true for any non-2 version, so this constraint
+    // is a no-op for legacy rows and a hard requirement for new ones.
+    check(
+      "ck_evidence_contract_v2_complete",
+      sql`${t.evidenceContractVersion} <> 2 OR (
+        ${t.patternStep} IS NOT NULL
+        AND ${t.component} IS NOT NULL
+        AND ${t.directness} IS NOT NULL
+        AND ${t.sourceClass} IS NOT NULL
+        AND ${t.officiality} IS NOT NULL
+      )`,
     ),
   ],
 );

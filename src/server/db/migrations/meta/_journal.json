@@ -71,6 +71,13 @@
       "when": 1787335131591,
       "tag": "0009_engine_evidence_ownership",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787341759460,
+      "tag": "0010_r2_evidence_contract_version",
+      "breakpoints": true
     }
   ]
 }
