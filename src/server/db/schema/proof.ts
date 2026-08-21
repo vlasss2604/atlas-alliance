@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  index,
   jsonb,
   pgTable,
   smallint,
@@ -13,6 +14,8 @@ import {
 import { projects, topics } from "./catalog";
 import {
   evidenceRelationship,
+  freshnessClass,
+  proofVerificationStatus,
   proofVisibility,
   sourceHealth,
   sourceType,
@@ -45,6 +48,12 @@ export const proofs = pgTable(
     // «Что может изменить вывод».
     layers: jsonb("layers").notNull(),
     researchCutoff: timestamp("research_cutoff", { withTimezone: true }),
+    // D-041: гейтит промоушен в ACTIVE-память (Фаза 5), а не появление
+    // кандидата (D-023) — извлечение и промоушен остаются разными порогами.
+    // Выставляется контролируемым скриптом владельца/админа (D-055).
+    verificationStatus: proofVerificationStatus("verification_status")
+      .notNull()
+      .default("DRAFT"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -53,6 +62,10 @@ export const proofs = pgTable(
     // Ровно один Proof на job: ретрай воркера не создаёт второй.
     uniqueIndex("uq_proofs_research_job").on(t.researchJobId),
     check("ck_proofs_confidence", sql`${t.confidence} BETWEEN 0 AND 100`),
+    // Без индексов измерение Memory OFF/ON недостоверно — seq scan,
+    // не качество памяти, объяснял бы разницу (phase-5-plan.md §1.2).
+    index("ix_proofs_project_topic").on(t.projectId, t.topicId),
+    index("ix_proofs_owner").on(t.ownerUserId),
   ],
 );
 
@@ -89,7 +102,11 @@ export const evidence = pgTable(
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }),
     dataAsOf: timestamp("data_as_of", { withTimezone: true }),
-    freshnessClass: text("freshness_class"),
+    // Канонический словарь (D-044): LOW_CHANGE/MEDIUM_CHANGE/HIGH_CHANGE —
+    // приведено миграцией 0006 с прежнего текстового CHECK ('LOW'/'MEDIUM'/
+    // 'HIGH_CHANGE'), пока таблица пуста, до того как память заведёт
+    // третью версию словаря (phase-5-plan.md §5.3).
+    freshnessClass: freshnessClass("freshness_class"),
     // Неизменяемый provenance момента исследования: Proof навсегда ссылается
     // на то, что ARI видел тогда, даже если источник изменится.
     retrievedUrl: text("retrieved_url").notNull(),
@@ -100,21 +117,23 @@ export const evidence = pgTable(
       .defaultNow(),
   },
   (t) => [
-    check(
-      "ck_evidence_freshness_class",
-      sql`${t.freshnessClass} IS NULL OR ${t.freshnessClass} IN ('LOW', 'MEDIUM', 'HIGH_CHANGE')`,
-    ),
+    index("ix_evidence_proof").on(t.proofId),
+    index("ix_evidence_source").on(t.sourceId),
   ],
 );
 
-export const proofGaps = pgTable("proof_gaps", {
-  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  proofId: uuid("proof_id")
-    .notNull()
-    .references(() => proofs.id, { onDelete: "cascade" }),
-  description: text("description").notNull(),
-  kind: text("kind"),
-  createdAt: timestamp("created_at", { withTimezone: true })
-    .notNull()
-    .defaultNow(),
-});
+export const proofGaps = pgTable(
+  "proof_gaps",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    proofId: uuid("proof_id")
+      .notNull()
+      .references(() => proofs.id, { onDelete: "cascade" }),
+    description: text("description").notNull(),
+    kind: text("kind"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [index("ix_proof_gaps_proof").on(t.proofId)],
+);

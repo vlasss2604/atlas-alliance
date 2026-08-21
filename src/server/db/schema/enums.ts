@@ -99,3 +99,48 @@ export const memoryStatus = pgEnum("memory_status", [
 ]);
 
 export const userRole = pgEnum("user_role", ["USER", "ADMIN"]);
+
+// Фаза 5 (phase-5-plan.md §5). Lifecycle памяти — единственный барьер
+// против отравления (D-025): переход в ACTIVE только человеком, прямая
+// вставка ACTIVE отклоняется триггером (0006_research_memory.sql).
+export const memoryLifecycleState = pgEnum("memory_lifecycle_state", [
+  "OBSERVED",
+  "CANDIDATE",
+  "ACTIVE",
+  "DEPRECATED",
+  "SUPERSEDED",
+]);
+
+export const memoryHealth = pgEnum("memory_health", [
+  "OK",
+  "QUESTIONABLE",
+  "REVERIFY",
+  "STALE",
+  "DEPRECATED",
+]);
+
+// Канонический словарь свежести (D-044): заменяет текстовый CHECK на
+// evidence.freshness_class, приведённый той же миграцией.
+export const freshnessClass = pgEnum("freshness_class", [
+  "LOW_CHANGE",
+  "MEDIUM_CHANGE",
+  "HIGH_CHANGE",
+]);
+
+// D-041: VERIFIED гейтит промоушен в ACTIVE-память, а не появление кандидата.
+export const proofVerificationStatus = pgEnum("proof_verification_status", [
+  "DRAFT",
+  "REVIEWED",
+  "VERIFIED",
+]);
+
+export const projectMemoryKind = pgEnum("project_memory_kind", [
+  "SOURCE_ROUTE",
+  "USEFUL_QUERY",
+  "FAILED_QUERY",
+  "DEAD_END",
+  "TERMINOLOGY",
+  "METRIC_SEMANTICS",
+  "FRESHNESS_NOTE",
+  "CAVEAT",
+]);

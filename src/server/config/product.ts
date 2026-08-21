@@ -30,6 +30,22 @@ const productConfigSchema = z.object({
   demo_max_recovery_steps: z.number().int().min(0),
   budget_demo: jobBudgetSchema,
   budget_core: jobBudgetSchema,
+  // Фаза 5 (D-043): оценка Memory OFF vs ON — штатный режим, не хак в
+  // тестах. Планировщик читает этот ключ на каждый job.
+  memory_enabled: z.boolean(),
+  // Пороги retrieval — в конфиг, не в код (phase-5-plan.md §5.5).
+  memory_retrieval_top_k: z.number().int().positive(),
+  memory_min_confidence_reuse: z.number().int().min(0).max(100),
+  // Фолбэк свежести, когда конкретная запись памяти не несёт stale_after.
+  memory_stale_after_days: z.object({
+    LOW_CHANGE: z.number().int().positive(),
+    MEDIUM_CHANGE: z.number().int().positive(),
+    HIGH_CHANGE: z.number().int().positive(),
+  }),
+  // Триггер пересмотра семантики (§3.4.4, §6): доля ретривалов, где память
+  // существовала, но не была найдена structured-путём. Не enforced
+  // автоматически в Фазе 5 — читается оценочным harness'ом (§7).
+  memory_semantic_review_threshold: z.number().min(0).max(1),
 });
 
 export type ProductConfig = z.infer<typeof productConfigSchema>;
@@ -61,6 +77,15 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
     maxWallClockSec: 1200,
     reservedRecoverySteps: 3,
   },
+  memory_enabled: true,
+  memory_retrieval_top_k: 5,
+  memory_min_confidence_reuse: 70,
+  memory_stale_after_days: {
+    LOW_CHANGE: 180,
+    MEDIUM_CHANGE: 30,
+    HIGH_CHANGE: 3,
+  },
+  memory_semantic_review_threshold: 0.2,
 };
 
 export async function loadProductConfig(

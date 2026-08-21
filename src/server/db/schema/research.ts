@@ -145,6 +145,9 @@ export const interpretations = pgTable(
       .on(t.parentId)
       .where(sql`parent_id IS NOT NULL`),
     index("ix_interpretations_user_created").on(t.userId, t.createdAt.desc()),
+    // Retrieval-ключи планировщика Фазы 5 читаются отсюда по job'у
+    // (phase-5-plan.md §5.2).
+    index("ix_interpretations_research_job").on(t.researchJobId),
   ],
 );
 
