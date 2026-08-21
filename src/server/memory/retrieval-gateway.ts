@@ -63,8 +63,10 @@ function toHit(r: Row, matchedVia: MatchedVia): RetrievalHit {
     statement: r.statement,
     mechanismState: r.mechanism_state,
     freshnessClass: r.freshness_class,
-    verifiedAt: r.verified_at,
-    dataAsOf: r.data_as_of,
+    // db.execute() — raw pg driver, не гарантированно Date (в отличие от
+    // типизированного select()); приводим явно.
+    verifiedAt: new Date(r.verified_at),
+    dataAsOf: r.data_as_of ? new Date(r.data_as_of) : null,
     staleAfterDays: r.stale_after_days,
     confidence: r.confidence,
     matchedVia,

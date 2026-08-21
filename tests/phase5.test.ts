@@ -5,6 +5,8 @@ import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import {
   demoQuotaReservations,
   evidence,
+  memoryRetrievals,
+  productConfig,
   projectMemoryItems,
   projects,
   proofs,
@@ -12,6 +14,7 @@ import {
   researchMemory,
   researchMemoryProvenance,
   researchPatterns,
+  researchPlans,
   sources,
   topics,
   userIdentities,
@@ -26,7 +29,8 @@ import {
 } from "../src/server/memory/lifecycle";
 import { markProofVerified } from "../src/server/memory/verification";
 import { structuredMemoryRetrievalGateway } from "../src/server/memory/retrieval-gateway";
-import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
+import { coreEntitlement, demoEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 
 let ctx: TestContext;
 
@@ -628,5 +632,154 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
     expect(step8.length).toBe(2);
     // Top-K оставляет наиболее уверенные записи.
     expect(step8.every((h) => h.confidence >= 62)).toBe(true);
+  });
+});
+
+async function setMemoryConfig(ctx2: TestContext, patch: Record<string, unknown>) {
+  for (const [key, value] of Object.entries(patch)) {
+    await ctx2.db
+      .insert(productConfig)
+      .values({ key, value })
+      .onConflictDoUpdate({ target: productConfig.key, set: { value } });
+  }
+}
+
+async function makeJob(
+  ctx2: TestContext,
+  opts: { projectId: string; topicId: string; entitlement: ReturnType<typeof coreEntitlement> },
+) {
+  const user = await ctx2.db.insert(users).values({}).returning().then((r) => r[0]);
+  return createResearchJob(ctx2.db, ctx2.boss, {
+    userId: user.id,
+    topicId: opts.topicId,
+    projectId: opts.projectId,
+    originalQuestion: "does protocol revenue reach token holders?",
+    normalizedTask: { project_slug: "x", project_slugs: ["x"], task: "value capture investigation" },
+    normalizedTaskHash: uniq("hash"),
+    idempotencyKey: uniq("idem"),
+    entitlement: opts.entitlement,
+    demoLifetimeProofLimit: 3,
+  });
+}
+
+describe("Фаза 5 — планировщик поверх job'ов: runMemoryPlanningStage (chunk F/G)", () => {
+  it("17. память меняет план: тот же вопрос с памятью и без неё даёт структурно разные контракты", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("proj17"), name: "Test Project 17", status: "ACTIVE_CORE" })
+      .returning();
+    await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 1,
+      claimKey: "economic_source",
+      statement: "0.3% swap fee is the economic source",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 95,
+      originKind: "TEST",
+    });
+    await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 3,
+      claimKey: "allocation_mechanism",
+      statement: "governance-approved buyback mechanism",
+      freshnessClass: "MEDIUM_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 92,
+      originKind: "TEST",
+    });
+
+    await setMemoryConfig(ctx, { memory_enabled: true });
+    const jobOn = await makeJob(ctx, { projectId: project.id, topicId, entitlement: coreEntitlement() });
+    const withMemory = await runMemoryPlanningStage(ctx.db, jobOn.job.id);
+
+    await setMemoryConfig(ctx, { memory_enabled: false });
+    const jobOff = await makeJob(ctx, { projectId: project.id, topicId, entitlement: coreEntitlement() });
+    const withoutMemory = await runMemoryPlanningStage(ctx.db, jobOff.job.id);
+    await setMemoryConfig(ctx, { memory_enabled: true }); // восстановить для следующих тестов
+
+    const [planOn] = await ctx.db.select().from(researchPlans).where(eq(researchPlans.id, withMemory.planId));
+    const [planOff] = await ctx.db.select().from(researchPlans).where(eq(researchPlans.id, withoutMemory.planId));
+    const contractOn = planOn.contract as { alreadySatisfiedSteps: number[]; missingSteps: number[] };
+    const contractOff = planOff.contract as { alreadySatisfiedSteps: number[]; missingSteps: number[] };
+
+    // Структурно разные, поимённо — не просто "разный текст".
+    expect(contractOn.alreadySatisfiedSteps.sort()).toEqual([1, 3]);
+    expect(contractOff.alreadySatisfiedSteps).toEqual([]);
+    expect(contractOff.missingSteps.length).toBe(8);
+    expect(planOn.mode).toBe("TARGETED_REFRESH");
+    expect(planOff.mode).toBe("FRESH_RESEARCH");
+    expect(withMemory.memoryUsed).toBe(true);
+    expect(withoutMemory.memoryUsed).toBe(false);
+    expect(withMemory.memoryStatus).toBe("USED");
+    expect(withoutMemory.memoryStatus).toBe("NOT_USED");
+
+    // memory_retrievals — сырьё для оценки OFF/ON, привязано к правильному плану.
+    const [retrievalOn] = await ctx.db
+      .select()
+      .from(memoryRetrievals)
+      .where(eq(memoryRetrievals.researchJobId, jobOn.job.id));
+    expect(retrievalOn.planId).toBe(withMemory.planId);
+    expect(retrievalOn.retrievedCount).toBeGreaterThanOrEqual(2);
+  });
+
+  it("18. capability ceiling: DEMO не может получить FRESH_RESEARCH даже если план решил бы иначе", async () => {
+    const topicId = await activeTopicId();
+    const [freshProject] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("proj18"), name: "Test Project 18", status: "ACTIVE_CORE" })
+      .returning();
+    await setMemoryConfig(ctx, { memory_enabled: true });
+    // Ничего не засеяно для этого проекта -> desiredMode был бы FRESH_RESEARCH.
+    const job = await makeJob(ctx, {
+      projectId: freshProject.id,
+      topicId,
+      entitlement: demoEntitlement(), // capability = demo_max_capability = TARGETED_REFRESH
+    });
+    const result = await runMemoryPlanningStage(ctx.db, job.job.id);
+    expect(result.mode).toBe("TARGETED_REFRESH");
+
+    const [plan] = await ctx.db.select().from(researchPlans).where(eq(researchPlans.id, result.planId));
+    expect(plan.mode).toBe("TARGETED_REFRESH");
+    const contract = plan.contract as { stopConditions: string[] };
+    expect(contract.stopConditions.some((s) => s.includes("capability ceiling"))).toBe(true);
+  });
+
+  it("19. memory_status доезжает до job и отражает реальность (USED_AND_REVERIFIED при просроченном факте)", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("proj19"), name: "Test Project 19", status: "ACTIVE_CORE" })
+      .returning();
+    const staleMemId = (
+      await ctx.db
+        .insert(researchMemory)
+        .values({
+          projectId: project.id,
+          topicId,
+          patternStep: 5,
+          claimKey: "current_status_reverify_test",
+          statement: "status checked long ago",
+          freshnessClass: "HIGH_CHANGE",
+          verifiedAt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // старше HIGH_CHANGE default (3d)
+          confidence: 90,
+          originKind: "TEST",
+        })
+        .returning()
+    )[0].id;
+    const admin = await ctx.db.insert(users).values({ role: "ADMIN" }).returning().then((r) => r[0]);
+    await promoteToActive(ctx.db, staleMemId, admin.id);
+
+    await setMemoryConfig(ctx, { memory_enabled: true });
+    const job = await makeJob(ctx, { projectId: project.id, topicId, entitlement: coreEntitlement() });
+    const result = await runMemoryPlanningStage(ctx.db, job.job.id);
+    expect(result.memoryStatus).toBe("USED_AND_REVERIFIED");
+
+    const [jobRow] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, job.job.id));
+    expect(jobRow.memoryStatus).toBe("USED_AND_REVERIFIED");
+    expect(jobRow.progressStage).toBe(2);
   });
 });

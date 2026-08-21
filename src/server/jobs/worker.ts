@@ -4,6 +4,7 @@ import { deleteStaleRateLimits } from "../auth/rate-limit";
 import { deleteExpiredSessions } from "../auth/session";
 import { createDatabase, type Database } from "../db/client";
 import { researchJobs } from "../db/schema";
+import { runMemoryPlanningStage } from "../memory/plan-job";
 import { createBoss, RESEARCH_QUEUE } from "./queue";
 import { resolveDemoReservation, transitionJobState } from "./research-jobs";
 
@@ -64,15 +65,34 @@ export async function startWorker() {
       return; // job отменён/потерян — задача считается обработанной
     }
     await transitionJobState(db, jobId, "RUNNING", "worker picked up");
-    // Фаза 1: no-op. Никакого фейкового прогресса — job остаётся RUNNING
-    // только на время реальной работы; здесь работы нет, честно завершаем
-    // технической ошибкой NOT_IMPLEMENTED и возвращаем DEMO-слот.
+
+    // Стадия 2 LOCKED §9 «Проверяю накопленный опыт» — Фаза 5 делает её
+    // настоящей: retrieval → детерминированный план → запись контракта.
+    // Честный сбой планирования — не то же самое, что «движка ещё нет»
+    // (Фаза 6): разные errorCode, чтобы не смешивать баг с гранью фазы.
+    let planningErrorCode: string | null = null;
+    try {
+      await runMemoryPlanningStage(db, jobId);
+    } catch (e) {
+      console.error("[worker] memory planning stage failed", e);
+      planningErrorCode = "MEMORY_PLANNING_FAILED";
+    }
+
+    // Стадия 3+ «Ищу недостающие доказательства» — Research Engine, Фаза 6.
+    // Никакого фейкового прогресса: план записан по-настоящему, дальше
+    // честно нечем продолжить — завершаем понятной технической ошибкой
+    // и возвращаем DEMO-слот.
     await db.transaction(async (tx) => {
       await tx
         .update(researchJobs)
-        .set({ errorCode: "NOT_IMPLEMENTED" })
+        .set({ errorCode: planningErrorCode ?? "NOT_IMPLEMENTED" })
         .where(eq(researchJobs.id, jobId));
-      await transitionJobState(tx, jobId, "FAILED", "phase 1: engine not implemented");
+      await transitionJobState(
+        tx,
+        jobId,
+        "FAILED",
+        planningErrorCode ? "phase 5: memory planning failed" : "phase 5: engine not implemented",
+      );
       if (job.entitlementAtStart === "DEMO") {
         await resolveDemoReservation(tx, jobId, "RELEASED");
       }
