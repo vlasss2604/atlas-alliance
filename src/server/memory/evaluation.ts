@@ -123,9 +123,12 @@ export interface ScenarioResult {
   // D-066: метрики считаются только там, где определены. null — метрика
   // математически не определена для этого сценария (пустое ожидаемое или
   // пустое предсказанное множество), а не синтетическая единица.
+  // noise_rate — дополнение precision: при пустом предсказанном множестве
+  // не определён так же, как precision (синтетический 0 приукрашивал бы
+  // агрегат тем же приёмом, что изгнан из recall/precision).
   recall: number | null;
   precision: number | null;
-  noiseRate: number;
+  noiseRate: number | null;
   // Негативные сценарии (пустое ожидание): отдельная метрика отсутствия
   // ложных срабатываний. null для сценариев с непустым ожиданием.
   noFalsePositives: boolean | null;
@@ -308,7 +311,7 @@ export async function runGoldenScenario(
   const precision =
     actualSatisfied.size === 0 ? null : truePositives.length / actualSatisfied.size;
   const noise = [...actualSatisfied].filter((s) => !expectedSatisfied.has(s));
-  const noiseRate = actualSatisfied.size === 0 ? 0 : noise.length / actualSatisfied.size;
+  const noiseRate = actualSatisfied.size === 0 ? null : noise.length / actualSatisfied.size;
   // Негативные сценарии: явная метрика отсутствия ложных срабатываний.
   const noFalsePositives = expectedSatisfied.size === 0 ? actualSatisfied.size === 0 : null;
 
@@ -373,7 +376,8 @@ export interface AggregateMetrics {
   meanRecall: number | null;
   precisionDefinedCount: number;
   meanPrecision: number | null;
-  meanNoiseRate: number;
+  noiseDefinedCount: number;
+  meanNoiseRate: number | null;
   // Негативные сценарии — отдельная метрика: доля без ложных срабатываний.
   negativeScenarioCount: number;
   noFalsePositiveRate: number | null;
@@ -437,6 +441,9 @@ export function aggregateGoldenResults(results: ScenarioResult[]): AggregateMetr
   const precisionValues = acceptance
     .map((r) => r.precision)
     .filter((v): v is number => v !== null);
+  const noiseValues = acceptance
+    .map((r) => r.noiseRate)
+    .filter((v): v is number => v !== null);
   const negative = acceptance.filter((r) => r.noFalsePositives !== null);
 
   const falseReuseSteps = acceptance.reduce((s, r) => s + r.falseReuseStepCount, 0);
@@ -448,7 +455,8 @@ export function aggregateGoldenResults(results: ScenarioResult[]): AggregateMetr
     meanRecall: mean(recallValues),
     precisionDefinedCount: precisionValues.length,
     meanPrecision: mean(precisionValues),
-    meanNoiseRate: acceptance.reduce((s, r) => s + r.noiseRate, 0) / n,
+    noiseDefinedCount: noiseValues.length,
+    meanNoiseRate: mean(noiseValues),
     negativeScenarioCount: negative.length,
     noFalsePositiveRate:
       negative.length === 0

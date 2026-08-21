@@ -48,19 +48,20 @@ describe("Фаза 5 — Golden set: Memory OFF vs ON (chunk H)", () => {
         [...result.contractOn.alreadySatisfiedSteps].sort((a, b) => a - b),
         scenario.name,
       ).toEqual(scenario.expectedSatisfiedSteps);
-      expect(result.noiseRate, `${scenario.name}: noise`).toBe(0);
-
       if (scenario.expectedSatisfiedSteps.length > 0) {
-        // Позитивный сценарий: recall/precision определены и равны 1.
+        // Позитивный сценарий: recall/precision/noise определены.
         expect(result.recall, `${scenario.name}: recall`).toBe(1);
         expect(result.precision, `${scenario.name}: precision`).toBe(1);
+        expect(result.noiseRate, `${scenario.name}: noise`).toBe(0);
         expect(result.noFalsePositives, scenario.name).toBeNull();
       } else {
         // Негативный сценарий: recall НЕ определён (пустое ожидаемое
-        // множество) — вместо синтетической 1 отдельная метрика
+        // множество), precision и noise_rate НЕ определены (пустое
+        // предсказанное) — вместо синтетических 1/0 отдельная метрика
         // отсутствия ложных срабатываний.
         expect(result.recall, `${scenario.name}: recall must be undefined`).toBeNull();
         expect(result.precision, `${scenario.name}: precision must be undefined`).toBeNull();
+        expect(result.noiseRate, `${scenario.name}: noise must be undefined`).toBeNull();
         expect(result.noFalsePositives, `${scenario.name}: negative safety`).toBe(true);
       }
 
@@ -210,11 +211,14 @@ describe("Фаза 5 — Golden set: Memory OFF vs ON (chunk H)", () => {
     const acceptance = SCENARIOS.filter((s) => !s.metricValidationOnly);
     const positive = acceptance.filter((s) => s.expectedSatisfiedSteps.length > 0);
     const negative = acceptance.filter((s) => s.expectedSatisfiedSteps.length === 0);
-    // recall определён ровно там, где ожидаемое множество непусто.
+    // recall определён ровно там, где ожидаемое множество непусто;
+    // precision/noise — где непусто предсказанное (здесь совпадает).
     expect(agg.recallDefinedCount).toBe(positive.length);
+    expect(agg.noiseDefinedCount).toBe(positive.length);
     expect(agg.negativeScenarioCount).toBe(negative.length);
     expect(agg.meanRecall).toBe(1);
     expect(agg.meanPrecision).toBe(1);
+    expect(agg.meanNoiseRate).toBe(0);
     expect(agg.noFalsePositiveRate).toBe(1); // ни один негативный сценарий не дал ложного срабатывания
     // Синтетические единицы за пустые сценарии агрегат больше не надувают:
     // средние считаются по определённым значениям, не по всем сценариям.

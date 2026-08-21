@@ -135,7 +135,7 @@ async function printScenario(db: TestContext["db"], result: ScenarioResult): Pro
 
   console.log("");
   console.log(
-    `recall=${fmtMetric(result.recall, "no expected positives")}  precision=${fmtMetric(result.precision, "nothing predicted positive")}  noise_rate=${result.noiseRate}  search_delta=${result.searchDelta}`,
+    `recall=${fmtMetric(result.recall, "no expected positives")}  precision=${fmtMetric(result.precision, "nothing predicted positive")}  noise_rate=${fmtMetric(result.noiseRate, "nothing predicted positive")}  search_delta=${result.searchDelta}`,
   );
   if (result.noFalsePositives !== null) {
     console.log(
@@ -182,7 +182,7 @@ async function main() {
     console.log(`mean recall          : ${fmtMetric(agg.meanRecall, "no scenario had expected positives")}  (over ${agg.recallDefinedCount} scenarios where recall is defined)`);
     console.log(`mean precision       : ${fmtMetric(agg.meanPrecision, "no scenario predicted positives")}  (over ${agg.precisionDefinedCount} scenarios where precision is defined)`);
     console.log(`negative safety      : ${fmtMetric(agg.noFalsePositiveRate, "no negative scenarios")}  (share of ${agg.negativeScenarioCount} negative-only scenarios with NO false positives)`);
-    console.log(`mean noise_rate      : ${agg.meanNoiseRate}`);
+    console.log(`mean noise_rate      : ${fmtMetric(agg.meanNoiseRate, "no scenario predicted positives")}  (over ${agg.noiseDefinedCount} scenarios where noise_rate is defined)`);
     console.log(`false_reuse_rate     : ${agg.falseReuseRate}  (${agg.falseReuseStepCount}/${agg.satisfiedStepCount} satisfied steps)  ${agg.falseReuseRate === 0 ? "[acceptance condition MET]" : "[!! BLOCKS PHASE 5 ACCEPTANCE]"}`);
     console.log(`total steps skipped  : ${agg.totalStepsSkipped}`);
     console.log(`total steps refreshed: ${agg.totalStepsRefreshed}`);
