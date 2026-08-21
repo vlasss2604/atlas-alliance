@@ -701,6 +701,12 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       parseInterpreterResult({ ...valid, understood_summary: null }),
     ).toThrow(InterpreterContractError);
   });
+  it("13b2. D-037 (вариант 2, решение владельца): «зачем нужен токен» и «доходит ли доход до держателя» — одна задача, без уточнения", () => {
+    // phase-4-freeze.md §5: живая модель раньше уточняла здесь; владелец
+    // выбрал вариант 2 — отвечать сразу, без уточняющего вопроса.
+    expect(SYSTEM_PROMPT).toContain("are the same Token Value Capture task");
+  });
+
   it("13c. D-039: промпт требует грамотный язык в пользовательских полях", () => {
     // Найдено живым прогоном: модель иногда выдаёт грамматически неверное
     // слово ("заработивает"). Правка — одна строка про грамотность
