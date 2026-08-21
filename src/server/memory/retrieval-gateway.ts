@@ -177,7 +177,36 @@ export const structuredMemoryRetrievalGateway: MemoryRetrievalGateway = {
       list.sort(
         (a, b) => b.confidence - a.confidence || (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
       );
-      result.push(...list.slice(0, opts.topKPerStep));
+      const kept = list.slice(0, opts.topKPerStep);
+      // D-062: усечение Top-K не имеет права молча разрешать конфликт в
+      // пользу «более уверенной» записи. Если за границей среза остаётся
+      // запись, несущая ДРУГОЙ mechanism_state для компонента, уже
+      // представленного в срезе, лучшая такая запись добавляется к выдаче:
+      // планировщик обязан увидеть каждое различное состояние, иначе
+      // CONTRADICTED недостижим по построению. Компонент, вытесненный из
+      // среза целиком, не дополняется — это безопасное направление
+      // (непокрытый компонент -> REQUIRED_FRESH, лишняя перепроверка,
+      // не ложное переиспользование).
+      const keptComponents = new Set<string>();
+      const keptStates = new Map<string, Set<string>>();
+      for (const h of kept) {
+        keptComponents.add(h.component);
+        if (h.mechanismState !== null) {
+          const states = keptStates.get(h.component) ?? new Set<string>();
+          states.add(h.mechanismState);
+          keptStates.set(h.component, states);
+        }
+      }
+      for (const h of list.slice(opts.topKPerStep)) {
+        if (h.mechanismState === null || !keptComponents.has(h.component)) continue;
+        const states = keptStates.get(h.component) ?? new Set<string>();
+        if (!states.has(h.mechanismState)) {
+          kept.push(h); // список отсортирован: первая встреченная = лучшая
+          states.add(h.mechanismState);
+          keptStates.set(h.component, states);
+        }
+      }
+      result.push(...kept);
     }
     return result.sort(
       (a, b) =>

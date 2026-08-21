@@ -860,6 +860,55 @@ describe("Фаза 5 — MemoryRetrievalGateway: structured retrieval (chunk D)"
     expect(months?.staleAfterSeconds).toBe(90 * 24 * 60 * 60); // Postgres: месяц = 30 дней
   });
 
+  it("16e. D-062: усечение Top-K не скрывает конфликтующий mechanism_state от планировщика", async () => {
+    const topicId = await activeTopicId();
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("topk_conflict"), name: "TopK Conflict Project", status: "ACTIVE_CORE" })
+      .returning();
+    // 5 согласных записей с ВЫСОКОЙ уверенностью + 1 конфликтующая с
+    // НИЗКОЙ: прежний срез top-5 по уверенности молча выбрасывал
+    // конфликтующую — противоречие разрешалось «более уверенной» записью,
+    // что D-062 прямо запрещает.
+    for (let i = 0; i < 5; i += 1) {
+      await activateMemory(ctx, {
+        projectId: project.id,
+        topicId,
+        patternStep: 5,
+        component: "CURRENT_STATE",
+        claimKey: `current_status_agree_${i}`,
+        statement: `mechanism running, source ${i}`,
+        mechanismState: "ACTIVE",
+        freshnessClass: "LOW_CHANGE",
+        verifiedAt: new Date(),
+        confidence: 95 - i,
+        originKind: "TEST",
+      });
+    }
+    const pausedId = await activateMemory(ctx, {
+      projectId: project.id,
+      topicId,
+      patternStep: 5,
+      component: "CURRENT_STATE",
+      claimKey: "current_status_paused",
+      statement: "mechanism halted per latest governance note",
+      mechanismState: "PAUSED",
+      freshnessClass: "LOW_CHANGE",
+      verifiedAt: new Date(),
+      confidence: 80, // ниже всех пяти согласных — за границей среза top-5
+      originKind: "TEST",
+    });
+
+    const hits = await structuredMemoryRetrievalGateway.retrieve(
+      ctx.db,
+      { projectId: project.id, topicId },
+      { topKPerStep: 5 },
+    );
+    // Конфликтующая запись обязана дойти до планировщика.
+    expect(hits.some((h) => h.memoryId === pausedId)).toBe(true);
+    expect(hits.filter((h) => h.patternStep === 5).length).toBe(6); // 5 + представитель другого состояния
+  });
+
   it("16d. L-1 (D-052): порядок и состав retrieval детерминированы при равной уверенности", async () => {
     const topicId = await activeTopicId();
     const [project] = await ctx.db
