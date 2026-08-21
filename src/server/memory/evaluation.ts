@@ -1,13 +1,20 @@
-import { eq } from "drizzle-orm";
+import { eq, inArray } from "drizzle-orm";
 import type { PgBoss } from "pg-boss";
 
 import { DEFAULT_PRODUCT_CONFIG } from "../config/product";
 import type { Database } from "../db/client";
-import { productConfig, projects, researchPlans, users } from "../db/schema";
+import {
+  productConfig,
+  projects,
+  researchMemoryProvenance,
+  researchPlans,
+  sources,
+  users,
+} from "../db/schema";
 import type { EntitlementSnapshot, ResearchCapability } from "../domain/types";
 import { createResearchJob } from "../jobs/research-jobs";
 import type { ResearchBoundaryContract } from "./contract";
-import { observeMemoryCandidate, promoteToActive } from "./lifecycle";
+import { copyProvenance, observeMemoryCandidate, promoteToActive } from "./lifecycle";
 import { runMemoryPlanningStage } from "./plan-job";
 
 // Golden set (phase-5-plan.md §7.2–7.3, D-049). Память сеется нами — значит
@@ -64,6 +71,21 @@ export interface ScenarioResult {
   stepsSkipped: number;
   stepsRefreshed: number;
   searchDelta: number;
+  // Читается из contract.stopConditions (planner.ts уже пишет туда честную
+  // границу при зажатии режима) — не пересчитывается заново, только читается.
+  capabilityCeilingHit: boolean;
+  capabilityCeilingNote: string | null;
+}
+
+// Планировщик уже кладёт эту строку в stopConditions, когда desiredMode
+// превышает capability_at_start (planner.ts). Читаем её здесь, а не
+// пересчитываем решение заново — единственный источник истины остаётся один.
+function readCapabilityCeiling(contract: ResearchBoundaryContract): {
+  hit: boolean;
+  note: string | null;
+} {
+  const note = contract.stopConditions.find((s) => s.includes("capability ceiling")) ?? null;
+  return { hit: note !== null, note };
 }
 
 async function setMemoryEnabled(db: Database, value: boolean): Promise<void> {
@@ -80,6 +102,13 @@ async function seedFacts(
   facts: GoldenMemoryFact[],
   adminId: string,
 ): Promise<void> {
+  if (facts.length === 0) return;
+  // Один системный source на сценарий — provenance должна быть предъявима
+  // (CLI/владелец хочет видеть, откуда факт), не только memoryId.
+  const [source] = await db
+    .insert(sources)
+    .values({ url: `https://example.com/golden-set/${uid("src")}`, urlHash: uid("srchash") })
+    .returning();
   for (const f of facts) {
     const { id } = await observeMemoryCandidate(db, {
       projectId,
@@ -94,6 +123,16 @@ async function seedFacts(
     });
     if (f.promote) {
       await promoteToActive(db, id, adminId);
+      // Copied-provenance path (§5.1) — тот же код, что использует
+      // реальный промоушен, не заглушка для отчёта.
+      await copyProvenance(db, {
+        memoryId: id,
+        sourceId: source.id,
+        retrievedUrl: `https://example.com/golden-set/${f.claimKey}`,
+        contentHash: `sha256:golden:${f.claimKey}`,
+        fragment: f.statement,
+        fetchedAt: f.verifiedAt,
+      });
     }
   }
 }
@@ -186,6 +225,8 @@ export async function runGoldenScenario(
     (e) => !promotedClaimKeys.has(e.claimKey),
   ).length;
 
+  const ceiling = readCapabilityCeiling(on.contract);
+
   return {
     scenario: scenario.name,
     angle: scenario.angle,
@@ -201,6 +242,8 @@ export async function runGoldenScenario(
     stepsSkipped: on.contract.alreadySatisfiedSteps.length,
     stepsRefreshed: on.contract.requiredFreshEvidence.length,
     searchDelta: off.contract.researchBudget.maxSearchQueries - on.contract.researchBudget.maxSearchQueries,
+    capabilityCeilingHit: ceiling.hit,
+    capabilityCeilingNote: ceiling.note,
   };
 }
 
@@ -213,6 +256,39 @@ export interface AggregateMetrics {
   totalStepsSkipped: number;
   totalStepsRefreshed: number;
   meanSearchDelta: number;
+}
+
+export interface ProvenanceView {
+  sourceId: string;
+  retrievedUrl: string;
+  contentHash: string;
+  fragment: string | null;
+}
+
+// Для отчёта (CLI/владелец): что стоит за reusableEvidence[].memoryId,
+// не только сам ID. Чтение уже персистентных строк, ничего не пересчитывает.
+export async function fetchProvenanceByMemoryId(
+  db: Database,
+  memoryIds: string[],
+): Promise<Map<string, ProvenanceView[]>> {
+  if (memoryIds.length === 0) return new Map();
+  const rows = await db
+    .select({
+      memoryId: researchMemoryProvenance.memoryId,
+      sourceId: researchMemoryProvenance.sourceId,
+      retrievedUrl: researchMemoryProvenance.retrievedUrl,
+      contentHash: researchMemoryProvenance.contentHash,
+      fragment: researchMemoryProvenance.fragment,
+    })
+    .from(researchMemoryProvenance)
+    .where(inArray(researchMemoryProvenance.memoryId, memoryIds));
+  const map = new Map<string, ProvenanceView[]>();
+  for (const r of rows) {
+    const list = map.get(r.memoryId) ?? [];
+    list.push({ sourceId: r.sourceId, retrievedUrl: r.retrievedUrl, contentHash: r.contentHash, fragment: r.fragment });
+    map.set(r.memoryId, list);
+  }
+  return map;
 }
 
 export function aggregateGoldenResults(results: ScenarioResult[]): AggregateMetrics {

@@ -38,6 +38,50 @@ export async function sweepStaleRunningJobs(db: Database): Promise<number> {
   return stale.length;
 }
 
+// Обработчик одной задачи очереди — вынесен из startWorker() именованной
+// экспортируемой функцией, чтобы её можно было прогнать через настоящий
+// pg-boss dequeue в acceptance-тесте (tests/phase5-worker-acceptance.test.ts)
+// без дублирования этой логики. Поведение не изменилось, только форма.
+export async function handleResearchJobTask(db: Database, jobId: string): Promise<void> {
+  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job || job.state !== "QUEUED") {
+    return; // job отменён/потерян — задача считается обработанной
+  }
+  await transitionJobState(db, jobId, "RUNNING", "worker picked up");
+
+  // Стадия 2 LOCKED §9 «Проверяю накопленный опыт» — Фаза 5 делает её
+  // настоящей: retrieval → детерминированный план → запись контракта.
+  // Честный сбой планирования — не то же самое, что «движка ещё нет»
+  // (Фаза 6): разные errorCode, чтобы не смешивать баг с гранью фазы.
+  let planningErrorCode: string | null = null;
+  try {
+    await runMemoryPlanningStage(db, jobId);
+  } catch (e) {
+    console.error("[worker] memory planning stage failed", e);
+    planningErrorCode = "MEMORY_PLANNING_FAILED";
+  }
+
+  // Стадия 3+ «Ищу недостающие доказательства» — Research Engine, Фаза 6.
+  // Никакого фейкового прогресса: план записан по-настоящему, дальше
+  // честно нечем продолжить — завершаем понятной технической ошибкой
+  // и возвращаем DEMO-слот.
+  await db.transaction(async (tx) => {
+    await tx
+      .update(researchJobs)
+      .set({ errorCode: planningErrorCode ?? "NOT_IMPLEMENTED" })
+      .where(eq(researchJobs.id, jobId));
+    await transitionJobState(
+      tx,
+      jobId,
+      "FAILED",
+      planningErrorCode ? "phase 5: memory planning failed" : "phase 5: engine not implemented",
+    );
+    if (job.entitlementAtStart === "DEMO") {
+      await resolveDemoReservation(tx, jobId, "RELEASED");
+    }
+  });
+}
+
 // Entrypoint worker-процесса. В Фазе 1 хендлер — no-op (инфраструктура);
 // реальный research-pipeline подключается в Фазах 4–6.
 export async function startWorker() {
@@ -56,47 +100,7 @@ export async function startWorker() {
   );
 
   await boss.work<{ jobId: string }>(RESEARCH_QUEUE, async ([task]) => {
-    const { jobId } = task.data;
-    const [job] = await db
-      .select()
-      .from(researchJobs)
-      .where(eq(researchJobs.id, jobId));
-    if (!job || job.state !== "QUEUED") {
-      return; // job отменён/потерян — задача считается обработанной
-    }
-    await transitionJobState(db, jobId, "RUNNING", "worker picked up");
-
-    // Стадия 2 LOCKED §9 «Проверяю накопленный опыт» — Фаза 5 делает её
-    // настоящей: retrieval → детерминированный план → запись контракта.
-    // Честный сбой планирования — не то же самое, что «движка ещё нет»
-    // (Фаза 6): разные errorCode, чтобы не смешивать баг с гранью фазы.
-    let planningErrorCode: string | null = null;
-    try {
-      await runMemoryPlanningStage(db, jobId);
-    } catch (e) {
-      console.error("[worker] memory planning stage failed", e);
-      planningErrorCode = "MEMORY_PLANNING_FAILED";
-    }
-
-    // Стадия 3+ «Ищу недостающие доказательства» — Research Engine, Фаза 6.
-    // Никакого фейкового прогресса: план записан по-настоящему, дальше
-    // честно нечем продолжить — завершаем понятной технической ошибкой
-    // и возвращаем DEMO-слот.
-    await db.transaction(async (tx) => {
-      await tx
-        .update(researchJobs)
-        .set({ errorCode: planningErrorCode ?? "NOT_IMPLEMENTED" })
-        .where(eq(researchJobs.id, jobId));
-      await transitionJobState(
-        tx,
-        jobId,
-        "FAILED",
-        planningErrorCode ? "phase 5: memory planning failed" : "phase 5: engine not implemented",
-      );
-      if (job.entitlementAtStart === "DEMO") {
-        await resolveDemoReservation(tx, jobId, "RELEASED");
-      }
-    });
+    await handleResearchJobTask(db, task.data.jobId);
   });
 
   const shutdown = async () => {

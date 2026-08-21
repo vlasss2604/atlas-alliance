@@ -13,6 +13,7 @@
     "worker:dev": "tsx src/server/jobs/worker.ts",
     "admin:verify-proof": "tsx scripts/verify-proof.ts",
     "admin:promote-memory": "tsx scripts/promote-memory.ts",
+    "eval:memory": "tsx scripts/eval-memory.ts",
     "test": "vitest run",
     "smoke:interpreter": "tsx scripts/smoke-interpreter.ts",
     "test:e2e": "playwright test"
