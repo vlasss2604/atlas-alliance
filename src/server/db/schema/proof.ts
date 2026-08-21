@@ -124,12 +124,21 @@ export const evidence = pgTable(
       .references(() => sources.id, { onDelete: "restrict" }),
     // Сопоставление с контрактом (§6.2): без пары (step, component)
     // Evidence нельзя приписать к работе ContractView/контроллера.
-    patternStep: smallint("pattern_step").notNull(),
-    component: text("component").notNull(),
+    // Nullable (Phase 6 S0-S3 review fix package, migration 0009):
+    // строки, созданные ДО этой миграции (Phase 1-5 Evidence), не несут
+    // этого значения и не могут детерминированно его получить — обратно
+    // совместимая ступенчатая схема, а не изобретённое значение по
+    // умолчанию. Каждая строка, записанная production-кодом Фазы 6,
+    // всегда заполняет оба поля — nullable ослабляет только тип колонки,
+    // не инвариант записи.
+    patternStep: smallint("pattern_step"),
+    component: text("component"),
     relationship: evidenceRelationship("relationship").notNull(),
     // Правило достаточности опирается на прямоту, а не на количество
-    // источников (§9, §11.2) — не nullable: у извлечения всегда есть мнение.
-    directness: evidenceDirectness("directness").notNull(),
+    // источников (§9, §11.2) — у извлечения всегда есть мнение, КРОМЕ
+    // унаследованных строк Phase 1-5 (см. patternStep выше) — nullable по
+    // той же причине.
+    directness: evidenceDirectness("directness"),
     fragment: text("fragment").notNull(), // оригинал, не переводится
     summary: text("summary"), // локализуемое краткое описание
     doesNotProve: text("does_not_prove"),
@@ -141,8 +150,10 @@ export const evidence = pgTable(
     // fees / issuance / treasury / collateral_return — структурно, не в
     // прозе (CHECK 3 atlas-core).
     valueSource: text("value_source"),
-    sourceClass: evidenceSourceClass("source_class").notNull(),
-    officiality: evidenceOfficiality("officiality").notNull(),
+    // Nullable по той же причине, что patternStep выше — Phase 1-5
+    // Evidence не несёт этих значений.
+    sourceClass: evidenceSourceClass("source_class"),
+    officiality: evidenceOfficiality("officiality"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }),
     dataAsOf: timestamp("data_as_of", { withTimezone: true }),

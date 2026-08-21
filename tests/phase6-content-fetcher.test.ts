@@ -99,6 +99,95 @@ describe("Фаза 6, S1 — ContentFetcher: SSRF-защита (реальный
   });
 });
 
+// HIGH-2 fix: string-prefix IPv6 checks (`startsWith("fe8")`) don't align
+// to CIDR boundaries — this suite proves correct, numeric prefix-aware
+// blocking at the exact edges of every required range, including forms
+// that tunnel a blocked IPv4 destination through an otherwise-plausible
+// IPv6 literal.
+describe("Фаза 6, S1 — ContentFetcher: HIGH-2, корректная численная проверка IPv6-диапазонов", () => {
+  it("fe80::/10 — блокирует ВЕСЬ диапазон, включая нестроковые-префиксные края (fea0::, feb0::, febf:ffff::)", () => {
+    expect(isBlockedIp("fe80::")).toBe(true);
+    expect(isBlockedIp("fe80::1")).toBe(true);
+    expect(isBlockedIp("fea0::1")).toBe(true); // "fea0" не начинается с "fe8"/"fe9" по строковому префиксу — старый баг пропускал это
+    expect(isBlockedIp("feb0::1")).toBe(true);
+    expect(isBlockedIp("febf:ffff:ffff:ffff:ffff:ffff:ffff:ffff")).toBe(true); // верхняя граница диапазона
+  });
+  it("fe80::/10 — НЕ блокирует адреса сразу за границей диапазона", () => {
+    expect(isBlockedIp("fec0::1")).toBe(false); // fec0 — первый адрес ПОСЛЕ fe80::/10 (site-local, deprecated, не входит в /10)
+    expect(isBlockedIp("fe7f:ffff:ffff:ffff:ffff:ffff:ffff:ffff")).toBe(false); // последний адрес ПЕРЕД диапазоном
+  });
+  it("fc00::/7 — блокирует весь диапазон (fc00.. fdff..)", () => {
+    expect(isBlockedIp("fc00::1")).toBe(true);
+    expect(isBlockedIp("fd00::1")).toBe(true);
+    expect(isBlockedIp("fdff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")).toBe(true); // верхняя граница
+  });
+  it("fc00::/7 — НЕ блокирует адрес сразу за границей (fe00::)", () => {
+    expect(isBlockedIp("fe00::1")).toBe(false);
+  });
+  it("::/128 (unspecified) и ::1/128 (loopback) блокируются точно, не более широким диапазоном", () => {
+    expect(isBlockedIp("::")).toBe(true);
+    expect(isBlockedIp("::1")).toBe(true);
+    // Обычный публичный адрес вне ::/96 (устаревшая IPv4-compatible форма
+    // тоже декодируется и проверяется — см. отдельный тест ниже) не должен
+    // задеваться правилами ::/128 и ::1/128.
+    expect(isBlockedIp("2001:db8::2")).toBe(false);
+  });
+  it("IPv4-mapped ::ffff:0:0/96 — декодирует встроенный v4 и применяет обычную v4-политику", () => {
+    expect(isBlockedIp("::ffff:10.0.0.1")).toBe(true); // встроенный приватный v4 -> блок
+    expect(isBlockedIp("::ffff:127.0.0.1")).toBe(true); // встроенный loopback v4 -> блок
+    expect(isBlockedIp("::ffff:8.8.8.8")).toBe(false); // встроенный публичный v4 -> не блокируется этим правилом
+    // Та же форма чистым hex (без точечной записи) — оба представления
+    // одного и того же адреса обязаны решаться одинаково.
+    expect(isBlockedIp("::ffff:a00:1")).toBe(true); // 0a00:0001 = 10.0.0.1
+  });
+  it("NAT64 64:ff9b::/96 — декодирует встроенный v4 и применяет обычную v4-политику", () => {
+    expect(isBlockedIp("64:ff9b::10.0.0.1")).toBe(true);
+    expect(isBlockedIp("64:ff9b::169.254.169.254")).toBe(true); // метаданные через NAT64-туннель
+    expect(isBlockedIp("64:ff9b::8.8.8.8")).toBe(false);
+  });
+  it("6to4 2002::/16 — декодирует встроенный v4 (следующие 32 бита) и применяет обычную v4-политику", () => {
+    // 2002:0a00:0001:: -> встроенный v4 = 10.0.0.1
+    expect(isBlockedIp("2002:a00:1::")).toBe(true);
+    // 2002:0808:0808:: -> встроенный v4 = 8.8.8.8 (публичный)
+    expect(isBlockedIp("2002:808:808::")).toBe(false);
+  });
+  it("устаревшая IPv4-compatible форма (::a.b.c.d/96) — декодирует встроенный v4", () => {
+    expect(isBlockedIp("::10.0.0.1")).toBe(true);
+    expect(isBlockedIp("::8.8.8.8")).toBe(false);
+  });
+  it("multicast ff00::/8 остаётся заблокированным", () => {
+    expect(isBlockedIp("ff02::1")).toBe(true);
+  });
+  it("обычный публичный IPv6-адрес не блокируется ни одним правилом", () => {
+    expect(isBlockedIp("2001:4860:4860::8888")).toBe(false); // публичный резолвер, для примера диапазона
+  });
+  it("неразбираемая строка считается заблокированной (fail closed), а не пропускается", () => {
+    expect(isBlockedIp("not-an-ipv6-address")).toBe(true);
+  });
+
+  it("реальный fetch на fea0::1 (внутри fe80::/10, вне строкового префикса fe8/fe9) отклоняется ДО сети", async () => {
+    let error: unknown;
+    try {
+      await safeContentFetcher.fetch("http://[fea0::1]/");
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ContentFetchError);
+    expect((error as ContentFetchError).reason).toBe("BLOCKED_ADDRESS");
+  });
+
+  it("реальный fetch на IPv4-mapped приватный адрес (::ffff:10.0.0.1) отклоняется ДО сети", async () => {
+    let error: unknown;
+    try {
+      await safeContentFetcher.fetch("http://[::ffff:10.0.0.1]/");
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ContentFetchError);
+    expect((error as ContentFetchError).reason).toBe("BLOCKED_ADDRESS");
+  });
+});
+
 describe("Фаза 6, S1 — ContentFetcher: HTML-нормализация (чистая функция, без сети)", () => {
   it("вырезает <script>/<style>/комментарии, схлопывает пробелы", () => {
     const html = `<html><head><style>.x{color:red}</style></head>
@@ -135,6 +224,16 @@ describe("Фаза 6, S1 — ContentFetcher: HTTP-механика (локаль
       } else if (req.url === "/error") {
         res.writeHead(500);
         res.end("server error");
+      } else if (req.url === "/redirect-malformed-location") {
+        // Deliberately invalid Location: an unbracketed literal that the
+        // WHATWG URL parser rejects even resolved against a valid base —
+        // this must surface as a typed ContentFetchError, not a raw
+        // TypeError escaping from `new URL(...)`.
+        res.writeHead(302, { location: "http://[not-a-valid-host" });
+        res.end();
+      } else if (req.url === "/redirect-to-ok") {
+        res.writeHead(302, { location: "/ok" });
+        res.end();
       } else {
         res.writeHead(404);
         res.end();
@@ -214,5 +313,56 @@ describe("Фаза 6, S1 — ContentFetcher: HTTP-механика (локаль
     }
     expect(error).toBeInstanceOf(ContentFetchError);
     expect((error as ContentFetchError).reason).toBe("HTTP_ERROR");
+  });
+
+  // LOW-2 regression: a malformed Location header must not escape the
+  // redirect loop as a raw TypeError — it is a typed INVALID_URL failure
+  // like any other rejected fetch target.
+  it("некорректный Location в редиректе — типизированная ошибка (INVALID_URL), не сырой TypeError", async () => {
+    let error: unknown;
+    try {
+      await testFetcher.fetch(`${baseUrl}/redirect-malformed-location`);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ContentFetchError);
+    expect((error as ContentFetchError).reason).toBe("INVALID_URL");
+  });
+
+  // LOW-2 regression: a redirect hop blocked by SSRF policy must report
+  // REDIRECT_TARGET_BLOCKED (not the same BLOCKED_ADDRESS reason used for
+  // a blocked start URL) — the two are distinguishable failure reasons in
+  // ContentFetchFailureReason and callers may need to tell them apart.
+  it("блокировка адреса на редирект-хопе — REDIRECT_TARGET_BLOCKED, не BLOCKED_ADDRESS", async () => {
+    let hopCount = 0;
+    const redirectAwareFetcher = createContentFetcher({
+      isAddressBlocked: () => {
+        hopCount += 1;
+        return hopCount > 1; // first hop (start URL) allowed, redirect hop blocked
+      },
+    });
+    let error: unknown;
+    try {
+      await redirectAwareFetcher.fetch(`${baseUrl}/redirect-to-ok`);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ContentFetchError);
+    expect((error as ContentFetchError).reason).toBe("REDIRECT_TARGET_BLOCKED");
+  });
+
+  // Same check, but confirms the START url itself still reports the
+  // original BLOCKED_ADDRESS reason (not REDIRECT_TARGET_BLOCKED) — the
+  // two reasons stay distinct in both directions.
+  it("блокировка стартового URL — по-прежнему BLOCKED_ADDRESS, не REDIRECT_TARGET_BLOCKED", async () => {
+    const blockedFetcher = createContentFetcher({ isAddressBlocked: () => true });
+    let error: unknown;
+    try {
+      await blockedFetcher.fetch(`${baseUrl}/ok`);
+    } catch (e) {
+      error = e;
+    }
+    expect(error).toBeInstanceOf(ContentFetchError);
+    expect((error as ContentFetchError).reason).toBe("BLOCKED_ADDRESS");
   });
 });

@@ -33,19 +33,20 @@ UPDATE "evidence" e SET "research_job_id" = p."research_job_id"
   FROM "proofs" p WHERE p."id" = e."proof_id";--> statement-breakpoint
 ALTER TABLE "evidence" ALTER COLUMN "research_job_id" SET NOT NULL;--> statement-breakpoint
 
--- Остальные добавления §6.2 — NOT NULL сразу без backfill-пути (кроме
--- явно опциональных): evidence не пишется НИ ОДНОЙ production-функцией до
--- Фазы 6 (phase-6-plan.md §0.2), значит существующих строк, которым
--- нечем заполнить эти колонки, структурно нет. Если это предположение
--- когда-либо окажется неверным на реальной БД, этот ALTER явно откажет,
--- а не молча испортит данные — ровно то поведение, которое нужно.
-ALTER TABLE "evidence" ADD COLUMN "pattern_step" smallint NOT NULL;--> statement-breakpoint
-ALTER TABLE "evidence" ADD COLUMN "component" text NOT NULL;--> statement-breakpoint
-ALTER TABLE "evidence" ADD COLUMN "directness" "evidence_directness" NOT NULL;--> statement-breakpoint
+-- Остальные добавления §6.2 — NULLABLE (Phase 6 S0-S3 review fix package):
+-- эти пять колонок не могут быть детерминированно восстановлены для
+-- строк Evidence, созданных ДО этой миграции (Phase 1-5) — обратно
+-- совместимая ступенчатая схема вместо придуманного значения по
+-- умолчанию или требования "таблица evidence пуста". Каждая строка,
+-- записанная production-кодом Фазы 6, всегда заполняет их — nullable
+-- ослабляет только тип колонки на уровне БД, не инвариант записи.
+ALTER TABLE "evidence" ADD COLUMN "pattern_step" smallint;--> statement-breakpoint
+ALTER TABLE "evidence" ADD COLUMN "component" text;--> statement-breakpoint
+ALTER TABLE "evidence" ADD COLUMN "directness" "evidence_directness";--> statement-breakpoint
 ALTER TABLE "evidence" ADD COLUMN "mechanism_state" text;--> statement-breakpoint
 ALTER TABLE "evidence" ADD COLUMN "value_source" text;--> statement-breakpoint
-ALTER TABLE "evidence" ADD COLUMN "source_class" "evidence_source_class" NOT NULL;--> statement-breakpoint
-ALTER TABLE "evidence" ADD COLUMN "officiality" "evidence_officiality" NOT NULL;--> statement-breakpoint
+ALTER TABLE "evidence" ADD COLUMN "source_class" "evidence_source_class";--> statement-breakpoint
+ALTER TABLE "evidence" ADD COLUMN "officiality" "evidence_officiality";--> statement-breakpoint
 ALTER TABLE "evidence" ADD COLUMN "published_at" timestamp with time zone;--> statement-breakpoint
 ALTER TABLE "evidence" ADD COLUMN "claim_key" text;--> statement-breakpoint
 ALTER TABLE "sources" ADD COLUMN "title" text;--> statement-breakpoint

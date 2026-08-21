@@ -1343,13 +1343,13 @@
           "name": "pattern_step",
           "type": "smallint",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "component": {
           "name": "component",
           "type": "text",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "relationship": {
           "name": "relationship",
@@ -1363,7 +1363,7 @@
           "type": "evidence_directness",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "fragment": {
           "name": "fragment",
@@ -1400,14 +1400,14 @@
           "type": "evidence_source_class",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "officiality": {
           "name": "officiality",
           "type": "evidence_officiality",
           "typeSchema": "public",
           "primaryKey": false,
-          "notNull": true
+          "notNull": false
         },
         "fetched_at": {
           "name": "fetched_at",

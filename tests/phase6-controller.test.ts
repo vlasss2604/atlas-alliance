@@ -475,4 +475,198 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
       ),
     ).toBe(false);
   });
+
+  // HIGH-1 fix: reservedRecoverySteps must be a JOB-LIFETIME limit,
+  // derived from persisted research_attempts, not a per-run counter that
+  // resets on every redelivery/restart.
+  describe("HIGH-1 — recovery budget is job-lifetime, not per-run", () => {
+    function singleComponentView(reservedRecoverySteps: number, maxSearchQueries = 10): ContractView {
+      const r = plan([hit({ patternStep: 1, component: "SOURCE_OF_VALUE", confidence: 10 })]); // UNUSABLE -> в очереди
+      const view = buildContractView({ contract: r.contract, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" });
+      return {
+        ...view,
+        workQueue: view.workQueue.filter((c) => c.step === 1 && c.component === "SOURCE_OF_VALUE"),
+        excludedComponents: [],
+        researchBudget: { ...view.researchBudget, maxSearchQueries, reservedRecoverySteps },
+      };
+    }
+    const alwaysFail: WorkExecutor = { async execute() { return { status: "FAILED", reason: "always fails" }; } };
+
+    it("restart/redelivery: суммарная recovery-ёмкость (=1) не восстанавливается ни одним из множества перезапусков", async () => {
+      const view = singleComponentView(1);
+      const jobId = await makeJob(coreEntitlement());
+
+      const r1 = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // attempt 1 (normal) — fails
+      expect(r1.attemptsThisRun).toBe(1);
+      expect(r1.recoveryAttemptsUsed).toBe(0);
+
+      const r2 = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // attempt 2 (recovery) — consumes the 1 reserved slot, fails
+      expect(r2.attemptsThisRun).toBe(1);
+      expect(r2.recoveryAttemptsUsed).toBe(1);
+      expect(r2.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
+
+      // Три дополнительных "рестарта/редеставки" подряд — ни один не
+      // должен восстановить исчерпанную recovery-ёмкость или создать
+      // ещё одну попытку.
+      for (let i = 0; i < 3; i++) {
+        const rN = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW });
+        expect(rN.attemptsThisRun).toBe(0);
+        expect(rN.stopReason).toBe("BUDGET_EXHAUSTED");
+        expect(rN.recoveryAttemptsUsed).toBe(1); // остаётся 1, никогда не больше
+      }
+
+      const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+      expect(rows.length).toBe(2); // ровно attempt 1 и attempt 2 — рестарты не создали третью попытку
+    });
+
+    it("recovery затем restart: восстановление успевает один раз, дальнейшие рестарты не дают второй попытки", async () => {
+      const view = singleComponentView(1);
+      const jobId = await makeJob(coreEntitlement());
+      let call = 0;
+      const failThenSucceed: WorkExecutor = {
+        async execute() {
+          call++;
+          return call === 1 ? { status: "FAILED", reason: "first fails" } : { status: "SUCCEEDED" };
+        },
+      };
+      await runResearchController({ db: ctx.db, jobId, view, executor: failThenSucceed, now: NOW }); // attempt 1 fails
+      const recovered = await runResearchController({ db: ctx.db, jobId, view, executor: failThenSucceed, now: NOW }); // attempt 2 (recovery) succeeds
+      expect(recovered.succeeded.length).toBe(1);
+      expect(recovered.recoveryAttemptsUsed).toBe(1);
+
+      // "Рестарт" после успеха: компонент уже SUCCEEDED -> ничего не
+      // делает, recovery-счётчик остаётся историческим (1), не растёт.
+      const after = await runResearchController({ db: ctx.db, jobId, view, executor: failThenSucceed, now: NOW });
+      expect(after.attemptsThisRun).toBe(0);
+      expect(after.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
+    });
+
+    it("точная граница бюджета: reservedRecoverySteps=2 разрешает РОВНО 2 recovery-попытки за всю жизнь job'а", async () => {
+      const view = singleComponentView(2);
+      const jobId = await makeJob(coreEntitlement());
+      await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // attempt 1 normal
+      const r2 = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // attempt 2 recovery #1
+      expect(r2.attemptsThisRun).toBe(1);
+      const r3 = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // attempt 3 recovery #2 — граница
+      expect(r3.attemptsThisRun).toBe(1);
+      expect(r3.recoveryAttemptsUsed).toBe(2);
+      const r4 = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // за границей
+      expect(r4.attemptsThisRun).toBe(0);
+      expect(r4.stopReason).toBe("BUDGET_EXHAUSTED");
+    });
+
+    it("нулевой резерв: reservedRecoverySteps=0 не разрешает НИ ОДНОЙ recovery-попытки, даже после многих рестартов", async () => {
+      const view = singleComponentView(0);
+      const jobId = await makeJob(coreEntitlement());
+      await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW }); // attempt 1 normal, fails
+      for (let i = 0; i < 3; i++) {
+        const r = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW });
+        expect(r.attemptsThisRun).toBe(0);
+        expect(r.stopReason).toBe("BUDGET_EXHAUSTED");
+      }
+      const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+      expect(rows.length).toBe(1); // только attempt 1 — никогда вторая попытка
+    });
+
+    it("испорченная персистентная история попыток (пропуски/не по порядку) всё равно корректно ограничивает recovery-ёмкость", async () => {
+      const view = singleComponentView(1);
+      const jobId = await makeJob(coreEntitlement());
+      // Вручную создаём "грязную" историю: attempt_number идут не по
+      // порядку и содержат пропуск (нет №2), но есть №1 и №5 — оба
+      // персистентно существуют до первого настоящего вызова контроллера.
+      await ctx.db.insert(researchAttempts).values([
+        { researchJobId: jobId, patternStep: 1, component: "SOURCE_OF_VALUE", attemptNumber: 5, status: "FAILED", reason: "stray high attempt number" },
+        { researchJobId: jobId, patternStep: 1, component: "SOURCE_OF_VALUE", attemptNumber: 1, status: "FAILED", reason: "normal attempt" },
+      ]);
+      // Один персистентный recovery-номер (5 > 1) уже занял единственный
+      // зарезервированный слот — новый вызов не должен получить попытку.
+      const result = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysFail, now: NOW });
+      expect(result.attemptsThisRun).toBe(0);
+      expect(result.stopReason).toBe("BUDGET_EXHAUSTED");
+      expect(result.recoveryAttemptsUsed).toBe(1);
+      // Следующая попытка (если бы была создана) обязана нумероваться
+      // строго выше максимума уже увиденного (6), не №2 — доказывается
+      // косвенно тем, что ни одна новая строка не появилась.
+      const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+      expect(rows.length).toBe(2);
+    });
+  });
+
+  // MEDIUM-3 fix: the STARTED insert is a real DB-atomic claim
+  // (onConflictDoNothing + RETURNING against the unique index). Two
+  // concurrent controller invocations racing for the same (job, step,
+  // component) attempt must execute the external work exactly once — the
+  // loser must never call the executor at all.
+  describe("MEDIUM-3 — атомарный claim попытки под конкурентными вызовами", () => {
+    it("два параллельных runResearchController на одном job'е с одной и той же ожидающей работой: внешний executor вызывается ровно один раз", async () => {
+      const r = plan([hit({ patternStep: 1, component: "SOURCE_OF_VALUE", confidence: 10 })]); // единственный элемент очереди
+      const view = buildContractView({ contract: r.contract, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" });
+      const singleItemView: ContractView = {
+        ...view,
+        workQueue: view.workQueue.filter((c) => c.step === 1 && c.component === "SOURCE_OF_VALUE"),
+        excludedComponents: [],
+      };
+      const jobId = await makeJob(coreEntitlement());
+
+      let executions = 0;
+      const countingExecutor: WorkExecutor = {
+        async execute() {
+          executions++;
+          return { status: "SUCCEEDED" };
+        },
+      };
+
+      const [resultA, resultB] = await Promise.all([
+        runResearchController({ db: ctx.db, jobId, view: singleItemView, executor: countingExecutor, now: NOW }),
+        runResearchController({ db: ctx.db, jobId, view: singleItemView, executor: countingExecutor, now: NOW }),
+      ]);
+
+      // Внешняя работа выполнена РОВНО один раз суммарно между двумя
+      // конкурентными вызовами, а не дважды.
+      expect(executions).toBe(1);
+
+      const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+      expect(rows.length).toBe(1); // ровно одна строка попытки, не дубликат
+      expect(rows[0].status).toBe("SUCCEEDED");
+
+      // Ровно один из двух вызовов сообщает о фактическом исполнении;
+      // другой — либо ничего не сделал (проиграл claim), либо доложил о
+      // том же успехе (если его вызов случился уже ПОСЛЕ того, как первый
+      // и claim, и запись успеха успели персистироваться) — оба исхода
+      // корректны, важно лишь что суммарно исполнение было одно.
+      const totalSucceeded = resultA.succeeded.length + resultB.succeeded.length;
+      const totalAttempts = resultA.attemptsThisRun + resultB.attemptsThisRun;
+      expect(totalAttempts).toBeLessThanOrEqual(2); // никогда больше одной попытки на "владельца" исхода
+      expect(totalSucceeded).toBeGreaterThanOrEqual(1);
+    });
+
+    it("проигравший claim вызов не тратит бюджет — 10 параллельных вызовов на бюджет с местом ровно под 1 попытку не создают лишних STARTED-строк", async () => {
+      const r = plan([hit({ patternStep: 1, component: "SOURCE_OF_VALUE", confidence: 10 })]);
+      const view = buildContractView({ contract: r.contract, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" });
+      const singleItemView: ContractView = {
+        ...view,
+        workQueue: view.workQueue.filter((c) => c.step === 1 && c.component === "SOURCE_OF_VALUE"),
+        excludedComponents: [],
+        researchBudget: { ...view.researchBudget, maxSearchQueries: 1, reservedRecoverySteps: 0 },
+      };
+      const jobId = await makeJob(coreEntitlement());
+      let executions = 0;
+      const countingExecutor: WorkExecutor = {
+        async execute() {
+          executions++;
+          return { status: "SUCCEEDED" };
+        },
+      };
+
+      await Promise.all(
+        Array.from({ length: 10 }, () =>
+          runResearchController({ db: ctx.db, jobId, view: singleItemView, executor: countingExecutor, now: NOW }),
+        ),
+      );
+
+      expect(executions).toBe(1);
+      const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+      expect(rows.length).toBe(1); // ни одна из 9 проигравших попыток claim не создала свою строку
+    });
+  });
 });

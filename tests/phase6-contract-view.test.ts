@@ -222,11 +222,11 @@ describe("Фаза 6, S0 — ContractView (типизированная прое
     ).toThrow(ContractInvalidError);
   });
 
-  it("7. никакого случайного расширения на уровне шага: пометка REQUIRED_FRESH не переисследует уже SATISFIED-компонент", () => {
-    // Синтетический (не из planner.ts) контракт: шаг помечен REQUIRED_FRESH,
-    // но единственный его компонент несёт state=SATISFIED — некорректная,
-    // но теоретически возможная десинхронизация. ContractView обязан
-    // доверять КОМПОНЕНТУ, а не ярлыку шага, и не добавлять его в работу.
+  it("7. owner decision (review fix package): step.decision=REQUIRED_FRESH при ВСЕХ компонентах SATISFIED — malformed-but-type-valid контракт, жёсткий отказ", () => {
+    // Раньше ContractView тихо доверял КОМПОНЕНТУ и просто не добавлял
+    // такой шаг в работу — этого больше недостаточно: несогласованность
+    // САМА ПО СЕБЕ обязана быть жёстким отказом (owner decision), а не
+    // тихо поглощаться component-level trust.
     const r = plan(fullCoverageHits());
     const tampered: ResearchBoundaryContract = {
       ...r.contract,
@@ -234,18 +234,44 @@ describe("Фаза 6, S0 — ContractView (типизированная прое
         d.step === 7 ? { ...d, decision: "REQUIRED_FRESH" as const } : d,
       ),
     };
-    const view = buildContractView({
-      contract: tampered,
-      // Пересчитанный desiredMode после порчи шага 7 (missing=0,
-      // requiredFresh=1) — тест изолирует именно КОМПОНЕНТНОЕ доверие,
-      // а не ловит несвязанный mode-mismatch.
-      mode: "TARGETED_REFRESH",
-      capabilityAtStart: "FRESH_RESEARCH",
-    });
-    expect(view.workQueue.some((c) => c.step === 7)).toBe(false);
-    expect(
-      view.reused.some((c) => c.step === 7 && c.component === "NET_EFFECT"),
-    ).toBe(true);
+    expect(() =>
+      buildContractView({
+        contract: tampered,
+        mode: "TARGETED_REFRESH",
+        capabilityAtStart: "FRESH_RESEARCH",
+      }),
+    ).toThrow(ContractDerivationMismatchError);
+  });
+
+  it("7a. owner decision: step.decision=ALREADY_SATISFIED при НЕ-SATISFIED компоненте — жёсткий отказ, а не тихая репарация", () => {
+    // Ровно пример из пакета исправлений: шаг заявлен закрытым, но один
+    // из его обязательных компонентов помечен как непокрытый.
+    const r = plan([hit({ patternStep: 3, component: "MECHANISM_SPEC", confidence: 95 })]);
+    const step3 = r.contract.stepDecisions.find((d) => d.step === 3)!;
+    expect(step3.decision).toBe("REQUIRED_FRESH"); // GOVERNANCE_BASIS = NO_MEMORY
+    const tampered: ResearchBoundaryContract = {
+      ...r.contract,
+      stepDecisions: r.contract.stepDecisions.map((d) =>
+        d.step === 3 ? { ...d, decision: "ALREADY_SATISFIED" as const } : d,
+      ),
+    };
+    expect(() =>
+      buildContractView({ contract: tampered, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" }),
+    ).toThrow(ContractDerivationMismatchError);
+  });
+
+  it("7b. никакого случайного расширения на уровне компонента: легитимно смешанный REQUIRED_FRESH шаг переисследует только несатисфицированный компонент", () => {
+    // Согласованный (не malformed) случай: decision=REQUIRED_FRESH и НЕ
+    // все компоненты SATISFIED — проходит проверку консистентности, и
+    // компонентное доверие (не ярлык шага) по-прежнему решает работу.
+    const r = plan([
+      hit({ patternStep: 3, component: "MECHANISM_SPEC", confidence: 95 }),
+      hit({ patternStep: 3, component: "GOVERNANCE_BASIS", confidence: 10 }), // UNUSABLE
+    ]);
+    const view = buildContractView({ contract: r.contract, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" });
+    expect(view.workQueue.some((c) => c.step === 3 && c.component === "GOVERNANCE_BASIS")).toBe(true);
+    expect(view.workQueue.some((c) => c.step === 3 && c.component === "MECHANISM_SPEC")).toBe(false);
+    expect(view.reused.some((c) => c.step === 3 && c.component === "MECHANISM_SPEC")).toBe(true);
   });
 
   it("8. полностью покрытая память: workQueue пуст, всё в reused, capabilityCeilingHit=false", () => {
@@ -296,5 +322,69 @@ describe("Фаза 6, S0 — ContractView (типизированная прое
     );
     expect(view.workQueue.length).toBe(totalRequiredComponents);
     expect(view.excludedComponents).toEqual([]);
+  });
+
+  it("11. owner decision: несогласованный контракт не может обойти вывод режима исследования — фальшивый ALREADY_SATISFIED не понижает FRESH_RESEARCH до MEMORY", () => {
+    // Без консистентность-проверки: подделка шага 1 в ALREADY_SATISFIED
+    // (реально NO_MEMORY по всем компонентам) убрала бы его из missing[],
+    // и desiredMode пересчитался бы в MEMORY вместо FRESH_RESEARCH —
+    // ложное «всё известно» вместо честного «нужно искать».
+    const r = plan([]); // ничего не найдено -> все 8 шагов MISSING, mode=FRESH_RESEARCH
+    expect(r.mode).toBe("FRESH_RESEARCH");
+    const tampered: ResearchBoundaryContract = {
+      ...r.contract,
+      stepDecisions: r.contract.stepDecisions.map((d, i) =>
+        i === 0
+          ? {
+              ...d,
+              decision: "ALREADY_SATISFIED" as const,
+              components: d.components.map((c) => ({ ...c, state: "SATISFIED" as const })),
+            }
+          : d,
+      ),
+    };
+    expect(() =>
+      buildContractView({ contract: tampered, mode: "MEMORY", capabilityAtStart: "FRESH_RESEARCH" }),
+    ).toThrow(ContractDerivationMismatchError);
+  });
+
+  it("12. owner decision: несогласованный контракт не может обойти границу способности DEMO", () => {
+    // DEMO (TARGETED_REFRESH) с реально пустой памятью обязан упереться в
+    // потолок (desiredMode=FRESH_RESEARCH > capabilityAtStart). Подделка,
+    // маскирующая один MISSING шаг под ALREADY_SATISFIED БЕЗ согласованного
+    // изменения его компонентов (те остаются NO_MEMORY), попыталась бы
+    // снизить desiredMode до TARGETED_REFRESH и тихо обойти потолок —
+    // отклоняется на этапе консистентности, до того как потолок вообще
+    // пересчитывается. (Самосогласованная подделка, где компоненты ТОЖЕ
+    // помечены SATISFIED, ContractView структурно не отличит от истинного
+    // плана — за пределами того, что проверяет консистентность.)
+    const r = plan([], { capabilityAtStart: "TARGETED_REFRESH", budgetAtStart: DEFAULT_PRODUCT_CONFIG.budget_demo });
+    expect(r.capabilityCeilingHit).toBe(true);
+    const tampered: ResearchBoundaryContract = {
+      ...r.contract,
+      stepDecisions: r.contract.stepDecisions.map((d, i) =>
+        i === 0 ? { ...d, decision: "ALREADY_SATISFIED" as const } : d,
+      ),
+    };
+    expect(() =>
+      buildContractView({ contract: tampered, mode: "TARGETED_REFRESH", capabilityAtStart: "TARGETED_REFRESH" }),
+    ).toThrow(ContractDerivationMismatchError);
+  });
+
+  it("13. owner decision: несогласованный контракт не может обойти excludedScope (шаг за потолком, заявленный ALREADY_SATISFIED)", () => {
+    const r = plan([], { capabilityAtStart: "TARGETED_REFRESH", budgetAtStart: DEFAULT_PRODUCT_CONFIG.budget_demo });
+    // Портим ОДИН из исключённых шагов, помечая его закрытым — попытка
+    // протащить компонент в work queue/reused, минуя excludedScope —
+    // компоненты остаются несогласованными (NO_MEMORY), что и ловится.
+    const excludedStepIndex = r.contract.stepDecisions.findIndex((d) => d.decision !== "ALREADY_SATISFIED");
+    const tampered: ResearchBoundaryContract = {
+      ...r.contract,
+      stepDecisions: r.contract.stepDecisions.map((d, i) =>
+        i === excludedStepIndex ? { ...d, decision: "ALREADY_SATISFIED" as const } : d,
+      ),
+    };
+    expect(() =>
+      buildContractView({ contract: tampered, mode: r.mode, capabilityAtStart: "TARGETED_REFRESH" }),
+    ).toThrow(ContractDerivationMismatchError);
   });
 });

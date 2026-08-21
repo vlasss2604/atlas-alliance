@@ -124,6 +124,32 @@ export function buildContractView(input: BuildContractViewInput): ContractView {
     );
   }
 
+  // Owner decision (Phase 6 S0-S3 review fix package): stepDecisions[]
+  // remains authoritative, but the STEP-level decision must be consistent
+  // with its own component states. A malformed-but-type-valid contract —
+  // e.g. decision=ALREADY_SATISFIED while a required component is not
+  // SATISFIED — must hard-fail here rather than let a later reader trust
+  // the step label over the components it disagrees with. This check runs
+  // before anything else derives from step.decision (mode, exclusion),
+  // so a malformed step can never quietly influence either.
+  for (const step of contract.stepDecisions) {
+    const allSatisfied = step.components.every((c) => c.state === "SATISFIED");
+    if (step.decision === "ALREADY_SATISFIED" && !allSatisfied) {
+      const inconsistent = step.components
+        .filter((c) => c.state !== "SATISFIED")
+        .map((c) => `${c.component}=${c.state}`)
+        .join(", ");
+      throw new ContractDerivationMismatchError(
+        `step ${step.step} (${step.stepName}) is ALREADY_SATISFIED but component state(s) disagree: ${inconsistent}`,
+      );
+    }
+    if (step.decision !== "ALREADY_SATISFIED" && allSatisfied) {
+      throw new ContractDerivationMismatchError(
+        `step ${step.step} (${step.stepName}) is ${step.decision} but every component reports SATISFIED`,
+      );
+    }
+  }
+
   // Independent re-derivation of the desired mode from the authoritative
   // stepDecisions (same formula planner.ts uses, D-058) — deliberately
   // NOT imported from planner.ts, see module comment.

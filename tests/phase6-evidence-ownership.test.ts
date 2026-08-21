@@ -26,9 +26,24 @@ import {
 import {
   coreEntitlement,
   setupTestDatabase,
+  TEST_DATABASE_URL,
   uniq,
   type TestContext,
 } from "./phase1-setup";
+
+// LOW-1 fix: derive maintenance/fixture DB URLs from TEST_DATABASE_URL
+// (the same env-overridable source every other test uses) instead of a
+// hardcoded localhost:5432 assumption — this test must work against
+// whatever Postgres the rest of the suite is pointed at (CI runner,
+// container, remote instance).
+function fixtureDbUrl(dbName: string): string {
+  const url = new URL(TEST_DATABASE_URL);
+  url.pathname = `/${dbName}`;
+  return url.toString();
+}
+function maintenanceDbUrl(): string {
+  return fixtureDbUrl("postgres");
+}
 
 // Phase 6, S2 — Evidence ownership tests (D-088, phase-6-plan.md §6.3a).
 // These are the eight tests the plan requires BEFORE any engine code
@@ -211,15 +226,19 @@ describe("Фаза 6, S2 — владение Evidence (D-088, §6.3a)", () => {
     expect(pgError(error).code).toBe("23502"); // not_null_violation
   });
 
-  it("5. backfill: строки, созданные до 0009, сохраняют свой Proof и получают его research_job_id (дореформенная фикстура)", async () => {
+  it("5. backfill: строки, созданные до 0009, переживают РЕАЛЬНУЮ миграцию 0009 и получают research_job_id (дореформенная фикстура)", async () => {
     // Настоящая дореформенная фикстура: отдельная БД мигрируется ТОЛЬКО
     // миграциями 0000-0008 (evidence ещё без research_job_id, proof_id
     // ещё NOT NULL) — ровно та форма таблицы, что была до Фазы 6. В неё
     // вставляется Evidence старой формы, а затем накатывается ПОЛНЫЙ
-    // набор миграций, включая 0009 с его backfill-шагом.
+    // набор миграций через штатный migrator (drizzle-orm/node-postgres),
+    // включая 0009 с его backfill-шагом — не воспроизведённый вручную
+    // фрагмент SQL, а тот же путь, которым проходит настоящая продакшн-БД
+    // (Phase 6 S0-S3 review fix package: "Do not hand-replay selected
+    // migration SQL in place of testing the actual migration").
     const dbName = "atlas_test_evidence_backfill_fixture";
-    const adminUrl = "postgres://atlas:atlas@localhost:5432/postgres";
-    const dbUrl = `postgres://atlas:atlas@localhost:5432/${dbName}`;
+    const adminUrl = maintenanceDbUrl();
+    const dbUrl = fixtureDbUrl(dbName);
 
     const admin = new Client({ connectionString: adminUrl });
     await admin.connect();
@@ -309,34 +328,73 @@ describe("Фаза 6, S2 — владение Evidence (D-088, §6.3a)", () => {
         [proofId, sourceId],
       )
     ).rows[0].id;
-    // Именно шаги backfill'а 0009 — не файл целиком: остальные NOT NULL
-    // колонки §6.2 (pattern_step, component, ...) у ЭТОЙ строки в
-    // принципе не могут иметь честного значения (их источника не
-    // существовало до Фазы 6) и корректно отказали бы, если бы миграция
-    // применялась к БД, где такая — реально никогда не возникающая —
-    // строка есть (phase-6-plan.md §0.2: evidence не пишется ни одной
-    // production-функцией до Фазы 6). Тест изолирует ИМЕННО backfill
-    // research_job_id (D-088), который безопасен и без этого допущения.
-    await client1.query(
-      `ALTER TABLE evidence DROP CONSTRAINT evidence_proof_id_proofs_id_fk`,
-    );
-    await client1.query(
-      `ALTER TABLE evidence ALTER COLUMN proof_id DROP NOT NULL`,
-    );
-    await client1.query(`ALTER TABLE evidence ADD COLUMN research_job_id uuid`);
-    await client1.query(
-      `UPDATE evidence e SET research_job_id = p.research_job_id FROM proofs p WHERE p.id = e.proof_id`,
-    );
-    await client1.query(
-      `ALTER TABLE evidence ALTER COLUMN research_job_id SET NOT NULL`,
-    );
+    // Реальная миграция: полный migrations-каталог (0000-0009, тот же
+    // путь, что и продакшн-деплой), через штатный migrator drizzle-orm.
+    // pattern_step/component/directness/source_class/officiality теперь
+    // nullable (backward-compatible staged schema) именно для того, чтобы
+    // эта строка — у которой честного значения для них структурно нет —
+    // прошла миграцию, а не отказала.
+    await migrate(drizzle(client1), { migrationsFolder: srcDir });
 
+    // (5) Evidence переживает миграцию.
     const { rows } = await client1.query(
-      `SELECT proof_id, research_job_id FROM evidence WHERE id = $1`,
+      `SELECT id, proof_id, research_job_id, pattern_step, component, directness,
+              source_class, officiality
+         FROM evidence WHERE id = $1`,
       [preReformEvidenceId],
     );
+    expect(rows.length).toBe(1);
+    // (6) связь Evidence -> Proof пережила миграцию.
     expect(rows[0].proof_id).toBe(proofId);
-    expect(rows[0].research_job_id).toBe(researchJobId); // корректно заполнено backfill'ом
+    // (7) research_job_id детерминированно восстановлен через Evidence -> Proof -> Proof.research_job_id.
+    expect(rows[0].research_job_id).toBe(researchJobId);
+    // Новые Phase 6 поля, которых у дореформенной строки честно нет,
+    // остаются NULL — не изобретённое значение, не отказ миграции.
+    expect(rows[0].pattern_step).toBeNull();
+    expect(rows[0].component).toBeNull();
+    expect(rows[0].directness).toBeNull();
+    expect(rows[0].source_class).toBeNull();
+    expect(rows[0].officiality).toBeNull();
+
+    // (8) D-088 ownership-инварианты после миграции: research_job_id
+    // NOT NULL, составной FK evidence_proof_same_job_fk на месте.
+    const notNullCheck = await client1.query(
+      `SELECT is_nullable FROM information_schema.columns
+         WHERE table_name = 'evidence' AND column_name = 'research_job_id'`,
+    );
+    expect(notNullCheck.rows[0].is_nullable).toBe("NO");
+    const fkCheck = await client1.query(
+      `SELECT conname FROM pg_constraint WHERE conname = 'evidence_proof_same_job_fk'`,
+    );
+    expect(fkCheck.rows.length).toBe(1);
+
+    // Составной FK реально запрещает Evidence на Proof чужого job'а даже
+    // для строки, прошедшей через миграцию 0009 (не только для строк,
+    // вставленных напрямую через Drizzle в других тестах этого файла).
+    const secondUserId = (
+      await client1.query(`INSERT INTO users (role) VALUES ('USER') RETURNING id`)
+    ).rows[0].id;
+    const foreignJobId = (
+      await client1.query(
+        `INSERT INTO research_jobs (
+            user_id, topic_id, project_id, original_question, normalized_task, normalized_task_hash,
+            idempotency_key, entitlement_at_start, capability_at_start, budget_at_start, state
+          ) VALUES ($1, $2, $3, 'q2', '{}'::jsonb, 'h2', 'i2', 'DEMO', 'TARGETED_REFRESH', '{}'::jsonb, 'QUEUED')
+          RETURNING id`,
+        [secondUserId, jobId, projectId],
+      )
+    ).rows[0].id;
+    let fkViolation: unknown;
+    try {
+      await client1.query(
+        `INSERT INTO evidence (proof_id, research_job_id, source_id, relationship, fragment, fetched_at, retrieved_url, content_hash)
+           VALUES ($1, $2, $3, 'SUPPORTS', 'cross-job', now(), 'https://example.com/cross-job', 'sha256:cross-job')`,
+        [proofId, foreignJobId, sourceId],
+      );
+    } catch (e) {
+      fkViolation = e;
+    }
+    expect(pgError(fkViolation).code).toBe("23503");
 
     await client1.end();
     const admin2 = new Client({ connectionString: adminUrl });

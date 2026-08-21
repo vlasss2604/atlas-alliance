@@ -123,22 +123,117 @@ function isBlockedIpv4(ip: string): boolean {
   return BLOCKED_V4_RANGES.some(([base, bits]) => inV4Range(ip, base, bits));
 }
 
+// HIGH-2 fix: string-prefix checks (`lower.startsWith("fe8")`) are wrong
+// for CIDR ranges that don't align to a hex-digit (nibble) boundary —
+// fe80::/10 covers fe80:: through febf:ffff:..., which "startsWith('fe8')"
+// both over- and under-matches (febf:: doesn't start with "fe8", and
+// "fe9"/"fe8" as separate prefixes miss fea0::-febf:: entirely). Numeric,
+// bit-level prefix matching is the only correct way to test a CIDR range.
+
+// Parses any textual form dns.lookup() can return for a valid IPv6
+// address — full, "::"-compressed, and forms with a dotted-quad IPv4 tail
+// (::ffff:1.2.3.4, ::1.2.3.4, 64:ff9b::1.2.3.4) — into its 16 raw bytes.
+// Returns null for anything that doesn't parse as a well-formed address;
+// callers treat that as "block" (fail closed), never "allow".
+function ipv6ToBytes(ip: string): Uint8Array | null {
+  let head = ip;
+
+  // Embedded dotted-quad IPv4 tail, if present — rewritten into two hex
+  // groups so the rest of the parser only ever deals with hex groups.
+  const lastColon = ip.lastIndexOf(":");
+  const tail = lastColon >= 0 ? ip.slice(lastColon + 1) : ip;
+  if (tail.includes(".")) {
+    const octets = tail.split(".").map((n) => Number(n));
+    if (octets.length !== 4 || octets.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) {
+      return null;
+    }
+    const hi = ((octets[0] << 8) | octets[1]).toString(16);
+    const lo = ((octets[2] << 8) | octets[3]).toString(16);
+    head = `${ip.slice(0, lastColon + 1)}${hi}:${lo}`;
+  }
+
+  const doubleColonParts = head.split("::");
+  if (doubleColonParts.length > 2) return null;
+
+  const toGroups = (s: string): string[] => (s.length === 0 ? [] : s.split(":"));
+  let groups: string[];
+  if (doubleColonParts.length === 2) {
+    const left = toGroups(doubleColonParts[0]);
+    const right = toGroups(doubleColonParts[1]);
+    const missing = 8 - left.length - right.length;
+    if (missing < 0) return null;
+    groups = [...left, ...Array(missing).fill("0"), ...right];
+  } else {
+    groups = toGroups(head);
+  }
+  if (groups.length !== 8) return null;
+
+  const bytes = new Uint8Array(16);
+  for (let i = 0; i < 8; i++) {
+    if (!/^[0-9a-fA-F]{1,4}$/.test(groups[i])) return null;
+    const v = parseInt(groups[i], 16);
+    bytes[i * 2] = (v >> 8) & 0xff;
+    bytes[i * 2 + 1] = v & 0xff;
+  }
+  return bytes;
+}
+
+// True when `bytes` falls within the CIDR range described by `prefixIp`/
+// `prefixLen` (0-128), compared bit-for-bit rather than by string prefix.
+function matchesV6Prefix(bytes: Uint8Array, prefixIp: string, prefixLen: number): boolean {
+  const prefixBytes = ipv6ToBytes(prefixIp);
+  if (!prefixBytes) return false;
+  const fullBytes = Math.floor(prefixLen / 8);
+  const remBits = prefixLen % 8;
+  for (let i = 0; i < fullBytes; i++) {
+    if (bytes[i] !== prefixBytes[i]) return false;
+  }
+  if (remBits > 0) {
+    const mask = (0xff << (8 - remBits)) & 0xff;
+    if ((bytes[fullBytes] & mask) !== (prefixBytes[fullBytes] & mask)) return false;
+  }
+  return true;
+}
+
+// CIDR ranges blocked outright, checked bit-for-bit (HIGH-2):
+//   ::/128       unspecified
+//   ::1/128      loopback
+//   fe80::/10    link-local (fe80:: .. febf:ffff:...) — includes fea0::/fea1::/febf:ffff:: etc
+//   fc00::/7     unique local (fc00:: .. fdff:...)
+//   ff00::/8     multicast
+const BLOCKED_V6_EXACT_RANGES: Array<[string, number]> = [
+  ["::", 128],
+  ["::1", 128],
+  ["fe80::", 10],
+  ["fc00::", 7],
+  ["ff00::", 8],
+];
+
+// Tunneling/embedding forms that can carry a blocked IPv4 destination
+// inside an otherwise-unblocked-looking IPv6 literal — each maps to the
+// byte offset where the embedded IPv4 address lives once decoded to raw
+// bytes, and the embedded address is re-checked against the ordinary
+// IPv4 policy (HIGH-2: "decode the IPv4 address and pass it through the
+// normal IPv4 deny policy").
+const V6_EMBEDDED_V4_TUNNELS: Array<{ prefix: string; prefixLen: number; v4Offset: number }> = [
+  { prefix: "::ffff:0:0", prefixLen: 96, v4Offset: 12 }, // IPv4-mapped ::ffff:0:0/96
+  { prefix: "64:ff9b::", prefixLen: 96, v4Offset: 12 }, // NAT64 64:ff9b::/96
+  { prefix: "2002::", prefixLen: 16, v4Offset: 2 }, // 6to4 2002::/16
+  { prefix: "::", prefixLen: 96, v4Offset: 12 }, // deprecated IPv4-compatible ::a.b.c.d/96
+];
+
 function isBlockedIpv6(ip: string): boolean {
-  const lower = ip.toLowerCase();
-  if (lower === "::1") return true; // loopback
-  if (lower === "::") return true; // unspecified
-  if (
-    lower.startsWith("fe80:") ||
-    lower.startsWith("fe8") ||
-    lower.startsWith("fe9")
-  )
-    return true; // link-local
-  if (lower.startsWith("fc") || lower.startsWith("fd")) return true; // unique local (fc00::/7)
-  if (lower.startsWith("::ffff:")) {
-    // IPv4-mapped IPv6 — validate the embedded v4 address too, otherwise
-    // rebinding through a mapped address would bypass the v4 blocklist.
-    const mapped = lower.slice("::ffff:".length);
-    if (isIP(mapped) === 4) return isBlockedIpv4(mapped);
+  const bytes = ipv6ToBytes(ip);
+  if (!bytes) return true; // unparsable — fail closed, never allow
+
+  if (BLOCKED_V6_EXACT_RANGES.some(([prefix, len]) => matchesV6Prefix(bytes, prefix, len))) {
+    return true;
+  }
+  for (const tunnel of V6_EMBEDDED_V4_TUNNELS) {
+    if (matchesV6Prefix(bytes, tunnel.prefix, tunnel.prefixLen)) {
+      const [a, b, c, d] = bytes.slice(tunnel.v4Offset, tunnel.v4Offset + 4);
+      if (isBlockedIpv4(`${a}.${b}.${c}.${d}`)) return true;
+    }
   }
   return false;
 }
@@ -173,10 +268,22 @@ async function resolveAndValidate(
   hostname: string,
   url: string,
   isAddressBlocked: (ip: string) => boolean,
+  // LOW-2 fix: the initial URL and a redirect target are distinct typed
+  // failure reasons (ContentFetchFailureReason already declared both) —
+  // a blocked redirect hop must surface as REDIRECT_TARGET_BLOCKED, not
+  // be silently reported under the same reason as a blocked start URL.
+  isRedirectHop: boolean,
 ): Promise<string> {
+  // URL#hostname keeps the brackets around an IPv6 literal ("[::1]") —
+  // required for Host-header formatting, but dns.lookup() only accepts
+  // the bare address. Without stripping them here, any URL with a
+  // literal IPv6 host (attacker-supplied or otherwise) fails DNS
+  // resolution outright instead of ever reaching the SSRF address check.
+  const lookupTarget =
+    hostname.startsWith("[") && hostname.endsWith("]") ? hostname.slice(1, -1) : hostname;
   let resolved: { address: string; family: number };
   try {
-    resolved = await dnsLookup(hostname);
+    resolved = await dnsLookup(lookupTarget);
   } catch {
     throw new ContentFetchError(
       "DNS_RESOLUTION_FAILED",
@@ -186,7 +293,7 @@ async function resolveAndValidate(
   }
   if (isAddressBlocked(resolved.address)) {
     throw new ContentFetchError(
-      "BLOCKED_ADDRESS",
+      isRedirectHop ? "REDIRECT_TARGET_BLOCKED" : "BLOCKED_ADDRESS",
       `resolved address ${resolved.address} for ${hostname} is in a blocked range`,
       url,
     );
@@ -299,6 +406,7 @@ async function fetchWithRedirects(
       parsed.hostname,
       currentUrl,
       isAddressBlocked,
+      hop > 0,
     );
     const result = await fetchOneHop(currentUrl, pinnedIp, opts);
 
@@ -314,7 +422,19 @@ async function fetchWithRedirects(
           startUrl,
         );
       }
-      const next = new URL(result.headers.location, currentUrl).toString();
+      // LOW-2 fix: a malformed Location header must not escape as a raw
+      // TypeError from the URL constructor — it is a typed fetch failure
+      // like any other rejected redirect target.
+      let next: string;
+      try {
+        next = new URL(result.headers.location, currentUrl).toString();
+      } catch {
+        throw new ContentFetchError(
+          "INVALID_URL",
+          `malformed redirect Location header: ${result.headers.location}`,
+          currentUrl,
+        );
+      }
       const nextParsed = safeParseUrl(next);
       if (nextParsed.protocol !== "http:" && nextParsed.protocol !== "https:") {
         throw new ContentFetchError(
