@@ -66,6 +66,17 @@ export const researchJobs = pgTable(
       .default(0),
     unread: boolean("unread").notNull().default(false),
     errorCode: text("error_code"),
+    // First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
+    // WHY execution stopped, kept structurally separate from `state`
+    // (execution result) and `error_code` (technical failure detail).
+    // Reuses ControllerStopReason values where the terminal state came
+    // from the engine (WORK_QUEUE_EXHAUSTED, BUDGET_EXHAUSTED,
+    // CAPABILITY_BOUNDARY_NO_ELIGIBLE_WORK), plus a small closed set of
+    // worker-level reasons for paths the controller never sees
+    // (MEMORY_PLANNING_FAILED, SYSTEM_OR_PROVIDER_FAILURE, NOT_IMPLEMENTED
+    // for any future eligibility gap). Never used to encode an
+    // evidentiary conclusion — that lives only in research_claim_support.
+    terminationReason: text("termination_reason"),
     // Фаза 6, S4 review fix (BLOCKER-2/HIGH-1) — job-lifetime ATOMIC
     // reservation counters for the three real dimensional ceilings
     // (real SearchGateway calls, real ContentFetcher opens, reserved

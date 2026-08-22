@@ -102,20 +102,31 @@ describe("Фаза 5 — настоящий end-to-end через pg-boss worker
         await handleResearchJobTask(ctx.db, task.data.jobId);
       });
 
+      // First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
+      // the worker now hands off to the real frozen research engine
+      // (via a zero-cost, zero-network fake executor) instead of
+      // terminating with errorCode=NOT_IMPLEMENTED right after planning.
+      // With every S4 attempt deterministically finding zero search
+      // candidates, the job reaches a genuine terminal outcome — never
+      // FAILED for a fake-provider job (no technical failure occurs).
       await waitUntil(async () => {
         const [row] = await ctx.db
           .select({ state: researchJobs.state })
           .from(researchJobs)
           .where(eq(researchJobs.id, job.id));
-        return row?.state === "FAILED";
+        return row?.state === "SUCCEEDED" || row?.state === "BUDGET_LIMIT_REACHED";
       }, 15_000);
 
       const [finalJob] = await ctx.db
         .select()
         .from(researchJobs)
         .where(eq(researchJobs.id, job.id));
-      // Планирование прошло по-настоящему; честно не хватает только Фазы 6.
-      expect(finalJob.errorCode).toBe("NOT_IMPLEMENTED");
+      // Планирование прошло по-настоящему, и движок Фазы 6 теперь тоже
+      // реально подключён (First Real Run Stage 1) — NOT_IMPLEMENTED
+      // больше не является исходом для этого пути.
+      expect(finalJob.errorCode).not.toBe("NOT_IMPLEMENTED");
+      expect(["SUCCEEDED", "BUDGET_LIMIT_REACHED"]).toContain(finalJob.state);
+      expect(finalJob.terminationReason).toBeTruthy();
       expect(finalJob.memoryStatus).toBe("USED");
       expect(finalJob.progressStage).toBe(2);
 

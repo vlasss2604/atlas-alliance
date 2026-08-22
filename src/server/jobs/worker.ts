@@ -3,10 +3,62 @@ import { eq, sql } from "drizzle-orm";
 import { deleteStaleRateLimits } from "../auth/rate-limit";
 import { deleteExpiredSessions } from "../auth/session";
 import { createDatabase, type Database } from "../db/client";
-import { researchJobs } from "../db/schema";
+import { projects, researchJobs } from "../db/schema";
+import type { ControllerRunResult } from "../engine/controller";
+import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
+import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
 import { createBoss, RESEARCH_QUEUE } from "./queue";
 import { resolveDemoReservation, transitionJobState } from "./research-jobs";
+
+// First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
+// terminal contract mapping. `job.state` is the execution result,
+// `job.terminationReason` is WHY execution stopped, `job.errorCode` is
+// the technical failure detail — these are never collapsed into each
+// other, and neither is ever read as an evidentiary conclusion (that
+// lives only in research_claim_support.status, written by S7).
+//
+// Reuses ControllerStopReason (controller.ts) verbatim where the
+// terminal state came from the engine itself — this function does not
+// invent a parallel vocabulary for outcomes the controller already names
+// precisely. `null` means the engine stopped for a resumable,
+// non-terminal reason (INTERRUPTED) — this worker never sets
+// maxAttemptsThisRun, so the controller should never actually return
+// this from a call made here; the null case exists only as a defensive
+// fallback that leaves the job RUNNING for a later pickup rather than
+// forcing it into a state that would misrepresent what happened.
+interface EngineOutcome {
+  state: "SUCCEEDED" | "BUDGET_LIMIT_REACHED" | "FAILED";
+  terminationReason: string;
+  errorCode: string | null;
+}
+
+export function mapEngineOutcome(stopReason: ControllerRunResult["stopReason"]): EngineOutcome | null {
+  switch (stopReason) {
+    case "BUDGET_EXHAUSTED":
+      // §B of the stage spec: budget exhaustion with incomplete evidence
+      // is NOT a system/provider failure — research_claim_support may
+      // legitimately be INSUFFICIENT_EVIDENCE for this job, and that is
+      // an honest evidentiary outcome, not a reason to mark the job
+      // FAILED.
+      return { state: "BUDGET_LIMIT_REACHED", terminationReason: "BUDGET_EXHAUSTED", errorCode: null };
+    case "CAPABILITY_BOUNDARY_NO_ELIGIBLE_WORK":
+      // Documented convention from controller.ts's own ControllerStopReason
+      // comment: the caller turns this into errorCode=CAPABILITY_BOUNDARY.
+      // Nothing failed — the capability ceiling excluded all work before
+      // any attempt was made — so the job state is SUCCEEDED (there was
+      // nothing eligible to do), not FAILED.
+      return { state: "SUCCEEDED", terminationReason: "CAPABILITY_BOUNDARY_NO_ELIGIBLE_WORK", errorCode: "CAPABILITY_BOUNDARY" };
+    case "WORK_QUEUE_EXHAUSTED":
+      // §A of the stage spec: every eligible (step, component) has
+      // either succeeded or exhausted its retries — normal evidence
+      // completion, whatever research_claim_support.status turns out to
+      // be.
+      return { state: "SUCCEEDED", terminationReason: "WORK_QUEUE_EXHAUSTED", errorCode: null };
+    case "INTERRUPTED":
+      return null;
+  }
+}
 
 // Periodic-обслуживание (phase-2-plan §2.1, §6): истёкшие сессии и
 // устаревшие rate-limit-бакеты.
@@ -61,21 +113,82 @@ export async function handleResearchJobTask(db: Database, jobId: string): Promis
     planningErrorCode = "MEMORY_PLANNING_FAILED";
   }
 
-  // Стадия 3+ «Ищу недостающие доказательства» — Research Engine, Фаза 6.
-  // Никакого фейкового прогресса: план записан по-настоящему, дальше
-  // честно нечем продолжить — завершаем понятной технической ошибкой
-  // и возвращаем DEMO-слот.
+  if (planningErrorCode) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(researchJobs)
+        .set({ errorCode: planningErrorCode, terminationReason: planningErrorCode })
+        .where(eq(researchJobs.id, jobId));
+      await transitionJobState(tx, jobId, "FAILED", "phase 5: memory planning failed");
+      if (job.entitlementAtStart === "DEMO") {
+        await resolveDemoReservation(tx, jobId, "RELEASED");
+      }
+    });
+    return;
+  }
+
+  // First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
+  // Phase 5 planning succeeded; hand off to the frozen S4->S5->S6->S7
+  // research engine (runS4ResearchJob) via a deterministic, zero-cost,
+  // zero-network executor (non-live-executor.ts). The worker only
+  // orchestrates the hand-off and maps the engine's own outcome onto the
+  // job's terminal contract — it never reimplements S4/S5/S6/S7 research
+  // semantics itself. research_enabled stays false (D-028); this path
+  // never resolves a live provider (non-live-executor.ts supplies every
+  // one of S4's four provider roles and both model cost profiles as
+  // explicit fixtures, so s4-executor.ts's preflight never falls back to
+  // a production resolver).
+  const [project] = await db.select().from(projects).where(eq(projects.id, job.projectId as string));
+  if (!project) {
+    // Planning already required job.projectId to be set and resolvable
+    // (runMemoryPlanningStage throws otherwise, handled above) — this is
+    // therefore a genuine internal inconsistency, never an evidentiary
+    // outcome, if it is ever reached.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(researchJobs)
+        .set({ errorCode: "PROJECT_NOT_FOUND", terminationReason: "SYSTEM_OR_PROVIDER_FAILURE" })
+        .where(eq(researchJobs.id, jobId));
+      await transitionJobState(tx, jobId, "FAILED", "engine: job project vanished before execution");
+      if (job.entitlementAtStart === "DEMO") {
+        await resolveDemoReservation(tx, jobId, "RELEASED");
+      }
+    });
+    return;
+  }
+
+  let outcome: EngineOutcome | null;
+  try {
+    const executor = createNonLiveS4WorkExecutor({ db, project });
+    const result = await runS4ResearchJob(db, jobId, executor, new Date());
+    outcome = mapEngineOutcome(result.stopReason);
+  } catch (e) {
+    // §C of the stage spec: a genuine execution failure (provider/
+    // resolver/internal-invariant exception) must never masquerade as an
+    // evidentiary conclusion (INSUFFICIENT_EVIDENCE/NOT_SUPPORTED/etc) —
+    // it becomes FAILED with a preserved technical reason, full stop.
+    console.error("[worker] research engine execution failed", e);
+    outcome = {
+      state: "FAILED",
+      terminationReason: "SYSTEM_OR_PROVIDER_FAILURE",
+      errorCode: e instanceof Error ? e.name : "ENGINE_EXECUTION_FAILED",
+    };
+  }
+
+  if (outcome === null) {
+    // INTERRUPTED (see mapEngineOutcome) — leave the job RUNNING; a later
+    // worker pickup resumes it via the controller's own persisted-attempt
+    // replay semantics. Not expected in production.
+    return;
+  }
+
+  const resolvedOutcome = outcome;
   await db.transaction(async (tx) => {
     await tx
       .update(researchJobs)
-      .set({ errorCode: planningErrorCode ?? "NOT_IMPLEMENTED" })
+      .set({ errorCode: resolvedOutcome.errorCode, terminationReason: resolvedOutcome.terminationReason })
       .where(eq(researchJobs.id, jobId));
-    await transitionJobState(
-      tx,
-      jobId,
-      "FAILED",
-      planningErrorCode ? "phase 5: memory planning failed" : "phase 5: engine not implemented",
-    );
+    await transitionJobState(tx, jobId, resolvedOutcome.state, `engine: ${resolvedOutcome.terminationReason}`);
     if (job.entitlementAtStart === "DEMO") {
       await resolveDemoReservation(tx, jobId, "RELEASED");
     }

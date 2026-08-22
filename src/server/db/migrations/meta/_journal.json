@@ -134,6 +134,13 @@
       "when": 1787432978052,
       "tag": "0018_s7_claim_support",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787438882491,
+      "tag": "0019_first_real_run_stage1_termination_reason",
+      "breakpoints": true
     }
   ]
 }
