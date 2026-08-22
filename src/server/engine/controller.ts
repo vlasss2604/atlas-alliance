@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { researchAttempts, researchJobs } from "../db/schema";
 import type { ComponentWorkItem, ContractView } from "./contract-view";
+import type { ComponentReconciliationResult } from "./component-reconciler";
 
 // Phase 6, S3 — ResearchController skeleton (phase-6-plan.md §19 S3, D-070,
 // D-072). Deterministic: consumes a ContractView (S0), schedules the
@@ -105,6 +106,32 @@ export interface ControllerRunInput {
   // incidental scheduling. Never set outside tests; 0/undefined (the
   // production default) has no effect on behavior.
   debugClaimDelayMs?: number;
+  // Phase 6, S5 (phase-6-s5-plan.md §12 "продолжение исследования S5 не
+  // запускает", §17.1) — an optional post-attempt hook: reconciliation
+  // reads whatever Evidence THIS job has accumulated for the (step,
+  // component) just attempted and persists a ComponentReconciliationResult.
+  // Called AFTER S4 Evidence acquisition for that component (per the task:
+  // "S5 only after S4 Evidence acquisition"), regardless of whether the
+  // attempt itself SUCCEEDED/FAILED/SKIPPED — a FAILED/SKIPPED attempt can
+  // still leave prior-attempt Evidence behind that is worth reconciling,
+  // and "no new Evidence this attempt" is itself a legitimate
+  // INSUFFICIENT_EVIDENCE outcome (D-084), not a reason to skip
+  // reconciliation. Optional and additive: omitting it (every S3/S4 caller
+  // that predates S5) reproduces the exact pre-S5 controller behavior byte
+  // for byte — this hook has no effect on scope, budget, eligibility, or
+  // stop reason, only on whether research_component_results gets written.
+  // The controller passes the hook exactly what S5's plan requires (job
+  // id, item, now) and never inspects or acts on the returned result
+  // itself (§12: "реконсилятор не имеет доступа ни к бюджету, ни к
+  // очереди" — symmetrically, the controller does not read its
+  // requiresFreshEvidence/status to trigger another attempt; that
+  // decision is out of S5's and this slice's scope, D-092/§17.1).
+  reconcile?: (
+    db: Database | Transaction,
+    jobId: string,
+    item: Pick<ComponentWorkItem, "step" | "component">,
+    now: Date,
+  ) => Promise<ComponentReconciliationResult>;
 }
 
 export interface ControllerRunResult {
@@ -424,6 +451,7 @@ export async function runResearchController(
   const { db, jobId, view, executor, now } = input;
   const maxAttemptsThisRun = input.maxAttemptsThisRun ?? Infinity;
   const debugClaimDelayMs = input.debugClaimDelayMs ?? 0;
+  const reconcile = input.reconcile;
 
   // Unlocked read, used only to narrow which items this run bothers to
   // loop over (D-072: workQueue is the only authoritative work source).
@@ -574,6 +602,14 @@ export async function runResearchController(
       );
 
     recoveryAttemptsUsed = (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime;
+
+    // S5 (phase-6-s5-plan.md §12, §17.1): after S4 Evidence acquisition
+    // for this (step, component) — regardless of this attempt's own
+    // status, see the reconcile field's doc comment — and never gating or
+    // altering anything about this attempt's own outcome above.
+    if (reconcile) {
+      await reconcile(db, jobId, item, now);
+    }
 
     if (result.status === "SUCCEEDED") succeeded.push(item);
     else if (result.status === "SKIPPED") skipped.push(item);

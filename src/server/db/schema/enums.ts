@@ -179,3 +179,15 @@ export const researchAttemptStatus = pgEnum("research_attempt_status", [
   "FAILED",
   "SKIPPED",
 ]);
+
+// Phase 6, S5 (phase-6-s5-plan.md §3, D-092) — exactly four terminal
+// reconciliation states. NOT_APPLICABLE is deliberately absent (Pattern v1
+// has no optional component, D-022/D-095) — see the plan for why adding it
+// here would become a place to hide missing evidence rather than report it
+// honestly.
+export const componentReconciliationStatus = pgEnum("component_reconciliation_status", [
+  "SUPPORTED",
+  "PARTIALLY_SUPPORTED",
+  "CONTRADICTED",
+  "INSUFFICIENT_EVIDENCE",
+]);
