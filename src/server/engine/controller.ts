@@ -36,7 +36,16 @@ export interface WorkExecutionResult {
   spent?: {
     searchQueries: number;
     sourceOpens: number;
-    modelCostMicro: number;
+    // D-090 (S4 final implementation): this is an AUTHORIZED MAXIMUM
+    // (what was reserved before the model call), never actual provider
+    // spend — no per-token usage reconciliation happens in S4. Named
+    // accordingly so audit/reporting never reads it as money actually
+    // billed (D-036). The underlying DB columns
+    // (research_attempts.model_cost_micro_spent,
+    // research_jobs.model_cost_micro_reserved) keep their existing
+    // storage names — this is a runtime/reporting-boundary rename only,
+    // not a migration.
+    authorizedModelCostMicro: number;
   };
 }
 
@@ -107,7 +116,8 @@ export interface ControllerRunResult {
   budgetSpent: {
     searchQueries: number;
     sourceOpens: number;
-    modelCostMicro: number;
+    // D-090: authorized maximum, not actual spend — see WorkExecutionResult.
+    authorizedModelCostMicro: number;
   };
   recoveryAttemptsUsed: number;
 }
@@ -436,7 +446,7 @@ export async function runResearchController(
       succeeded: [],
       failed: [],
       skipped: [],
-      budgetSpent: { searchQueries: 0, sourceOpens: 0, modelCostMicro: 0 },
+      budgetSpent: { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 },
       recoveryAttemptsUsed: 0,
     };
   }
@@ -445,7 +455,7 @@ export async function runResearchController(
   const succeeded: ComponentWorkItem[] = [];
   const failed: ComponentWorkItem[] = [];
   const skipped: ComponentWorkItem[] = [];
-  const budgetSpent = { searchQueries: 0, sourceOpens: 0, modelCostMicro: 0 };
+  const budgetSpent = { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 };
 
   // Reported lifetime recovery count — refreshed after every claim
   // decision (see below) so the returned value is never staler than this
@@ -535,11 +545,11 @@ export async function runResearchController(
     const auditedSpent = {
       searchQueries: Math.max(0, result.spent?.searchQueries ?? 0),
       sourceOpens: Math.max(0, result.spent?.sourceOpens ?? 0),
-      modelCostMicro: Math.max(0, result.spent?.modelCostMicro ?? 0),
+      authorizedModelCostMicro: Math.max(0, result.spent?.authorizedModelCostMicro ?? 0),
     };
     budgetSpent.searchQueries += auditedSpent.searchQueries;
     budgetSpent.sourceOpens += auditedSpent.sourceOpens;
-    budgetSpent.modelCostMicro += auditedSpent.modelCostMicro;
+    budgetSpent.authorizedModelCostMicro += auditedSpent.authorizedModelCostMicro;
 
     await db
       .update(researchAttempts)
@@ -549,7 +559,10 @@ export async function runResearchController(
         completedAt: now,
         searchQueriesSpent: auditedSpent.searchQueries,
         sourceOpensSpent: auditedSpent.sourceOpens,
-        modelCostMicroSpent: auditedSpent.modelCostMicro,
+        // D-090: research_attempts.model_cost_micro_spent is the legacy
+        // storage name (frozen column, not renamed) — the value written is
+        // the authorized-maximum reservation, not actual provider spend.
+        modelCostMicroSpent: auditedSpent.authorizedModelCostMicro,
       })
       .where(
         and(

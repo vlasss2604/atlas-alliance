@@ -46,7 +46,9 @@ export const DEFAULT_EVIDENCE_EXTRACTOR_MODEL = "claude-haiku-4-5";
 // P3 resolved (S4) — same shape as resolveQueryProposer(): async,
 // MODEL_GATEWAY-driven, lazy-failure (no credentials -> the live
 // implementation's first real call throws, not this resolver).
-export async function resolveEvidenceExtractor(model?: string): Promise<EvidenceExtractor> {
+// `maxOutputTokens` (D-090, phase-6-plan.md §5.6): see resolveQueryProposer's
+// doc comment — same discipline.
+export async function resolveEvidenceExtractor(model?: string, maxOutputTokens?: number): Promise<EvidenceExtractor> {
   if (_override) return _override;
   const kind = process.env.MODEL_GATEWAY ?? "anthropic";
   if (kind === "fake") {
@@ -58,5 +60,6 @@ export async function resolveEvidenceExtractor(model?: string): Promise<Evidence
   const { createAnthropicEvidenceExtractor } = await import("./evidence-extractor-anthropic");
   return createAnthropicEvidenceExtractor(
     model ?? process.env.EVIDENCE_EXTRACTOR_MODEL ?? DEFAULT_EVIDENCE_EXTRACTOR_MODEL,
+    maxOutputTokens,
   );
 }

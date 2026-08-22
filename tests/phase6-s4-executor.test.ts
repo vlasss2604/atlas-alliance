@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 import {
   evidence,
+  productConfig,
   projectMemoryItems,
   projects,
   researchJobs,
@@ -23,6 +24,7 @@ import type { QueryProposer } from "../src/server/engine/providers/query-propose
 import { SearchProviderUnavailableError } from "../src/server/engine/providers/search-gateway";
 import type { SearchGateway } from "../src/server/engine/providers/search-gateway";
 import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
+import { calculateMaxAuthorizedCostMicro, loadModelCostProfile } from "../src/server/engine/model-cost-profile";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
@@ -85,13 +87,17 @@ async function activateSourceRoute(
   projectId: string,
   domain: string,
   lifecycleState: "OBSERVED" | "CANDIDATE" | "ACTIVE" | "DEPRECATED" | "SUPERSEDED" = "ACTIVE",
+  // D-089 (§7.2a): the SAME jsonb content shape, extended with an
+  // OPTIONAL human-set routeClass — passed here as raw jsonb content so
+  // tests can also exercise an invalid value (a human typo).
+  content: Record<string, unknown> = {},
 ): Promise<void> {
   const [row] = await ctx.db
     .insert(projectMemoryItems)
     .values({
       projectId,
       kind: "SOURCE_ROUTE",
-      content: { domain },
+      content: { domain, ...content },
       lifecycleState: "OBSERVED",
     })
     .returning();
@@ -494,9 +500,13 @@ describe("Фаза 6, S4 — HIGH-1: атомарная резервация max
         }),
       ),
     );
-    // Ровно 1 вызов QueryProposer'а стоит ESTIMATED_QUERY_PROPOSER_COST_MICRO=5000.
-    await Promise.all(items.map((item, i) => executors[i].execute(item, ctxFor(p.jobId, { maxModelCostMicro: 5_000 }))));
-    expect(proposerCalls).toBeLessThanOrEqual(1);
+    // Ровно 1 авторизованный вызов QueryProposer'а по D-090 cost profile
+    // для дефолтной seeded-модели (claude-haiku-4-5).
+    const oneCallCostMicro = calculateMaxAuthorizedCostMicro(loadModelCostProfile(DEFAULT_PRODUCT_CONFIG.query_proposer_model));
+    await Promise.all(
+      items.map((item, i) => executors[i].execute(item, ctxFor(p.jobId, { maxModelCostMicro: oneCallCostMicro }))),
+    );
+    expect(proposerCalls).toBe(1);
   });
 
   it("C. несколько измерений почти исчерпаны -> действие исполняется только если ВСЕ требуемые измерения авторизованы", async () => {
@@ -822,6 +832,129 @@ describe("Фаза 6, S4 — HIGH-B: детерминированная клас
 });
 
 // ============================================================
+// D-089 (S4 final implementation) — SOURCE_ROUTE routeClass: project-
+// specific sourceClass comes ONLY from an explicit human-set field on the
+// exact ACTIVE SOURCE_ROUTE that already produced CONFIRMED, and ONLY
+// where the public classifier did not positively recognize the domain.
+// ============================================================
+describe("Фаза 6, S4 — D-089: routeClass — точная locked-прецедентность §7.2a", () => {
+  async function evidenceRowFor(
+    p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
+    url: string,
+  ): Promise<{ sourceClass: string; officiality: string } | undefined> {
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    return row ? { sourceClass: row.sourceClass!, officiality: row.officiality! } : undefined;
+  }
+
+  // A/B/C. exact project route + each of the three routeClass values.
+  for (const routeClass of ["OFFICIAL_DOCS", "GOVERNANCE", "OFFICIAL_REPORT"] as const) {
+    it(`${routeClass === "OFFICIAL_DOCS" ? "A" : routeClass === "GOVERNANCE" ? "B" : "C"}. ACTIVE точный проектный route + routeClass=${routeClass} -> ${routeClass} + CONFIRMED`, async () => {
+      const p = await makeJob();
+      const domain = `unclassified-${routeClass.toLowerCase()}.example`;
+      await activateSourceRoute(p.projectId, domain, "ACTIVE", { routeClass });
+      const row = await evidenceRowFor(p, `https://${domain}/page`);
+      expect(row?.sourceClass).toBe(routeClass);
+      expect(row?.officiality).toBe("CONFIRMED");
+    });
+  }
+
+  // D. ACTIVE route with no routeClass -> CONFIRMED + normal fallback.
+  it("D. ACTIVE route без routeClass -> CONFIRMED + обычный детерминированный fallback (SOCIAL)", async () => {
+    const p = await makeJob();
+    const domain = "no-routeclass.example";
+    await activateSourceRoute(p.projectId, domain, "ACTIVE"); // no routeClass
+    const row = await evidenceRowFor(p, `https://${domain}/page`);
+    expect(row?.sourceClass).toBe("SOCIAL");
+    expect(row?.officiality).toBe("CONFIRMED");
+  });
+
+  // E. inactive route -> no project-specific class (and no CONFIRMED).
+  it("E. неактивный route с routeClass -> НЕ даёт проектный класс (и не даёт CONFIRMED)", async () => {
+    const p = await makeJob();
+    const domain = "inactive-with-routeclass.example";
+    await activateSourceRoute(p.projectId, domain, "CANDIDATE", { routeClass: "OFFICIAL_DOCS" });
+    const row = await evidenceRowFor(p, `https://${domain}/page`);
+    expect(row?.sourceClass).toBe("SOCIAL");
+    expect(row?.officiality).toBe("CLAIMED");
+  });
+
+  // F. another project's route -> no project-specific class.
+  it("F. route ЧУЖОГО проекта с routeClass -> НЕ даёт проектный класс для этого job'а", async () => {
+    const foreign = await makeJob({ slug: uniq("d89_foreign") });
+    const p = await makeJob();
+    const domain = "foreign-with-routeclass.example";
+    await activateSourceRoute(foreign.projectId, domain, "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+    const row = await evidenceRowFor(p, `https://${domain}/page`);
+    expect(row?.sourceClass).toBe("SOCIAL");
+    expect(row?.officiality).toBe("CLAIMED");
+  });
+
+  // G. invalid routeClass -> ignored safely, no job failure.
+  it("G. невалидный routeClass -> игнорируется как отсутствующий, job не падает", async () => {
+    const p = await makeJob();
+    const domain = "invalid-routeclass.example";
+    await activateSourceRoute(p.projectId, domain, "ACTIVE", { routeClass: "SUPER_OFFICIAL_TOTALLY_TRUST_ME" });
+    const url = `https://${domain}/page`;
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).not.toBe("FAILED"); // job does not crash for a human typo
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    expect(row.sourceClass).toBe("SOCIAL"); // ignored as absent, not invented
+    expect(row.officiality).toBe("CONFIRMED"); // officiality is unaffected by the bad routeClass
+    // §7.2a rule 2: the fact of ignoring it is observed via the existing
+    // per-attempt reason channel, not silently dropped.
+    expect(result.reason).toContain("routeClass ignored");
+  });
+
+  // H. X/social + routeClass -> SOCIAL remains SOCIAL (precedence).
+  it("H. соцсеть с routeClass=OFFICIAL_DOCS -> остаётся SOCIAL (routeClass не перекрывает опознанный публичный класс)", async () => {
+    const p = await makeJob();
+    // x.com is a shared, multi-tenant social platform — a routeClass on
+    // the project's own SOURCE_ROUTE for it is checked, but resolveSourceClass
+    // only consults routeClass at step 6, so a positively-recognized SOCIAL
+    // domain must win regardless.
+    await activateSourceRoute(p.projectId, "x.com", "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+    const row = await evidenceRowFor(p, "https://x.com/official_project_account/status/1");
+    expect(row?.sourceClass).toBe("SOCIAL");
+    expect(row?.officiality).toBe("CONFIRMED"); // owner's own example: SOCIAL + CONFIRMED
+  });
+
+  // I. public governance platform + routeClass -> GOVERNANCE remains GOVERNANCE.
+  it("I. общая governance-платформа с routeClass=OFFICIAL_REPORT -> остаётся GOVERNANCE", async () => {
+    const p = await makeJob();
+    await activateSourceRoute(p.projectId, "snapshot.org", "ACTIVE", { routeClass: "OFFICIAL_REPORT" });
+    const row = await evidenceRowFor(p, "https://snapshot.org/#/some-space/proposal/0xabc");
+    expect(row?.sourceClass).toBe("GOVERNANCE");
+    expect(row?.officiality).toBe("CONFIRMED");
+  });
+
+  // J. data provider + routeClass -> DATA_PROVIDER remains DATA_PROVIDER.
+  it("J. независимый data provider с routeClass=OFFICIAL_DOCS -> остаётся DATA_PROVIDER", async () => {
+    const p = await makeJob();
+    await activateSourceRoute(p.projectId, "dune.com", "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+    const row = await evidenceRowFor(p, "https://dune.com/some-dashboard");
+    expect(row?.sourceClass).toBe("DATA_PROVIDER");
+    expect(row?.officiality).toBe("CONFIRMED");
+  });
+});
+
+// ============================================================
 // MEDIUM-1 — Evidence idempotency
 // ============================================================
 describe("Фаза 6, S4 — MEDIUM-1: идемпотентность персистенции Evidence", () => {
@@ -879,7 +1012,7 @@ describe("Фаза 6, S4 — MEDIUM-2: неожиданная (нетипизи�
     );
     const result = await executor.execute(ITEM, ctxFor(p.jobId));
     expect(result.status).toBeDefined(); // не бросил исключение наружу
-    expect(result.spent?.modelCostMicro).toBeGreaterThan(0); // QueryProposer-резервация не потеряна
+    expect(result.spent?.authorizedModelCostMicro).toBeGreaterThan(0); // QueryProposer-резервация не потеряна
     const row = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
     expect(row.searchQueriesReserved).toBeGreaterThan(0); // резервация на попытку поиска тоже не потеряна
   });
@@ -1240,7 +1373,7 @@ describe("Фаза 6, S4 — контроллер не может быть пе�
     };
     const dishonestExecutor: WorkExecutor = {
       async execute() {
-        return { status: "SUCCEEDED", spent: { searchQueries: 999, sourceOpens: 999, modelCostMicro: 999_999 } };
+        return { status: "SUCCEEDED", spent: { searchQueries: 999, sourceOpens: 999, authorizedModelCostMicro: 999_999 } };
       },
     };
     await runResearchController({ db: ctx.db, jobId: p.jobId, view, executor: dishonestExecutor, now: NOW });
@@ -1250,5 +1383,122 @@ describe("Фаза 6, S4 — контроллер не может быть пе�
     // резервации остаются на нуле независимо от самоотчёта.
     expect(jobRow.sourceOpensReserved).toBe(0);
     expect(jobRow.modelCostMicroReserved).toBe(0);
+  });
+});
+
+// ============================================================
+// D-090 (S4 final implementation) — model cost profile: fail closed,
+// bounded input, reserve-before-call, insufficient budget -> no call.
+// ============================================================
+describe("Фаза 6, S4 — D-090: cost profile — fail closed / bounded input / reserve-before-call", () => {
+  async function setModelConfig(key: "query_proposer_model" | "evidence_extractor_model", value: string): Promise<void> {
+    await ctx.db.update(productConfig).set({ value }).where(eq(productConfig.key, key));
+  }
+  async function resetModelConfig(key: "query_proposer_model" | "evidence_extractor_model"): Promise<void> {
+    await setModelConfig(key, DEFAULT_PRODUCT_CONFIG[key]);
+  }
+
+  it("нет одобренного cost profile для сконфигурированной query_proposer_model -> FAILED (MODEL_COST_PROFILE_MISSING), провайдер НЕ вызывается", async () => {
+    const p = await makeJob();
+    let proposerCalled = false;
+    await setModelConfig("query_proposer_model", "some-unapproved-model-xyz");
+    try {
+      const executor = createS4WorkExecutor(
+        depsFor(p.jobId, p, {
+          queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
+        }),
+      );
+      const result = await executor.execute(ITEM, ctxFor(p.jobId));
+      expect(result.status).toBe("FAILED");
+      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+      expect(proposerCalled).toBe(false); // no call — order is bound -> price -> reserve -> call, and price failed first
+      const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
+      expect(jobRow.modelCostMicroReserved).toBe(0); // no reservation attempted either
+    } finally {
+      await resetModelConfig("query_proposer_model");
+    }
+  });
+
+  it("нет одобренного cost profile для сконфигурированной evidence_extractor_model -> FAILED, extractor НЕ вызывается, уже понесённые search/fetch траты сохранены", async () => {
+    const p = await makeJob();
+    const url = "https://example.com/evidence-profile-missing";
+    let extractorCalled = false;
+    await setModelConfig("evidence_extractor_model", "another-unapproved-model");
+    try {
+      const executor = createS4WorkExecutor(
+        depsFor(p.jobId, p, {
+          searchGateway: fixedSearchGateway([url]),
+          contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url }) }),
+          evidenceExtractor: { name: "fixture", async extract() { extractorCalled = true; return []; } },
+        }),
+      );
+      const result = await executor.execute(ITEM, ctxFor(p.jobId));
+      expect(result.status).toBe("FAILED");
+      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+      expect(extractorCalled).toBe(false);
+      expect(result.spent?.searchQueries).toBeGreaterThan(0); // already-incurred search spend preserved
+      expect(result.spent?.sourceOpens).toBeGreaterThan(0); // already-incurred fetch spend preserved
+    } finally {
+      await resetModelConfig("evidence_extractor_model");
+    }
+  });
+
+  it("bounded input: EvidenceExtractor получает документ, усечённый до профильного потолка, а не сырой 2MB текст", async () => {
+    const p = await makeJob();
+    const url = "https://example.com/huge-document";
+    const profile = loadModelCostProfile(DEFAULT_PRODUCT_CONFIG.evidence_extractor_model);
+    const maxChars = profile.maxInputTokens * 3; // matches model-cost-profile.ts's own conservative ratio
+    const huge = `${p.projectName}: ` + "filler ".repeat(1_000_000); // far larger than any profile ceiling
+    let receivedLength = -1;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: huge }) }),
+        evidenceExtractor: {
+          name: "fixture",
+          async extract(input) {
+            receivedLength = input.document.normalizedText.length;
+            return [];
+          },
+        },
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(receivedLength).toBeGreaterThan(0);
+    expect(receivedLength).toBeLessThan(huge.length); // truncated
+    expect(receivedLength).toBeLessThanOrEqual(maxChars); // never exceeds the deterministic bound
+  });
+
+  it("reserve-before-call: QueryProposer резервация видна в БД ДО того, как fixture-провайдер фактически вызывается", async () => {
+    const p = await makeJob();
+    let reservedBeforeCall = -1;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        queryProposer: {
+          name: "fixture",
+          async proposeQueries() {
+            const row = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
+            reservedBeforeCall = row.modelCostMicroReserved;
+            return ["q1"];
+          },
+        },
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(reservedBeforeCall).toBeGreaterThan(0); // already reserved by the time the provider call happened
+  });
+
+  it("недостаточно оставшегося modelCostMicro бюджета -> QueryProposer НЕ вызывается", async () => {
+    const p = await makeJob();
+    let called = false;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        queryProposer: { name: "fixture", async proposeQueries() { called = true; return ["q1"]; } },
+      }),
+    );
+    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxModelCostMicro: 1 })); // far below any real profile cost
+    expect(called).toBe(false);
+    expect(result.status).toBe("SKIPPED");
+    expect(result.reason).toBe("MODEL_COST_BUDGET_EXHAUSTED_BEFORE_QUERY_PROPOSAL");
   });
 });

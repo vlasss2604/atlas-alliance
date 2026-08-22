@@ -19,7 +19,10 @@ import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extr
 // returns. A compromised or malicious model response can, at worst,
 // produce facts that get discarded — it cannot reach the controller.
 
-const MAX_TOKENS = 1536;
+// Fallback only for direct callers that bypass the D-090 cost-profile
+// flow (e.g. this module's own lazy-failure-resolution tests) — real S4
+// execution always passes the approved profile's maxOutputTokens instead.
+const DEFAULT_MAX_TOKENS = 1536;
 
 // BLOCKER-1 (S4 review fix, D-074, §7.2): sourceClass/officiality are
 // NOT part of this schema. Source authority is computed deterministically
@@ -83,7 +86,7 @@ function client(): Anthropic {
   return _client;
 }
 
-export function createAnthropicEvidenceExtractor(model: string): EvidenceExtractor {
+export function createAnthropicEvidenceExtractor(model: string, maxOutputTokens = DEFAULT_MAX_TOKENS): EvidenceExtractor {
   return {
     name: "anthropic",
     async extract(input: EvidenceExtractionInput) {
@@ -91,7 +94,7 @@ export function createAnthropicEvidenceExtractor(model: string): EvidenceExtract
       try {
         message = await client().messages.create({
           model,
-          max_tokens: MAX_TOKENS,
+          max_tokens: maxOutputTokens,
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content: buildUserContent(input) }],
           output_config: { format: zodOutputFormat(extractionResultSchema) },

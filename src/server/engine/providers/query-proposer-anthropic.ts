@@ -18,7 +18,10 @@ import type { QueryProposalInput, QueryProposer } from "./query-proposer";
 // output shape a model could use to widen anything even if it tried —
 // only the caller (S4 executor) decides what to do with the strings.
 
-const MAX_TOKENS = 512;
+// Fallback only for direct callers that bypass the D-090 cost-profile
+// flow (e.g. this module's own lazy-failure-resolution tests) — real S4
+// execution always passes the approved profile's maxOutputTokens instead.
+const DEFAULT_MAX_TOKENS = 512;
 
 const queryProposalSchema = z.object({
   queries: z.array(z.string().min(1).max(300)).max(20),
@@ -52,7 +55,7 @@ function client(): Anthropic {
   return _client;
 }
 
-export function createAnthropicQueryProposer(model: string): QueryProposer {
+export function createAnthropicQueryProposer(model: string, maxOutputTokens = DEFAULT_MAX_TOKENS): QueryProposer {
   return {
     name: "anthropic",
     async proposeQueries(input: QueryProposalInput): Promise<string[]> {
@@ -60,7 +63,7 @@ export function createAnthropicQueryProposer(model: string): QueryProposer {
       try {
         message = await client().messages.create({
           model,
-          max_tokens: MAX_TOKENS,
+          max_tokens: maxOutputTokens,
           system: SYSTEM_PROMPT,
           messages: [{ role: "user", content: buildUserContent(input) }],
           output_config: { format: zodOutputFormat(queryProposalSchema) },

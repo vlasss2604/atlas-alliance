@@ -134,7 +134,7 @@ function fakeExecutor(
       return {
         status: resolve(item),
         reason: `fake: ${item.component}`,
-        spent: { searchQueries: 1, sourceOpens: 1, modelCostMicro: 100 },
+        spent: { searchQueries: 1, sourceOpens: 1, authorizedModelCostMicro: 100 },
       };
     },
   };
@@ -286,7 +286,7 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
     const executor: WorkExecutor = {
       async execute() {
         // Fails before ever touching SearchGateway — zero search spend.
-        return { status: "FAILED", reason: "PRE_SEARCH_FAILURE", spent: { searchQueries: 0, sourceOpens: 0, modelCostMicro: 0 } };
+        return { status: "FAILED", reason: "PRE_SEARCH_FAILURE", spent: { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 } };
       },
     };
     const result = await runResearchController({ db: ctx.db, jobId, view: singleItemView, executor, now: NOW });
@@ -317,7 +317,7 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
         // A real executor would refuse its first SearchGateway call here
         // (reserveJobBudget against a ceiling of 0) and terminate honestly
         // — this fake mirrors that outcome directly.
-        return { status: "FAILED", reason: "SEARCH_QUERY_BUDGET_EXHAUSTED", spent: { searchQueries: 0, sourceOpens: 0, modelCostMicro: 0 } };
+        return { status: "FAILED", reason: "SEARCH_QUERY_BUDGET_EXHAUSTED", spent: { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 } };
       },
     };
     const result = await runResearchController({ db: ctx.db, jobId, view: zeroSearchView, executor: honestExecutor, now: NOW });
@@ -927,7 +927,7 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
           executions++;
           return {
             status: "SUCCEEDED",
-            spent: { searchQueries: 7, sourceOpens: 3, modelCostMicro: 1000 },
+            spent: { searchQueries: 7, sourceOpens: 3, authorizedModelCostMicro: 1000 },
           };
         },
       };

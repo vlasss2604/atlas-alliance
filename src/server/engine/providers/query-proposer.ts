@@ -52,7 +52,15 @@ export const DEFAULT_QUERY_PROPOSER_MODEL = "claude-haiku-4-5";
 // product_config.query_proposer_model pass it through; omitted, it falls
 // back to QUERY_PROPOSER_MODEL / the D-026-style default — config key,
 // not deploy.
-export async function resolveQueryProposer(model?: string): Promise<QueryProposer> {
+// `maxOutputTokens` (D-090, phase-6-plan.md §5.6): the caller's approved
+// model cost profile's output ceiling, passed straight through as the
+// live implementation's `max_tokens` — the reservation this ceiling was
+// priced against is only a real upper bound if the call is actually
+// constrained by the same number. Omitted only by direct callers that
+// don't go through the D-090 cost-profile flow (e.g. this module's own
+// tests exercising lazy-failure resolution) — falls back to the live
+// implementation's own default in that case.
+export async function resolveQueryProposer(model?: string, maxOutputTokens?: number): Promise<QueryProposer> {
   if (_override) return _override;
   const kind = process.env.MODEL_GATEWAY ?? "anthropic";
   if (kind === "fake") {
@@ -64,5 +72,6 @@ export async function resolveQueryProposer(model?: string): Promise<QueryPropose
   const { createAnthropicQueryProposer } = await import("./query-proposer-anthropic");
   return createAnthropicQueryProposer(
     model ?? process.env.QUERY_PROPOSER_MODEL ?? DEFAULT_QUERY_PROPOSER_MODEL,
+    maxOutputTokens,
   );
 }
