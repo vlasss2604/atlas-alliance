@@ -272,6 +272,28 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
     expect(r.excludedEvidence.some((e) => e.reason === "DUPLICATE_UNIT")).toBe(true);
   });
 
+  it("L2. дедупликация выбирает представителя ДЕТЕРМИНИРОВАННО, независимо от порядка входного массива (прямой дискриминирующий тест для order-independence дедупа)", () => {
+    // L above uses two byte-identical duplicate rows, so it cannot tell
+    // "whichever came first in the array wins" apart from "the
+    // deterministic sort key wins" — both pick a representative that
+    // behaves identically either way. Here the two "duplicate" rows
+    // (same extraction_unit_key — a data anomaly, but the reconciler must
+    // still handle it deterministically) differ in officiality, so WHICH
+    // one survives dedup changes the observable result
+    // (INSUFFICIENT_AUTHORITY or not). Reversing the input array must not
+    // change which one wins.
+    const reqs = requirements();
+    const confirmed = row({ extractionUnitKey: "dup-officiality", officiality: "CONFIRMED", sourceId: "s-confirmed" });
+    const claimed = row({ extractionUnitKey: "dup-officiality", officiality: "CLAIMED", sourceId: "s-claimed" });
+    const forward = reconcile([confirmed, claimed], reqs);
+    const backward = reconcile([claimed, confirmed], reqs);
+    expect(forward).toEqual(backward);
+    // The deterministic sort order (§12) ranks CONFIRMED ahead of CLAIMED
+    // as a tie-break, so the confirmed row is the stable winner either way.
+    expect(forward.supportingEvidenceIds).toEqual([confirmed.id]);
+    expect(forward.status).toBe("SUPPORTED");
+  });
+
   it("M. Evidence нет вовсе -> INSUFFICIENT_EVIDENCE + NO_EVIDENCE_FOUND, статус успеха", () => {
     const r = reconcile([], requirements());
     expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
@@ -562,7 +584,13 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
   it("10. SOCIAL не блокирует установленный компонент (см. R)", () => {
     const reqs = requirements({ establishingClasses: ["OFFICIAL_DOCS"] });
     const official = row({ mechanismState: "LIVE" });
-    const social = row({ sourceClass: "SOCIAL", relationship: "CONTRADICTS" });
+    // mechanismState set explicitly (DEPRECATED, disagreeing with LIVE) —
+    // a SOCIAL row with no state at all (UNKNOWN) can never enter
+    // contradiction detection regardless of class-eligibility, so it
+    // would pass even if the class gate for CONTRADICTS rows regressed.
+    // The state must actually disagree for this to be a real test of the
+    // "SOCIAL disagreement never blocks" rule, not a no-op.
+    const social = row({ sourceClass: "SOCIAL", relationship: "CONTRADICTS", mechanismState: "DEPRECATED" });
     const r = reconcile([official, social], reqs);
     expect(r.status).toBe("SUPPORTED");
   });
@@ -576,7 +604,14 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
     });
     const weird = row({ component: "CURRENT_STATE", mechanismState: "totally-made-up-state" });
     const r = reconcile([weird], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
-    expect(r.currentState).not.toBe("totally-made-up-state");
+    // A weak `.not.toBe("totally-made-up-state")` would trivially pass on
+    // a case-transformed pass-through ("TOTALLY-MADE-UP-STATE") without
+    // actually proving normalization happened. A genuinely UNKNOWN state
+    // is never reported as currentState at all (there is nothing to
+    // report) — so the correct positive assertion is null, which a
+    // pass-through mutation (reporting the raw unrecognized string
+    // instead) would violate.
+    expect(r.currentState).toBeNull();
   });
 
   it("12. Evidence чужого компонента не принято (см. J)", () => {

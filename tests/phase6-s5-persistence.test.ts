@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   evidence,
+  projectMemoryItems,
   projects,
   researchComponentResults,
   sources,
@@ -211,6 +212,74 @@ describe("Фаза 6, S5 — персистенция (research_component_result
     const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 3, component: "GOVERNANCE_BASIS" }, NOW);
     expect(result.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(result.excludedEvidence[0].reason).toBe("CLASS_NOT_ADMISSIBLE");
+  });
+
+  it("реальная seeded матрица EXECUTION_EVIDENCE: OFFICIAL_DOCS не устанавливает исполнение (mutation 4 teeth, через реальный Pattern)", async () => {
+    const { jobId } = await makeJob();
+    const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
+    await insertEvidence(jobId, sourceId, {
+      patternStep: 4,
+      component: "EXECUTION_EVIDENCE",
+      sourceClass: "OFFICIAL_DOCS",
+      mechanismState: "LIVE",
+    });
+
+    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
+    expect(result.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(result.reasonCodes).toContain("MISSING_EXECUTION_EVIDENCE");
+    expect(result.excludedEvidence[0].reason).toBe("CLASS_NOT_ADMISSIBLE");
+  });
+
+  it("реальная seeded матрица EXECUTION_EVIDENCE: ONCHAIN_VERIFIABLE с mechanism_state=PROPOSED не устанавливает исполнение (mutation 5 teeth, через реальный Pattern)", async () => {
+    const { jobId } = await makeJob();
+    const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
+    await insertEvidence(jobId, sourceId, {
+      patternStep: 4,
+      component: "EXECUTION_EVIDENCE",
+      sourceClass: "ONCHAIN_VERIFIABLE",
+      mechanismState: "PROPOSED",
+    });
+
+    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
+    expect(result.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(result.reasonCodes).toContain("MISSING_EXECUTION_EVIDENCE");
+  });
+
+  it("реальная seeded матрица EXECUTION_EVIDENCE: ONCHAIN_VERIFIABLE с mechanism_state=LIVE УСТАНАВЛИВАЕТ исполнение (позитивный контроль для двух тестов выше)", async () => {
+    const { jobId } = await makeJob();
+    const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
+    await insertEvidence(jobId, sourceId, {
+      patternStep: 4,
+      component: "EXECUTION_EVIDENCE",
+      sourceClass: "ONCHAIN_VERIFIABLE",
+      mechanismState: "LIVE",
+    });
+
+    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
+    expect(result.status).toBe("SUPPORTED");
+  });
+
+  it("mutation 19/20 teeth: reconcileAndPersistComponent не пишет ни в evidence, ни в project_memory_items — только в research_component_results (проверено и на SUPPORTED-исходе, а не только CLAIMED/partial)", async () => {
+    const { jobId, projectId } = await makeJob();
+    const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
+    // Deliberately CONFIRMED/DIRECT/admissible-class — a genuine SUPPORTED
+    // outcome, not PARTIALLY_SUPPORTED, so a mutation gated on
+    // `status === "SUPPORTED"` (a real, plausible defect shape — e.g. "only
+    // promote memory once a component is fully established") cannot hide
+    // behind a test that only exercises the partial path.
+    const evId = await insertEvidence(jobId, sourceId);
+
+    const [evidenceBefore] = await ctx.db.select().from(evidence).where(eq(evidence.id, evId));
+    const memoryCountBefore = (await ctx.db.select().from(projectMemoryItems).where(eq(projectMemoryItems.projectId, projectId))).length;
+
+    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 1, component: "SOURCE_OF_VALUE" }, NOW);
+    expect(result.status).toBe("SUPPORTED");
+
+    const [evidenceAfter] = await ctx.db.select().from(evidence).where(eq(evidence.id, evId));
+    const memoryCountAfter = (await ctx.db.select().from(projectMemoryItems).where(eq(projectMemoryItems.projectId, projectId))).length;
+
+    expect(evidenceAfter).toEqual(evidenceBefore);
+    expect(memoryCountAfter).toBe(memoryCountBefore);
   });
 });
 
