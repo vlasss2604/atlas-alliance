@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, desc, eq, inArray, ne } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchComponentResults, researchJobs, researchMechanismAssembly, researchPatterns, researchPlans } from "../db/schema";
@@ -34,14 +34,22 @@ async function loadActivePatternContentForJob(db: Database | Transaction, jobId:
     .where(eq(researchPlans.researchJobId, jobId))
     .orderBy(desc(researchPlans.version))
     .limit(1);
-  if (planRow) {
-    const contract = parseContract(planRow.contract);
-    if (contract.patternVersion !== activeVersion) {
-      throw new MissingActivePatternError(
-        `job ${jobId}'s frozen contract.patternVersion=${contract.patternVersion} does not match topic ${job.topicId}'s ` +
-          `current ACTIVE Pattern version=${activeVersion} — refusing to assemble against a Pattern the job was not planned under`,
-      );
-    }
+  // S6 audit fix (LOW-2): a job with S5 results but NO frozen plan/contract
+  // is an abnormal state, not a license to silently trust whatever Pattern
+  // version happens to be ACTIVE right now. The version cross-check is
+  // only meaningful against the version the job was actually planned
+  // under — without it, refuse rather than guess.
+  if (!planRow) {
+    throw new MissingActivePatternError(
+      `no research_plans row for job ${jobId} — refusing to assemble without the frozen contract's patternVersion to cross-check`,
+    );
+  }
+  const contract = parseContract(planRow.contract);
+  if (contract.patternVersion !== activeVersion) {
+    throw new MissingActivePatternError(
+      `job ${jobId}'s frozen contract.patternVersion=${contract.patternVersion} does not match topic ${job.topicId}'s ` +
+        `current ACTIVE Pattern version=${activeVersion} — refusing to assemble against a Pattern the job was not planned under`,
+    );
   }
 
   const [pattern] = await db
@@ -130,6 +138,18 @@ async function persistAssembly(
   result: MechanismAssemblyResult,
   now: Date,
 ): Promise<void> {
+  // S6 audit fix (LOW-2): the key is (job, pattern_version) — if a job is
+  // ever legitimately re-assembled under a different version, the previous
+  // version's projection is stale and must not linger as a second "current"
+  // assembly for the same job. Derived projection: deleting is always safe.
+  await db
+    .delete(researchMechanismAssembly)
+    .where(
+      and(
+        eq(researchMechanismAssembly.researchJobId, jobId),
+        ne(researchMechanismAssembly.patternVersion, patternVersion),
+      ),
+    );
   await db
     .insert(researchMechanismAssembly)
     .values({

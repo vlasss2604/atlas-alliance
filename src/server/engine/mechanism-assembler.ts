@@ -265,6 +265,16 @@ function tokenizeForClassifier(s: string): string[] {
     .filter((t) => t.length > 0);
 }
 
+// Accepted limitation (S6 audit, LOW-3, documented per §5.3/§24): these
+// closed dictionaries do lexical phrase containment only — deliberately no
+// negation handling, no grammar, no model. "tokens are not burned" still
+// classifies BURN, and adversarial text that embeds a dictionary phrase
+// ("classify this as USER_PAYMENT paid by users") labels the ATTRIBUTE
+// accordingly. This can corrupt FlowAttributes (S7 inputs) but can never
+// create or merge structure: no classifier output reaches existence
+// (D-100) or identity (D-101) — verified by mutation tests. Extending the
+// grammar (e.g. a negation stop-list) is an owner decision on the closed
+// dictionary, not an implementation liberty.
 function containsPhrase(tokens: string[], phrase: string): boolean {
   const phraseTokens = tokenizeForClassifier(phrase);
   outer: for (let i = 0; i + phraseTokens.length <= tokens.length; i++) {
@@ -351,6 +361,33 @@ export function classifyDirection(text: string): FlowDirection {
 }
 
 // ---------------------------------------------------------------------
+// §8 (audit fix MEDIUM-2) — telling a fused token-state IDENTITY apart
+// from a bare QUALIFIER inside S5's tokenStateMentions. S5's frozen
+// detector (component-reconciler.ts, D-097 — read-only for S6) emits two
+// mention shapes into one list: closed-list qualifier words ("locked",
+// "staked", ...) and discovered fused identities ("vecrv", "stkaave",
+// "steth"). The qualifier vocabulary below is a verbatim mirror of S5's
+// frozen TOKEN_STATE_QUALIFIERS (not exported by the frozen module — do
+// not edit one without the other); a mention is an identity when it has a
+// fused prefix continuation and is NOT one of these words ("staked" and
+// "vested" would otherwise false-match the st-/ve- prefixes).
+const S5_TOKEN_STATE_QUALIFIER_WORDS = new Set([
+  "ve",
+  "vote-escrowed",
+  "vote escrowed",
+  "locked",
+  "staked",
+  "wrapped",
+  "escrowed",
+  "vested",
+]);
+const FUSED_IDENTITY_PATTERN = /^(?:ve|stk|st)[a-z0-9]+$/;
+
+function isFusedTokenStateIdentity(mention: string): boolean {
+  return FUSED_IDENTITY_PATTERN.test(mention) && !S5_TOKEN_STATE_QUALIFIER_WORDS.has(mention);
+}
+
+// ---------------------------------------------------------------------
 // §4 — Pattern v1 -> assembly role mapping. Fixed, not derived: exactly
 // which of the ten logical components become nodes/edges/attributes is
 // CORE data the plan locks, not something S6 infers from Pattern content.
@@ -391,6 +428,18 @@ interface Slot {
 // key is PURELY structural: (step, component, parentBranchPath,
 // structuralUnitKey) — no classification of any kind reads here
 // (D-101, mutations 38-43).
+//
+// Honesty note (S6 audit, LOW-1): within one invocation, `step`,
+// `component` and `parentBranchPathHash` are CONSTANT across every
+// candidate, and the accumulator Map below is local to the invocation —
+// so the only input that actually distinguishes slots is
+// structuralUnitKey. The real invariant that keeps sibling branches from
+// colliding is per-invocation isolation: this function is called once per
+// (lineage, step, component) with candidates already scoped to that
+// lineage; candidates of sibling branches never share an accumulator. The
+// full tuple is kept as contract-shaped defense-in-depth (D-101 names it),
+// but a mutation removing the constant fields is undetectable by
+// construction — do not claim mutation teeth for it.
 function partitionIntoSlots(
   step: number,
   component: string,
@@ -425,7 +474,13 @@ interface WorkingLineage {
   lineage: LineageStep[];
   branchSlotPath: number[];
   branchPointStep: number | null;
-  branchSourceIds: Set<string>;
+  // S6 audit fix (HIGH-1/MEDIUM-1): only the sources of slots attached AT
+  // or AFTER the fork point. The shared prefix's sources deliberately do
+  // NOT live here — sharing provenance with the prefix is sharing it with
+  // EVERY sibling branch equally, which discriminates nothing (§13.4:
+  // "разделяет provenance с ЭТОЙ ветвью"). Before any fork this set is
+  // unused: an unforked lineage accepts every admitted row.
+  postForkSourceIds: Set<string>;
   gaps: MechanismGap[];
   branchAttributionUnresolved: Set<string>; // component names, for dedupe
 }
@@ -435,7 +490,7 @@ function cloneLineage(l: WorkingLineage): WorkingLineage {
     lineage: [...l.lineage],
     branchSlotPath: [...l.branchSlotPath],
     branchPointStep: l.branchPointStep,
-    branchSourceIds: new Set(l.branchSourceIds),
+    postForkSourceIds: new Set(l.postForkSourceIds),
     gaps: [...l.gaps],
     branchAttributionUnresolved: new Set(l.branchAttributionUnresolved),
   };
@@ -504,10 +559,10 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
   // §18a steps 4-8 — incremental lineage/slot/branch walk, Pattern-step
   // order. Root starts as a single lineage before anything is evaluated.
   let active: WorkingLineage[] = [
-    { lineage: [], branchSlotPath: [], branchPointStep: null, branchSourceIds: new Set(), gaps: [], branchAttributionUnresolved: new Set() },
+    { lineage: [], branchSlotPath: [], branchPointStep: null, postForkSourceIds: new Set(), gaps: [], branchAttributionUnresolved: new Set() },
   ];
   const unassignedGaps: MechanismGap[] = [];
-  let enumerationCapped = false;
+  let enumerationCapPoint: { step: number; component: string } | null = null;
 
   for (let step = 1; step <= 8; step++) {
     const components = requiredComponentsForStepSafe(input.pattern, step);
@@ -515,6 +570,30 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
       const key = `${step}:${component}`;
       const result = byKey.get(key);
       const next: WorkingLineage[] = [];
+
+      // S6 audit fix (HIGH-1): branch attribution is decided against the
+      // WHOLE current fork picture, not one lineage in isolation. A row
+      // whose post-fork provenance is shared by MORE than one sibling
+      // branch (or by none) is not deterministically attributable to any
+      // single branch — attaching it to each passing branch multiplied
+      // sibling branches into a cartesian product of "established" flows
+      // that no Evidence ever asserted. Precompute, once per component,
+      // how many forked lineages each admitted row's sourceId passes.
+      const allRowsForComponent =
+        result && (result.status === "SUPPORTED" || result.status === "PARTIALLY_SUPPORTED")
+          ? resolveRows(result.supportingEvidenceIds, key)
+          : [];
+      const forkedLineages = active.filter((l) => l.branchPointStep !== null);
+      const passCountByRowId = new Map<string, number>();
+      if (forkedLineages.length > 0) {
+        for (const row of allRowsForComponent) {
+          let count = 0;
+          for (const fl of forkedLineages) {
+            if (fl.postForkSourceIds.has(row.sourceId)) count += 1;
+          }
+          passCountByRowId.set(row.id, count);
+        }
+      }
 
       for (const l of active) {
         if (!result || result.status === "INSUFFICIENT_EVIDENCE") {
@@ -529,6 +608,10 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
           continue;
         }
         if (result.status === "CONTRADICTED") {
+          // Audit NOTE-2: contradicting ids are provenance too — a
+          // dangling contradicting reference is the same §21 п.5 failure
+          // as a dangling supporting one.
+          resolveRows(result.contradictingEvidenceIds, key);
           const clone = cloneLineage(l);
           clone.gaps.push({
             kind: "CONTRADICTED_COMPONENT",
@@ -540,17 +623,38 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
           continue;
         }
 
-        // SUPPORTED / PARTIALLY_SUPPORTED — branch attribution (§13.4)
-        // first: once a lineage has forked, a downstream component's
-        // Evidence attaches to it only if it shares sourceId with
-        // something already established on this lineage.
-        const allRows = resolveRows(result.supportingEvidenceIds, key);
-        const candidateRows =
-          l.branchPointStep === null
-            ? allRows
-            : allRows.filter((r) => l.branchSourceIds.has(r.sourceId));
+        // SUPPORTED / PARTIALLY_SUPPORTED.
+        const allRows = allRowsForComponent;
+        if (allRows.length === 0) {
+          // SUPPORTED/PARTIALLY_SUPPORTED with zero supportingEvidenceIds
+          // is an impossible S5 state (§21 п.3) — S5 never emits SUPPORTED
+          // without at least one supporting id.
+          throw new MechanismAssemblyInvariantError(`${key} is ${result.status} with no supportingEvidenceIds`);
+        }
 
-        if (allRows.length > 0 && candidateRows.length === 0) {
+        // §13.4, post-audit-fix semantics: once this lineage has forked,
+        // a row attaches to it ONLY when the row's provenance singles this
+        // branch out — it shares a post-fork sourceId with this branch and
+        // with NO sibling branch. Rows shared by several branches (the
+        // whole-document case) or by none are unattributable: they
+        // produce BRANCH_ATTRIBUTION_UNRESOLVED, never an attachment to
+        // every passing branch and never a cartesian fork multiplication.
+        let candidateRows: AssemblyEvidenceProjection[];
+        let attributionUnresolved = false;
+        if (l.branchPointStep === null) {
+          candidateRows = allRows;
+        } else {
+          candidateRows = allRows.filter(
+            (r) => l.postForkSourceIds.has(r.sourceId) && passCountByRowId.get(r.id) === 1,
+          );
+          const anyAmbiguousToMe = allRows.some(
+            (r) => l.postForkSourceIds.has(r.sourceId) && (passCountByRowId.get(r.id) ?? 0) > 1,
+          );
+          const anyOrphan = allRows.some((r) => (passCountByRowId.get(r.id) ?? 0) === 0);
+          attributionUnresolved = candidateRows.length === 0 || anyAmbiguousToMe || anyOrphan;
+        }
+
+        if (candidateRows.length === 0) {
           const clone = cloneLineage(l);
           clone.gaps.push({
             kind: "BRANCH_ATTRIBUTION_UNRESOLVED",
@@ -561,19 +665,24 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
           next.push(clone);
           continue;
         }
-        if (candidateRows.length === 0) {
-          // SUPPORTED/PARTIALLY_SUPPORTED with zero supportingEvidenceIds
-          // is an impossible S5 state (§21 п.3) — S5 never emits SUPPORTED
-          // without at least one supporting id.
-          throw new MechanismAssemblyInvariantError(`${key} is ${result.status} with no supportingEvidenceIds`);
-        }
 
         const parentBranchPathHash = sha256Hex(canonicalize(l.lineage));
         const slots = partitionIntoSlots(step, component, parentBranchPathHash, candidateRows);
 
         if (active.length * slots.length + (active.length - 1) > MAX_FLOWS && slots.length > 1) {
-          enumerationCapped = true;
+          // S6 audit fix (HIGH-2): the cap must never silently drop an
+          // established component from this lineage's structure. The
+          // affected flow carries a positioned FLOW_ENUMERATION_INCOMPLETE
+          // gap (so it can never present COMPLETE_PATH), and the
+          // result-level gap below names the first cap position too.
+          enumerationCapPoint = enumerationCapPoint ?? { step, component };
           const clone = cloneLineage(l);
+          clone.gaps.push({
+            kind: "FLOW_ENUMERATION_INCOMPLETE",
+            component,
+            afterStep: step,
+            provenance: { componentResults: [{ step, component }], evidenceIds: [] },
+          });
           next.push(clone);
           continue;
         }
@@ -581,13 +690,18 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
         slots.forEach((slot, slotIndex) => {
           const clone = cloneLineage(l);
           clone.lineage.push({ step, component, componentResultKey: key, evidenceIds: slot.evidenceIds });
-          for (const id of slot.evidenceIds) {
-            const row = evidenceById.get(id)!;
-            clone.branchSourceIds.add(row.sourceId);
-          }
           if (slots.length > 1) {
             clone.branchPointStep = clone.branchPointStep ?? step;
             clone.branchSlotPath.push(slotIndex);
+          }
+          // Post-fork provenance accumulates from the fork point onward —
+          // the diverging slot itself included (it IS what distinguishes
+          // this branch); pre-fork slots stay out (see postForkSourceIds).
+          if (clone.branchPointStep !== null) {
+            for (const id of slot.evidenceIds) {
+              const row = evidenceById.get(id)!;
+              clone.postForkSourceIds.add(row.sourceId);
+            }
           }
           if (result.status === "PARTIALLY_SUPPORTED") {
             clone.gaps.push({
@@ -597,6 +711,18 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
               provenance: provenanceOf(step, component, slot.evidenceIds),
             });
           }
+          if (attributionUnresolved) {
+            // Some of this component's admitted rows could NOT be
+            // attributed (shared by several branches or by none) even
+            // though others attached uniquely here — §13.4: unattributable
+            // Evidence "порождает разрыв на каждой затронутой ветви".
+            clone.gaps.push({
+              kind: "BRANCH_ATTRIBUTION_UNRESOLVED",
+              component,
+              afterStep: step,
+              provenance: provenanceOf(step, component, result.supportingEvidenceIds),
+            });
+          }
           next.push(clone);
         });
       }
@@ -604,12 +730,15 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
     }
   }
 
-  if (enumerationCapped) {
+  if (enumerationCapPoint) {
     unassignedGaps.push({
       kind: "FLOW_ENUMERATION_INCOMPLETE",
-      component: null,
-      afterStep: null,
-      provenance: { componentResults: [], evidenceIds: [] },
+      component: enumerationCapPoint.component,
+      afterStep: enumerationCapPoint.step,
+      provenance: {
+        componentResults: [{ step: enumerationCapPoint.step, component: enumerationCapPoint.component }],
+        evidenceIds: [],
+      },
     });
   }
 
@@ -696,6 +825,10 @@ function buildFlow(
     { component: "FLOW_PATH", from: "VALUE_SOURCE", to: "MECHANISM" },
     { component: "EXECUTION_EVIDENCE", from: "MECHANISM", to: "DESTINATION" },
   ];
+  // S6 audit fix (MEDIUM-3): §5.1 — executed is true ONLY when
+  // EXECUTION_EVIDENCE is itself established on this lineage. A FLOW_PATH
+  // edge over a specification-only mechanism must never read as executed.
+  const executionEstablishedHere = !!lineageStepFor(l, "EXECUTION_EVIDENCE");
   for (const spec of edgeSpecs) {
     const step = stepOf[spec.component];
     const lineageStep = lineageStepFor(l, spec.component);
@@ -706,7 +839,7 @@ function buildFlow(
       to: spec.to,
       basisComponent: spec.component,
       basisStatus: result.status,
-      executed: true,
+      executed: executionEstablishedHere,
       qualifications: qualificationsOf(result.reasonCodes),
       provenance: provenanceOf(step, spec.component, lineageStep.evidenceIds),
     });
@@ -718,15 +851,26 @@ function buildFlow(
   const valueSourceText = textFor("SOURCE_OF_VALUE");
   const valueSource: ValueSource = valueSourceText ? classifyValueSource(valueSourceText) : "UNKNOWN";
 
+  // S6 audit fix (MEDIUM-5): the walk already emits the correct gap for
+  // every component it could not attach (missing -> its *_UNRESOLVED /
+  // MISSING_COMPONENT kind, contradicted -> CONTRADICTED_COMPONENT,
+  // unattributable -> BRANCH_ATTRIBUTION_UNRESOLVED, capped ->
+  // FLOW_ENUMERATION_INCOMPLETE). buildFlow's absence-emissions below are
+  // now gated on "no gap already covers this component" — they exist only
+  // as a defensive backstop, never a second copy of the same absence.
+  const componentAlreadyGapped = (component: string): boolean => gaps.some((g) => g.component === component);
+
   const destinationText = textFor("DESTINATION");
   const destinationKind: DestinationKind = destinationText ? classifyDestinationKind(destinationText) : "UNKNOWN";
   if (!lineageStepFor(l, "DESTINATION")) {
-    gaps.push({
-      kind: "DESTINATION_UNRESOLVED",
-      component: "DESTINATION",
-      afterStep: 6,
-      provenance: { componentResults: [{ step: 6, component: "DESTINATION" }], evidenceIds: [] },
-    });
+    if (!componentAlreadyGapped("DESTINATION")) {
+      gaps.push({
+        kind: "DESTINATION_UNRESOLVED",
+        component: "DESTINATION",
+        afterStep: 6,
+        provenance: { componentResults: [{ step: 6, component: "DESTINATION" }], evidenceIds: [] },
+      });
+    }
   } else if (destinationKind === "UNKNOWN") {
     gaps.push({
       kind: "DESTINATION_UNRESOLVED",
@@ -745,15 +889,44 @@ function buildFlow(
   const direction: FlowDirection = directionText ? classifyDirection(directionText) : "UNKNOWN";
 
   // §8 — token state carried forward verbatim from S5, never re-derived.
+  //
+  // S6 audit fix (MEDIUM-2): S5's frozen detector routinely emits a
+  // qualifier AND a fused identity for ONE state ("locked veCRV" ->
+  // ["locked","vecrv"]) — a single component's mention list describes ONE
+  // state, never a conflict, so pooling both components' lists into one
+  // set and calling size>1 a mismatch was wrong in both directions. The
+  // comparison is now per-component: each side is reduced to its most
+  // specific representation (fused identities when present, else the bare
+  // qualifiers), and a TOKEN_STATE_MISMATCH exists only when BOTH sides
+  // carry a state and those representations share nothing.
+  //
+  // Documented v1 limitation (same posture as §13.2b): the plan's
+  // qualified-vs-UNQUALIFIED-neighbor example ("RECIPIENT несёт vecrv,
+  // DESTINATION — незаквалифицированный crv") is NOT detectable from
+  // frozen S5 data — S5 records qualified-state mentions only, so an
+  // empty mention list cannot distinguish "text names the liquid token"
+  // from "text does not name the token at all". Treating every
+  // empty-mention neighbor as a mismatch would falsely gap the plan's own
+  // scenario D. Detecting it needs liquid-token mentions at
+  // reconciliation/extraction time — a future frozen-contract change,
+  // not an S6 guess.
+  const stateRepresentationOf = (mentions: string[]): Set<string> => {
+    const identities = mentions.filter(isFusedTokenStateIdentity);
+    return new Set(identities.length > 0 ? identities : mentions);
+  };
   const recipientResult = resultFor(byKey, 6, "RECIPIENT");
   const destinationResult = resultFor(byKey, 6, "DESTINATION");
-  const recipientStates = lineageStepFor(l, "RECIPIENT") ? (recipientResult?.tokenStateMentions ?? []) : [];
-  const destinationStates = lineageStepFor(l, "DESTINATION") ? (destinationResult?.tokenStateMentions ?? []) : [];
-  const allStates = [...new Set([...recipientStates, ...destinationStates])];
+  const recipientStates = stateRepresentationOf(
+    lineageStepFor(l, "RECIPIENT") ? (recipientResult?.tokenStateMentions ?? []) : [],
+  );
+  const destinationStates = stateRepresentationOf(
+    lineageStepFor(l, "DESTINATION") ? (destinationResult?.tokenStateMentions ?? []) : [],
+  );
+  const statesIntersect = [...recipientStates].some((s) => destinationStates.has(s));
+  const tokenStateMismatch = recipientStates.size > 0 && destinationStates.size > 0 && !statesIntersect;
+
   let tokenState: string | null = null;
-  if (allStates.length === 1) {
-    tokenState = allStates[0];
-  } else if (allStates.length > 1) {
+  if (tokenStateMismatch) {
     gaps.push({
       kind: "TOKEN_STATE_MISMATCH",
       component: null,
@@ -769,6 +942,15 @@ function buildFlow(
         ]),
       },
     });
+  } else {
+    // Deterministic representative: the single shared/known state — a
+    // unique fused identity when one exists, else the unique qualifier.
+    // Anything plural or indeterminate stays null (not a gap: nothing
+    // conflicts, the state is just not representable as one string).
+    const union = new Set([...recipientStates, ...destinationStates]);
+    const identities = [...union].filter(isFusedTokenStateIdentity);
+    if (identities.length === 1) tokenState = identities[0];
+    else if (identities.length === 0 && union.size === 1) tokenState = [...union][0];
   }
 
   const attributes: FlowAttributes = {
@@ -792,7 +974,7 @@ function buildFlow(
     });
   }
 
-  if (!lineageStepFor(l, "RECIPIENT")) {
+  if (!lineageStepFor(l, "RECIPIENT") && !componentAlreadyGapped("RECIPIENT")) {
     gaps.push({
       kind: "RECIPIENT_UNRESOLVED",
       component: "RECIPIENT",
@@ -831,7 +1013,7 @@ function buildFlow(
       qualifications: qualificationsOf(durabilityResult.reasonCodes),
       provenance: provenanceOf(8, "DURABILITY_BASIS", durabilityStep.evidenceIds),
     };
-  } else {
+  } else if (!componentAlreadyGapped("DURABILITY_BASIS")) {
     gaps.push({
       kind: "MISSING_COMPONENT",
       component: "DURABILITY_BASIS",
@@ -840,7 +1022,7 @@ function buildFlow(
     });
   }
 
-  if (!lineageStepFor(l, "GOVERNANCE_BASIS")) {
+  if (!lineageStepFor(l, "GOVERNANCE_BASIS") && !componentAlreadyGapped("GOVERNANCE_BASIS")) {
     gaps.push({
       kind: "MISSING_COMPONENT",
       component: "GOVERNANCE_BASIS",
@@ -848,6 +1030,15 @@ function buildFlow(
       provenance: { componentResults: [{ step: 3, component: "GOVERNANCE_BASIS" }], evidenceIds: [] },
     });
   }
+
+  // §10/§11.1 (audit fix MEDIUM-4) — TEMPORAL_STATE_MISMATCH: the flow's
+  // CURRENT_STATE is established and claims a live-ish state, while some
+  // other lineage component carries DEPRECATED/REMOVED on a STRICTLY
+  // newer temporal basis. computeLifecycle already degrades the lifecycle
+  // for exactly this conflict; the conflict itself must also be a
+  // machine-readable gap, not only an implicit lifecycle downgrade.
+  const temporalConflict = detectTemporalStateMismatch(l, byKey);
+  if (temporalConflict) gaps.push(temporalConflict);
 
   // §10.1 lifecycle.
   const lifecycle = computeLifecycle(l, byKey);
@@ -879,6 +1070,53 @@ function buildFlow(
     durability,
     gaps,
   };
+}
+
+// Audit fix MEDIUM-4 — see the call site in buildFlow. Mirrors the exact
+// newer-conflict predicate computeLifecycle's CURRENT branch uses, so the
+// gap and the lifecycle downgrade can never disagree about what a
+// temporal conflict is.
+function detectTemporalStateMismatch(
+  l: WorkingLineage,
+  byKey: Map<string, ComponentReconciliationResult>,
+): MechanismGap | null {
+  const currentStateStep = lineageStepFor(l, "CURRENT_STATE");
+  const currentStateResult = resultFor(byKey, 5, "CURRENT_STATE");
+  if (
+    !currentStateStep ||
+    !currentStateResult ||
+    (currentStateResult.status !== "SUPPORTED" && currentStateResult.status !== "PARTIALLY_SUPPORTED")
+  ) {
+    return null;
+  }
+  const cs = currentStateResult.currentState;
+  if (cs !== "LIVE" && cs !== "IMPLEMENTING") return null;
+  const csAt = currentStateResult.temporalBasis ? new Date(currentStateResult.temporalBasis.at).getTime() : null;
+  if (csAt === null) return null;
+
+  for (const step of l.lineage) {
+    if (step.component === "CURRENT_STATE") continue;
+    const r = resultFor(byKey, step.step, step.component);
+    if (!r?.currentState || !r.temporalBasis) continue;
+    if (
+      (r.currentState === "DEPRECATED" || r.currentState === "REMOVED") &&
+      new Date(r.temporalBasis.at).getTime() > csAt
+    ) {
+      return {
+        kind: "TEMPORAL_STATE_MISMATCH",
+        component: "CURRENT_STATE",
+        afterStep: 5,
+        provenance: {
+          componentResults: [
+            { step: 5, component: "CURRENT_STATE" },
+            { step: step.step, component: step.component },
+          ],
+          evidenceIds: sortedIds([...currentStateStep.evidenceIds, ...step.evidenceIds]),
+        },
+      };
+    }
+  }
+  return null;
 }
 
 function computeLifecycle(l: WorkingLineage, byKey: Map<string, ComponentReconciliationResult>): FlowLifecycle {
