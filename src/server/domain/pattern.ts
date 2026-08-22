@@ -47,10 +47,13 @@ const requiredComponentsSchema = z
 // live in Pattern/CORE content, additively, keyed by COMPONENT NAME (not
 // step — a component name is unique across the whole Pattern v1 matrix).
 // `ComponentReconciler` (component-reconciler.ts) CONSUMES this and never
-// invents a fallback: a component absent from this record has NO Pattern
-// requirement, which componentRequirementsFor() below represents as an
-// empty establishingClasses set — nothing establishes it, not a coded
-// default standing in for one (S5 plan §5, acceptance scenario Y).
+// invents a fallback. Two distinct cases, per D-095 (see
+// componentRequirementsFor below for the enforcement): an EXPLICIT entry
+// with establishingClasses: [] is valid Pattern data (a human/CORE
+// decision that this component structurally cannot be established,
+// S5 plan §5 acceptance scenario Y); a component with NO entry at all is
+// a CORE configuration failure — componentRequirementsFor throws
+// PatternConfigurationError rather than silently defaulting to case A.
 const evidenceSourceClassSchema = z.enum([
   "ONCHAIN_VERIFIABLE",
   "OFFICIAL_DOCS",

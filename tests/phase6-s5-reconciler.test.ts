@@ -1127,3 +1127,156 @@ describe("Deep audit LOW-1/LOW-2: currentState не выбирается мол�
     expect(r.tokenStateMentions).toEqual(["vecrv"]);
   });
 });
+
+describe("Final review, deep-audit round 2: token-state identity must not fail open on casing/separators (D-096)", () => {
+  const veCrvReqs = () =>
+    requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      tokenStateSensitive: true,
+      requiredTokenState: "veCRV",
+    });
+
+  // Owner scenarios A-D: veCRV survives camelCase, Titlecase, and
+  // ALL-CAPS casing — none of these downgrade a SUPPORTED result, and
+  // all normalize to the SAME tokenStateMentions identity.
+  it.each([
+    ["A. veCRV (canonical camelCase)", "veCRV holders receive fees"],
+    ["B. VeCRV (Titlecase prefix)", "VeCRV holders receive fees"],
+    ["C. VECRV (ALL-CAPS)", "VECRV holders receive fees"],
+  ])("%s -> SUPPORTED, no TOKEN_STATE_UNQUALIFIED, tokenStateMentions=[veCRV identity]", (_label, fragment) => {
+    const r = reconcile([row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment })], veCrvReqs(), {
+      item: { step: 6, component: "RECIPIENT" },
+    });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.reasonCodes).not.toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["vecrv"]);
+  });
+
+  // Owner scenario E: veBAL (same prefix, different ticker) must NOT match
+  // requiredTokenState=veCRV, regardless of the casing fix above.
+  it("E. veBAL != required veCRV -> PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED", () => {
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "veBAL holders receive fees" })],
+      veCrvReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["vebal"]);
+  });
+
+  const stkAaveReqs = () =>
+    requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      tokenStateSensitive: true,
+      requiredTokenState: "stkAAVE",
+    });
+
+  // Owner scenarios F-G: stkAAVE casing matrix.
+  it.each([
+    ["F. stkAAVE (canonical camelCase)", "stkAAVE holders receive rewards"],
+    ["G. STKAAVE (ALL-CAPS)", "STKAAVE holders receive rewards"],
+  ])("%s -> SUPPORTED, tokenStateMentions=[stkAAVE identity]", (_label, fragment) => {
+    const r = reconcile([row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment })], stkAaveReqs(), {
+      item: { step: 6, component: "RECIPIENT" },
+    });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.tokenStateMentions).toEqual(["stkaave"]);
+  });
+
+  // Owner scenarios H-I: bare ticker and a different fused prefix never
+  // imply the required qualified state.
+  it("H. bare AAVE never fabricates stkAAVE identity (no qualifier mentioned at all -> nothing to flag; pre-existing D-096 semantics, unchanged by the casing fix)", () => {
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "AAVE holders receive rewards" })],
+      stkAaveReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.reasonCodes).not.toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual([]);
+  });
+
+  it("I. stETH != required stkAAVE -> PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED, tokenStateMentions=[steth]", () => {
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "stETH holders receive rewards" })],
+      stkAaveReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["steth"]);
+  });
+
+  // Owner scenario J: multiple distinct fused identities in one fragment
+  // are all preserved, never merged.
+  it("J. Evidence содержит veCRV и veBAL -> tokenStateMentions сохраняет обе раздельно", () => {
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "veCRV holders and veBAL holders both receive fees" })],
+      veCrvReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.tokenStateMentions.slice().sort()).toEqual(["vebal", "vecrv"]);
+  });
+
+  // Owner scenario K: ordinary English words sharing the "ve"/"st"/"stk"
+  // prefix in normal lowercase prose must never fabricate an identity —
+  // this is the boundary the casing fix must not weaken.
+  it("K. give/never/starter/stone/vested/vehicle в обычной прозе не создают fused token-state идентичность", () => {
+    const r = reconcile(
+      [
+        row({
+          component: "RECIPIENT",
+          sourceClass: "ONCHAIN_VERIFIABLE",
+          fragment: "They never give a starter kit; the vested amount sits on a stone monument near the vehicle depot",
+        }),
+      ],
+      veCrvReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.tokenStateMentions).not.toContain("stone");
+    expect(r.tokenStateMentions).not.toContain("starter");
+    expect(r.tokenStateMentions).not.toContain("vehicle");
+    // "vested" IS expected — as the pre-existing GENERIC qualifier match
+    // only (TOKEN_STATE_QUALIFIERS), never as a fused "ve"+"sted" identity.
+    expect(r.tokenStateMentions).toEqual(["vested"]);
+  });
+
+  // §6 separator forms: "ve-CRV" / "ve CRV" normalize to the same
+  // identity as the fused form, licensed by the same uppercase-ticker-
+  // start discipline (so "ve fees"/"ve-something" still cannot fuse).
+  it.each([
+    ["ve-CRV (hyphen separator)", "ve-CRV holders receive fees"],
+    ["ve CRV (space separator)", "ve CRV holders receive fees"],
+  ])("separator form: %s -> SUPPORTED, tokenStateMentions=[veCRV identity]", (_label, fragment) => {
+    const r = reconcile([row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment })], veCrvReqs(), {
+      item: { step: 6, component: "RECIPIENT" },
+    });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.tokenStateMentions).toEqual(["vecrv"]);
+  });
+
+  it("separator discipline is not a blank two-word license: 've fees' does not fuse into a bogus identity", () => {
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "ve fees are distributed to holders" })],
+      veCrvReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.tokenStateMentions).toEqual([]);
+  });
+
+  // §8 carry-forward: the qualified identity is recorded in
+  // tokenStateMentions even when the casing fix means there is no
+  // downgrade at all (SUPPORTED, not PARTIALLY_SUPPORTED).
+  it("carry-forward: SUPPORTED (no downgrade) via ALL-CAPS still populates tokenStateMentions with the normalized identity", () => {
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "VECRV holders receive protocol fees" })],
+      veCrvReqs(),
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.tokenStateMentions).toEqual(["vecrv"]);
+  });
+});

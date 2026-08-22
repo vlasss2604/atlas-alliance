@@ -146,24 +146,58 @@ function tokenizeForMatch(s: string): string[] {
 // "ve"/"stk"/"st". A fused-prefix qualifier attaches directly onto its
 // ticker with no delimiter (veCRV, veBAL, stkAAVE, stETH) — plain
 // word-tokenization can never see the prefix as a token of its own there.
-// Boundary discipline: the prefix, lowercase, immediately followed by an
-// uppercase letter (the start of the fused ticker) at a word start — the
-// same false-positive-avoidance discipline as S4's project-name
-// containment, applied to a fused rather than a delimited token. This is
-// what stops "give"/"start"/"stone" (no camelCase fusion) from ever
-// matching. The captured identity is the WHOLE match (prefix + ticker),
-// normalized — "vecrv", "vebal", "stkaave" — so two different fused
-// tickers under the same prefix are never conflated with each other, and
-// never conflated with the bare ticker alone ("CRV" without "ve" produces
-// no fused mention at all).
+//
+// FINAL fix (deep audit round 2, phase-6-s5-audit round-2) — case is
+// presentation, not economic identity: veCRV/VeCRV/VECRV must all
+// resolve to the same identity, and so must stkAAVE/StkAAVE/STKAAVE. The
+// qualifier prefix below is therefore matched via an explicit per-letter
+// case class (`[vV][eE]`, never the regex /i/ flag) — the /i/ flag would
+// also blunt the uppercase lookahead that is this detector's ONLY
+// boundary signal against ordinary lowercase English continuations
+// ("vested", "vehicle", "starter", "stone", "give", "never" — none of
+// which ever have an uppercase letter immediately after the prefix in
+// normal prose). That lookahead still fires correctly in three shapes
+// that all carry the same signal (an uppercase letter right after the
+// prefix in the ORIGINAL text): classic camelCase (veCRV), Titlecase
+// (VeCRV), and ALL-CAPS (VECRV — trivially true since every letter in an
+// all-caps run is uppercase, including the one right after the prefix).
+// A single optional hyphen/space between prefix and ticker is accepted
+// too (§6 separator forms: "ve-CRV", "ve CRV") under the exact same
+// discipline — it is the uppercase ticker-start that licenses the match,
+// never the separator alone, so "ve fees"/"ve-something" (lowercase
+// continuation) still cannot fuse.
+//
+// Deliberately NOT supported, reported rather than invented: a fully
+// lowercase, no-case-transition fused form ("vecrv", "stkaave", "steth"
+// written in a single all-lowercase run with no camelCase/Titlecase/
+// ALL-CAPS/separator signal at all). That shape is lexically IDENTICAL
+// to an ordinary lowercase English continuation sharing the same
+// prefix — "vecrv" and "vested" are the same shape (lowercase prefix +
+// lowercase continuation at a word boundary), and the two-letter "st"
+// prefix collides with common words (start, stone, story, state, still)
+// the same way. The task's own §14 matrix requires "vested" to remain
+// its own lexical qualifier ONLY (never a fused identity) while
+// requiring "vecrv" to fuse — those two requirements are satisfiable
+// only by a ticker allowlist/dictionary, which D-096/§3 explicitly
+// forbids ("no semantic model inference", "keep the detector lexical
+// and bounded"). This is the one ambiguity from the final review
+// deliberately left unimplemented rather than resolved by inventing an
+// ontology; see the return report for the full write-up.
+//
+// The captured identity is the WHOLE match (prefix + ticker), case- and
+// separator-normalized — "vecrv", "vebal", "stkaave" — so two different
+// fused tickers under the same prefix are never conflated with each
+// other, and never conflated with the bare ticker alone ("CRV" without
+// "ve" produces no fused mention at all).
 const FUSED_TOKEN_STATE_PREFIXES = ["ve", "stk", "st"] as const;
 
 function detectFusedTokenStateIdentities(text: string): string[] {
   const found = new Set<string>();
   for (const prefix of FUSED_TOKEN_STATE_PREFIXES) {
-    const pattern = new RegExp(`\\b${prefix}(?=[A-Z])[A-Za-z][A-Za-z0-9]*`, "g");
+    const prefixCaseInsensitive = [...prefix].map((ch) => `[${ch}${ch.toUpperCase()}]`).join("");
+    const pattern = new RegExp(`\\b${prefixCaseInsensitive}[-\\s]?(?=[A-Z])([A-Za-z][A-Za-z0-9]*)`, "g");
     for (const match of text.matchAll(pattern)) {
-      found.add(normalizeForLexicalMatch(match[0]));
+      found.add(normalizeForLexicalMatch(`${prefix}${match[1]}`));
     }
   }
   return [...found];
