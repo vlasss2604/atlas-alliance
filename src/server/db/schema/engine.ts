@@ -11,6 +11,7 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+import type { MechanismFlow, MechanismGap } from "../../engine/mechanism-assembler";
 
 import { componentReconciliationStatus, researchAttemptStatus } from "./enums";
 import { researchJobs } from "./research";
@@ -113,5 +114,48 @@ export const researchComponentResults = pgTable(
       t.component,
     ),
     index("ix_research_component_results_job").on(t.researchJobId),
+  ],
+);
+
+// Phase 6, S6 (phase-6-s6-plan.md §20, D-103) — a DERIVED PROJECTION,
+// same discipline as research_component_results above: deleting every row
+// here and re-running assembleMechanism() from the same (Pattern,
+// research_component_results, admitted Evidence) is required to reproduce
+// a semantically identical result. Truth stays in research_component_results
+// and evidence; this table exists so S7 (and audit) can read the assembled
+// mechanism without recomputing it, and so a crash between S6 and S7 never
+// requires re-running S4/S5 work.
+//
+// flows/unassignedGaps are jsonb, not relational columns (§20 п.4): no
+// caller queries into nodes/edges/gaps individually — the one consumer
+// reads the assembly whole — so a second family of tables would be
+// unused normalization, not safety.
+export const researchMechanismAssembly = pgTable(
+  "research_mechanism_assembly",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    researchJobId: uuid("research_job_id")
+      .notNull()
+      .references(() => researchJobs.id, { onDelete: "cascade" }),
+    patternVersion: integer("pattern_version").notNull(),
+    flows: jsonb("flows").notNull().$type<MechanismFlow[]>(),
+    unassignedGaps: jsonb("unassigned_gaps").notNull().$type<MechanismGap[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // §20 — "one assembly per job and Pattern version"; the upsert target
+    // that keeps replay idempotent rather than accumulating rows.
+    uniqueIndex("uq_research_mechanism_assembly_job_pattern_version").on(
+      t.researchJobId,
+      t.patternVersion,
+    ),
+    index("ix_research_mechanism_assembly_job").on(t.researchJobId),
   ],
 );

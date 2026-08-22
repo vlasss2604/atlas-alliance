@@ -9,6 +9,7 @@ import type { ControllerRunResult, WorkExecutor } from "./controller";
 import { parseContract } from "../memory/contract";
 import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
+import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 
 // Phase 6, S4 — the actual production wiring point: given a jobId, load
 // its frozen entitlement/budget, its persisted Research Boundary
@@ -106,6 +107,16 @@ export async function runS4ResearchJob(
   // even though the per-attempt hook alone cannot be (see doc comment
   // above).
   await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
+
+  // Phase 6, S6 (phase-6-s6-plan.md §27) — assembly is a derived
+  // projection over whatever S5 results currently exist, same discipline
+  // as the S5 sweep above: re-running it after every call is
+  // deterministic, cheap, and never re-spends S4 budget or repeats paid
+  // research. This is what makes S6 eventually consistent across a
+  // crash/restart between S5 persistence and S6 assembly, without a
+  // separate per-attempt hook (S6 has no per-component granularity to
+  // hook into — it consumes the whole job's S5 result set at once).
+  await assembleAndPersistMechanism(db, jobId, now);
 
   return result;
 }
