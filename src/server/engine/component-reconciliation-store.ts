@@ -1,9 +1,11 @@
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { evidence, researchComponentResults, researchJobs, researchPatterns } from "../db/schema";
+import { evidence, researchAttempts, researchComponentResults, researchJobs, researchPatterns, researchPlans } from "../db/schema";
 import { loadProductConfig } from "../config/product";
 import { componentRequirementsFor, patternContentSchema } from "../domain/pattern";
+import { parseContract } from "../memory/contract";
+import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
 import type { ComponentWorkItem } from "./contract-view";
 import { reconcileComponent, type ComponentReconciliationResult, type EvidenceRow } from "./component-reconciler";
 
@@ -13,11 +15,54 @@ import { reconcileComponent, type ComponentReconciliationResult, type EvidenceRo
 // result. All the actual rules live in component-reconciler.ts — nothing
 // here decides establishment/contradiction/supersession/token-state.
 
-async function loadPatternContentForJob(db: Database | Transaction, jobId: string) {
+// HIGH-4 (deep audit) fix — the previous version of this function read
+// "the first research_patterns row for this topic", with no status filter
+// and no ORDER BY: on a topic carrying a RETIRED v1 alongside an ACTIVE
+// v2, it silently reconciled against whichever row Postgres's heap
+// happened to return first — proven non-deterministic and, in the deep
+// audit's repro, the RETIRED version. This reuses the SAME Phase-6-safe
+// ACTIVE-only lookup S4 already established (active-pattern.ts) rather
+// than inventing a second selector, and additionally cross-checks the
+// job's own frozen contract.patternVersion (the same check
+// buildContractView performs at plan time, §5.1) — defensively re-verified
+// here since S5 can run at a different moment than plan-time. Either
+// disagreement is a hard, typed configuration failure — never a silent
+// fallback to some other row.
+async function loadActivePatternContentForJob(db: Database | Transaction, jobId: string) {
   const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
   if (!job) throw new Error(`research job not found: ${jobId}`);
-  const [pattern] = await db.select().from(researchPatterns).where(eq(researchPatterns.topicId, job.topicId));
-  if (!pattern) throw new Error(`no research_patterns row for topic ${job.topicId}`);
+  if (!job.topicId) throw new Error(`research job ${jobId} has no topicId`);
+
+  const activeVersion = await loadActivePatternVersion(db, job.topicId);
+  if (activeVersion === null) {
+    throw new MissingActivePatternError(
+      `no ACTIVE research_patterns row for topic ${job.topicId} — refusing to reconcile without a confirmed active Pattern version`,
+    );
+  }
+
+  const [planRow] = await db
+    .select()
+    .from(researchPlans)
+    .where(eq(researchPlans.researchJobId, jobId))
+    .orderBy(desc(researchPlans.version))
+    .limit(1);
+  if (planRow) {
+    const contract = parseContract(planRow.contract);
+    if (contract.patternVersion !== activeVersion) {
+      throw new MissingActivePatternError(
+        `job ${jobId}'s frozen contract.patternVersion=${contract.patternVersion} does not match topic ${job.topicId}'s ` +
+          `current ACTIVE Pattern version=${activeVersion} — refusing to reconcile against a Pattern the job was not planned under`,
+      );
+    }
+  }
+
+  const [pattern] = await db
+    .select()
+    .from(researchPatterns)
+    .where(and(eq(researchPatterns.topicId, job.topicId), eq(researchPatterns.version, activeVersion)));
+  if (!pattern) {
+    throw new Error(`ACTIVE research_patterns row for topic ${job.topicId} version ${activeVersion} vanished between lookup and read`);
+  }
   // Same discipline as plan-job.ts's loadActivePattern — a malformed
   // Pattern must not silently reach reconciliation.
   return patternContentSchema.parse(pattern.content);
@@ -119,6 +164,15 @@ async function persistResult(
 // widens scope beyond ComponentWorkItem's own (step, component) — no
 // budget, no provider, no search here (§17.1 boundary, restated at the
 // integration edge too).
+//
+// MEDIUM-3 (deep audit): a PatternConfigurationError from
+// componentRequirementsFor (CORE not configured for this component at
+// all) is deliberately NOT caught here — it propagates to the caller as a
+// real system/configuration failure, never silently persisted as a false
+// INSUFFICIENT_EVIDENCE row. Same posture for MissingActivePatternError
+// (HIGH-4): a Pattern selection failure is a configuration failure, not
+// an evidentiary outcome, and must not produce a derived-projection row
+// that looks like one.
 export async function reconcileAndPersistComponent(
   db: Database | Transaction,
   jobId: string,
@@ -126,7 +180,7 @@ export async function reconcileAndPersistComponent(
   now: Date,
 ): Promise<ComponentReconciliationResult> {
   const [pattern, config, evidenceRows] = await Promise.all([
-    loadPatternContentForJob(db, jobId),
+    loadActivePatternContentForJob(db, jobId),
     loadProductConfig(db),
     loadEvidenceRows(db, jobId, item.step, item.component),
   ]);
@@ -141,4 +195,53 @@ export async function reconcileAndPersistComponent(
   });
   await persistResult(db, jobId, result, now);
   return result;
+}
+
+// HIGH-2 (deep audit) fix — the smallest deterministic recovery
+// mechanism: reconcile every (step, component) in `workQueue` whose S4
+// attempt is already terminal (SUCCEEDED/FAILED/SKIPPED), regardless of
+// whether it was already reconciled. reconcileAndPersistComponent is an
+// idempotent derived-projection upsert (§11.3) — calling it again for an
+// already-current row is a wasted read, never a correctness or budget
+// problem, and never touches search/fetch/model budget (no WorkExecutor,
+// no provider, nothing paid happens here). This is the sweep that makes
+// S5 eventually consistent no matter when/where a crash happened between
+// an S4 attempt's terminal UPDATE and its own S5 persistence — including
+// a crash that happened on a PRIOR run of this job entirely, which the
+// controller's own per-attempt `reconcile` hook structurally cannot ever
+// revisit (a SUCCEEDED component is filtered out of `pending` before the
+// controller's loop runs at all).
+//
+// A pending (not-yet-terminal, i.e. STARTED-and-still-within-lease, or
+// never-attempted) component is intentionally left alone — reconciling it
+// now would either read a stale/incomplete Evidence set for it, or (per
+// §12) attempt to synthesize a result for work that has not actually
+// finished; neither is this sweep's job. It runs unconditionally after
+// every runS4ResearchJob call (see that module), so a component only
+// pending because it isn't due yet will be swept the moment it does
+// become terminal, either via the per-attempt hook or the next sweep.
+export async function reconcileOutstandingComponents(
+  db: Database | Transaction,
+  jobId: string,
+  workQueue: Pick<ComponentWorkItem, "step" | "component">[],
+  now: Date,
+): Promise<void> {
+  if (workQueue.length === 0) return;
+
+  const attemptRows = await db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+  const latestByKey = new Map<string, { attemptNumber: number; status: string }>();
+  for (const row of attemptRows) {
+    const key = `${row.patternStep}:${row.component}`;
+    const prior = latestByKey.get(key);
+    if (!prior || row.attemptNumber >= prior.attemptNumber) {
+      latestByKey.set(key, { attemptNumber: row.attemptNumber, status: row.status });
+    }
+  }
+
+  const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "SKIPPED"]);
+  for (const item of workQueue) {
+    const latest = latestByKey.get(`${item.step}:${item.component}`);
+    if (!latest || !TERMINAL_STATUSES.has(latest.status)) continue;
+    await reconcileAndPersistComponent(db, jobId, item, now);
+  }
 }

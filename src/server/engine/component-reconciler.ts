@@ -117,8 +117,10 @@ export interface ComponentReconciliationResult {
 // §9 (D-096) — closed, code-owned list of token-state qualifiers, checked
 // with token-boundary discipline (same discipline as S4's project-name
 // containment) so "veCRV" matches but "give" (containing "ve") does not.
+// "ve"/"stk"/"st" are FUSED prefixes (handled separately below, by
+// FUSED_PREFIXES) — they never appear as their own delimited word, so the
+// generic word-tokenizer below would never see them anyway.
 const TOKEN_STATE_QUALIFIERS = [
-  "ve",
   "vote-escrowed",
   "vote escrowed",
   "locked",
@@ -138,26 +140,42 @@ function tokenizeForMatch(s: string): string[] {
     .filter((t) => t.length > 0);
 }
 
+// HIGH-5 (deep audit) fix — D-096 requires token-STATE IDENTITY, not a
+// bare qualifier: "CRV != veCRV" and "AAVE != stkAAVE" mean the actual
+// fused ticker must be preserved, not collapsed into the generic word
+// "ve"/"stk"/"st". A fused-prefix qualifier attaches directly onto its
+// ticker with no delimiter (veCRV, veBAL, stkAAVE, stETH) — plain
+// word-tokenization can never see the prefix as a token of its own there.
+// Boundary discipline: the prefix, lowercase, immediately followed by an
+// uppercase letter (the start of the fused ticker) at a word start — the
+// same false-positive-avoidance discipline as S4's project-name
+// containment, applied to a fused rather than a delimited token. This is
+// what stops "give"/"start"/"stone" (no camelCase fusion) from ever
+// matching. The captured identity is the WHOLE match (prefix + ticker),
+// normalized — "vecrv", "vebal", "stkaave" — so two different fused
+// tickers under the same prefix are never conflated with each other, and
+// never conflated with the bare ticker alone ("CRV" without "ve" produces
+// no fused mention at all).
+const FUSED_TOKEN_STATE_PREFIXES = ["ve", "stk", "st"] as const;
+
+function detectFusedTokenStateIdentities(text: string): string[] {
+  const found = new Set<string>();
+  for (const prefix of FUSED_TOKEN_STATE_PREFIXES) {
+    const pattern = new RegExp(`\\b${prefix}(?=[A-Z])[A-Za-z][A-Za-z0-9]*`, "g");
+    for (const match of text.matchAll(pattern)) {
+      found.add(normalizeForLexicalMatch(match[0]));
+    }
+  }
+  return [...found];
+}
+
 // §9 — detects qualifiers by lexical token match, over the text the model
 // actually produced (fragment/summary of an evidence row already admitted
 // for this component) — never a fresh search, never a model call.
-//
-// "ve" needs its own detector: unlike "staked"/"locked"/"wrapped" (which
-// always appear as their own separated word — "staked AAVE"), a
-// vote-escrowed ticker fuses the prefix directly onto the token with no
-// delimiter (veCRV, veBAL) — plain word-tokenization can never see "ve" as
-// a token of its own there. Boundary discipline for THIS qualifier is a
-// case-sensitive "ve" immediately followed by an uppercase letter (the
-// start of the fused ticker) — the same false-positive risk word-boundary
-// checks elsewhere in this codebase (S4 project containment) guard
-// against, applied to a fused rather than a delimited token.
-const VE_FUSION_PATTERN = /\bve(?=[A-Z])/;
-
 function detectTokenStateMentions(text: string): string[] {
   const tokens = tokenizeForMatch(text);
   const found = new Set<string>();
   for (const qualifier of TOKEN_STATE_QUALIFIERS) {
-    if (qualifier === "ve") continue; // handled separately below
     const qualifierTokens = tokenizeForMatch(qualifier);
     outer: for (let i = 0; i + qualifierTokens.length <= tokens.length; i++) {
       for (let j = 0; j < qualifierTokens.length; j++) {
@@ -167,7 +185,7 @@ function detectTokenStateMentions(text: string): string[] {
       break;
     }
   }
-  if (VE_FUSION_PATTERN.test(text)) found.add("ve");
+  for (const identity of detectFusedTokenStateIdentities(text)) found.add(identity);
   return [...found].sort();
 }
 
@@ -239,23 +257,6 @@ function compareDeterministic(a: EvidenceRow, b: EvidenceRow): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-// D-093 §8.1a — "at least as capable of establishing THIS component" is
-// class-membership only, never a global rank. If A wasn't capable at all,
-// any B is vacuously "at least as capable" (B may supersede A regardless
-// of B's own class) — this is what lets a newer, structurally inadmissible
-// row fail to block supersession-by-omission while never itself winning
-// (scenario W: OFFICIAL_DOCS can't supersede EXECUTION_EVIDENCE's onchain
-// row, but also never establishes it either).
-function atLeastAsCapable(
-  aClass: EvidenceSourceClass | null,
-  bClass: EvidenceSourceClass | null,
-  establishingClasses: EvidenceSourceClass[],
-): boolean {
-  const aCapable = aClass !== null && establishingClasses.includes(aClass);
-  if (!aCapable) return true;
-  return bClass !== null && establishingClasses.includes(bClass);
-}
-
 interface RowVerdict {
   row: EvidenceRow;
   exclusionReason: ExclusionReason | null;
@@ -295,6 +296,26 @@ function evaluateCoreEligibility(
     }
   }
   return { ok: true, reason: null };
+}
+
+// HIGH-3 (deep audit) fix — D-093 condition 4 ("B not less capable of
+// establishing THIS component than A") is the FULL establishment
+// threshold, not class-membership alone. §4 defines "capable of
+// establishing" as: admissible class (§5) + relationship=SUPPORTS
+// (condition 3 — "INDIRECT gives at most partial, INFERRED nothing") +
+// directness=DIRECT (condition 4) + whatever §6 state/freshness gates the
+// component requires. A row that could never itself establish this
+// component — INFERRED, CONTEXT, LIMITS, INDIRECT, wrong class, stale,
+// wrong state — must never be "at least as capable" of anything: it
+// cannot supersede an older row that DOES establish. This subsumes the
+// old class-membership-only rule (which is exactly evaluateCoreEligibility
+// restricted to the SUPPORTS+DIRECT axes) and removes the need for the
+// former "vacuous when A wasn't capable either" special case — a B that
+// fully qualifies supersedes regardless of A's own capability (scenario
+// X); a B that doesn't qualify supersedes nothing, ever (scenario W,
+// and P1a-d in the deep audit).
+function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict): boolean {
+  return v.eligibleCore && row.relationship === "SUPPORTS" && row.directness === "DIRECT";
 }
 
 export function reconcileComponent(input: ComponentReconciliationInput): ComponentReconciliationResult {
@@ -369,10 +390,9 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     });
   }
 
-  // --- Step 4: supersession (§8.1) — among core-eligible-or-not rows that
-  // carry a real state and a real temporal basis; class-capability (not
-  // core eligibility, which already folds in the live-state gate) governs
-  // condition 4, matching D-093's "class membership only" test. -----------
+  // --- Step 4: supersession (§8.1) — HIGH-3 fix: condition 4 now requires
+  // the FULL establishment threshold from B (isEstablishmentEligible), not
+  // class membership alone — see that function's doc comment. -------------
   const supersededIds = new Set<string>();
   const candidatesForSupersession = survivingAfterDedup.filter((r) => {
     const v = verdictByRowId.get(r.id)!;
@@ -384,7 +404,7 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       if (a.id === b.id) continue;
       const vb = verdictByRowId.get(b.id)!;
       if (vb.temporalBasis!.at.getTime() <= va.temporalBasis!.at.getTime()) continue; // b must be strictly newer
-      if (!atLeastAsCapable(a.sourceClass, b.sourceClass, requirements.establishingClasses)) continue;
+      if (!isEstablishmentEligible(b, vb)) continue;
       supersededIds.add(a.id);
       break;
     }
@@ -399,6 +419,12 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   const fullEstablishing: EvidenceRow[] = [];
   const partialEstablishing: EvidenceRow[] = [];
   const contradictionCapable: EvidenceRow[] = [];
+  // MEDIUM-2 fix: a DIRECT CONTRADICTS row's final disposition (excluded
+  // vs. actively contradiction-bearing) cannot be decided until AFTER
+  // contradiction detection runs below — deciding it here, unconditionally,
+  // is exactly what let one evidenceId land in BOTH contradictingEvidenceIds
+  // AND excludedEvidence (deep audit P3a). It is added to
+  // contradictionCapable now and its exclusion decision deferred.
 
   for (const row of activePool) {
     const v = verdictByRowId.get(row.id)!;
@@ -411,9 +437,8 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
         contradictionCapable.push(row);
         if (row.relationship === "SUPPORTS") {
           fullEstablishing.push(row);
-        } else {
-          excluded.set(row.id, "RELATIONSHIP_NOT_SUPPORTING");
         }
+        // CONTRADICTS: excluded/kept decided after Step 6 below.
         continue;
       }
       if (row.directness === "INDIRECT" && row.relationship === "SUPPORTS") {
@@ -428,6 +453,17 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   }
 
   // --- Step 6: contradiction (§7, D-094) ------------------------------------
+  // MEDIUM-1 fix: the threshold is state INCOMPATIBILITY, not a
+  // relationship label. Two contradiction-capable, state-bearing rows
+  // conflict iff their normalized states differ — this covers SUPPORTS-vs-
+  // SUPPORTS-different-state (unchanged) AND SUPPORTS-vs-CONTRADICTS
+  // (previously fired on relationship alone, even at identical states —
+  // deep audit P6) while correctly NOT firing when a CONTRADICTS row
+  // states the SAME machine-readable state as the SUPPORTS row it
+  // "disagrees" with in prose (relationship label from the S4 model is
+  // never itself the fact — the state is). A CONTRADICTS row with UNKNOWN
+  // state was already excluded from this pool by the state-bearing filter,
+  // so it correctly cannot fabricate OR suppress anything (P4a/P7).
   const stateBearingCapable = contradictionCapable.filter((r) => verdictByRowId.get(r.id)!.normalizedState !== "UNKNOWN");
   let contradictionFound = false;
   const contradictingSet = new Set<string>();
@@ -437,16 +473,26 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       const b = stateBearingCapable[j];
       const va = verdictByRowId.get(a.id)!;
       const vb = verdictByRowId.get(b.id)!;
-      const bothSupportDiffer =
-        a.relationship === "SUPPORTS" && b.relationship === "SUPPORTS" && va.normalizedState !== vb.normalizedState;
-      const opposingRelationship =
-        (a.relationship === "SUPPORTS" && b.relationship === "CONTRADICTS") ||
-        (a.relationship === "CONTRADICTS" && b.relationship === "SUPPORTS");
-      if (bothSupportDiffer || opposingRelationship) {
+      if (va.normalizedState !== vb.normalizedState) {
         contradictionFound = true;
         contradictingSet.add(a.id);
         contradictingSet.add(b.id);
       }
+    }
+  }
+
+  // MEDIUM-2 fix, continued: finalize the deferred CONTRADICTS disposition
+  // now that contradictingSet is known. A CONTRADICTS row that ended up
+  // actively bearing the conflict is NEVER also recorded as excluded — the
+  // three output sets (supporting/contradicting/excluded) stay disjoint.
+  // A CONTRADICTS row that did NOT participate in any actual conflict (no
+  // conflict at all, or a same-state disagreement that MEDIUM-1 correctly
+  // refuses to treat as conflict) is excluded as non-supporting, same as
+  // before (P4a/P7's honest INSUFFICIENT_EVIDENCE outcome).
+  for (const row of contradictionCapable) {
+    if (row.relationship !== "CONTRADICTS") continue;
+    if (!contradictingSet.has(row.id)) {
+      excluded.set(row.id, "RELATIONSHIP_NOT_SUPPORTING");
     }
   }
 
@@ -458,6 +504,14 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     const contradictingRows = [...stateBearingCapable]
       .filter((r) => contradictingSet.has(r.id))
       .sort(compareDeterministic);
+    // LOW-2 (deep audit) — D-096 requires token-state observations to
+    // transfer forward to S6 always, including on a CONTRADICTED outcome:
+    // both conflicting sides may still name a qualified token state worth
+    // carrying forward even though the component itself did not resolve.
+    const tokenStateMentions = new Set<string>();
+    for (const row of contradictingRows) {
+      for (const m of detectTokenStateMentions(`${row.fragment} ${row.summary ?? ""}`)) tokenStateMentions.add(m);
+    }
     return {
       step: item.step,
       component: item.component,
@@ -468,7 +522,7 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       excludedEvidence,
       currentState: null,
       temporalBasis: null,
-      tokenStateMentions: [],
+      tokenStateMentions: [...tokenStateMentions].sort(),
       requiresFreshEvidence: true,
     };
   }
@@ -553,7 +607,15 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   let temporalBasis: ComponentReconciliationResult["temporalBasis"] = null;
   if (requirements.requiresCurrentState || requirements.requiresLiveMechanismState) {
     const stateRows = supportingRows.filter((r) => verdictByRowId.get(r.id)!.normalizedState !== "UNKNOWN");
-    if (stateRows.length > 0) {
+    // LOW-1 (deep audit) — non-CONTRADICTED does not mean agreeing: two
+    // INDIRECT-only rows (which never reach Step 6's contradiction pool)
+    // can carry different states while the component is merely
+    // PARTIALLY_SUPPORTED. Picking the best-ranked row's state in that
+    // case would be exactly the "molчаливый выбор строки" §8.1
+    // prohibits — report currentState only when every state-bearing
+    // establishing row actually agrees.
+    const distinctStates = new Set(stateRows.map((r) => verdictByRowId.get(r.id)!.normalizedState));
+    if (stateRows.length > 0 && distinctStates.size === 1) {
       const chosen = stateRows[0];
       const v = verdictByRowId.get(chosen.id)!;
       currentState = v.normalizedState;

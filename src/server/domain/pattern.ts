@@ -115,25 +115,46 @@ export function requiredComponentsForStep(
   return pattern.requiredComponents[String(step)] ?? [];
 }
 
-// D-095: the reconciler-facing accessor. A component with no entry gets a
-// neutral, non-establishing shape — NOT a code-invented authority list.
-// establishingClasses: [] is the only thing that makes that neutral: it
-// structurally cannot establish anything (CLASS_NOT_ADMISSIBLE for every
-// row), it does not silently grant or forbid anything else.
-const NO_REQUIREMENT: ComponentRequirementsEntry = {
-  establishingClasses: [],
-  requiresCurrentState: false,
-  requiresLiveMechanismState: false,
-  freshnessClass: "LOW_CHANGE",
-  tokenStateSensitive: false,
-  requiredTokenState: null,
-};
+// MEDIUM-3 (deep audit, phase-6-s5-audit.md) — D-095 draws a real
+// distinction the previous NO_REQUIREMENT fallback erased:
+//
+//   A. An EXPLICIT entry with establishingClasses: [] is valid Pattern
+//      DATA — a human/CORE decision that this component structurally
+//      cannot be established (scenario Y). This is a legitimate
+//      evidentiary outcome (INSUFFICIENT_EVIDENCE).
+//   B. NO entry at all — the key absent from componentRequirements, or
+//      componentRequirements itself absent from Pattern content (the
+//      exact shape of a pre-S5 seeded Pattern row, deep audit DBP4) — is
+//      NOT a Pattern decision about this component; CORE was simply never
+//      configured for S5 reconciliation of it. Silently treating this as
+//      case A turns "S5 not configured yet" into a false research
+//      conclusion ("investigated, found nothing") for every component of
+//      every job, forever, on any pre-migration database.
+//
+// Case B is therefore a CONFIGURATION failure, not an Evidence
+// conclusion — componentRequirementsFor throws rather than returning a
+// silent default, so the caller (component-reconciliation-store.ts) can
+// surface it as a system/configuration error instead of persisting a
+// false INSUFFICIENT_EVIDENCE row.
+export class PatternConfigurationError extends Error {
+  constructor(component: string) {
+    super(
+      `Pattern is missing componentRequirements for component "${component}" — CORE is not configured for S5 ` +
+        `reconciliation of this component. This is a configuration failure, not an evidentiary conclusion (D-095).`,
+    );
+    this.name = "PatternConfigurationError";
+  }
+}
 
 export function componentRequirementsFor(
   pattern: PatternContent,
   component: string,
 ): ComponentRequirementsEntry {
-  return pattern.componentRequirements?.[component] ?? NO_REQUIREMENT;
+  const entry = pattern.componentRequirements?.[component];
+  if (entry === undefined) {
+    throw new PatternConfigurationError(component);
+  }
+  return entry;
 }
 
 export const PATTERN_V1_CONTENT: PatternContent = {

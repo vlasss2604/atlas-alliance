@@ -228,7 +228,7 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
     expect(r.excludedEvidence[0].reason).toBe("STALE_FOR_CURRENT_STATE");
   });
 
-  it("I. RECIPIENT, во фрагменте veCRV, requiredTokenState=null -> PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED, элемент не исключён, tokenStateMentions=[veCRV-qualifier]", () => {
+  it("I. RECIPIENT, во фрагменте veCRV, requiredTokenState=null -> PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED, элемент не исключён, tokenStateMentions=[veCRV identity]", () => {
     const reqs = requirements({
       component: "RECIPIENT",
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS", "GOVERNANCE"],
@@ -243,7 +243,9 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
     expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
     expect(r.supportingEvidenceIds.length).toBe(1);
-    expect(r.tokenStateMentions).toContain("ve");
+    // HIGH-5 fix: the full token-state IDENTITY is preserved ("vecrv"),
+    // not collapsed into the generic qualifier "ve" — D-096 (CRV != veCRV).
+    expect(r.tokenStateMentions).toContain("vecrv");
   });
 
   it("J. Evidence чужого компонента -> исключено WRONG_COMPONENT", () => {
@@ -366,12 +368,12 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
     expect(r.excludedEvidence[0].reason).toBe("DIRECTNESS_INSUFFICIENT");
   });
 
-  it("U. RECIPIENT, requiredTokenState=veCRV, Evidence про veCRV -> SUPPORTED; понижения нет; tokenStateMentions всё равно заполнен", () => {
+  it("U. RECIPIENT, requiredTokenState=veCRV (canonical owner scenario), Evidence про veCRV -> SUPPORTED; понижения нет; tokenStateMentions всё равно заполнен", () => {
     const reqs = requirements({
       component: "RECIPIENT",
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS", "GOVERNANCE"],
       tokenStateSensitive: true,
-      requiredTokenState: "ve",
+      requiredTokenState: "veCRV",
     });
     const r = reconcile(
       [row({ component: "RECIPIENT", fragment: "veCRV holders receive protocol fees", summary: null })],
@@ -380,23 +382,41 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
     );
     expect(r.status).toBe("SUPPORTED");
     expect(r.reasonCodes).not.toContain("TOKEN_STATE_UNQUALIFIED");
-    expect(r.tokenStateMentions.length).toBeGreaterThan(0);
+    expect(r.tokenStateMentions).toContain("vecrv");
   });
 
-  it("V. NET_EFFECT, requiredTokenState=ve, Evidence про иное состояние (staked) -> PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED; состояния не слиты, элемент не исключён", () => {
+  it("U2. RECIPIENT, requiredTokenState=veCRV, Evidence про veBAL (ДРУГОЙ токен, тот же префикс) -> НЕ совпадает, PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED (deep audit HIGH-5b: разные ve-состояния не сливаются)", () => {
+    const reqs = requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS", "GOVERNANCE"],
+      tokenStateSensitive: true,
+      requiredTokenState: "veCRV",
+    });
+    const r = reconcile(
+      [row({ component: "RECIPIENT", fragment: "veBAL holders receive protocol fees", summary: null })],
+      reqs,
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["vebal"]);
+  });
+
+  it("V. NET_EFFECT, requiredTokenState=veCRV, Evidence про stkAAVE (иное состояние) -> PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED; состояния не слиты, элемент не исключён", () => {
     const reqs = requirements({
       component: "NET_EFFECT",
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       tokenStateSensitive: true,
-      requiredTokenState: "ve",
+      requiredTokenState: "veCRV",
     });
     const r = reconcile(
-      [row({ component: "NET_EFFECT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "staked AAVE tokens receive rewards", summary: null })],
+      [row({ component: "NET_EFFECT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "stkAAVE holders receive safety incentives", summary: null })],
       reqs,
       { item: { step: 7, component: "NET_EFFECT" } },
     );
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
     expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["stkaave"]);
     expect(r.supportingEvidenceIds.length).toBe(1);
   });
 
@@ -738,12 +758,12 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
     expect(r.excludedEvidence.find((e) => e.evidenceId === olderDocs.id)).toBeUndefined();
   });
 
-  it("24. точная квалификация состояния токена не понижена автоматически (см. U)", () => {
+  it("24. точная квалификация состояния токена не понижена автоматически (см. U, канонический requiredTokenState=veCRV)", () => {
     const reqs = requirements({
       component: "RECIPIENT",
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       tokenStateSensitive: true,
-      requiredTokenState: "ve",
+      requiredTokenState: "veCRV",
     });
     const r = reconcile([row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "veCRV holders receive fees" })], reqs, {
       item: { step: 6, component: "RECIPIENT" },
@@ -751,12 +771,12 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
     expect(r.status).toBe("SUPPORTED");
   });
 
-  it("25. равенство состояний токена не выводится семантически (staked != ve, оба сохраняются раздельно)", () => {
+  it("25. равенство состояний токена не выводится семантически (staked != veCRV, оба сохраняются раздельно)", () => {
     const reqs = requirements({
       component: "RECIPIENT",
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       tokenStateSensitive: true,
-      requiredTokenState: "ve",
+      requiredTokenState: "veCRV",
     });
     const r = reconcile(
       [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "staked tokens receive fees" })],
@@ -764,6 +784,22 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
       { item: { step: 6, component: "RECIPIENT" } },
     );
     expect(r.tokenStateMentions).toEqual(["staked"]);
+    expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+  });
+
+  it("25b. stETH не сливается со stkAAVE — разные fused-префиксы (st vs stk) дают разные идентичности (deep audit HIGH-5c)", () => {
+    const reqs = requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      tokenStateSensitive: true,
+      requiredTokenState: "stkAAVE",
+    });
+    const r = reconcile(
+      [row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "stETH balances rebase daily for holders" })],
+      reqs,
+      { item: { step: 6, component: "RECIPIENT" } },
+    );
+    expect(r.tokenStateMentions).toEqual(["steth"]);
     expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
   });
 
@@ -791,17 +827,303 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
     expect(r.status).toBe("CONTRADICTED");
   });
 
-  it("29. tokenStateMentions заполнен, даже когда квалификация обнаружена, но понижения не было (см. U)", () => {
+  it("29. tokenStateMentions заполнен, даже когда квалификация обнаружена, но понижения не было (см. U, канонический requiredTokenState=veCRV)", () => {
     const reqs = requirements({
       component: "RECIPIENT",
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       tokenStateSensitive: true,
-      requiredTokenState: "ve",
+      requiredTokenState: "veCRV",
     });
     const r = reconcile([row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment: "veCRV holders receive fees" })], reqs, {
       item: { step: 6, component: "RECIPIENT" },
     });
     expect(r.status).toBe("SUPPORTED");
-    expect(r.tokenStateMentions.length).toBeGreaterThan(0);
+    expect(r.tokenStateMentions).toEqual(["vecrv"]);
+  });
+});
+
+// ============================================================
+// Deep audit fix package (phase-6-s5-audit.md) — HIGH-3 supersession,
+// MEDIUM-1 contradiction, MEDIUM-2 provenance partition, MEDIUM-4
+// contradiction test-teeth. §15/§16 test matrices of the fix task.
+// ============================================================
+describe("Deep audit HIGH-3: вытеснение требует полной пригодности к установлению (§16 матрица)", () => {
+  // Baseline for all P1x probes: MECHANISM_SPEC, establishing =
+  // [OFFICIAL_DOCS, GOVERNANCE]; older row is a genuine DIRECT SUPPORTS
+  // CONFIRMED OFFICIAL_DOCS LIVE 2025 — exactly the deep-audit repro shape.
+  const reqs = requirements({
+    component: "MECHANISM_SPEC",
+    establishingClasses: ["OFFICIAL_DOCS", "GOVERNANCE"],
+  });
+  function olderEstablishing() {
+    return row({
+      component: "MECHANISM_SPEC",
+      sourceClass: "OFFICIAL_DOCS",
+      officiality: "CONFIRMED",
+      directness: "DIRECT",
+      relationship: "SUPPORTS",
+      mechanismState: "LIVE",
+      publishedAt: new Date("2025-01-01T00:00:00Z"),
+    });
+  }
+  function newerNonEstablishing(overrides: Partial<EvidenceRow>) {
+    return row({
+      component: "MECHANISM_SPEC",
+      sourceClass: "OFFICIAL_DOCS",
+      mechanismState: "DEPRECATED",
+      publishedAt: new Date("2026-01-01T00:00:00Z"),
+      ...overrides,
+    });
+  }
+
+  it("P1a: старая DIRECT SUPPORTS выживает — новая строка INFERRED допустимого класса не вытесняет", () => {
+    const older = olderEstablishing();
+    const newer = newerNonEstablishing({ directness: "INFERRED", relationship: "SUPPORTS", sourceId: "newer" });
+    const r = reconcile([older, newer], reqs, { item: { step: 3, component: "MECHANISM_SPEC" } });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.supportingEvidenceIds).toEqual([older.id]);
+    expect(r.excludedEvidence.find((e) => e.evidenceId === older.id)).toBeUndefined();
+  });
+
+  it("P1b: старая DIRECT SUPPORTS выживает — новая строка CONTEXT допустимого класса не вытесняет", () => {
+    const older = olderEstablishing();
+    const newer = newerNonEstablishing({ relationship: "CONTEXT", directness: "DIRECT", sourceId: "newer" });
+    const r = reconcile([older, newer], reqs, { item: { step: 3, component: "MECHANISM_SPEC" } });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.supportingEvidenceIds).toEqual([older.id]);
+  });
+
+  it("P1c: старая DIRECT SUPPORTS выживает — новая строка LIMITS допустимого класса не вытесняет", () => {
+    const older = olderEstablishing();
+    const newer = newerNonEstablishing({ relationship: "LIMITS", directness: "DIRECT", sourceId: "newer" });
+    const r = reconcile([older, newer], reqs, { item: { step: 3, component: "MECHANISM_SPEC" } });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.supportingEvidenceIds).toEqual([older.id]);
+  });
+
+  it("P1d: старая DIRECT SUPPORTS выживает — новая строка INDIRECT (даже CLAIMED) допустимого класса не вытесняет", () => {
+    const older = olderEstablishing();
+    const newer = newerNonEstablishing({ directness: "INDIRECT", relationship: "SUPPORTS", officiality: "CLAIMED", sourceId: "newer" });
+    const r = reconcile([older, newer], reqs, { item: { step: 3, component: "MECHANISM_SPEC" } });
+    // The core HIGH-3 guarantee: the INDIRECT row must never SUPERSEDE —
+    // the strong DIRECT establishment is never excluded/erased, and never
+    // downgraded to INDIRECT_ONLY (a real, still-standing DIRECT
+    // establishing element exists). Status may still land on
+    // PARTIALLY_SUPPORTED via INSUFFICIENT_AUTHORITY — that reflects the
+    // separate, orthogonal §12 "best-ranked" tie-break for the authority
+    // cap (which prefers the newer row for THAT purpose only), not a
+    // supersession defect; the point under test is that the older id is
+    // never excluded and INDIRECT_ONLY never fires.
+    expect(r.excludedEvidence.find((e) => e.evidenceId === older.id)).toBeUndefined();
+    expect(r.supportingEvidenceIds).toContain(older.id);
+    expect(r.reasonCodes).not.toContain("INDIRECT_ONLY");
+  });
+
+  it("newer eligible DIRECT SUPPORTS with a valid newer state may still supersede (§16 positive control — D-093 intact)", () => {
+    const older = olderEstablishing();
+    const newer = newerNonEstablishing({ directness: "DIRECT", relationship: "SUPPORTS", sourceId: "newer" });
+    const r = reconcile([older, newer], reqs, { item: { step: 3, component: "MECHANISM_SPEC" } });
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.supportingEvidenceIds).toEqual([newer.id]);
+    expect(r.excludedEvidence.find((e) => e.evidenceId === older.id)?.reason).toBe("SUPERSEDED_BY_NEWER");
+  });
+});
+
+describe("Deep audit MEDIUM-1: противоречие требует несовместимых состояний, не метку relationship (§15 матрица)", () => {
+  const reqs = requirements({
+    component: "CURRENT_STATE",
+    establishingClasses: ["OFFICIAL_DOCS"],
+    requiresCurrentState: true,
+    freshnessClass: "LOW_CHANGE",
+  });
+
+  it("P6: DIRECT SUPPORTS(LIVE) + DIRECT CONTRADICTS(LIVE, тот же класс) -> НЕ CONTRADICTED (метка relationship одна не фабрикует конфликт при равных состояниях)", () => {
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const contradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "LIVE", sourceId: "c" });
+    const r = reconcile([supports, contradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).not.toBe("CONTRADICTED");
+  });
+
+  it("DIRECT SUPPORTS(LIVE) + DIRECT CONTRADICTS(DEPRECATED, допустимый класс) -> CONTRADICTED (несовместимые состояния)", () => {
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const contradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED", sourceId: "c" });
+    const r = reconcile([supports, contradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("CONTRADICTED");
+    expect(r.contradictingEvidenceIds.sort()).toEqual([supports.id, contradicts.id].sort());
+  });
+
+  it("P4a: одинокая DIRECT CONTRADICTS допустимого класса без противоречащей SUPPORTS-строки не создаёт конфликта — честный SUPPORTED по единственной SUPPORTS", () => {
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const loneContradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "LIVE", sourceId: "c" });
+    const r = reconcile([supports, loneContradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("SUPPORTED");
+  });
+
+  it("P7: только одинокая DIRECT CONTRADICTS строка (нет SUPPORTS вовсе) -> честный INSUFFICIENT_EVIDENCE, не ошибка и не ложный SUPPORTED", () => {
+    const loneContradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED" });
+    const r = reconcile([loneContradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+  });
+});
+
+describe("Deep audit MEDIUM-2: партиция provenance — id не может быть одновременно contradicting и excluded (§7 инвариант)", () => {
+  it("P3a: активно противоречащая CONTRADICTS-строка НЕ появляется в excludedEvidence", () => {
+    const reqs = requirements({
+      component: "CURRENT_STATE",
+      establishingClasses: ["OFFICIAL_DOCS"],
+      requiresCurrentState: true,
+      freshnessClass: "LOW_CHANGE",
+    });
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const contradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED", sourceId: "c" });
+    const r = reconcile([supports, contradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("CONTRADICTED");
+    expect(r.contradictingEvidenceIds).toContain(contradicts.id);
+    expect(r.excludedEvidence.find((e) => e.evidenceId === contradicts.id)).toBeUndefined();
+  });
+
+  it("инвариант дизъюнктности: ни один id не встречается более чем в одном из supporting/contradicting/excluded — прогнан по нескольким фикстурам", () => {
+    const reqs = requirements({
+      component: "CURRENT_STATE",
+      establishingClasses: ["OFFICIAL_DOCS"],
+      requiresCurrentState: true,
+      freshnessClass: "LOW_CHANGE",
+    });
+    const fixtures: EvidenceRow[][] = [
+      [
+        row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" }),
+        row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED", sourceId: "c" }),
+      ],
+      [
+        row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" }),
+        row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "LIVE", sourceId: "c" }),
+      ],
+      [
+        row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED" }),
+      ],
+      [row({ component: "CURRENT_STATE", sourceClass: "SOCIAL", relationship: "CONTRADICTS", mechanismState: "DEPRECATED" })],
+    ];
+    for (const evidence of fixtures) {
+      const r = reconcile(evidence, reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+      const supportingSet = new Set(r.supportingEvidenceIds);
+      const contradictingSet = new Set(r.contradictingEvidenceIds);
+      const excludedSet = new Set(r.excludedEvidence.map((e) => e.evidenceId));
+      for (const id of supportingSet) {
+        expect(contradictingSet.has(id)).toBe(false);
+        expect(excludedSet.has(id)).toBe(false);
+      }
+      for (const id of contradictingSet) {
+        expect(supportingSet.has(id)).toBe(false);
+        expect(excludedSet.has(id)).toBe(false);
+      }
+    }
+  });
+});
+
+describe("Deep audit MEDIUM-4: зубы для допустимого DIRECT CONTRADICTS (не SOCIAL) — §9 матрица", () => {
+  function reqsFor(component: string) {
+    return requirements({ component, establishingClasses: ["OFFICIAL_DOCS"], requiresCurrentState: true, freshnessClass: "LOW_CHANGE" });
+  }
+
+  it("допустимая DIRECT CONTRADICTS участвует и создаёт CONTRADICTED против DIRECT SUPPORTS с иным состоянием", () => {
+    const reqs = reqsFor("CURRENT_STATE");
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const contradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED", sourceId: "c" });
+    const r = reconcile([supports, contradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("CONTRADICTED");
+  });
+
+  it("INDIRECT CONTRADICTS допустимого класса НЕ создаёт терминального конфликта (mutation M2 teeth)", () => {
+    const reqs = reqsFor("CURRENT_STATE");
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const indirectContradicts = row({
+      component: "CURRENT_STATE",
+      relationship: "CONTRADICTS",
+      directness: "INDIRECT",
+      mechanismState: "DEPRECATED",
+      sourceId: "c",
+    });
+    const r = reconcile([supports, indirectContradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("SUPPORTED");
+  });
+
+  it("INFERRED CONTRADICTS допустимого класса НЕ создаёт терминального конфликта", () => {
+    const reqs = reqsFor("CURRENT_STATE");
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const inferredContradicts = row({
+      component: "CURRENT_STATE",
+      relationship: "CONTRADICTS",
+      directness: "INFERRED",
+      mechanismState: "DEPRECATED",
+      sourceId: "c",
+    });
+    const r = reconcile([supports, inferredContradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("SUPPORTED");
+  });
+
+  it("SOCIAL CONTRADICTS не может создать конфликт там, где Pattern исключает SOCIAL (mutation M5 teeth — SUPPORTS-vs-CONTRADICTS ветка проверена НЕ через SOCIAL здесь, а классовым порогом отдельно)", () => {
+    const reqs = reqsFor("CURRENT_STATE");
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const social = row({ component: "CURRENT_STATE", sourceClass: "SOCIAL", relationship: "CONTRADICTS", mechanismState: "DEPRECATED", sourceId: "c" });
+    const r = reconcile([supports, social], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("SUPPORTED");
+  });
+
+  it("одинаковое состояние между SUPPORTS и допустимой DIRECT CONTRADICTS не фабрикует конфликт (mutation M6-style teeth)", () => {
+    const reqs = reqsFor("CURRENT_STATE");
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const sameStateContradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "LIVE", sourceId: "c" });
+    const r = reconcile([supports, sameStateContradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).not.toBe("CONTRADICTED");
+  });
+
+  it("несовместимое состояние может создать конфликт (позитивный контроль)", () => {
+    const reqs = reqsFor("CURRENT_STATE");
+    const supports = row({ component: "CURRENT_STATE", relationship: "SUPPORTS", mechanismState: "LIVE" });
+    const differentStateContradicts = row({ component: "CURRENT_STATE", relationship: "CONTRADICTS", mechanismState: "DEPRECATED", sourceId: "c" });
+    const r = reconcile([supports, differentStateContradicts], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("CONTRADICTED");
+  });
+});
+
+describe("Deep audit LOW-1/LOW-2: currentState не выбирается молча при разногласии партиалов; tokenStateMentions на CONTRADICTED", () => {
+  it("LOW-1: две INDIRECT-строки с разными состояниями -> currentState=null, не молчаливый выбор", () => {
+    const reqs = requirements({
+      component: "CURRENT_STATE",
+      establishingClasses: ["OFFICIAL_DOCS"],
+      requiresCurrentState: true,
+      freshnessClass: "LOW_CHANGE",
+    });
+    const a = row({ component: "CURRENT_STATE", directness: "INDIRECT", mechanismState: "LIVE" });
+    const b = row({ component: "CURRENT_STATE", directness: "INDIRECT", mechanismState: "DEPRECATED", sourceId: "b" });
+    const r = reconcile([a, b], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.currentState).toBeNull();
+  });
+
+  it("LOW-2: tokenStateMentions заполняется даже на CONTRADICTED, если конфликтующие строки называют квалифицированное состояние", () => {
+    const reqs = requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      requiresCurrentState: false,
+    });
+    const supports = row({
+      component: "RECIPIENT",
+      sourceClass: "ONCHAIN_VERIFIABLE",
+      relationship: "SUPPORTS",
+      mechanismState: "LIVE",
+      fragment: "veCRV holders receive fees",
+    });
+    const contradicts = row({
+      component: "RECIPIENT",
+      sourceClass: "ONCHAIN_VERIFIABLE",
+      relationship: "CONTRADICTS",
+      mechanismState: "DEPRECATED",
+      fragment: "veCRV holders receive nothing",
+      sourceId: "c",
+    });
+    const r = reconcile([supports, contradicts], reqs, { item: { step: 6, component: "RECIPIENT" } });
+    expect(r.status).toBe("CONTRADICTED");
+    expect(r.tokenStateMentions).toEqual(["vecrv"]);
   });
 });
