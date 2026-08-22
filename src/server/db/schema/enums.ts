@@ -191,3 +191,65 @@ export const componentReconciliationStatus = pgEnum("component_reconciliation_st
   "CONTRADICTED",
   "INSUFFICIENT_EVIDENCE",
 ]);
+
+// First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) —
+// operational trace vocabulary. This is TRACE, never Evidence and never
+// a claim judgment: it records "what S4 did", not "what is true about
+// the project" (§H, TRACE ≠ EVIDENCE). Closed by design — no free-text
+// operation names.
+export const traceOperationType = pgEnum("trace_operation_type", [
+  "QUERY_PROPOSED",
+  "SEARCH_EXECUTED",
+  "CANDIDATE_RETURNED",
+  "CANDIDATE_DEDUPED",
+  "CANDIDATE_SKIPPED_BUDGET",
+  "FETCH_ATTEMPTED",
+  "FETCH_OK",
+  "FETCH_FAILED",
+  "EXTRACT_ATTEMPTED",
+  "EXTRACT_OK",
+  "EXTRACT_FAILED",
+  "REJECTED_WRONG_PROJECT",
+  "REJECTED_WRONG_COMPONENT",
+  "REJECTED_NOT_TRACEABLE",
+]);
+
+// Outcome of the ONE operation this row records — deliberately the same
+// three-value vocabulary research_attempts/WorkExecutionResult already
+// use (D-070 discipline: no parallel status vocabulary invented here).
+export const traceStatus = pgEnum("trace_status", ["OK", "FAILED", "SKIPPED"]);
+
+// Which of S4's four provider roles performed the operation, when the
+// event is operation-level rather than job-level.
+export const traceProviderKind = pgEnum("trace_provider_kind", [
+  "QUERY_PROPOSE",
+  "SEARCH",
+  "FETCH",
+  "EXTRACT",
+]);
+
+// Closed reason vocabulary — never a raw exception/provider-response
+// string (§A/§M: a provider error containing a credential or secret must
+// never leak into this field). PROVIDER_ERROR is the deliberate, single
+// catch-all for "the provider call itself threw/failed" — the actual
+// message is discarded, not laundered into a "safe-looking" code.
+export const traceReasonCode = pgEnum("trace_reason_code", [
+  "NONE",
+  "ZERO_CANDIDATES",
+  "DUPLICATE_URL",
+  "SEARCH_QUERY_BUDGET_EXHAUSTED",
+  "SOURCE_OPEN_BUDGET_EXHAUSTED",
+  "MODEL_COST_BUDGET_EXHAUSTED",
+  "PROVIDER_ERROR",
+  "WRONG_PROJECT",
+  "WRONG_COMPONENT",
+  "NOT_TRACEABLE",
+]);
+
+// The three existing authoritative budget axes (research_jobs.*Reserved,
+// budget-reservation.ts) — trace never introduces a fourth.
+export const traceBudgetAxis = pgEnum("trace_budget_axis", [
+  "searchQueries",
+  "sourceOpens",
+  "modelCostMicro",
+]);

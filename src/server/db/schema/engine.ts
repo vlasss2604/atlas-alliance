@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  bigint,
   boolean,
+  check,
   index,
   integer,
   jsonb,
@@ -14,7 +16,15 @@ import {
 import type { MechanismFlow, MechanismGap } from "../../engine/mechanism-assembler";
 import type { ClaimReasonCode, ClaimRequirementResult, MechanismGapRef } from "../../engine/claim-evaluator";
 
-import { componentReconciliationStatus, researchAttemptStatus } from "./enums";
+import {
+  componentReconciliationStatus,
+  researchAttemptStatus,
+  traceBudgetAxis,
+  traceOperationType,
+  traceProviderKind,
+  traceReasonCode,
+  traceStatus,
+} from "./enums";
 import { researchJobs } from "./research";
 
 // Фаза 6, S3 (phase-6-plan.md §19 S3, §6.3 item 5) — сырой журнал попыток
@@ -206,5 +216,70 @@ export const researchClaimSupport = pgTable(
       t.requirementSetVersion,
     ),
     index("ix_research_claim_support_job").on(t.researchJobId),
+  ],
+);
+
+// First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) —
+// append-only OPERATIONAL trace, never Evidence and never read by
+// component-reconciliation-store/S5/S6/S7 (§H, TRACE ≠ EVIDENCE: no
+// store in this codebase selects from this table except the read-only
+// alpha-inspect script). Records "what S4 did" (a query was proposed, a
+// search executed, a candidate deduped, a fetch failed, a fact rejected
+// as the wrong component) — never "what is true about the project".
+// Code discipline (not a DB trigger): this table is only ever INSERTed
+// into, never UPDATEd or DELETEd — see trace-store.ts.
+//
+// source_id/evidence_id are plain nullable uuid columns, deliberately
+// WITHOUT a foreign key — a trace event may reference the resulting
+// source/evidence row for audit convenience (alpha-inspect linking), but
+// this table must never become something S5/S6/S7 need to join against,
+// and no FK is needed for that: the link is one-directional and
+// best-effort, not a referential-integrity requirement.
+export const researchTraceEvents = pgTable(
+  "research_trace_events",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    researchJobId: uuid("research_job_id")
+      .notNull()
+      .references(() => researchJobs.id, { onDelete: "cascade" }),
+    researchAttemptId: uuid("research_attempt_id").references(() => researchAttempts.id, { onDelete: "set null" }),
+    // Deterministic, gap-free ordering within one job — allocated
+    // atomically via a job-row lock (trace-store.ts), the same discipline
+    // controller.ts's claimAttempt already uses for research_attempts.
+    sequence: bigint("sequence", { mode: "number" }).notNull(),
+    operationType: traceOperationType("operation_type").notNull(),
+    providerKind: traceProviderKind("provider_kind"),
+    // A bounded, human-identifiable provider label (e.g. a real
+    // provider.name, or the explicit "non-live-fixture" identity) — never
+    // a credential-bearing string (§C/§M).
+    providerName: text("provider_name"),
+    patternStep: smallint("pattern_step"),
+    component: text("component"),
+    // Bounded target reference (a query string or a URL) — Internal
+    // Alpha explicitly allows this (§M); never a raw document body, raw
+    // provider response, model chain-of-thought, or secret.
+    targetRef: text("target_ref"),
+    status: traceStatus("status").notNull(),
+    // Closed vocabulary only (§A/§M) — never a raw exception/provider
+    // message. "NONE" (not null) makes "no reason" and "reason omitted by
+    // mistake" the same explicit, intentional value.
+    reasonCode: traceReasonCode("reason_code").notNull().default("NONE"),
+    sourceId: uuid("source_id"),
+    evidenceId: uuid("evidence_id"),
+    budgetAxis: traceBudgetAxis("budget_axis"),
+    budgetAmount: integer("budget_amount"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("uq_research_trace_events_job_sequence").on(t.researchJobId, t.sequence),
+    index("ix_research_trace_events_job").on(t.researchJobId),
+    index("ix_research_trace_events_attempt").on(t.researchAttemptId),
+    // §M — bounded target_ref: a generous but finite cap, defense in
+    // depth against ever storing an unbounded document/response body.
+    check("ck_research_trace_events_target_ref_len", sql`char_length(${t.targetRef}) <= 2048`),
   ],
 );

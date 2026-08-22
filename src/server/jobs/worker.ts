@@ -4,7 +4,7 @@ import { deleteStaleRateLimits } from "../auth/rate-limit";
 import { deleteExpiredSessions } from "../auth/session";
 import { createDatabase, type Database } from "../db/client";
 import { projects, researchJobs } from "../db/schema";
-import type { ControllerRunResult } from "../engine/controller";
+import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
@@ -94,7 +94,18 @@ export async function sweepStaleRunningJobs(db: Database): Promise<number> {
 // экспортируемой функцией, чтобы её можно было прогнать через настоящий
 // pg-boss dequeue в acceptance-тесте (tests/phase5-worker-acceptance.test.ts)
 // без дублирования этой логики. Поведение не изменилось, только форма.
-export async function handleResearchJobTask(db: Database, jobId: string): Promise<void> {
+// First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) —
+// admin/test-only seam: when supplied, replaces the accepted Stage 1
+// zero-candidate executor with a caller-provided WorkExecutor for this
+// one call. Omitting it (every production caller, including
+// startWorker() below and every pre-Stage-2 test) reproduces Stage 1's
+// exact accepted behavior byte for byte. Used ONLY by alpha-run.ts (to
+// exercise the richer non-live trace fixture through the real worker
+// path) and Stage 2's own tests — never by any live/production code
+// path, and it can never carry a real provider: alpha-run.ts only ever
+// passes createTraceFixtureExecutor (trace-fixture-executor.ts), itself
+// built entirely from non-live fixtures.
+export async function handleResearchJobTask(db: Database, jobId: string, executorOverride?: WorkExecutor): Promise<void> {
   const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
   if (!job || job.state !== "QUEUED") {
     return; // job отменён/потерян — задача считается обработанной
@@ -159,7 +170,7 @@ export async function handleResearchJobTask(db: Database, jobId: string): Promis
 
   let outcome: EngineOutcome | null;
   try {
-    const executor = createNonLiveS4WorkExecutor({ db, project });
+    const executor = executorOverride ?? createNonLiveS4WorkExecutor({ db, project });
     const result = await runS4ResearchJob(db, jobId, executor, new Date());
     outcome = mapEngineOutcome(result.stopReason);
   } catch (e) {

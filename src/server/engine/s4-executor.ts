@@ -20,6 +20,28 @@ import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import type { ComponentTarget, ExtractedFact } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
+import { findAttemptId, recordTraceEvent } from "./trace-store";
+
+// First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — this
+// file's OWN instrumentation is additive-only: every recordTraceEvent
+// call below sits around an existing decision (a branch/condition that
+// was already here) and never changes what that decision returns, in
+// what order, or which attempt/candidate it applies to. No condition,
+// branch ordering, candidate ordering, containment rule, traceability
+// rule, Evidence-admission rule, source classification, budget rule, or
+// provider-selection rule in this file was touched to add tracing.
+//
+// recordTraceEvent (trace-store.ts) THROWS on persistence failure by
+// design (§5 of the stage spec) — deliberately NOT caught anywhere in
+// this file. An uncaught exception here propagates through
+// controller.ts's executor.execute() call (which has no try/catch around
+// it) and run-job.ts, and is caught only at the worker boundary
+// (worker.ts's handleResearchJobTask), which maps it to
+// state=FAILED/terminationReason=SYSTEM_OR_PROVIDER_FAILURE — never a
+// fabricated S7 evidentiary conclusion. This file adds no new
+// try/catch/exception-handling of its own to achieve that; it is a
+// structural consequence of trace persistence being mandatory and
+// unguarded here.
 
 // Phase 6, S4 — the real bounded execution pipeline:
 //   ComponentWorkItem -> QueryProposer -> SearchGateway -> ContentFetcher
@@ -368,6 +390,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const { queryProposerProfile, evidenceExtractorProfile, searchGateway, contentFetcher, queryProposer, evidenceExtractor } =
         pre.value;
 
+      // Stage 2: resolves the STARTED research_attempts row's own id
+      // (controller.ts's claimAttempt already created it before calling
+      // this executor; its id was just never threaded into ctx) so trace
+      // events below can link to research_attempt_id without any change
+      // to controller.ts. Best-effort null if not found — never blocks
+      // or alters the attempt itself; only trace linkage degrades.
+      const attemptId = await findAttemptId(deps.db, ctx.jobId, item.step, item.component, ctx.attemptNumber);
+
       // --- 1. QueryProposer -----------------------------------------------
       const queryProposerCostMicro = calculateMaxAuthorizedCostMicro(queryProposerProfile);
       const queryProposerReserved = await reserveJobBudget(
@@ -398,6 +428,19 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       if (queries.length === 0) {
         return { status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent };
       }
+      for (const q of queries) {
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "QUERY_PROPOSED",
+          providerKind: "QUERY_PROPOSE",
+          providerName: queryProposer.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: q,
+          status: "OK",
+        });
+      }
 
       // --- 2. SearchGateway -------------------------------------------------
       // BLOCKER-2: each real SearchGateway call atomically reserves ONE
@@ -424,12 +467,37 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         );
         if (!reserved) {
           searchBudgetExhausted = true;
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "SEARCH_EXECUTED",
+            providerKind: "SEARCH",
+            patternStep: item.step,
+            component: item.component,
+            targetRef: query,
+            status: "SKIPPED",
+            reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
+            budgetAxis: "searchQueries",
+            budgetAmount: 1,
+          });
           break;
         }
         spent.searchQueries += 1;
         const searchResult = await callProvider("SEARCH_GATEWAY", () =>
           searchGateway.search(query, target, { maxResults: MAX_SEARCH_RESULTS_PER_QUERY }),
         );
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "SEARCH_EXECUTED",
+          providerKind: "SEARCH",
+          providerName: searchGateway.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: query,
+          status: searchResult.ok ? "OK" : "FAILED",
+          reasonCode: searchResult.ok ? "NONE" : "PROVIDER_ERROR",
+        });
         if (!searchResult.ok) {
           lastSearchFailureReason = searchResult.reason;
           continue; // one query's failure doesn't fail the whole attempt
@@ -439,6 +507,29 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // (§3, D-076). title/snippet are discarded here entirely; they
           // never reach evidence-extractor or persistence.
           if (typeof r.url === "string" && r.url.length > 0) {
+            const wasDuplicate = candidateUrls.has(r.url);
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "CANDIDATE_RETURNED",
+              providerKind: "SEARCH",
+              patternStep: item.step,
+              component: item.component,
+              targetRef: r.url,
+              status: "OK",
+            });
+            if (wasDuplicate) {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "CANDIDATE_DEDUPED",
+                patternStep: item.step,
+                component: item.component,
+                targetRef: r.url,
+                status: "SKIPPED",
+                reasonCode: "DUPLICATE_URL",
+              });
+            }
             candidateUrls.set(r.url, { url: r.url });
           }
         }
@@ -461,9 +552,46 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       for (const { url } of candidateUrls.values()) {
         if (opensAttempted >= MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT) break;
         const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
-        if (!reserved) break; // job-lifetime source-open ceiling reached
+        if (!reserved) {
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "CANDIDATE_SKIPPED_BUDGET",
+            patternStep: item.step,
+            component: item.component,
+            targetRef: url,
+            status: "SKIPPED",
+            reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
+            budgetAxis: "sourceOpens",
+            budgetAmount: 1,
+          });
+          break; // job-lifetime source-open ceiling reached
+        }
         opensAttempted += 1;
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "FETCH_ATTEMPTED",
+          providerKind: "FETCH",
+          providerName: contentFetcher.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: url,
+          status: "OK",
+        });
         const fetchResult = await callProvider("CONTENT_FETCHER", () => contentFetcher.fetch(url));
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: fetchResult.ok ? "FETCH_OK" : "FETCH_FAILED",
+          providerKind: "FETCH",
+          providerName: contentFetcher.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: url,
+          status: fetchResult.ok ? "OK" : "FAILED",
+          reasonCode: fetchResult.ok ? "NONE" : "PROVIDER_ERROR",
+        });
         if (!fetchResult.ok) {
           lastFetchFailureReason = fetchResult.reason;
           continue; // typed/unexpected fetch failure — try the next candidate
@@ -491,8 +619,36 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           evidenceExtractorCostMicro,
           ctx.budget.maxModelCostMicro,
         );
-        if (!reserved) break; // job-lifetime model-cost ceiling reached
+        if (!reserved) {
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "CANDIDATE_SKIPPED_BUDGET",
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "SKIPPED",
+            reasonCode: "MODEL_COST_BUDGET_EXHAUSTED",
+            budgetAxis: "modelCostMicro",
+            budgetAmount: evidenceExtractorCostMicro,
+          });
+          break; // job-lifetime model-cost ceiling reached
+        }
         spent.authorizedModelCostMicro += evidenceExtractorCostMicro;
+
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "EXTRACT_ATTEMPTED",
+          providerKind: "EXTRACT",
+          providerName: evidenceExtractor.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: doc.finalUrl,
+          status: "OK",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: evidenceExtractorCostMicro,
+        });
 
         // Item 6 (S4 final acceptance fix): no input bounding — the
         // extractor is given the document text exactly as fetched. See
@@ -503,6 +659,18 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         );
         if (!extractResult.ok) {
           extractionFailures += 1;
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "EXTRACT_FAILED",
+            providerKind: "EXTRACT",
+            providerName: evidenceExtractor.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "FAILED",
+            reasonCode: "PROVIDER_ERROR",
+          });
           continue;
         }
         const facts: ExtractedFact[] = extractResult.value;
@@ -518,7 +686,20 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         if (route.observation) observations.add(observationCode(route.observation));
         const projectContained =
           route.officiality === "CONFIRMED" || documentNamesProject(doc.normalizedText, deps.project);
-        if (!projectContained) continue; // wrong-project document — never persisted, regardless of what the extractor claims
+        if (!projectContained) {
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "REJECTED_WRONG_PROJECT",
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "SKIPPED",
+            reasonCode: "WRONG_PROJECT",
+            sourceId: sourceInfo.id,
+          });
+          continue; // wrong-project document — never persisted, regardless of what the extractor claims
+        }
 
         // D-089/§7.2a: exact locked precedence — routeClass only supplies
         // the class at step 6, after every public/project-independent
@@ -531,13 +712,39 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // step/component is not "extra scope generously offered" — it
           // is discarded outright. The model has no path from here to
           // the controller, the work queue, or any other component.
-          if (fact.step !== target.step || fact.component !== target.component) continue;
+          if (fact.step !== target.step || fact.component !== target.component) {
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "REJECTED_WRONG_COMPONENT",
+              patternStep: fact.step,
+              component: fact.component,
+              targetRef: doc.finalUrl,
+              status: "SKIPPED",
+              reasonCode: "WRONG_COMPONENT",
+              sourceId: sourceInfo.id,
+            });
+            continue;
+          }
           // §7/D-076/item 12.D: no traceable excerpt in the EXACT document
           // text the extractor was given -> not Evidence, regardless of
           // how confident the model sounds. A project name or a support
           // fragment that exists only OUTSIDE what the model actually saw
           // must never silently validate model Evidence.
-          if (!isTraceable(doc.normalizedText, fact.supportFragment)) continue;
+          if (!isTraceable(doc.normalizedText, fact.supportFragment)) {
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "REJECTED_NOT_TRACEABLE",
+              patternStep: fact.step,
+              component: fact.component,
+              targetRef: doc.finalUrl,
+              status: "SKIPPED",
+              reasonCode: "NOT_TRACEABLE",
+              sourceId: sourceInfo.id,
+            });
+            continue;
+          }
 
           // MEDIUM-1: deterministic identity for THIS extracted unit —
           // a replayed identical (job, source, step, component, fragment)
@@ -574,6 +781,22 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             })
             .returning({ id: evidence.id });
           if (row) insertedEvidenceIds.push(row.id);
+          // §J item 18 — links trace to the resulting source/evidence ids
+          // without making the trace table itself readable as Evidence
+          // (no fragment/statement/provenance is copied here, only ids).
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "EXTRACT_OK",
+            providerKind: "EXTRACT",
+            providerName: evidenceExtractor.name,
+            patternStep: fact.step,
+            component: fact.component,
+            targetRef: doc.finalUrl,
+            status: "OK",
+            sourceId: sourceInfo.id,
+            evidenceId: row?.id ?? null,
+          });
         }
       }
 

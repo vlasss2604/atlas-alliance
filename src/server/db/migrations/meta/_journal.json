@@ -141,6 +141,13 @@
       "when": 1787438882491,
       "tag": "0019_first_real_run_stage1_termination_reason",
       "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787441967596,
+      "tag": "0020_first_real_run_stage2_trace_events",
+      "breakpoints": true
     }
   ]
 }
