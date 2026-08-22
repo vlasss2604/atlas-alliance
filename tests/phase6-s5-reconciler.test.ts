@@ -1280,3 +1280,174 @@ describe("Final review, deep-audit round 2: token-state identity must not fail o
     expect(r.tokenStateMentions).toEqual(["vecrv"]);
   });
 });
+
+describe("Final review, deep-audit round 3 (MEDIUM-1): known-state VERIFICATION vs unknown-state DISCOVERY must not fail open on ALL-CAPS prose", () => {
+  const veCrvReqs = () =>
+    requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      tokenStateSensitive: true,
+      requiredTokenState: "veCRV",
+    });
+  const stkAaveReqs = () =>
+    requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      tokenStateSensitive: true,
+      requiredTokenState: "stkAAVE",
+    });
+  const noRequiredStateReqs = () =>
+    requirements({
+      component: "RECIPIENT",
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      tokenStateSensitive: true,
+      requiredTokenState: null,
+    });
+
+  const reconcileWith = (reqs: ReturnType<typeof veCrvReqs>, fragment: string) =>
+    reconcile([row({ component: "RECIPIENT", sourceClass: "ONCHAIN_VERIFIABLE", fragment })], reqs, {
+      item: { step: 6, component: "RECIPIENT" },
+    });
+
+  // §12 known-state regression matrix — requiredTokenState=veCRV: every
+  // casing/separator combination VERIFIES to the same identity.
+  it.each([
+    "veCRV", "VeCRV", "VECRV", "vecrv", "ve-CRV", "ve CRV", "VE-CRV", "VE CRV",
+  ])("known state veCRV: %s holders receive fees -> SUPPORTED, tokenStateMentions=[vecrv]", (form) => {
+    const r = reconcileWith(veCrvReqs(), `${form} holders receive fees`);
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.reasonCodes).not.toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["vecrv"]);
+  });
+
+  // §12 known-state false-positive matrix — a DIFFERENT qualified
+  // identity is genuinely discovered (veBAL, a real distinct state), so
+  // D-096's existing downgrade rule correctly fires: it does not verify
+  // veCRV.
+  it("known state veCRV: veBAL holders receive fees -> does NOT verify, PARTIALLY_SUPPORTED + TOKEN_STATE_UNQUALIFIED", () => {
+    const r = reconcileWith(veCrvReqs(), "veBAL holders receive fees");
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["vebal"]);
+  });
+
+  // §12 known-state false-positive matrix — none of these ordinary-prose
+  // forms verify veCRV, and none fabricate ANY identity at all
+  // (tokenStateMentions stays empty) — so, per the pre-existing,
+  // unchanged D-096 downgrade rule (TOKEN_STATE_UNQUALIFIED only fires
+  // when something WAS detected), the component is SUPPORTED: there is
+  // nothing to disagree with the required state.
+  it.each([
+    "VEHICLE for value capture",
+    "VESTING schedule for team",
+    "We VE BOUGHT back tokens",
+    "never give",
+    "give away tokens",
+  ])("known state veCRV: %s -> no identity fabricated at all, SUPPORTED, tokenStateMentions=[]", (fragment) => {
+    const r = reconcileWith(veCrvReqs(), fragment);
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.reasonCodes).not.toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual([]);
+  });
+
+  // §12 known-state regression matrix — requiredTokenState=stkAAVE.
+  it.each([
+    "stkAAVE", "StkAAVE", "STKAAVE", "stkaave", "stk-AAVE", "stk AAVE",
+  ])("known state stkAAVE: %s holders receive rewards -> SUPPORTED, tokenStateMentions=[stkaave]", (form) => {
+    const r = reconcileWith(stkAaveReqs(), `${form} holders receive rewards`);
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.tokenStateMentions).toEqual(["stkaave"]);
+  });
+
+  // §12/§15 — the exact Opus ALL-CAPS-heading reproductions must never
+  // verify stkAAVE, and must not fabricate ANY fused identity at all —
+  // so the component is SUPPORTED (nothing detected to disagree with the
+  // required state), never a false stkAAVE match. This is the block that
+  // makes the MEDIUM impossible to reintroduce.
+  it.each([
+    "STAKING REWARDS: 50% of protocol fees are distributed to stakers",
+    "STARTER GUIDE FOR HOLDERS",
+    "Section 3.2 STATE TRANSITIONS are governed on-chain",
+    "STONE COLD HOLDERS",
+    "AAVE holders receive rewards",
+  ])("known state stkAAVE: %s -> does NOT verify (no fabricated identity), SUPPORTED", (fragment) => {
+    const r = reconcileWith(stkAaveReqs(), fragment);
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.tokenStateMentions).toEqual([]);
+  });
+
+  // stETH is a real, distinct identity — DISCOVERY correctly still finds
+  // it even though it does not verify the different required state
+  // stkAAVE (unchanged from the accepted prior-round scenario I).
+  it("known state stkAAVE: stETH holders receive rewards -> does not verify stkAAVE, but tokenStateMentions still records the real steth identity", () => {
+    const r = reconcileWith(stkAaveReqs(), "stETH holders receive rewards");
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("TOKEN_STATE_UNQUALIFIED");
+    expect(r.tokenStateMentions).toEqual(["steth"]);
+  });
+
+  // §13/§15 — the exact Opus ALL-CAPS/unsafe-separator reproductions,
+  // required as PERMANENT regression tests, for UNKNOWN state
+  // (requiredTokenState=null). None may fabricate a fused identity.
+  it.each([
+    "STAKING REWARDS: 50% of protocol fees are distributed to stakers",
+    "VESTING SCHEDULE: team tokens unlock linearly over 4 years",
+    "Section 3.2 STATE TRANSITIONS are governed on-chain",
+    "VEHICLE FOR VALUE CAPTURE",
+    "STARTER GUIDE FOR HOLDERS",
+    "STONE COLD HOLDERS",
+    "St Petersburg office opened",
+    "We VE BOUGHT back tokens",
+  ])("unknown state (requiredTokenState=null): %s -> no fused token-state identity fabricated", (fragment) => {
+    const r = reconcileWith(noRequiredStateReqs(), fragment);
+    expect(r.tokenStateMentions).toEqual([]);
+  });
+
+  // §7/§8 — unknown state, fully bare ALL-CAPS/all-lowercase fused forms
+  // (no case-transition, no separator) remain a documented, conservative
+  // LOW limitation: acceptable to leave undetected without a requiredTokenState
+  // anchor, rather than guessing.
+  it.each([
+    ["VECRV holders receive fees", []],
+    ["vecrv holders receive fees", []],
+    ["STKAAVE holders receive rewards", []],
+  ])("unknown state (requiredTokenState=null): bare %s left conservatively undetected", (fragment, expected) => {
+    const r = reconcileWith(noRequiredStateReqs(), fragment);
+    expect(r.tokenStateMentions).toEqual(expected);
+  });
+
+  // §13 unknown-state safe-discovery matrix — structurally unambiguous
+  // forms (case transition or explicit lowercase-prefix separator) ARE
+  // still discovered with no required state at all.
+  it.each([
+    ["veCRV holders receive fees", ["vecrv"]],
+    ["VeCRV holders receive fees", ["vecrv"]],
+    ["ve-CRV holders receive fees", ["vecrv"]],
+    ["ve CRV holders receive fees", ["vecrv"]],
+    ["stkAAVE holders receive rewards", ["stkaave"]],
+    ["StkAAVE holders receive rewards", ["stkaave"]],
+    ["stk-AAVE holders receive rewards", ["stkaave"]],
+    ["stk AAVE holders receive rewards", ["stkaave"]],
+    ["stETH holders receive rewards", ["steth"]],
+    ["StETH holders receive rewards", ["steth"]],
+    ["st-ETH holders receive rewards", ["steth"]],
+    ["st ETH holders receive rewards", ["steth"]],
+  ])("unknown state (requiredTokenState=null): %s -> tokenStateMentions=%j", (fragment, expected) => {
+    const r = reconcileWith(noRequiredStateReqs(), fragment);
+    expect(r.tokenStateMentions).toEqual(expected);
+  });
+
+  // §14 — multiple distinct identities are still preserved, never
+  // collapsed, under the tightened discovery grammar too.
+  it("multi-identity: veCRV and veBAL holders vote -> tokenStateMentions preserves both distinct identities", () => {
+    const r = reconcileWith(noRequiredStateReqs(), "veCRV and veBAL holders vote");
+    expect(r.tokenStateMentions.slice().sort()).toEqual(["vebal", "vecrv"]);
+  });
+
+  // §10 — requiredTokenState is never fabricated into tokenStateMentions
+  // merely because Pattern names it; it must actually be found.
+  it("requiredTokenState is never fabricated when Evidence never mentions it at all", () => {
+    const r = reconcileWith(veCrvReqs(), "the protocol distributes fees to holders");
+    expect(r.tokenStateMentions).toEqual([]);
+  });
+});

@@ -147,66 +147,134 @@ function tokenizeForMatch(s: string): string[] {
 // ticker with no delimiter (veCRV, veBAL, stkAAVE, stETH) — plain
 // word-tokenization can never see the prefix as a token of its own there.
 //
-// FINAL fix (deep audit round 2, phase-6-s5-audit round-2) — case is
-// presentation, not economic identity: veCRV/VeCRV/VECRV must all
-// resolve to the same identity, and so must stkAAVE/StkAAVE/STKAAVE. The
-// qualifier prefix below is therefore matched via an explicit per-letter
-// case class (`[vV][eE]`, never the regex /i/ flag) — the /i/ flag would
-// also blunt the uppercase lookahead that is this detector's ONLY
-// boundary signal against ordinary lowercase English continuations
-// ("vested", "vehicle", "starter", "stone", "give", "never" — none of
-// which ever have an uppercase letter immediately after the prefix in
-// normal prose). That lookahead still fires correctly in three shapes
-// that all carry the same signal (an uppercase letter right after the
-// prefix in the ORIGINAL text): classic camelCase (veCRV), Titlecase
-// (VeCRV), and ALL-CAPS (VECRV — trivially true since every letter in an
-// all-caps run is uppercase, including the one right after the prefix).
-// A single optional hyphen/space between prefix and ticker is accepted
-// too (§6 separator forms: "ve-CRV", "ve CRV") under the exact same
-// discipline — it is the uppercase ticker-start that licenses the match,
-// never the separator alone, so "ve fees"/"ve-something" (lowercase
-// continuation) still cannot fuse.
+// FINAL fix, round 3 (phase-6-s5-audit round 3, MEDIUM-1) — round 2's
+// fully case-insensitive fused detector fixed the casing gap but
+// overshot: it also fabricated identities from ordinary ALL-CAPS prose
+// ("STAKING", "VESTING") and unsafe two-word shapes ("St Petersburg",
+// "VE BOUGHT"), because an ALL-CAPS run trivially satisfies "uppercase
+// right after the prefix" with no further discrimination possible from
+// surface form alone. The fix is to stop trying to solve this with ONE
+// detector and split the two genuinely different operations the review
+// (§1-2, §9) names:
 //
-// Deliberately NOT supported, reported rather than invented: a fully
-// lowercase, no-case-transition fused form ("vecrv", "stkaave", "steth"
-// written in a single all-lowercase run with no camelCase/Titlecase/
-// ALL-CAPS/separator signal at all). That shape is lexically IDENTICAL
-// to an ordinary lowercase English continuation sharing the same
-// prefix — "vecrv" and "vested" are the same shape (lowercase prefix +
-// lowercase continuation at a word boundary), and the two-letter "st"
-// prefix collides with common words (start, stone, story, state, still)
-// the same way. The task's own §14 matrix requires "vested" to remain
-// its own lexical qualifier ONLY (never a fused identity) while
-// requiring "vecrv" to fuse — those two requirements are satisfiable
-// only by a ticker allowlist/dictionary, which D-096/§3 explicitly
-// forbids ("no semantic model inference", "keep the detector lexical
-// and bounded"). This is the one ambiguity from the final review
-// deliberately left unimplemented rather than resolved by inventing an
-// ontology; see the return report for the full write-up.
+//   - VERIFICATION: does Evidence contain the ALREADY-KNOWN identity
+//     Pattern asked for (requirements.requiredTokenState)? This is safe
+//     to match fully case-insensitively, in any casing/separator combo,
+//     because the ticker itself is fixed and human-approved — we are
+//     never guessing what a ticker is, only whether Evidence names the
+//     one Pattern already named. detectRequiredTokenStateIdentity below.
 //
-// The captured identity is the WHOLE match (prefix + ticker), case- and
-// separator-normalized — "vecrv", "vebal", "stkaave" — so two different
-// fused tickers under the same prefix are never conflated with each
-// other, and never conflated with the bare ticker alone ("CRV" without
-// "ve" produces no fused mention at all).
+//   - DISCOVERY: what qualified identity (if any) does Evidence mention
+//     when nothing specific was asked for? This has no such anchor, so
+//     it must stay conservative: only shapes that carry a structural
+//     signal beyond "starts with a known prefix" are accepted — a
+//     genuine case TRANSITION (fused camelCase/Titlecase: veCRV, VeCRV)
+//     or an EXPLICIT separator paired with the prefix's own canonical
+//     lowercase spelling (ve-CRV, ve CRV — never "St"/"VE", which is
+//     exactly what "St Petersburg"/"VE BOUGHT" are). A bare ALL-CAPS or
+//     all-lowercase fused run (VECRV, vecrv) carries neither signal and
+//     is deliberately left undetected here — see §7-8 of the final
+//     review and the report for the full write-up; this is unchanged
+//     from round 2's already-accepted all-lowercase deferral, now
+//     extended to bare ALL-CAPS specifically because DISCOVERY (unlike
+//     VERIFICATION) has no fixed ticker to anchor against.
+//
+// detectTokenStateMentions (below) is the union of both: the
+// requirement-agnostic DISCOVERY set, plus — only when Evidence text
+// actually contains it — the specific identity VERIFICATION was asked
+// to look for. Pattern's requiredTokenState is never added just because
+// it exists in Pattern; §10 of the review.
 const FUSED_TOKEN_STATE_PREFIXES = ["ve", "stk", "st"] as const;
 
-function detectFusedTokenStateIdentities(text: string): string[] {
+function titlecase(prefix: string): string {
+  return prefix[0]!.toUpperCase() + prefix.slice(1);
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// DISCOVERY grammar (requiredTokenState unknown/irrelevant) — see the
+// block comment above. Two shapes only, both requiring a real structural
+// boundary signal, never a bare ALL-CAPS or all-lowercase run:
+//
+//   1. Fused, no separator: prefix in its exact canonical lowercase
+//      spelling OR Titlecase (first letter capitalised, matching a
+//      sentence- or name-initial position), immediately followed by an
+//      uppercase ticker-start letter — veCRV, VeCRV, stkAAVE, StkAAVE,
+//      stETH, StETH. An ALL-CAPS prefix ("VE", "STK", "ST") is
+//      deliberately excluded from this shape: it is what let "STAKING"/
+//      "VESTING"/"STATE"/"STARTER"/"STONE" fuse in round 2.
+//   2. Explicit separator: prefix in its exact canonical lowercase
+//      spelling ONLY (not Titlecase, not ALL-CAPS) + a single hyphen or
+//      space + an uppercase ticker-start letter — "ve-CRV", "ve CRV",
+//      "stk AAVE", "st-ETH". Restricting the separated shape to exact
+//      lowercase is what distinguishes "ve CRV" (accepted) from
+//      "St Petersburg" / "VE BOUGHT" / "ST REWARDS" (Titlecase/ALL-CAPS
+//      prefix, rejected) — those three unsafe examples share the exact
+//      "prefix + separator + uppercase-start word" shape as the wanted
+//      ones, so the prefix's own casing is the only remaining signal.
+function detectGenericTokenStateIdentities(text: string): string[] {
   const found = new Set<string>();
   for (const prefix of FUSED_TOKEN_STATE_PREFIXES) {
-    const prefixCaseInsensitive = [...prefix].map((ch) => `[${ch}${ch.toUpperCase()}]`).join("");
-    const pattern = new RegExp(`\\b${prefixCaseInsensitive}[-\\s]?(?=[A-Z])([A-Za-z][A-Za-z0-9]*)`, "g");
-    for (const match of text.matchAll(pattern)) {
+    const lower = prefix;
+    const title = titlecase(prefix);
+    const fusedPattern = new RegExp(`\\b(?:${lower}|${title})(?=[A-Z])([A-Za-z][A-Za-z0-9]*)`, "g");
+    for (const match of text.matchAll(fusedPattern)) {
+      found.add(normalizeForLexicalMatch(`${prefix}${match[1]}`));
+    }
+    const separatedPattern = new RegExp(`\\b${lower}[-\\s](?=[A-Z])([A-Za-z][A-Za-z0-9]*)`, "g");
+    for (const match of text.matchAll(separatedPattern)) {
       found.add(normalizeForLexicalMatch(`${prefix}${match[1]}`));
     }
   }
   return [...found];
 }
 
+// VERIFICATION (requiredTokenState known) — see the block comment above.
+// Anchored to the EXACT expected identity, so full case-insensitivity is
+// safe: there is no other candidate it could accidentally resolve to,
+// unlike open-ended discovery. Splits requiredTokenState into its known
+// fused prefix (longest match first, so "stk" wins over "st") and the
+// remaining ticker, then looks for that literal prefix+ticker pair,
+// case-insensitively, with an optional single hyphen/space between them
+// at exactly that boundary — "VE-CRV"/"VE CRV" verify requiredTokenState
+// "veCRV" (§3/§12) without opening any general ALL-CAPS discovery, because
+// the ticker portion must literally equal the known "CRV", not an
+// arbitrary uppercase continuation ("BOUGHT" does not equal "CRV").
+// requiredTokenState values that don't start with a known fused prefix
+// fall back to a plain whole-word case-insensitive literal match (no
+// separator, since there is no known prefix/ticker boundary to place one
+// at).
+function detectRequiredTokenStateIdentity(text: string, requiredTokenState: string): string | null {
+  const requiredLower = requiredTokenState.toLowerCase();
+  const prefix = [...FUSED_TOKEN_STATE_PREFIXES]
+    .sort((a, b) => b.length - a.length)
+    .find((p) => requiredLower.startsWith(p));
+
+  const pattern =
+    prefix !== undefined
+      ? new RegExp(
+          `\\b${escapeRegExp(requiredTokenState.slice(0, prefix.length))}[-\\s]?${escapeRegExp(
+            requiredTokenState.slice(prefix.length),
+          )}\\b`,
+          "i",
+        )
+      : new RegExp(`\\b${escapeRegExp(requiredTokenState)}\\b`, "i");
+
+  return pattern.test(text) ? normalizeForLexicalMatch(requiredTokenState) : null;
+}
+
 // §9 — detects qualifiers by lexical token match, over the text the model
 // actually produced (fragment/summary of an evidence row already admitted
 // for this component) — never a fresh search, never a model call.
-function detectTokenStateMentions(text: string): string[] {
+// requiredTokenState, when known, additionally licenses VERIFICATION of
+// that one specific identity (see detectRequiredTokenStateIdentity) —
+// this can surface a casing/separator variant DISCOVERY alone would
+// leave conservative about (e.g. "VECRV" or "vecrv" when Pattern already
+// names "veCRV"), without widening what DISCOVERY accepts when nothing
+// specific was asked for.
+function detectTokenStateMentions(text: string, requiredTokenState: string | null): string[] {
   const tokens = tokenizeForMatch(text);
   const found = new Set<string>();
   for (const qualifier of TOKEN_STATE_QUALIFIERS) {
@@ -219,7 +287,11 @@ function detectTokenStateMentions(text: string): string[] {
       break;
     }
   }
-  for (const identity of detectFusedTokenStateIdentities(text)) found.add(identity);
+  for (const identity of detectGenericTokenStateIdentities(text)) found.add(identity);
+  if (requiredTokenState !== null) {
+    const verified = detectRequiredTokenStateIdentity(text, requiredTokenState);
+    if (verified !== null) found.add(verified);
+  }
   return [...found].sort();
 }
 
@@ -544,7 +616,9 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     // carrying forward even though the component itself did not resolve.
     const tokenStateMentions = new Set<string>();
     for (const row of contradictingRows) {
-      for (const m of detectTokenStateMentions(`${row.fragment} ${row.summary ?? ""}`)) tokenStateMentions.add(m);
+      for (const m of detectTokenStateMentions(`${row.fragment} ${row.summary ?? ""}`, requirements.requiredTokenState)) {
+        tokenStateMentions.add(m);
+      }
     }
     return {
       step: item.step,
@@ -609,7 +683,9 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // only under all three named conditions.
   const tokenStateMentions = new Set<string>();
   for (const row of establishing) {
-    for (const m of detectTokenStateMentions(`${row.fragment} ${row.summary ?? ""}`)) tokenStateMentions.add(m);
+    for (const m of detectTokenStateMentions(`${row.fragment} ${row.summary ?? ""}`, requirements.requiredTokenState)) {
+      tokenStateMentions.add(m);
+    }
   }
   if (
     requirements.tokenStateSensitive &&
