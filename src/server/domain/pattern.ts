@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { RESEARCH_INTENTS } from "../interpreter/schema";
+
 // Pattern v1 — скелет Research Boundary Contract (phase-5-plan.md §4.1,
 // canonical §14). 8 шагов Token Value Capture. CORE управляется человеком
 // (D-022): переход v1→v2 — ручной, с регрессией; этот файл не меняется
@@ -100,6 +102,50 @@ export type ComponentRequirementsEntry = z.infer<typeof componentRequirementsEnt
 // enforces "missing means no requirement", not this schema's optionality.
 const componentRequirementsSchema = z.record(z.string(), componentRequirementsEntrySchema).optional();
 
+// Phase 6, S7 (phase-6-s7-plan.md §5, §6, D-105) — ClaimRequirement is
+// CORE data, authored by a human exactly like componentRequirements
+// (D-095 discipline): S7 consumes it and never invents a requirement.
+// Six kinds only (§5) — no free-text predicate, no requiredQuantity, no
+// polarity field (§16/§7: nothing upstream can feed them).
+const requirementKindSchema = z.enum([
+  "COMPONENT_ESTABLISHED",
+  "FLOW_RELATIONSHIP",
+  "FLOW_ATTRIBUTE",
+  "NET_EFFECT_ESTABLISHED",
+  "LIFECYCLE",
+  "DURABILITY_ESTABLISHED",
+]);
+
+const claimRequirementSchema = z.object({
+  requirementId: z.string().min(1),
+  kind: requirementKindSchema,
+  optionality: z.enum(["REQUIRED", "OPTIONAL"]),
+  components: z.array(z.string().min(1)).optional(),
+  relationshipFrom: z.string().min(1).optional(),
+  relationshipTo: z.string().min(1).optional(),
+  attribute: z.enum(["valueSource", "direction", "recipientKind", "destinationKind", "tokenState"]).optional(),
+  expectedValues: z.array(z.string().min(1)).optional(),
+  expectedLifecycle: z.enum(["CURRENT", "HISTORICAL"]).optional(),
+});
+
+export type ClaimRequirement = z.infer<typeof claimRequirementSchema>;
+export type RequirementKind = z.infer<typeof requirementKindSchema>;
+
+// §28 — 8 v1 in-scope intents get a real requirement set; the other 3
+// (UNKNOWN, SCENARIO_CAUSAL_IMPACT, CLAIM_FACT_CHECK) are handled by S7
+// itself before ever reaching this lookup (§6, D-106) — they deliberately
+// have no CORE entry here, and that absence is not a configuration error
+// for them specifically (intentRequirementsFor is never called with one
+// of those three).
+const intentRequirementSetSchema = z.object({
+  requirements: z.array(claimRequirementSchema).min(1),
+  ceiling: z.enum(["PARTIALLY_SUPPORTED"]).optional(),
+});
+
+const intentRequirementsSchema = z.record(z.string(), intentRequirementSetSchema).optional();
+
+export type IntentRequirementSet = z.infer<typeof intentRequirementSetSchema>;
+
 // zod-контракт на content (phase-5-plan.md §5.2) — без него blind-регрессия
 // будущей Фазы 10 непроверяема: Pattern v1 обязан оставаться ровно 8 шагами
 // в фиксированном порядке.
@@ -107,6 +153,7 @@ export const patternContentSchema = z.object({
   steps: z.array(patternStepSchema).length(8),
   requiredComponents: requiredComponentsSchema,
   componentRequirements: componentRequirementsSchema,
+  intentRequirements: intentRequirementsSchema,
 });
 
 export type PatternContent = z.infer<typeof patternContentSchema>;
@@ -159,6 +206,42 @@ export function componentRequirementsFor(
   }
   return entry;
 }
+
+// Phase 6, S7 (phase-6-s7-plan.md §6, §25, D-105, acceptance scenario AX)
+// — same discipline as PatternConfigurationError: an in-scope intent
+// (one of the 8 named in §28) missing its CORE entry is a configuration
+// failure, never silently treated as "researched, found nothing" for
+// every job carrying that intent. Callers must never invoke this for
+// UNKNOWN / SCENARIO_CAUSAL_IMPACT / CLAIM_FACT_CHECK — those three are
+// handled before this lookup is ever reached (§6, D-106).
+export class IntentConfigurationError extends Error {
+  constructor(intent: string) {
+    super(
+      `Pattern is missing intentRequirements for intent "${intent}" — CORE is not configured for S7 claim-support ` +
+        `evaluation of this intent. This is a configuration failure, not an evidentiary conclusion (D-105).`,
+    );
+    this.name = "IntentConfigurationError";
+  }
+}
+
+export function intentRequirementsFor(
+  pattern: PatternContent,
+  intent: string,
+): IntentRequirementSet {
+  const entry = pattern.intentRequirements?.[intent as (typeof RESEARCH_INTENTS)[number]];
+  if (entry === undefined) {
+    throw new IntentConfigurationError(intent);
+  }
+  return entry;
+}
+
+// Phase 6, S7 (phase-6-s7-plan.md §24) — a human-bumped version number
+// for the intentRequirements CORE data itself, independent of
+// patternVersion (a human can edit requirements without touching the
+// Pattern). Bump this constant whenever intentRequirements changes so
+// research_claim_support's key (§24) never silently serves a stale
+// projection computed under a since-edited requirement set.
+export const INTENT_REQUIREMENTS_VERSION = 1;
 
 export const PATTERN_V1_CONTENT: PatternContent = {
   steps: [
@@ -313,6 +396,60 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+    },
+  },
+  // Phase 6, S7 (phase-6-s7-plan.md §28) — the 8 in-scope v1 intents.
+  // Each requirement set is human-authored CORE data (D-095 discipline):
+  // S7 consumes these atoms and invents none. UNKNOWN, SCENARIO_CAUSAL_IMPACT,
+  // and CLAIM_FACT_CHECK deliberately have no entry — see intentRequirementsFor.
+  intentRequirements: {
+    PROTOCOL_REVENUE_TO_TOKEN: {
+      requirements: [
+        { requirementId: "PRT-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+        { requirementId: "PRT-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
+      ],
+    },
+    PASSIVE_HOLDER_OUTCOME: {
+      requirements: [
+        { requirementId: "PHO-1", kind: "FLOW_ATTRIBUTE", optionality: "REQUIRED", attribute: "recipientKind", expectedValues: ["PASSIVE_HOLDER"] },
+      ],
+    },
+    REWARD_SOURCE: {
+      requirements: [
+        { requirementId: "RS-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+        { requirementId: "RS-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
+      ],
+    },
+    BURN_OR_SUPPLY_EFFECT: {
+      requirements: [{ requirementId: "BSE-1", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" }],
+    },
+    MECHANISM_CURRENT_STATE: {
+      requirements: [{ requirementId: "MCS-1", kind: "LIFECYCLE", optionality: "REQUIRED", expectedLifecycle: "CURRENT" }],
+    },
+    USAGE_TO_TOKEN_LINKAGE: {
+      requirements: [
+        { requirementId: "UTL-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+        { requirementId: "UTL-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
+      ],
+    },
+    VALUE_CAPTURE: {
+      requirements: [
+        { requirementId: "VC-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+        { requirementId: "VC-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
+        { requirementId: "VC-3", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" },
+      ],
+    },
+    TOKEN_UTILITY: {
+      requirements: [
+        { requirementId: "TU-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+        {
+          requirementId: "TU-2",
+          kind: "FLOW_ATTRIBUTE",
+          optionality: "OPTIONAL",
+          attribute: "recipientKind",
+          expectedValues: ["PASSIVE_HOLDER", "STAKER", "NODE_OPERATOR", "TREASURY", "LP", "EXTERNAL"],
+        },
+      ],
     },
   },
 };

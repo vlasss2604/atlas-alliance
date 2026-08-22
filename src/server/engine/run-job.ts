@@ -10,6 +10,7 @@ import { parseContract } from "../memory/contract";
 import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
+import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 
 // Phase 6, S4 — the actual production wiring point: given a jobId, load
 // its frozen entitlement/budget, its persisted Research Boundary
@@ -117,6 +118,13 @@ export async function runS4ResearchJob(
   // separate per-attempt hook (S6 has no per-component granularity to
   // hook into — it consumes the whole job's S5 result set at once).
   await assembleAndPersistMechanism(db, jobId, now);
+
+  // Phase 6, S7 (phase-6-s7-plan.md §34) — claim support is a derived
+  // projection over whatever S6 assembly currently exists, same
+  // discipline as the S6 assembly step above. evaluateAndPersistClaimSupport
+  // returns null (no-op) when no S6 projection exists yet for this job —
+  // S7 never runs ahead of S6, and this is not a failure, just "not yet".
+  await evaluateAndPersistClaimSupport(db, jobId, now);
 
   return result;
 }

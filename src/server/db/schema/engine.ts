@@ -12,6 +12,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import type { MechanismFlow, MechanismGap } from "../../engine/mechanism-assembler";
+import type { ClaimReasonCode, ClaimRequirementResult, MechanismGapRef } from "../../engine/claim-evaluator";
 
 import { componentReconciliationStatus, researchAttemptStatus } from "./enums";
 import { researchJobs } from "./research";
@@ -157,5 +158,53 @@ export const researchMechanismAssembly = pgTable(
       t.patternVersion,
     ),
     index("ix_research_mechanism_assembly_job").on(t.researchJobId),
+  ],
+);
+
+// Phase 6, S7 (phase-6-s7-plan.md §24, D-111) — a DERIVED PROJECTION,
+// same discipline as research_component_results / research_mechanism_assembly:
+// deleting every row here and re-running evaluateClaimSupport() from the
+// same (IntentRequirementSet, MechanismAssemblyResult) is required to
+// reproduce a semantically identical result. Truth stays in Pattern's
+// intentRequirements CORE data and research_mechanism_assembly; this
+// table exists so a claim-support read never needs to recompute it.
+//
+// requirement_set_version is part of the key (not just job+patternVersion)
+// because a human can edit CORE intentRequirements without touching
+// patternVersion (§24) — without this, an edited requirement set would
+// silently keep serving the old projection as if it were current.
+export const researchClaimSupport = pgTable(
+  "research_claim_support",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    researchJobId: uuid("research_job_id")
+      .notNull()
+      .references(() => researchJobs.id, { onDelete: "cascade" }),
+    patternVersion: integer("pattern_version").notNull(),
+    requirementSetVersion: integer("requirement_set_version").notNull(),
+    intent: text("intent").notNull(),
+    status: text("status").notNull(),
+    reasonCodes: jsonb("reason_codes").notNull().$type<ClaimReasonCode[]>(),
+    requirementResults: jsonb("requirement_results").notNull().$type<ClaimRequirementResult[]>(),
+    contextGaps: jsonb("context_gaps").notNull().$type<MechanismGapRef[]>(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // §24 — "one claim-support projection per job, Pattern version, and
+    // requirement-set version"; the upsert target that keeps replay
+    // idempotent rather than accumulating rows.
+    uniqueIndex("uq_research_claim_support_job_pattern_reqset").on(
+      t.researchJobId,
+      t.patternVersion,
+      t.requirementSetVersion,
+    ),
+    index("ix_research_claim_support_job").on(t.researchJobId),
   ],
 );

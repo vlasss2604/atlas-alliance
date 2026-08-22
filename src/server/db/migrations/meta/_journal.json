@@ -120,6 +120,20 @@
       "when": 1787424634605,
       "tag": "0016_s6_mechanism_assembly",
       "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787424634606,
+      "tag": "0017_s7_backfill_intent_requirements",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787432978052,
+      "tag": "0018_s7_claim_support",
+      "breakpoints": true
     }
   ]
 }
