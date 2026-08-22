@@ -16,7 +16,7 @@ import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import type { ComponentTarget, ExtractedFact } from "./providers/types";
-import { deriveSourceClass, resolveOfficiality } from "./source-authority";
+import { deriveSourceClass, deriveSourceType, resolveOfficiality } from "./source-authority";
 
 // Phase 6, S4 — the real bounded execution pipeline:
 //   ComponentWorkItem -> QueryProposer -> SearchGateway -> ContentFetcher
@@ -109,22 +109,55 @@ function isTraceable(documentText: string, supportFragment: string): boolean {
   return normalizeForContainment(documentText).includes(normalizeForContainment(supportFragment));
 }
 
-// HIGH-2: deterministic, non-fuzzy project containment. A document is
-// "about" the target project only if it literally names the project (by
-// name, slug, or ticker) — never because a search result or an
-// extractor's rewritten summary says so. This intentionally does NOT
-// attempt semantic understanding of what the document is "really about";
-// it is a structural, code-owned substring check.
+// Word-boundary tokenizer — splits on anything that isn't ASCII
+// alphanumeric, lowercased. "arbitrage", "arb-itrage" and "ARBITRAGE" all
+// tokenize to one token ("arbitrage"), never containing "arb" as a
+// sub-token, so an exact-token comparison structurally cannot match a
+// short identifier merely because it appears as a substring of a longer,
+// unrelated word.
+function tokenize(s: string): string[] {
+  return normalizeForContainment(s)
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t.length > 0);
+}
+
+// HIGH-A (S4 final re-review fix): `documentTokens.includes(needle)` (the
+// prior implementation) admitted incidental substrings — a ticker like
+// "ARB" matched inside "arbitrary"/"arbitrage"/"arbiter", "UNI" inside
+// "university"/"unique", etc. Containment must be a real lexical identity,
+// not an arbitrary substring. `phrase`'s own tokens must appear as a
+// CONSECUTIVE, exact-token run in the document's tokens — this is boundary-
+// safe for both a single-token identifier (a ticker) and a multi-token
+// phrase (a project name/slug), and needs no special-casing for very short
+// tickers: a 2-character token can only ever equal another 2-character
+// token, never appear "inside" a longer one.
+function containsIdentityPhrase(documentTokens: string[], phrase: string): boolean {
+  const phraseTokens = tokenize(phrase);
+  if (phraseTokens.length === 0) return false;
+  outer: for (let i = 0; i + phraseTokens.length <= documentTokens.length; i++) {
+    for (let j = 0; j < phraseTokens.length; j++) {
+      if (documentTokens[i + j] !== phraseTokens[j]) continue outer;
+    }
+    return true;
+  }
+  return false;
+}
+
+// HIGH-2/HIGH-A: deterministic, non-fuzzy project containment. A document
+// is "about" the target project only if it literally names the project —
+// by its canonical name, canonical slug, or exact ticker token — never
+// because a search result or an extractor's rewritten summary says so, and
+// never because a short identifier merely appears as a substring of some
+// other word. This intentionally does NOT attempt semantic understanding
+// of what the document is "really about"; it is a structural, code-owned,
+// boundary-aware identity check.
 function documentNamesProject(
   documentText: string,
   project: { name: string; slug: string; ticker: string | null },
 ): boolean {
-  const normalizedDoc = normalizeForContainment(documentText);
-  const candidates = [project.name, project.slug.replace(/[_-]/g, " "), project.ticker ?? ""];
-  return candidates.some((c) => {
-    const needle = normalizeForContainment(c);
-    return needle.length >= 3 && normalizedDoc.includes(needle);
-  });
+  const documentTokens = tokenize(documentText);
+  const candidates = [project.name, project.slug, project.ticker ?? ""].filter((c) => c.trim().length > 0);
+  return candidates.some((c) => containsIdentityPhrase(documentTokens, c));
 }
 
 function extractionUnitKey(
@@ -146,9 +179,13 @@ async function findOrCreateSource(
   const urlHash = hashUrl(url);
   const [existing] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
   if (existing) return { id: existing.id, sourceType: existing.sourceType };
+  // HIGH-B (S4 final re-review): sourceType is populated deterministically
+  // from the URL at the moment this global, shared source row is first
+  // created — never left at the bare column default, and never revisited
+  // per-project (the row is reused across jobs/projects, D-088 territory).
   const [created] = await db
     .insert(sources)
-    .values({ url, urlHash })
+    .values({ url, urlHash, sourceType: deriveSourceType(url) })
     .onConflictDoNothing({ target: sources.urlHash })
     .returning({ id: sources.id, sourceType: sources.sourceType });
   if (created) return created;
@@ -230,6 +267,13 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const searchGateway = deps.searchGateway ?? resolveSearchGateway();
       const candidateUrls = new Map<string, { url: string }>();
       let searchBudgetExhausted = false;
+      // LOW-A (S4 final re-review): keep the most recent typed provider
+      // failure reason around so a terminal SKIPPED/FAILED result can
+      // surface it for observability, instead of only a generic
+      // NO_SEARCH_CANDIDATES/NO_SOURCE_COULD_BE_FETCHED reason that hides
+      // WHY every candidate/query failed. No secret/response-body content
+      // — callProvider's reason string is already `${label}: ${message}`.
+      let lastSearchFailureReason: string | null = null;
       for (const query of queries) {
         const reserved = await reserveJobBudget(
           deps.db,
@@ -246,7 +290,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         const searchResult = await callProvider("SEARCH_GATEWAY", () =>
           searchGateway.search(query, target, { maxResults: MAX_SEARCH_RESULTS_PER_QUERY }),
         );
-        if (!searchResult.ok) continue; // one query's failure doesn't fail the whole attempt
+        if (!searchResult.ok) {
+          lastSearchFailureReason = searchResult.reason;
+          continue; // one query's failure doesn't fail the whole attempt
+        }
         for (const r of searchResult.value) {
           // A search result is a candidate URL ONLY — never Evidence
           // (§3, D-076). title/snippet are discarded here entirely; they
@@ -257,29 +304,40 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         }
       }
       if (candidateUrls.size === 0) {
-        return {
-          status: "FAILED",
-          reason: searchBudgetExhausted ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "NO_SEARCH_CANDIDATES",
-          spent,
-        };
+        // LOW-A: prefer the actual typed provider failure reason over the
+        // generic label when one exists — the search budget being
+        // exhausted is a distinct, higher-priority reason worth keeping
+        // as-is since it isn't a provider failure at all.
+        const reason = searchBudgetExhausted
+          ? "SEARCH_QUERY_BUDGET_EXHAUSTED"
+          : (lastSearchFailureReason ?? "NO_SEARCH_CANDIDATES");
+        return { status: "FAILED", reason, spent };
       }
 
       // --- 3. ContentFetcher (already the accepted S1 SSRF-safe impl) ------
       const contentFetcher = deps.contentFetcher ?? resolveContentFetcher();
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
+      let lastFetchFailureReason: string | null = null;
       for (const { url } of candidateUrls.values()) {
         if (opensAttempted >= MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT) break;
         const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
         if (!reserved) break; // job-lifetime source-open ceiling reached
         opensAttempted += 1;
         const fetchResult = await callProvider("CONTENT_FETCHER", () => contentFetcher.fetch(url));
-        if (!fetchResult.ok) continue; // typed/unexpected fetch failure — try the next candidate
+        if (!fetchResult.ok) {
+          lastFetchFailureReason = fetchResult.reason;
+          continue; // typed/unexpected fetch failure — try the next candidate
+        }
         fetchedDocs.push(fetchResult.value);
         spent.sourceOpens += 1;
       }
       if (fetchedDocs.length === 0) {
-        return { status: "FAILED", reason: "NO_SOURCE_COULD_BE_FETCHED", spent };
+        return {
+          status: "FAILED",
+          reason: lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED",
+          spent,
+        };
       }
 
       // --- 4. EvidenceExtractor ----------------------------------------------

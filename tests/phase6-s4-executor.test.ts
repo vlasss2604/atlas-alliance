@@ -50,16 +50,18 @@ async function activeTopicId(): Promise<string> {
   return t.id;
 }
 
-async function makeJob(projectOverrides: Partial<{ name: string; slug: string }> = {}): Promise<{
+async function makeJob(projectOverrides: Partial<{ name: string; slug: string; ticker: string }> = {}): Promise<{
   jobId: string;
   projectId: string;
   projectName: string;
   projectSlug: string;
+  projectTicker: string | null;
 }> {
   const topicId = await activeTopicId();
   const slug = projectOverrides.slug ?? uniq("p6s4");
   const name = projectOverrides.name ?? "S4 Executor Test Project";
-  const [project] = await ctx.db.insert(projects).values({ slug, name, status: "ACTIVE_CORE" }).returning();
+  const ticker = projectOverrides.ticker ?? null;
+  const [project] = await ctx.db.insert(projects).values({ slug, name, ticker, status: "ACTIVE_CORE" }).returning();
   const [user] = await ctx.db.insert(users).values({}).returning();
   const { job } = await createResearchJob(ctx.db, ctx.boss, {
     userId: user.id,
@@ -72,7 +74,7 @@ async function makeJob(projectOverrides: Partial<{ name: string; slug: string }>
     entitlement: coreEntitlement(),
     demoLifetimeProofLimit: 1000,
   });
-  return { jobId: job.id, projectId: project.id, projectName: name, projectSlug: slug };
+  return { jobId: job.id, projectId: project.id, projectName: name, projectSlug: slug, projectTicker: ticker };
 }
 
 // project_memory_items_lifecycle_guard (0007_memory_lifecycle_guard.sql)
@@ -194,7 +196,7 @@ function fixedExtractor(facts: ExtractedFact[]): EvidenceExtractor {
 
 function depsFor(
   jobId: string,
-  project: { projectId: string; projectName: string; projectSlug: string },
+  project: { projectId: string; projectName: string; projectSlug: string; projectTicker?: string | null },
   overrides: {
     queryProposer?: QueryProposer;
     searchGateway?: SearchGateway;
@@ -204,7 +206,12 @@ function depsFor(
 ) {
   return {
     db: ctx.db,
-    project: { id: project.projectId, name: project.projectName, slug: project.projectSlug, ticker: null },
+    project: {
+      id: project.projectId,
+      name: project.projectName,
+      slug: project.projectSlug,
+      ticker: project.projectTicker ?? null,
+    },
     queryProposer: overrides.queryProposer ?? fixedQueryProposer(["q1"]),
     searchGateway: overrides.searchGateway ?? fixedSearchGateway([]),
     contentFetcher: overrides.contentFetcher ?? fixedContentFetcher({}),
@@ -592,6 +599,229 @@ describe("Фаза 6, S4 — HIGH-2: содержание проекта — д�
 });
 
 // ============================================================
+// HIGH-A (S4 final re-review) — project containment must not be
+// satisfiable by an incidental substring; boundary-aware identity match
+// ============================================================
+describe("Фаза 6, S4 — HIGH-A: boundary-aware project identity — не substring, а лексическая идентичность", () => {
+  async function acceptsAsEvidence(p: {
+    jobId: string;
+    projectId: string;
+    projectName: string;
+    projectSlug: string;
+    projectTicker: string | null;
+  }, documentText: string): Promise<boolean> {
+    const url = `https://example.com/${uniq("doc")}`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: documentText }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: documentText })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const rows = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    return rows.length > 0;
+  }
+
+  // A. all eight short-ticker adversarial cases from the review, verbatim.
+  const ADVERSARIAL_CASES: Array<{ ticker: string; falsePositiveText: string }> = [
+    { ticker: "ARB", falsePositiveText: "this was an entirely arbitrary decision, subject to arbitrage and arbiter review" },
+    { ticker: "UNI", falsePositiveText: "she attends a large university and values her unique, united community" },
+    { ticker: "ENS", falsePositiveText: "the sensor requires a valid license and supports several extensions" },
+    { ticker: "INJ", falsePositiveText: "the patient suffered an injury after an injection went wrong" },
+    { ticker: "APT", falsePositiveText: "students adapt quickly by the third chapter, showing real aptitude" },
+    { ticker: "TON", falsePositiveText: "the shipment weighed several tons of raw material" },
+    { ticker: "NEAR", falsePositiveText: "the store is nearly closed, but it's nearby the old station" },
+    { ticker: "OP", falsePositiveText: "the optimism was clear, and the operation ran smoothly" },
+  ];
+
+  for (const { ticker, falsePositiveText } of ADVERSARIAL_CASES) {
+    it(`A. тикер "${ticker}" не устанавливает идентичность из-за случайного вхождения в другое слово`, async () => {
+      const p = await makeJob({ name: `Unrelated Project ${uniq("name")}`, slug: uniq("proj"), ticker });
+      const accepted = await acceptsAsEvidence(p, falsePositiveText);
+      expect(accepted).toBe(false);
+    });
+  }
+
+  // B. Project A job + explicit Project B document.
+  it("B. Project A job + документ явно про Project B -> Evidence отклонена", async () => {
+    const projectA = await makeJob({ name: "Alpha Protocol", slug: uniq("alpha_hb") });
+    const accepted = await acceptsAsEvidence(
+      projectA,
+      "Beta Protocol announces a governance upgrade unrelated to any other project",
+    );
+    expect(accepted).toBe(false);
+  });
+
+  // C. ticker appears only as a substring of another word.
+  it("C. тикер встречается ТОЛЬКО как подстрока другого слова -> не устанавливает идентичность", async () => {
+    const p = await makeJob({ name: `Unrelated ${uniq("name")}`, slug: uniq("proj"), ticker: "OP" });
+    const accepted = await acceptsAsEvidence(p, "the protocol's optics team optimized the operator dashboard");
+    expect(accepted).toBe(false);
+  });
+
+  // D. ticker appears as an exact standalone token.
+  it("D. тикер встречается как ТОЧНЫЙ отдельный токен -> устанавливает идентичность", async () => {
+    const p = await makeJob({ name: `Unrelated ${uniq("name")}`, slug: uniq("proj"), ticker: "OP" });
+    const accepted = await acceptsAsEvidence(p, "the treasury for OP accrues fees directly from sequencer revenue");
+    expect(accepted).toBe(true);
+  });
+
+  // E. canonical multi-word project name.
+  it("E. каноническое многословное имя проекта -> устанавливает идентичность", async () => {
+    const p = await makeJob({ name: "S4 Executor Test Project", slug: uniq("proj") });
+    const accepted = await acceptsAsEvidence(p, "S4 Executor Test Project's fee accrues directly to the treasury");
+    expect(accepted).toBe(true);
+  });
+
+  // F. canonical slug punctuation variants (hyphen/underscore/case).
+  it("F. канонический slug с вариантами пунктуации (дефис/подчёркивание/регистр) -> устанавливает идентичность", async () => {
+    const p = await makeJob({ name: "Unrelated Display Name", slug: "my-cool_Project" });
+    const accepted = await acceptsAsEvidence(p, "MY COOL PROJECT's fee accrues directly to the treasury contract");
+    expect(accepted).toBe(true);
+  });
+
+  // G. CONFIRMED project domain even with no identity text in the document.
+  it("G. CONFIRMED домен проекта без какого-либо текста идентичности в документе -> Evidence принимается", async () => {
+    const p = await makeJob({ name: `Unrelated ${uniq("name")}`, slug: uniq("proj") });
+    const domain = "confirmed-domain-no-text.example";
+    await activateSourceRoute(p.projectId, domain, "ACTIVE");
+    const url = `https://${domain}/page`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({
+          [url]: doc({ finalUrl: url, normalizedText: "generic fee mechanism description, names nothing project-specific" }),
+        }),
+        evidenceExtractor: fixedExtractor([
+          validFact({ supportFragment: "generic fee mechanism description, names nothing project-specific" }),
+        ]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const rows = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    expect(rows.length).toBe(1);
+  });
+
+  // H. another project's CONFIRMED route must not leak.
+  it("H. CONFIRMED route ЧУЖОГО проекта не даёт идентичности для этого проекта", async () => {
+    const foreign = await makeJob({ slug: uniq("hb_foreign") });
+    const p = await makeJob({ name: `Unrelated ${uniq("name")}`, slug: uniq("proj") });
+    const domain = "foreign-confirmed.example";
+    await activateSourceRoute(foreign.projectId, domain, "ACTIVE");
+    const url = `https://${domain}/page`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({
+          [url]: doc({ finalUrl: url, normalizedText: "generic content naming nothing about the target project" }),
+        }),
+        evidenceExtractor: fixedExtractor([
+          validFact({ supportFragment: "generic content naming nothing about the target project" }),
+        ]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const rows = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    // The domain IS CONFIRMED, but only for `foreign`'s project — for `p`
+    // it resolves to CLAIMED, and the document names neither project, so
+    // containment must be refused.
+    expect(rows.length).toBe(0);
+  });
+});
+
+// ============================================================
+// HIGH-B (S4 final re-review) — deterministic source-class routing
+// (phase-6-plan.md §7.2 / D-074). OFFICIAL_DOCS/OFFICIAL_REPORT remain
+// intentionally unreachable — see source-authority.ts's doc comment and
+// the STRATEGY REVIEW REQUIRED note in the final report.
+// ============================================================
+describe("Фаза 6, S4 — HIGH-B: детерминированная классификация sourceClass — каждый достижимый класс отдельно", () => {
+  async function sourceClassFor(
+    p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
+    url: string,
+  ): Promise<string | undefined> {
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    return row?.sourceClass ?? undefined;
+  }
+
+  it("unknown domain -> SOCIAL (weakest class, never guessed stronger)", async () => {
+    const p = await makeJob();
+    const sourceClass = await sourceClassFor(p, "https://totally-unknown-domain.example/page");
+    expect(sourceClass).toBe("SOCIAL");
+  });
+
+  it("социальный домен -> SOCIAL", async () => {
+    const p = await makeJob();
+    const sourceClass = await sourceClassFor(p, "https://x.com/somehandle/status/999");
+    expect(sourceClass).toBe("SOCIAL");
+  });
+
+  it("block explorer -> ONCHAIN_VERIFIABLE", async () => {
+    const p = await makeJob();
+    const sourceClass = await sourceClassFor(p, "https://etherscan.io/address/0x1234");
+    expect(sourceClass).toBe("ONCHAIN_VERIFIABLE");
+  });
+
+  it("общая governance-платформа -> GOVERNANCE", async () => {
+    const p = await makeJob();
+    const sourceClass = await sourceClassFor(p, "https://snapshot.org/#/some-space/proposal/0xabc");
+    expect(sourceClass).toBe("GOVERNANCE");
+  });
+
+  it("независимый data provider -> DATA_PROVIDER", async () => {
+    const p = await makeJob();
+    const sourceClass = await sourceClassFor(p, "https://defillama.com/protocol/some-protocol");
+    expect(sourceClass).toBe("DATA_PROVIDER");
+  });
+
+  it("независимое research/media издание -> RESEARCH_MEDIA", async () => {
+    const p = await makeJob();
+    const sourceClass = await sourceClassFor(p, "https://theblock.co/post/some-article");
+    expect(sourceClass).toBe("RESEARCH_MEDIA");
+  });
+
+  it("ACTIVE SOURCE_ROUTE для точного проекта/домена не меняет sourceClass — officiality и sourceClass остаются независимыми осями", async () => {
+    const p = await makeJob();
+    const domain = "confirmed-but-unclassified.example";
+    await activateSourceRoute(p.projectId, domain, "ACTIVE");
+    const url = `https://${domain}/page`;
+    const sourceClass = await sourceClassFor(p, url);
+    // CONFIRMED alone must NOT silently promote this to OFFICIAL_DOCS or
+    // any other stronger class — D-074's two axes stay independent.
+    expect(sourceClass).toBe("SOCIAL");
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    expect(row.officiality).toBe("CONFIRMED");
+  });
+
+  it("неактивный SOURCE_ROUTE -> не влияет на sourceClass (остаётся детерминированным от URL)", async () => {
+    const p = await makeJob();
+    const domain = "inactive-route.example";
+    await activateSourceRoute(p.projectId, domain, "CANDIDATE");
+    const sourceClass = await sourceClassFor(p, `https://${domain}/page`);
+    expect(sourceClass).toBe("SOCIAL");
+  });
+
+  it("SOURCE_ROUTE чужого проекта -> не влияет на sourceClass для этого job'а", async () => {
+    const foreign = await makeJob({ slug: uniq("hb2_foreign") });
+    const p = await makeJob();
+    const domain = "cross-project-route.example";
+    await activateSourceRoute(foreign.projectId, domain, "ACTIVE");
+    const sourceClass = await sourceClassFor(p, `https://${domain}/page`);
+    expect(sourceClass).toBe("SOCIAL");
+  });
+});
+
+// ============================================================
 // MEDIUM-1 — Evidence idempotency
 // ============================================================
 describe("Фаза 6, S4 — MEDIUM-1: идемпотентность персистенции Evidence", () => {
@@ -800,7 +1030,10 @@ describe("Фаза 6, S4 — SearchGateway: сниппет никогда не �
     const result = await executor.execute(ITEM, ctxFor(p.jobId));
     expect(extractCalls).toBe(0);
     expect(result.status).toBe("FAILED");
-    expect(result.reason).toBe("NO_SOURCE_COULD_BE_FETCHED");
+    // LOW-A (S4 final re-review): the terminal reason now preserves the
+    // actual typed provider failure instead of only a generic label.
+    expect(result.reason).toContain("CONTENT_FETCHER");
+    expect(result.reason).toContain("not found in fixture");
   });
 });
 
@@ -914,7 +1147,10 @@ describe("Фаза 6, S4 — провайдер недоступен (тест 1
     );
     const result = await executor.execute(ITEM, ctxFor(p.jobId));
     expect(result.status).toBe("FAILED");
-    expect(result.reason).toBe("NO_SEARCH_CANDIDATES");
+    // LOW-A (S4 final re-review): the terminal reason now preserves the
+    // actual typed provider failure instead of only a generic label.
+    expect(result.reason).toContain("SEARCH_GATEWAY");
+    expect(result.reason).toContain("BRAVE_SEARCH_API_KEY is not set");
   });
 });
 

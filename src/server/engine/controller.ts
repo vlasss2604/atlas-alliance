@@ -268,19 +268,22 @@ type ClaimOutcome =
 // across the read-check-claim, never across a model/provider call, per
 // the review's explicit constraint.
 //
-// NOTE (S4 review fix, BLOCKER-2/HIGH-1): this function's own budget gate
-// is the ATTEMPT-COUNT gate only (how many attempts/recovery-retries a
-// component gets) — it is deliberately NOT where real external-call
-// dimensional budget (maxSearchQueries as call count, maxSourceOpens,
-// maxModelCostMicro) is enforced anymore. That enforcement moved to
-// per-call atomic reservation against research_jobs.*Reserved
-// (budget-reservation.ts), made by the executor immediately before each
-// real external action — conflating the two was exactly the defect
-// (attempt count vs. real search-call count) the review found. This
-// function still does a cheap, non-authoritative early-exit read of the
-// same reserved counters (from the row it already has locked) purely to
-// avoid claiming an attempt when a dimension is visibly already
-// exhausted — not the real enforcement, just an optimization.
+// NOTE (S4 review fix, BLOCKER-2/HIGH-1, refined MEDIUM-A): this
+// function's own budget gate is the ATTEMPT-COUNT gate only (how many
+// attempts/recovery-retries a component gets) — it is deliberately NOT
+// where real external-call dimensional budget (maxSearchQueries as call
+// count, maxSourceOpens, maxModelCostMicro) is enforced. That enforcement
+// lives entirely in per-call atomic reservation against
+// research_jobs.*Reserved (budget-reservation.ts), made by the executor
+// immediately before each real external action — conflating the two was
+// exactly the defect (attempt count vs. real search-call count) the
+// review found. An earlier round of this fix also read the reserved
+// dimensional counters here as a "cheap early-exit optimization" before
+// claiming an attempt; that read was removed (MEDIUM-A) because it was
+// actively wrong at ceiling=0 (a legitimate config for a dimension a
+// component never needs) — it refused to claim ANY attempt in that case,
+// even for components that would never have touched the dimension,
+// instead of letting the executor run and terminate honestly.
 async function claimAttempt(
   db: Database | Transaction,
   jobId: string,
@@ -292,18 +295,39 @@ async function claimAttempt(
     maxWallClockSec: number;
     reservedRecoverySteps: number;
   },
+  // MEDIUM-A (S4 final re-review): the ceiling on NORMAL (first) attempt
+  // slots — deliberately NOT derived from maxSearchQueries. maxSearchQueries
+  // means "maximum real SearchGateway calls" (BLOCKER-2) and nothing else;
+  // the Boundary Contract does not define it as "maxAttempts", and no
+  // independent attempt-ceiling field exists in the frozen 5-field budget
+  // vocabulary either (inventing one would be a new frozen-contract field,
+  // out of scope for S4). The deterministic work set itself already
+  // provides a finite, job-lifetime-stable upper bound: every distinct
+  // (step, component) pair the job's frozen Pattern/contract requires gets
+  // exactly one normal attempt, regardless of how many (if any) of those
+  // attempts end up making a real search call. Callers pass
+  // `view.workQueue.length` — fixed for the job's lifetime once the
+  // contract/active-Pattern are frozen at plan time.
+  normalAttemptCeiling: number,
   now: Date,
   debugClaimDelayMs: number,
 ): Promise<ClaimOutcome> {
   return db.transaction(async (tx) => {
-    const locked = await tx.execute(
-      sql`SELECT search_queries_reserved, source_opens_reserved, model_cost_micro_reserved
-          FROM ${researchJobs} WHERE id = ${jobId} FOR UPDATE`,
-    );
-    const jobRow = locked.rows[0] as
-      | { search_queries_reserved: number; source_opens_reserved: number; model_cost_micro_reserved: number }
-      | undefined;
-    if (!jobRow) {
+    // The row lock itself (not its columns) is what serializes concurrent
+    // claimAttempt transactions for this job (R-1) — see the function doc
+    // comment. MEDIUM-A (S4 final re-review) removed the early-exit read
+    // of search_queries_reserved/source_opens_reserved/model_cost_micro_reserved
+    // that used to accompany this lock: at ceiling=0 (a legitimate config,
+    // e.g. a component that never needs search at all) that check treated
+    // "0 spent >= 0 ceiling" as already-exhausted and refused to claim an
+    // attempt for EVERY component, even ones that would never have touched
+    // that dimension — blocking the executor from ever running long enough
+    // to terminate honestly. Real dimensional enforcement was already
+    // fully owned by per-call atomic reservation inside the executor
+    // (BLOCKER-2/HIGH-1); this was only ever a non-authoritative
+    // optimization, and it was actively wrong at the zero-ceiling edge.
+    const locked = await tx.execute(sql`SELECT id FROM ${researchJobs} WHERE id = ${jobId} FOR UPDATE`);
+    if (locked.rows.length === 0) {
       throw new Error(`research job not found: ${jobId}`);
     }
 
@@ -337,18 +361,14 @@ async function claimAttempt(
     }
 
     const isRecoveryAttempt = (maxAttemptByKey.get(key) ?? 0) > 0;
-    const normalCeiling = Math.max(0, budget.maxSearchQueries - budget.reservedRecoverySteps);
+    // MEDIUM-A: normalCeiling is the deterministic work-set size, not
+    // maxSearchQueries-derived — see the parameter doc comment above.
+    const normalCeiling = normalAttemptCeiling;
     const recoveryCeiling = budget.reservedRecoverySteps;
     const attemptSlotExhausted = isRecoveryAttempt
       ? recoveryAttemptsUsedLifetime >= recoveryCeiling
       : normalAttemptsUsedLifetime >= normalCeiling;
-    // Cheap early-exit only — see NOTE above. Real enforcement is
-    // per-call atomic reservation in the executor.
-    const dimensionalVisiblyExhausted =
-      jobRow.search_queries_reserved >= budget.maxSearchQueries ||
-      jobRow.source_opens_reserved >= budget.maxSourceOpens ||
-      jobRow.model_cost_micro_reserved >= budget.maxModelCostMicro;
-    if (attemptSlotExhausted || dimensionalVisiblyExhausted) {
+    if (attemptSlotExhausted) {
       return { claimed: false, reason: "BUDGET_EXHAUSTED" };
     }
 
@@ -446,7 +466,15 @@ export async function runResearchController(
       };
     }
 
-    const outcome = await claimAttempt(db, jobId, item, view.researchBudget, now, debugClaimDelayMs);
+    const outcome = await claimAttempt(
+      db,
+      jobId,
+      item,
+      view.researchBudget,
+      view.workQueue.length,
+      now,
+      debugClaimDelayMs,
+    );
 
     if (!outcome.claimed) {
       if (outcome.reason === "ALREADY_CLAIMED") {

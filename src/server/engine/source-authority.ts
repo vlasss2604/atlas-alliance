@@ -34,12 +34,22 @@ function hostnameOf(url: string): string | null {
   }
 }
 
-// A small, fixed, code-owned domain list — not a place for fuzzy/semantic
+// Small, fixed, code-owned domain lists — not a place for fuzzy/semantic
 // matching. Unknown/unmapped domains deliberately fall through to the
 // WEAKEST class (SOCIAL) rather than guessing something stronger: a
 // classifier that defaults upward would be exactly the "model becomes
 // authoritative" defect this fix closes, just moved into a lookup table
 // instead of a prompt.
+//
+// HIGH-B (S4 final re-review): every list below is deliberately
+// project-INDEPENDENT — a shared, multi-tenant platform recognizable from
+// its own domain alone, regardless of which project's job is running.
+// OFFICIAL_DOCS and OFFICIAL_REPORT are NOT in this file (see the comment
+// on deriveSourceClass below) — "documentation of THE protocol" and
+// "official report of THE project" are inherently project-specific and
+// cannot be derived from a global domain list without either guessing or
+// silently promoting an unrelated CONFIRMED domain to a stronger class
+// than officiality alone establishes (exactly what the review prohibits).
 const ONCHAIN_EXPLORER_DOMAINS = new Set([
   "etherscan.io",
   "bscscan.com",
@@ -66,9 +76,61 @@ const SOCIAL_DOMAINS = new Set([
   "warpcast.com",
 ]);
 
+// Shared, multi-tenant governance/voting platforms — "форум/портал
+// голосований" (§7.2) that is not any one project's own domain, so it is
+// safe to recognize globally the same way an explorer is.
+const GOVERNANCE_PLATFORM_DOMAINS = new Set([
+  "snapshot.org",
+  "snapshot.box",
+  "commonwealth.im",
+  "tally.xyz",
+  "boardroom.io",
+]);
+
+// Independent data/analytics providers — "независимый провайдер
+// данных/аналитики" (§7.2). Bounded, well-known, project-independent.
+const DATA_PROVIDER_DOMAINS = new Set([
+  "dune.com",
+  "defillama.com",
+  "tokenterminal.com",
+  "messari.io",
+  "coingecko.com",
+  "nansen.ai",
+]);
+
+// Independent crypto research/media outlets — "независимое исследование,
+// качественные медиа" (§7.2). Bounded, well-known, project-independent.
+const RESEARCH_MEDIA_DOMAINS = new Set([
+  "theblock.co",
+  "coindesk.com",
+  "decrypt.co",
+  "cointelegraph.com",
+  "blockworks.co",
+  "thedefiant.io",
+  "bankless.com",
+]);
+
 // `sourceType` mirrors the `sources` table's own enum
 // (OFFICIAL_DOCS/GOVERNANCE/ONCHAIN/SECURITY/RESEARCH/NEWS/OTHER) — the
-// "type" half of §7.2's "детерминирован, из URL и типа".
+// "type" half of §7.2's "детерминирован, из URL и типа". It is populated
+// deterministically by deriveSourceType() below, at the same URL-derived
+// granularity as everything in this file.
+//
+// HIGH-B (S4 final re-review): OFFICIAL_DOCS and OFFICIAL_REPORT are
+// structurally UNREACHABLE from this function on purpose. §7.2 describes
+// them as "документация протокола" / "официальный дашборд/отчёт проекта"
+// — inherently PROJECT-SPECIFIC concepts (every project has its own docs
+// domain), and the only project-scoped signal this architecture currently
+// has is `project_memory_items` SOURCE_ROUTE, whose `content` shape today
+// carries only `{ domain }` — a human confirming "this domain belongs to
+// project X" does NOT also tell us whether it is their docs site, their
+// governance forum, or their transparency dashboard. Manufacturing that
+// distinction here would be exactly the "random CONFIRMED project domain
+// silently becomes another class through guesswork" defect the review
+// explicitly prohibits. See the S4 final re-review report for the
+// STRATEGY REVIEW REQUIRED note on the schema extension (an explicit,
+// human-set `routeClass` on the confirmed SOURCE_ROUTE record) that would
+// be needed to close this gap safely.
 export function deriveSourceClass(
   url: string,
   sourceType: "OFFICIAL_DOCS" | "GOVERNANCE" | "ONCHAIN" | "SECURITY" | "RESEARCH" | "NEWS" | "OTHER",
@@ -78,12 +140,34 @@ export function deriveSourceClass(
     return "ONCHAIN_VERIFIABLE";
   }
   if (host && SOCIAL_DOMAINS.has(host)) return "SOCIAL";
-  if (sourceType === "GOVERNANCE") return "GOVERNANCE";
-  if (sourceType === "OFFICIAL_DOCS") return "OFFICIAL_DOCS";
-  if (sourceType === "RESEARCH" || sourceType === "NEWS") return "RESEARCH_MEDIA";
-  // SECURITY/OTHER/unmapped — default to the weakest class, never guess
-  // something stronger for an unrecognized domain.
+  if (host && DATA_PROVIDER_DOMAINS.has(host)) return "DATA_PROVIDER";
+  if (sourceType === "GOVERNANCE" || (host && GOVERNANCE_PLATFORM_DOMAINS.has(host))) {
+    return "GOVERNANCE";
+  }
+  if (sourceType === "RESEARCH" || sourceType === "NEWS" || (host && RESEARCH_MEDIA_DOMAINS.has(host))) {
+    return "RESEARCH_MEDIA";
+  }
+  // SECURITY/OFFICIAL_DOCS/OTHER/unmapped — default to the weakest class,
+  // never guess something stronger for an unrecognized domain. See the
+  // doc comment above for why OFFICIAL_DOCS is intentionally not reachable
+  // from `sourceType` here even though the Phase-1 `sources` enum has a
+  // same-named value.
   return "SOCIAL";
+}
+
+// Populates `sources.sourceType` deterministically FROM THE URL ALONE —
+// project-independent, same discipline as deriveSourceClass. This is what
+// closes "sources.sourceType is effectively always OTHER": findOrCreateSource
+// now calls this at insert time instead of leaving every row at the
+// column's bare default.
+export function deriveSourceType(
+  url: string,
+): "OFFICIAL_DOCS" | "GOVERNANCE" | "ONCHAIN" | "SECURITY" | "RESEARCH" | "NEWS" | "OTHER" {
+  const host = hostnameOf(url);
+  if (host && ONCHAIN_EXPLORER_DOMAINS.has(host)) return "ONCHAIN";
+  if (host && GOVERNANCE_PLATFORM_DOMAINS.has(host)) return "GOVERNANCE";
+  if (host && RESEARCH_MEDIA_DOMAINS.has(host)) return "RESEARCH";
+  return "OTHER";
 }
 
 // project_memory_items.content is untyped jsonb at the DB layer (no

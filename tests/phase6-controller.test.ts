@@ -228,7 +228,17 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
     expect(result.attemptsThisRun).toBe(0);
   });
 
-  it("3. бюджет: обычный потолок (maxSearchQueries - reservedRecoverySteps попыток) останавливает исполнение", async () => {
+  // MEDIUM-A (S4 final re-review): maxSearchQueries means "maximum real
+  // SearchGateway calls" (BLOCKER-2) and nothing else — it is NOT an
+  // attempt-slot ceiling. The deterministic work set itself (workQueue)
+  // provides the normal-attempt ceiling now: every distinct pending
+  // component gets exactly one normal attempt, however small
+  // maxSearchQueries is, because a fake/deterministic executor (like the
+  // one here) may not even call SearchGateway at all. The REAL dimensional
+  // ceiling (actual search-call count) is enforced separately, inside the
+  // real S4 executor, by atomic per-call reservation — see
+  // phase6-s4-executor.test.ts's BLOCKER-2 suite for that guarantee.
+  it("3. maxSearchQueries НЕ является потолком попыток — все 10 компонентов получают нормальную попытку при maxSearchQueries=1", async () => {
     const r = plan([]); // все 10 компонентов MISSING -> все в workQueue
     const view = buildContractView({
       contract: r.contract,
@@ -241,8 +251,8 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
       ...view,
       researchBudget: {
         ...view.researchBudget,
-        maxSearchQueries: 3,
-        reservedRecoverySteps: 1,
+        maxSearchQueries: 1, // deliberately far smaller than the work set
+        reservedRecoverySteps: 0,
       },
     };
     const executor = fakeExecutor(() => "SUCCEEDED");
@@ -254,10 +264,67 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
       now: NOW,
     });
 
-    // normalCeiling = 3 - 1 = 2 попытки максимум до BUDGET_EXHAUSTED
-    expect(result.attemptsThisRun).toBe(2);
-    expect(result.stopReason).toBe("BUDGET_EXHAUSTED");
-    expect(result.succeeded.length).toBe(2);
+    // normalCeiling = view.workQueue.length (10), not maxSearchQueries (1).
+    expect(result.attemptsThisRun).toBe(view.workQueue.length);
+    expect(result.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
+    expect(result.succeeded.length).toBe(view.workQueue.length);
+  });
+
+  // A component that never reaches SearchGateway at all (e.g. it fails
+  // before ever proposing/issuing a query) must still get its normal
+  // attempt slot — normal-attempt eligibility is not gated on whether the
+  // component "used" any search budget, only on the deterministic work set.
+  it("3b. компонент, не дошедший до SearchGateway, всё равно получает нормальную попытку и не тратит search-бюджет", async () => {
+    const r = plan([]);
+    const view = buildContractView({ contract: r.contract, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" });
+    const jobId = await makeJob(coreEntitlement());
+    const singleItemView: ContractView = {
+      ...view,
+      workQueue: view.workQueue.slice(0, 1),
+      researchBudget: { ...view.researchBudget, maxSearchQueries: 0, reservedRecoverySteps: 0 },
+    };
+    const executor: WorkExecutor = {
+      async execute() {
+        // Fails before ever touching SearchGateway — zero search spend.
+        return { status: "FAILED", reason: "PRE_SEARCH_FAILURE", spent: { searchQueries: 0, sourceOpens: 0, modelCostMicro: 0 } };
+      },
+    };
+    const result = await runResearchController({ db: ctx.db, jobId, view: singleItemView, executor, now: NOW });
+    expect(result.attemptsThisRun).toBe(1);
+    expect(result.failed.length).toBe(1);
+    expect(result.budgetSpent.searchQueries).toBe(0);
+  });
+
+  // MEDIUM-A required test C: maxSearchQueries=0 must not hang or infinite-
+  // loop the controller, and no real search calls happen — but honest
+  // per-component termination still occurs (the executor DOES get invoked
+  // for each pending component; a real S4 executor terminates each one
+  // FAILED/SKIPPED via its own atomic reservation refusal at the first
+  // real SearchGateway call — see phase6-s4-executor.test.ts's BLOCKER-2
+  // suite for that exact behavior with a live executor).
+  it("3c. maxSearchQueries=0 -> контроллер конечен, компоненты честно терминируются без единого поискового вызова", async () => {
+    const r = plan([]); // 10 компонентов MISSING
+    const view = buildContractView({ contract: r.contract, mode: r.mode, capabilityAtStart: "FRESH_RESEARCH" });
+    const jobId = await makeJob(coreEntitlement());
+    const zeroSearchView: ContractView = {
+      ...view,
+      researchBudget: { ...view.researchBudget, maxSearchQueries: 0, reservedRecoverySteps: 0 },
+    };
+    let executions = 0;
+    const honestExecutor: WorkExecutor = {
+      async execute() {
+        executions += 1;
+        // A real executor would refuse its first SearchGateway call here
+        // (reserveJobBudget against a ceiling of 0) and terminate honestly
+        // — this fake mirrors that outcome directly.
+        return { status: "FAILED", reason: "SEARCH_QUERY_BUDGET_EXHAUSTED", spent: { searchQueries: 0, sourceOpens: 0, modelCostMicro: 0 } };
+      },
+    };
+    const result = await runResearchController({ db: ctx.db, jobId, view: zeroSearchView, executor: honestExecutor, now: NOW });
+    expect(executions).toBe(view.workQueue.length); // finite — every component got its honest chance
+    expect(result.failed.length).toBe(view.workQueue.length);
+    expect(result.budgetSpent.searchQueries).toBe(0); // no real search calls
+    expect(["WORK_QUEUE_EXHAUSTED", "BUDGET_EXHAUSTED"]).toContain(result.stopReason);
   });
 
   it("4. восстановление в пределах reservedRecoverySteps: повторная попытка проваленного компонента списывается с резерва, не с обычного бюджета", async () => {
@@ -782,7 +849,15 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
       expect(recoveryRows.length).toBe(2); // ровно потолок, не 4 (по одному на компонент)
     });
 
-    it("3. конкурентная авторизация нормального бюджета на РАЗНЫХ компонентах -> normal-пул тоже не может быть перерасходован", async () => {
+    // MEDIUM-A (S4 final re-review): normalCeiling is now the deterministic
+    // work-set size (view.workQueue.length), not maxSearchQueries-derived
+    // — it can no longer be under-sized relative to the number of distinct
+    // components a SHARED view names. What concurrency must still protect
+    // is the per-component claim itself (MEDIUM-3/R-1): N concurrent
+    // invocations all racing over the SAME shared work queue must produce
+    // exactly one attempt row per distinct component, never a duplicate,
+    // regardless of how many invocations raced for it.
+    it("3. конкурентные вызовы, разделяющие ОДИН workQueue из 5 компонентов -> ровно 5 попыток, по одной на компонент, без дублей", async () => {
       const items = [
         { step: 1, component: "SOURCE_OF_VALUE" },
         { step: 2, component: "FLOW_PATH" },
@@ -799,17 +874,21 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
         },
       };
 
-      // reservedRecoverySteps=0 -> normalCeiling = maxSearchQueries = 2.
-      const perItemViews = items.map((i) => multiComponentView([i], 0, 2));
+      // maxSearchQueries deliberately tiny (1) — proves the ceiling is no
+      // longer derived from it at all; every invocation shares the SAME
+      // full 5-item view, racing each other for the SAME 5 components.
+      const sharedView = multiComponentView(items, 0, 1);
       await Promise.all(
-        perItemViews.map((view) =>
-          runResearchController({ db: ctx.db, jobId, view, executor: countingExecutor, now: NOW, debugClaimDelayMs: 60 }),
+        Array.from({ length: 5 }, () =>
+          runResearchController({ db: ctx.db, jobId, view: sharedView, executor: countingExecutor, now: NOW, debugClaimDelayMs: 60 }),
         ),
       );
 
-      expect(executions).toBe(2); // ровно normalCeiling, не 5 (по одному на компонент)
+      expect(executions).toBe(5); // one per distinct component, none lost, none duplicated
       const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
-      expect(rows.length).toBe(2);
+      expect(rows.length).toBe(5);
+      const distinctKeys = new Set(rows.map((r) => `${r.patternStep}:${r.component}`));
+      expect(distinctKeys.size).toBe(5);
     });
 
     it("4. рестарт после конкурентных claim'ов -> персистентный учёт остаётся авторитетным, новых попыток не создаётся", async () => {
@@ -817,7 +896,7 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
         { step: 1, component: "SOURCE_OF_VALUE" },
         { step: 2, component: "FLOW_PATH" },
       ];
-      const view = multiComponentView(items, 0, 1); // normalCeiling=1
+      const view = multiComponentView(items, 0, 1); // normalCeiling = view.workQueue.length = 2
       const jobId = await makeJob(coreEntitlement());
       const alwaysSucceed: WorkExecutor = { async execute() { return { status: "SUCCEEDED" }; } };
 
@@ -827,17 +906,15 @@ describe("Фаза 6, S3 — ResearchController (детерминированн�
         ),
       );
       const rowsAfterConcurrency = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
-      expect(rowsAfterConcurrency.length).toBe(1); // потолок в 1 попытку соблюдён
+      expect(rowsAfterConcurrency.length).toBe(2); // ровно по одной попытке на оба компонента
 
-      // "Рестарт": ещё один, последовательный вызов не должен создать
-      // вторую попытку — второй компонент навсегда остаётся неисполненным
-      // под этим бюджетом, персистентный учёт (не память процесса)
-      // остаётся источником истины.
+      // "Рестарт": оба компонента уже SUCCEEDED — ещё один, последовательный
+      // вызов не должен создать НИ ОДНОЙ новой попытки; персистентный учёт
+      // (не память процесса) остаётся источником истины.
       const restart = await runResearchController({ db: ctx.db, jobId, view, executor: alwaysSucceed, now: NOW });
       expect(restart.attemptsThisRun).toBe(0);
-      expect(restart.stopReason).toBe("BUDGET_EXHAUSTED");
       const rowsAfterRestart = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
-      expect(rowsAfterRestart.length).toBe(1); // не выросло
+      expect(rowsAfterRestart.length).toBe(2); // не выросло
     });
 
     it("5. проигранная авторизация/claim -> executor не вызывается, бюджет не тратится (ни своим, ни чужим счётом)", async () => {
