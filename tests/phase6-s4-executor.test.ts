@@ -1,13 +1,13 @@
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 import {
   evidence,
-  productConfig,
   projectMemoryItems,
   projects,
   researchJobs,
+  sources,
   topics,
   users,
 } from "../src/server/db/schema";
@@ -24,7 +24,8 @@ import type { QueryProposer } from "../src/server/engine/providers/query-propose
 import { SearchProviderUnavailableError } from "../src/server/engine/providers/search-gateway";
 import type { SearchGateway } from "../src/server/engine/providers/search-gateway";
 import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
-import { calculateMaxAuthorizedCostMicro, loadModelCostProfile } from "../src/server/engine/model-cost-profile";
+import { calculateMaxAuthorizedCostMicro } from "../src/server/engine/model-cost-profile";
+import type { ModelCostProfile } from "../src/server/engine/model-cost-profile";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
@@ -200,6 +201,24 @@ function fixedExtractor(facts: ExtractedFact[]): EvidenceExtractor {
   return { name: "fixture", async extract() { return facts; } };
 }
 
+// S4 FINAL ACCEPTANCE FIX (items 3/4): the production cost-profile
+// catalogue (model-cost-profile.ts) is intentionally EMPTY until S10 —
+// every real production model id fails closed. This FIXTURE profile is
+// STRUCTURALLY SEPARATE — injected only via S4ExecutorDeps's dedicated
+// test-only fields, never through the production catalogue — and proves
+// arithmetic/reservation/wiring behavior only. It makes no claim about
+// real Anthropic billing safety. Tests that specifically want to exercise
+// the real fail-closed path build S4ExecutorDeps directly instead of
+// through depsFor (see the D-090 describe block).
+const FIXTURE_COST_PROFILE: ModelCostProfile = {
+  modelId: "fixture-test-model",
+  inputPriceMicroUsdPerToken: 1,
+  outputPriceMicroUsdPerToken: 5,
+  maxInputTokens: 8_000,
+  maxOutputTokens: 1_536,
+  priceVersion: "test-fixture-not-production",
+};
+
 function depsFor(
   jobId: string,
   project: { projectId: string; projectName: string; projectSlug: string; projectTicker?: string | null },
@@ -208,6 +227,8 @@ function depsFor(
     searchGateway?: SearchGateway;
     contentFetcher?: ContentFetcher;
     evidenceExtractor?: EvidenceExtractor;
+    queryProposerCostProfile?: ModelCostProfile;
+    evidenceExtractorCostProfile?: ModelCostProfile;
   } = {},
 ) {
   return {
@@ -222,6 +243,8 @@ function depsFor(
     searchGateway: overrides.searchGateway ?? fixedSearchGateway([]),
     contentFetcher: overrides.contentFetcher ?? fixedContentFetcher({}),
     evidenceExtractor: overrides.evidenceExtractor ?? fixedExtractor([]),
+    queryProposerCostProfile: overrides.queryProposerCostProfile ?? FIXTURE_COST_PROFILE,
+    evidenceExtractorCostProfile: overrides.evidenceExtractorCostProfile ?? FIXTURE_COST_PROFILE,
   };
 }
 
@@ -501,8 +524,8 @@ describe("Фаза 6, S4 — HIGH-1: атомарная резервация max
       ),
     );
     // Ровно 1 авторизованный вызов QueryProposer'а по D-090 cost profile
-    // для дефолтной seeded-модели (claude-haiku-4-5).
-    const oneCallCostMicro = calculateMaxAuthorizedCostMicro(loadModelCostProfile(DEFAULT_PRODUCT_CONFIG.query_proposer_model));
+    // (FIXTURE-профиль depsFor'а — production каталог пуст до S10).
+    const oneCallCostMicro = calculateMaxAuthorizedCostMicro(FIXTURE_COST_PROFILE);
     await Promise.all(
       items.map((item, i) => executors[i].execute(item, ctxFor(p.jobId, { maxModelCostMicro: oneCallCostMicro }))),
     );
@@ -919,7 +942,7 @@ describe("Фаза 6, S4 — D-089: routeClass — точная locked-прец�
     expect(row.officiality).toBe("CONFIRMED"); // officiality is unaffected by the bad routeClass
     // §7.2a rule 2: the fact of ignoring it is observed via the existing
     // per-attempt reason channel, not silently dropped.
-    expect(result.reason).toContain("routeClass ignored");
+    expect(result.reason).toContain("INVALID_ROUTE_CLASS");
   });
 
   // H. X/social + routeClass -> SOCIAL remains SOCIAL (precedence).
@@ -1387,88 +1410,143 @@ describe("Фаза 6, S4 — контроллер не может быть пе�
 });
 
 // ============================================================
-// D-090 (S4 final implementation) — model cost profile: fail closed,
-// bounded input, reserve-before-call, insufficient budget -> no call.
+// D-090 (S4 final acceptance fix) — production cost profile catalogue is
+// EMPTY until S10: every real model call fails closed, for BOTH roles,
+// with ZERO reservation (checked in the preflight, before anything is
+// reserved — items 2/3/10/11). FIXTURE profiles (injected via
+// S4ExecutorDeps, never the production catalogue — items 3/4) prove
+// reservation ordering and wiring separately, in the describe block
+// above this one (depsFor's default FIXTURE_COST_PROFILE).
 // ============================================================
-describe("Фаза 6, S4 — D-090: cost profile — fail closed / bounded input / reserve-before-call", () => {
-  async function setModelConfig(key: "query_proposer_model" | "evidence_extractor_model", value: string): Promise<void> {
-    await ctx.db.update(productConfig).set({ value }).where(eq(productConfig.key, key));
-  }
-  async function resetModelConfig(key: "query_proposer_model" | "evidence_extractor_model"): Promise<void> {
-    await setModelConfig(key, DEFAULT_PRODUCT_CONFIG[key]);
+describe("Фаза 6, S4 — D-090: production profile EMPTY -> fail closed для ОБОИХ ролей (items 2/3)", () => {
+  // Deliberately NOT using depsFor — depsFor injects FIXTURE_COST_PROFILE
+  // by default, which would mask the real production fail-closed path
+  // this block exists to prove.
+  function prodDeps(
+    p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
+    overrides: {
+      queryProposer?: QueryProposer;
+      searchGateway?: SearchGateway;
+      contentFetcher?: ContentFetcher;
+      evidenceExtractor?: EvidenceExtractor;
+    } = {},
+  ) {
+    return {
+      db: ctx.db,
+      project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+      ...overrides,
+      // queryProposerCostProfile/evidenceExtractorCostProfile intentionally
+      // omitted — falls through to the (empty) production catalogue.
+    };
   }
 
-  it("нет одобренного cost profile для сконфигурированной query_proposer_model -> FAILED (MODEL_COST_PROFILE_MISSING), провайдер НЕ вызывается", async () => {
+  it("query_proposer_model (claude-haiku-4-5, seeded default) -> FAILED (MODEL_COST_PROFILE_MISSING), НИ ОДИН провайдер не вызван, НИЧЕГО не зарезервировано", async () => {
     const p = await makeJob();
     let proposerCalled = false;
-    await setModelConfig("query_proposer_model", "some-unapproved-model-xyz");
-    try {
-      const executor = createS4WorkExecutor(
-        depsFor(p.jobId, p, {
-          queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
-        }),
-      );
-      const result = await executor.execute(ITEM, ctxFor(p.jobId));
-      expect(result.status).toBe("FAILED");
-      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
-      expect(proposerCalled).toBe(false); // no call — order is bound -> price -> reserve -> call, and price failed first
-      const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
-      expect(jobRow.modelCostMicroReserved).toBe(0); // no reservation attempted either
-    } finally {
-      await resetModelConfig("query_proposer_model");
-    }
-  });
-
-  it("нет одобренного cost profile для сконфигурированной evidence_extractor_model -> FAILED, extractor НЕ вызывается, уже понесённые search/fetch траты сохранены", async () => {
-    const p = await makeJob();
-    const url = "https://example.com/evidence-profile-missing";
-    let extractorCalled = false;
-    await setModelConfig("evidence_extractor_model", "another-unapproved-model");
-    try {
-      const executor = createS4WorkExecutor(
-        depsFor(p.jobId, p, {
-          searchGateway: fixedSearchGateway([url]),
-          contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url }) }),
-          evidenceExtractor: { name: "fixture", async extract() { extractorCalled = true; return []; } },
-        }),
-      );
-      const result = await executor.execute(ITEM, ctxFor(p.jobId));
-      expect(result.status).toBe("FAILED");
-      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
-      expect(extractorCalled).toBe(false);
-      expect(result.spent?.searchQueries).toBeGreaterThan(0); // already-incurred search spend preserved
-      expect(result.spent?.sourceOpens).toBeGreaterThan(0); // already-incurred fetch spend preserved
-    } finally {
-      await resetModelConfig("evidence_extractor_model");
-    }
-  });
-
-  it("bounded input: EvidenceExtractor получает документ, усечённый до профильного потолка, а не сырой 2MB текст", async () => {
-    const p = await makeJob();
-    const url = "https://example.com/huge-document";
-    const profile = loadModelCostProfile(DEFAULT_PRODUCT_CONFIG.evidence_extractor_model);
-    const maxChars = profile.maxInputTokens * 3; // matches model-cost-profile.ts's own conservative ratio
-    const huge = `${p.projectName}: ` + "filler ".repeat(1_000_000); // far larger than any profile ceiling
-    let receivedLength = -1;
+    let searchCalled = false;
     const executor = createS4WorkExecutor(
-      depsFor(p.jobId, p, {
-        searchGateway: fixedSearchGateway([url]),
-        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: huge }) }),
-        evidenceExtractor: {
-          name: "fixture",
-          async extract(input) {
-            receivedLength = input.document.normalizedText.length;
-            return [];
-          },
-        },
+      prodDeps(p, {
+        queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
+        searchGateway: { name: "fixture", async search() { searchCalled = true; return []; } },
       }),
     );
-    await executor.execute(ITEM, ctxFor(p.jobId));
-    expect(receivedLength).toBeGreaterThan(0);
-    expect(receivedLength).toBeLessThan(huge.length); // truncated
-    expect(receivedLength).toBeLessThanOrEqual(maxChars); // never exceeds the deterministic bound
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+    expect(proposerCalled).toBe(false); // preflight fails before ANY reservation or call
+    expect(searchCalled).toBe(false);
+    expect(result.spent?.searchQueries).toBe(0);
+    expect(result.spent?.sourceOpens).toBe(0);
+    expect(result.spent?.authorizedModelCostMicro).toBe(0);
+    const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
+    expect(jobRow.modelCostMicroReserved).toBe(0);
+    expect(jobRow.searchQueriesReserved).toBe(0);
   });
 
+  it("evidence_extractor_model (claude-haiku-4-5, seeded default) -> FAILED (MODEL_COST_PROFILE_MISSING) в preflight — search/fetch НЕ выполняются вовсе (item 11: не тратим их бюджет впустую)", async () => {
+    const p = await makeJob();
+    const url = "https://example.com/evidence-profile-missing";
+    let searchCalled = false;
+    let extractorCalled = false;
+    const executor = createS4WorkExecutor(
+      prodDeps(p, {
+        searchGateway: { name: "fixture", async search() { searchCalled = true; return [{ url, title: null, snippet: null }]; } },
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url }) }),
+        evidenceExtractor: { name: "fixture", async extract() { extractorCalled = true; return []; } },
+      }),
+    );
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+    // LOW-1/item 11: the whole point of the preflight is that EvidenceExtractor's
+    // missing profile is discovered BEFORE search/fetch budget is spent —
+    // not merely before the extractor is called.
+    expect(searchCalled).toBe(false);
+    expect(extractorCalled).toBe(false);
+    expect(result.spent?.searchQueries).toBe(0);
+    expect(result.spent?.sourceOpens).toBe(0);
+  });
+});
+
+// ============================================================
+// MEDIUM-4 (S4 final acceptance fix) — required real case: the SearchGateway
+// RESOLVER itself (resolveSearchGateway(), not the gateway's .search() call)
+// throws when BRAVE_SEARCH_API_KEY is absent and no SearchGateway is
+// injected. Preflight must convert this into a deterministic FAILED result
+// BEFORE any reservation — not let it escape as an uncaught exception after
+// QueryProposer has already reserved model cost.
+// ============================================================
+describe("Фаза 6, S4 — MEDIUM-4: SearchGateway резолвер (не .search()) падает в preflight, ДО любой резервации", () => {
+  const ORIGINAL_BRAVE_KEY = process.env.BRAVE_SEARCH_API_KEY;
+  const ORIGINAL_PROVIDER = process.env.SEARCH_GATEWAY_PROVIDER;
+
+  beforeAll(() => {
+    delete process.env.BRAVE_SEARCH_API_KEY;
+    delete process.env.SEARCH_GATEWAY_PROVIDER;
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_BRAVE_KEY === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+    else process.env.BRAVE_SEARCH_API_KEY = ORIGINAL_BRAVE_KEY;
+    if (ORIGINAL_PROVIDER === undefined) delete process.env.SEARCH_GATEWAY_PROVIDER;
+    else process.env.SEARCH_GATEWAY_PROVIDER = ORIGINAL_PROVIDER;
+  });
+
+  it("BRAVE_SEARCH_API_KEY отсутствует + SearchGateway НЕ инжектирован -> FAILED до QueryProposer-резервации, без throw", async () => {
+    const p = await makeJob();
+    let proposerCalled = false;
+    // Deliberately NOT depsFor — depsFor always defaults searchGateway to a
+    // fixture (fixedSearchGateway([])), which would never actually invoke
+    // the real resolveSearchGateway(). FIXTURE_COST_PROFILE is injected
+    // directly for both roles so this test isolates the SearchGateway
+    // resolver specifically — not the separately-proven cost-profile
+    // fail-closed path.
+    const executor = createS4WorkExecutor({
+      db: ctx.db,
+      project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+      queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
+      queryProposerCostProfile: FIXTURE_COST_PROFILE,
+      evidenceExtractorCostProfile: FIXTURE_COST_PROFILE,
+      // searchGateway deliberately omitted — forces the real
+      // resolveSearchGateway() to run and throw.
+    });
+    // The whole point of this test: execute() must not throw past the
+    // executor boundary — preflight converts the resolver's throw into a
+    // typed FAILED result.
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("SEARCH_GATEWAY");
+    expect(result.reason).toContain("BRAVE_SEARCH_API_KEY is not set");
+    expect(proposerCalled).toBe(false); // no paid work occurred before the resolver failure was discovered
+    expect(result.spent?.searchQueries).toBe(0);
+    expect(result.spent?.sourceOpens).toBe(0);
+    expect(result.spent?.authorizedModelCostMicro).toBe(0);
+    const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
+    expect(jobRow.modelCostMicroReserved).toBe(0);
+  });
+});
+
+describe("Фаза 6, S4 — D-090: reserve-before-call / insufficient budget (FIXTURE profile via depsFor)", () => {
   it("reserve-before-call: QueryProposer резервация видна в БД ДО того, как fixture-провайдер фактически вызывается", async () => {
     const p = await makeJob();
     let reservedBeforeCall = -1;
@@ -1500,5 +1578,377 @@ describe("Фаза 6, S4 — D-090: cost profile — fail closed / bounded input
     expect(called).toBe(false);
     expect(result.status).toBe("SKIPPED");
     expect(result.reason).toBe("MODEL_COST_BUDGET_EXHAUSTED_BEFORE_QUERY_PROPOSAL");
+  });
+});
+
+// ============================================================
+// MEDIUM-2 (S4 final acceptance fix) — duplicate ACTIVE SOURCE_ROUTE for
+// the same project+domain must never depend on PostgreSQL row/heap order.
+// ============================================================
+describe("Фаза 6, S4 — MEDIUM-2: конфликт нескольких ACTIVE SOURCE_ROUTE для одного домена — не зависит от порядка строк", () => {
+  async function insertActiveSourceRoute(projectId: string, domain: string, routeClass?: string): Promise<void> {
+    // Direct two-step insert-then-promote (same lifecycle guard as
+    // activateSourceRoute) but allows inserting MULTIPLE rows for the
+    // same project+domain, which activateSourceRoute's single-row helper
+    // does not model.
+    const [row] = await ctx.db
+      .insert(projectMemoryItems)
+      .values({
+        projectId,
+        kind: "SOURCE_ROUTE",
+        content: routeClass ? { domain, routeClass } : { domain },
+        lifecycleState: "OBSERVED",
+      })
+      .returning();
+    await ctx.db.update(projectMemoryItems).set({ lifecycleState: "CANDIDATE" }).where(eq(projectMemoryItems.id, row.id));
+    await ctx.db.update(projectMemoryItems).set({ lifecycleState: "ACTIVE" }).where(eq(projectMemoryItems.id, row.id));
+  }
+
+  async function evidenceRowFor(
+    p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
+    url: string,
+  ): Promise<{ sourceClass: string; officiality: string; reason?: string } | undefined> {
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    return row ? { sourceClass: row.sourceClass!, officiality: row.officiality!, reason: result.reason } : undefined;
+  }
+
+  it("две ACTIVE-записи для одного домена с ОДИНАКОВЫМ routeClass -> детерминированный единый результат", async () => {
+    const p = await makeJob();
+    const domain = "same-routeclass-twice.example";
+    await insertActiveSourceRoute(p.projectId, domain, "OFFICIAL_DOCS");
+    await insertActiveSourceRoute(p.projectId, domain, "OFFICIAL_DOCS");
+    const row = await evidenceRowFor(p, `https://${domain}/page`);
+    expect(row?.sourceClass).toBe("OFFICIAL_DOCS");
+    expect(row?.officiality).toBe("CONFIRMED");
+  });
+
+  it("две ACTIVE-записи для одного домена с РАЗНЫМ routeClass -> ни один не выигрывает произвольно; routeClass отсутствует, officiality остаётся CONFIRMED", async () => {
+    const p = await makeJob();
+    const domain = "conflicting-routeclass.example";
+    await insertActiveSourceRoute(p.projectId, domain, "OFFICIAL_DOCS");
+    await insertActiveSourceRoute(p.projectId, domain, "GOVERNANCE");
+    const row = await evidenceRowFor(p, `https://${domain}/page`);
+    // Neither OFFICIAL_DOCS nor GOVERNANCE wins arbitrarily — routeClass
+    // becomes absent, falling through to the weakest deterministic class.
+    expect(row?.sourceClass).toBe("SOCIAL");
+    expect(row?.officiality).toBe("CONFIRMED"); // domain ownership itself is not in conflict
+    expect(row?.reason).toContain("SOURCE_ROUTE_CONFLICT");
+  });
+
+  it("тот же конфликт, строки вставлены/промотированы в ОБРАТНОМ физическом порядке -> идентичный результат", async () => {
+    const p = await makeJob();
+    const domain = "conflicting-routeclass-reversed.example";
+    // Reversed insertion order relative to the previous test.
+    await insertActiveSourceRoute(p.projectId, domain, "GOVERNANCE");
+    await insertActiveSourceRoute(p.projectId, domain, "OFFICIAL_DOCS");
+    const row = await evidenceRowFor(p, `https://${domain}/page`);
+    expect(row?.sourceClass).toBe("SOCIAL");
+    expect(row?.officiality).toBe("CONFIRMED");
+    expect(row?.reason).toContain("SOURCE_ROUTE_CONFLICT");
+  });
+});
+
+// ============================================================
+// MEDIUM-3 (S4 final acceptance fix) — subdomain-safe matching for
+// recognized public platforms; dot-boundary required (no
+// "example.com.evil.com" false positive).
+// ============================================================
+describe("Фаза 6, S4 — MEDIUM-3: subdomain-safe классификация публичных платформ", () => {
+  async function sourceClassFor(
+    p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
+    url: string,
+  ): Promise<string | undefined> {
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    return row?.sourceClass ?? undefined;
+  }
+
+  const SUBDOMAIN_CASES: Array<{ url: string; expected: string }> = [
+    { url: "https://m.x.com/somehandle/status/1", expected: "SOCIAL" },
+    { url: "https://mobile.twitter.com/somehandle/status/1", expected: "SOCIAL" },
+    { url: "https://old.reddit.com/r/example", expected: "SOCIAL" },
+    { url: "https://np.reddit.com/r/example", expected: "SOCIAL" },
+    { url: "https://support.discord.com/hc/article", expected: "SOCIAL" },
+  ];
+  for (const { url, expected } of SUBDOMAIN_CASES) {
+    it(`поддомен признанной платформы (${url}) -> сохраняет публичный класс ${expected}`, async () => {
+      const p = await makeJob();
+      const sourceClass = await sourceClassFor(p, url);
+      expect(sourceClass).toBe(expected);
+    });
+  }
+
+  it("НЕБЕЗОПАСНОЕ совпадение domain-без-точки не срабатывает: example.com.evil.com не классифицируется как x.com/etc.", async () => {
+    const p = await makeJob();
+    // Not a subdomain of any recognized platform (no dot boundary before
+    // the platform name) — must fall through to the weakest class, never
+    // match "x.com" merely because the string ends with "x.com"-like text.
+    const sourceClass = await sourceClassFor(p, "https://reddit.com.evil-lookalike.example/r/example");
+    expect(sourceClass).toBe("SOCIAL"); // falls through to weakest fallback, NOT because it matched reddit.com
+  });
+
+  // A regression-teeth gap: SUBDOMAIN_CASES above all expect "SOCIAL", but
+  // that is ALSO the unconditional final fallback (step 6, no
+  // activeRouteClass) — so those tests alone cannot distinguish "correctly
+  // recognized as the social platform at step 2" from "fell all the way
+  // through by coincidence". Setting an ACTIVE routeClass on the exact
+  // subdomain proves step 2 (social) actually wins BEFORE step 6
+  // (routeClass) is even consulted — if subdomain recognition regresses to
+  // exact-match-only, this test catches it where SUBDOMAIN_CASES cannot.
+  it("поддомен признанной социальной платформы с ACTIVE routeClass -> ВСЁ РАВНО SOCIAL, routeClass не применяется (не совпадение с fallback)", async () => {
+    const p = await makeJob();
+    const subdomain = "m.x.com";
+    await activateSourceRoute(p.projectId, subdomain, "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+    const sourceClass = await sourceClassFor(p, `https://${subdomain}/somehandle/status/1`);
+    expect(sourceClass).toBe("SOCIAL"); // social recognition (step 2) precedes routeClass (step 6) even with an exact ACTIVE route present
+  });
+});
+
+// ============================================================
+// Item 9 (S4 final acceptance fix) — shared multi-tenant hosting
+// platforms must not become project-owned strong evidence merely because
+// a human stored the BARE base domain as SOURCE_ROUTE.
+// ============================================================
+describe("Фаза 6, S4 — item 9: общие multi-tenant платформы — routeClass не поднимает целый shared-хост", () => {
+  async function sourceClassFor(
+    p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
+    url: string,
+  ): Promise<string | undefined> {
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    return row?.sourceClass ?? undefined;
+  }
+
+  const SHARED_PLATFORM_BASES = ["github.com", "gitbook.io", "medium.com", "mirror.xyz", "notion.site", "substack.com", "readthedocs.io"];
+  for (const base of SHARED_PLATFORM_BASES) {
+    it(`ACTIVE SOURCE_ROUTE на голый ${base} с routeClass=OFFICIAL_DOCS -> НЕ поднимает весь shared-хост`, async () => {
+      const p = await makeJob();
+      await activateSourceRoute(p.projectId, base, "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+      const sourceClass = await sourceClassFor(p, `https://${base}/some/path`);
+      expect(sourceClass).toBe("SOCIAL"); // routeClass ignored for the bare shared-platform base domain
+    });
+  }
+
+  it("project-специфичный ПОДДОМЕН shared-платформы (project.gitbook.io) МОЖЕТ нести routeClass через точный ACTIVE route", async () => {
+    const p = await makeJob();
+    const projectSubdomain = "our-specific-project.gitbook.io";
+    await activateSourceRoute(p.projectId, projectSubdomain, "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+    const sourceClass = await sourceClassFor(p, `https://${projectSubdomain}/docs`);
+    expect(sourceClass).toBe("OFFICIAL_DOCS"); // a specific subdomain is NOT the whole shared platform
+  });
+});
+
+// ============================================================
+// Item 12.A — SOURCE_ROUTE domain equality: project confirms domain A,
+// fetched URL is domain B -> no CONFIRMED, no routeClass leak.
+// ============================================================
+describe("Фаза 6, S4 — item 12.A: SOURCE_ROUTE домен должен совпадать ТОЧНО, не частично", () => {
+  it("ACTIVE SOURCE_ROUTE для domain A + документ на domain B -> CLAIMED, без routeClass", async () => {
+    const p = await makeJob();
+    await activateSourceRoute(p.projectId, "confirmed-domain-a.example", "ACTIVE", { routeClass: "OFFICIAL_DOCS" });
+    const url = "https://totally-different-domain-b.example/page";
+    const text = `${p.projectName}: generic factual statement about the treasury mechanism`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const [row] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    expect(row.officiality).toBe("CLAIMED");
+    expect(row.sourceClass).toBe("SOCIAL"); // no routeClass leaked from the unrelated confirmed domain
+  });
+});
+
+// ============================================================
+// Item 12.B — the executor path: cost profile -> executor -> resolver ->
+// provider request. profile.maxOutputTokens must reach the real Anthropic
+// request through createS4WorkExecutor itself, not only the direct
+// createAnthropicX() unit call already covered in
+// phase6-s4-model-cost-profile.test.ts.
+// ============================================================
+const executorPathCreateMock = vi.fn();
+vi.mock("@anthropic-ai/sdk", () => {
+  class FakeAnthropicForExecutorPath {
+    messages = { create: executorPathCreateMock };
+    static APIError = class extends Error {};
+  }
+  return { default: FakeAnthropicForExecutorPath };
+});
+vi.mock("@anthropic-ai/sdk/helpers/zod", () => ({
+  zodOutputFormat: () => ({ type: "json_schema" }),
+}));
+
+describe("Фаза 6, S4 — item 12.B: executor -> resolver -> provider — profile.maxOutputTokens доходит до реального запроса", () => {
+  const ORIGINAL_KEY = process.env.ANTHROPIC_API_KEY;
+
+  beforeAll(() => {
+    process.env.ANTHROPIC_API_KEY = "test-key-not-real";
+  });
+
+  afterAll(() => {
+    if (ORIGINAL_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = ORIGINAL_KEY;
+  });
+
+  it("реальный resolveQueryProposer() внутри createS4WorkExecutor передаёт FIXTURE-профильный maxOutputTokens в запрос провайдера", async () => {
+    executorPathCreateMock.mockReset();
+    executorPathCreateMock.mockResolvedValue({
+      stop_reason: "end_turn",
+      content: [{ type: "text", text: JSON.stringify({ queries: ["q1"] }) }],
+    });
+    const p = await makeJob();
+    const distinctiveMaxOutputTokens = 999;
+    const executor = createS4WorkExecutor({
+      db: ctx.db,
+      project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+      // queryProposer deliberately NOT overridden — goes through the REAL
+      // resolveQueryProposer() -> createAnthropicQueryProposer() path,
+      // hitting the mocked Anthropic SDK class above.
+      queryProposerCostProfile: {
+        modelId: "claude-haiku-4-5",
+        inputPriceMicroUsdPerToken: 1,
+        outputPriceMicroUsdPerToken: 5,
+        maxInputTokens: 8_000,
+        maxOutputTokens: distinctiveMaxOutputTokens,
+        priceVersion: "test-fixture-not-production",
+      },
+      evidenceExtractorCostProfile: {
+        modelId: "claude-haiku-4-5",
+        inputPriceMicroUsdPerToken: 1,
+        outputPriceMicroUsdPerToken: 5,
+        maxInputTokens: 8_000,
+        maxOutputTokens: 1_536,
+        priceVersion: "test-fixture-not-production",
+      },
+      searchGateway: fixedSearchGateway([]),
+    });
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(executorPathCreateMock).toHaveBeenCalledTimes(1);
+    expect(executorPathCreateMock.mock.calls[0][0].max_tokens).toBe(distinctiveMaxOutputTokens);
+  });
+});
+
+// ============================================================
+// Item 12.C — deriveSourceType persistence: the actual `sources` row
+// receives the expected sourceType, not just the pure function output.
+// ============================================================
+describe("Фаза 6, S4 — item 12.C: deriveSourceType — фактическая строка sources получает ожидаемый sourceType", () => {
+  it("etherscan.io -> sources.source_type = ONCHAIN (не бездоказательный OTHER-дефолт)", async () => {
+    const p = await makeJob();
+    const url = "https://etherscan.io/address/0xabc";
+    const text = `${p.projectName}: generic factual statement`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: text }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: text })]),
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    const [evRow] = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    const [srcRow] = await ctx.db.select().from(sources).where(eq(sources.id, evRow.sourceId));
+    expect(srcRow.sourceType).toBe("ONCHAIN");
+  });
+});
+
+// ============================================================
+// Item 12.D — model-visible containment: a project name / support
+// fragment existing only OUTSIDE the text the extractor actually
+// received must never silently validate model Evidence.
+// ============================================================
+describe("Фаза 6, S4 — item 12.D: project containment и traceability работают на тексте, который extractor РЕАЛЬНО получил", () => {
+  it("supportFragment существует только ВНЕ переданного extractor'у документа -> отклонено (галлюцинация не проходит)", async () => {
+    const p = await makeJob();
+    const url = "https://example.com/model-visible-test";
+    const actuallyShownText = `${p.projectName}: the protocol fee accrues to the treasury`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: actuallyShownText }) }),
+        evidenceExtractor: fixedExtractor([
+          // A hallucinated fragment the fetched document never contained.
+          validFact({ supportFragment: "the treasury distributes 100% of fees to token holders every epoch" }),
+        ]),
+      }),
+    );
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    const rows = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, p.jobId));
+    expect(rows.length).toBe(0);
+    expect(result.status).toBe("SKIPPED");
+  });
+
+  it("project name существует ТОЛЬКО в документе (что extractor видел), не выдумано -> Evidence принимается честно", async () => {
+    const p = await makeJob();
+    const url = "https://example.com/model-visible-honest";
+    const shownText = `${p.projectName}: the protocol fee accrues directly to the treasury contract`;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: shownText }) }),
+        evidenceExtractor: fixedExtractor([validFact({ supportFragment: shownText })]),
+      }),
+    );
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("SUCCEEDED");
+  });
+});
+
+// ============================================================
+// Item 1/6 (S4 final acceptance fix) — no chars/token input-bounding
+// heuristic is applied anywhere: the extractor receives the document
+// exactly as fetched, however large. There is no mathematically honest
+// hard bound on model input in this codebase today (owner clarification),
+// so S4 must not silently truncate and call the truncation a safety
+// mechanism.
+// ============================================================
+describe("Фаза 6, S4 — item 1/6: НЕТ chars/token эвристики — EvidenceExtractor получает документ без усечения", () => {
+  it("очень большой документ (200k символов) -> EvidenceExtractor получает ПОЛНЫЙ, неусечённый текст", async () => {
+    const p = await makeJob();
+    const url = "https://example.com/very-large-document";
+    const huge = `${p.projectName}: ` + "filler text ".repeat(20_000); // ~240k chars
+    let receivedLength = -1;
+    const executor = createS4WorkExecutor(
+      depsFor(p.jobId, p, {
+        searchGateway: fixedSearchGateway([url]),
+        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url, normalizedText: huge }) }),
+        evidenceExtractor: {
+          name: "fixture",
+          async extract(input) {
+            receivedLength = input.document.normalizedText.length;
+            return [];
+          },
+        },
+      }),
+    );
+    await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(receivedLength).toBe(huge.length); // exactly the full document, no truncation of any kind
   });
 });

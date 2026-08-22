@@ -8,12 +8,7 @@ import { evidence, sources } from "../db/schema";
 import { reserveJobBudget } from "./budget-reservation";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
-import {
-  ModelCostProfileMissingError,
-  boundInputText,
-  calculateMaxAuthorizedCostMicro,
-  loadModelCostProfile,
-} from "./model-cost-profile";
+import { ModelCostProfileMissingError, calculateMaxAuthorizedCostMicro, loadModelCostProfile } from "./model-cost-profile";
 import type { ModelCostProfile } from "./model-cost-profile";
 import { resolveContentFetcher } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
@@ -59,13 +54,18 @@ import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./sour
 //   D-089: OFFICIAL_DOCS/GOVERNANCE/OFFICIAL_REPORT are reachable only via
 //     an explicit, human-set routeClass on the SAME ACTIVE SOURCE_ROUTE
 //     row that produced CONFIRMED — resolveSourceClass enforces the exact
-//     locked precedence (routeClass only at step 6, after every public
-//     class has had a chance to positively recognize the domain).
+//     locked precedence, and never for a bare shared multi-tenant
+//     platform domain (source-authority.ts).
 //   D-090: every model call (QueryProposer, EvidenceExtractor) is priced
 //     from an approved, version-controlled cost profile BEFORE it is
-//     reserved or made — bound input -> bound output -> price -> reserve
-//     -> call. No profile for the configured model -> no call
-//     (MODEL_COST_PROFILE_MISSING, fail closed).
+//     reserved or made. S4 FINAL ACCEPTANCE FIX — the production profile
+//     catalogue is intentionally EMPTY until S10 (see
+//     model-cost-profile.ts): no live model call is currently possible,
+//     for EITHER role, without a test-injected fixture profile. Every
+//     resolver (cost profile, SearchGateway, ContentFetcher) is checked
+//     in one PREFLIGHT step before any budget is reserved (MEDIUM-4/LOW-1)
+//     — a missing prerequisite fails the attempt for zero cost, not after
+//     paid work already happened.
 
 // Per-attempt cap on how many search queries a single attempt may
 // propose — a LOCAL shaping bound, not a budget ceiling. The real ceiling
@@ -92,6 +92,15 @@ export interface S4ExecutorDeps {
   searchGateway?: SearchGateway;
   contentFetcher?: ContentFetcher;
   evidenceExtractor?: EvidenceExtractor;
+  // S4 FINAL ACCEPTANCE FIX (items 3/4) — TEST/FIXTURE cost profiles,
+  // structurally SEPARATE from the production catalogue in
+  // model-cost-profile.ts (which is intentionally empty until S10). When
+  // set, these bypass the production lookup for that one role only, so a
+  // test can exercise real arithmetic/reservation/maxOutputTokens-wiring
+  // behavior without claiming anything about real Anthropic billing
+  // safety. Never set outside tests.
+  queryProposerCostProfile?: ModelCostProfile;
+  evidenceExtractorCostProfile?: ModelCostProfile;
 }
 
 function hashUrl(url: string): string {
@@ -106,7 +115,11 @@ function normalizeForContainment(s: string): string {
 // actually appears in the document it claims to come from. A model
 // asserting something the document does not contain is invention, not
 // extraction — this is the code-level check, independent of anything the
-// model claims about itself.
+// model claims about itself. Always checked against the EXACT text the
+// extractor was given (item 6/12.D) — this file no longer truncates that
+// text before the call, so "the document" and "what the model saw" are
+// the same value; if a future round reintroduces input bounding, this
+// check must move to whatever bounded copy is actually sent.
 function isTraceable(documentText: string, supportFragment: string): boolean {
   if (supportFragment.trim().length === 0) return false;
   return normalizeForContainment(documentText).includes(normalizeForContainment(supportFragment));
@@ -117,7 +130,10 @@ function isTraceable(documentText: string, supportFragment: string): boolean {
 // tokenize to one token ("arbitrage"), never containing "arb" as a
 // sub-token, so an exact-token comparison structurally cannot match a
 // short identifier merely because it appears as a substring of a longer,
-// unrelated word.
+// unrelated word. ASCII-only by design (item 15) — non-ASCII project
+// identity (Cyrillic/CJK project names) is a known, deliberately deferred
+// gap: it fails SAFE (a false negative — containment is refused, never
+// wrongly granted), not a reason to reopen S4 scope here.
 function tokenize(s: string): string[] {
   return normalizeForContainment(s)
     .split(/[^a-z0-9]+/)
@@ -153,10 +169,7 @@ function containsIdentityPhrase(documentTokens: string[], phrase: string): boole
 // never because a short identifier merely appears as a substring of some
 // other word. This intentionally does NOT attempt semantic understanding
 // of what the document is "really about"; it is a structural, code-owned,
-// boundary-aware identity check. Always runs against the FULL fetched
-// text (not the D-090 model-visible bounded copy) — this is a pure code
-// check with no model cost, so bounding it would only weaken detection
-// for a project name mentioned late in a long document.
+// boundary-aware identity check.
 function documentNamesProject(
   documentText: string,
   project: { name: string; slug: string; ticker: string | null },
@@ -216,16 +229,98 @@ async function callProvider<T>(label: string, fn: () => Promise<T>): Promise<{ o
   }
 }
 
-// D-090: resolves the approved cost profile for `modelId`, or returns a
-// typed failure reason instead of throwing past this boundary — the ONE
-// place execute() decides "no profile -> no call" for a given role.
-function resolveCostProfile(modelId: string): { ok: true; profile: ModelCostProfile } | { ok: false; reason: string } {
+// D-090: resolves the cost profile for `modelId` — test-injected fixture
+// profile first (structurally separate from production, items 3/4), else
+// the production catalogue (intentionally empty until S10). Returns a
+// typed failure reason instead of throwing past this boundary.
+function resolveCostProfile(
+  modelId: string,
+  fixture: ModelCostProfile | undefined,
+): { ok: true; profile: ModelCostProfile } | { ok: false; reason: string } {
+  if (fixture) return { ok: true, profile: fixture };
   try {
     return { ok: true, profile: loadModelCostProfile(modelId) };
   } catch (e) {
     if (e instanceof ModelCostProfileMissingError) return { ok: false, reason: e.message };
     throw e;
   }
+}
+
+interface Preflight {
+  queryProposerProfile: ModelCostProfile;
+  evidenceExtractorProfile: ModelCostProfile;
+  searchGateway: SearchGateway;
+  contentFetcher: ContentFetcher;
+  queryProposer: QueryProposer;
+  evidenceExtractor: EvidenceExtractor;
+}
+
+// MEDIUM-4/LOW-1 (S4 final acceptance fix): every resolver this attempt
+// will need — cost profiles AND providers, for every stage — is resolved
+// and verified HERE, before a single reservation is made. A resolver that
+// throws (missing BRAVE_SEARCH_API_KEY, MODEL_GATEWAY=fake with no
+// fixture, a missing cost profile) becomes a deterministic, zero-cost
+// FAILED result instead of an uncaught exception escaping after
+// already-reserved/spent budget (the exact "QueryProposer reserved, then
+// SearchGateway resolution throws uncaught" scenario the review names).
+async function preflight(
+  deps: S4ExecutorDeps,
+  config: { query_proposer_model: string; evidence_extractor_model: string },
+): Promise<{ ok: true; value: Preflight } | { ok: false; reason: string }> {
+  const qp = resolveCostProfile(config.query_proposer_model, deps.queryProposerCostProfile);
+  if (!qp.ok) return { ok: false, reason: qp.reason };
+
+  const ep = resolveCostProfile(config.evidence_extractor_model, deps.evidenceExtractorCostProfile);
+  if (!ep.ok) return { ok: false, reason: ep.reason };
+
+  let searchGateway: SearchGateway;
+  try {
+    searchGateway = deps.searchGateway ?? resolveSearchGateway();
+  } catch (e) {
+    return { ok: false, reason: `SEARCH_GATEWAY: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  let contentFetcher: ContentFetcher;
+  try {
+    contentFetcher = deps.contentFetcher ?? resolveContentFetcher();
+  } catch (e) {
+    return { ok: false, reason: `CONTENT_FETCHER: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  let queryProposer: QueryProposer;
+  try {
+    queryProposer = deps.queryProposer ?? (await resolveQueryProposer(config.query_proposer_model, qp.profile.maxOutputTokens));
+  } catch (e) {
+    return { ok: false, reason: `QUERY_PROPOSER: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  let evidenceExtractor: EvidenceExtractor;
+  try {
+    evidenceExtractor =
+      deps.evidenceExtractor ?? (await resolveEvidenceExtractor(config.evidence_extractor_model, ep.profile.maxOutputTokens));
+  } catch (e) {
+    return { ok: false, reason: `EVIDENCE_EXTRACTOR: ${e instanceof Error ? e.message : String(e)}` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      queryProposerProfile: qp.profile,
+      evidenceExtractorProfile: ep.profile,
+      searchGateway,
+      contentFetcher,
+      queryProposer,
+      evidenceExtractor,
+    },
+  };
+}
+
+// Item 13: a normalized, bounded, safe-to-persist code for why routeClass
+// ended up absent despite a matching CONFIRMED row — never the raw jsonb
+// value a human typed (no unbounded dump into research_attempts.reason,
+// no secrets).
+function observationCode(observation: "INVALID_ROUTE_CLASS" | "SOURCE_ROUTE_CONFLICT"): string {
+  return observation;
 }
 
 export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
@@ -245,16 +340,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
 
       const spent = { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 };
 
-      // §7.2a rule 2 (D-089): an invalid routeClass value is ignored, not
-      // a job failure, but the fact of ignoring it is observed. Collected
-      // across every source touched this attempt and folded into the
-      // final result's `reason` — the existing, already-approved
-      // per-attempt observation channel (research_attempts.reason), not a
-      // new learning system.
-      const invalidRouteClassObservations = new Set<string>();
+      // §7.2a rule 2 (D-089) / MEDIUM-2: a bounded, safe observation code
+      // (never a raw human-typed value) collected across every source
+      // touched this attempt and folded into the final result's `reason`
+      // — the existing, already-approved per-attempt observation channel
+      // (research_attempts.reason), not a new learning system.
+      const observations = new Set<string>();
       function withObservations(reason: string): string {
-        if (invalidRouteClassObservations.size === 0) return reason;
-        return `${reason}; routeClass ignored (invalid): ${[...invalidRouteClassObservations].join(", ")}`;
+        if (observations.size === 0) return reason;
+        return `${reason}; source-route observations: ${[...observations].join(", ")}`;
       }
 
       // D-090 step 1: determine configured model for each role. Same
@@ -264,12 +358,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // followed, now also driving which cost profile applies.
       const config = await loadProductConfig(deps.db);
 
-      // --- 1. QueryProposer -----------------------------------------------
-      const queryProposerProfileResult = resolveCostProfile(config.query_proposer_model);
-      if (!queryProposerProfileResult.ok) {
-        return { status: "FAILED", reason: queryProposerProfileResult.reason, spent };
+      // MEDIUM-4/LOW-1: resolve every provider and cost profile THIS
+      // ATTEMPT could need, before any reservation, so a resolver failure
+      // is always zero-cost and always a typed FAILED result.
+      const pre = await preflight(deps, config);
+      if (!pre.ok) {
+        return { status: "FAILED", reason: pre.reason, spent };
       }
-      const queryProposerProfile = queryProposerProfileResult.profile;
+      const { queryProposerProfile, evidenceExtractorProfile, searchGateway, contentFetcher, queryProposer, evidenceExtractor } =
+        pre.value;
+
+      // --- 1. QueryProposer -----------------------------------------------
       const queryProposerCostMicro = calculateMaxAuthorizedCostMicro(queryProposerProfile);
       const queryProposerReserved = await reserveJobBudget(
         deps.db,
@@ -283,8 +382,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       }
       spent.authorizedModelCostMicro += queryProposerCostMicro;
 
-      const queryProposer =
-        deps.queryProposer ?? (await resolveQueryProposer(config.query_proposer_model, queryProposerProfile.maxOutputTokens));
       const proposeResult = await callProvider("QUERY_PROPOSER", () =>
         queryProposer.proposeQueries({ target, hint, maxQueries: MAX_QUERIES_PER_ATTEMPT }),
       );
@@ -308,7 +405,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // BEFORE it is made — not a per-attempt local budget. Once the
       // reservation is refused, this attempt stops issuing MORE queries;
       // queries already issued (and their results) stand.
-      const searchGateway = deps.searchGateway ?? resolveSearchGateway();
       const candidateUrls = new Map<string, { url: string }>();
       let searchBudgetExhausted = false;
       // LOW-A: keep the most recent typed provider failure reason around
@@ -359,7 +455,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       }
 
       // --- 3. ContentFetcher (already the accepted S1 SSRF-safe impl) ------
-      const contentFetcher = deps.contentFetcher ?? resolveContentFetcher();
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
@@ -385,18 +480,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       }
 
       // --- 4. EvidenceExtractor ----------------------------------------------
-      // D-090 fail-closed: resolved ONCE for this attempt, before any
-      // EvidenceExtractor call is made — already-incurred search/fetch
-      // spend above is preserved either way (MEDIUM-2 discipline).
-      const evidenceExtractorProfileResult = resolveCostProfile(config.evidence_extractor_model);
-      if (!evidenceExtractorProfileResult.ok) {
-        return { status: "FAILED", reason: evidenceExtractorProfileResult.reason, spent };
-      }
-      const evidenceExtractorProfile = evidenceExtractorProfileResult.profile;
       const evidenceExtractorCostMicro = calculateMaxAuthorizedCostMicro(evidenceExtractorProfile);
-      const evidenceExtractor =
-        deps.evidenceExtractor ??
-        (await resolveEvidenceExtractor(config.evidence_extractor_model, evidenceExtractorProfile.maxOutputTokens));
       const insertedEvidenceIds: string[] = [];
       let extractionFailures = 0;
       for (const doc of fetchedDocs) {
@@ -410,15 +494,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         if (!reserved) break; // job-lifetime model-cost ceiling reached
         spent.authorizedModelCostMicro += evidenceExtractorCostMicro;
 
-        // §8 INPUT BOUNDING (D-090): deterministically bound what the
-        // model actually sees to the SAME numbers the reservation above
-        // was priced with — "ограничить -> оценить -> зарезервировать ->
-        // вызвать". The extractor only ever sees this bounded copy.
-        const boundedText = boundInputText(doc.normalizedText, evidenceExtractorProfile);
-        const boundedDoc = { ...doc, normalizedText: boundedText };
-
+        // Item 6 (S4 final acceptance fix): no input bounding — the
+        // extractor is given the document text exactly as fetched. See
+        // model-cost-profile.ts's module comment for why a chars/token
+        // heuristic was removed rather than kept as a claimed guarantee.
         const extractResult = await callProvider("EVIDENCE_EXTRACTOR", () =>
-          evidenceExtractor.extract({ target, document: boundedDoc }),
+          evidenceExtractor.extract({ target, document: doc }),
         );
         if (!extractResult.ok) {
           extractionFailures += 1;
@@ -431,21 +512,18 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // domain is a human-CONFIRMED SOURCE_ROUTE for the project
         // (computed below, per-source — a confirmed domain IS the
         // project's own domain by definition, so text-mention is not
-        // additionally required in that case). Containment runs against
-        // the FULL document text, not the D-090 bounded copy (see
-        // documentNamesProject's own doc comment).
+        // additionally required in that case).
         const sourceInfo = await findOrCreateSource(deps.db, doc.finalUrl);
         const route = await resolveSourceRoute(deps.db, deps.project.id, doc.finalUrl);
-        if (route.invalidRouteClassObserved) {
-          invalidRouteClassObservations.add(route.invalidRouteClassObserved);
-        }
+        if (route.observation) observations.add(observationCode(route.observation));
         const projectContained =
           route.officiality === "CONFIRMED" || documentNamesProject(doc.normalizedText, deps.project);
         if (!projectContained) continue; // wrong-project document — never persisted, regardless of what the extractor claims
 
         // D-089/§7.2a: exact locked precedence — routeClass only supplies
         // the class at step 6, after every public/project-independent
-        // class has had a chance to positively recognize the domain.
+        // class (and every shared multi-tenant platform base domain) has
+        // had a chance to positively recognize/exclude the domain.
         const sourceClass = resolveSourceClass(doc.finalUrl, sourceInfo.sourceType, route.routeClass);
 
         for (const fact of facts) {
@@ -454,12 +532,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // is discarded outright. The model has no path from here to
           // the controller, the work queue, or any other component.
           if (fact.step !== target.step || fact.component !== target.component) continue;
-          // §7/D-076: no traceable excerpt in the actual (D-090 bounded)
-          // document the extractor was shown -> not Evidence, regardless
-          // of how confident the model sounds. A support fragment outside
-          // the bounded, model-visible portion is unseen content — it is
-          // correct to drop it, not to fabricate evidence from it (§8).
-          if (!isTraceable(boundedDoc.normalizedText, fact.supportFragment)) continue;
+          // §7/D-076/item 12.D: no traceable excerpt in the EXACT document
+          // text the extractor was given -> not Evidence, regardless of
+          // how confident the model sounds. A project name or a support
+          // fragment that exists only OUTSIDE what the model actually saw
+          // must never silently validate model Evidence.
+          if (!isTraceable(doc.normalizedText, fact.supportFragment)) continue;
 
           // MEDIUM-1: deterministic identity for THIS extracted unit —
           // a replayed identical (job, source, step, component, fragment)

@@ -34,6 +34,23 @@ function hostnameOf(url: string): string | null {
   }
 }
 
+// MEDIUM-3 (S4 final acceptance fix): safe hostname matching for a
+// recognized platform base domain — the platform's own bare domain OR any
+// of its subdomains (m.x.com, old.reddit.com, support.discord.com, ...)
+// still count as that platform. `endsWith` alone is UNSAFE:
+// "example.com.evil.com".endsWith("example.com") is true. The dot-boundary
+// check is what makes this safe.
+function matchesPlatformDomain(host: string, base: string): boolean {
+  return host === base || host.endsWith(`.${base}`);
+}
+
+function hostMatchesAnyPlatform(host: string, domains: ReadonlySet<string>): boolean {
+  for (const base of domains) {
+    if (matchesPlatformDomain(host, base)) return true;
+  }
+  return false;
+}
+
 // Small, fixed, code-owned domain lists — not a place for fuzzy/semantic
 // matching. Unknown/unmapped domains deliberately fall through to the
 // WEAKEST class (SOCIAL) rather than guessing something stronger: a
@@ -41,15 +58,11 @@ function hostnameOf(url: string): string | null {
 // authoritative" defect this fix closes, just moved into a lookup table
 // instead of a prompt.
 //
-// HIGH-B (S4 final re-review): every list below is deliberately
-// project-INDEPENDENT — a shared, multi-tenant platform recognizable from
-// its own domain alone, regardless of which project's job is running.
-// OFFICIAL_DOCS and OFFICIAL_REPORT are NOT in this file (see the comment
-// on deriveSourceClass below) — "documentation of THE protocol" and
-// "official report of THE project" are inherently project-specific and
-// cannot be derived from a global domain list without either guessing or
-// silently promoting an unrelated CONFIRMED domain to a stronger class
-// than officiality alone establishes (exactly what the review prohibits).
+// HIGH-B/MEDIUM-3: every list below is deliberately project-INDEPENDENT —
+// a shared, multi-tenant platform recognizable from its own domain (base
+// domain OR subdomain — matchesPlatformDomain) alone, regardless of which
+// project's job is running. OFFICIAL_DOCS and OFFICIAL_REPORT are NOT in
+// this file — see the comment on resolveSourceClass below.
 const ONCHAIN_EXPLORER_DOMAINS = new Set([
   "etherscan.io",
   "bscscan.com",
@@ -110,6 +123,37 @@ const RESEARCH_MEDIA_DOMAINS = new Set([
   "bankless.com",
 ]);
 
+// Item 9 (S4 final acceptance fix): general-purpose, multi-tenant hosting
+// platforms that are NOT in any class-specific list above (so they are not
+// otherwise "publicly recognized" and would reach step 6), but where a
+// bare, domain-only SOURCE_ROUTE must still NOT be trusted to elevate the
+// entire shared platform to a project-specific strong class. A human who
+// registers "github.com" (or "medium.com", "notion.site", ...) as their
+// project's confirmed domain has confirmed nothing about which tenant on
+// that shared host is theirs — SOURCE_ROUTE only stores a domain, never a
+// path, so S4 has no safe way to know "github.com/OurOrg/docs" is the
+// project's without inventing path-level tenancy tracking, which is
+// explicitly out of scope here. A genuinely project-specific SUBDOMAIN
+// (project.gitbook.io) is a different, safe case — see
+// isBareSharedPlatformBase below, which blocks ONLY the exact base domain,
+// never a subdomain of it.
+const SHARED_MULTI_TENANT_PLATFORM_BASE_DOMAINS = new Set([
+  "github.com",
+  "gitbook.io",
+  "medium.com",
+  "mirror.xyz",
+  "notion.site",
+  "substack.com",
+  "readthedocs.io",
+]);
+
+// True only for an EXACT shared-platform base domain (github.com), never
+// for a subdomain of it (project.gitbook.io stays eligible for routeClass
+// — it is a specific host, not the whole shared platform).
+function isBareSharedPlatformBase(host: string): boolean {
+  return SHARED_MULTI_TENANT_PLATFORM_BASE_DOMAINS.has(host);
+}
+
 // D-089's three project-specific classes — reachable ONLY via an explicit
 // human-set `routeClass` on the exact ACTIVE SOURCE_ROUTE that also
 // produced CONFIRMED for this project/domain (see resolveSourceRoute
@@ -128,12 +172,13 @@ const VALID_ROUTE_CLASSES: readonly RouteClass[] = ["OFFICIAL_DOCS", "GOVERNANCE
 // SAME ACTIVE SOURCE_ROUTE row that produced this project's CONFIRMED,
 // never any other row — see resolveSourceRoute) is consulted ONLY at step
 // 6, after every public/project-independent class has had a chance to
-// positively recognize the domain. This ordering is the whole point of
-// D-089: a `routeClass` set on a shared, multi-tenant platform (snapshot.org,
-// dune.com) or a social domain must NOT be able to lift SOCIAL/DATA_PROVIDER/
-// GOVERNANCE into a stronger project-specific class and walk around D-074's
-// "SOCIAL never supports a conclusion" — confirming "this domain belongs to
-// project X" is simply the wrong granularity for a whole shared domain.
+// positively recognize the domain, AND only when the domain is not itself
+// a known shared multi-tenant hosting platform (item 9 above). This
+// ordering is the whole point of D-089: a `routeClass` set on a shared,
+// multi-tenant platform (snapshot.org, dune.com, github.com) or a social
+// domain must NOT be able to lift SOCIAL/DATA_PROVIDER/GOVERNANCE — or an
+// otherwise-unclassified shared host — into a strong project-specific
+// class and walk around D-074's "SOCIAL never supports a conclusion".
 export function resolveSourceClass(
   url: string,
   sourceType: "OFFICIAL_DOCS" | "GOVERNANCE" | "ONCHAIN" | "SECURITY" | "RESEARCH" | "NEWS" | "OTHER",
@@ -141,41 +186,49 @@ export function resolveSourceClass(
 ): EvidenceSourceClass {
   const host = hostnameOf(url);
   // 1. ONCHAIN / explorer
-  if (sourceType === "ONCHAIN" || (host && ONCHAIN_EXPLORER_DOMAINS.has(host))) {
+  if (sourceType === "ONCHAIN" || (host && hostMatchesAnyPlatform(host, ONCHAIN_EXPLORER_DOMAINS))) {
     return "ONCHAIN_VERIFIABLE";
   }
   // 2. recognised social domain
-  if (host && SOCIAL_DOMAINS.has(host)) return "SOCIAL";
+  if (host && hostMatchesAnyPlatform(host, SOCIAL_DOMAINS)) return "SOCIAL";
   // 3. recognised independent data provider
-  if (host && DATA_PROVIDER_DOMAINS.has(host)) return "DATA_PROVIDER";
+  if (host && hostMatchesAnyPlatform(host, DATA_PROVIDER_DOMAINS)) return "DATA_PROVIDER";
   // 4. recognised public governance platform
-  if (sourceType === "GOVERNANCE" || (host && GOVERNANCE_PLATFORM_DOMAINS.has(host))) {
+  if (sourceType === "GOVERNANCE" || (host && hostMatchesAnyPlatform(host, GOVERNANCE_PLATFORM_DOMAINS))) {
     return "GOVERNANCE";
   }
   // 5. recognised research/media source
-  if (sourceType === "RESEARCH" || sourceType === "NEWS" || (host && RESEARCH_MEDIA_DOMAINS.has(host))) {
+  if (sourceType === "RESEARCH" || sourceType === "NEWS" || (host && hostMatchesAnyPlatform(host, RESEARCH_MEDIA_DOMAINS))) {
     return "RESEARCH_MEDIA";
   }
   // 6. otherwise unknown/unclassified domain — the ONLY point where a
-  // project-specific routeClass may supply a strong class.
-  if (activeRouteClass) return activeRouteClass;
+  // project-specific routeClass may supply a strong class, and only if
+  // the domain is not itself the bare base domain of a known shared,
+  // multi-tenant hosting platform (item 9).
+  if (activeRouteClass && !(host && isBareSharedPlatformBase(host))) {
+    return activeRouteClass;
+  }
   // Weakest class — never guess something stronger for an unrecognized
-  // domain with no human-confirmed project-specific class either.
+  // domain with no eligible human-confirmed project-specific class either.
   return "SOCIAL";
 }
 
 // Populates `sources.sourceType` deterministically FROM THE URL ALONE —
-// project-independent, same discipline as deriveSourceClass. This is what
-// closes "sources.sourceType is effectively always OTHER": findOrCreateSource
-// now calls this at insert time instead of leaving every row at the
-// column's bare default.
+// project-independent, same discipline as resolveSourceClass. This is
+// what closes "sources.sourceType is effectively always OTHER":
+// findOrCreateSource calls this at insert time instead of leaving every
+// row at the column's bare default. Its output is later consumed by
+// resolveSourceClass above (steps 1/4/5 check `sourceType`), so a wrong
+// or stale sourceType would directly change classification — this is
+// verified end-to-end via the actual `sources` row, not just this
+// function in isolation (see phase6-s4-executor.test.ts's HIGH-B suite).
 export function deriveSourceType(
   url: string,
 ): "OFFICIAL_DOCS" | "GOVERNANCE" | "ONCHAIN" | "SECURITY" | "RESEARCH" | "NEWS" | "OTHER" {
   const host = hostnameOf(url);
-  if (host && ONCHAIN_EXPLORER_DOMAINS.has(host)) return "ONCHAIN";
-  if (host && GOVERNANCE_PLATFORM_DOMAINS.has(host)) return "GOVERNANCE";
-  if (host && RESEARCH_MEDIA_DOMAINS.has(host)) return "RESEARCH";
+  if (host && hostMatchesAnyPlatform(host, ONCHAIN_EXPLORER_DOMAINS)) return "ONCHAIN";
+  if (host && hostMatchesAnyPlatform(host, GOVERNANCE_PLATFORM_DOMAINS)) return "GOVERNANCE";
+  if (host && hostMatchesAnyPlatform(host, RESEARCH_MEDIA_DOMAINS)) return "RESEARCH";
   return "OTHER";
 }
 
@@ -191,36 +244,32 @@ interface SourceRouteContent {
 
 export interface ResolvedSourceRoute {
   officiality: EvidenceOfficiality;
-  // Non-null ONLY when officiality is CONFIRMED and the SAME row also
-  // carries a syntactically valid routeClass (§7.2a rule 1: "routeClass
-  // авторитетен только когда сработала та же самая ACTIVE SOURCE_ROUTE-
-  // запись, что дала officiality = CONFIRMED"). Precedence over the public
-  // classifier is enforced by resolveSourceClass, not here — this function
-  // only reports what the confirmed row actually said.
+  // Non-null ONLY when officiality is CONFIRMED and exactly one distinct
+  // routeClass value was found across every matching ACTIVE row for this
+  // project/domain (§7.2a rule 1, MEDIUM-2 conflict handling below).
   routeClass: RouteClass | null;
-  // Set when the matching ACTIVE row carried a routeClass value outside
-  // the three valid ones — a human typo in free-form jsonb, per §7.2a rule
-  // 2 ("значение вне разрешённого множества — игнорируется как
-  // отсутствующее... факт игнорирования попадает в research_attempts как
-  // наблюдение"). The job must NOT fail for this; the caller folds this
-  // into the attempt's existing `reason` observation channel.
-  invalidRouteClassObserved: string | null;
+  // A short, bounded, safe-to-persist code identifying why routeClass
+  // ended up null/ignored despite a matching CONFIRMED row — never a raw
+  // dump of arbitrary jsonb (item 13). Absent when there was nothing to
+  // observe (no match, or a clean single-row result).
+  observation: "INVALID_ROUTE_CLASS" | "SOURCE_ROUTE_CONFLICT" | null;
 }
 
 function isValidRouteClass(value: unknown): value is RouteClass {
   return typeof value === "string" && (VALID_ROUTE_CLASSES as readonly string[]).includes(value);
 }
 
-// The single source of truth for BOTH axes' project-specific inputs,
-// resolved together from the SAME matching row — officiality and
-// routeClass must never be read from two different SOURCE_ROUTE rows.
+// The single source of truth for BOTH axes' project-specific inputs. Reads
+// EVERY ACTIVE SOURCE_ROUTE row that names this exact project+domain (not
+// just the first one found) so the result never depends on PostgreSQL row/
+// heap order — MEDIUM-2 (S4 final acceptance fix).
 //
-// CONFIRMED iff an ACTIVE SOURCE_ROUTE item for THIS project names THIS
-// exact domain (case-insensitive, "www." stripped the same way on both
-// sides). Everything else — including a project without any SOURCE_ROUTE
-// records, a job with no project, an inactive/DRAFT SOURCE_ROUTE, or a
-// SOURCE_ROUTE belonging to a different project — is CLAIMED (and
-// routeClass is always null in that case: §7.2a rule 1). There is no
+// CONFIRMED iff at least one ACTIVE SOURCE_ROUTE item for THIS project
+// names THIS exact domain (case-insensitive, "www." stripped the same way
+// on both sides). Everything else — including a project without any
+// SOURCE_ROUTE records, a job with no project, an inactive/DRAFT
+// SOURCE_ROUTE, or a SOURCE_ROUTE belonging to a different project — is
+// CLAIMED (and routeClass is always null in that case). There is no
 // escalation path from CLAIMED to CONFIRMED that does not go through a
 // human-approved ACTIVE row, and no way for routeClass to leak from a row
 // that did NOT match this exact project+domain.
@@ -229,7 +278,7 @@ export async function resolveSourceRoute(
   projectId: string | null,
   url: string,
 ): Promise<ResolvedSourceRoute> {
-  const notFound: ResolvedSourceRoute = { officiality: "CLAIMED", routeClass: null, invalidRouteClassObserved: null };
+  const notFound: ResolvedSourceRoute = { officiality: "CLAIMED", routeClass: null, observation: null };
   if (!projectId) return notFound;
   const host = hostnameOf(url);
   if (!host) return notFound;
@@ -245,26 +294,44 @@ export async function resolveSourceRoute(
       ),
     );
 
+  // MEDIUM-2: collect EVERY matching row for this exact domain — never
+  // return on the first hit, which is exactly what makes a resolver
+  // row-order-dependent.
+  const matchingRouteClasses: (RouteClass | null)[] = [];
+  let anyMatch = false;
+  let sawInvalidRouteClass = false;
   for (const row of rows) {
     const content = row.content as SourceRouteContent;
     if (typeof content?.domain !== "string") continue;
     const routeDomain = content.domain.toLowerCase().replace(/^www\./, "");
     if (routeDomain !== host) continue;
-    // Exact matching ACTIVE row found — officiality is CONFIRMED
-    // regardless of what routeClass (if anything) it carries.
+    anyMatch = true;
     if (content.routeClass === undefined || content.routeClass === null) {
-      return { officiality: "CONFIRMED", routeClass: null, invalidRouteClassObserved: null };
+      matchingRouteClasses.push(null);
+    } else if (isValidRouteClass(content.routeClass)) {
+      matchingRouteClasses.push(content.routeClass);
+    } else {
+      // §7.2a rule 2: invalid value ignored as absent, not a job failure.
+      sawInvalidRouteClass = true;
+      matchingRouteClasses.push(null);
     }
-    if (isValidRouteClass(content.routeClass)) {
-      return { officiality: "CONFIRMED", routeClass: content.routeClass, invalidRouteClassObserved: null };
-    }
-    // §7.2a rule 2: invalid value ignored as absent, not a job failure —
-    // observed for audit instead.
-    return {
-      officiality: "CONFIRMED",
-      routeClass: null,
-      invalidRouteClassObserved: String(content.routeClass),
-    };
   }
-  return notFound;
+  if (!anyMatch) return notFound;
+
+  // Domain ownership is unambiguous the moment ANY matching ACTIVE row
+  // exists — every matching row agrees the domain belongs to this
+  // project, so CONFIRMED is safe regardless of routeClass disagreement.
+  const distinctNonNullRouteClasses = new Set(matchingRouteClasses.filter((c): c is RouteClass => c !== null));
+  if (distinctNonNullRouteClasses.size > 1) {
+    // MEDIUM-2: conflicting routeClass values across multiple ACTIVE rows
+    // for the same project+domain — never choose an arbitrary winner.
+    // routeClass becomes absent; officiality (domain ownership) is
+    // preserved since that part is not in conflict.
+    return { officiality: "CONFIRMED", routeClass: null, observation: "SOURCE_ROUTE_CONFLICT" };
+  }
+  const resolvedRouteClass = distinctNonNullRouteClasses.size === 1 ? [...distinctNonNullRouteClasses][0] : null;
+  if (resolvedRouteClass === null && sawInvalidRouteClass) {
+    return { officiality: "CONFIRMED", routeClass: null, observation: "INVALID_ROUTE_CLASS" };
+  }
+  return { officiality: "CONFIRMED", routeClass: resolvedRouteClass, observation: null };
 }

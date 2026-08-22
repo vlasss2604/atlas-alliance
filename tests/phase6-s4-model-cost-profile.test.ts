@@ -1,43 +1,47 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Phase 6, S4 final implementation (D-090, phase-6-plan.md §5.6) —
-// cost-profile arithmetic and the "bounded output actually reaches the
+// cost-profile arithmetic and the "maxOutputTokens actually reaches the
 // provider call" wiring. No live credentials used: the Anthropic SDK
 // class itself is mocked so this test proves the REQUEST SHAPE this
 // codebase builds, not anything about the real API.
+//
+// S4 FINAL ACCEPTANCE FIX: the production cost-profile catalogue is
+// intentionally EMPTY until S10 (see model-cost-profile.ts's module
+// comment) — there is no mathematically honest hard bound on model INPUT
+// in this codebase today, and a chars/token heuristic is not one either.
+// loadModelCostProfile() therefore fails closed for EVERY model id,
+// production included. Fixture ModelCostProfile object literals used
+// below (arbitrary numbers, never "claude-haiku-4-5") prove arithmetic
+// and wiring only — they never claim anything about real Anthropic
+// billing safety (item 4's TEST/FIXTURE vs OWNER-APPROVED PRODUCTION
+// distinction).
 
-import {
-  ModelCostProfileMissingError,
-  boundInputText,
-  calculateMaxAuthorizedCostMicro,
-  loadModelCostProfile,
-  maxInputCharsFor,
-} from "../src/server/engine/model-cost-profile";
+import { ModelCostProfileMissingError, calculateMaxAuthorizedCostMicro, loadModelCostProfile } from "../src/server/engine/model-cost-profile";
 
-describe("Фаза 6, S4 — D-090: model-cost-profile арифметика", () => {
-  it("loadModelCostProfile: известная модель -> профиль с положительными полями", () => {
-    const profile = loadModelCostProfile("claude-haiku-4-5");
-    expect(profile.modelId).toBe("claude-haiku-4-5");
-    expect(profile.maxInputTokens).toBeGreaterThan(0);
-    expect(profile.maxOutputTokens).toBeGreaterThan(0);
-    expect(profile.inputPriceMicroUsdPerToken).toBeGreaterThan(0);
-    expect(profile.outputPriceMicroUsdPerToken).toBeGreaterThan(0);
-  });
-
-  it("loadModelCostProfile: неизвестная модель -> ModelCostProfileMissingError (fail closed)", () => {
-    expect(() => loadModelCostProfile("some-model-nobody-approved")).toThrow(ModelCostProfileMissingError);
-    try {
-      loadModelCostProfile("some-model-nobody-approved");
-    } catch (e) {
-      expect(e).toBeInstanceOf(ModelCostProfileMissingError);
-      expect((e as ModelCostProfileMissingError).message).toContain("MODEL_COST_PROFILE_MISSING");
-      expect((e as ModelCostProfileMissingError).modelId).toBe("some-model-nobody-approved");
+describe("Фаза 6, S4 — D-090: production cost profile catalogue — EMPTY до S10 (fail closed)", () => {
+  it("loadModelCostProfile: ЛЮБАЯ модель, включая claude-haiku-4-5, -> ModelCostProfileMissingError", () => {
+    for (const modelId of ["claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5", "some-model-nobody-approved"]) {
+      expect(() => loadModelCostProfile(modelId)).toThrow(ModelCostProfileMissingError);
     }
   });
 
-  it("calculateMaxAuthorizedCostMicro: точная целочисленная формула maxInput*inputPrice + maxOutput*outputPrice", () => {
+  it("ModelCostProfileMissingError несёт modelId и MODEL_COST_PROFILE_MISSING в сообщении", () => {
+    try {
+      loadModelCostProfile("claude-haiku-4-5");
+      throw new Error("expected loadModelCostProfile to throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(ModelCostProfileMissingError);
+      expect((e as ModelCostProfileMissingError).message).toContain("MODEL_COST_PROFILE_MISSING");
+      expect((e as ModelCostProfileMissingError).modelId).toBe("claude-haiku-4-5");
+    }
+  });
+});
+
+describe("Фаза 6, S4 — D-090: calculateMaxAuthorizedCostMicro — чистая арифметика (FIXTURE-профили, не production)", () => {
+  it("точная целочисленная формула maxInput*inputPrice + maxOutput*outputPrice", () => {
     const profile = {
-      modelId: "test-model",
+      modelId: "fixture-test-model",
       inputPriceMicroUsdPerToken: 3,
       outputPriceMicroUsdPerToken: 7,
       maxInputTokens: 1000,
@@ -47,13 +51,13 @@ describe("Фаза 6, S4 — D-090: model-cost-profile арифметика", ()
     expect(calculateMaxAuthorizedCostMicro(profile)).toBe(1000 * 3 + 200 * 7);
   });
 
-  it("calculateMaxAuthorizedCostMicro: реальный профиль никогда не занижает (round upward) — boundary при простых числах", () => {
+  it("реальный профиль никогда не занижает (round upward) — boundary при простых числах", () => {
     // A profile whose prices don't divide evenly into a round number —
     // this is the case D-090 explicitly warns about ("avoid floating
     // point money errors"). Integer arithmetic here means there is no
     // fractional remainder to accidentally round down in the first place.
     const profile = {
-      modelId: "test-model-odd",
+      modelId: "fixture-test-model-odd",
       inputPriceMicroUsdPerToken: 7,
       outputPriceMicroUsdPerToken: 11,
       maxInputTokens: 333,
@@ -64,44 +68,16 @@ describe("Фаза 6, S4 — D-090: model-cost-profile арифметика", ()
     expect(calculateMaxAuthorizedCostMicro(profile)).toBe(expected);
     expect(Number.isInteger(calculateMaxAuthorizedCostMicro(profile))).toBe(true);
   });
-
-  it("boundInputText: текст короче потолка -> не изменяется", () => {
-    const profile = loadModelCostProfile("claude-haiku-4-5");
-    const short = "a short document";
-    expect(boundInputText(short, profile)).toBe(short);
-  });
-
-  it("boundInputText: текст длиннее потолка -> усекается детерминированно до maxInputCharsFor(profile)", () => {
-    const profile = loadModelCostProfile("claude-haiku-4-5");
-    const maxChars = maxInputCharsFor(profile);
-    const long = "x".repeat(maxChars + 5000);
-    const bounded = boundInputText(long, profile);
-    expect(bounded.length).toBe(maxChars);
-    expect(bounded).toBe(long.slice(0, maxChars));
-  });
-
-  it("boundInputText: ровно на границе -> не усекается (off-by-one)", () => {
-    const profile = loadModelCostProfile("claude-haiku-4-5");
-    const maxChars = maxInputCharsFor(profile);
-    const exact = "y".repeat(maxChars);
-    expect(boundInputText(exact, profile)).toBe(exact);
-    expect(boundInputText(exact, profile).length).toBe(maxChars);
-  });
-
-  it("boundInputText: на единицу длиннее границы -> усекается на 1 символ", () => {
-    const profile = loadModelCostProfile("claude-haiku-4-5");
-    const maxChars = maxInputCharsFor(profile);
-    const overByOne = "z".repeat(maxChars + 1);
-    const bounded = boundInputText(overByOne, profile);
-    expect(bounded.length).toBe(maxChars);
-  });
 });
 
-// --- wiring: the approved profile's maxOutputTokens actually reaches the
-// provider's max_tokens field. The Anthropic SDK class is mocked (no live
-// credentials, no network) — this proves the request THIS CODEBASE
-// builds, matching the discipline every other S4 provider test in this
-// suite already uses (deterministic fixtures, no live internet/model).
+// --- wiring: an approved profile's maxOutputTokens actually reaches the
+// provider's max_tokens field, at the direct createAnthropicX() unit
+// level. The Anthropic SDK class is mocked (no live credentials, no
+// network) — this proves the request THIS CODEBASE builds, not anything
+// about the real API. See phase6-s4-executor.test.ts's D-090 suite (item
+// 12.B) for the SAME property proven through the real executor path
+// (cost profile -> executor -> resolver -> provider request), which this
+// unit-level test alone does not cover.
 const createMock = vi.fn();
 
 vi.mock("@anthropic-ai/sdk", () => {
@@ -116,7 +92,7 @@ vi.mock("@anthropic-ai/sdk/helpers/zod", () => ({
   zodOutputFormat: () => ({ type: "json_schema" }),
 }));
 
-describe("Фаза 6, S4 — D-090: maxOutputTokens доходит до провайдерского вызова (bounded output)", () => {
+describe("Фаза 6, S4 — D-090: maxOutputTokens доходит до провайдерского вызова (unit-level createAnthropicX)", () => {
   const ORIGINAL_KEY = process.env.ANTHROPIC_API_KEY;
 
   beforeEach(() => {
@@ -167,7 +143,7 @@ describe("Фаза 6, S4 — D-090: maxOutputTokens доходит до пров
         requestedUrl: "https://example.com/doc",
         httpStatus: 200,
         contentType: "text/html",
-        normalizedText: "some bounded text",
+        normalizedText: "some visible text",
         contentHash: "sha256:x",
         fetchedAt: new Date("2026-08-22T00:00:00Z"),
         byteLength: 10,
