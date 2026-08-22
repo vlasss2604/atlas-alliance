@@ -436,6 +436,298 @@ describe("S7 acceptance scenarios (phase-6-s7-plan.md §29)", () => {
     // become SUPPORTED by combining evidence across the two flows.
     expect(r.status).not.toBe("SUPPORTED");
   });
+
+  it("Z. token state mismatch by absence (UNKNOWN/null) -> no support, distinct from D's positive CONTRADICTED case", () => {
+    const pattern: PatternContent = {
+      ...PATTERN_V1_CONTENT,
+      intentRequirements: {
+        ...PATTERN_V1_CONTENT.intentRequirements,
+        PASSIVE_HOLDER_OUTCOME: {
+          requirements: [{ requirementId: "TS-1", kind: "FLOW_ATTRIBUTE", optionality: "REQUIRED", attribute: "tokenState", expectedValues: ["crv"] }],
+        },
+      },
+    };
+    const f = completeFlow({ attributes: attrs({ tokenState: null }) });
+    const r = evaluateClaimSupport(evalInput({ pattern, intent: "PASSIVE_HOLDER_OUTCOME", assembly: assemble([f]) }));
+    expect(r.status).not.toBe("SUPPORTED");
+    expect(r.requirementResults[0].status).toBe("UNSATISFIED"); // absence, not CONTRADICTED (D-078)
+  });
+
+  it("O. quantifier requirement ('all revenue') is structurally unreachable -> ceiling caps it, never SUPPORTED", () => {
+    // ClaimRequirement has no quantifier field at all (§5/§16, D-109) —
+    // CORE cannot author "ALL revenue" as an atom. The only way a task
+    // claiming this can be represented is via task_type=CLAIM_VERIFICATION
+    // on top of whatever structural atoms DO exist; the ceiling then
+    // guarantees SUPPORTED is unreachable regardless of how complete the
+    // underlying mechanism is.
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }));
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+  });
+
+  it("P. exact numeric proposition is structurally unreachable -> NUMERIC_VALUE_NOT_ESTABLISHED is never emitted; ceiling caps instead", () => {
+    // No RequirementKind can represent "exactly N%" (§16/§20, D-109) — the
+    // reason code exists in the closed vocabulary for forward reachability
+    // (§5) but no evaluator code path assigns it in v1. This test proves
+    // the negative directly: across every requirement kind this file
+    // exercises, NUMERIC_VALUE_NOT_ESTABLISHED never appears, and a task
+    // claiming a specific number still cannot exceed the §3.2 ceiling.
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }));
+    expect(r.reasonCodes).not.toContain("NUMERIC_VALUE_NOT_ESTABLISHED");
+    expect(r.status).not.toBe("SUPPORTED");
+  });
+
+  it("Q. negative claim with no counter-evidence -> INSUFFICIENT_EVIDENCE, never NOT_SUPPORTED (D-078)", () => {
+    // A claim of the form 'X does NOT happen' cannot be established from
+    // mere absence of evidence for the corresponding positive atom — S7
+    // has no polarity field (§21) so this is represented identically to
+    // any other zero-evidence required atom.
+    const f = flow({}); // nothing established, no gaps at all
+    const r = evaluateClaimSupport(evalInput({ assembly: assemble([f]) }));
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.status).not.toBe("NOT_SUPPORTED");
+  });
+
+  it("R. negative claim with positive incompatibility -> NOT_SUPPORTED", () => {
+    // Unlike Q, a positively-established CONTRADICTED_COMPONENT gives S7
+    // a genuine positive incompatibility to stand on (§18 point 2).
+    const f = flow({ gaps: [gap("CONTRADICTED_COMPONENT", "SOURCE_OF_VALUE", 1, ["e1", "e2"])] });
+    const r = evaluateClaimSupport(evalInput({ assembly: assemble([f]) }));
+    expect(r.status).toBe("NOT_SUPPORTED");
+  });
+
+  it("AE. strength adjective ('strongly', 'significantly') is structurally unreachable -> STRENGTH_NOT_ESTABLISHED never emitted", () => {
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }));
+    expect(r.reasonCodes).not.toContain("STRENGTH_NOT_ESTABLISHED");
+    expect(r.status).not.toBe("SUPPORTED");
+  });
+
+  it("AF. '50% of revenue' with mere mechanism existence -> not full support (existence != a specific percentage)", () => {
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }));
+    expect(r.status).not.toBe("SUPPORTED");
+  });
+
+  it("AK. missing provenance on an otherwise-SATISFIED requirement -> ClaimEvaluationInvariantError (system failure, §22/§25)", () => {
+    // Malformed S6 output (netEffect present but its own provenance
+    // carries zero evidenceIds) must never silently become a SATISFIED
+    // result with empty provenance — that would violate §22's mandatory
+    // provenance invariant. This is a genuine internal invariant
+    // violation (§25's closed system-failure list), not a claim outcome.
+    const f = completeFlow({ netEffect: netEffect("SUPPORTED", []) });
+    expect(() => evaluateClaimSupport(evalInput({ intent: "VALUE_CAPTURE", assembly: assemble([f]) }))).toThrow(ClaimEvaluationInvariantError);
+  });
+
+  it("AN. ClaimSupportResult carries no Proof-prose/explanation field anywhere in its shape", () => {
+    const r = evaluateClaimSupport(evalInput());
+    const keys = Object.keys(r);
+    for (const forbidden of ["explanation", "prose", "summary", "verdictText", "proofText", "narrative"]) {
+      expect(keys).not.toContain(forbidden);
+    }
+    expect(keys.sort()).toEqual(["contextGaps", "intent", "patternVersion", "reasonCodes", "requirementResults", "requirementSetVersion", "researchJobId", "status"].sort());
+  });
+
+  it("AQ. 'holding the token yields fees' vs an operator-only reward flow -> no generalization from operator reward to passive-holder capture", () => {
+    const operatorFlow = flow({ lineage: [lineageStep(6, "DESTINATION", ["e1"])], nodes: [node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])], attributes: attrs({ recipientKind: "NODE_OPERATOR" }) });
+    const r = evaluateClaimSupport(evalInput({ intent: "PASSIVE_HOLDER_OUTCOME", assembly: assemble([operatorFlow]) }));
+    expect(r.status).not.toBe("SUPPORTED");
+    expect(r.requirementResults[0].reasonCodes).toContain("ACTOR_MISMATCH");
+  });
+
+  it("AR. governance proposal approved does not, by itself, establish 'mechanism currently works' -> LIFECYCLE stays unsatisfied", () => {
+    // A GOVERNANCE_BASIS lineage step (proposal approved) is not a
+    // CURRENT_STATE lineage step (mechanism actually live) — S7 must not
+    // generalize "approved" into "currently executing".
+    const f = flow({ lifecycle: "NOT_ESTABLISHED", lineage: [lineageStep(4, "GOVERNANCE_BASIS", ["e1"])], nodes: [] });
+    const r = evaluateClaimSupport(evalInput({ intent: "MECHANISM_CURRENT_STATE", assembly: assemble([f]) }));
+    expect(r.status).not.toBe("SUPPORTED");
+  });
+
+  it("AS. buyback attribute established alone does not imply NET_EFFECT (supply reduction) -> compound stays PARTIALLY_SUPPORTED", () => {
+    const pattern: PatternContent = {
+      ...PATTERN_V1_CONTENT,
+      intentRequirements: {
+        ...PATTERN_V1_CONTENT.intentRequirements,
+        BURN_OR_SUPPLY_EFFECT: {
+          requirements: [
+            { requirementId: "BB-ATTR", kind: "FLOW_ATTRIBUTE", optionality: "REQUIRED", attribute: "destinationKind", expectedValues: ["BURN"] },
+            { requirementId: "BB-NET", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" },
+          ],
+        },
+      },
+    };
+    const f = flow({
+      lineage: [lineageStep(6, "DESTINATION", ["e1"])],
+      nodes: [node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])],
+      attributes: attrs({ destinationKind: "BURN" }),
+      gaps: [gap("NET_EFFECT_UNRESOLVED", "NET_EFFECT", 7)],
+    });
+    const r = evaluateClaimSupport(evalInput({ pattern, intent: "BURN_OR_SUPPLY_EFFECT", assembly: assemble([f]) }));
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.requirementResults.find((rr) => rr.requirementId === "BB-ATTR")?.status).toBe("SATISFIED");
+    expect(r.requirementResults.find((rr) => rr.requirementId === "BB-NET")?.status).toBe("UNSATISFIED");
+  });
+
+  it("AT. a reward payout with no source anywhere in the assembly does not establish 'reward comes from revenue'", () => {
+    const rewardOnly = flow({ lineage: [lineageStep(6, "DESTINATION", ["e1"])], nodes: [node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])], attributes: attrs({ recipientKind: "STAKER" }) });
+    const r = evaluateClaimSupport(evalInput({ intent: "REWARD_SOURCE", assembly: assemble([rewardOnly]) }));
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("AU. usage occurring alone does not establish 'usage delivers value to the holder' -> relationship atom unsatisfied", () => {
+    const usageOnly = flow({ lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"])], nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"])], attributes: attrs({ valueSource: "FEES" }) });
+    const r = evaluateClaimSupport(evalInput({ intent: "USAGE_TO_TOKEN_LINKAGE", assembly: assemble([usageOnly]) }));
+    expect(r.status).not.toBe("SUPPORTED");
+    expect(r.requirementResults.find((rr) => rr.requirementId === "UTL-2")?.status).toBe("UNSATISFIED");
+  });
+
+  it("AY. FLOW_ENUMERATION_INCOMPLETE on an otherwise-satisfying flow -> existential SUPPORTED still holds, gap surfaces as non-blocking context", () => {
+    // S7's requirement kinds are all existential ('does at least one
+    // coherent flow satisfy this'), never universal ('do ALL flows
+    // satisfy this') — an incomplete enumeration cannot block an
+    // existential requirement that a known-good flow already satisfies,
+    // and S7 never claims the enumeration itself was exhaustive.
+    const good = completeFlow({ flowId: "fGood" });
+    const r = evaluateClaimSupport(evalInput({ assembly: assemble([good], [gap("FLOW_ENUMERATION_INCOMPLETE", null, null, ["e9"])]) }));
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.contextGaps.some((g) => g.kind === "FLOW_ENUMERATION_INCOMPLETE")).toBe(true);
+  });
+
+  it("mutation-5 companion: destinationKind=BUYBACK_HOLD does not satisfy a BURN requirement (mechanism-label aliasing forbidden)", () => {
+    const pattern: PatternContent = {
+      ...PATTERN_V1_CONTENT,
+      intentRequirements: {
+        ...PATTERN_V1_CONTENT.intentRequirements,
+        BURN_OR_SUPPLY_EFFECT: {
+          requirements: [{ requirementId: "BURN-ONLY", kind: "FLOW_ATTRIBUTE", optionality: "REQUIRED", attribute: "destinationKind", expectedValues: ["burn"] }],
+        },
+      },
+    };
+    const f = flow({ lineage: [lineageStep(6, "DESTINATION", ["e1"])], nodes: [node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])], attributes: attrs({ destinationKind: "BUYBACK_HOLD" }) });
+    const r = evaluateClaimSupport(evalInput({ pattern, intent: "BURN_OR_SUPPLY_EFFECT", assembly: assemble([f]) }));
+    expect(r.requirementResults[0].status).toBe("CONTRADICTED");
+    expect(r.requirementResults[0].reasonCodes).toContain("DESTINATION_MISMATCH");
+  });
+
+  it("mutation-12 companion: direction=RETURN with an established non-holder recipient does not satisfy a PASSIVE_HOLDER requirement", () => {
+    const f = flow({ lineage: [lineageStep(6, "DESTINATION", ["e1"])], nodes: [node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])], attributes: attrs({ recipientKind: "STAKER", direction: "RETURN" }) });
+    const r = evaluateClaimSupport(evalInput({ intent: "PASSIVE_HOLDER_OUTCOME", assembly: assemble([f]) }));
+    expect(r.requirementResults[0].status).toBe("CONTRADICTED");
+    expect(r.requirementResults[0].reasonCodes).toContain("ACTOR_MISMATCH");
+  });
+
+  it("mutation-30/31/32 companion: two co-winning flows/requirements/gaps produce a canonically ordered result regardless of input order", () => {
+    const pattern: PatternContent = {
+      ...PATTERN_V1_CONTENT,
+      intentRequirements: {
+        ...PATTERN_V1_CONTENT.intentRequirements,
+        VALUE_CAPTURE: {
+          requirements: [
+            { requirementId: "ZZ-LAST", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+            { requirementId: "AA-FIRST", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" },
+          ],
+        },
+      },
+    };
+    // Two flows that BOTH fully satisfy every requirement (a genuine tie
+    // at the winning verdict tier), so matchedFlowIds has 2+ entries whose
+    // relative order is otherwise unconstrained by anything except
+    // canonical sorting.
+    const flowZ = completeFlow({ flowId: "zFlow" });
+    const flowA = completeFlow({ flowId: "aFlow" });
+    const gapHigh = gap("FLOW_ENUMERATION_INCOMPLETE", null, 8, ["gHigh"]);
+    const gapLow = gap("FLOW_ENUMERATION_INCOMPLETE", null, 1, ["gLow"]);
+
+    const forward = evaluateClaimSupport(evalInput({ pattern, intent: "VALUE_CAPTURE", assembly: assemble([flowZ, flowA], [gapHigh, gapLow]) }));
+    const reversed = evaluateClaimSupport(evalInput({ pattern, intent: "VALUE_CAPTURE", assembly: assemble([flowA, flowZ], [gapLow, gapHigh]) }));
+    expect(forward).toEqual(reversed);
+    expect(forward.requirementResults.map((r) => r.requirementId)).toEqual(["AA-FIRST", "ZZ-LAST"]);
+    expect(forward.requirementResults[0].matchedFlowIds).toEqual(["aFlow", "zFlow"]);
+  });
+});
+
+describe("S7 acceptance closure pass — D-107/D-106 re-verification (owner request)", () => {
+  it("D-107: REQUIRED atoms SATISFIED+PARTIAL+SATISFIED must NOT be SUPPORTED (PARTIAL is not full satisfaction)", () => {
+    const pattern: PatternContent = {
+      ...PATTERN_V1_CONTENT,
+      intentRequirements: {
+        ...PATTERN_V1_CONTENT.intentRequirements,
+        VALUE_CAPTURE: {
+          requirements: [
+            { requirementId: "MIX-A", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+            { requirementId: "MIX-B", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" },
+            { requirementId: "MIX-C", kind: "DURABILITY_ESTABLISHED", optionality: "REQUIRED" },
+          ],
+        },
+      },
+    };
+    const f = completeFlow({
+      netEffect: netEffect("PARTIALLY_SUPPORTED", ["e3"]), // MIX-B -> PARTIAL
+      durability: durability("SUPPORTED", ["e9"]), // MIX-C -> SATISFIED
+      // MIX-A (SOURCE_OF_VALUE via completeFlow's own lineage) -> SATISFIED
+    });
+    const r = evaluateClaimSupport(evalInput({ pattern, intent: "VALUE_CAPTURE", assembly: assemble([f]) }));
+    expect(r.requirementResults.find((rr) => rr.requirementId === "MIX-A")?.status).toBe("SATISFIED");
+    expect(r.requirementResults.find((rr) => rr.requirementId === "MIX-B")?.status).toBe("PARTIAL");
+    expect(r.requirementResults.find((rr) => rr.requirementId === "MIX-C")?.status).toBe("SATISFIED");
+    expect(r.status).not.toBe("SUPPORTED");
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("REQUIRED_PATH_PARTIAL");
+  });
+
+  it("D-106: CLAIM_FACT_CHECK with zero S6 evidence -> INSUFFICIENT_EVIDENCE, never silently raised to PARTIALLY_SUPPORTED", () => {
+    const r = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([]) }));
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+  });
+
+  it("D-106: CLAIM_FACT_CHECK with some S6 mechanism evidence -> ceiling PARTIALLY_SUPPORTED (never SUPPORTED)", () => {
+    const r = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([completeFlow()]) }));
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+  });
+
+  it("D-106: CLAIM_FACT_CHECK can never reach NOT_SUPPORTED or SUPPORTED — only the two structurally reachable outcomes exist", () => {
+    const withEvidence = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([completeFlow()]) }));
+    const withoutEvidence = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([]) }));
+    expect(["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED"]).toContain(withEvidence.status);
+    expect(["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED"]).toContain(withoutEvidence.status);
+  });
+
+  it("D-106: task_type=CLAIM_VERIFICATION, underlying result is INSUFFICIENT_EVIDENCE -> remains INSUFFICIENT_EVIDENCE (ceiling never raises)", () => {
+    const f = flow({}); // nothing established, no gaps
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([f]) }));
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("D-106: task_type=CLAIM_VERIFICATION, underlying result is NOT_SUPPORTED -> remains NOT_SUPPORTED (ceiling never raises)", () => {
+    const f = flow({ gaps: [gap("CONTRADICTED_COMPONENT", "SOURCE_OF_VALUE", 1, ["e1", "e2"])] });
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([f]) }));
+    expect(r.status).toBe("NOT_SUPPORTED");
+  });
+
+  it("D-106: task_type=CLAIM_VERIFICATION, underlying result is SUPPORTED -> capped to PARTIALLY_SUPPORTED (the one case the ceiling DOES act on)", () => {
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }));
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+  });
+
+  it("mutation-14 companion: PARTIAL required atom mixed with SATISFIED atoms is deterministic across requirement order", () => {
+    const pattern: PatternContent = {
+      ...PATTERN_V1_CONTENT,
+      intentRequirements: {
+        ...PATTERN_V1_CONTENT.intentRequirements,
+        VALUE_CAPTURE: {
+          requirements: [
+            { requirementId: "ORD-A", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
+            { requirementId: "ORD-B", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" },
+          ],
+        },
+      },
+    };
+    const f = completeFlow({ netEffect: netEffect("PARTIALLY_SUPPORTED", ["e3"]) });
+    const r = evaluateClaimSupport(evalInput({ pattern, intent: "VALUE_CAPTURE", assembly: assemble([f]) }));
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.status).not.toBe("SUPPORTED");
+  });
 });
 
 describe("S7 D-110 — no confidence/probability field anywhere in the schema", () => {

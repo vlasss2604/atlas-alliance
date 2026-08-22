@@ -315,10 +315,18 @@ function evaluateFlowAttribute(req: ClaimRequirement, flow: MechanismFlow): Flow
   if (evidenceIds.length === 0) return null; // nothing established on this flow at all — not a candidate
 
   if (isUnestablished) {
+    // §20 precision: when the underlying component IS established but S6
+    // positively flagged its classification as unresolved (FLOW_IDENTITY_
+    // UNRESOLVED — currently only produced for SOURCE_OF_VALUE/valueSource,
+    // mechanism-assembler.ts), surface that specific code instead of the
+    // generic REQUIRED_ATOM_UNSATISFIED. Still absence, not incompatibility
+    // — status stays UNSATISFIED, never CONTRADICTED (§18.1: not proof of
+    // a positive incompatibility, just an unresolved identity).
+    const identityGaps = attribute === "valueSource" ? gapsForComponentOnFlow(flow, "SOURCE_OF_VALUE").filter((g) => g.kind === "FLOW_IDENTITY_UNRESOLVED") : [];
     return {
       status: "UNSATISFIED",
-      reasonCodes: ["REQUIRED_ATOM_UNSATISFIED"],
-      blockingGaps: [],
+      reasonCodes: identityGaps.length > 0 ? ["FLOW_IDENTITY_UNRESOLVED"] : ["REQUIRED_ATOM_UNSATISFIED"],
+      blockingGaps: identityGaps,
       evidenceIds: [],
       componentResultKeys: [],
     };
@@ -522,6 +530,26 @@ export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportR
     return { ...baseResult(input), status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["INTENT_NOT_CLASSIFIED"], requirementResults: [], contextGaps: [] };
   }
   if (CEILING_INTENTS.has(intent)) {
+    // §3.2/D-106 — the ceiling is a MAXIMUM ("never SUPPORTED"), never a
+    // floor: it must not silently raise a genuinely-empty result (zero S6
+    // flows, i.e. no mechanism evidence exists for this job at all) up to
+    // "partially supported". CLAIM_FACT_CHECK has no CORE requirement set
+    // (out of scope, §28) so there is no per-atom evaluation to run — the
+    // only structurally honest signal available is "did S6 establish any
+    // mechanism at all for this job's topic", which is what gates between
+    // the two reachable outcomes below. NOT_SUPPORTED stays structurally
+    // unreachable here (no requirement set means no positive-incompatibility
+    // check is possible), which is intentional, not a gap — see
+    // phase6-s7-claim-evaluator.test.ts's dedicated regression.
+    if (assembly.flows.length === 0) {
+      return {
+        ...baseResult(input),
+        status: "INSUFFICIENT_EVIDENCE",
+        reasonCodes: ["CLAIM_PROPOSITION_NOT_STRUCTURED", "NO_RELEVANT_FLOW"],
+        requirementResults: [],
+        contextGaps: contextGapsFor(assembly, new Set()),
+      };
+    }
     return {
       ...baseResult(input),
       status: "PARTIALLY_SUPPORTED",
