@@ -21,6 +21,21 @@ import { loadActivePatternVersion } from "./active-pattern";
 // output to feed into. It exists so activePatternVersion resolution has
 // one real, testable production caller instead of remaining test-only,
 // and so a future S5 slice has a single integration point to call.
+
+// S4 review fix (LOW-1): the approved plan requires the active Pattern
+// version to match the stored contract, or the job fails explicitly.
+// Silently passing `undefined` when no ACTIVE row exists (buildContractView
+// simply skips its own cross-check for `undefined` — contract-view.ts is
+// frozen and untouched here) would let a topic with no ACTIVE Pattern run
+// research unchecked. This module hard-fails BEFORE calling
+// buildContractView instead.
+export class MissingActivePatternError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MissingActivePatternError";
+  }
+}
+
 export async function runS4ResearchJob(
   db: Database | Transaction,
   jobId: string,
@@ -41,12 +56,17 @@ export async function runS4ResearchJob(
 
   const contract = parseContract(planRow.contract);
   const activePatternVersion = await loadActivePatternVersion(db, job.topicId);
+  if (activePatternVersion === null) {
+    throw new MissingActivePatternError(
+      `no ACTIVE research_patterns row for topic ${job.topicId} — refusing to run research without a confirmed active Pattern version`,
+    );
+  }
 
   const view: ContractView = buildContractView({
     contract,
     mode: planRow.mode,
     capabilityAtStart: job.capabilityAtStart,
-    activePatternVersion: activePatternVersion ?? undefined,
+    activePatternVersion,
   });
 
   return runResearchController({ db, jobId, view, executor, now });

@@ -23,9 +23,14 @@ const productConfigSchema = z.object({
   // Модель Interpreter (решение владельца №2). Смена — без деплоя.
   interpreter_model: z.string().min(1),
   // Фаза 6, S4 (D-032/D-026 continuation, P3): роли модели движка меняются
-  // ключом, не кодом — тот же принцип, что interpreter_model.
-  query_proposer_model: z.string().min(1),
-  evidence_extractor_model: z.string().min(1),
+  // ключом, не кодом — тот же принцип, что interpreter_model. MEDIUM-3
+  // (S4 review fix): .default(...) — не .min(1) без default — так строка
+  // без соответствующей строки product_config (реальная существующая БД,
+  // мигрированная, но не пересеянная) не роняет loadProductConfig() для
+  // ВСЕХ вызывающих маршрутов. Миграция 0012 также сама вставляет эти
+  // ключи (ON CONFLICT DO NOTHING) — это защита в глубину, не замена.
+  query_proposer_model: z.string().min(1).default("claude-haiku-4-5"),
+  evidence_extractor_model: z.string().min(1).default("claude-haiku-4-5"),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),

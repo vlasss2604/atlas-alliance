@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { evidence, projects, researchPatterns, sources, topics, users } from "../src/server/db/schema";
 import { loadActivePatternVersion } from "../src/server/engine/active-pattern";
 import type { WorkExecutor } from "../src/server/engine/controller";
-import { runS4ResearchJob } from "../src/server/engine/run-job";
+import { MissingActivePatternError, runS4ResearchJob } from "../src/server/engine/run-job";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
@@ -132,6 +132,92 @@ describe("Фаза 6, S4 — runS4ResearchJob: ContractView -> ResearchControlle
 
     const executor: WorkExecutor = { async execute() { return { status: "SUCCEEDED" }; } };
     await expect(runS4ResearchJob(ctx.db, jobId, executor, NOW)).rejects.toThrow(/CONTRACT_INVALID/);
+  });
+});
+
+describe("Фаза 6, S4 — LOW-1: без ACTIVE Pattern research не идёт молча, а падает явно", () => {
+  async function makePlannedJobForTopic(topicId: string): Promise<string> {
+    const [project] = await ctx.db
+      .insert(projects)
+      .values({ slug: uniq("p6s4low1"), name: "S4 LOW-1 test", status: "ACTIVE_CORE" })
+      .returning();
+    const [user] = await ctx.db.insert(users).values({}).returning();
+    const { job } = await createResearchJob(ctx.db, ctx.boss, {
+      userId: user.id,
+      topicId,
+      projectId: project.id,
+      originalQuestion: "does protocol revenue reach token holders?",
+      normalizedTask: { project_slug: project.slug, project_slugs: [project.slug], task: "x" },
+      normalizedTaskHash: uniq("hash"),
+      idempotencyKey: uniq("idem"),
+      entitlement: coreEntitlement(),
+      demoLifetimeProofLimit: 1000,
+    });
+    await runMemoryPlanningStage(ctx.db, job.id);
+    return job.id;
+  }
+
+  it("ровно одна ACTIVE-версия для темы -> используется без ошибки", async () => {
+    // Собственная тема (не общая тема по умолчанию, чью версию Pattern'а
+    // другие тесты этого файла намеренно мутируют) — единственная ACTIVE
+    // строка, с контрактом, чей patternVersion честно совпадает.
+    const referenceTopicId = await activeTopicId();
+    const [referenceRow] = await ctx.db
+      .select()
+      .from(researchPatterns)
+      .where(eq(researchPatterns.topicId, referenceTopicId));
+
+    const [topic] = await ctx.db
+      .insert(topics)
+      .values({ slug: uniq("t_low1_exactly_one_active"), name: "LOW-1 exactly one active", isActive: true })
+      .returning();
+    await ctx.db.insert(researchPatterns).values({
+      topicId: topic.id,
+      version: 1,
+      status: "ACTIVE",
+      content: referenceRow.content,
+    });
+
+    const version = await loadActivePatternVersion(ctx.db, topic.id);
+    expect(version).toBe(1);
+
+    const jobId = await makePlannedJobForTopic(topic.id);
+    const executor: WorkExecutor = { async execute() { return { status: "SUCCEEDED" }; } };
+    const result = await runS4ResearchJob(ctx.db, jobId, executor, NOW);
+    expect(result.stopReason).toBeDefined();
+  });
+
+  it("только исторические (не ACTIVE) версии Pattern'а для темы -> жёсткий отказ MissingActivePatternError", async () => {
+    const referenceTopicId = await activeTopicId();
+    const [referenceRow] = await ctx.db
+      .select()
+      .from(researchPatterns)
+      .where(eq(researchPatterns.topicId, referenceTopicId));
+
+    const [topic] = await ctx.db
+      .insert(topics)
+      .values({ slug: uniq("t_low1_no_active"), name: "LOW-1 no active pattern", isActive: false })
+      .returning();
+    // Валидный по схеме content (переиспользуем content реального ACTIVE
+    // Pattern'а как шаблон) — иначе Phase 5 loadActivePattern() упадёт
+    // раньше, чем мы дойдём до проверяемого S4-инварианта. Оба ряда
+    // сознательно НЕ ACTIVE — единственное, что здесь проверяется.
+    await ctx.db.insert(researchPatterns).values({
+      topicId: topic.id,
+      version: 1,
+      status: "DRAFT",
+      content: referenceRow.content,
+    });
+    await ctx.db.insert(researchPatterns).values({
+      topicId: topic.id,
+      version: 2,
+      status: "RETIRED",
+      content: referenceRow.content,
+    });
+
+    const jobId = await makePlannedJobForTopic(topic.id);
+    const executor: WorkExecutor = { async execute() { return { status: "SUCCEEDED" }; } };
+    await expect(runS4ResearchJob(ctx.db, jobId, executor, NOW)).rejects.toThrow(MissingActivePatternError);
   });
 });
 

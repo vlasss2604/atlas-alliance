@@ -12,6 +12,16 @@ export interface ComponentTarget {
   step: number;
   stepName: string;
   component: string;
+  // S4 review fix (HIGH-2, project containment): immutable project
+  // identity carried structurally into every provider call, not just
+  // mentioned in a prompt. Prompt inclusion alone does not stop a
+  // compromised/wrong extractor from rewriting a summary to sound like
+  // it's about this project — the real containment check
+  // (s4-executor.ts) verifies the FETCHED DOCUMENT itself names the
+  // project, independent of anything a provider claims about it.
+  projectId: string | null;
+  projectName: string;
+  projectSlug: string;
 }
 
 export interface SourceCandidate {
@@ -74,10 +84,12 @@ export interface ExtractedFact {
   supportFragment: string;
   mechanismState: string | null;
   directness: "DIRECT" | "INDIRECT" | "INFERRED";
-  // Two-axis authority (§7.2) — deterministic from the source, not from
-  // how many times something like it was said (no repetition-as-authority).
-  sourceClass: EvidenceSourceClass;
-  officiality: EvidenceOfficiality;
+  // S4 review fix (BLOCKER-1, D-074, §7.2): sourceClass/officiality are
+  // DELIBERATELY ABSENT from this interface. Source authority is a two-
+  // axis, code-computed decision (source-authority.ts) — the model is
+  // never asked for it and has no field here to raise it even if it
+  // tried. "The model may extract candidate factual content. The model
+  // MUST NOT be authoritative for source authority."
   // Applicability time, where the document states one — optional, since
   // not every fetched page carries a publish date.
   publishedAt: Date | null;

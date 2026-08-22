@@ -85,6 +85,20 @@
       "when": 1787344199008,
       "tag": "0011_s4_attempt_spend_and_evidence_version_check",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787386028609,
+      "tag": "0012_s4_review_budget_reservation",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787386632459,
+      "tag": "0013_evidence_idempotency_key",
+      "breakpoints": true
     }
   ]
 }

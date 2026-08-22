@@ -3,6 +3,7 @@ import {
   boolean,
   check,
   index,
+  integer,
   jsonb,
   pgTable,
   smallint,
@@ -65,6 +66,21 @@ export const researchJobs = pgTable(
       .default(0),
     unread: boolean("unread").notNull().default(false),
     errorCode: text("error_code"),
+    // Фаза 6, S4 review fix (BLOCKER-2/HIGH-1) — job-lifetime ATOMIC
+    // reservation counters for the three real dimensional ceilings
+    // (real SearchGateway calls, real ContentFetcher opens, reserved
+    // model cost), separate from and never conflated with the
+    // ATTEMPT-COUNT gate in controller.ts (which stays keyed off the
+    // same maxSearchQueries NUMBER for historical/S3-accepted reasons,
+    // but counts a structurally different thing — attempts, not calls).
+    // Each external action reserves its unit here via a single atomic
+    // `UPDATE ... WHERE current + amount <= ceiling` BEFORE the call is
+    // made (see budget-reservation.ts) — no DB lock is held across the
+    // external call itself, and the reservation is never refunded on
+    // failure ("not a free retry").
+    searchQueriesReserved: integer("search_queries_reserved").notNull().default(0),
+    sourceOpensReserved: integer("source_opens_reserved").notNull().default(0),
+    modelCostMicroReserved: integer("model_cost_micro_reserved").notNull().default(0),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

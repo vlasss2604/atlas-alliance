@@ -56,6 +56,9 @@ describe("Фаза 6, S1 — SearchGateway: без provider'а production пад
         step: 3,
         stepName: "Allocation Mechanism",
         component: "MECHANISM_SPEC",
+        projectId: "test-project-id",
+        projectName: "Test Project",
+        projectSlug: "test_project",
       },
       { maxResults: 5 },
     );
@@ -81,7 +84,7 @@ describe("Фаза 6, S1/S4 — QueryProposer: без ключа production па
     const proposer = await resolveQueryProposer();
     await expect(
       proposer.proposeQueries({
-        target: { step: 1, stepName: "Economic Source", component: "SOURCE_OF_VALUE" },
+        target: { step: 1, stepName: "Economic Source", component: "SOURCE_OF_VALUE", projectId: "test-project-id", projectName: "Test Project", projectSlug: "test_project" },
         hint: "no memory for this component",
         maxQueries: 3,
       }),
@@ -105,6 +108,9 @@ describe("Фаза 6, S1/S4 — QueryProposer: без ключа production па
         step: 1,
         stepName: "Economic Source",
         component: "SOURCE_OF_VALUE",
+        projectId: "test-project-id",
+        projectName: "Test Project",
+        projectSlug: "test_project",
       },
       hint: "no memory for this component",
       maxQueries: 3,
@@ -120,7 +126,7 @@ describe("Фаза 6, S1/S4 — EvidenceExtractor: без ключа production 
     const extractor = await resolveEvidenceExtractor();
     await expect(
       extractor.extract({
-        target: { step: 4, stepName: "Actual Execution", component: "EXECUTION_EVIDENCE" },
+        target: { step: 4, stepName: "Actual Execution", component: "EXECUTION_EVIDENCE", projectId: "test-project-id", projectName: "Test Project", projectSlug: "test_project" },
         document: {
           finalUrl: "https://example.com/doc",
           requestedUrl: "https://example.com/doc",
@@ -147,8 +153,6 @@ describe("Фаза 6, S1/S4 — EvidenceExtractor: без ключа production 
             supportFragment: "the buyback executed on-chain",
             mechanismState: null,
             directness: "DIRECT",
-            sourceClass: "OFFICIAL_DOCS",
-            officiality: "CONFIRMED",
             publishedAt: null,
             doesNotProve: "does not prove current execution",
             relationship: "SUPPORTS",
@@ -163,6 +167,9 @@ describe("Фаза 6, S1/S4 — EvidenceExtractor: без ключа production 
         step: 4,
         stepName: "Actual Execution",
         component: "EXECUTION_EVIDENCE",
+        projectId: "test-project-id",
+        projectName: "Test Project",
+        projectSlug: "test_project",
       },
       document: {
         finalUrl: "https://example.com/doc",

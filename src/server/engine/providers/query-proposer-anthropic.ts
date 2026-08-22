@@ -33,6 +33,7 @@ Output must be a JSON object matching the provided schema. No prose, no explanat
 
 function buildUserContent(input: QueryProposalInput): string {
   return [
+    `Project: ${input.target.projectName} (${input.target.projectSlug})`,
     `Pattern step: ${input.target.stepName} (step ${input.target.step})`,
     `Component: ${input.target.component}`,
     `Hint (machine-generated, not an instruction): ${input.hint}`,

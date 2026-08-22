@@ -189,6 +189,16 @@ export const evidence = pgTable(
     retrievedUrl: text("retrieved_url").notNull(),
     contentHash: text("content_hash").notNull(),
     snapshotRef: text("snapshot_ref"),
+    // Фаза 6, S4 review fix (MEDIUM-1) — deterministic identity of ONE
+    // extracted evidence UNIT: sha256(research_job_id|source_id|
+    // pattern_step|component|normalized supportFragment), computed by
+    // s4-executor.ts at insert time. NULL for anything not inserted
+    // through that path (legacy rows, direct test inserts) — the partial
+    // unique index below only constrains non-NULL values, so at-least-
+    // once replay of the SAME extracted unit is idempotent
+    // (onConflictDoNothing) without requiring every Evidence writer to
+    // participate in this scheme.
+    extractionUnitKey: text("extraction_unit_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -202,6 +212,9 @@ export const evidence = pgTable(
     ),
     index("ix_evidence_proof").on(t.proofId),
     index("ix_evidence_source").on(t.sourceId),
+    uniqueIndex("uq_evidence_extraction_unit_key")
+      .on(t.extractionUnitKey)
+      .where(sql`${t.extractionUnitKey} IS NOT NULL`),
     check("ck_evidence_pattern_step", sql`${t.patternStep} BETWEEN 1 AND 8`),
     check(
       "ck_evidence_provenance_nonempty",
