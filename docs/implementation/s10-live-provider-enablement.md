@@ -440,3 +440,100 @@ FIRST REAL ATLAS RUN            НЕ ВЫПОЛНЕН
 **S10 не заморожен этим документом.** Freeze — отдельное решение
 владельца после ревью. FIRST REAL ATLAS RUN — отдельный, будущий,
 явно owner-controlled шаг.
+
+---
+
+## 20. Acceptance Closure (D-119) — коррекция §5/§7/§17 по независимому ревью
+
+Независимое ревью HEAD `eac7b87` (§19 выше) вернуло **REJECT / DO NOT
+ACCEPT** (BLOCKER 2, HIGH 1, MEDIUM 2, LOW 3). Этот раздел — историческая
+коррекция; §1–19 выше не стираются, но §5 (Retry) и §17 (терминальный
+контракт при сбое) читать вместе с этим разделом как авторитетным.
+
+**BLOCKER-1 — capability-fatal канал.** §17 (выше) утверждал, что сбой
+исполнения становится `FAILED`/`SYSTEM_OR_PROVIDER_FAILURE` — это было
+верно для `TracePersistenceError` (Stage 2, D-115), но НЕ было верно
+для полного отказа живой способности провайдера: такой отказ
+деградировал в обычный `WorkExecutionResult.FAILED`, доходил до
+`WORK_QUEUE_EXHAUSTED → SUCCEEDED`, и S7 писал `INSUFFICIENT_EVIDENCE`
+— нарушение D-114. Закрыто новым `CapabilityFatalError`
+(`src/server/engine/capability-fatal-error.ts`), бросаемым из
+`s4-executor.ts` при доказанной недоступности SearchGateway/
+QueryProposer/EvidenceExtractor/count_tokens после допустимого retry —
+распространяется структурно через `controller.ts`/`run-job.ts` (нет
+промежуточного try/catch) до границы `worker.ts`, без единого
+изменения контроллера или S5/S6/S7.
+
+**BLOCKER-2 — retry владеет резервацией на КАЖДУЮ внешнюю попытку.** §5
+(выше) описывал `retryOnceIfTransient` как провайдер-внутренний —
+это было архитектурной ошибкой: одна S4-резервация могла авторизовать
+ДВА реальных внешних вызова (Brave/Anthropic), в обход правила «каждый
+биллируемый внешний вызов получает собственную резервацию ДО вызова».
+Retry перенесён из провайдеров (`search-gateway-brave.ts`/
+`query-proposer-anthropic.ts`/`evidence-extractor-anthropic.ts` теперь
+делают РОВНО одну внешнюю попытку каждый) в новую единую функцию
+`reserveAndCallWithRetry` (`s4-executor.ts`), которая резервирует
+бюджет перед каждой попыткой, включая повтор. `count_tokens` остаётся
+исключением (небиллируемо, собственный внутренний retry в
+`token-gate.ts`) — задокументировано явно, не новая бюджетная ось.
+
+**HIGH-1 — посчитанный запрос = generation-запрос.** `count_tokens`
+получал только `model`/`system`/`messages`; `output_config` не входил
+в посчитанный запрос, хотя влияет на то, как провайдер токенизирует
+запрос. `countThenGate` (`token-gate.ts`) теперь требует `outputConfig`
+как обязательный параметр; оба провайдерских файла строят один общий
+`baseRequest`, используемый структурно идентично для counting и
+generation.
+
+**MEDIUM-1 — одна audit-строка на реальную попытку модели.** Полное
+usage копировалось на каждую строку `QUERY_PROPOSED`/`EXTRACT_OK`, так
+что `SUM(actual_cost_micro)` завышал реальную стоимость кратно числу
+предложенных запросов/допущенных фактов одного вызова. Новый закрытый
+`trace_operation_type` `MODEL_CALL_ATTEMPTED` (миграция `0022`) — ровно
+одна audit-строка на реальный внешний вызов генерации.
+`QUERY_PROPOSED`/`EXTRACT_OK` больше не несут usage-полей.
+`alpha-run.ts`/`alpha-inspect.ts` теперь суммируют `actual_cost_micro`
+только по `operation_type = 'MODEL_CALL_ATTEMPTED'`, без сужающего
+`::int`.
+
+**MEDIUM-2 — no-prompt-caching billing assumption.** `INTERNAL_ALPHA_V1`
+намеренно не использует prompt caching. Новое поле
+`ModelUsage.unsupportedBillingUsage` — если ответ Anthropic сообщает
+ненулевые `cache_creation_input_tokens`/`cache_read_input_tokens`,
+`s4-executor.ts` не вычисляет `actualCostMicro` из одних
+input/output-токенов (оставляет `null`, `reasonCode=
+UNSUPPORTED_BILLING_USAGE`), вместо молчаливого занижения стоимости.
+
+**§7 LOW, принятые тривиально:** malformed JSON от Brave (HTTP 200,
+невалидное тело) переклассифицирован нетранзиентным — детерминированный
+сбой парсинга, повтор идентичного запроса воспроизвёл бы тот же
+результат.
+
+**Раскрыто, НЕ реализовано:** операционная видимость номера попытки
+`count_tokens` (1 vs retry 2) — отдельная trace-запись не добавлена;
+неудача `count_tokens` после retry уже становится `fatal` и видна
+через `CapabilityFatalError`/`MODEL_CALL_ATTEMPTED`, но какая именно
+попытка (первая или вторая) не различима в трейсе.
+
+Новый regression-файл: `tests/s10-acceptance-closure.test.ts` (19
+тестов — BLOCKER-1 A–F + E2E, BLOCKER-2 1–5, HIGH-1, MEDIUM-1,
+MEDIUM-2).
+
+### Регрессия этого closure pass
+
+- `npx vitest run` → **748 passed, 4 skipped, 0 failed**
+- `tsc --noEmit` → чисто
+- `eslint .` → чисто
+- `next build` → успех
+- `drizzle-kit generate` → без дрейфа (миграция `0022` уже применена)
+- `npm run eval:memory` → не изменился
+- `npx playwright test` → 7 passed, 1 skipped
+
+S4 изменён только execution/accounting-only; `controller.ts`/
+`component-reconciler.ts`/`mechanism-assembler.ts`/`claim-evaluator.ts`/
+`claim-support-store.ts` — нулевой diff. `research_enabled=false`;
+`internal_alpha_enabled` остаётся default `false`. Живого трафика
+Brave/Anthropic в рамках этого closure pass не было.
+
+**Этот closure pass сам себя не замораживает.** Freeze S10 остаётся
+отдельным решением владельца после повторного независимого ревью.

@@ -31,6 +31,16 @@ export interface ComponentTarget {
 export interface ModelUsage {
   inputTokens: number;
   outputTokens: number;
+  // S10 acceptance closure (MEDIUM-2, D-119) — true when the provider
+  // response reported a billable usage category (e.g.
+  // cache_creation_input_tokens/cache_read_input_tokens) that the
+  // approved cost profile cannot safely price, because INTERNAL_ALPHA_V1
+  // intentionally does not use prompt caching. When true, the consumer
+  // (s4-executor.ts) must NOT compute actualCostMicro from
+  // inputTokens/outputTokens alone — that would silently understate real
+  // cost. Never invents pricing for the unsupported category; surfaces
+  // an explicit reason code instead.
+  unsupportedBillingUsage?: boolean;
 }
 
 export interface SourceCandidate {

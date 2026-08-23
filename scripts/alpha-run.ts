@@ -262,9 +262,13 @@ async function main() {
     }
 
     const jobRow = (await db.select().from(researchJobs).where(eq(researchJobs.id, job.id)))[0];
+    // S10 acceptance closure (MEDIUM-1, D-119): actual cost is calculated
+    // from MODEL_CALL_ATTEMPTED audit rows only — QUERY_PROPOSED/EXTRACT_OK
+    // no longer carry usage, so summing over all trace rows would double
+    // count. No ::int narrowing — SUM(bigint) stays numeric-safe.
     const [{ actualCostMicroSum }] = (
       await db.execute(
-        sql`SELECT COALESCE(SUM(${researchTraceEvents.actualCostMicro}), 0)::int AS "actualCostMicroSum" FROM ${researchTraceEvents} WHERE research_job_id = ${job.id}`,
+        sql`SELECT COALESCE(SUM(${researchTraceEvents.actualCostMicro}), 0) AS "actualCostMicroSum" FROM ${researchTraceEvents} WHERE research_job_id = ${job.id} AND operation_type = 'MODEL_CALL_ATTEMPTED'`,
       )
     ).rows as [{ actualCostMicroSum: number }];
 

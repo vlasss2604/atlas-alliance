@@ -4,7 +4,6 @@ import { z } from "zod";
 
 import { EvidenceExtractorUnavailableError } from "./evidence-extractor";
 import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extractor";
-import { retryOnceIfTransient } from "./retry";
 import { countThenGate } from "./token-gate";
 import type { ModelUsage } from "./types";
 
@@ -105,8 +104,12 @@ export function createAnthropicEvidenceExtractor(
 ): EvidenceExtractor {
   return {
     name: "anthropic",
+    // S10 acceptance closure (BLOCKER-2, D-119): exactly ONE external
+    // extraction attempt per call — retry (with its own fresh
+    // reservation) is now owned entirely by s4-executor.ts's
+    // reserveAndCallWithRetry, never by this provider primitive.
     async extract(input: EvidenceExtractionInput) {
-      return retryOnceIfTransient(() => doExtract(input, model, maxOutputTokens, maxInputTokens, onUsage));
+      return doExtract(input, model, maxOutputTokens, maxInputTokens, onUsage);
     },
   };
 }
@@ -119,18 +122,25 @@ async function doExtract(
   onUsage?: (usage: ModelUsage) => void,
 ) {
   const userContent = buildUserContent(input);
+  // S10 acceptance closure (HIGH-1, D-119): ONE shared base request
+  // object — model/system/messages/output_config — used for BOTH the
+  // count and the generation call, so the two structurally cannot drift
+  // apart. max_tokens is generation-only, added separately below.
+  const baseRequest = {
+    model,
+    system: SYSTEM_PROMPT,
+    messages: [{ role: "user" as const, content: userContent }],
+    output_config: { format: zodOutputFormat(extractionResultSchema) },
+  };
   // D-090 count-then-gate (S10, token-gate.ts): throws ModelInputOversizedError
   // or TokenCountUnavailableError before any generation call is made —
   // the document's normalizedText is never truncated to fit.
-  await countThenGate(client(), model, SYSTEM_PROMPT, [{ role: "user", content: userContent }], maxInputTokens);
+  await countThenGate(client(), baseRequest.model, baseRequest.system, baseRequest.messages, baseRequest.output_config, maxInputTokens);
   let message;
   try {
     message = await client().messages.create({
-      model,
+      ...baseRequest,
       max_tokens: maxOutputTokens,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userContent }],
-      output_config: { format: zodOutputFormat(extractionResultSchema) },
     });
   } catch (e) {
     const status = e instanceof Anthropic.APIError ? e.status : undefined;
@@ -144,7 +154,12 @@ async function doExtract(
   if (message.stop_reason === "max_tokens") {
     throw new EvidenceExtractorUnavailableError("model output truncated (max_tokens)");
   }
-  onUsage?.({ inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens });
+  // S10 acceptance closure (MEDIUM-2, D-119): INTERNAL_ALPHA_V1 does not
+  // use prompt caching — if the provider response reports a billable
+  // cache category anyway, flag it rather than silently pricing only
+  // input_tokens/output_tokens (which would understate real cost).
+  const unsupportedBillingUsage = (message.usage.cache_creation_input_tokens ?? 0) > 0 || (message.usage.cache_read_input_tokens ?? 0) > 0;
+  onUsage?.({ inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens, unsupportedBillingUsage });
   const text = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
   let raw: unknown;
   try {

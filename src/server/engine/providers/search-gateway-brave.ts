@@ -1,6 +1,5 @@
 import { SearchProviderUnavailableError } from "./search-gateway";
 import type { SearchGateway } from "./search-gateway";
-import { retryOnceIfTransient } from "./retry";
 import type { ComponentTarget, SourceCandidate } from "./types";
 
 // Phase 6 — live SearchGateway over the Brave Search API (Web Search),
@@ -17,12 +16,12 @@ const REQUEST_TIMEOUT_MS = 10_000;
 export function createBraveSearchGateway(apiKey: string): SearchGateway {
   return {
     name: "brave",
-    // S10 (live-provider-enablement.md §8, D-118): 1 retry, 2 total
-    // external attempts maximum, only for a failure this module already
-    // classifies transient (429/5xx/network — see the throw sites below,
-    // unchanged).
+    // S10 acceptance closure (BLOCKER-2, D-119): exactly ONE external
+    // attempt per call — retry (with its own fresh reservation) is now
+    // owned entirely by s4-executor.ts's reserveAndCallWithRetry, never
+    // by this provider primitive.
     async search(query, target, opts): Promise<SourceCandidate[]> {
-      return retryOnceIfTransient(() => doSearch(apiKey, query, target, opts));
+      return doSearch(apiKey, query, target, opts);
     },
   };
 }
@@ -63,7 +62,11 @@ async function doSearch(
   try {
     body = await res.json();
   } catch {
-    throw new SearchProviderUnavailableError("Brave Search response was not valid JSON", true);
+    // S10 acceptance closure (§7 LOW-a, D-119): a 200-status response body
+    // that fails to parse as JSON is a deterministic malformed payload, not
+    // a transient transport blip — retrying an identical request would
+    // reproduce the same parse failure. Non-transient, no retry.
+    throw new SearchProviderUnavailableError("Brave Search response was not valid JSON", false);
   }
 
   const results = (body as { web?: { results?: unknown[] } })?.web?.results ?? [];

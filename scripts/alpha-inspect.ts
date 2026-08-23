@@ -191,9 +191,13 @@ async function main() {
     // Reserved) from actual (audit-only, summed from real provider usage
     // persisted on the operational trace) from limit (the job's budget
     // envelope) — never conflated, never a second budget authority.
+    // S10 acceptance closure (MEDIUM-1, D-119): actual cost is calculated
+    // from MODEL_CALL_ATTEMPTED audit rows only (QUERY_PROPOSED/EXTRACT_OK
+    // no longer carry usage) — no ::int narrowing, SUM(bigint) stays
+    // numeric-safe.
     const [{ actualCostMicroSum }] = (
       await db.execute(
-        sql`SELECT COALESCE(SUM(actual_cost_micro), 0)::int AS "actualCostMicroSum" FROM research_trace_events WHERE research_job_id = ${jobId}`,
+        sql`SELECT COALESCE(SUM(actual_cost_micro), 0) AS "actualCostMicroSum" FROM research_trace_events WHERE research_job_id = ${jobId} AND operation_type = 'MODEL_CALL_ATTEMPTED'`,
       )
     ).rows as [{ actualCostMicroSum: number }];
     console.log(`  model cost micro: reserved=${job.modelCostMicroReserved} actual=${actualCostMicroSum} limit=${budget.maxModelCostMicro}`);

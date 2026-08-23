@@ -64,7 +64,7 @@ describe("S10 §5 — D-090 count-then-gate (token-gate.ts)", () => {
       // catch branch — not needed on the happy/oversized path.
     } as unknown as import("@anthropic-ai/sdk").default;
 
-    await expect(countThenGate(fakeClient, "claude-haiku-4-5", "sys", [{ role: "user", content: "hi" }], 4000)).rejects.toBeInstanceOf(
+    await expect(countThenGate(fakeClient, "claude-haiku-4-5", "sys", [{ role: "user", content: "hi" }], undefined, 4000)).rejects.toBeInstanceOf(
       ModelInputOversizedError,
     );
     expect(createMock).not.toHaveBeenCalled();
@@ -75,7 +75,7 @@ describe("S10 §5 — D-090 count-then-gate (token-gate.ts)", () => {
     const fakeClient = {
       messages: { countTokens: vi.fn().mockResolvedValue({ input_tokens: 10 }) },
     } as unknown as import("@anthropic-ai/sdk").default;
-    await expect(countThenGate(fakeClient, "claude-haiku-4-5", "sys", [{ role: "user", content: "hi" }], 4000)).resolves.toBeUndefined();
+    await expect(countThenGate(fakeClient, "claude-haiku-4-5", "sys", [{ role: "user", content: "hi" }], undefined, 4000)).resolves.toBeUndefined();
   });
 
   it("count_tokens itself failing throws TokenCountUnavailableError — never falls through to generation", async () => {
@@ -83,7 +83,7 @@ describe("S10 §5 — D-090 count-then-gate (token-gate.ts)", () => {
     const fakeClient = {
       messages: { countTokens: vi.fn().mockRejectedValue(new Error("network down")) },
     } as unknown as import("@anthropic-ai/sdk").default;
-    await expect(countThenGate(fakeClient, "claude-haiku-4-5", "sys", [{ role: "user", content: "hi" }], 4000)).rejects.toBeInstanceOf(
+    await expect(countThenGate(fakeClient, "claude-haiku-4-5", "sys", [{ role: "user", content: "hi" }], undefined, 4000)).rejects.toBeInstanceOf(
       TokenCountUnavailableError,
     );
   });

@@ -23,10 +23,12 @@ import { resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
+import { isTransientError } from "./providers/retry";
 import { ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
 import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import { findAttemptId, recordTraceEvent } from "./trace-store";
+import { CapabilityFatalError } from "./capability-fatal-error";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — this
 // file's OWN instrumentation is additive-only: every recordTraceEvent
@@ -320,6 +322,103 @@ function resolveCostProfile(
   }
 }
 
+// S10 acceptance closure (BLOCKER-1/BLOCKER-2, D-119) — the ONE place
+// that owns "reserve BEFORE every external attempt, including a retry"
+// for a billable/budgeted external call (SearchGateway per-query,
+// QueryProposer, EvidenceExtractor). Provider primitives themselves now
+// perform exactly ONE external attempt each (retry.ts/the three
+// providers/*-anthropic.ts files no longer self-retry) — this function
+// is what actually issues a second reservation and a second call when a
+// retry is warranted, so `research_jobs.*Reserved` always equals the
+// real number of external attempts made (never one reservation
+// authorizing two calls).
+//
+// Classification (never conflated — see live-provider-enablement.md
+// closure §1/§2/§8):
+//   "ok"          — the call succeeded (on attempt 1 or the retry).
+//   "skip_budget" — the FIRST reservation was refused; zero external
+//                   attempts made. Local/continuable (existing budget-
+//                   exhausted behavior, unchanged).
+//   "local"       — a non-transient failure (schema-invalid, oversized
+//                   input, or a retry's reservation was refused after a
+//                   transient first failure). Local/continuable — the
+//                   caller returns a normal FAILED/SKIPPED result, never
+//                   throws.
+//   "fatal"       — the capability itself is unavailable: a transient
+//                   failure survived through the allowed retry, or
+//                   count_tokens (which owns its own internal retry, see
+//                   token-gate.ts) could not be obtained at all. The
+//                   caller MUST throw CapabilityFatalError for this case
+//                   — never return an ordinary WorkExecutionResult.
+interface RetryOutcome<T> {
+  kind: "ok" | "skip_budget" | "local" | "fatal";
+  value?: T;
+  reason?: string;
+  reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE";
+  capability?: string;
+  attempts: number;
+}
+
+async function reserveAndCallWithRetry<T>(params: {
+  db: Database | Transaction;
+  jobId: string;
+  budgetAxis: "searchQueries" | "modelCostMicro";
+  reserveAmount: number;
+  maxBudget: number;
+  label: string;
+  capability: string;
+  fn: () => Promise<T>;
+  // Invoked once per real external attempt, immediately after its
+  // reservation succeeds and BEFORE fn() is called — lets a caller trace
+  // "attempted" per real attempt (including a retry), not just the final
+  // resolved outcome.
+  onAttempt?: (attemptNumber: number) => Promise<void>;
+}): Promise<RetryOutcome<T>> {
+  let attempts = 0;
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    const reserved = await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget);
+    if (!reserved) {
+      if (attempt === 1) return { kind: "skip_budget", attempts };
+      // A transient first failure warranted a retry, but the retry's own
+      // reservation was refused — this is a budget constraint, not proven
+      // capability unavailability (we never got to make the second real
+      // attempt), so it stays local, not fatal.
+      return { kind: "local", reason: safeFailureReason(params.label, lastError), reasonCode: classifyTraceReasonCode(lastError), attempts };
+    }
+    attempts++;
+    if (params.onAttempt) await params.onAttempt(attempt);
+    try {
+      const value = await params.fn();
+      return { kind: "ok", value, attempts };
+    } catch (e) {
+      lastError = e;
+      if (e instanceof ModelInputOversizedError) {
+        // Never fatal (owner decision, explicit): an oversized single
+        // source/input is a local operational skip, not a capability
+        // failure — retrying would not change the input size.
+        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "MODEL_INPUT_OVERSIZED", attempts };
+      }
+      if (e instanceof TokenCountUnavailableError) {
+        // count_tokens already retried internally (token-gate.ts) before
+        // this exception was thrown — an unresolved failure here means
+        // the counting capability itself is unavailable, immediately.
+        return { kind: "fatal", reason: safeFailureReason(params.label, e), capability: `${params.capability}_COUNT_TOKENS`, attempts };
+      }
+      if (!isTransientError(e)) {
+        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", attempts };
+      }
+      if (attempt === 2) {
+        // Transient on the retry too — the capability itself is down.
+        return { kind: "fatal", reason: safeFailureReason(params.label, e), capability: params.capability, attempts };
+      }
+      // Transient on attempt 1 — loop continues, reserves again, retries.
+    }
+  }
+  // Unreachable (the loop always returns), but keeps the function total.
+  return { kind: "local", reason: safeFailureReason(params.label, lastError), reasonCode: "PROVIDER_ERROR", attempts };
+}
+
 interface Preflight {
   queryProposerProfile: ModelCostProfile;
   evidenceExtractorProfile: ModelCostProfile;
@@ -476,56 +575,104 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const attemptId = await findAttemptId(deps.db, ctx.jobId, item.step, item.component, ctx.attemptNumber);
 
       // --- 1. QueryProposer -----------------------------------------------
+      // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
+      // BEFORE every external attempt, including a retry — one
+      // reservation can never authorize two real calls.
       const queryProposerCostMicro = calculateMaxAuthorizedCostMicro(queryProposerProfile);
-      const queryProposerReserved = await reserveJobBudget(
-        deps.db,
-        ctx.jobId,
-        "modelCostMicro",
-        queryProposerCostMicro,
-        ctx.budget.maxModelCostMicro,
-      );
-      if (!queryProposerReserved) {
+      const queryProposerOutcome = await reserveAndCallWithRetry({
+        db: deps.db,
+        jobId: ctx.jobId,
+        budgetAxis: "modelCostMicro",
+        reserveAmount: queryProposerCostMicro,
+        maxBudget: ctx.budget.maxModelCostMicro,
+        label: "QUERY_PROPOSER",
+        capability: "QUERY_PROPOSER",
+        fn: () => queryProposer.proposeQueries({ target, hint, maxQueries: MAX_QUERIES_PER_ATTEMPT }),
+      });
+      spent.authorizedModelCostMicro += queryProposerOutcome.attempts * queryProposerCostMicro;
+
+      if (queryProposerOutcome.kind === "skip_budget") {
         return { status: "SKIPPED", reason: "MODEL_COST_BUDGET_EXHAUSTED_BEFORE_QUERY_PROPOSAL", spent };
       }
-      spent.authorizedModelCostMicro += queryProposerCostMicro;
-
-      const proposeResult = await callProvider("QUERY_PROPOSER", () =>
-        queryProposer.proposeQueries({ target, hint, maxQueries: MAX_QUERIES_PER_ATTEMPT }),
-      );
-      if (!proposeResult.ok) {
-        // S10 (D-090 count-then-gate, §5/§17): explicit trace when the
-        // reason is the count-then-gate decision itself — otherwise this
-        // role has no pre-call ATTEMPTED/OK/FAILED triplet the way
-        // EXTRACT_* does, so without this the count-gate decision would
-        // be invisible to alpha-inspect.
-        if (proposeResult.reasonCode === "MODEL_INPUT_OVERSIZED" || proposeResult.reasonCode === "TOKEN_COUNT_UNAVAILABLE") {
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "MODEL_CALL_SKIPPED",
-            providerKind: "QUERY_PROPOSE",
-            patternStep: item.step,
-            component: item.component,
-            status: "SKIPPED",
-            reasonCode: proposeResult.reasonCode,
-            budgetAxis: "modelCostMicro",
-            budgetAmount: queryProposerCostMicro,
-          });
-        }
-        return { status: "FAILED", reason: proposeResult.reason, spent };
+      if (queryProposerOutcome.kind === "fatal") {
+        // BLOCKER-1: the capability itself is unavailable — throw, never
+        // return an ordinary FAILED result. Propagates uncaught through
+        // controller.ts/run-job.ts to worker.ts's existing catch
+        // boundary: state=FAILED/terminationReason=SYSTEM_OR_PROVIDER_FAILURE,
+        // no research_claim_support row (S7 never runs for this job).
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "MODEL_CALL_ATTEMPTED",
+          providerKind: "QUERY_PROPOSE",
+          providerName: queryProposer.name,
+          patternStep: item.step,
+          component: item.component,
+          status: "FAILED",
+          reasonCode: "PROVIDER_ERROR",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
+        });
+        throw new CapabilityFatalError(queryProposerOutcome.capability!, queryProposerOutcome.reason);
       }
-      // S10 (§7) — audit-only actual usage/cost for this one QueryProposer
-      // call, priced with the SAME approved profile that sized the
-      // reservation above. Null for a non-live/fixture call (no onUsage
-      // callback wired) — every field stays null, never a fabricated 0.
+      if (queryProposerOutcome.kind === "local") {
+        // S10 (D-090 count-then-gate, §5/§17): a dedicated skip trace for
+        // the count-then-gate decision itself (no generation call was
+        // ever made) vs a real attempted-and-failed call — otherwise this
+        // role has no pre-call ATTEMPTED/OK/FAILED triplet the way
+        // EXTRACT_* does.
+        const isCountGateSkip = queryProposerOutcome.reasonCode === "MODEL_INPUT_OVERSIZED" || queryProposerOutcome.reasonCode === "TOKEN_COUNT_UNAVAILABLE";
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: isCountGateSkip ? "MODEL_CALL_SKIPPED" : "MODEL_CALL_ATTEMPTED",
+          providerKind: "QUERY_PROPOSE",
+          providerName: isCountGateSkip ? undefined : queryProposer.name,
+          patternStep: item.step,
+          component: item.component,
+          status: isCountGateSkip ? "SKIPPED" : "FAILED",
+          reasonCode: queryProposerOutcome.reasonCode,
+          budgetAxis: "modelCostMicro",
+          budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
+        });
+        return { status: "FAILED", reason: queryProposerOutcome.reason!, spent };
+      }
+      // "ok" — S10 (§7) — audit-only actual usage/cost for this ONE
+      // successful QueryProposer attempt, priced with the SAME approved
+      // profile that sized the reservation above. Exactly ONE
+      // MODEL_CALL_ATTEMPTED row per call site (MEDIUM-1) — QUERY_PROPOSED
+      // (below, per accepted query) never carries usage, avoiding the
+      // N-rows-overstate-cost defect.
       const queryProposerUsage = usage.queryProposer;
-      const queryProposerActualCostMicro = queryProposerUsage ? calculateActualCostMicro(queryProposerProfile, queryProposerUsage) : null;
+      const queryProposerActualCostMicro =
+        queryProposerUsage && !queryProposerUsage.unsupportedBillingUsage
+          ? calculateActualCostMicro(queryProposerProfile, queryProposerUsage)
+          : null;
+      await recordTraceEvent(deps.db, {
+        researchJobId: ctx.jobId,
+        researchAttemptId: attemptId,
+        operationType: "MODEL_CALL_ATTEMPTED",
+        providerKind: "QUERY_PROPOSE",
+        providerName: queryProposer.name,
+        patternStep: item.step,
+        component: item.component,
+        status: "OK",
+        // MEDIUM-2: never invent a price for a billable usage category
+        // the approved profile can't safely price (prompt caching is not
+        // used in S10) — surface it explicitly instead of an understated cost.
+        reasonCode: queryProposerUsage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
+        budgetAxis: "modelCostMicro",
+        budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
+        actualInputTokens: queryProposerUsage?.inputTokens ?? null,
+        actualOutputTokens: queryProposerUsage?.outputTokens ?? null,
+        actualCostMicro: queryProposerActualCostMicro,
+      });
       // Bounded again here regardless of what the proposer promised —
       // "Query count must be bounded before execution by controller
       // budget" (§2). Also drop empty/whitespace-only strings — never
       // trust shape beyond the type.
-      const queries = proposeResult.value
-        .filter((q) => typeof q === "string" && q.trim().length > 0)
+      const queries = queryProposerOutcome
+        .value!.filter((q) => typeof q === "string" && q.trim().length > 0)
         .slice(0, MAX_QUERIES_PER_ATTEMPT);
       if (queries.length === 0) {
         return { status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent };
@@ -541,36 +688,38 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           component: item.component,
           targetRef: q,
           status: "OK",
-          actualInputTokens: queryProposerUsage?.inputTokens ?? null,
-          actualOutputTokens: queryProposerUsage?.outputTokens ?? null,
-          actualCostMicro: queryProposerActualCostMicro,
         });
       }
 
       // --- 2. SearchGateway -------------------------------------------------
-      // BLOCKER-2: each real SearchGateway call atomically reserves ONE
-      // unit of the job's real, job-lifetime maxSearchQueries ceiling
-      // BEFORE it is made — not a per-attempt local budget. Once the
-      // reservation is refused, this attempt stops issuing MORE queries;
-      // queries already issued (and their results) stand.
+      // BLOCKER-2 (S10 closure, D-119): each REAL Brave HTTP attempt —
+      // including a retry — reserves its own unit of the job's real,
+      // job-lifetime maxSearchQueries ceiling BEFORE it is made, via
+      // reserveAndCallWithRetry. searchQueriesReserved therefore always
+      // equals the real number of Brave HTTP attempts, never one
+      // reservation authorizing two calls.
       const candidateUrls = new Map<string, { url: string }>();
       let searchBudgetExhausted = false;
       // LOW-A: keep the most recent typed provider failure reason around
       // so a terminal SKIPPED/FAILED result can surface it for
       // observability, instead of only a generic NO_SEARCH_CANDIDATES/
       // NO_SOURCE_COULD_BE_FETCHED reason that hides WHY every candidate/
-      // query failed. No secret/response-body content — callProvider's
-      // reason string is already `${label}: ${message}`.
+      // query failed.
       let lastSearchFailureReason: string | null = null;
       for (const query of queries) {
-        const reserved = await reserveJobBudget(
-          deps.db,
-          ctx.jobId,
-          "searchQueries",
-          1,
-          ctx.budget.maxSearchQueries,
-        );
-        if (!reserved) {
+        const searchOutcome = await reserveAndCallWithRetry({
+          db: deps.db,
+          jobId: ctx.jobId,
+          budgetAxis: "searchQueries",
+          reserveAmount: 1,
+          maxBudget: ctx.budget.maxSearchQueries,
+          label: "SEARCH_GATEWAY",
+          capability: "SEARCH_GATEWAY",
+          fn: () => searchGateway.search(query, target, { maxResults: MAX_SEARCH_RESULTS_PER_QUERY }),
+        });
+        spent.searchQueries += searchOutcome.attempts;
+
+        if (searchOutcome.kind === "skip_budget") {
           searchBudgetExhausted = true;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
@@ -587,10 +736,27 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           });
           break;
         }
-        spent.searchQueries += 1;
-        const searchResult = await callProvider("SEARCH_GATEWAY", () =>
-          searchGateway.search(query, target, { maxResults: MAX_SEARCH_RESULTS_PER_QUERY }),
-        );
+        if (searchOutcome.kind === "fatal") {
+          // BLOCKER-1: SearchGateway unavailable after the approved
+          // retry — throw, never return an ordinary FAILED result (see
+          // the QueryProposer section above for the full propagation
+          // note).
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "SEARCH_EXECUTED",
+            providerKind: "SEARCH",
+            providerName: searchGateway.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: query,
+            status: "FAILED",
+            reasonCode: "PROVIDER_ERROR",
+            budgetAxis: "searchQueries",
+            budgetAmount: searchOutcome.attempts,
+          });
+          throw new CapabilityFatalError(searchOutcome.capability!, searchOutcome.reason);
+        }
         await recordTraceEvent(deps.db, {
           researchJobId: ctx.jobId,
           researchAttemptId: attemptId,
@@ -600,14 +766,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           patternStep: item.step,
           component: item.component,
           targetRef: query,
-          status: searchResult.ok ? "OK" : "FAILED",
-          reasonCode: searchResult.ok ? "NONE" : "PROVIDER_ERROR",
+          status: searchOutcome.kind === "ok" ? "OK" : "FAILED",
+          reasonCode: searchOutcome.kind === "ok" ? "NONE" : (searchOutcome.reasonCode ?? "PROVIDER_ERROR"),
+          budgetAxis: "searchQueries",
+          budgetAmount: searchOutcome.attempts,
         });
-        if (!searchResult.ok) {
-          lastSearchFailureReason = searchResult.reason;
-          continue; // one query's failure doesn't fail the whole attempt
+        if (searchOutcome.kind !== "ok") {
+          lastSearchFailureReason = searchOutcome.reason ?? null;
+          continue; // one query's local failure doesn't fail the whole attempt
         }
-        for (const r of searchResult.value) {
+        for (const r of searchOutcome.value!) {
           // A search result is a candidate URL ONLY — never Evidence
           // (§3, D-076). title/snippet are discarded here entirely; they
           // never reach evidence-extractor or persistence.
@@ -716,15 +884,43 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const evidenceExtractorCostMicro = calculateMaxAuthorizedCostMicro(evidenceExtractorProfile);
       const insertedEvidenceIds: string[] = [];
       let extractionFailures = 0;
+      let nonOversizedExtractionFailures = 0;
       for (const doc of fetchedDocs) {
-        const reserved = await reserveJobBudget(
-          deps.db,
-          ctx.jobId,
-          "modelCostMicro",
-          evidenceExtractorCostMicro,
-          ctx.budget.maxModelCostMicro,
-        );
-        if (!reserved) {
+        // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
+        // BEFORE every real extraction attempt, including a retry —
+        // EXTRACT_ATTEMPTED fires once per real attempt via onAttempt.
+        const extractOutcome = await reserveAndCallWithRetry({
+          db: deps.db,
+          jobId: ctx.jobId,
+          budgetAxis: "modelCostMicro",
+          reserveAmount: evidenceExtractorCostMicro,
+          maxBudget: ctx.budget.maxModelCostMicro,
+          label: "EVIDENCE_EXTRACTOR",
+          capability: "EVIDENCE_EXTRACTOR",
+          // Item 6 (S4 final acceptance fix): no input bounding — the
+          // extractor is given the document text exactly as fetched. See
+          // model-cost-profile.ts's module comment for why a chars/token
+          // heuristic was removed rather than kept as a claimed guarantee.
+          fn: () => evidenceExtractor.extract({ target, document: doc }),
+          onAttempt: async () => {
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "EXTRACT_ATTEMPTED",
+              providerKind: "EXTRACT",
+              providerName: evidenceExtractor.name,
+              patternStep: item.step,
+              component: item.component,
+              targetRef: doc.finalUrl,
+              status: "OK",
+              budgetAxis: "modelCostMicro",
+              budgetAmount: evidenceExtractorCostMicro,
+            });
+          },
+        });
+        spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+
+        if (extractOutcome.kind === "skip_budget") {
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -739,31 +935,35 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           });
           break; // job-lifetime model-cost ceiling reached
         }
-        spent.authorizedModelCostMicro += evidenceExtractorCostMicro;
-
-        await recordTraceEvent(deps.db, {
-          researchJobId: ctx.jobId,
-          researchAttemptId: attemptId,
-          operationType: "EXTRACT_ATTEMPTED",
-          providerKind: "EXTRACT",
-          providerName: evidenceExtractor.name,
-          patternStep: item.step,
-          component: item.component,
-          targetRef: doc.finalUrl,
-          status: "OK",
-          budgetAxis: "modelCostMicro",
-          budgetAmount: evidenceExtractorCostMicro,
-        });
-
-        // Item 6 (S4 final acceptance fix): no input bounding — the
-        // extractor is given the document text exactly as fetched. See
-        // model-cost-profile.ts's module comment for why a chars/token
-        // heuristic was removed rather than kept as a claimed guarantee.
-        const extractResult = await callProvider("EVIDENCE_EXTRACTOR", () =>
-          evidenceExtractor.extract({ target, document: doc }),
-        );
-        if (!extractResult.ok) {
+        if (extractOutcome.kind === "fatal") {
+          // BLOCKER-1: EvidenceExtractor unavailable after the approved
+          // retry — throw, never return an ordinary FAILED/SKIPPED
+          // result (see the QueryProposer section above for the full
+          // propagation note).
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "MODEL_CALL_ATTEMPTED",
+            providerKind: "EXTRACT",
+            providerName: evidenceExtractor.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "FAILED",
+            reasonCode: "PROVIDER_ERROR",
+            budgetAxis: "modelCostMicro",
+            budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
+          });
+          throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
+        }
+        if (extractOutcome.kind === "local") {
           extractionFailures += 1;
+          // S10 acceptance closure (BLOCKER-1, D-119, "IMPORTANT OVERSIZED
+          // INPUT RULE"): an oversized source is a local operational skip,
+          // never evidence of the extractor being unavailable — a batch
+          // where every failure is MODEL_INPUT_OVERSIZED must resolve to
+          // SKIPPED below, not FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE.
+          if (extractOutcome.reasonCode !== "MODEL_INPUT_OVERSIZED") nonOversizedExtractionFailures += 1;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -778,22 +978,46 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             component: item.component,
             targetRef: doc.finalUrl,
             status: "FAILED",
-            reasonCode: extractResult.reasonCode,
+            reasonCode: extractOutcome.reasonCode ?? "PROVIDER_ERROR",
           });
           continue;
         }
-        const facts: ExtractedFact[] = extractResult.value;
+        // "ok"
+        const facts: ExtractedFact[] = extractOutcome.value!;
         // S10 (§7) — audit-only actual usage/cost for THIS document's
         // extraction call, priced with the SAME approved profile that
         // sized the reservation above. Captured immediately after this
         // call (not before the per-document loop) since evidenceExtractor
         // is resolved once per attempt but called once per document —
         // the onUsage callback overwrites usage.evidenceExtractor on
-        // every call, so it must be read fresh for each document.
+        // every call, so it must be read fresh for each document. MEDIUM-1
+        // (D-119): exactly ONE MODEL_CALL_ATTEMPTED row per document's
+        // successful call — EXTRACT_OK (below, per admitted fact) never
+        // carries usage, avoiding the N-rows-overstate-cost defect.
         const evidenceExtractorUsage = usage.evidenceExtractor;
-        const evidenceExtractorActualCostMicro = evidenceExtractorUsage
-          ? calculateActualCostMicro(evidenceExtractorProfile, evidenceExtractorUsage)
-          : null;
+        const evidenceExtractorActualCostMicro =
+          evidenceExtractorUsage && !evidenceExtractorUsage.unsupportedBillingUsage
+            ? calculateActualCostMicro(evidenceExtractorProfile, evidenceExtractorUsage)
+            : null;
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "MODEL_CALL_ATTEMPTED",
+          providerKind: "EXTRACT",
+          providerName: evidenceExtractor.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: doc.finalUrl,
+          status: "OK",
+          // MEDIUM-2: never invent a price for a billable usage category
+          // the approved profile can't safely price.
+          reasonCode: evidenceExtractorUsage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
+          actualInputTokens: evidenceExtractorUsage?.inputTokens ?? null,
+          actualOutputTokens: evidenceExtractorUsage?.outputTokens ?? null,
+          actualCostMicro: evidenceExtractorActualCostMicro,
+        });
 
         // HIGH-2: this document is only eligible to produce Evidence for
         // THIS project if it literally names the project, OR its source
@@ -916,9 +1140,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             status: "OK",
             sourceId: sourceInfo.id,
             evidenceId: row?.id ?? null,
-            actualInputTokens: evidenceExtractorUsage?.inputTokens ?? null,
-            actualOutputTokens: evidenceExtractorUsage?.outputTokens ?? null,
-            actualCostMicro: evidenceExtractorActualCostMicro,
+            // MEDIUM-1 (D-119): usage/cost lives on the ONE MODEL_CALL_ATTEMPTED
+            // row for this document's call (above), never duplicated
+            // across every admitted fact — summing actual_cost_micro
+            // over MODEL_CALL_ATTEMPTED alone gives the true cost.
           });
         }
       }
@@ -932,7 +1157,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           spent,
         };
       }
-      if (extractionFailures > 0 && extractionFailures === fetchedDocs.length) {
+      if (extractionFailures > 0 && extractionFailures === fetchedDocs.length && nonOversizedExtractionFailures > 0) {
         return { status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent };
       }
       return { status: "SKIPPED", reason: withObservations("NO_TRACEABLE_FACTS_FOR_COMPONENT"), spent };

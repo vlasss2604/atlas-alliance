@@ -219,6 +219,14 @@ export const traceOperationType = pgEnum("trace_operation_type", [
   // reason codes below for its own count-then-gate skip). Additive, not
   // a replacement for any existing operation.
   "MODEL_CALL_SKIPPED",
+  // S10 acceptance closure (MEDIUM-1, D-119): the ONE dedicated audit row
+  // per real external model-generation attempt (QueryProposer or
+  // EvidenceExtractor) — carries actual_input_tokens/actual_output_tokens/
+  // actual_cost_micro on success, null on failure. QUERY_PROPOSED (per
+  // proposed query) and EXTRACT_OK (per admitted fact) no longer carry
+  // duplicated usage — summing actual_cost_micro over MODEL_CALL_ATTEMPTED
+  // rows alone gives the true cost, never an overstated multiple.
+  "MODEL_CALL_ATTEMPTED",
 ]);
 
 // Outcome of the ONE operation this row records — deliberately the same
@@ -258,6 +266,12 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   // ever a raw provider message — both are closed, code-authored codes.
   "MODEL_INPUT_OVERSIZED",
   "TOKEN_COUNT_UNAVAILABLE",
+  // S10 acceptance closure (MEDIUM-2, D-119): the provider response
+  // reported a billable usage category (cache_creation_input_tokens/
+  // cache_read_input_tokens) that INTERNAL_ALPHA_V1's approved cost
+  // profile cannot safely price (prompt caching is not used in S10) —
+  // actual_cost_micro is left null rather than silently understated.
+  "UNSUPPORTED_BILLING_USAGE",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,
