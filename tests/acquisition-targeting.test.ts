@@ -357,15 +357,27 @@ describe("acquisition targeting — shared platforms need a confirmed project lo
 
   it("targets ONLY the human-confirmed domain, never the rest of the platform list", () => {
     const { targetedQueries } = buildTargetedQueries({
+      establishingClasses: ["GOVERNANCE"],
+      confirmedRouteDomainsByClass: { GOVERNANCE: ["snapshot.org"] },
+      baseQueries: ["supply"],
+    });
+    expect(targetedQueries).toEqual(["site:snapshot.org supply"]);
+    // The confirmation for snapshot.org must not drag in every other
+    // governance platform the code-owned list happens to contain.
+    expect(targetedQueries.some((q) => q.includes("tally.xyz"))).toBe(false);
+    expect(targetedQueries.some((q) => q.includes("commonwealth.im"))).toBe(false);
+  });
+
+  it("D-133 tightened ONCHAIN_VERIFIABLE further: a confirmed DOMAIN is not enough, only a confirmed ADDRESS", () => {
+    // A shared explorer stays unsafe when all we have is "this explorer
+    // is relevant" — that says nothing about WHICH token page is ours.
+    const { targetedQueries, unreachableClasses } = buildTargetedQueries({
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       confirmedRouteDomainsByClass: { ONCHAIN_VERIFIABLE: ["solscan.io"] },
       baseQueries: ["supply"],
     });
-    expect(targetedQueries).toEqual(["site:solscan.io supply"]);
-    // The confirmation for solscan.io must not drag in every other
-    // explorer the code-owned list happens to contain.
-    expect(targetedQueries.some((q) => q.includes("etherscan.io"))).toBe(false);
-    expect(targetedQueries.some((q) => q.includes("bscscan.com"))).toBe(false);
+    expect(targetedQueries).toEqual([]);
+    expect(unreachableClasses).toContain("ONCHAIN_VERIFIABLE");
   });
 
   it("a confirmed locator for one class never leaks into another class", () => {

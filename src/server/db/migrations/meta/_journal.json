@@ -169,6 +169,13 @@
       "when": 1787497520274,
       "tag": "0023_owner_manual_alpha_job_origin",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1787598000000,
+      "tag": "0024_project_identity_memory_kind",
+      "breakpoints": true
     }
   ]
 }

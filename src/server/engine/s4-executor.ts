@@ -872,6 +872,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const { targetedQueries, unreachableClasses } = buildTargetedQueries({
         establishingClasses: plan.establishingClasses,
         confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
+        onchainLocators: plan.onchainLocators,
         baseQueries: modelQueries,
       });
       for (const cls of unreachableClasses) {

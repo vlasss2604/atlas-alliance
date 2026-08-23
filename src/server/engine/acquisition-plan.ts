@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { interpretations, projectMemoryItems, researchJobs } from "../db/schema";
@@ -10,6 +10,10 @@ import {
 } from "../domain/pattern";
 import { loadActivePatternVersion } from "./active-pattern";
 import { intentRequiredComponents } from "./budget-fairness";
+import {
+  explorerLocatorsForIdentity,
+  parseProjectIdentity,
+} from "../domain/project-identity";
 import type { EvidenceSourceClass } from "./providers/types";
 import { researchPatterns } from "../db/schema";
 
@@ -30,6 +34,11 @@ import { researchPatterns } from "../db/schema";
 export interface AcquisitionPlan {
   establishingClasses: readonly EvidenceSourceClass[];
   confirmedRouteDomainsByClass: Partial<Record<EvidenceSourceClass, string[]>>;
+  // D-133 — `site:<explorer> <tokenAddress>` locators derived from the
+  // project's human-confirmed on-chain identity. Empty when no ACTIVE
+  // PROJECT_IDENTITY record with a token address exists, which is the
+  // safe default: an explorer is never searched by project name.
+  onchainLocators: string[];
   intentRequired: ReadonlySet<string>;
   intent: string;
 }
@@ -37,6 +46,7 @@ export interface AcquisitionPlan {
 const EMPTY_PLAN: AcquisitionPlan = {
   establishingClasses: [],
   confirmedRouteDomainsByClass: {},
+  onchainLocators: [],
   intentRequired: new Set<string>(),
   intent: "UNKNOWN",
 };
@@ -68,7 +78,14 @@ async function loadConfirmedRouteDomains(
     .select({ content: projectMemoryItems.content })
     .from(projectMemoryItems)
     .where(
-      eq(projectMemoryItems.projectId, projectId),
+      and(
+        eq(projectMemoryItems.projectId, projectId),
+        eq(projectMemoryItems.kind, "SOURCE_ROUTE"),
+        // Human confirmation is the ACTIVE row and nothing else — an
+        // OBSERVED/CANDIDATE/DEPRECATED/SUPERSEDED route confers no
+        // authority, exactly as D-074 requires.
+        eq(projectMemoryItems.lifecycleState, "ACTIVE"),
+      ),
     );
   for (const row of rows) {
     const content = row.content as { domain?: unknown; routeClass?: unknown } | null;
@@ -79,6 +96,36 @@ async function loadConfirmedRouteDomains(
     (byClass[cls] ??= []).push(domain);
   }
   return byClass;
+}
+
+// D-133 — the project's confirmed on-chain identity, if a human has
+// ACTIVEd one. Only the identity's own chain bounds which explorers may
+// be addressed, and only its token address is used as the query text, so
+// neither a project name nor another chain's explorer can leak in.
+async function loadOnchainLocators(
+  db: Database | Transaction,
+  projectId: string | null,
+): Promise<string[]> {
+  if (!projectId) return [];
+  const rows = await db
+    .select({ content: projectMemoryItems.content })
+    .from(projectMemoryItems)
+    .where(
+      and(
+        eq(projectMemoryItems.projectId, projectId),
+        eq(projectMemoryItems.kind, "PROJECT_IDENTITY"),
+        eq(projectMemoryItems.lifecycleState, "ACTIVE"),
+      ),
+    );
+  const locators: string[] = [];
+  for (const row of rows) {
+    const identity = parseProjectIdentity(row.content);
+    if (!identity) continue;
+    for (const locator of explorerLocatorsForIdentity(identity)) {
+      if (!locators.includes(locator)) locators.push(locator);
+    }
+  }
+  return locators;
 }
 
 export async function loadAcquisitionPlan(
@@ -126,6 +173,7 @@ export async function loadAcquisitionPlan(
     return {
       establishingClasses,
       confirmedRouteDomainsByClass: await loadConfirmedRouteDomains(db, projectId),
+      onchainLocators: await loadOnchainLocators(db, projectId),
       intentRequired: intentRequiredComponents(requirementSet),
       intent,
     };

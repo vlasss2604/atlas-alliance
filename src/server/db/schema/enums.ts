@@ -157,6 +157,12 @@ export const projectMemoryKind = pgEnum("project_memory_kind", [
   "METRIC_SEMANTICS",
   "FRESHNESS_NOTE",
   "CAVEAT",
+  // D-133 — WHICH entity this project actually is: chain + token
+  // mint/contract address. Distinct from SOURCE_ROUTE, which says WHERE
+  // to look (a domain). Both are human-confirmed the same way (an ACTIVE
+  // row), and neither is ever evidence: a locator proves where to look,
+  // never what is true. SOURCE != EVIDENCE != FACT.
+  "PROJECT_IDENTITY",
 ]);
 
 // Фаза 6 (phase-6-plan.md §6.2). Прямота доказательства — правило

@@ -72,6 +72,13 @@ export interface TargetingInput {
   // component structurally cannot be established (a legal Pattern value)
   // — no targeting is produced for it.
   establishingClasses: readonly EvidenceSourceClass[];
+  // D-133 — the project's human-confirmed on-chain identity, when one
+  // exists. Supplies ONCHAIN_VERIFIABLE locators addressed by the token's
+  // globally-unique mint/contract ADDRESS rather than by project name,
+  // which is what makes a shared explorer safe for one project. The chain
+  // in the identity also bounds WHICH explorers may be used at all, so a
+  // Solana project can never be addressed at an Ethereum explorer.
+  onchainLocators?: readonly string[];
   // Domains that resolveSourceRoute already reported as CONFIRMED for
   // THIS project, grouped by the routeClass the human set on them.
   confirmedRouteDomainsByClass?: Partial<Record<EvidenceSourceClass, readonly string[]>>;
@@ -102,6 +109,10 @@ export function buildTargetedQueries(input: TargetingInput): TargetingResult {
     // Still report unreachable classes even when there is nothing to
     // target with — the caller wants that signal regardless.
     for (const cls of input.establishingClasses) {
+      if (cls === "ONCHAIN_VERIFIABLE") {
+        if ((input.onchainLocators ?? []).length === 0) unreachableClasses.push(cls);
+        continue;
+      }
       const confirmed = input.confirmedRouteDomainsByClass?.[cls] ?? [];
       if (confirmed.length === 0) unreachableClasses.push(cls);
     }
@@ -113,8 +124,27 @@ export function buildTargetedQueries(input: TargetingInput): TargetingResult {
   // component. Round-robin one domain per class before taking a second
   // from any class, so a component admitting several classes spends its
   // targeted slots across them rather than exhausting the first.
+  // D-133 — ONCHAIN_VERIFIABLE is addressed by confirmed token address,
+  // not by confirmed domain, so it is resolved before the domain loop.
+  // These locators already carry their own query text (the address), so
+  // they are emitted verbatim rather than appended to the model's topic.
+  const onchainLocators = input.onchainLocators ?? [];
+  const wantsOnchain = input.establishingClasses.includes("ONCHAIN_VERIFIABLE");
+  if (wantsOnchain && onchainLocators.length > 0) {
+    for (const locator of onchainLocators) {
+      if (targetedQueries.length >= maxTargeted) break;
+      targetedQueries.push(locator);
+    }
+  }
+
   const perClassDomains = new Map<EvidenceSourceClass, string[]>();
   for (const cls of input.establishingClasses) {
+    // Already handled above from confirmed identity; a confirmed DOMAIN
+    // never substitutes for a confirmed ADDRESS on a shared explorer.
+    if (cls === "ONCHAIN_VERIFIABLE") {
+      if (onchainLocators.length === 0) unreachableClasses.push(cls);
+      continue;
+    }
     const confirmed = input.confirmedRouteDomainsByClass?.[cls] ?? [];
     // D-132: ONLY human-confirmed, project-specific domains are safe
     // acquisition targets. The code-owned platform lists identify what a
