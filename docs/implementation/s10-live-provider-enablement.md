@@ -537,3 +537,83 @@ Brave/Anthropic в рамках этого closure pass не было.
 
 **Этот closure pass сам себя не замораживает.** Freeze S10 остаётся
 отдельным решением владельца после повторного независимого ревью.
+
+---
+
+## 21. Final Pre-Smoke Closure (D-120) — коррекция §3/§20 по повторному
+независимому ревью
+
+Повторное независимое ревью HEAD `6108f30` (§20 выше) вернуло **REJECT /
+DO NOT ACCEPT** (BLOCKER 0, HIGH 1, MEDIUM 1, LOW 3). Этот раздел —
+историческая коррекция §20 и, транзитивно, §3 (Retry) выше.
+
+**HIGH-1 — дименсиональное истощение бюджета.** §20 закрыло BLOCKER-1
+(capability-fatal) и BLOCKER-2 (per-attempt резервация), но не заметило
+симметричный дефект: отказ РЕЗЕРВАЦИИ (не сам вызов провайдера)
+по-прежнему деградировал в обычный локальный исход исполнения —
+замороженный контроллер мог завершиться `WORK_QUEUE_EXHAUSTED →
+SUCCEEDED`, и S7 мог записать `INSUFFICIENT_EVIDENCE`, хотя реальная
+причина остановки — исчерпание бюджета `searchQueries`/`sourceOpens`/
+`modelCostMicro`, а не недостаточность доказательств. Закрыто новым
+`BudgetExhaustedError` (`budget-exhausted-error.ts`), бросаемым из
+`s4-executor.ts` ТОЛЬКО когда отказ резервации оставляет НОЛЬ полезного
+результата этой попытки (компонент, уже получивший кандидатов/
+документы/evidence до истощения оси, НЕ превращается задним числом в
+бюджетный сбой) — распространяется структурно через `controller.ts`/
+`run-job.ts` (без единого изменения) до `worker.ts`, который получил
+ОДНУ узкую типизированную ветку catch: `state=BUDGET_LIMIT_REACHED`/
+`terminationReason=BUDGET_EXHAUSTED`/`errorCode=null` — та же лексика,
+которую `mapEngineOutcome` уже использует для собственного
+(attempt-count) `BUDGET_EXHAUSTED` контроллера.
+
+**MEDIUM-1 — ретрай count_tokens не работал против сырой ошибки
+Anthropic SDK.** §3 (Retry) выше описывал `token-gate.ts`'s внутренний
+retry как рабочий — это было архитектурной ошибкой: `retryOnceIfTransient`
+классифицировал СЫРОЕ исключение SDK классификатором по умолчанию
+(требует поле `.transient`, которого сырое исключение Anthropic никогда
+не несёт, поскольку это поле вычисляется ВЫЗЫВАЮЩИМ в catch-блоке ПОСЛЕ
+того, как retry уже решил не повторять). Реальный транзиентный
+503/429/сетевой сбой на попытке #1 `count_tokens` никогда не повторялся
+на практике. Исправлено новым `isTransientAnthropicApiError` (`retry.ts`)
+— единое правило `429 | undefined-статус | 5xx`, теперь используемое
+`token-gate.ts` (передан явно как классификатор) И
+`query-proposer-anthropic.ts`/`evidence-extractor-anthropic.ts` (устранён
+дубль того же правила, ранее продублированного трижды).
+
+Принят §8 (кардинальность `MODEL_CALL_ATTEMPTED`, оставленный residual
+LOW в §20): одна реальная HTTP-попытка генерации теперь равна одной
+audit-строке — успешная попытка после одного транзиентного отказа
+производит 2 строки (FAILED + OK), а не 1 строку с задвоенной
+`budgetAmount`. Принят §9 (alpha-inspect): новая секция `MODEL CALLS`.
+
+Раскрыто, НЕ реализовано (принято как LOW): операционная видимость
+номера попытки `count_tokens` — недоступность после retry уже становится
+`fatal` и видна через `CapabilityFatalError`, но какая именно попытка не
+различима в трейсе; потребовало бы протаскивать db/jobId/attemptId в
+`token-gate.ts` (сейчас чистый provider-слой без DB-осведомлённости).
+
+Новый regression-файл: `tests/s10-final-pre-smoke-closure.test.ts` (12
+тестов — A/B через полный `handleResearchJobTask`, C/D/E/F на уровне
+executor, G/H/I против `countThenGate` с настоящими `Anthropic.APIError`,
+J replay-safety, K cardinality). Миграция схемы НЕ потребовалась.
+
+### Регрессия этого closure pass
+
+- `npx vitest run` → **760 passed, 4 skipped, 0 failed** (748 базовых +
+  12 новых; 10 существующих тестов обновлены — их ожидания
+  соответствовали ДОпоправочному поведению budget-exhaustion)
+- `tsc --noEmit` → чисто
+- `eslint .` → чисто
+- `next build` → успех
+- `drizzle-kit generate` → без дрейфа
+- `npm run eval:memory` → не изменился
+- `npx playwright test` → 7 passed, 1 skipped
+
+S4 изменён только execution/accounting-only (плюс одна узкая
+типизированная ветка catch в `worker.ts`); `controller.ts`/`run-job.ts`/
+S5/S6/S7 — нулевой diff. `research_enabled=false`;
+`internal_alpha_enabled` остаётся default `false`. Живого трафика
+провайдеров в рамках этого closure pass не было.
+
+**Этот closure pass сам себя не замораживает.** Freeze S10 остаётся
+отдельным решением владельца после повторного независимого ревью.

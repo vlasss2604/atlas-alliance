@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { retryOnceIfTransient } from "./retry";
+import { isTransientAnthropicApiError, retryOnceIfTransient } from "./retry";
 
 // S10 (live-provider-enablement.md §5, D-118) — D-090's provable model-
 // input bound, implemented as COUNT-THEN-GATE: before every Anthropic
@@ -82,15 +82,21 @@ export async function countThenGate(
 ): Promise<void> {
   let result: { input_tokens: number };
   try {
-    result = await retryOnceIfTransient(() =>
-      client.messages.countTokens({ model, system, messages, output_config: outputConfig }),
+    // MEDIUM-1 (S10 final pre-smoke closure, D-120): classify the RAW SDK
+    // exception with isTransientAnthropicApiError, NOT the default
+    // (.transient-field) classifier — a raw count_tokens exception never
+    // carries that field, so the default would never retry a genuinely
+    // transient 429/503/network failure. Exactly one retry, max 2 total
+    // count_tokens attempts.
+    result = await retryOnceIfTransient(
+      () => client.messages.countTokens({ model, system, messages, output_config: outputConfig }),
+      isTransientAnthropicApiError,
     );
   } catch (e) {
     const status = e instanceof Anthropic.APIError ? e.status : undefined;
-    const transient = status === 429 || status === undefined || (status >= 500 && status < 600);
     throw new TokenCountUnavailableError(
       `count_tokens failed: ${status ?? "?"} ${e instanceof Error ? e.name : String(e)}`,
-      transient,
+      isTransientAnthropicApiError(e),
     );
   }
   if (result.input_tokens > maxInputTokens) {

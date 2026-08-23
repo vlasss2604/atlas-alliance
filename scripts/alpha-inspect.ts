@@ -118,6 +118,23 @@ async function main() {
     const sorted = [...traceRows].sort((a, b) => a.sequence - b.sequence);
     const byOp = (ops: string[]) => sorted.filter((t) => ops.includes(t.operationType));
 
+    // §9 (S10 final pre-smoke closure, D-120): every real external model
+    // generation attempt (QueryProposer or EvidenceExtractor) — including
+    // a FAILED attempt that preceded a successful retry — must be
+    // inspectable: role/provider/status/budget authorization/safe reason/
+    // tokens/cost where available. Never prompts/completions/CoT/raw
+    // errors (those are never persisted to trace at all, §A/§M).
+    section("MODEL CALLS");
+    const modelCallEvents = byOp(["MODEL_CALL_ATTEMPTED", "MODEL_CALL_SKIPPED"]);
+    if (modelCallEvents.length === 0) console.log("  (no model-call trace)");
+    for (const t of modelCallEvents) {
+      console.log(
+        `  [#${t.sequence}] ${t.operationType} provider=${t.providerKind ?? "(none)"} status=${t.status} reason=${t.reasonCode} ` +
+          `budgetAmount=${t.budgetAmount ?? "(none)"} inputTokens=${t.actualInputTokens ?? "(n/a)"} outputTokens=${t.actualOutputTokens ?? "(n/a)"} ` +
+          `actualCostMicro=${t.actualCostMicro ?? "(n/a)"}`,
+      );
+    }
+
     section("SEARCH");
     const searchEvents = byOp(["QUERY_PROPOSED", "SEARCH_EXECUTED", "MODEL_CALL_SKIPPED"]);
     if (searchEvents.length === 0) console.log("  (no search trace)");

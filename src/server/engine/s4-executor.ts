@@ -29,6 +29,7 @@ import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/typ
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import { findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
+import { BudgetExhaustedError } from "./budget-exhausted-error";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — this
 // file's OWN instrumentation is additive-only: every recordTraceEvent
@@ -334,27 +335,39 @@ function resolveCostProfile(
 // authorizing two calls).
 //
 // Classification (never conflated — see live-provider-enablement.md
-// closure §1/§2/§8):
-//   "ok"          — the call succeeded (on attempt 1 or the retry).
-//   "skip_budget" — the FIRST reservation was refused; zero external
-//                   attempts made. Local/continuable (existing budget-
-//                   exhausted behavior, unchanged).
-//   "local"       — a non-transient failure (schema-invalid, oversized
-//                   input, or a retry's reservation was refused after a
-//                   transient first failure). Local/continuable — the
-//                   caller returns a normal FAILED/SKIPPED result, never
-//                   throws.
-//   "fatal"       — the capability itself is unavailable: a transient
-//                   failure survived through the allowed retry, or
-//                   count_tokens (which owns its own internal retry, see
-//                   token-gate.ts) could not be obtained at all. The
-//                   caller MUST throw CapabilityFatalError for this case
-//                   — never return an ordinary WorkExecutionResult.
+// closure §1/§2/§8, and the S10 final pre-smoke closure §3/§5, D-120):
+//   "ok"              — the call succeeded (on attempt 1 or the retry).
+//   "budget_exhausted"— a required reservation could not be authorized:
+//                       either the FIRST reservation was refused (zero
+//                       real attempts made), or a transient first
+//                       failure warranted a retry but the retry's OWN
+//                       reservation was refused (exactly one real
+//                       attempt made). Neither is proven capability
+//                       unavailability — the provider was never given
+//                       (or never given a second) authorized attempt.
+//                       HIGH-1 (D-120): the CALLER decides whether this
+//                       terminates the whole job (throw
+//                       BudgetExhaustedError) or is a local/continuable
+//                       event for this one call within a multi-call loop
+//                       (SearchGateway per-query, EvidenceExtractor
+//                       per-document) — reserveAndCallWithRetry itself
+//                       never throws.
+//   "local"           — a non-transient failure (schema-invalid or
+//                       oversized input). Local/continuable — the caller
+//                       returns a normal FAILED/SKIPPED result, never
+//                       throws.
+//   "fatal"           — the capability itself is unavailable: a
+//                       transient failure survived through the allowed
+//                       retry, or count_tokens (which owns its own
+//                       internal retry, see token-gate.ts) could not be
+//                       obtained at all. The caller MUST throw
+//                       CapabilityFatalError for this case — never
+//                       return an ordinary WorkExecutionResult.
 interface RetryOutcome<T> {
-  kind: "ok" | "skip_budget" | "local" | "fatal";
+  kind: "ok" | "budget_exhausted" | "local" | "fatal";
   value?: T;
   reason?: string;
-  reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE";
+  reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE" | "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED";
   capability?: string;
   attempts: number;
 }
@@ -373,18 +386,36 @@ async function reserveAndCallWithRetry<T>(params: {
   // "attempted" per real attempt (including a retry), not just the final
   // resolved outcome.
   onAttempt?: (attemptNumber: number) => Promise<void>;
+  // S10 final pre-smoke closure (§8, D-120) — MODEL_CALL attempt
+  // cardinality: invoked ONLY when attempt 1 fails transiently and the
+  // loop is about to make a second, real, freshly-reserved attempt —
+  // never for a non-transient/oversized/budget-denied outcome (those
+  // already resolve to exactly one real attempt, already correctly
+  // represented by the single post-hoc trace row the caller writes).
+  // Lets a caller emit ONE audit row for the FAILED first attempt,
+  // distinct from the row the caller writes for the (successful or
+  // still-failing) second attempt — so trace cardinality equals real
+  // external-call cardinality instead of collapsing two real attempts
+  // into one row.
+  onTransientRetry?: (firstAttemptError: unknown) => Promise<void>;
 }): Promise<RetryOutcome<T>> {
+  const budgetReasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED" =
+    params.budgetAxis === "searchQueries" ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "MODEL_COST_BUDGET_EXHAUSTED";
   let attempts = 0;
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= 2; attempt++) {
     const reserved = await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget);
     if (!reserved) {
-      if (attempt === 1) return { kind: "skip_budget", attempts };
-      // A transient first failure warranted a retry, but the retry's own
-      // reservation was refused — this is a budget constraint, not proven
-      // capability unavailability (we never got to make the second real
-      // attempt), so it stays local, not fatal.
-      return { kind: "local", reason: safeFailureReason(params.label, lastError), reasonCode: classifyTraceReasonCode(lastError), attempts };
+      // attempt===1: zero real attempts ever made. attempt===2: exactly
+      // one real attempt was made (it failed transiently), then the
+      // retry's own reservation was refused — never proven capability
+      // unavailability either way, always budget_exhausted.
+      return {
+        kind: "budget_exhausted",
+        reason: attempts > 0 ? safeFailureReason(params.label, lastError) : undefined,
+        reasonCode: budgetReasonCode,
+        attempts,
+      };
     }
     attempts++;
     if (params.onAttempt) await params.onAttempt(attempt);
@@ -413,6 +444,7 @@ async function reserveAndCallWithRetry<T>(params: {
         return { kind: "fatal", reason: safeFailureReason(params.label, e), capability: params.capability, attempts };
       }
       // Transient on attempt 1 — loop continues, reserves again, retries.
+      if (params.onTransientRetry) await params.onTransientRetry(e);
     }
   }
   // Unreachable (the loop always returns), but keeps the function total.
@@ -588,11 +620,52 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         label: "QUERY_PROPOSER",
         capability: "QUERY_PROPOSER",
         fn: () => queryProposer.proposeQueries({ target, hint, maxQueries: MAX_QUERIES_PER_ATTEMPT }),
+        // S10 final pre-smoke closure (§8, D-120): a FAILED attempt-1
+        // trace row for a transient failure that is about to be retried —
+        // distinct from the row written below for the resolved (ok/
+        // fatal) attempt-2 outcome, so a real 2-attempt sequence produces
+        // 2 MODEL_CALL_ATTEMPTED rows, not 1.
+        onTransientRetry: async (firstAttemptError) => {
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "MODEL_CALL_ATTEMPTED",
+            providerKind: "QUERY_PROPOSE",
+            providerName: queryProposer.name,
+            patternStep: item.step,
+            component: item.component,
+            status: "FAILED",
+            reasonCode: classifyTraceReasonCode(firstAttemptError),
+            budgetAxis: "modelCostMicro",
+            budgetAmount: queryProposerCostMicro,
+          });
+        },
       });
       spent.authorizedModelCostMicro += queryProposerOutcome.attempts * queryProposerCostMicro;
 
-      if (queryProposerOutcome.kind === "skip_budget") {
-        return { status: "SKIPPED", reason: "MODEL_COST_BUDGET_EXHAUSTED_BEFORE_QUERY_PROPOSAL", spent };
+      if (queryProposerOutcome.kind === "budget_exhausted") {
+        // HIGH-1 (S10 final pre-smoke closure, D-120): QueryProposer is
+        // step 1 of this component's attempt — a required reservation
+        // failing here always means ZERO usable result is possible this
+        // attempt (there is no "partial success" concept before any
+        // query has even been proposed). Never degrade into an ordinary
+        // FAILED/SKIPPED result that the controller could fold into
+        // WORK_QUEUE_EXHAUSTED -> SUCCEEDED: throw, so the job's terminal
+        // state honestly reflects budget exhaustion, never fabricated
+        // evidentiary completion.
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "MODEL_CALL_SKIPPED",
+          providerKind: "QUERY_PROPOSE",
+          patternStep: item.step,
+          component: item.component,
+          status: "SKIPPED",
+          reasonCode: "MODEL_COST_BUDGET_EXHAUSTED",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
+        });
+        throw new BudgetExhaustedError("modelCostMicro", queryProposerOutcome.reason);
       }
       if (queryProposerOutcome.kind === "fatal") {
         // BLOCKER-1: the capability itself is unavailable — throw, never
@@ -600,6 +673,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // controller.ts/run-job.ts to worker.ts's existing catch
         // boundary: state=FAILED/terminationReason=SYSTEM_OR_PROVIDER_FAILURE,
         // no research_claim_support row (S7 never runs for this job).
+        // §8/D-120: budgetAmount covers only THIS (final, still-failing)
+        // attempt — a prior transient attempt-1 failure already has its
+        // own row from onTransientRetry above.
         await recordTraceEvent(deps.db, {
           researchJobId: ctx.jobId,
           researchAttemptId: attemptId,
@@ -611,7 +687,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           status: "FAILED",
           reasonCode: "PROVIDER_ERROR",
           budgetAxis: "modelCostMicro",
-          budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
+          budgetAmount: queryProposerCostMicro,
         });
         throw new CapabilityFatalError(queryProposerOutcome.capability!, queryProposerOutcome.reason);
       }
@@ -662,7 +738,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // used in S10) — surface it explicitly instead of an understated cost.
         reasonCode: queryProposerUsage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
         budgetAxis: "modelCostMicro",
-        budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
+        // §8/D-120: this row covers only THIS (successful) attempt's
+        // cost — a prior transient attempt-1 failure, if any, already
+        // has its own row from onTransientRetry above.
+        budgetAmount: queryProposerCostMicro,
         actualInputTokens: queryProposerUsage?.inputTokens ?? null,
         actualOutputTokens: queryProposerUsage?.outputTokens ?? null,
         actualCostMicro: queryProposerActualCostMicro,
@@ -719,7 +798,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         });
         spent.searchQueries += searchOutcome.attempts;
 
-        if (searchOutcome.kind === "skip_budget") {
+        if (searchOutcome.kind === "budget_exhausted") {
+          // HIGH-1 (S10 final pre-smoke closure, D-120): a required
+          // reservation could not be authorized — never proven capability
+          // unavailability. Recorded and the query loop stops here (the
+          // ceiling is job-lifetime and monotonic, so a later query in
+          // this same loop would hit the identical refusal) — whether
+          // this becomes the job's terminal BUDGET_LIMIT_REACHED is
+          // decided once, after the loop, by whether ANY usable candidate
+          // was found at all (see the zero-candidates check below).
           searchBudgetExhausted = true;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
@@ -730,9 +817,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             component: item.component,
             targetRef: query,
             status: "SKIPPED",
-            reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
+            reasonCode: searchOutcome.reasonCode ?? "SEARCH_QUERY_BUDGET_EXHAUSTED",
             budgetAxis: "searchQueries",
-            budgetAmount: 1,
+            budgetAmount: searchOutcome.attempts,
           });
           break;
         }
@@ -808,13 +895,19 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         }
       }
       if (candidateUrls.size === 0) {
+        // HIGH-1 (S10 final pre-smoke closure, §3 G1/G3, D-120): zero
+        // candidates AND the reason is (at least in part) a required
+        // reservation being refused — this attempt could not do any
+        // usable search work, and the axis is job-lifetime/monotonic so
+        // no later component in this job will fare any better. Throw,
+        // never let this collapse into an ordinary FAILED result the
+        // controller could fold into WORK_QUEUE_EXHAUSTED -> SUCCEEDED.
+        if (searchBudgetExhausted) {
+          throw new BudgetExhaustedError("searchQueries", lastSearchFailureReason ?? "SEARCH_QUERY_BUDGET_EXHAUSTED");
+        }
         // LOW-A: prefer the actual typed provider failure reason over the
-        // generic label when one exists — the search budget being
-        // exhausted is a distinct, higher-priority reason worth keeping
-        // as-is since it isn't a provider failure at all.
-        const reason = searchBudgetExhausted
-          ? "SEARCH_QUERY_BUDGET_EXHAUSTED"
-          : (lastSearchFailureReason ?? "NO_SEARCH_CANDIDATES");
+        // generic label when one exists.
+        const reason = lastSearchFailureReason ?? "NO_SEARCH_CANDIDATES";
         return { status: "FAILED", reason, spent };
       }
 
@@ -822,10 +915,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
+      let sourceOpenBudgetExhausted = false;
       for (const { url } of candidateUrls.values()) {
         if (opensAttempted >= MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT) break;
         const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
         if (!reserved) {
+          // §4 (S10 final pre-smoke closure, D-120): the third
+          // authoritative dimensional budget axis — same treatment as
+          // searchQueries/modelCostMicro below: recorded here, decided
+          // once after the loop by whether ANY document was actually
+          // fetched at all (see the zero-fetched-docs check below).
+          sourceOpenBudgetExhausted = true;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -873,6 +973,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         spent.sourceOpens += 1;
       }
       if (fetchedDocs.length === 0) {
+        // §4 (S10 final pre-smoke closure, D-120): zero documents fetched
+        // AND the source-open budget ran out — same rule as
+        // searchQueries above: nothing usable came out of this attempt,
+        // the axis is job-lifetime/monotonic, so throw rather than
+        // returning an ordinary FAILED result.
+        if (sourceOpenBudgetExhausted) {
+          throw new BudgetExhaustedError("sourceOpens", lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED");
+        }
         return {
           status: "FAILED",
           reason: lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED",
@@ -885,6 +993,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const insertedEvidenceIds: string[] = [];
       let extractionFailures = 0;
       let nonOversizedExtractionFailures = 0;
+      let extractionBudgetExhausted = false;
       for (const doc of fetchedDocs) {
         // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
         // BEFORE every real extraction attempt, including a retry —
@@ -917,10 +1026,39 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               budgetAmount: evidenceExtractorCostMicro,
             });
           },
+          // §8/D-120: same MODEL_CALL attempt-cardinality tightening as
+          // QueryProposer above — one FAILED row for the transient
+          // attempt-1 failure, distinct from the row written below for
+          // the resolved (ok/fatal) attempt-2 outcome.
+          onTransientRetry: async (firstAttemptError) => {
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "MODEL_CALL_ATTEMPTED",
+              providerKind: "EXTRACT",
+              providerName: evidenceExtractor.name,
+              patternStep: item.step,
+              component: item.component,
+              targetRef: doc.finalUrl,
+              status: "FAILED",
+              reasonCode: classifyTraceReasonCode(firstAttemptError),
+              budgetAxis: "modelCostMicro",
+              budgetAmount: evidenceExtractorCostMicro,
+            });
+          },
         });
         spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
 
-        if (extractOutcome.kind === "skip_budget") {
+        if (extractOutcome.kind === "budget_exhausted") {
+          // §3/§4 (S10 final pre-smoke closure, D-120): recorded here;
+          // whether this becomes the job's terminal BUDGET_LIMIT_REACHED
+          // is decided once, after the loop, by whether ANY evidence was
+          // already produced from an earlier document (see the
+          // post-loop check below) — a component that already succeeded
+          // from prior documents is not retroactively turned into a
+          // budget failure just because a later document couldn't be
+          // reserved.
+          extractionBudgetExhausted = true;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -929,9 +1067,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             component: item.component,
             targetRef: doc.finalUrl,
             status: "SKIPPED",
-            reasonCode: "MODEL_COST_BUDGET_EXHAUSTED",
+            reasonCode: extractOutcome.reasonCode ?? "MODEL_COST_BUDGET_EXHAUSTED",
             budgetAxis: "modelCostMicro",
-            budgetAmount: evidenceExtractorCostMicro,
+            budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
           });
           break; // job-lifetime model-cost ceiling reached
         }
@@ -939,7 +1077,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // BLOCKER-1: EvidenceExtractor unavailable after the approved
           // retry — throw, never return an ordinary FAILED/SKIPPED
           // result (see the QueryProposer section above for the full
-          // propagation note).
+          // propagation note). §8/D-120: budgetAmount covers only THIS
+          // (final, still-failing) attempt — a prior transient attempt-1
+          // failure already has its own row from onTransientRetry above.
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -952,7 +1092,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             status: "FAILED",
             reasonCode: "PROVIDER_ERROR",
             budgetAxis: "modelCostMicro",
-            budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
+            budgetAmount: evidenceExtractorCostMicro,
           });
           throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
         }
@@ -1013,7 +1153,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // the approved profile can't safely price.
           reasonCode: evidenceExtractorUsage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
           budgetAxis: "modelCostMicro",
-          budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
+          // §8/D-120: this row covers only THIS (successful) attempt's
+          // cost — a prior transient attempt-1 failure, if any, already
+          // has its own row from onTransientRetry above.
+          budgetAmount: evidenceExtractorCostMicro,
           actualInputTokens: evidenceExtractorUsage?.inputTokens ?? null,
           actualOutputTokens: evidenceExtractorUsage?.outputTokens ?? null,
           actualCostMicro: evidenceExtractorActualCostMicro,
@@ -1156,6 +1299,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           ),
           spent,
         };
+      }
+      // §3/§4 (S10 final pre-smoke closure, D-120): zero evidence AND the
+      // model-cost budget ran out during extraction — nothing usable came
+      // out of this attempt, and the axis is job-lifetime/monotonic, so
+      // throw rather than returning an ordinary FAILED/SKIPPED result the
+      // controller could fold into WORK_QUEUE_EXHAUSTED -> SUCCEEDED. A
+      // component that already produced evidence from an earlier document
+      // took the SUCCEEDED branch above and never reaches this check.
+      if (extractionBudgetExhausted) {
+        throw new BudgetExhaustedError("modelCostMicro", "MODEL_COST_BUDGET_EXHAUSTED_DURING_EXTRACTION");
       }
       if (extractionFailures > 0 && extractionFailures === fetchedDocs.length && nonOversizedExtractionFailures > 0) {
         return { status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent };

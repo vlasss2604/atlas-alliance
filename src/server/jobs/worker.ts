@@ -4,6 +4,7 @@ import { deleteStaleRateLimits } from "../auth/rate-limit";
 import { deleteExpiredSessions } from "../auth/session";
 import { createDatabase, type Database } from "../db/client";
 import { projects, researchJobs } from "../db/schema";
+import { BudgetExhaustedError } from "../engine/budget-exhausted-error";
 import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
@@ -193,16 +194,33 @@ export async function handleResearchJobTask(
     const result = await runS4ResearchJob(db, jobId, executor, new Date());
     outcome = mapEngineOutcome(result.stopReason);
   } catch (e) {
-    // §C of the stage spec: a genuine execution failure (provider/
-    // resolver/internal-invariant exception) must never masquerade as an
-    // evidentiary conclusion (INSUFFICIENT_EVIDENCE/NOT_SUPPORTED/etc) —
-    // it becomes FAILED with a preserved technical reason, full stop.
     console.error("[worker] research engine execution failed", e);
-    outcome = {
-      state: "FAILED",
-      terminationReason: "SYSTEM_OR_PROVIDER_FAILURE",
-      errorCode: e instanceof Error ? e.name : "ENGINE_EXECUTION_FAILED",
-    };
+    // S10 final pre-smoke closure (HIGH-1, D-120): a required dimensional
+    // job budget axis (searchQueries/sourceOpens/modelCostMicro) being
+    // exhausted is NOT a system/provider failure — s4-executor.ts throws
+    // this ONE narrow typed exception (never an ordinary uncaught
+    // exception) specifically so the worker can distinguish "the job
+    // legitimately ran out of authorized budget" from "something actually
+    // broke". Mapped to BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED, the SAME
+    // terminal vocabulary mapEngineOutcome already uses for the
+    // controller's own (attempt-count) BUDGET_EXHAUSTED stop reason —
+    // never SYSTEM_OR_PROVIDER_FAILURE, and never allowed to fall through
+    // to the generic branch below (which would misreport an honest budget
+    // stop as a technical failure).
+    if (e instanceof BudgetExhaustedError) {
+      outcome = { state: "BUDGET_LIMIT_REACHED", terminationReason: "BUDGET_EXHAUSTED", errorCode: null };
+    } else {
+      // §C of the stage spec: a genuine execution failure (provider/
+      // resolver/internal-invariant exception) must never masquerade as
+      // an evidentiary conclusion (INSUFFICIENT_EVIDENCE/NOT_SUPPORTED/
+      // etc) — it becomes FAILED with a preserved technical reason, full
+      // stop.
+      outcome = {
+        state: "FAILED",
+        terminationReason: "SYSTEM_OR_PROVIDER_FAILURE",
+        errorCode: e instanceof Error ? e.name : "ENGINE_EXECUTION_FAILED",
+      };
+    }
   }
 
   if (outcome === null) {

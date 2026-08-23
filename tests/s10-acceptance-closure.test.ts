@@ -5,6 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { evidence, projects, researchClaimSupport, researchJobs, researchTraceEvents, topics, users } from "../src/server/db/schema";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { CapabilityFatalError } from "../src/server/engine/capability-fatal-error";
+import { BudgetExhaustedError } from "../src/server/engine/budget-exhausted-error";
 import { ContentFetchError } from "../src/server/engine/providers/content-fetcher";
 import type { ContentFetcher } from "../src/server/engine/providers/content-fetcher";
 import { EvidenceExtractorUnavailableError } from "../src/server/engine/providers/evidence-extractor";
@@ -348,10 +349,14 @@ describe("S10 closure — BLOCKER-2: retry reserves per real external attempt", 
     const executor = createS4WorkExecutor(depsFor(p, { queryProposer: fixedQueryProposer(["q1"]), searchGateway }));
     // maxSearchQueries=1 — the retry's reservation must be denied. A
     // denied retry reservation is a budget constraint, not proven
-    // capability unavailability (BLOCKER-1 classification), so this
-    // resolves to an ordinary local FAILED result — it never throws.
-    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 1 }));
-    expect(result.status).toBe("FAILED");
+    // capability unavailability (BLOCKER-1 classification) — but since
+    // zero candidates end up possible, S10 final pre-smoke closure
+    // (HIGH-1, D-120) requires this to throw BudgetExhaustedError, never
+    // an ordinary FAILED result the controller could fold into
+    // WORK_QUEUE_EXHAUSTED -> SUCCEEDED.
+    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 1 }))).rejects.toBeInstanceOf(
+      BudgetExhaustedError,
+    );
     expect(calls).toBe(1);
     const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
     expect(jobRow.searchQueriesReserved).toBe(1);
@@ -388,10 +393,14 @@ describe("S10 closure — BLOCKER-2: retry reserves per real external attempt", 
       },
     };
     const executor = createS4WorkExecutor(depsFor(p, { queryProposer, searchGateway: fixedSearchGateway([]) }));
-    // Budget for exactly one attempt's reservation, not two.
-    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxModelCostMicro: perAttempt }));
+    // Budget for exactly one attempt's reservation, not two. S10 final
+    // pre-smoke closure (HIGH-1, D-120, test B/G2): the denied retry
+    // reservation means zero usable result is possible for this
+    // QueryProposer-first component — throws BudgetExhaustedError.
+    await expect(
+      executor.execute(ITEM, ctxFor(p.jobId, { maxModelCostMicro: perAttempt })),
+    ).rejects.toBeInstanceOf(BudgetExhaustedError);
     expect(calls).toBe(1);
-    expect(result.status).toBe("FAILED");
   });
 
   it("5. no SDK-hidden retries: Anthropic SDK client is constructed with maxRetries: 0 (source check)", async () => {

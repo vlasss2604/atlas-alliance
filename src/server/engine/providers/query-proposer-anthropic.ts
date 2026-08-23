@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { QueryProposerUnavailableError } from "./query-proposer";
 import type { QueryProposalInput, QueryProposer } from "./query-proposer";
+import { isTransientAnthropicApiError } from "./retry";
 import { countThenGate } from "./token-gate";
 import type { ModelUsage } from "./types";
 
@@ -119,8 +120,10 @@ async function doProposeQueries(
       e instanceof Anthropic.APIError
         ? `api ${status ?? "?"} ${e.name}: ${String(e.message).slice(0, 200)}`
         : `api call failed: ${e instanceof Error ? e.message : String(e)}`;
-    const transient = status === 429 || status === undefined || (status >= 500 && status < 600);
-    throw new QueryProposerUnavailableError(detail, transient);
+    // S10 final pre-smoke closure (MEDIUM-1, D-120): shared with
+    // token-gate.ts's raw count_tokens retry — one classifier, never a
+    // second, independently-drifting copy of this rule.
+    throw new QueryProposerUnavailableError(detail, isTransientAnthropicApiError(e));
   }
   if (message.stop_reason === "max_tokens") {
     throw new QueryProposerUnavailableError("model output truncated (max_tokens)");

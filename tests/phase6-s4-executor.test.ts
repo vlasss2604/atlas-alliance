@@ -13,6 +13,7 @@ import {
   users,
 } from "../src/server/db/schema";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
+import { BudgetExhaustedError } from "../src/server/engine/budget-exhausted-error";
 import { runResearchController } from "../src/server/engine/controller";
 import type { WorkExecutor } from "../src/server/engine/controller";
 import type { ContractView } from "../src/server/engine/contract-view";
@@ -423,7 +424,16 @@ describe("Фаза 6, S4 — BLOCKER-2: maxSearchQueries — реальный п
         searchGateway: { name: "fixture", async search() { realCalls += 1; return []; } },
       }),
     );
-    await runResearchController({ db: ctx.db, jobId: p.jobId, view, executor, now: NOW });
+    // S10 final pre-smoke closure (HIGH-1, D-120): once the job-lifetime
+    // searchQueries ceiling is genuinely exhausted for a component that
+    // then finds ZERO candidates, s4-executor.ts now throws
+    // BudgetExhaustedError (propagating uncaught through the controller)
+    // instead of quietly returning an ordinary FAILED result — the real
+    // call ceiling assertion below still holds regardless of whether the
+    // run stopped via a normal return or this throw.
+    await runResearchController({ db: ctx.db, jobId: p.jobId, view, executor, now: NOW }).catch((e) => {
+      expect(e).toBeInstanceOf(BudgetExhaustedError);
+    });
     expect(realCalls).toBeLessThanOrEqual(8);
   });
 
@@ -446,7 +456,12 @@ describe("Фаза 6, S4 — BLOCKER-2: maxSearchQueries — реальный п
         searchGateway: { name: "fixture", async search() { realCalls += 1; return []; } },
       }),
     );
-    await Promise.all(
+    // S10 final pre-smoke closure (HIGH-1, D-120): a component that ends
+    // up with zero candidates because the real searchQueries ceiling was
+    // exhausted now throws BudgetExhaustedError rather than returning an
+    // ordinary result — allSettled so one component's throw doesn't stop
+    // the others from being awaited; the real call ceiling still holds.
+    await Promise.allSettled(
       items.map((item) => executor.execute(item, ctxFor(p.jobId, { maxSearchQueries: 8 }))),
     );
     expect(realCalls).toBeLessThanOrEqual(1);
@@ -462,9 +477,16 @@ describe("Фаза 6, S4 — BLOCKER-2: maxSearchQueries — реальный п
         searchGateway: { name: "fixture", async search() { realCalls += 1; return []; } },
       }),
     );
-    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }));
+    // S10 final pre-smoke closure (HIGH-1, D-120, test C/G3): the search
+    // budget is already fully exhausted before this attempt even starts
+    // — zero candidates possible, zero real calls made — throws
+    // BudgetExhaustedError rather than returning an ordinary FAILED
+    // result the controller could fold into WORK_QUEUE_EXHAUSTED ->
+    // SUCCEEDED.
+    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }))).rejects.toBeInstanceOf(
+      BudgetExhaustedError,
+    );
     expect(realCalls).toBe(0);
-    expect(result.reason).toBe("SEARCH_QUERY_BUDGET_EXHAUSTED");
   });
 
   it("QueryProposer возвращает 100 запросов -> реальные вызовы ограничены оставшимся persisted-бюджетом job'а, не локальным клэмпом", async () => {
@@ -477,7 +499,14 @@ describe("Фаза 6, S4 — BLOCKER-2: maxSearchQueries — реальный п
         searchGateway: { name: "fixture", async search() { realCalls += 1; return []; } },
       }),
     );
-    await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }));
+    // S10 final pre-smoke closure (HIGH-1, D-120): the fixture always
+    // returns zero results, so once the 2 remaining units are spent and
+    // budget is exhausted for the rest, zero candidates were ever found
+    // -> BudgetExhaustedError, not an ordinary result. The real call
+    // ceiling assertion is what this test exists to prove.
+    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }))).rejects.toBeInstanceOf(
+      BudgetExhaustedError,
+    );
     expect(realCalls).toBeLessThanOrEqual(2); // only 2 units remained (8-6)
   });
 });
@@ -506,7 +535,12 @@ describe("Фаза 6, S4 — HIGH-1: атомарная резервация max
         }),
       ),
     );
-    await Promise.all(items.map((item, i) => executors[i].execute(item, ctxFor(p.jobId, { maxSourceOpens: 1 }))));
+    // S10 final pre-smoke closure (HIGH-1, D-120): a component that ends
+    // up with zero fetched docs because the real sourceOpens ceiling was
+    // exhausted now throws BudgetExhaustedError — allSettled so one
+    // component's throw doesn't stop the others; the real fetch ceiling
+    // assertion is what this test exists to prove.
+    await Promise.allSettled(items.map((item, i) => executors[i].execute(item, ctxFor(p.jobId, { maxSourceOpens: 1 }))));
     expect(realFetches).toBeLessThanOrEqual(1);
   });
 
@@ -527,7 +561,11 @@ describe("Фаза 6, S4 — HIGH-1: атомарная резервация max
     // Ровно 1 авторизованный вызов QueryProposer'а по D-090 cost profile
     // (FIXTURE-профиль depsFor'а — production каталог пуст до S10).
     const oneCallCostMicro = calculateMaxAuthorizedCostMicro(FIXTURE_COST_PROFILE);
-    await Promise.all(
+    // S10 final pre-smoke closure (HIGH-1, D-120): a component denied its
+    // QueryProposer reservation now throws BudgetExhaustedError —
+    // allSettled so one component's throw doesn't stop the others; the
+    // real proposer-call ceiling is what this test exists to prove.
+    await Promise.allSettled(
       items.map((item, i) => executors[i].execute(item, ctxFor(p.jobId, { maxModelCostMicro: oneCallCostMicro }))),
     );
     expect(proposerCalls).toBe(1);
@@ -545,9 +583,14 @@ describe("Фаза 6, S4 — HIGH-1: атомарная резервация max
         contentFetcher: { name: "fixture", async fetch(u) { fetches += 1; return doc({ finalUrl: u }); } },
       }),
     );
-    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSourceOpens: 10 }));
+    // S10 final pre-smoke closure (HIGH-1, D-120): the sourceOpens axis
+    // is already fully exhausted for THIS component — zero fetches
+    // possible — throws BudgetExhaustedError rather than returning an
+    // ordinary FAILED result.
+    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSourceOpens: 10 }))).rejects.toBeInstanceOf(
+      BudgetExhaustedError,
+    );
     expect(fetches).toBe(0);
-    expect(result.status).toBe("FAILED");
   });
 
   it("D. рестарт: persisted резервации остаются авторитетными между вызовами", async () => {
@@ -1607,10 +1650,14 @@ describe("Фаза 6, S4 — D-090: reserve-before-call / insufficient budget (F
         queryProposer: { name: "fixture", async proposeQueries() { called = true; return ["q1"]; } },
       }),
     );
-    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxModelCostMicro: 1 })); // far below any real profile cost
+    // S10 final pre-smoke closure (HIGH-1, D-120, test D/G4): the FIRST
+    // QueryProposer reservation being refused now throws
+    // BudgetExhaustedError rather than an ordinary SKIPPED result — the
+    // provider is still never called (zero cost either way).
+    await expect(
+      executor.execute(ITEM, ctxFor(p.jobId, { maxModelCostMicro: 1 })), // far below any real profile cost
+    ).rejects.toBeInstanceOf(BudgetExhaustedError);
     expect(called).toBe(false);
-    expect(result.status).toBe("SKIPPED");
-    expect(result.reason).toBe("MODEL_COST_BUDGET_EXHAUSTED_BEFORE_QUERY_PROPOSAL");
   });
 });
 
