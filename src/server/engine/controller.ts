@@ -68,6 +68,18 @@ export interface WorkExecutor {
       // moment ANY concurrent attempt (on this or another component)
       // reserves anything, which is exactly the race BLOCKER-2 found.
       budget: { maxSearchQueries: number; maxSourceOpens: number; maxModelCostMicro: number };
+      // D-130 — shape of the job's own work queue, so an executor can
+      // divide the frozen ceilings fairly instead of letting whichever
+      // components the queue happens to visit first consume everything.
+      // Both are optional so every existing/fixture executor keeps
+      // working unchanged; s4-executor treats absence as "1" (i.e. the
+      // historic behaviour of no fair-share division).
+      //
+      // workQueueSize: total components in this job's queue.
+      // remainingComponents: components with no terminal attempt yet,
+      // INCLUDING the one now being executed (always >= 1 here).
+      workQueueSize?: number;
+      remainingComponents?: number;
     },
   ): Promise<WorkExecutionResult>;
 }
@@ -480,6 +492,10 @@ export async function runResearchController(
   }
 
   let attemptsThisRun = 0;
+  // D-130 — how many of `pending` this run has already handed to the
+  // executor, so the per-component fair share is computed against what
+  // genuinely still needs budget rather than the original queue length.
+  let processedFromPending = 0;
   const succeeded: ComponentWorkItem[] = [];
   const failed: ComponentWorkItem[] = [];
   const skipped: ComponentWorkItem[] = [];
@@ -563,7 +579,16 @@ export async function runResearchController(
         maxSourceOpens: view.researchBudget.maxSourceOpens,
         maxModelCostMicro: view.researchBudget.maxModelCostMicro,
       },
+      // D-130 — queue shape, so the executor can divide the frozen
+      // ceilings fairly across components instead of letting the ones the
+      // queue visits first spend everything. `pending` is this run's own
+      // not-yet-succeeded set; `processedFromPending` counts how many of
+      // them this run has already attempted, so the remainder (including
+      // the current item) is what still needs a share.
+      workQueueSize: view.workQueue.length,
+      remainingComponents: Math.max(1, pending.length - processedFromPending),
     });
+    processedFromPending += 1;
     attemptsThisRun += 1;
 
     // Informational/audit only — see WorkExecutionResult doc comment.

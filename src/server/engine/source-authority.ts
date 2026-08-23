@@ -154,6 +154,63 @@ function isBareSharedPlatformBase(host: string): boolean {
   return SHARED_MULTI_TENANT_PLATFORM_BASE_DOMAINS.has(host);
 }
 
+// D-129 — the SAME code-owned lists above, read back out as "which
+// domains does THIS module classify into THIS class". Acquisition
+// (s4-executor) uses this to steer search toward hosts whose class the
+// classifier can already recognize, instead of issuing generic queries
+// and discarding whatever comes back.
+//
+// This is deliberately a READ of the existing classification authority,
+// never a second, parallel notion of authority: every domain returned
+// here is one resolveSourceClass() above would independently classify
+// into the requested class from the URL alone. Nothing a model or a
+// search provider says can add a domain to these sets.
+//
+// OFFICIAL_DOCS / OFFICIAL_REPORT are ABSENT on purpose — they have no
+// code-owned domain list anywhere in this file, because per D-074 they
+// are reachable only through a human-confirmed ACTIVE SOURCE_ROUTE for
+// the specific project. Targeting for those two classes therefore comes
+// exclusively from that human-confirmed record (see
+// targetDomainsForClass's `confirmedRouteDomains` parameter) — the engine
+// can never invent an "official" domain for a project on its own.
+const CLASS_OWNED_DOMAINS: Partial<Record<EvidenceSourceClass, ReadonlySet<string>>> = {
+  ONCHAIN_VERIFIABLE: ONCHAIN_EXPLORER_DOMAINS,
+  GOVERNANCE: GOVERNANCE_PLATFORM_DOMAINS,
+  DATA_PROVIDER: DATA_PROVIDER_DOMAINS,
+  RESEARCH_MEDIA: RESEARCH_MEDIA_DOMAINS,
+  SOCIAL: SOCIAL_DOMAINS,
+};
+
+// Domains worth STEERING SEARCH AT for a given admissible class.
+//
+// `confirmedRouteDomains` must contain only domains that already resolved
+// to CONFIRMED officiality for THIS project with a routeClass equal to
+// `sourceClass` (i.e. read from resolveSourceRoute's own output, which
+// only ever reflects a human-approved ACTIVE SOURCE_ROUTE row). They are
+// returned first because a project's own confirmed domain is a stronger
+// acquisition target than a shared multi-tenant platform.
+export function targetDomainsForClass(
+  sourceClass: EvidenceSourceClass,
+  confirmedRouteDomains: readonly string[] = [],
+): string[] {
+  const owned = CLASS_OWNED_DOMAINS[sourceClass];
+  const platform = owned ? [...owned] : [];
+  // Confirmed project domains first, then the code-owned platforms, with
+  // duplicates removed so one domain can never be targeted twice (and so
+  // it can never look like two independent sources — see D-129 note in
+  // s4-executor about alias/domain duplication).
+  return [...new Set([...confirmedRouteDomains, ...platform])];
+}
+
+// True when the class has NO code-owned domain list, i.e. it can only be
+// reached through a human-confirmed SOURCE_ROUTE. Callers use this to
+// report honestly that a component's required class is unreachable for a
+// project with no confirmed routes, rather than silently searching for
+// something that can never be classified into it.
+export function classRequiresConfirmedRoute(sourceClass: EvidenceSourceClass): boolean {
+  return CLASS_OWNED_DOMAINS[sourceClass] === undefined;
+}
+
 // D-089's three project-specific classes — reachable ONLY via an explicit
 // human-set `routeClass` on the exact ACTIVE SOURCE_ROUTE that also
 // produced CONFIRMED for this project/domain (see resolveSourceRoute

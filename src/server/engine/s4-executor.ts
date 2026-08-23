@@ -4,7 +4,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { loadProductConfig } from "../config/product";
 import type { Database, Transaction } from "../db/client";
-import { evidence, sources } from "../db/schema";
+import { evidence, researchJobs, sources } from "../db/schema";
 import { reserveJobBudget } from "./budget-reservation";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
@@ -27,6 +27,9 @@ import { isTransientError } from "./providers/retry";
 import { ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
 import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
+import { blendQueries, buildTargetedQueries } from "./acquisition-targeting";
+import { componentSearchAllowance } from "./budget-fairness";
+import { loadAcquisitionPlan } from "./acquisition-plan";
 import { findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
@@ -370,6 +373,28 @@ interface RetryOutcome<T> {
   reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE" | "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED";
   capability?: string;
   attempts: number;
+}
+
+// D-130 — live read of how much of the searchQueries axis this job has
+// already reserved. Read fresh immediately before computing an
+// allowance, never cached: any concurrent attempt may have reserved in
+// between, and a stale figure would hand out budget twice.
+async function currentSearchQueriesReserved(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<number> {
+  try {
+    const [row] = await db
+      .select({ reserved: researchJobs.searchQueriesReserved })
+      .from(researchJobs)
+      .where(eq(researchJobs.id, jobId));
+    return row?.reserved ?? 0;
+  } catch {
+    // Never let an observability read fail an attempt — a conservative 0
+    // simply means "assume nothing reserved", and the real ceiling is
+    // still enforced atomically by reserveJobBudget on every call.
+    return 0;
+  }
 }
 
 async function reserveAndCallWithRetry<T>(params: {
@@ -786,12 +811,69 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // "Query count must be bounded before execution by controller
       // budget" (§2). Also drop empty/whitespace-only strings — never
       // trust shape beyond the type.
-      const queries = queryProposerOutcome
+      const modelQueries = queryProposerOutcome
         .value!.filter((q) => typeof q === "string" && q.trim().length > 0)
         .slice(0, MAX_QUERIES_PER_ATTEMPT);
-      if (queries.length === 0) {
+      if (modelQueries.length === 0) {
         return { status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent };
       }
+
+      // D-129/D-130 — component-aware acquisition. Loaded from
+      // authoritative records only (Pattern componentRequirements, the
+      // job's own normalized_intent, human-confirmed SOURCE_ROUTE); a
+      // failure to resolve any of it degrades to "no steering", never to
+      // a failed attempt.
+      const plan = await loadAcquisitionPlan(deps.db, ctx.jobId, item.component, deps.project.id);
+
+      // D-130: how many search units this component may spend, so that a
+      // later component the job's INTENT actually requires cannot be
+      // starved by earlier Pattern steps walking the queue first. Reads
+      // the live reserved counter, never a stale snapshot.
+      const reservedNow = await currentSearchQueriesReserved(deps.db, ctx.jobId);
+      const searchAllowance = componentSearchAllowance({
+        maxSearchQueries: ctx.budget.maxSearchQueries,
+        alreadyReserved: reservedNow,
+        workQueueSize: ctx.workQueueSize ?? 1,
+        remainingComponents: ctx.remainingComponents ?? 1,
+        isIntentRequired: plan.intentRequired.has(item.component),
+        hardCapPerAttempt: MAX_QUERIES_PER_ATTEMPT,
+      });
+      // An allowance of 0 means the JOB's searchQueries axis is already
+      // exhausted, not that this component is being throttled. That case
+      // must keep its existing, accepted behaviour exactly: fall through
+      // with one query so reserveJobBudget refuses it and
+      // BudgetExhaustedError is thrown (D-120's terminal contract), never
+      // silently degraded into a SKIPPED result the controller could fold
+      // into WORK_QUEUE_EXHAUSTED -> SUCCEEDED. This module never decides
+      // budget exhaustion itself; the atomic reservation does.
+      const effectiveAllowance = Math.max(1, searchAllowance);
+
+      // D-129: steer part of this attempt's allowance at hosts whose
+      // class source-authority.ts ALREADY recognizes as one this
+      // component admits. Admissibility itself is untouched — this only
+      // gives admissible evidence a chance to exist.
+      const { targetedQueries, unreachableClasses } = buildTargetedQueries({
+        establishingClasses: plan.establishingClasses,
+        confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
+        baseQueries: modelQueries,
+      });
+      for (const cls of unreachableClasses) {
+        // Honest, bounded observability: a required class that can only
+        // come from a human-confirmed SOURCE_ROUTE this project does not
+        // have. Never silently ignored — it is the real reason such a
+        // component can stay INSUFFICIENT_EVIDENCE at any budget.
+        observations.add(`CLASS_REQUIRES_CONFIRMED_ROUTE:${cls}`);
+      }
+      // Targeting REPLACES, never ADDS: the total query count for this
+      // attempt can never exceed what the proposer itself returned (still
+      // bounded by the fair-share allowance). Steering changes WHERE the
+      // searches point, never how many search units a component spends —
+      // so per-component budget accounting is identical to before D-129.
+      const queries = blendQueries(
+        targetedQueries,
+        modelQueries,
+        Math.min(effectiveAllowance, modelQueries.length),
+      );
       for (const q of queries) {
         await recordTraceEvent(deps.db, {
           researchJobId: ctx.jobId,
