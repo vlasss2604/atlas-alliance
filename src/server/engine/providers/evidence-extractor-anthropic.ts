@@ -53,6 +53,27 @@ const extractedFactSchema = z.object({
 });
 const extractionResultSchema = z.object({ facts: z.array(extractedFactSchema).max(20) });
 
+// D-128 — publishedAt arrives as untrusted model text. The schema only
+// proves it is A string, never that it is a PARSEABLE date: a real live
+// run returned a value `new Date()` could not parse, producing an Invalid
+// Date object that passed silently through extraction, S4 and S5 and only
+// exploded much later inside the driver as
+// "RangeError: Invalid time value" when drizzle called .toISOString() on
+// it — killing an entire job (SYSTEM_OR_PROVIDER_FAILURE) after all of its
+// search/fetch/model budget had already been spent.
+//
+// An unparseable published date is treated exactly as the model returning
+// null, which the schema and the evidence.published_at column already
+// allow: "this evidence carries no usable publication date". It is never
+// guessed, back-filled, or substituted with fetch time — inventing a date
+// would fabricate provenance, and provenance is what published_at exists
+// to record.
+export function parseModelPublishedAt(raw: string | null): Date | null {
+  if (!raw) return null;
+  const parsed = new Date(raw);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
 const SYSTEM_PROMPT = `You extract factual candidate Evidence from ONE already-fetched document for ONE bounded research task.
 
 You are given a Pattern step, a component, and the document's normalized text inside a fenced block labeled DOCUMENT.
@@ -176,7 +197,7 @@ async function doExtract(
   }
   return parsed.data.facts.map((f) => ({
     ...f,
-    publishedAt: f.publishedAt ? new Date(f.publishedAt) : null,
+    publishedAt: parseModelPublishedAt(f.publishedAt),
   }));
 }
 
