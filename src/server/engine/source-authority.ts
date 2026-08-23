@@ -75,6 +75,42 @@ const ONCHAIN_EXPLORER_DOMAINS = new Set([
   "optimistic.etherscan.io",
 ]);
 
+// D-131 — TEST NETWORK explorer hosts. A live run admitted
+// sepolia.etherscan.io as ONCHAIN_VERIFIABLE and used it to
+// PARTIALLY_SUPPORT a NET_EFFECT claim about token supply. A testnet
+// carries no production economic reality: its balances and supplies are
+// free to mint and prove nothing about a real asset.
+// matchesPlatformDomain deliberately treats any subdomain of a
+// recognized explorer as that explorer (m.x.com, old.reddit.com) — right
+// for social/media hosts, wrong here, because it silently promoted every
+// testnet to production-grade on-chain authority.
+//
+// Project-independent and code-owned, exactly like the lists above:
+// these are network names, never a project's or a chain's business.
+const TESTNET_HOST_LABELS = new Set([
+  "sepolia",
+  "goerli",
+  "ropsten",
+  "rinkeby",
+  "kovan",
+  "holesky",
+  "mumbai",
+  "amoy",
+  "testnet",
+  "devnet",
+  "fuji",
+]);
+
+// True when any dot-separated LABEL of the host is a known test network.
+// Label-by-label rather than substring, so "sepolia.etherscan.io" and
+// "testnet.bscscan.com" are caught while an unrelated host that merely
+// contains the text inside a longer label is not.
+export function isTestNetworkHost(url: string): boolean {
+  const host = hostnameOf(url);
+  if (!host) return false;
+  return host.split(".").some((label) => TESTNET_HOST_LABELS.has(label));
+}
+
 const SOCIAL_DOMAINS = new Set([
   "twitter.com",
   "x.com",
@@ -242,6 +278,13 @@ export function resolveSourceClass(
   activeRouteClass: RouteClass | null,
 ): EvidenceSourceClass {
   const host = hostnameOf(url);
+  // 0. D-131 — a TEST network explorer is never production on-chain
+  // authority. Falls through to the weakest class (SOCIAL) like any other
+  // unrecognized host, so it can still be recorded and read as context
+  // but can never establish a component whose Pattern requires
+  // ONCHAIN_VERIFIABLE. Checked FIRST so it cannot be rescued by the
+  // sourceType==="ONCHAIN" branch either.
+  if (isTestNetworkHost(url)) return "SOCIAL";
   // 1. ONCHAIN / explorer
   if (sourceType === "ONCHAIN" || (host && hostMatchesAnyPlatform(host, ONCHAIN_EXPLORER_DOMAINS))) {
     return "ONCHAIN_VERIFIABLE";

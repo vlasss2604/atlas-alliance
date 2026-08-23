@@ -12,6 +12,7 @@ import {
 } from "../src/server/engine/budget-fairness";
 import {
   classRequiresConfirmedRoute,
+  isTestNetworkHost,
   resolveSourceClass,
   targetDomainsForClass,
 } from "../src/server/engine/source-authority";
@@ -62,7 +63,7 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
       baseQueries: ["supply"],
     });
     for (const q of targetedQueries) {
-      const domain = /^site:(\S+)\s/.exec(q)?.[1]!;
+      const domain = /^site:(\S+)\s/.exec(q)?.[1] ?? "";
       expect(resolveSourceClass(`https://${domain}/p`, "OTHER", null)).toBe("ONCHAIN_VERIFIABLE");
     }
   });
@@ -75,7 +76,7 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
       baseQueries: ["governance proposal"],
     });
     for (const q of targetedQueries) {
-      const domain = /^site:(\S+)\s/.exec(q)?.[1]!;
+      const domain = /^site:(\S+)\s/.exec(q)?.[1] ?? "";
       expect(resolveSourceClass(`https://${domain}/p`, "OTHER", null)).not.toBe("SOCIAL");
     }
   });
@@ -272,5 +273,39 @@ describe("budget fairness — later intent-critical components cannot be starved
     });
     expect([...required].sort()).toEqual(["FLOW_PATH", "RECIPIENT", "SOURCE_OF_VALUE"]);
     expect(required.has("DURABILITY_BASIS")).toBe(false);
+  });
+});
+
+// D-131 — a live run admitted sepolia.etherscan.io as ONCHAIN_VERIFIABLE
+// and used it to PARTIALLY_SUPPORT a NET_EFFECT claim about token supply.
+// matchesPlatformDomain treats any subdomain of a recognized explorer as
+// that explorer, which silently promoted every test network to
+// production-grade on-chain authority. A testnet's balances and supplies
+// are free to mint and prove nothing about a real asset.
+describe("source authority — test networks are never production on-chain authority (D-131)", () => {
+  it("classifies testnet explorer subdomains as SOCIAL, not ONCHAIN_VERIFIABLE", () => {
+    for (const url of [
+      "https://sepolia.etherscan.io/token/0x38ef1520464a8b2b67d8408996e68a814e6479d8",
+      "https://goerli.etherscan.io/address/0xabc",
+      "https://testnet.bscscan.com/token/0xdef",
+      "https://mumbai.polygonscan.com/tx/0x1",
+    ]) {
+      expect(resolveSourceClass(url, "OTHER", null), url).toBe("SOCIAL");
+    }
+  });
+
+  it("a testnet host cannot be rescued into ONCHAIN_VERIFIABLE by sourceType", () => {
+    expect(resolveSourceClass("https://sepolia.etherscan.io/token/0x1", "ONCHAIN", null)).toBe("SOCIAL");
+  });
+
+  it("mainnet explorers are unaffected", () => {
+    expect(resolveSourceClass("https://etherscan.io/token/0x1", "OTHER", null)).toBe("ONCHAIN_VERIFIABLE");
+    expect(resolveSourceClass("https://solscan.io/token/abc", "OTHER", null)).toBe("ONCHAIN_VERIFIABLE");
+    expect(resolveSourceClass("https://basescan.org/token/0x1", "OTHER", null)).toBe("ONCHAIN_VERIFIABLE");
+  });
+
+  it("does not catch an unrelated host that merely contains the text inside a longer label", () => {
+    expect(isTestNetworkHost("https://sepoliaanalytics.example.com/x")).toBe(false);
+    expect(isTestNetworkHost("https://sepolia.etherscan.io/x")).toBe(true);
   });
 });
