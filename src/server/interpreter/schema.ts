@@ -156,6 +156,28 @@ export function assertConsistent(r: InterpreterModelResult): void {
   if (r.related_entities.length > 0 && !r.project_or_asset?.trim()) {
     fail("related_entities without a primary entity");
   }
+  // Живой прогон (2026-08-23): "Куда на самом деле уходят токены $PUMP,
+  // которые pump.fun покупает через buyback, и уменьшает ли это
+  // предложение токена?" вернулась с status=OUT_OF_SCOPE/route=
+  // OUTSIDE_CURRENT_DOMAIN, но с normalized_intent=MECHANISM_CURRENT_STATE
+  // и non-empty research_task, описывающим ровно buyback/supply-effect
+  // механизм — тот же вопрос, который модель сама классифицировала как
+  // исследовательскую задачу. Это самопротиворечивый вывод модели (не
+  // решение сервера и не особый случай языка/проекта): normalized_intent
+  // вне UNKNOWN и заполненный research_task не могут сосуществовать с
+  // «вне домена». Требуем status===OUT_OF_SCOPE отдельно от route, чтобы
+  // не задеть механическую деградацию normalizeModelOutput() (explanation-
+  // маршрут без quick_answer → route=OUTSIDE_CURRENT_DOMAIN, status=
+  // INVALID, "13b" ниже) — та деградация оставляет старые normalized_intent/
+  // research_task нетронутыми и не является этим классом противоречия.
+  if (
+    r.status === "OUT_OF_SCOPE" &&
+    r.route === "OUTSIDE_CURRENT_DOMAIN" &&
+    r.normalized_intent !== "UNKNOWN" &&
+    r.research_task?.trim()
+  ) {
+    fail("OUTSIDE_CURRENT_DOMAIN with in-domain normalized_intent and research_task");
+  }
 }
 
 // Нормализация ДО строгой проверки. Канон atlas-intent прямо требует:

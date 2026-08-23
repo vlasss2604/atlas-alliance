@@ -876,6 +876,117 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
     // проверки — повтора к модели не потребовалось.
     expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
   });
+  it("17. D-122 (живой прогон): OUTSIDE_CURRENT_DOMAIN самопротиворечие — «Куда на самом деле уходят токены $PUMP, которые pump.fun покупает через buyback, и уменьшает ли это предложение токена?» — отвергается, повтор чинит через существующий механизм", async () => {
+    // Точная форма живого сбоя (D-122): модель классифицировала вопрос как
+    // buyback/supply-effect механизм (normalized_intent=MECHANISM_CURRENT_STATE,
+    // research_task заполнен и описывает именно этот механизм), но при этом
+    // сама же выставила route=OUTSIDE_CURRENT_DOMAIN/status=OUT_OF_SCOPE —
+    // самопротиворечие, которое старая схема пропускала как валидный ответ.
+    const REAL_QUESTION =
+      "Куда на самом деле уходят токены $PUMP, которые pump.fun покупает через buyback, и уменьшает ли это предложение токена?";
+
+    const contradictoryOutsideDomain = () => ({
+      status: "OUT_OF_SCOPE",
+      project_or_asset: "Pump.fun",
+      related_entities: ["PUMP"],
+      topic: "token buyback and supply reduction mechanism",
+      task_type: "PROJECT_MECHANISM",
+      research_task:
+        "Identify the destination of PUMP tokens purchased through Pump.fun's buyback mechanism and determine whether these purchases result in a net reduction of circulating token supply.",
+      understood_summary:
+        "You want to understand what actually happens to the PUMP tokens that Pump.fun buys back through its buyback program, and whether this actually reduces the token supply in circulation.",
+      user_assumptions: ["Pump.fun conducts buybacks of PUMP tokens"],
+      ambiguities: [],
+      clarification_question: null,
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      normalized_intent: "MECHANISM_CURRENT_STATE",
+      intent_confidence: 0.92,
+      route_reason:
+        "The question asks about a specific tokenomics mechanism (buyback) and its actual effect on supply.",
+      needs_fresh_evidence: true,
+      quick_answer: null,
+    });
+
+    // (1) Ровно класс бага: unit-уровень, parseInterpreterResult отвергает
+    // напрямую — это самопротиворечие, а не «почти годный» результат.
+    expect(() => parseInterpreterResult(contradictoryOutsideDomain())).toThrow(
+      InterpreterContractError,
+    );
+
+    // (2) Существующее поведение повтора: первый ответ модели —
+    // противоречивый OUTSIDE-результат, второй — исправленный READY/
+    // DEEP_RESEARCH → интерпретация принята, attempts=2. Никакого нового
+    // повтора не введено: это тот же единственный retry, что и D-038/тест 8.
+    const c = await makeAuthedClient();
+    __pushFakeScript(() => contradictoryOutsideDomain());
+    __pushFakeScript((input) => {
+      expect(input.contractViolation).toContain(
+        "OUTSIDE_CURRENT_DOMAIN with in-domain normalized_intent and research_task",
+      );
+      return {
+        ...contradictoryOutsideDomain(),
+        status: "READY",
+        route: "DEEP_RESEARCH",
+        // related_entities пуст на исправленном ответе: "PUMP" как алиас
+        // того же pump_fun иначе сталкивается с не связанной с этой правкой
+        // логикой resolveAllEntities/allResolved (interpret.ts) — сравнение
+        // ожидает, что КАЖДАЯ названная сущность резолвится в СВОЙ слаг, а
+        // здесь "PUMP" резолвится в тот же pump_fun, что и project_or_asset.
+        // Не предмет этого теста/фикса.
+        related_entities: [],
+      };
+    });
+    const { res, body } = await ask(c, REAL_QUESTION);
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    expect(body.interpretation.understood?.projectSlug).toBe("pump_fun");
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(2);
+  });
+
+  it("17b. настоящий вне-доменный вопрос остаётся честным OUT_OF_SCOPE (normalized_intent=UNKNOWN, research_task пуст)", () => {
+    // Контраст с тестом 17: когда intent реально UNKNOWN и задачи нет,
+    // OUTSIDE_CURRENT_DOMAIN — не противоречие, а корректный вывод.
+    const genuineOutOfDomain = modelSays({
+      status: "OUT_OF_SCOPE",
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      project_or_asset: null,
+      task_type: null,
+      research_task: null,
+      understood_summary: null,
+      normalized_intent: "UNKNOWN",
+      route_reason: "outside Token Value Capture",
+    })();
+    const parsed = parseInterpreterResult(genuineOutOfDomain);
+    expect(parsed.status).toBe("OUT_OF_SCOPE");
+    expect(parsed.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+  });
+
+  it("17c. правило смотрит только на структурные поля, не на язык текста", () => {
+    // Тот же класс противоречия, но все текстовые поля — на английском:
+    // правило обязано сработать одинаково, потому что оно читает route/
+    // normalized_intent/research_task, а не язык user_assumptions/summary.
+    const contradictoryEnglish = modelSays({
+      status: "OUT_OF_SCOPE",
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      project_or_asset: "Pump.fun",
+      task_type: "PROJECT_MECHANISM",
+      research_task: "Determine where bought-back tokens go and whether supply falls.",
+      understood_summary: "You want to know where the buyback tokens go.",
+      normalized_intent: "BURN_OR_SUPPLY_EFFECT",
+      route_reason: "buyback mechanism",
+    })();
+    expect(() => parseInterpreterResult(contradictoryEnglish)).toThrow(InterpreterContractError);
+
+    // А обычный валидный DEEP_RESEARCH результат новым правилом не задет
+    // вовсе — оно смотрит только на route === OUTSIDE_CURRENT_DOMAIN.
+    const validResult = modelSays({ project_or_asset: "Uniswap" })();
+    expect(parseInterpreterResult(validResult).status).toBe("READY");
+  });
 });
 
 async function quotaCount(userId: string): Promise<number> {
