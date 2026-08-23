@@ -121,6 +121,13 @@ export function blendQueries(
   targeted: readonly string[],
   modelQueries: readonly string[],
   maxTotal: number,
+  // True when at least one class this component admits CAN be produced by
+  // an ordinary, untargeted web result (SOCIAL / RESEARCH_MEDIA /
+  // DATA_PROVIDER). When false, a generic query is close to worthless for
+  // this component — whatever it returns will be classified into a class
+  // S5 must reject — so the scarce slots go to targeted queries first,
+  // including the case where only ONE slot exists.
+  genericMayEstablish = true,
 ): string[] {
   if (maxTotal <= 0) return [];
   const out: string[] = [];
@@ -131,13 +138,31 @@ export function blendQueries(
     seen.add(trimmed);
     out.push(trimmed);
   };
-  // Reserve one slot for the model's own untargeted query whenever the
-  // budget allows more than a single query this attempt.
-  const targetedBudget = maxTotal > 1 ? Math.min(targeted.length, maxTotal - 1) : 0;
+  // Reserve a slot for the model's own untargeted query only when a
+  // generic result could actually establish this component AND more than
+  // one slot exists. Otherwise targeted queries take precedence.
+  const reserveGenericSlot = genericMayEstablish && maxTotal > 1;
+  const targetedBudget = reserveGenericSlot
+    ? Math.min(targeted.length, maxTotal - 1)
+    : Math.min(targeted.length, maxTotal);
   for (let i = 0; i < targetedBudget; i += 1) push(targeted[i]);
   for (const q of modelQueries) push(q);
   // If the model produced fewer queries than the remaining room, let any
   // leftover targeted queries use it rather than wasting the slot.
   for (const q of targeted) push(q);
   return out;
+}
+
+// Classes an ordinary, untargeted general-web search can plausibly yield.
+// Used only to decide query PRIORITY — never admissibility.
+const GENERIC_REACHABLE_CLASSES: ReadonlySet<EvidenceSourceClass> = new Set<EvidenceSourceClass>([
+  "SOCIAL",
+  "RESEARCH_MEDIA",
+  "DATA_PROVIDER",
+]);
+
+export function genericSearchMayEstablish(
+  establishingClasses: readonly EvidenceSourceClass[],
+): boolean {
+  return establishingClasses.some((c) => GENERIC_REACHABLE_CLASSES.has(c));
 }

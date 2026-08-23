@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   blendQueries,
   buildTargetedQueries,
+  genericSearchMayEstablish,
   MAX_TARGETED_QUERIES_PER_ATTEMPT,
 } from "../src/server/engine/acquisition-targeting";
 import {
@@ -124,9 +125,54 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
     expect(blended.length).toBeLessThanOrEqual(3);
   });
 
-  it("respects a one-query allowance by spending it on the model's own query", () => {
-    const blended = blendQueries(["site:solscan.io supply"], ["generic supply question"], 1);
-    expect(blended).toEqual(["generic supply question"]);
+  it("A. spends a single-query allowance on the TARGETED query when generic search cannot establish the component", () => {
+    // The live regression this encodes: with a fair-share allowance of 1,
+    // reserving that slot for the model's generic query meant targeting
+    // never fired at all, and the component's only search returned
+    // SOCIAL — guaranteed inadmissible.
+    const blended = blendQueries(
+      ["site:solscan.io supply"],
+      ["generic supply question"],
+      1,
+      /* genericMayEstablish */ false,
+    );
+    expect(blended).toEqual(["site:solscan.io supply"]);
+  });
+
+  it("a single-query allowance always goes to a targeted query when one exists — it is already aimed at an admitted class", () => {
+    const blended = blendQueries(
+      ["site:defillama.com supply"],
+      ["generic supply question"],
+      1,
+      /* genericMayEstablish */ true,
+    );
+    expect(blended).toEqual(["site:defillama.com supply"]);
+  });
+
+  it("genericMayEstablish decides the RESERVED generic slot once more than one query is allowed", () => {
+    // generic CAN establish -> one slot is held back for the model query
+    const withGeneric = blendQueries(
+      ["site:defillama.com a", "site:dune.com a"],
+      ["model query a"],
+      2,
+      true,
+    );
+    expect(withGeneric).toContain("model query a");
+    // generic CANNOT establish -> both slots go to targeted queries
+    const withoutGeneric = blendQueries(
+      ["site:solscan.io a", "site:solana.fm a"],
+      ["model query a"],
+      2,
+      false,
+    );
+    expect(withoutGeneric).toEqual(["site:solscan.io a", "site:solana.fm a"]);
+  });
+
+  it("genericSearchMayEstablish reflects the component's own admitted classes", () => {
+    expect(genericSearchMayEstablish(["OFFICIAL_DOCS", "GOVERNANCE", "ONCHAIN_VERIFIABLE"])).toBe(false);
+    expect(genericSearchMayEstablish(["ONCHAIN_VERIFIABLE", "DATA_PROVIDER"])).toBe(true);
+    expect(genericSearchMayEstablish(["RESEARCH_MEDIA"])).toBe(true);
+    expect(genericSearchMayEstablish([])).toBe(false);
   });
 
   it("G. contains no project-specific hardcoding — the same call shape works for any project", () => {

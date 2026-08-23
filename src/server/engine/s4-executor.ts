@@ -27,7 +27,7 @@ import { isTransientError } from "./providers/retry";
 import { ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
 import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
-import { blendQueries, buildTargetedQueries } from "./acquisition-targeting";
+import { blendQueries, buildTargetedQueries, genericSearchMayEstablish } from "./acquisition-targeting";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { findAttemptId, recordTraceEvent } from "./trace-store";
@@ -393,6 +393,23 @@ async function currentSearchQueriesReserved(
     // Never let an observability read fail an attempt — a conservative 0
     // simply means "assume nothing reserved", and the real ceiling is
     // still enforced atomically by reserveJobBudget on every call.
+    return 0;
+  }
+}
+
+// D-130 — same live-read discipline as currentSearchQueriesReserved, for
+// the sourceOpens axis.
+async function currentSourceOpensReserved(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<number> {
+  try {
+    const [row] = await db
+      .select({ reserved: researchJobs.sourceOpensReserved })
+      .from(researchJobs)
+      .where(eq(researchJobs.id, jobId));
+    return row?.reserved ?? 0;
+  } catch {
     return 0;
   }
 }
@@ -873,6 +890,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         targetedQueries,
         modelQueries,
         Math.min(effectiveAllowance, modelQueries.length),
+        genericSearchMayEstablish(plan.establishingClasses),
       );
       for (const q of queries) {
         await recordTraceEvent(deps.db, {
@@ -1022,11 +1040,28 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       }
 
       // --- 3. ContentFetcher (already the accepted S1 SSRF-safe impl) ------
+      // D-130: sourceOpens gets the SAME fair-share division as
+      // searchQueries. With the flat per-attempt cap of 6 and a ceiling of
+      // 24, five components exhausted the axis and every later component —
+      // including an intent-required one — was starved. Same contract as
+      // above: a proposal cap only, floored at 1, full cap for the last
+      // pending component so reserveJobBudget can still refuse and throw.
+      const openAllowance = Math.max(
+        1,
+        componentSearchAllowance({
+          maxSearchQueries: ctx.budget.maxSourceOpens,
+          alreadyReserved: await currentSourceOpensReserved(deps.db, ctx.jobId),
+          workQueueSize: ctx.workQueueSize ?? 1,
+          remainingComponents: ctx.remainingComponents ?? 1,
+          isIntentRequired: plan.intentRequired.has(item.component),
+          hardCapPerAttempt: MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT,
+        }),
+      );
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
       for (const { url } of candidateUrls.values()) {
-        if (opensAttempted >= MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT) break;
+        if (opensAttempted >= openAllowance) break;
         const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
         if (!reserved) {
           // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
