@@ -7,6 +7,7 @@ import {
   requireSession,
 } from "@/src/server/auth/guards";
 import { researchJobs } from "@/src/server/db/schema";
+import { startOwnerManualAlphaResearch } from "@/src/server/services/start-owner-alpha-research";
 import { startResearch } from "@/src/server/services/start-research";
 import { getBoss, getDb, getProductConfig } from "@/src/server/runtime";
 
@@ -49,16 +50,28 @@ export async function POST(req: Request): Promise<Response> {
     if (!body.interpretationId || !body.idempotencyKey) {
       throw new HttpError(400, "BAD_REQUEST");
     }
-    const { job, created } = await startResearch(
-      db,
-      await getBoss(),
-      await getProductConfig(),
-      {
-        userId: session.userId,
-        interpretationId: body.interpretationId,
-        idempotencyKey: body.idempotencyKey,
-      },
-    );
+    const config = await getProductConfig();
+    // Owner Manual Alpha App Test (D-123) — ADMIN-only additive admission
+    // path, reachable ONLY while the public path is closed
+    // (research_enabled=false). The moment research_enabled becomes true,
+    // this branch is dead code for every request (startResearch's own
+    // check is no longer the one being bypassed) — an ADMIN submitting a
+    // question once the product is live goes through the exact same
+    // startResearch as any other user, with no special treatment.
+    // Normal (non-ADMIN) users always fall through to startResearch below,
+    // which still throws RESEARCH_DISABLED exactly as before this change.
+    const { job, created } =
+      !config.research_enabled && session.role === "ADMIN"
+        ? await startOwnerManualAlphaResearch(db, await getBoss(), {
+            userId: session.userId,
+            interpretationId: body.interpretationId,
+            idempotencyKey: body.idempotencyKey,
+          })
+        : await startResearch(db, await getBoss(), config, {
+            userId: session.userId,
+            interpretationId: body.interpretationId,
+            idempotencyKey: body.idempotencyKey,
+          });
     return Response.json(
       {
         job: {

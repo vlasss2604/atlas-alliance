@@ -100,6 +100,20 @@ export const memoryStatus = pgEnum("memory_status", [
 
 export const userRole = pgEnum("user_role", ["USER", "ADMIN"]);
 
+// Owner Manual Alpha App Test (D-123) — distinguishes a research job
+// created through the normal product path from one created through the
+// ADMIN-only manual internal-alpha admission path (start-owner-alpha-
+// research.ts). Read by the worker (worker.ts) to decide whether
+// createLiveS4WorkExecutor may even be considered for this job — never
+// inferred from the requesting user's role at execution time, since the
+// job may be picked up by the worker long after the admin's session
+// ended. PRODUCT is the default for every existing/normal job; this
+// column never widens what a normal PRODUCT job can do.
+export const researchJobOrigin = pgEnum("research_job_origin", [
+  "PRODUCT",
+  "OWNER_MANUAL_ALPHA",
+]);
+
 // Фаза 5 (phase-5-plan.md §5). Lifecycle памяти — единственный барьер
 // против отравления (D-025): переход в ACTIVE только человеком, прямая
 // вставка ACTIVE отклоняется триггером (0006_research_memory.sql).

@@ -21,6 +21,7 @@ import {
   memoryStatus,
   quotaReservationState,
   researchCapability,
+  researchJobOrigin,
   researchJobState,
 } from "./enums";
 import { users } from "./identity";
@@ -61,6 +62,12 @@ export const researchJobs = pgTable(
     capabilityAtStart: researchCapability("capability_at_start").notNull(),
     budgetAtStart: jsonb("budget_at_start").notNull(),
     idempotencyKey: text("idempotency_key").notNull(),
+    // Owner Manual Alpha App Test (D-123) — deterministic provenance marker,
+    // set once at creation and never inferred from the requester's role at
+    // execution time (the worker may pick this job up long after the
+    // admin's session ended). PRODUCT is the default for every existing/
+    // normal job; this column alone never widens what a PRODUCT job can do.
+    origin: researchJobOrigin("origin").notNull().default("PRODUCT"),
     clarificationAttempts: smallint("clarification_attempts")
       .notNull()
       .default(0),

@@ -2,6 +2,7 @@ import { eq, sql } from "drizzle-orm";
 
 import { deleteStaleRateLimits } from "../auth/rate-limit";
 import { deleteExpiredSessions } from "../auth/session";
+import { loadProductConfig } from "../config/product";
 import { createDatabase, type Database } from "../db/client";
 import { projects, researchJobs } from "../db/schema";
 import { BudgetExhaustedError } from "../engine/budget-exhausted-error";
@@ -9,6 +10,7 @@ import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
+import { resolveOwnerAlphaWorkExecutor } from "./owner-alpha-routing";
 import { createBoss, RESEARCH_QUEUE } from "./queue";
 import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
 
@@ -190,7 +192,26 @@ export async function handleResearchJobTask(
 
   let outcome: EngineOutcome | null;
   try {
-    const executor = executorOverride ?? createNonLiveS4WorkExecutor({ db, project });
+    // Owner Manual Alpha App Test (D-123) — the ONLY branch point where a
+    // live-provider executor can be selected. executorOverride (test/CLI
+    // seam) always wins, unchanged from before. A normal PRODUCT-origin
+    // job (every existing/default job) falls straight to
+    // createNonLiveS4WorkExecutor exactly as before this change — this
+    // branch is additive, not a redefinition of the default path.
+    let executor: WorkExecutor;
+    if (executorOverride) {
+      executor = executorOverride;
+    } else if (job.origin === "OWNER_MANUAL_ALPHA") {
+      const config = await loadProductConfig(db);
+      executor = await resolveOwnerAlphaWorkExecutor({
+        db,
+        job,
+        project,
+        internalAlphaEnabled: config.internal_alpha_enabled,
+      });
+    } else {
+      executor = createNonLiveS4WorkExecutor({ db, project });
+    }
     const result = await runS4ResearchJob(db, jobId, executor, new Date());
     outcome = mapEngineOutcome(result.stopReason);
   } catch (e) {

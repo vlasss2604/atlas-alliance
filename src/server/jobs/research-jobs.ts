@@ -36,6 +36,10 @@ export interface CreateResearchJobInput {
   idempotencyKey: string;
   entitlement: EntitlementSnapshot;
   demoLifetimeProofLimit: number;
+  // Owner Manual Alpha App Test (D-123) — defaults to "PRODUCT" for every
+  // existing caller (start-research.ts never sets this). Only
+  // start-owner-alpha-research.ts passes "OWNER_MANUAL_ALPHA".
+  origin?: "PRODUCT" | "OWNER_MANUAL_ALPHA";
 }
 
 export interface CreateResearchJobResult {
@@ -127,6 +131,7 @@ export async function createResearchJob(
           entitlementAtStart: input.entitlement.level,
           capabilityAtStart: input.entitlement.capability,
           budgetAtStart: input.entitlement.budget,
+          origin: input.origin ?? "PRODUCT",
         })
         .returning();
 

@@ -74,6 +74,28 @@ export const ru: Dict = {
       "Сопоставляю доказательства",
       "Формирую Proof",
     ],
+    detail: {
+      loading: "Загружаю результат…",
+      error: "Не удалось загрузить результат.",
+      findingTitle: "Вывод",
+      mechanismTitle: "Как это работает",
+      evidenceTitle: "Доказательства",
+      sourcesTitle: "Источники",
+      noEvidence: "Для этого исследования не было принято ни одного доказательства.",
+      debugTitle: "Research Debug",
+      statusLabel: {
+        SUPPORTED: "Подтверждено доказательствами",
+        PARTIALLY_SUPPORTED: "Частично подтверждено доказательствами",
+        NOT_SUPPORTED: "Не подтверждено доказательствами",
+        INSUFFICIENT_EVIDENCE: "Недостаточно доказательств для ответа",
+      },
+      terminationLabel: {
+        BUDGET_EXHAUSTED: "Остановлено — исчерпан бюджет исследования",
+        WORK_QUEUE_EXHAUSTED: "Проверено всё, до чего удалось дойти",
+        SYSTEM_OR_PROVIDER_FAILURE: "Остановлено из-за технического сбоя",
+        CAPABILITY_BOUNDARY_NO_ELIGIBLE_WORK: "Не осталось доступного для исследования",
+      },
+    },
   },
   projects: {
     title: "Проекты",

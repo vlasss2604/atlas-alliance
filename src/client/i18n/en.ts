@@ -76,6 +76,28 @@ export const en = {
       "Weighing the evidence",
       "Building the Proof",
     ],
+    detail: {
+      loading: "Loading result…",
+      error: "Couldn't load this result.",
+      findingTitle: "Finding",
+      mechanismTitle: "How it works",
+      evidenceTitle: "Evidence",
+      sourcesTitle: "Sources",
+      noEvidence: "No evidence was admitted for this research.",
+      debugTitle: "Research Debug",
+      statusLabel: {
+        SUPPORTED: "Supported by the evidence",
+        PARTIALLY_SUPPORTED: "Partially supported by the evidence",
+        NOT_SUPPORTED: "Not supported by the evidence",
+        INSUFFICIENT_EVIDENCE: "Insufficient evidence to answer this",
+      } as Record<string, string>,
+      terminationLabel: {
+        BUDGET_EXHAUSTED: "Stopped because it hit its research budget",
+        WORK_QUEUE_EXHAUSTED: "Finished checking everything it could reach",
+        SYSTEM_OR_PROVIDER_FAILURE: "Stopped because of a technical failure",
+        CAPABILITY_BOUNDARY_NO_ELIGIBLE_WORK: "Nothing eligible left to research",
+      } as Record<string, string>,
+    },
   },
   projects: {
     title: "Projects",

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { api } from "@/src/client/api";
+import { api, type ResearchJobDetail } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
 import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 
@@ -11,10 +11,119 @@ type Job = Awaited<ReturnType<typeof api.getResearchJobs>>["jobs"][number];
 const ACTIVE_STATES = ["QUEUED", "RUNNING", "AWAITING_CLARIFICATION"];
 const TERMINAL_STATES = ["SUCCEEDED", "FAILED", "CANCELLED", "BUDGET_LIMIT_REACHED"];
 
+// Owner Manual Alpha App Test (D-123) — minimum result-detail experience.
+// Reuses the page's existing glass/pill visual language; no new route, no
+// redesign. Translates S7's closed status vocabulary and the worker's
+// termination-reason vocabulary into plain product language (dict.research
+// .detail) rather than showing raw S4/S5/S6/S7 JSON in the primary view.
+function JobDetail({ detail }: { detail: ResearchJobDetail }) {
+  const { dict } = useApp();
+  const d = dict.research.detail;
+  const claim = detail.claimSupport;
+  const statusText = claim ? d.statusLabel[claim.status] ?? claim.status : null;
+  const terminationText = detail.job.terminationReason
+    ? d.terminationLabel[detail.job.terminationReason] ?? detail.job.terminationReason
+    : null;
+
+  return (
+    <div className="mt-3 flex flex-col gap-4 border-t border-[var(--atlas-border)] pt-3">
+      <section>
+        <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
+          {d.findingTitle}
+        </h3>
+        {claim ? (
+          <p className="mt-1 text-sm">
+            {claim.intent} — <span className="font-medium">{statusText}</span>
+          </p>
+        ) : (
+          <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">
+            {terminationText ?? d.noEvidence}
+          </p>
+        )}
+      </section>
+
+      {detail.mechanism && detail.mechanism.flows.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
+            {d.mechanismTitle}
+          </h3>
+          <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">
+            {detail.mechanism.flows.length} step
+            {detail.mechanism.flows.length === 1 ? "" : "s"} traced
+            {detail.mechanism.unassignedGaps.length > 0
+              ? `, ${detail.mechanism.unassignedGaps.length} gap${
+                  detail.mechanism.unassignedGaps.length === 1 ? "" : "s"
+                }`
+              : ""}
+            .
+          </p>
+        </section>
+      )}
+
+      <section>
+        <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
+          {d.evidenceTitle}
+        </h3>
+        {detail.evidence.length === 0 ? (
+          <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">{d.noEvidence}</p>
+        ) : (
+          <ul className="mt-1 flex flex-col gap-2">
+            {detail.evidence.map((e) => (
+              <li key={e.id} className="text-sm">
+                <p>{e.summary ?? e.fragment}</p>
+                {e.doesNotProve && (
+                  <p className="text-xs text-[var(--atlas-text-dim)]">
+                    {e.doesNotProve}
+                  </p>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {detail.evidence.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
+            {d.sourcesTitle}
+          </h3>
+          <ul className="mt-1 flex flex-col gap-1">
+            {[...new Map(detail.evidence.map((e) => [e.retrievedUrl, e])).values()].map(
+              (e) => (
+                <li key={e.retrievedUrl} className="truncate text-xs">
+                  <a
+                    href={e.retrievedUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[var(--atlas-cyan)]"
+                  >
+                    {e.sourceTitle ?? e.retrievedUrl}
+                  </a>
+                </li>
+              ),
+            )}
+          </ul>
+        </section>
+      )}
+
+      <details>
+        <summary className="cursor-pointer text-xs text-[var(--atlas-text-dim)]">
+          {d.debugTitle}
+        </summary>
+        <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap text-[10px] text-[var(--atlas-text-dim)]">
+          {JSON.stringify(detail, null, 2)}
+        </pre>
+      </details>
+    </div>
+  );
+}
+
 export default function ResearchPage() {
   const { dict, refresh } = useApp();
   const [jobs, setJobs] = useState<Job[] | null>(null);
   const [cancelling, setCancelling] = useState<string | null>(null);
+  const [openJobId, setOpenJobId] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, ResearchJobDetail | "loading" | "error">>({});
 
   useEffect(() => {
     void api.getResearchJobs().then((r) => setJobs(r.jobs)).catch(() => setJobs([]));
@@ -58,6 +167,25 @@ export default function ResearchPage() {
     );
     await api.markRead(job.id).catch(() => {});
     void refresh();
+  };
+
+  const openJob = async (job: Job) => {
+    void markRead(job);
+    if (!TERMINAL_STATES.includes(job.state)) return;
+    if (openJobId === job.id) {
+      setOpenJobId(null);
+      return;
+    }
+    setOpenJobId(job.id);
+    if (!details[job.id]) {
+      setDetails((prev) => ({ ...prev, [job.id]: "loading" }));
+      try {
+        const detail = await api.getResearchJob(job.id);
+        setDetails((prev) => ({ ...prev, [job.id]: detail }));
+      } catch {
+        setDetails((prev) => ({ ...prev, [job.id]: "error" }));
+      }
+    }
   };
 
   const cancelJob = async (job: Job) => {
@@ -104,7 +232,7 @@ export default function ResearchPage() {
                 >
                   <button
                     type="button"
-                    onClick={() => void markRead(job)}
+                    onClick={() => void openJob(job)}
                     className="block w-full text-left"
                   >
                     <span className="block truncate text-sm">
@@ -131,6 +259,28 @@ export default function ResearchPage() {
                       {dict.research.cancel}
                     </button>
                   )}
+                  {openJobId === job.id &&
+                    (() => {
+                      const d = details[job.id];
+                      if (d === "loading") {
+                        return (
+                          <p className="mt-3 text-sm text-[var(--atlas-text-dim)]">
+                            {dict.research.detail.loading}
+                          </p>
+                        );
+                      }
+                      if (d === "error") {
+                        return (
+                          <p className="mt-3 text-sm text-[var(--atlas-text-dim)]">
+                            {dict.research.detail.error}
+                          </p>
+                        );
+                      }
+                      if (d) {
+                        return <JobDetail detail={d} />;
+                      }
+                      return null;
+                    })()}
                 </div>
               </li>
             );

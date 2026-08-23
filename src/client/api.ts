@@ -151,6 +151,55 @@ async function requestChecked<T>(path: string, init: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+export interface ResearchEvidenceView {
+  id: string;
+  patternStep: number | null;
+  component: string | null;
+  relationship: string;
+  directness: string | null;
+  fragment: string;
+  summary: string | null;
+  doesNotProve: string | null;
+  mechanismState: string | null;
+  valueSource: string | null;
+  sourceClass: string | null;
+  officiality: string | null;
+  observedAt: string | null;
+  dataAsOf: string | null;
+  publishedAt: string | null;
+  retrievedUrl: string;
+  sourceTitle: string | null;
+  sourcePublisher: string | null;
+  sourceType: string;
+}
+
+export interface ResearchJobDetail {
+  job: {
+    id: string;
+    state: string;
+    progressStage: number;
+    originalQuestion: string;
+    terminationReason: string | null;
+    errorCode: string | null;
+    origin: string;
+    createdAt: string;
+    startedAt: string | null;
+    finishedAt: string | null;
+  };
+  claimSupport: {
+    intent: string;
+    status: "SUPPORTED" | "PARTIALLY_SUPPORTED" | "NOT_SUPPORTED" | "INSUFFICIENT_EVIDENCE";
+    reasonCodes: unknown[];
+    requirementResults: unknown[];
+    contextGaps: unknown[];
+  } | null;
+  mechanism: {
+    flows: unknown[];
+    unassignedGaps: unknown[];
+  } | null;
+  evidence: ResearchEvidenceView[];
+}
+
 export const api = {
   interpret: (question: string) =>
     requestChecked<InterpretResult>("/api/interpretations", {
@@ -193,6 +242,10 @@ export const api = {
         finishedAt: string | null;
       }[];
     }>("/api/research-jobs"),
+  getResearchJob: (id: string) =>
+    requestChecked<ResearchJobDetail>(`/api/research-jobs/${id}`, {
+      method: "GET",
+    }),
   markRead: (id: string) =>
     request<{ read: true }>(`/api/research-jobs/${id}/read`, {
       method: "POST",
