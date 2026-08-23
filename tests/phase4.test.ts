@@ -1158,6 +1158,103 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
       .where(eq(interpretations.id, rescued.body.interpretation.id));
     expect((rescuedRow.modelMeta as { attempts: number }).attempts).toBe(2);
   });
+
+  // 19a-19e: allResolved entity-alias fix (interpret.ts, applyServerDecisions).
+  // Живой сбой (2026-08-23): project_or_asset="Pump.fun" + related_entities=
+  // ["PUMP"] both resolve to the same catalog project pump_fun; the old
+  // allResolved check compared a DEDUPLICATED slug count against the raw
+  // named-entity count, so a valid READY/DEEP_RESEARCH answer was silently
+  // downgraded to OUT_OF_SCOPE/OUTSIDE_CURRENT_DOMAIN even though every
+  // named entity resolved. Fix: allResolved now reads resolution.adjustment
+  // (already computed per-entity by resolveAllEntities), not slugs.length.
+  it("19a. entity-alias fix: primary и related резолвятся в один и тот же проект — READY остаётся READY", async () => {
+    const c = await makeAuthedClient();
+    __pushFakeScript(modelSays({ project_or_asset: "Pump.fun", related_entities: ["PUMP"] }));
+    const { res, body } = await ask(c, "Куда уходят токены PUMP при buyback у Pump.fun?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    expect(body.interpretation.understood?.projectSlug).toBe("pump_fun");
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.result as { project_slugs: string[] }).project_slugs).toEqual(["pump_fun"]);
+  });
+
+  it("19b. entity-alias fix: primary резолвится, related сущность неизвестна — безопасное понижение сохранено", async () => {
+    const c = await makeAuthedClient();
+    __pushFakeScript(
+      modelSays({ project_or_asset: "Pump.fun", related_entities: ["TotallyUnknownCoinXYZ"] }),
+    );
+    const { body } = await ask(c, "Сравни Pump.fun и TotallyUnknownCoinXYZ по value capture");
+    expect(body.interpretation.status).toBe("OUT_OF_SCOPE");
+    expect(body.interpretation.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+    expect(body.interpretation.adjustment).toBe("PROJECT_UNRESOLVED");
+  });
+
+  it("19c. entity-alias fix: primary и related резолвятся в два разных проекта — READY остаётся READY", async () => {
+    const c = await makeAuthedClient();
+    __pushFakeScript(modelSays({ project_or_asset: "Pump.fun", related_entities: ["Aave"] }));
+    const { body } = await ask(c, "Сравни Pump.fun и Aave по value capture");
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.result as { project_slugs: string[] }).project_slugs).toEqual(["pump_fun", "aave"]);
+  });
+
+  it("19d. entity-alias fix: несколько related-алиасов резолвятся в один и тот же проект — READY остаётся READY", async () => {
+    const c = await makeAuthedClient();
+    __pushFakeScript(
+      modelSays({ project_or_asset: "Pump.fun", related_entities: ["PUMP", "pump fun"] }),
+    );
+    const { body } = await ask(c, "Куда уходят токены PUMP (он же pump fun) при buyback?");
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.result as { project_slugs: string[] }).project_slugs).toEqual(["pump_fun"]);
+  });
+
+  it("19e. D-123 rescue + entity-alias fix вместе: настоящая живая форма (related_entities=[\"PUMP\"]) теперь тоже спасается", async () => {
+    // До этого фикса тест 17/18 намеренно обходили этот случай (см. их
+    // комментарии) через related_entities: [] на исправленном/противоречивом
+    // ответе — потому что "PUMP" резолвился в тот же pump_fun, что и
+    // project_or_asset, и сталкивался именно с этим багом. Теперь, когда
+    // allResolved читает resolution.adjustment, настоящая форма живого сбоя
+    // воспроизводима целиком, end-to-end, без обхода.
+    const REAL_QUESTION =
+      "Куда на самом деле уходят токены $PUMP, которые pump.fun покупает через buyback, и уменьшает ли это предложение токена?";
+    const c = await makeAuthedClient();
+    __pushFakeScript(contradictoryBuybackFixture({ related_entities: ["PUMP"] }));
+    __pushFakeScript(
+      contradictoryBuybackFixture({
+        related_entities: ["PUMP"],
+        normalized_intent: "MECHANISM_CURRENT_STATE",
+      }),
+    );
+
+    const { res, body } = await ask(c, REAL_QUESTION);
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    expect(body.interpretation.adjustment).toBe("SCOPE_RESCUED");
+
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(2);
+    expect(
+      (row.result as { server_adjustment: string; project_slugs: string[] }).server_adjustment,
+    ).toBe("SCOPE_RESCUED");
+    expect((row.result as { project_slugs: string[] }).project_slugs).toEqual(["pump_fun"]);
+  });
 });
 
 async function quotaCount(userId: string): Promise<number> {

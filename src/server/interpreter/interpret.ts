@@ -339,8 +339,17 @@ function applyServerDecisions(
   // Понижение статуса — только для маршрута, который может привести
   // к исследованию. QUICK_EXPLANATION / NO_RESEARCH_NEEDED проекта
   // в каталоге не требуют: они и не запускают Proof.
-  const allResolved =
-    !!resolution.slug && resolution.slugs.length === result.related_entities.length + 1;
+  //
+  // "Все сущности резолвлены" — это уже ровно то, что resolveAllEntities
+  // вычисляет per-entity через adjustment (NONE, только пока КАЖДАЯ
+  // сущность резолвится): resolution.slugs — дедуплицированный список
+  // канонических проектов для гейта (project_slugs), а не счётчик резолвленных
+  // сущностей. Сравнение slugs.length с related_entities.length + 1 требовало
+  // отдельного слага НА КАЖДУЮ сущность и ложно понижало валидный READY,
+  // когда алиас/тикер называет тот же проект, что и primary (напр.
+  // project_or_asset="Pump.fun", related_entities=["PUMP"] — оба резолвятся
+  // в pump_fun, adjustment остаётся NONE, но slugs.length=1 ≠ 1+1=2).
+  const allResolved = !!resolution.slug && resolution.adjustment === "NONE";
   if (status === "READY" && result.route === "DEEP_RESEARCH" && !allResolved) {
     if (resolution.adjustment === "PROJECT_AMBIGUOUS") {
       status = "NEEDS_CLARIFICATION";
