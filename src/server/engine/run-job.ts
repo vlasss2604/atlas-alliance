@@ -1,7 +1,7 @@
 import { desc, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { researchJobs, researchPlans } from "../db/schema";
+import { researchComponentResults, researchJobs, researchPlans } from "../db/schema";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
 import { buildContractView } from "./contract-view";
 import type { ContractView } from "./contract-view";
@@ -130,12 +130,32 @@ export async function runS4ResearchJob(
     // exception is re-thrown unchanged afterwards, so the job's terminal
     // state stays exactly BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED.
     //
-    // Deliberately NARROW: only BudgetExhaustedError. A CapabilityFatalError
-    // or any other exception still propagates immediately, untouched.
+    // Deliberately NARROW in two independent ways:
+    //
+    //  1. Only BudgetExhaustedError. A CapabilityFatalError or any other
+    //     exception still propagates immediately, untouched — a broken
+    //     capability is not an evidentiary outcome.
+    //
+    //  2. Only when the S5 sweep actually produced component results.
+    //     A job whose budget was refused before ANY component reached a
+    //     terminal S4 attempt has genuinely nothing to project: it stopped
+    //     before S7 with no research performed, and inventing an empty
+    //     assembly + claim-support row for it would assert an evidentiary
+    //     conclusion about work that never happened. That "stopped before
+    //     S7" case is an accepted S10 outcome (D-120) and stays exactly as
+    //     it was. Only a job that DID do real, already-paid-for research
+    //     before running out of budget gets its projection.
     if (e instanceof BudgetExhaustedError) {
       await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
-      await assembleAndPersistMechanism(db, jobId, now);
-      await evaluateAndPersistClaimSupport(db, jobId, now);
+      const reconciled = await db
+        .select({ id: researchComponentResults.id })
+        .from(researchComponentResults)
+        .where(eq(researchComponentResults.researchJobId, jobId))
+        .limit(1);
+      if (reconciled.length > 0) {
+        await assembleAndPersistMechanism(db, jobId, now);
+        await evaluateAndPersistClaimSupport(db, jobId, now);
+      }
     }
     throw e;
   }

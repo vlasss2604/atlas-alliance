@@ -76,14 +76,24 @@ async function queueJob(entitlement: EntitlementSnapshot): Promise<string> {
 // the same logical condition behaved differently depending only on which
 // mechanism detected it.
 describe("runS4ResearchJob — budget exhaustion still produces derived projections (D-127)", () => {
-  it("runs S5/S6/S7 and persists claim support when the executor throws BudgetExhaustedError, then re-throws unchanged", async () => {
+  it("runs S5/S6/S7 and persists claim support when real research preceded the BudgetExhaustedError, then re-throws unchanged", async () => {
     const jobId = await queueJob(coreEntitlement());
 
-    // Executor that immediately signals an exhausted dimensional axis,
-    // exactly as s4-executor.ts does when a required reservation is
-    // refused. No provider, no network, no spend.
+    // Models the REAL production shape: some components complete normally
+    // (so S5 reconciles component results for them), and only then does a
+    // required reservation get refused and s4-executor.ts throw. No
+    // provider, no network, no spend.
+    let calls = 0;
     const executor: WorkExecutor = {
       async execute() {
+        calls += 1;
+        if (calls <= 2) {
+          return {
+            status: "SUCCEEDED",
+            reason: "fixture component completed",
+            spent: { searchQueries: 1, sourceOpens: 1, authorizedModelCostMicro: 0 },
+          };
+        }
         throw new BudgetExhaustedError("searchQueries", "SEARCH_QUERY_BUDGET_EXHAUSTED");
       },
     };
@@ -99,9 +109,33 @@ describe("runS4ResearchJob — budget exhaustion still produces derived projecti
       .from(researchClaimSupport)
       .where(eq(researchClaimSupport.researchJobId, jobId));
     expect(support.length).toBe(1);
-    // With zero admissible evidence this is INSUFFICIENT_EVIDENCE — an
-    // honest evidentiary outcome, never a fabricated conclusion.
+    // With no admissible evidence behind those components this is
+    // INSUFFICIENT_EVIDENCE — an honest evidentiary outcome, never a
+    // fabricated conclusion.
     expect(support[0].status).toBe("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("skips the projection entirely when the budget was refused before ANY component completed (accepted D-120 'stopped before S7')", async () => {
+    const jobId = await queueJob(coreEntitlement());
+    // Refused on the very first item: no component ever reached a terminal
+    // S4 attempt, so there is genuinely nothing to project. Inventing an
+    // assembly + claim-support row here would assert an evidentiary
+    // conclusion about research that never happened.
+    const executor: WorkExecutor = {
+      async execute() {
+        throw new BudgetExhaustedError("searchQueries", "SEARCH_QUERY_BUDGET_EXHAUSTED");
+      },
+    };
+
+    await expect(runS4ResearchJob(ctx.db, jobId, executor, new Date())).rejects.toBeInstanceOf(
+      BudgetExhaustedError,
+    );
+
+    const support = await ctx.db
+      .select()
+      .from(researchClaimSupport)
+      .where(eq(researchClaimSupport.researchJobId, jobId));
+    expect(support.length).toBe(0);
   });
 
   it("terminal job state is still BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED — the exception is re-thrown, not swallowed", async () => {
