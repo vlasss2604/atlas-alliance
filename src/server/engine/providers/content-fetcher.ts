@@ -308,6 +308,43 @@ interface RawFetchResult {
   finalUrl: string;
 }
 
+// Builds the `lookup` function handed to http/https.request so the TCP
+// connection is pinned to an already-SSRF-validated address and Node never
+// re-resolves the hostname itself (closing the DNS-rebinding TOCTOU
+// window).
+//
+// Honoring `options.all` is REQUIRED, not cosmetic: Node >= 20 enables
+// autoSelectFamily (Happy Eyeballs) by default, and in that mode
+// net.connect calls lookup with `{ all: true }` and requires an ARRAY of
+// { address, family } back. Answering with the bare (address, family)
+// form there makes Node read `.address` off a string, producing
+// "Invalid IP address: undefined" and failing EVERY fetch whose host is a
+// hostname — i.e. every real research URL. A literal-IP host skips lookup
+// entirely inside Node, which is why a suite that only fetches
+// http://127.0.0.1:<port> never exercised this at all.
+//
+// Both branches return the SAME pre-validated `pinnedIp`, so the
+// rebinding defense is identical either way.
+// Exported for direct unit testing of that contract (no DNS, no network).
+export function createPinnedLookup(pinnedIp: string) {
+  const family = isIP(pinnedIp) as 4 | 6;
+  return (
+    _hostname: string,
+    options: unknown,
+    callback: (
+      err: NodeJS.ErrnoException | null,
+      address: string | Array<{ address: string; family: number }>,
+      family?: number,
+    ) => void,
+  ): void => {
+    if ((options as { all?: boolean } | undefined)?.all) {
+      callback(null, [{ address: pinnedIp, family }]);
+      return;
+    }
+    callback(null, pinnedIp, family);
+  };
+}
+
 // Performs exactly ONE hop — no redirect following here. The caller loop
 // (fetchWithRedirects) re-validates SSRF for every hop, because a
 // same-origin 30x can still point at a blocked address.
@@ -328,12 +365,9 @@ function fetchOneHop(
         port: parsed.port || (isHttps ? 443 : 80),
         path: `${parsed.pathname}${parsed.search}`,
         method: "GET",
-        // Pin the TCP connection to the address we already validated —
-        // Node will NOT re-resolve the hostname itself when `lookup` is
-        // supplied, closing the DNS-rebinding TOCTOU window.
-        lookup: (_hostname, _options, callback) => {
-          callback(null, pinnedIp, isIP(pinnedIp) as 4 | 6);
-        },
+        // Pins the connection to the pre-validated address; see
+        // createPinnedLookup for why the `all` contract matters.
+        lookup: createPinnedLookup(pinnedIp) as unknown as http.RequestOptions["lookup"],
         headers: {
           "User-Agent": "AtlasProofResearchEngine/1 (+content-fetch)",
           Accept: "text/html,text/plain,application/json,application/xml",
