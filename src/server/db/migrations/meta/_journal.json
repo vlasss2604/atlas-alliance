@@ -1,0 +1,153 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787197437226,
+      "tag": "0000_init",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787197447753,
+      "tag": "0001_state_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787226599000,
+      "tag": "0002_auth_rate_limits",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787236537191,
+      "tag": "0003_job_events_notify",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787237616362,
+      "tag": "0004_journal_cascade_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787251277734,
+      "tag": "0005_interpretation_chain",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787310000301,
+      "tag": "0006_research_memory",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1787310019135,
+      "tag": "0007_memory_lifecycle_guard",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787318054485,
+      "tag": "0008_step_components_admin_barrier",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1787335131591,
+      "tag": "0009_engine_evidence_ownership",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1787341759460,
+      "tag": "0010_r2_evidence_contract_version",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1787344199008,
+      "tag": "0011_s4_attempt_spend_and_evidence_version_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1787386028609,
+      "tag": "0012_s4_review_budget_reservation",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1787386632459,
+      "tag": "0013_evidence_idempotency_key",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1787408482405,
+      "tag": "0014_s5_component_results",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1787500000000,
+      "tag": "0015_s5_backfill_component_requirements",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1787424634605,
+      "tag": "0016_s6_mechanism_assembly",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1787424634606,
+      "tag": "0017_s7_backfill_intent_requirements",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1787432978052,
+      "tag": "0018_s7_claim_support",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1787438882491,
+      "tag": "0019_first_real_run_stage1_termination_reason",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1787441967596,
+      "tag": "0020_first_real_run_stage2_trace_events",
+      "breakpoints": true
+    }
+  ]
+}
