@@ -148,6 +148,13 @@
       "when": 1787441967596,
       "tag": "0020_first_real_run_stage2_trace_events",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1787477460374,
+      "tag": "0021_s10_live_provider_trace",
+      "breakpoints": true
     }
   ]
 }

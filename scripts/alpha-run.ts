@@ -1,65 +1,63 @@
-// First Real Run, Stage 2 acceptance closure (pipeline-integration-stage2.md,
-// D-115/D-116) — internal/admin script. Creates ONE research job through
-// the existing service layer (createResearchJob — same admission/quota/
+// First Real Run, Stage 2 (D-115/D-116) + S10 (live-provider-enablement.md,
+// D-118) — internal/admin script. Creates ONE research job through the
+// existing service layer (createResearchJob — same admission/quota/
 // idempotency path any real job goes through) and drives it through the
 // REAL worker task handler (handleResearchJobTask), never by calling
-// S5/S6/S7 directly as a shortcut. Strictly non-live: the executor is
-// always the Stage 2 trace fixture (trace-fixture-executor.ts), itself
-// built entirely from non-live providers — createNonLiveS4WorkExecutor is
-// never bypassed toward anything live, and research_enabled is never read
-// or written by this script.
+// S5/S6/S7 directly as a shortcut.
 //
-// MEDIUM-3 closure: a real question run through this script now goes
-// through the REAL Interpreter service (createInterpretation) before the
-// job is created — S7 (claim-support-store.ts's loadIntentAndTaskType)
-// reads normalized_intent/task_type from the `interpretations` row it
-// finds via `interpretations.researchJobId`, NOT from job.normalizedTask.
-// The previous version of this script never created or linked an
-// interpretation row at all, so that lookup always found zero rows and
-// silently fell back to normalized_intent=UNKNOWN — S7 could never
-// evaluate a real requirement set no matter what Evidence Stage 2's
-// fixture produced. This script forces the Interpreter's own `fake`
-// gateway (interpreter/fake.ts) — an existing, deterministic, non-live
-// fixture already used by the test suite — via __setInterpreterGateway,
-// so classification never depends on MODEL_GATEWAY being set correctly
-// in the environment and never makes a live model call.
+// S10: this script now requires an EXPLICIT --mode=fixture|live — there
+// is NO default and NO fallback between the two in either direction
+// (§11). fixture mode is exactly Stage 2's accepted non-live trace
+// fixture (trace-fixture-executor.ts), unchanged. live mode is gated by
+// BOTH internal_alpha_enabled=true (a DB config flag) AND this explicit
+// --mode=live invocation (§10) — neither alone is sufficient — and uses
+// the real Brave/native-fetch/Anthropic providers via
+// createLiveS4WorkExecutor (live-executor.ts), which itself refuses to
+// construct if internal_alpha_enabled is false (a second, independent
+// backstop). research_enabled is never read or written by this script —
+// live mode does NOT require or imply research_enabled=true; the public/
+// product path stays closed regardless of internal-alpha state.
+//
+// Interpreter classification (createInterpretation) uses the SAME
+// deterministic non-live `fake` gateway in BOTH modes — the Interpreter
+// is not one of the four owner-approved live providers (§1), and
+// promoting it to live is out of this script's scope.
 //
 // HIGH-1 closure: this script creates the job with { skipEnqueue: true }
 // (research-jobs.ts) — no pg-boss task is ever enqueued for it, so there
 // is no possibility of a real worker process racing this script for the
-// same job. The atomic claim in handleResearchJobTask (worker.ts) is the
-// general production safety net for concurrent workers; this script
-// simply never creates the second competitor in the first place.
+// same job.
 //
 // Execution and inspection are deliberately separate scripts — this one
 // creates and runs; alpha-inspect.ts (read-only) is how you look at the
 // result.
 //
 // Usage:
-//   tsx scripts/alpha-run.ts --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name>]
+//   tsx scripts/alpha-run.ts --mode=fixture --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name>]
+//   tsx scripts/alpha-run.ts --mode=live    --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."]
 //
-// --actor is required (owner/admin invocation must name who is running
-// this, for the audit trail printed below — this script does not
-// silently run as an anonymous identity).
+// --actor is required in both modes (owner/admin invocation must name
+// who is running this, for the audit trail printed below).
 //
 // --asset must name one of interpreter/fake.ts's KNOWN_ASSETS (default
-// "Aave") — the fake Interpreter gateway only classifies DEEP_RESEARCH
-// for a question that names a recognized asset; anything else falls back
-// to NEEDS_CLARIFICATION/UNKNOWN by the real Interpreter contract's own
-// design, and this script fails loudly rather than fabricating a fake
-// normalized_intent to route around that.
-import { eq } from "drizzle-orm";
+// "Aave" in fixture mode, "Pump.fun" in live mode — §18's owner-approved
+// first live target) — the fake Interpreter gateway only classifies
+// DEEP_RESEARCH for a question that names a recognized asset.
+import { eq, sql } from "drizzle-orm";
 
-import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
+import { DEFAULT_PRODUCT_CONFIG, INTERNAL_ALPHA_V1, loadProductConfig } from "../src/server/config/product";
 import { createDatabase } from "../src/server/db/client";
-import { interpretations, projects, topics, users } from "../src/server/db/schema";
+import { interpretations, projects, researchJobs, researchTraceEvents, topics, users } from "../src/server/db/schema";
 import { createBoss, RESEARCH_QUEUE } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { createTraceFixtureExecutor, type TraceFixtureScenario } from "../src/server/engine/trace-fixture-executor";
+import { createLiveS4WorkExecutor, INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
+import { loadModelCostProfile, ModelCostProfileMissingError } from "../src/server/engine/model-cost-profile";
 import { createInterpretation } from "../src/server/interpreter/interpret";
 import { __setInterpreterGateway } from "../src/server/interpreter/gateway";
 import { fakeGateway } from "../src/server/interpreter/fake";
+import type { WorkExecutor } from "../src/server/engine/controller";
 import type { EntitlementSnapshot } from "../src/server/domain/types";
 
 function parseArgs(argv: string[]): Record<string, string> {
@@ -71,28 +69,85 @@ function parseArgs(argv: string[]): Record<string, string> {
   return out;
 }
 
+function usage(): never {
+  console.error(
+    'usage: tsx scripts/alpha-run.ts --mode=fixture|live --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name> (fixture only)]',
+  );
+  process.exit(1);
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const actor = args.actor;
-  if (!actor) {
-    console.error(
-      'usage: tsx scripts/alpha-run.ts --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name>]',
-    );
-    process.exit(1);
-  }
+  const mode = args.mode;
+  if (!actor || (mode !== "fixture" && mode !== "live")) usage();
 
-  // Non-live guarantee for the Interpreter call below: explicit, not
-  // dependent on the MODEL_GATEWAY environment variable being set
-  // correctly (interpreter/gateway.ts's own fake-in-production guard is
-  // a second, independent backstop, not relied on here).
+  // Non-live guarantee for the Interpreter call below, in BOTH modes:
+  // explicit, not dependent on the MODEL_GATEWAY environment variable
+  // being set correctly (interpreter/gateway.ts's own fake-in-production
+  // guard is a second, independent backstop, not relied on here).
   __setInterpreterGateway(fakeGateway);
 
-  const assetName = args.asset ?? "Aave";
-  const projectSlug = args.project ?? assetName.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const assetName = args.asset ?? (mode === "live" ? "Pump.fun" : "Aave");
+  const projectSlug = args.project ?? (mode === "live" ? "pump_fun" : assetName.toLowerCase().replace(/[^a-z0-9]/g, ""));
   const question = args.question ?? `does protocol revenue reach ${assetName} token holders?`;
   const scenario = (args.scenario ?? "ADMISSIBLE_EVIDENCE") as TraceFixtureScenario;
 
   const { db, pool } = createDatabase();
+  const config = await loadProductConfig(db);
+
+  // §12 — Internal Alpha Data Boundary: a LIVE run may only target an
+  // explicitly approved project slug, checked BEFORE anything else (no
+  // job, no interpretation, no reservation). Fixture mode is not bound
+  // by this — it never resolves a live provider regardless of project.
+  if (mode === "live" && !INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has(projectSlug)) {
+    console.error(`[alpha-run] refusing --mode=live for project "${projectSlug}" — not in the internal-alpha live allowlist (live-executor.ts).`);
+    console.error(`  allowed: ${[...INTERNAL_ALPHA_LIVE_PROJECT_SLUGS].join(", ")}`);
+    await pool.end();
+    process.exit(1);
+  }
+
+  // §11 — fail closed BEFORE creating a half-configured live job, for
+  // every prerequisite this script itself can check without spending
+  // anything.
+  if (mode === "live") {
+    const problems: string[] = [];
+    if (!config.internal_alpha_enabled) problems.push("internal_alpha_enabled is false (product_config)");
+    if (!process.env.BRAVE_SEARCH_API_KEY) problems.push("BRAVE_SEARCH_API_KEY is not set");
+    if (!process.env.ANTHROPIC_API_KEY) problems.push("ANTHROPIC_API_KEY is not set");
+    let queryProposerProfile;
+    try {
+      queryProposerProfile = loadModelCostProfile("QUERY_PROPOSER", config.query_proposer_model);
+    } catch (e) {
+      if (e instanceof ModelCostProfileMissingError) problems.push(e.message);
+      else throw e;
+    }
+    let evidenceExtractorProfile;
+    try {
+      evidenceExtractorProfile = loadModelCostProfile("EVIDENCE_EXTRACTOR", config.evidence_extractor_model);
+    } catch (e) {
+      if (e instanceof ModelCostProfileMissingError) problems.push(e.message);
+      else throw e;
+    }
+    if (problems.length > 0) {
+      console.error("[alpha-run] refusing --mode=live — prerequisites missing:");
+      for (const p of problems) console.error(`  - ${p}`);
+      await pool.end();
+      process.exit(1);
+    }
+    console.log("=== MODE: LIVE INTERNAL ALPHA ===");
+    console.log("  real internet:      YES");
+    console.log("  real provider cost: YES");
+    console.log("  search provider:    brave");
+    console.log(`  query proposer:     anthropic ${config.query_proposer_model} (cost profile ${queryProposerProfile!.priceVersion})`);
+    console.log(`  evidence extractor: anthropic ${config.evidence_extractor_model} (cost profile ${evidenceExtractorProfile!.priceVersion})`);
+    console.log(
+      `  INTERNAL_ALPHA_V1:  maxSearchQueries=${INTERNAL_ALPHA_V1.maxSearchQueries} maxSourceOpens=${INTERNAL_ALPHA_V1.maxSourceOpens} ` +
+        `maxModelCostMicro=${INTERNAL_ALPHA_V1.maxModelCostMicro} maxWallClockSec=${INTERNAL_ALPHA_V1.maxWallClockSec}`,
+    );
+    console.log("==================================");
+  }
+
   const boss = createBoss();
   await boss.start();
   await boss.createQueue(RESEARCH_QUEUE);
@@ -144,7 +199,10 @@ async function main() {
     const entitlement: EntitlementSnapshot = {
       level: "ARI_CORE",
       capability: "FRESH_RESEARCH",
-      budget: DEFAULT_PRODUCT_CONFIG.budget_core,
+      // §6 — LIVE runs use the ONE immutable internal-alpha envelope,
+      // never budget_core (the product default). Fixture mode keeps
+      // using budget_core, unchanged from Stage 2.
+      budget: mode === "live" ? INTERNAL_ALPHA_V1 : DEFAULT_PRODUCT_CONFIG.budget_core,
     };
 
     const createdAt = new Date();
@@ -181,36 +239,50 @@ async function main() {
     // same link start-research.ts writes for a real request. Without
     // this, S7's loadIntentAndTaskType (claim-support-store.ts) finds no
     // interpretation row for the job and silently falls back to
-    // normalized_intent=UNKNOWN (the exact MEDIUM-3 defect this closure
-    // fixes) — this update is what actually connects the classification
-    // above to the job S4/S5/S6/S7 will run against.
+    // normalized_intent=UNKNOWN.
     await db.update(interpretations).set({ researchJobId: job.id }).where(eq(interpretations.id, interp.id));
 
     // The REAL worker task handler — planning, then the frozen S4->S5->
     // S6->S7 engine, then the Stage 1 terminal-contract mapping — with
-    // ONLY the executor swapped for the non-live trace fixture. Not a
-    // shortcut around S5/S6/S7, which this handler still calls itself.
-    const executor = createTraceFixtureExecutor({ db, project, defaultScenario: scenario });
+    // ONLY the executor swapped. Not a shortcut around S5/S6/S7, which
+    // this handler still calls itself.
+    const executor: WorkExecutor =
+      mode === "live"
+        ? createLiveS4WorkExecutor({ db, project, internalAlphaEnabled: config.internal_alpha_enabled })
+        : createTraceFixtureExecutor({ db, project, defaultScenario: scenario });
     const result = await handleResearchJobTask(db, job.id, executor);
 
     if (!result.claimed) {
-      // §2 of the closure spec: never print success/"trace-fixture
-      // executor ran" for an invocation that did not actually claim the
-      // job — this branch is unreachable in normal operation (skipEnqueue
-      // means nothing else could have claimed it first) but is handled
-      // explicitly rather than assumed away, in case this job id was
-      // reused or raced by something else entirely.
+      // Never print success/"executor ran" for an invocation that did not
+      // actually claim the job — this branch is unreachable in normal
+      // operation (skipEnqueue means nothing else could have claimed it
+      // first) but is handled explicitly rather than assumed away.
       console.error(`[alpha-run] did not claim job ${job.id} (reason: ${result.reason}) — no research work was performed by this invocation.`);
       process.exit(1);
     }
 
+    const jobRow = (await db.select().from(researchJobs).where(eq(researchJobs.id, job.id)))[0];
+    const [{ actualCostMicroSum }] = (
+      await db.execute(
+        sql`SELECT COALESCE(SUM(${researchTraceEvents.actualCostMicro}), 0)::int AS "actualCostMicroSum" FROM ${researchTraceEvents} WHERE research_job_id = ${job.id}`,
+      )
+    ).rows as [{ actualCostMicroSum: number }];
+
     console.log("[alpha-run]");
+    console.log(`  mode:               ${mode}`);
     console.log(`  actor:              ${actor}`);
     console.log(`  jobId:              ${job.id}`);
     console.log(`  createdAt:          ${createdAt.toISOString()}`);
     console.log(`  interpretation:     normalized_intent=${normalizedIntent ?? "null"} task_type=${interp.understood.taskType ?? "null"} project_slug=${interp.understood.projectSlug}`);
-    console.log(`  non-live mode:      true (trace-fixture executor, scenario=${scenario}, provider_name=non-live-fixture; interpreter gateway=fake)`);
+    console.log(
+      mode === "live"
+        ? "  providers:          search=brave fetch=native query_proposer=anthropic evidence_extractor=anthropic (interpreter=fake, non-live)"
+        : `  non-live mode:      true (trace-fixture executor, scenario=${scenario}, provider_name=non-live-fixture; interpreter gateway=fake)`,
+    );
     console.log(`  project:            ${project.slug} (${project.id})`);
+    console.log(`  job state:          ${jobRow.state}`);
+    console.log(`  termination reason: ${jobRow.terminationReason ?? "(none)"}`);
+    console.log(`  model cost (micro): reserved=${jobRow.modelCostMicroReserved} actual=${actualCostMicroSum} limit=${entitlement.budget.maxModelCostMicro}`);
     console.log(`  next inspection:    tsx scripts/alpha-inspect.ts ${job.id}`);
   } finally {
     await boss.stop({ graceful: false });

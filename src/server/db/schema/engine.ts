@@ -270,6 +270,16 @@ export const researchTraceEvents = pgTable(
     evidenceId: uuid("evidence_id"),
     budgetAxis: traceBudgetAxis("budget_axis"),
     budgetAmount: integer("budget_amount"),
+    // S10 (live-provider-enablement.md §7) — AUDIT ONLY, never a second
+    // budget authority: the reservation counters on research_jobs remain
+    // the sole execution ceiling (§7 of the S10 spec, explicit owner
+    // instruction). Populated only for a live model call that actually
+    // returned usage; null for every non-live/fixture/failed call.
+    // Computed with the SAME approved role-specific ModelCostProfile
+    // used to size the reservation — never a dynamic pricing lookup.
+    actualInputTokens: integer("actual_input_tokens"),
+    actualOutputTokens: integer("actual_output_tokens"),
+    actualCostMicro: integer("actual_cost_micro"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

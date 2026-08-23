@@ -6,7 +6,7 @@
 // nothing computed from wall-clock time or randomness.
 //
 // Usage: tsx scripts/alpha-inspect.ts <jobId>
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 
 import { createDatabase } from "../src/server/db/client";
 import {
@@ -119,7 +119,7 @@ async function main() {
     const byOp = (ops: string[]) => sorted.filter((t) => ops.includes(t.operationType));
 
     section("SEARCH");
-    const searchEvents = byOp(["QUERY_PROPOSED", "SEARCH_EXECUTED"]);
+    const searchEvents = byOp(["QUERY_PROPOSED", "SEARCH_EXECUTED", "MODEL_CALL_SKIPPED"]);
     if (searchEvents.length === 0) console.log("  (no search trace)");
     for (const t of searchEvents) {
       console.log(`  [#${t.sequence}] ${t.operationType} status=${t.status} reason=${t.reasonCode} target=${t.targetRef ?? "(none)"}`);
@@ -186,7 +186,17 @@ async function main() {
     const budget = job.budgetAtStart as { maxSearchQueries: number; maxSourceOpens: number; maxModelCostMicro: number };
     console.log(`  search queries:   ${job.searchQueriesReserved} / ${budget.maxSearchQueries}`);
     console.log(`  source opens:     ${job.sourceOpensReserved} / ${budget.maxSourceOpens}`);
-    console.log(`  model cost micro: ${job.modelCostMicroReserved} / ${budget.maxModelCostMicro}`);
+    // S10 (live-provider-enablement.md §7) — MODEL COST distinguishes
+    // reserved (the authoritative execution ceiling, research_jobs.*
+    // Reserved) from actual (audit-only, summed from real provider usage
+    // persisted on the operational trace) from limit (the job's budget
+    // envelope) — never conflated, never a second budget authority.
+    const [{ actualCostMicroSum }] = (
+      await db.execute(
+        sql`SELECT COALESCE(SUM(actual_cost_micro), 0)::int AS "actualCostMicroSum" FROM research_trace_events WHERE research_job_id = ${jobId}`,
+      )
+    ).rows as [{ actualCostMicroSum: number }];
+    console.log(`  model cost micro: reserved=${job.modelCostMicroReserved} actual=${actualCostMicroSum} limit=${budget.maxModelCostMicro}`);
 
     section("TERMINATION");
     line("state", job.state);

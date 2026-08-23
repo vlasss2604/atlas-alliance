@@ -8,8 +8,13 @@ import { evidence, sources } from "../db/schema";
 import { reserveJobBudget } from "./budget-reservation";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
-import { ModelCostProfileMissingError, calculateMaxAuthorizedCostMicro, loadModelCostProfile } from "./model-cost-profile";
-import type { ModelCostProfile } from "./model-cost-profile";
+import {
+  ModelCostProfileMissingError,
+  calculateActualCostMicro,
+  calculateMaxAuthorizedCostMicro,
+  loadModelCostProfile,
+} from "./model-cost-profile";
+import type { ModelCostProfile, ModelRole } from "./model-cost-profile";
 import { resolveContentFetcher } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import { resolveEvidenceExtractor } from "./providers/evidence-extractor";
@@ -18,7 +23,8 @@ import { resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
-import type { ComponentTarget, ExtractedFact } from "./providers/types";
+import { ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
+import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import { findAttemptId, recordTraceEvent } from "./trace-store";
 
@@ -257,30 +263,57 @@ async function findOrCreateSource(
 // boundaries failed, D-070) plus the exception's own class NAME — never
 // its message — is sufficient to know provider role + operation failed +
 // a safe failure category, with nothing to leak.
+// S10 (LOW-3 hardening, live-provider-enablement.md §14, D-118): a small,
+// deterministic maximum on the error-class category — provider data
+// cannot normally control `e.constructor.name`, but bounding it anyway
+// closes the theoretical case of a pathological/malicious error class
+// name being interpolated here.
+const MAX_FAILURE_CATEGORY_LENGTH = 64;
+
 function safeFailureReason(label: string, e: unknown): string {
   const category = e instanceof Error ? e.constructor.name : "UnknownError";
-  return `${label}_FAILED:${category}`;
+  return `${label}_FAILED:${category.slice(0, MAX_FAILURE_CATEGORY_LENGTH)}`;
 }
 
-async function callProvider<T>(label: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
+// S10 (D-090 count-then-gate, live-provider-enablement.md §5/§17):
+// classifies a caught provider exception into a closed trace reason code
+// — MODEL_INPUT_OVERSIZED and TOKEN_COUNT_UNAVAILABLE are distinguished
+// from the generic PROVIDER_ERROR catch-all so it is inspectable
+// (alpha-inspect/trace) whether a model call was skipped because the
+// exact input exceeded the approved ceiling, or because token counting
+// itself failed — never the same undifferentiated bucket.
+function classifyTraceReasonCode(e: unknown): "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE" | "PROVIDER_ERROR" {
+  if (e instanceof ModelInputOversizedError) return "MODEL_INPUT_OVERSIZED";
+  if (e instanceof TokenCountUnavailableError) return "TOKEN_COUNT_UNAVAILABLE";
+  return "PROVIDER_ERROR";
+}
+
+async function callProvider<T>(
+  label: string,
+  fn: () => Promise<T>,
+): Promise<{ ok: true; value: T } | { ok: false; reason: string; reasonCode: ReturnType<typeof classifyTraceReasonCode> }> {
   try {
     return { ok: true, value: await fn() };
   } catch (e) {
-    return { ok: false, reason: safeFailureReason(label, e) };
+    return { ok: false, reason: safeFailureReason(label, e), reasonCode: classifyTraceReasonCode(e) };
   }
 }
 
-// D-090: resolves the cost profile for `modelId` — test-injected fixture
-// profile first (structurally separate from production, items 3/4), else
-// the production catalogue (intentionally empty until S10). Returns a
-// typed failure reason instead of throwing past this boundary.
+// D-090: resolves the cost profile for (role, modelId) — test-injected
+// fixture profile first (structurally separate from production, items
+// 3/4), else the production catalogue. S10 (D-118): role-qualified —
+// QUERY_PROPOSER and EVIDENCE_EXTRACTOR may use the same modelId but
+// resolve to two DIFFERENT approved profiles; a missing exact role+model
+// combination fails closed exactly like before. Returns a typed failure
+// reason instead of throwing past this boundary.
 function resolveCostProfile(
+  role: ModelRole,
   modelId: string,
   fixture: ModelCostProfile | undefined,
 ): { ok: true; profile: ModelCostProfile } | { ok: false; reason: string } {
   if (fixture) return { ok: true, profile: fixture };
   try {
-    return { ok: true, profile: loadModelCostProfile(modelId) };
+    return { ok: true, profile: loadModelCostProfile(role, modelId) };
   } catch (e) {
     if (e instanceof ModelCostProfileMissingError) return { ok: false, reason: e.message };
     throw e;
@@ -296,6 +329,17 @@ interface Preflight {
   evidenceExtractor: EvidenceExtractor;
 }
 
+// S10 (live-provider-enablement.md §7, D-118) — mutable capture boxes for
+// real provider usage, populated (at most once each) by the onUsage
+// callbacks threaded through resolveQueryProposer/resolveEvidenceExtractor
+// below. Never read before the corresponding provider call has actually
+// returned; audit-only (see model-cost-profile.ts's calculateActualCostMicro
+// and the trace-event calls that persist these).
+interface UsageCapture {
+  queryProposer: ModelUsage | null;
+  evidenceExtractor: ModelUsage | null;
+}
+
 // MEDIUM-4/LOW-1 (S4 final acceptance fix): every resolver this attempt
 // will need — cost profiles AND providers, for every stage — is resolved
 // and verified HERE, before a single reservation is made. A resolver that
@@ -307,11 +351,12 @@ interface Preflight {
 async function preflight(
   deps: S4ExecutorDeps,
   config: { query_proposer_model: string; evidence_extractor_model: string },
+  usage: UsageCapture,
 ): Promise<{ ok: true; value: Preflight } | { ok: false; reason: string }> {
-  const qp = resolveCostProfile(config.query_proposer_model, deps.queryProposerCostProfile);
+  const qp = resolveCostProfile("QUERY_PROPOSER", config.query_proposer_model, deps.queryProposerCostProfile);
   if (!qp.ok) return { ok: false, reason: qp.reason };
 
-  const ep = resolveCostProfile(config.evidence_extractor_model, deps.evidenceExtractorCostProfile);
+  const ep = resolveCostProfile("EVIDENCE_EXTRACTOR", config.evidence_extractor_model, deps.evidenceExtractorCostProfile);
   if (!ep.ok) return { ok: false, reason: ep.reason };
 
   let searchGateway: SearchGateway;
@@ -330,7 +375,11 @@ async function preflight(
 
   let queryProposer: QueryProposer;
   try {
-    queryProposer = deps.queryProposer ?? (await resolveQueryProposer(config.query_proposer_model, qp.profile.maxOutputTokens));
+    queryProposer =
+      deps.queryProposer ??
+      (await resolveQueryProposer(config.query_proposer_model, qp.profile.maxOutputTokens, qp.profile.maxInputTokens, (u) => {
+        usage.queryProposer = u;
+      }));
   } catch (e) {
     return { ok: false, reason: `QUERY_PROPOSER: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -338,7 +387,15 @@ async function preflight(
   let evidenceExtractor: EvidenceExtractor;
   try {
     evidenceExtractor =
-      deps.evidenceExtractor ?? (await resolveEvidenceExtractor(config.evidence_extractor_model, ep.profile.maxOutputTokens));
+      deps.evidenceExtractor ??
+      (await resolveEvidenceExtractor(
+        config.evidence_extractor_model,
+        ep.profile.maxOutputTokens,
+        ep.profile.maxInputTokens,
+        (u) => {
+          usage.evidenceExtractor = u;
+        },
+      ));
   } catch (e) {
     return { ok: false, reason: `EVIDENCE_EXTRACTOR: ${e instanceof Error ? e.message : String(e)}` };
   }
@@ -402,7 +459,8 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // MEDIUM-4/LOW-1: resolve every provider and cost profile THIS
       // ATTEMPT could need, before any reservation, so a resolver failure
       // is always zero-cost and always a typed FAILED result.
-      const pre = await preflight(deps, config);
+      const usage: UsageCapture = { queryProposer: null, evidenceExtractor: null };
+      const pre = await preflight(deps, config, usage);
       if (!pre.ok) {
         return { status: "FAILED", reason: pre.reason, spent };
       }
@@ -435,8 +493,33 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         queryProposer.proposeQueries({ target, hint, maxQueries: MAX_QUERIES_PER_ATTEMPT }),
       );
       if (!proposeResult.ok) {
+        // S10 (D-090 count-then-gate, §5/§17): explicit trace when the
+        // reason is the count-then-gate decision itself — otherwise this
+        // role has no pre-call ATTEMPTED/OK/FAILED triplet the way
+        // EXTRACT_* does, so without this the count-gate decision would
+        // be invisible to alpha-inspect.
+        if (proposeResult.reasonCode === "MODEL_INPUT_OVERSIZED" || proposeResult.reasonCode === "TOKEN_COUNT_UNAVAILABLE") {
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "MODEL_CALL_SKIPPED",
+            providerKind: "QUERY_PROPOSE",
+            patternStep: item.step,
+            component: item.component,
+            status: "SKIPPED",
+            reasonCode: proposeResult.reasonCode,
+            budgetAxis: "modelCostMicro",
+            budgetAmount: queryProposerCostMicro,
+          });
+        }
         return { status: "FAILED", reason: proposeResult.reason, spent };
       }
+      // S10 (§7) — audit-only actual usage/cost for this one QueryProposer
+      // call, priced with the SAME approved profile that sized the
+      // reservation above. Null for a non-live/fixture call (no onUsage
+      // callback wired) — every field stays null, never a fabricated 0.
+      const queryProposerUsage = usage.queryProposer;
+      const queryProposerActualCostMicro = queryProposerUsage ? calculateActualCostMicro(queryProposerProfile, queryProposerUsage) : null;
       // Bounded again here regardless of what the proposer promised —
       // "Query count must be bounded before execution by controller
       // budget" (§2). Also drop empty/whitespace-only strings — never
@@ -458,6 +541,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           component: item.component,
           targetRef: q,
           status: "OK",
+          actualInputTokens: queryProposerUsage?.inputTokens ?? null,
+          actualOutputTokens: queryProposerUsage?.outputTokens ?? null,
+          actualCostMicro: queryProposerActualCostMicro,
         });
       }
 
@@ -681,6 +767,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
+            // S10 (D-090 count-then-gate, §5/§17): reasonCode now
+            // distinguishes MODEL_INPUT_OVERSIZED/TOKEN_COUNT_UNAVAILABLE
+            // from the generic PROVIDER_ERROR catch-all — previously
+            // hardcoded to PROVIDER_ERROR for every EXTRACT_FAILED.
             operationType: "EXTRACT_FAILED",
             providerKind: "EXTRACT",
             providerName: evidenceExtractor.name,
@@ -688,11 +778,22 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             component: item.component,
             targetRef: doc.finalUrl,
             status: "FAILED",
-            reasonCode: "PROVIDER_ERROR",
+            reasonCode: extractResult.reasonCode,
           });
           continue;
         }
         const facts: ExtractedFact[] = extractResult.value;
+        // S10 (§7) — audit-only actual usage/cost for THIS document's
+        // extraction call, priced with the SAME approved profile that
+        // sized the reservation above. Captured immediately after this
+        // call (not before the per-document loop) since evidenceExtractor
+        // is resolved once per attempt but called once per document —
+        // the onUsage callback overwrites usage.evidenceExtractor on
+        // every call, so it must be read fresh for each document.
+        const evidenceExtractorUsage = usage.evidenceExtractor;
+        const evidenceExtractorActualCostMicro = evidenceExtractorUsage
+          ? calculateActualCostMicro(evidenceExtractorProfile, evidenceExtractorUsage)
+          : null;
 
         // HIGH-2: this document is only eligible to produce Evidence for
         // THIS project if it literally names the project, OR its source
@@ -815,6 +916,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             status: "OK",
             sourceId: sourceInfo.id,
             evidenceId: row?.id ?? null,
+            actualInputTokens: evidenceExtractorUsage?.inputTokens ?? null,
+            actualOutputTokens: evidenceExtractorUsage?.outputTokens ?? null,
+            actualCostMicro: evidenceExtractorActualCostMicro,
           });
         }
       }

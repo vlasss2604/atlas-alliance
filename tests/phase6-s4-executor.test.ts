@@ -4,6 +4,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 import {
   evidence,
+  productConfig,
   projectMemoryItems,
   projects,
   researchJobs,
@@ -1430,10 +1431,26 @@ describe("Фаза 6, S4 — контроллер не может быть пе�
 // reservation ordering and wiring separately, in the describe block
 // above this one (depsFor's default FIXTURE_COST_PROFILE).
 // ============================================================
-describe("Фаза 6, S4 — D-090: production profile EMPTY -> fail closed для ОБОИХ ролей (items 2/3)", () => {
+describe("Фаза 6/S10, D-090/D-118 — production profile fail-closed вне утверждённых (role, model) пар (items 2/3)", () => {
   // Deliberately NOT using depsFor — depsFor injects FIXTURE_COST_PROFILE
   // by default, which would mask the real production fail-closed path
   // this block exists to prove.
+  //
+  // S10 (D-118): the production catalogue now approves QUERY_PROPOSER/
+  // EVIDENCE_EXTRACTOR + claude-haiku-4-5 (the seeded default) — these
+  // tests set the config key to an UNAPPROVED model id for the duration
+  // of the test (restored in `finally`) to keep proving the fail-closed
+  // property for whatever ISN'T in the catalogue, since the seeded
+  // default itself no longer demonstrates it.
+  async function withUnapprovedModel(key: "query_proposer_model" | "evidence_extractor_model", fn: () => Promise<void>) {
+    await ctx.db.update(productConfig).set({ value: "claude-opus-5" }).where(eq(productConfig.key, key));
+    try {
+      await fn();
+    } finally {
+      await ctx.db.update(productConfig).set({ value: "claude-haiku-4-5" }).where(eq(productConfig.key, key));
+    }
+  }
+
   function prodDeps(
     p: { jobId: string; projectId: string; projectName: string; projectSlug: string },
     overrides: {
@@ -1452,51 +1469,55 @@ describe("Фаза 6, S4 — D-090: production profile EMPTY -> fail closed дл
     };
   }
 
-  it("query_proposer_model (claude-haiku-4-5, seeded default) -> FAILED (MODEL_COST_PROFILE_MISSING), НИ ОДИН провайдер не вызван, НИЧЕГО не зарезервировано", async () => {
-    const p = await makeJob();
-    let proposerCalled = false;
-    let searchCalled = false;
-    const executor = createS4WorkExecutor(
-      prodDeps(p, {
-        queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
-        searchGateway: { name: "fixture", async search() { searchCalled = true; return []; } },
-      }),
-    );
-    const result = await executor.execute(ITEM, ctxFor(p.jobId));
-    expect(result.status).toBe("FAILED");
-    expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
-    expect(proposerCalled).toBe(false); // preflight fails before ANY reservation or call
-    expect(searchCalled).toBe(false);
-    expect(result.spent?.searchQueries).toBe(0);
-    expect(result.spent?.sourceOpens).toBe(0);
-    expect(result.spent?.authorizedModelCostMicro).toBe(0);
-    const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
-    expect(jobRow.modelCostMicroReserved).toBe(0);
-    expect(jobRow.searchQueriesReserved).toBe(0);
+  it("query_proposer_model (unapproved model id) -> FAILED (MODEL_COST_PROFILE_MISSING), НИ ОДИН провайдер не вызван, НИЧЕГО не зарезервировано", async () => {
+    await withUnapprovedModel("query_proposer_model", async () => {
+      const p = await makeJob();
+      let proposerCalled = false;
+      let searchCalled = false;
+      const executor = createS4WorkExecutor(
+        prodDeps(p, {
+          queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
+          searchGateway: { name: "fixture", async search() { searchCalled = true; return []; } },
+        }),
+      );
+      const result = await executor.execute(ITEM, ctxFor(p.jobId));
+      expect(result.status).toBe("FAILED");
+      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+      expect(proposerCalled).toBe(false); // preflight fails before ANY reservation or call
+      expect(searchCalled).toBe(false);
+      expect(result.spent?.searchQueries).toBe(0);
+      expect(result.spent?.sourceOpens).toBe(0);
+      expect(result.spent?.authorizedModelCostMicro).toBe(0);
+      const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
+      expect(jobRow.modelCostMicroReserved).toBe(0);
+      expect(jobRow.searchQueriesReserved).toBe(0);
+    });
   });
 
-  it("evidence_extractor_model (claude-haiku-4-5, seeded default) -> FAILED (MODEL_COST_PROFILE_MISSING) в preflight — search/fetch НЕ выполняются вовсе (item 11: не тратим их бюджет впустую)", async () => {
-    const p = await makeJob();
-    const url = "https://example.com/evidence-profile-missing";
-    let searchCalled = false;
-    let extractorCalled = false;
-    const executor = createS4WorkExecutor(
-      prodDeps(p, {
-        searchGateway: { name: "fixture", async search() { searchCalled = true; return [{ url, title: null, snippet: null }]; } },
-        contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url }) }),
-        evidenceExtractor: { name: "fixture", async extract() { extractorCalled = true; return []; } },
-      }),
-    );
-    const result = await executor.execute(ITEM, ctxFor(p.jobId));
-    expect(result.status).toBe("FAILED");
-    expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
-    // LOW-1/item 11: the whole point of the preflight is that EvidenceExtractor's
-    // missing profile is discovered BEFORE search/fetch budget is spent —
-    // not merely before the extractor is called.
-    expect(searchCalled).toBe(false);
-    expect(extractorCalled).toBe(false);
-    expect(result.spent?.searchQueries).toBe(0);
-    expect(result.spent?.sourceOpens).toBe(0);
+  it("evidence_extractor_model (unapproved model id) -> FAILED (MODEL_COST_PROFILE_MISSING) в preflight — search/fetch НЕ выполняются вовсе (item 11: не тратим их бюджет впустую)", async () => {
+    await withUnapprovedModel("evidence_extractor_model", async () => {
+      const p = await makeJob();
+      const url = "https://example.com/evidence-profile-missing";
+      let searchCalled = false;
+      let extractorCalled = false;
+      const executor = createS4WorkExecutor(
+        prodDeps(p, {
+          searchGateway: { name: "fixture", async search() { searchCalled = true; return [{ url, title: null, snippet: null }]; } },
+          contentFetcher: fixedContentFetcher({ [url]: doc({ finalUrl: url }) }),
+          evidenceExtractor: { name: "fixture", async extract() { extractorCalled = true; return []; } },
+        }),
+      );
+      const result = await executor.execute(ITEM, ctxFor(p.jobId));
+      expect(result.status).toBe("FAILED");
+      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+      // LOW-1/item 11: the whole point of the preflight is that EvidenceExtractor's
+      // missing profile is discovered BEFORE search/fetch budget is spent —
+      // not merely before the extractor is called.
+      expect(searchCalled).toBe(false);
+      expect(extractorCalled).toBe(false);
+      expect(result.spent?.searchQueries).toBe(0);
+      expect(result.spent?.sourceOpens).toBe(0);
+    });
   });
 });
 
@@ -1807,9 +1828,10 @@ describe("Фаза 6, S4 — item 12.A: SOURCE_ROUTE домен должен с�
 // phase6-s4-model-cost-profile.test.ts.
 // ============================================================
 const executorPathCreateMock = vi.fn();
+const executorPathCountTokensMock = vi.fn();
 vi.mock("@anthropic-ai/sdk", () => {
   class FakeAnthropicForExecutorPath {
-    messages = { create: executorPathCreateMock };
+    messages = { create: executorPathCreateMock, countTokens: executorPathCountTokensMock };
     static APIError = class extends Error {};
   }
   return { default: FakeAnthropicForExecutorPath };
@@ -1832,8 +1854,11 @@ describe("Фаза 6, S4 — item 12.B: executor -> resolver -> provider — pro
 
   it("реальный resolveQueryProposer() внутри createS4WorkExecutor передаёт FIXTURE-профильный maxOutputTokens в запрос провайдера", async () => {
     executorPathCreateMock.mockReset();
+    executorPathCountTokensMock.mockReset();
+    executorPathCountTokensMock.mockResolvedValue({ input_tokens: 10 });
     executorPathCreateMock.mockResolvedValue({
       stop_reason: "end_turn",
+      usage: { input_tokens: 10, output_tokens: 3 },
       content: [{ type: "text", text: JSON.stringify({ queries: ["q1"] }) }],
     });
     const p = await makeJob();

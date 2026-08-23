@@ -24,6 +24,15 @@ export interface ComponentTarget {
   projectSlug: string;
 }
 
+// S10 (live-provider-enablement.md §7, D-118) — real token usage from a
+// live model call, audit-only (see model-cost-profile.ts's
+// calculateActualCostMicro). Never a second budget authority; never
+// derived from an estimate.
+export interface ModelUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface SourceCandidate {
   url: string;
   // Whatever the search provider returns as a title/snippet — advisory

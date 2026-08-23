@@ -1,4 +1,4 @@
-import type { ComponentTarget } from "./types";
+import type { ComponentTarget, ModelUsage } from "./types";
 
 // Phase 6, S1 — QueryProposer seam (phase-6-plan.md §4.1 table).
 //
@@ -60,7 +60,12 @@ export const DEFAULT_QUERY_PROPOSER_MODEL = "claude-haiku-4-5";
 // don't go through the D-090 cost-profile flow (e.g. this module's own
 // tests exercising lazy-failure resolution) — falls back to the live
 // implementation's own default in that case.
-export async function resolveQueryProposer(model?: string, maxOutputTokens?: number): Promise<QueryProposer> {
+export async function resolveQueryProposer(
+  model?: string,
+  maxOutputTokens?: number,
+  maxInputTokens?: number,
+  onUsage?: (usage: ModelUsage) => void,
+): Promise<QueryProposer> {
   if (_override) return _override;
   const kind = process.env.MODEL_GATEWAY ?? "anthropic";
   if (kind === "fake") {
@@ -73,5 +78,7 @@ export async function resolveQueryProposer(model?: string, maxOutputTokens?: num
   return createAnthropicQueryProposer(
     model ?? process.env.QUERY_PROPOSER_MODEL ?? DEFAULT_QUERY_PROPOSER_MODEL,
     maxOutputTokens,
+    maxInputTokens,
+    onUsage,
   );
 }

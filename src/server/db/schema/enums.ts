@@ -212,6 +212,13 @@ export const traceOperationType = pgEnum("trace_operation_type", [
   "REJECTED_WRONG_PROJECT",
   "REJECTED_WRONG_COMPONENT",
   "REJECTED_NOT_TRACEABLE",
+  // S10 (D-090 count-then-gate, live-provider-enablement.md): a model
+  // generation call was never made — the QueryProposer role has no
+  // pre-call ATTEMPTED/OK/FAILED triplet the way EXTRACT_* does
+  // (EvidenceExtractor's existing EXTRACT_FAILED already carries the new
+  // reason codes below for its own count-then-gate skip). Additive, not
+  // a replacement for any existing operation.
+  "MODEL_CALL_SKIPPED",
 ]);
 
 // Outcome of the ONE operation this row records — deliberately the same
@@ -244,6 +251,13 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   "WRONG_PROJECT",
   "WRONG_COMPONENT",
   "NOT_TRACEABLE",
+  // S10 (D-090 count-then-gate): distinguishes "the exact input token
+  // count exceeded the approved role-specific ceiling" from "count_tokens
+  // itself could not be obtained" — different capability-fatal-vs-local
+  // classifications (see live-provider-enablement.md §5/§9). Neither is
+  // ever a raw provider message — both are closed, code-authored codes.
+  "MODEL_INPUT_OVERSIZED",
+  "TOKEN_COUNT_UNAVAILABLE",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,

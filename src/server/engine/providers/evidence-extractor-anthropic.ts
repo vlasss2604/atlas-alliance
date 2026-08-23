@@ -4,6 +4,9 @@ import { z } from "zod";
 
 import { EvidenceExtractorUnavailableError } from "./evidence-extractor";
 import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extractor";
+import { retryOnceIfTransient } from "./retry";
+import { countThenGate } from "./token-gate";
+import type { ModelUsage } from "./types";
 
 // Phase 6, S4 — live EvidenceExtractor over the Anthropic Messages API.
 // Same shape as query-proposer-anthropic.ts / interpreter/anthropic.ts.
@@ -19,10 +22,18 @@ import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extr
 // returns. A compromised or malicious model response can, at worst,
 // produce facts that get discarded — it cannot reach the controller.
 
+// S10 (D-118): count-then-gated against the approved maxInputTokens
+// (D-090, token-gate.ts) BEFORE this call — the ONE role where an
+// unbounded document genuinely risks a large input, which is exactly
+// what this mechanism exists to prove-bound rather than estimate — and
+// retried exactly once on a transient failure only (retry.ts).
+
 // Fallback only for direct callers that bypass the D-090 cost-profile
 // flow (e.g. this module's own lazy-failure-resolution tests) — real S4
-// execution always passes the approved profile's maxOutputTokens instead.
+// execution always passes the approved profile's maxOutputTokens/
+// maxInputTokens instead.
 const DEFAULT_MAX_TOKENS = 1536;
+const DEFAULT_MAX_INPUT_TOKENS = 48_000;
 
 // BLOCKER-1 (S4 review fix, D-074, §7.2): sourceClass/officiality are
 // NOT part of this schema. Source authority is computed deterministically
@@ -86,48 +97,69 @@ function client(): Anthropic {
   return _client;
 }
 
-export function createAnthropicEvidenceExtractor(model: string, maxOutputTokens = DEFAULT_MAX_TOKENS): EvidenceExtractor {
+export function createAnthropicEvidenceExtractor(
+  model: string,
+  maxOutputTokens = DEFAULT_MAX_TOKENS,
+  maxInputTokens = DEFAULT_MAX_INPUT_TOKENS,
+  onUsage?: (usage: ModelUsage) => void,
+): EvidenceExtractor {
   return {
     name: "anthropic",
     async extract(input: EvidenceExtractionInput) {
-      let message;
-      try {
-        message = await client().messages.create({
-          model,
-          max_tokens: maxOutputTokens,
-          system: SYSTEM_PROMPT,
-          messages: [{ role: "user", content: buildUserContent(input) }],
-          output_config: { format: zodOutputFormat(extractionResultSchema) },
-        });
-      } catch (e) {
-        const status = e instanceof Anthropic.APIError ? e.status : undefined;
-        const detail =
-          e instanceof Anthropic.APIError
-            ? `api ${status ?? "?"} ${e.name}: ${String(e.message).slice(0, 200)}`
-            : `api call failed: ${e instanceof Error ? e.message : String(e)}`;
-        const transient = status === 429 || status === undefined || (status >= 500 && status < 600);
-        throw new EvidenceExtractorUnavailableError(detail, transient);
-      }
-      if (message.stop_reason === "max_tokens") {
-        throw new EvidenceExtractorUnavailableError("model output truncated (max_tokens)");
-      }
-      const text = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
-      let raw: unknown;
-      try {
-        raw = JSON.parse(text);
-      } catch {
-        throw new EvidenceExtractorUnavailableError("model output is not valid JSON");
-      }
-      const parsed = extractionResultSchema.safeParse(raw);
-      if (!parsed.success) {
-        throw new EvidenceExtractorUnavailableError(`model output failed schema validation: ${parsed.error.message}`);
-      }
-      return parsed.data.facts.map((f) => ({
-        ...f,
-        publishedAt: f.publishedAt ? new Date(f.publishedAt) : null,
-      }));
+      return retryOnceIfTransient(() => doExtract(input, model, maxOutputTokens, maxInputTokens, onUsage));
     },
   };
+}
+
+async function doExtract(
+  input: EvidenceExtractionInput,
+  model: string,
+  maxOutputTokens: number,
+  maxInputTokens: number,
+  onUsage?: (usage: ModelUsage) => void,
+) {
+  const userContent = buildUserContent(input);
+  // D-090 count-then-gate (S10, token-gate.ts): throws ModelInputOversizedError
+  // or TokenCountUnavailableError before any generation call is made —
+  // the document's normalizedText is never truncated to fit.
+  await countThenGate(client(), model, SYSTEM_PROMPT, [{ role: "user", content: userContent }], maxInputTokens);
+  let message;
+  try {
+    message = await client().messages.create({
+      model,
+      max_tokens: maxOutputTokens,
+      system: SYSTEM_PROMPT,
+      messages: [{ role: "user", content: userContent }],
+      output_config: { format: zodOutputFormat(extractionResultSchema) },
+    });
+  } catch (e) {
+    const status = e instanceof Anthropic.APIError ? e.status : undefined;
+    const detail =
+      e instanceof Anthropic.APIError
+        ? `api ${status ?? "?"} ${e.name}: ${String(e.message).slice(0, 200)}`
+        : `api call failed: ${e instanceof Error ? e.message : String(e)}`;
+    const transient = status === 429 || status === undefined || (status >= 500 && status < 600);
+    throw new EvidenceExtractorUnavailableError(detail, transient);
+  }
+  if (message.stop_reason === "max_tokens") {
+    throw new EvidenceExtractorUnavailableError("model output truncated (max_tokens)");
+  }
+  onUsage?.({ inputTokens: message.usage.input_tokens, outputTokens: message.usage.output_tokens });
+  const text = message.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw new EvidenceExtractorUnavailableError("model output is not valid JSON");
+  }
+  const parsed = extractionResultSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new EvidenceExtractorUnavailableError(`model output failed schema validation: ${parsed.error.message}`);
+  }
+  return parsed.data.facts.map((f) => ({
+    ...f,
+    publishedAt: f.publishedAt ? new Date(f.publishedAt) : null,
+  }));
 }
 
 export function __resetAnthropicEvidenceExtractorClient(): void {

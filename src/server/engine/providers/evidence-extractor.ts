@@ -1,4 +1,4 @@
-import type { ComponentTarget, ExtractedFact, FetchedDocument } from "./types";
+import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from "./types";
 
 // Phase 6, S1 — EvidenceExtractor seam (phase-6-plan.md §4.1 table, §16).
 //
@@ -48,7 +48,12 @@ export const DEFAULT_EVIDENCE_EXTRACTOR_MODEL = "claude-haiku-4-5";
 // implementation's first real call throws, not this resolver).
 // `maxOutputTokens` (D-090, phase-6-plan.md §5.6): see resolveQueryProposer's
 // doc comment — same discipline.
-export async function resolveEvidenceExtractor(model?: string, maxOutputTokens?: number): Promise<EvidenceExtractor> {
+export async function resolveEvidenceExtractor(
+  model?: string,
+  maxOutputTokens?: number,
+  maxInputTokens?: number,
+  onUsage?: (usage: ModelUsage) => void,
+): Promise<EvidenceExtractor> {
   if (_override) return _override;
   const kind = process.env.MODEL_GATEWAY ?? "anthropic";
   if (kind === "fake") {
@@ -61,5 +66,7 @@ export async function resolveEvidenceExtractor(model?: string, maxOutputTokens?:
   return createAnthropicEvidenceExtractor(
     model ?? process.env.EVIDENCE_EXTRACTOR_MODEL ?? DEFAULT_EVIDENCE_EXTRACTOR_MODEL,
     maxOutputTokens,
+    maxInputTokens,
+    onUsage,
   );
 }

@@ -31,6 +31,15 @@ const productConfigSchema = z.object({
   // ключи (ON CONFLICT DO NOTHING) — это защита в глубину, не замена.
   query_proposer_model: z.string().min(1).default("claude-haiku-4-5"),
   evidence_extractor_model: z.string().min(1).default("claude-haiku-4-5"),
+  // S10 (live-provider-enablement.md §10) — internal-alpha gate, SEPARATE
+  // from research_enabled (the public/product gate, which MUST remain
+  // false throughout S10 internal alpha). Live executor construction
+  // (live-executor.ts) requires BOTH this flag AND an explicit owner/
+  // admin `alpha-run --mode=live` invocation — neither alone is
+  // sufficient. .default(false): same MEDIUM-3-style defense as
+  // query_proposer_model above — an existing DB that only runs
+  // migrations (never re-seeds) still fails closed rather than throwing.
+  internal_alpha_enabled: z.boolean().default(false),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -69,6 +78,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   // D-032: механическая генерация/извлечение — Haiku.
   query_proposer_model: "claude-haiku-4-5",
   evidence_extractor_model: "claude-haiku-4-5",
+  internal_alpha_enabled: false,
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,
@@ -98,6 +108,22 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
     HIGH_CHANGE: 3,
   },
   memory_semantic_review_threshold: 0.2,
+};
+
+// S10 (live-provider-enablement.md §6, owner decision, LOCKED) — the ONE
+// immutable envelope for internal-alpha LIVE runs. Deliberately a plain
+// code constant, not a product_config row: unlike budget_demo/budget_core
+// (which the owner may retune via DB without a deploy), this number set
+// is explicitly "do not attempt to perfect these — recalibrate after
+// ~10-20 real internal runs" — a code change (reviewed, committed), same
+// discipline as model-cost-profile.ts's catalogue. No Quick/Standard/Deep
+// variants; exactly one envelope for the whole internal-alpha period.
+export const INTERNAL_ALPHA_V1: JobBudgetConfig = {
+  maxSearchQueries: 12,
+  maxSourceOpens: 24,
+  maxModelCostMicro: 2_000_000,
+  maxWallClockSec: 900,
+  reservedRecoverySteps: 1,
 };
 
 export async function loadProductConfig(

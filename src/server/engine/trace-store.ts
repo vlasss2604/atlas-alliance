@@ -30,6 +30,11 @@ export interface TraceEventInput {
   evidenceId?: string | null;
   budgetAxis?: (typeof researchTraceEvents.$inferInsert)["budgetAxis"];
   budgetAmount?: number | null;
+  // S10 (live-provider-enablement.md §7) — AUDIT ONLY. See engine.ts's
+  // column comments and model-cost-profile.ts's calculateActualCostMicro.
+  actualInputTokens?: number | null;
+  actualOutputTokens?: number | null;
+  actualCostMicro?: number | null;
 }
 
 // §M — a generous but finite bound on target_ref, defense in depth
@@ -42,21 +47,26 @@ export interface TraceEventInput {
 // over-length value slip through to the database.
 const MAX_TARGET_REF_LENGTH = 2048;
 
-// MEDIUM-1 (Stage 2 acceptance closure, D-116): deterministic redaction
-// of common credential-bearing query parameters, applied to EVERY
-// target_ref this module persists — not opt-in per call site. A search-
-// result or fetch URL is attacker/provider-influenced content (D-070);
-// storing it verbatim in an operational trace row would leak whatever
-// query string it happened to carry (confirmed reproducible: a search
+// MEDIUM-1 (Stage 2 acceptance closure, D-116) / S10 pre-live hardening
+// (live-provider-enablement.md §13, D-118, now a MANDATORY pre-live
+// requirement, not optional): deterministic redaction of common
+// credential-bearing query parameters, URL userinfo, and credential-
+// bearing URL fragments, applied to EVERY target_ref this module
+// persists — not opt-in per call site. A search-result or fetch URL is
+// attacker/provider-influenced content (D-070); storing it verbatim in
+// an operational trace row would leak whatever query string, userinfo,
+// or fragment it happened to carry (confirmed reproducible: a search
 // result URL containing `?api_key=SECRET`). Query/text target_refs
-// (QUERY_PROPOSED, SEARCH_EXECUTED) are not URLs — `new URL()` throws on
-// them, and the regex fallback only ever matches an explicit
-// `?name=value`/`&name=value` assignment, so plain query text passes
-// through unchanged. This is trace sanitization only: it never touches
-// the actual URL passed to ContentFetcher.fetch, and it never mutates
-// the Evidence table's own provenance columns or the sources table's URL
-// column — S4's admission/provenance semantics are unaffected (§7 of the
-// stage doc).
+// (QUERY_PROPOSED, SEARCH_EXECUTED) are not URLs — the regexes below only
+// ever match an explicit `?name=value`/`&name=value`/`#name=value`
+// assignment or a `user:pass@host` userinfo shape, so plain query text
+// passes through unchanged. This is trace sanitization only: it never
+// touches the actual URL passed to ContentFetcher.fetch, and it never
+// mutates the Evidence table's own provenance columns or the sources
+// table's URL column — S4's admission/provenance semantics are
+// unaffected (§7 of the Stage 2 doc). Do NOT overstate the guarantee:
+// this is the currently APPROVED list (§6/§13 of the S10 spec), not an
+// exhaustive enumeration of every possible credential-bearing URL shape.
 const SENSITIVE_URL_PARAM_NAMES = new Set([
   "api_key",
   "apikey",
@@ -68,6 +78,11 @@ const SENSITIVE_URL_PARAM_NAMES = new Set([
   "signature",
   "sig",
   "secret",
+  "auth_token",
+  "refresh_token",
+  "client_secret",
+  "password",
+  "session",
 ]);
 
 const REDACTED = "[REDACTED]";
@@ -77,15 +92,17 @@ const REDACTED = "[REDACTED]";
 // percent-encode "[REDACTED]" (and could re-normalize/reorder the rest
 // of the query string) — neither deterministic-looking nor necessary. A
 // direct regex replace on the raw text leaves every other character
-// untouched and produces the exact literal `key=[REDACTED]` value; it
-// also applies uniformly to an absolute URL, a relative path, or plain
-// non-URL text (QUERY_PROPOSED/SEARCH_EXECUTED's target_ref is a search
-// query string, not a URL — the pattern only ever matches an explicit
-// `?name=value`/`&name=value` assignment, so plain text passes through
-// unchanged).
+// untouched and produces the exact literal `key=[REDACTED]` value.
 export function redactUrl(raw: string): string {
   const namePattern = [...SENSITIVE_URL_PARAM_NAMES].join("|");
-  return raw.replace(new RegExp(`([?&](?:${namePattern})=)[^&#]*`, "gi"), `$1${REDACTED}`);
+  // §13: query parameters AND credential-bearing fragments (e.g.
+  // `#access_token=...`, `#token=...`) — the same closed name list,
+  // matched after `?`, `&`, or `#` alike, case-insensitive.
+  let out = raw.replace(new RegExp(`([?&#](?:${namePattern})=)[^&#]*`, "gi"), `$1${REDACTED}`);
+  // §13: URL userinfo (`https://user:password@host/...`) — redact
+  // everything between the scheme separator and `@`, never the host.
+  out = out.replace(/(:\/\/)[^/?#@\s]+@/g, `$1${REDACTED}@`);
+  return out;
 }
 
 function boundTargetRef(ref: string | null | undefined): string | null {
@@ -137,6 +154,9 @@ export async function recordTraceEvent(db: Database | Transaction, input: TraceE
         evidenceId: input.evidenceId ?? null,
         budgetAxis: input.budgetAxis ?? null,
         budgetAmount: input.budgetAmount ?? null,
+        actualInputTokens: input.actualInputTokens ?? null,
+        actualOutputTokens: input.actualOutputTokens ?? null,
+        actualCostMicro: input.actualCostMicro ?? null,
       });
     });
   } catch (e) {
