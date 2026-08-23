@@ -17,6 +17,7 @@ import {
   InterpreterContractError,
   type InterpreterModelResult,
   type InterpreterStatus,
+  type TaskType,
 } from "./schema";
 
 // Лимиты ввода (phase-4-plan §5.5).
@@ -37,7 +38,30 @@ const RETRY_DELAY_MS = Number(process.env.INTERPRETER_RETRY_DELAY_MS ?? 800);
 
 // Серверная поправка к выводу модели. Модель предполагает — сервер решает
 // (phase-4-plan §2.6): каталог проектов, а не LLM, определяет scope.
-export type ServerAdjustment = "NONE" | "PROJECT_UNRESOLVED" | "PROJECT_AMBIGUOUS";
+// SCOPE_RESCUED (D-123): единственная поправка, которая не понижает, а
+// ПОВЫШАЕТ маршрут модели — см. applyServerDecisions ниже.
+export type ServerAdjustment =
+  | "NONE"
+  | "PROJECT_UNRESOLVED"
+  | "PROJECT_AMBIGUOUS"
+  | "SCOPE_RESCUED";
+
+// D-123: task_type, для которых детерминированный server-side scope rescue
+// (ниже) вообще имеет смысл. EXPLANATION/OTHER_RESEARCH намеренно исключены:
+// EXPLANATION — семантика QUICK_EXPLANATION/NO_RESEARCH_NEEDED, не
+// DEEP_RESEARCH; OTHER_RESEARCH — слишком общая корзина, чтобы служить
+// самостоятельным доказательством «это точно TVC-механизм». Список — не
+// расширение домена: это подмножество УЖЕ существующих TASK_TYPES
+// (schema.ts), сужающее их для ОДНОЙ конкретной автоматической коррекции.
+const SCOPE_RESCUE_TASK_TYPES: ReadonlySet<TaskType> = new Set([
+  "PROJECT_MECHANISM",
+  "PROJECT_REVENUE",
+  "TOKEN_VALUE",
+  "RISK",
+  "CLAIM_VERIFICATION",
+  "COMPARISON",
+  "CHANGE_OVER_TIME",
+]);
 
 export interface StoredInterpretation extends InterpreterModelResult {
   project_slug: string | null;
@@ -149,6 +173,31 @@ async function callModel(
       throw e;
     }
   }
+  // D-123: единственное исключение из "второй сбой подряд → 502 без строки".
+  // rescuableScopeContradiction=true — узкий, явно помеченный класс
+  // (schema.ts, assertConsistent): OUTSIDE_CURRENT_DOMAIN self-contradiction.
+  // Кандидат пропускается дальше СО СВОИМ ИСХОДНЫМ route/status — решение о
+  // том, подтверждают ли резолюция проекта/task_type реальный TVC-scope,
+  // принимает applyServerDecisions ниже (там есть доступ к БД); если нет —
+  // кандидат остаётся тем же OUTSIDE_CURRENT_DOMAIN/OUT_OF_SCOPE, что и был.
+  // Третьего вызова модели здесь нет — attempts всегда 2.
+  if (
+    lastError instanceof InterpreterContractError &&
+    lastError.rescuableScopeContradiction &&
+    lastError.candidate
+  ) {
+    return {
+      result: lastError.candidate,
+      meta: {
+        gateway: gateway.name,
+        model,
+        inputTokens: lastError.meta?.inputTokens ?? null,
+        outputTokens: lastError.meta?.outputTokens ?? null,
+        latencyMs: lastError.meta?.latencyMs ?? 0,
+        attempts: 2,
+      },
+    };
+  }
   console.error(
     "[interpreter] unavailable",
     lastError instanceof Error ? lastError.message : lastError,
@@ -250,6 +299,42 @@ function applyServerDecisions(
     server_adjustment: resolution.adjustment,
   };
   let status = result.status;
+
+  // D-123 — deterministic server-side scope rescue. Reachable ONLY via
+  // callModel()'s rescuableScopeContradiction pass-through: a normal parse
+  // can never combine status=OUT_OF_SCOPE/route=OUTSIDE_CURRENT_DOMAIN with
+  // a non-UNKNOWN normalized_intent and a non-empty research_task —
+  // assertConsistent (schema.ts) already blocks that combination on a
+  // successful parse. So the only way `result` reaches here in that exact
+  // shape is: both model attempts produced this same self-contradiction,
+  // and the retry could not fix it. The server does NOT trust the model's
+  // OUTSIDE_CURRENT_DOMAIN/OUT_OF_SCOPE claim here — it independently
+  // re-derives scope from its OWN signals (project catalog resolution,
+  // supported task_type), and only overrides when ALL of them agree the
+  // request is in-domain. Every field this checks is one the model itself
+  // already reported — nothing here widens the TVC domain or special-cases
+  // a project/language: PUMP is not named, RU is not named.
+  if (
+    result.status === "OUT_OF_SCOPE" &&
+    result.route === "OUTSIDE_CURRENT_DOMAIN" &&
+    resolution.adjustment === "NONE" &&
+    !!resolution.slug &&
+    result.normalized_intent !== "UNKNOWN" &&
+    result.task_type !== null &&
+    SCOPE_RESCUE_TASK_TYPES.has(result.task_type) &&
+    !!result.research_task?.trim()
+  ) {
+    status = "READY";
+    stored.status = "READY";
+    stored.route = "DEEP_RESEARCH";
+    stored.server_adjustment = "SCOPE_RESCUED";
+    return { stored, status };
+  }
+  // Any other combination — project unresolved/ambiguous, normalized_intent
+  // still UNKNOWN, an out-of-set task_type, or an empty research_task —
+  // is NOT rescued: `stored` keeps the model's original OUT_OF_SCOPE/
+  // OUTSIDE_CURRENT_DOMAIN verdict untouched (the spread above already
+  // carries it), same as before this change.
 
   // Понижение статуса — только для маршрута, который может привести
   // к исследованию. QUICK_EXPLANATION / NO_RESEARCH_NEEDED проекта

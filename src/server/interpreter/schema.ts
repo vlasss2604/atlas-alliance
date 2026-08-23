@@ -85,20 +85,53 @@ export const interpreterResultSchema = z
 export type InterpreterModelResult = z.infer<typeof interpreterResultSchema>;
 export type InterpreterStatus = (typeof INTERPRETER_STATUSES)[number];
 export type QueryRoute = (typeof QUERY_ROUTES)[number];
+export type TaskType = (typeof TASK_TYPES)[number];
+
+// Реальное usage финального (провалившегося) вызова модели — только для
+// rescuableScopeContradiction (D-123, interpret.ts): без этого поля
+// аудиторская запись rescue-строки теряла бы фактический inputTokens/
+// outputTokens точно так же, как терялся бы обычный 502 без строки вовсе.
+// Не общий механизм для ЛЮБОГО провала второй попытки — только для этого
+// одного узкого класса.
+export interface CapturedModelMeta {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  latencyMs: number;
+}
 
 export class InterpreterContractError extends Error {
-  constructor(message: string) {
+  // meta не readonly: провайдер (anthropic.ts) ловит эту ошибку ПОСЛЕ throw
+  // изнутри parseInterpreterResult и дозаполняет её реальным usage вызова,
+  // который иначе терялся бы вместе с самим отказом.
+  public meta?: CapturedModelMeta;
+
+  constructor(
+    message: string,
+    // Схема-валидный, но кросс-полево противоречивый результат, из-за
+    // которого сработал fail(). Присутствует только когда assertConsistent
+    // (не safeParse) бросил ошибку — на "genuinely malformed shape" нет
+    // валидного объекта, который можно было бы передать дальше.
+    public readonly candidate?: InterpreterModelResult,
+    // true ТОЛЬКО для одного узкого правила ниже (OUTSIDE_CURRENT_DOMAIN
+    // self-contradiction, D-123) — единственный класс нарушения, который
+    // callModel() (interpret.ts) вправе пропустить дальше после исчерпания
+    // повтора вместо 502. Любое другое нарушение контракта продолжает
+    // безусловно приводить к 502 — это НЕ общий "прощаем вторую попытку"
+    // механизм.
+    public readonly rescuableScopeContradiction = false,
+  ) {
     super(message);
     this.name = "InterpreterContractError";
   }
 }
 
 // Согласованность между полями — то, что JSON-схема выразить не может.
-// Нарушение = невалидный ответ модели (retry → 502), а не «почти годный»
-// результат, который поедет дальше по конвейеру.
+// Нарушение = невалидный ответ модели (retry → 502, кроме одного узкого
+// rescuableScopeContradiction-класса ниже), а не «почти годный» результат,
+// который поедет дальше по конвейеру.
 export function assertConsistent(r: InterpreterModelResult): void {
-  const fail = (m: string) => {
-    throw new InterpreterContractError(m);
+  const fail = (m: string, rescuableScopeContradiction = false) => {
+    throw new InterpreterContractError(m, r, rescuableScopeContradiction);
   };
 
   if (r.status === "READY") {
@@ -176,7 +209,17 @@ export function assertConsistent(r: InterpreterModelResult): void {
     r.normalized_intent !== "UNKNOWN" &&
     r.research_task?.trim()
   ) {
-    fail("OUTSIDE_CURRENT_DOMAIN with in-domain normalized_intent and research_task");
+    // D-123: этот конкретный класс противоречия — и только он — доходит до
+    // callModel() как rescuableScopeContradiction. Если повтор (существующий
+    // единственный) тоже вернёт это же противоречие, interpret.ts вправе
+    // применить детерминированную server-side scope rescue — но ТОЛЬКО если
+    // резолюция проекта/task_type независимо подтверждают то же самое
+    // (interpret.ts, applyServerDecisions). Здесь мы лишь помечаем класс
+    // ошибки; решение о rescue принимается там, где есть доступ к БД.
+    fail(
+      "OUTSIDE_CURRENT_DOMAIN with in-domain normalized_intent and research_task",
+      true,
+    );
   }
 }
 

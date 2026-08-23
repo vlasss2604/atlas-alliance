@@ -8,7 +8,11 @@ import {
   type InterpreterInput,
 } from "./gateway";
 import { buildUserContent, SYSTEM_PROMPT } from "./prompt";
-import { interpreterResultSchema, parseInterpreterResult } from "./schema";
+import {
+  InterpreterContractError,
+  interpreterResultSchema,
+  parseInterpreterResult,
+} from "./schema";
 
 // Реализация ModelGateway поверх Anthropic Messages API.
 // Один лёгкий вызов со structured output (канон atlas-intent: «не три
@@ -75,16 +79,27 @@ export const anthropicGateway: InterpreterGateway = {
     } catch {
       throw new InterpreterUnavailableError("model output is not valid JSON");
     }
-    const result = parseInterpreterResult(raw);
+    const meta = {
+      inputTokens: message.usage?.input_tokens ?? null,
+      outputTokens: message.usage?.output_tokens ?? null,
+      latencyMs: Date.now() - startedAt,
+    };
+    let result;
+    try {
+      result = parseInterpreterResult(raw);
+    } catch (e) {
+      // D-123: если это исчерпывающий (второй) вызов и ошибка окажется
+      // rescuableScopeContradiction, callModel() (interpret.ts) сможет
+      // пропустить кандидата дальше вместо 502 — но тогда его усечённая
+      // аудиторская строка не должна терять реальный usage ИМЕННО этого,
+      // провалившегося вызова (иначе rescue-строка осталась бы без
+      // inputTokens/outputTokens, в отличие от любой обычной успешной).
+      if (e instanceof InterpreterContractError) e.meta = meta;
+      throw e;
+    }
     return {
       result,
-      meta: {
-        gateway: "anthropic",
-        model,
-        inputTokens: message.usage?.input_tokens ?? null,
-        outputTokens: message.usage?.output_tokens ?? null,
-        latencyMs: Date.now() - startedAt,
-      },
+      meta: { gateway: "anthropic", model, ...meta },
     };
   },
 };

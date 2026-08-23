@@ -987,6 +987,177 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
     const validResult = modelSays({ project_or_asset: "Uniswap" })();
     expect(parseInterpreterResult(validResult).status).toBe("READY");
   });
+
+  // D-123: детерминированный server-side scope rescue. Модель может
+  // ПРЕДЛОЖИТЬ route/status, но когда И повтор возвращает то же
+  // противоречие, сервер сам решает — по резолюции проекта и task_type,
+  // а не по третьему вызову модели (его здесь нет и не будет).
+  function contradictoryBuybackFixture(patch: Record<string, unknown> = {}) {
+    return () => ({
+      status: "OUT_OF_SCOPE",
+      project_or_asset: "Pump.fun",
+      related_entities: [],
+      topic: "token buyback and supply reduction mechanism",
+      task_type: "PROJECT_MECHANISM",
+      research_task:
+        "Identify the destination of PUMP tokens purchased through Pump.fun's buyback mechanism and determine whether these purchases result in a net reduction of circulating token supply.",
+      understood_summary:
+        "You want to understand what actually happens to the PUMP tokens that Pump.fun buys back, and whether this reduces the token supply in circulation.",
+      user_assumptions: ["Pump.fun conducts buybacks of PUMP tokens"],
+      ambiguities: [],
+      clarification_question: null,
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      normalized_intent: "BURN_OR_SUPPLY_EFFECT",
+      intent_confidence: 0.92,
+      route_reason: "buyback destination and supply effect",
+      needs_fresh_evidence: true,
+      quick_answer: null,
+      ...patch,
+    });
+  }
+
+  it("18. D-123: оба вызова модели противоречивы (реальный вопрос, RU) → детерминированный server rescue, READY/DEEP_RESEARCH, без третьего вызова", async () => {
+    const REAL_QUESTION =
+      "Куда на самом деле уходят токены $PUMP, которые pump.fun покупает через buyback, и уменьшает ли это предложение токена?";
+    const c = await makeAuthedClient();
+    __pushFakeScript(contradictoryBuybackFixture());
+    __pushFakeScript(contradictoryBuybackFixture({ normalized_intent: "MECHANISM_CURRENT_STATE" }));
+
+    const { res, body } = await ask(c, REAL_QUESTION);
+    expect(res.status).toBe(201); // не 502 — rescue, а не отказ
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    expect(body.interpretation.understood?.projectSlug).toBe("pump_fun");
+    // Не мнимый accept: adjustment называет rescue явно, для аудита.
+    expect(body.interpretation.adjustment).toBe("SCOPE_RESCUED");
+
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(2); // никогда 3
+    expect((row.result as { server_adjustment: string }).server_adjustment).toBe(
+      "SCOPE_RESCUED",
+    );
+  });
+
+  it("18b. английский эквивалент того же вопроса: то же структурное поведение", async () => {
+    const ENGLISH_QUESTION =
+      "Where do the $PUMP tokens purchased through buybacks actually go, and do those buybacks reduce token supply?";
+    const c = await makeAuthedClient();
+    __pushFakeScript(contradictoryBuybackFixture());
+    __pushFakeScript(contradictoryBuybackFixture());
+
+    const { res, body } = await ask(c, ENGLISH_QUESTION);
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    expect(body.interpretation.adjustment).toBe("SCOPE_RESCUED");
+  });
+
+  it("18c. неаккуратная формулировка («памп байбек куда токены деваются и саплай меньше?»): та же защита, если структурные поля резолвятся", async () => {
+    const MESSY_QUESTION = "памп байбек куда токены деваются и саплай меньше?";
+    const c = await makeAuthedClient();
+    __pushFakeScript(contradictoryBuybackFixture());
+    __pushFakeScript(contradictoryBuybackFixture());
+
+    const { res, body } = await ask(c, MESSY_QUESTION);
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("READY");
+    expect(body.interpretation.route).toBe("DEEP_RESEARCH");
+    expect(body.interpretation.adjustment).toBe("SCOPE_RESCUED");
+  });
+
+  it("18d. нерезолвленный проект → НЕ спасается автоматически, остаётся честным OUT_OF_SCOPE", async () => {
+    const c = await makeAuthedClient();
+    const unresolvable = contradictoryBuybackFixture({
+      project_or_asset: "TotallyUnknownCoinXYZ",
+    });
+    __pushFakeScript(unresolvable);
+    __pushFakeScript(unresolvable);
+
+    const { res, body } = await ask(c, "Куда уходят токены TotallyUnknownCoinXYZ при buyback?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("OUT_OF_SCOPE");
+    expect(body.interpretation.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+    expect(body.interpretation.adjustment).toBe("PROJECT_UNRESOLVED");
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(2);
+  });
+
+  it("18e. настоящий вне-доменный вопрос (UNKNOWN + пустой research_task), оба вызова одинаковы → остаётся честным OUT_OF_SCOPE, не третий вызов", async () => {
+    const c = await makeAuthedClient();
+    const genuine = () => ({
+      status: "OUT_OF_SCOPE",
+      project_or_asset: null,
+      related_entities: [],
+      topic: null,
+      task_type: null,
+      research_task: null,
+      understood_summary: null,
+      user_assumptions: [],
+      ambiguities: [],
+      clarification_question: null,
+      route: "OUTSIDE_CURRENT_DOMAIN",
+      normalized_intent: "UNKNOWN",
+      intent_confidence: 0.2,
+      route_reason: "outside Token Value Capture",
+      needs_fresh_evidence: false,
+      quick_answer: null,
+    });
+    // Единичный, не противоречивый ответ (не бросает InterpreterContractError
+    // вовсе) — модель годно классифицировала с первого раза, retry не нужен.
+    __pushFakeScript(genuine);
+
+    const { res, body } = await ask(c, "Что будет с ценами на нефть, если начнётся дождь?");
+    expect(res.status).toBe(201);
+    expect(body.interpretation.status).toBe("OUT_OF_SCOPE");
+    expect(body.interpretation.route).toBe("OUTSIDE_CURRENT_DOMAIN");
+    const [row] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, body.interpretation.id));
+    expect((row.modelMeta as { attempts: number }).attempts).toBe(1);
+  });
+
+  it("18f. cost safety: обычный READY — 1 генерация; противоречие+исправление — 2; персистентное противоречие — rescue после 2-й, третьего вызова нет", async () => {
+    const c = await makeAuthedClient();
+
+    // Обычный валидный вопрос: 1 генерация.
+    const normal = await ask(c, "Uniswap: holder что получает?");
+    expect(normal.res.status).toBe(201);
+    const [normalRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, normal.body.interpretation.id));
+    expect((normalRow.modelMeta as { attempts: number }).attempts).toBe(1);
+
+    // Противоречие → исправление на повторе: 2 генерации, READY.
+    __pushFakeScript(contradictoryBuybackFixture());
+    __pushFakeScript(() => ({ ...contradictoryBuybackFixture()(), status: "READY", route: "DEEP_RESEARCH" }));
+    const fixed = await ask(c, "Куда уходят токены PUMP при buyback?");
+    expect(fixed.res.status).toBe(201);
+    const [fixedRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, fixed.body.interpretation.id));
+    expect((fixedRow.modelMeta as { attempts: number }).attempts).toBe(2);
+
+    // Персистентное противоречие: 2 генерации, rescue, НИКОГДА третьей.
+    __pushFakeScript(contradictoryBuybackFixture());
+    __pushFakeScript(contradictoryBuybackFixture());
+    const rescued = await ask(c, "Куда уходят токены PUMP при buyback снова?");
+    expect(rescued.res.status).toBe(201);
+    expect(rescued.body.interpretation.status).toBe("READY");
+    const [rescuedRow] = await ctx.db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, rescued.body.interpretation.id));
+    expect((rescuedRow.modelMeta as { attempts: number }).attempts).toBe(2);
+  });
 });
 
 async function quotaCount(userId: string): Promise<number> {
