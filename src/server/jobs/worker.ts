@@ -9,7 +9,7 @@ import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
 import { createBoss, RESEARCH_QUEUE } from "./queue";
-import { resolveDemoReservation, transitionJobState } from "./research-jobs";
+import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
 
 // First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
 // terminal contract mapping. `job.state` is the execution result,
@@ -105,12 +105,31 @@ export async function sweepStaleRunningJobs(db: Database): Promise<number> {
 // path, and it can never carry a real provider: alpha-run.ts only ever
 // passes createTraceFixtureExecutor (trace-fixture-executor.ts), itself
 // built entirely from non-live fixtures.
-export async function handleResearchJobTask(db: Database, jobId: string, executorOverride?: WorkExecutor): Promise<void> {
-  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
-  if (!job || job.state !== "QUEUED") {
-    return; // job отменён/потерян — задача считается обработанной
+// First Real Run, Stage 2 acceptance closure (HIGH-1/§2, D-116): the
+// smallest structured contract a caller needs to tell "I claimed and
+// executed this job" apart from "someone/something else already has (or
+// had) it" — never a public API, only consumed by scripts/alpha-run.ts
+// and this module's own tests. `claimed: false` means this invocation
+// did ZERO research work: no planning, no S4 attempt, no trace row, no
+// Evidence, no S5/S6/S7, no terminal-state write — it returned before
+// any of that could start.
+export type HandleResearchJobTaskResult =
+  | { claimed: true }
+  | { claimed: false; reason: "NOT_FOUND" | "NOT_QUEUED" };
+
+export async function handleResearchJobTask(
+  db: Database,
+  jobId: string,
+  executorOverride?: WorkExecutor,
+): Promise<HandleResearchJobTaskResult> {
+  // Atomic claim (research-jobs.ts) replaces the former check-then-act
+  // (SELECT, then unconditional transitionJobState(..., "RUNNING")) —
+  // see claimResearchJob's own doc comment for why that was unsafe.
+  const job = await claimResearchJob(db, jobId);
+  if (!job) {
+    const [existing] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+    return { claimed: false, reason: existing ? "NOT_QUEUED" : "NOT_FOUND" };
   }
-  await transitionJobState(db, jobId, "RUNNING", "worker picked up");
 
   // Стадия 2 LOCKED §9 «Проверяю накопленный опыт» — Фаза 5 делает её
   // настоящей: retrieval → детерминированный план → запись контракта.
@@ -135,7 +154,7 @@ export async function handleResearchJobTask(db: Database, jobId: string, executo
         await resolveDemoReservation(tx, jobId, "RELEASED");
       }
     });
-    return;
+    return { claimed: true };
   }
 
   // First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
@@ -165,7 +184,7 @@ export async function handleResearchJobTask(db: Database, jobId: string, executo
         await resolveDemoReservation(tx, jobId, "RELEASED");
       }
     });
-    return;
+    return { claimed: true };
   }
 
   let outcome: EngineOutcome | null;
@@ -190,7 +209,7 @@ export async function handleResearchJobTask(db: Database, jobId: string, executo
     // INTERRUPTED (see mapEngineOutcome) — leave the job RUNNING; a later
     // worker pickup resumes it via the controller's own persisted-attempt
     // replay semantics. Not expected in production.
-    return;
+    return { claimed: true };
   }
 
   const resolvedOutcome = outcome;
@@ -204,6 +223,7 @@ export async function handleResearchJobTask(db: Database, jobId: string, executo
       await resolveDemoReservation(tx, jobId, "RELEASED");
     }
   });
+  return { claimed: true };
 }
 
 // Entrypoint worker-процесса. В Фазе 1 хендлер — no-op (инфраструктура);

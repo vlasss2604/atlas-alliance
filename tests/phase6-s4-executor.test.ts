@@ -1098,8 +1098,14 @@ describe("Фаза 6, S4 — QueryProposer: границы (тест 1, 2, 3, 6)
     );
     const result = await executor.execute(ITEM, ctxFor(p.jobId));
     expect(result.status).toBe("FAILED");
-    expect(result.reason).toContain("QUERY_PROPOSER");
-    expect(result.reason).toContain("schema validation");
+    // MEDIUM-2 closure (Stage 2 acceptance closure, D-116): the raw
+    // exception message ("model output failed schema validation: not an
+    // array") is no longer interpolated into the reason — only the
+    // provider role + a safe error-class category. See s4-executor.ts's
+    // safeFailureReason() for why (a provider/transport exception's
+    // message is free text that can carry a credential-bearing URL).
+    expect(result.reason).toBe("QUERY_PROPOSER_FAILED:QueryProposerUnavailableError");
+    expect(result.reason).not.toContain("schema validation");
   });
 });
 
@@ -1186,10 +1192,13 @@ describe("Фаза 6, S4 — SearchGateway: сниппет никогда не �
     const result = await executor.execute(ITEM, ctxFor(p.jobId));
     expect(extractCalls).toBe(0);
     expect(result.status).toBe("FAILED");
-    // LOW-A (S4 final re-review): the terminal reason now preserves the
-    // actual typed provider failure instead of only a generic label.
-    expect(result.reason).toContain("CONTENT_FETCHER");
-    expect(result.reason).toContain("not found in fixture");
+    // LOW-A (S4 final re-review): the terminal reason preserves the
+    // actual typed provider failure (which boundary, which error class)
+    // instead of only a generic label. MEDIUM-2 closure (D-116): the raw
+    // exception message ("not found in fixture") is no longer included —
+    // see safeFailureReason() in s4-executor.ts.
+    expect(result.reason).toBe("CONTENT_FETCHER_FAILED:ContentFetchError");
+    expect(result.reason).not.toContain("not found in fixture");
   });
 });
 
@@ -1303,10 +1312,13 @@ describe("Фаза 6, S4 — провайдер недоступен (тест 1
     );
     const result = await executor.execute(ITEM, ctxFor(p.jobId));
     expect(result.status).toBe("FAILED");
-    // LOW-A (S4 final re-review): the terminal reason now preserves the
-    // actual typed provider failure instead of only a generic label.
-    expect(result.reason).toContain("SEARCH_GATEWAY");
-    expect(result.reason).toContain("BRAVE_SEARCH_API_KEY is not set");
+    // LOW-A (S4 final re-review): the terminal reason preserves the
+    // actual typed provider failure (which boundary, which error class).
+    // MEDIUM-2 closure (D-116): the raw exception message
+    // ("BRAVE_SEARCH_API_KEY is not set") is no longer included — see
+    // safeFailureReason() in s4-executor.ts.
+    expect(result.reason).toBe("SEARCH_GATEWAY_FAILED:SearchProviderUnavailableError");
+    expect(result.reason).not.toContain("BRAVE_SEARCH_API_KEY is not set");
   });
 });
 

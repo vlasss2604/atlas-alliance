@@ -56,7 +56,12 @@ export class InterpreterUnavailableError extends Error {
 
 let _override: InterpreterGateway | null = null;
 
-// Только для тестов: подмена gateway без переменных окружения.
+// Только для тестов и внутреннего non-live tooling'а (scripts/alpha-run.ts,
+// First Real Run Stage 2, D-116) — подмена gateway без переменных
+// окружения. alpha-run вызывает это явно, чтобы гарантировать
+// non-live Interpreter независимо от того, как настроен MODEL_GATEWAY в
+// окружении — не полагается на переменную окружения как единственную
+// гарантию.
 export function __setInterpreterGateway(g: InterpreterGateway | null): void {
   _override = g;
 }

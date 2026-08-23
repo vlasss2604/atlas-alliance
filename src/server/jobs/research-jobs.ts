@@ -43,6 +43,21 @@ export interface CreateResearchJobResult {
   created: boolean;
 }
 
+// First Real Run, Stage 2 acceptance closure (D-116) — internal-only
+// escape hatch, NOT part of CreateResearchJobInput (so it can never be
+// populated from a spread/parsed request body): skips the pg-boss
+// enqueue that createResearchJob otherwise always performs. Every real
+// caller (start-research.ts) calls createResearchJob with no third
+// argument and gets the exact original enqueue behaviour, unchanged.
+// The only caller that ever passes { skipEnqueue: true } is
+// scripts/alpha-run.ts, which then drives the job itself through the
+// real handleResearchJobTask — this exists specifically so alpha-run
+// never creates a pg-boss task that a real worker process could also
+// pick up and race against it for the same job (HIGH-1 closure §3).
+export interface CreateResearchJobOptions {
+  skipEnqueue?: boolean;
+}
+
 function pgConstraint(e: unknown): string | undefined {
   const err = e as { code?: string; constraint?: string; cause?: unknown };
   if (err?.code === "23505") return err.constraint;
@@ -58,6 +73,7 @@ export async function createResearchJob(
   db: Database,
   boss: PgBoss,
   input: CreateResearchJobInput,
+  options?: CreateResearchJobOptions,
 ): Promise<CreateResearchJobResult> {
   try {
     return await db.transaction(async (tx) => {
@@ -121,7 +137,9 @@ export async function createResearchJob(
         });
       }
 
-      await enqueueResearchJobInTx(boss, tx, job.id);
+      if (!options?.skipEnqueue) {
+        await enqueueResearchJobInTx(boss, tx, job.id);
+      }
       return { job, created: true };
     });
   } catch (e) {
@@ -195,6 +213,34 @@ export async function transitionJobState(
   };
   // На Database открывает транзакцию, на Transaction — savepoint; оба корректны.
   return dbOrTx.transaction(run);
+}
+
+// First Real Run, Stage 2 acceptance closure (HIGH-1, D-116): atomic
+// claim. The previous "SELECT job; if state !== QUEUED return; UPDATE to
+// RUNNING" sequence was check-then-act — two concurrent handlers could
+// both read state='QUEUED' before either transitions it, and
+// trg_research_jobs_state_guard (0001_state_machine.sql) treats
+// OLD.state === NEW.state as a silent no-op, so a second, later
+// RUNNING->RUNNING "transition" would NOT be rejected by the DB either.
+// This is a single UPDATE ... WHERE id=$1 AND state='QUEUED' RETURNING
+// *: Postgres row-level locking makes it atomic without any explicit
+// FOR UPDATE — a concurrent UPDATE on the same row blocks until the
+// first commits, then re-evaluates its own WHERE clause against the now-
+// RUNNING row and matches zero rows. Exactly one caller ever receives a
+// non-null row for a given job.
+export async function claimResearchJob(
+  dbOrTx: Database | Transaction,
+  jobId: string,
+): Promise<ResearchJobRow | null> {
+  return dbOrTx.transaction(async (tx) => {
+    await tx.execute(sql`SELECT set_config('atlas.transition_note', 'worker picked up', true)`);
+    const rows = await tx
+      .update(researchJobs)
+      .set({ state: "RUNNING", startedAt: sql`COALESCE(started_at, now())` })
+      .where(and(eq(researchJobs.id, jobId), eq(researchJobs.state, "QUEUED")))
+      .returning();
+    return rows[0] ?? null;
+  });
 }
 
 // Разрешение резервации DEMO-квоты: RESERVED -> CONSUMED | RELEASED.

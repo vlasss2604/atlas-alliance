@@ -237,17 +237,36 @@ async function findOrCreateSource(
   return { id: afterRace.id, sourceType: afterRace.sourceType };
 }
 
-// MEDIUM-2: converts anything an external provider call throws (its own
-// typed error class OR an ordinary/unexpected Error) into a uniform typed
-// outcome, so no exception ever escapes an execute() call from one of
-// these four provider boundaries. `label` identifies which boundary threw,
-// for an honest, specific reason string.
+// MEDIUM-2 (Stage 2 acceptance closure, D-116): converts anything an
+// external provider call throws (its own typed error class OR an
+// ordinary/unexpected Error) into a uniform typed outcome, so no
+// exception ever escapes an execute() call from one of these four
+// provider boundaries. `label` identifies which boundary threw, for an
+// honest, specific reason string.
+//
+// Owner-approved security correction, not a research-semantic change:
+// this used to interpolate the caught exception's own `.message` into
+// the returned reason — and that reason ends up, unsanitized, in
+// research_attempts.reason via controller.ts's generic persistence of
+// WorkExecutionResult.reason (an owner-visible audit field). A provider/
+// transport exception's message is free text the underlying HTTP client
+// or SDK controls; it can embed a credential-bearing request URL or an
+// Authorization header verbatim (confirmed reproducible: a real
+// ContentFetchError thrown with such text in its message). `label` (a
+// closed, code-authored constant naming which of the four provider
+// boundaries failed, D-070) plus the exception's own class NAME — never
+// its message — is sufficient to know provider role + operation failed +
+// a safe failure category, with nothing to leak.
+function safeFailureReason(label: string, e: unknown): string {
+  const category = e instanceof Error ? e.constructor.name : "UnknownError";
+  return `${label}_FAILED:${category}`;
+}
+
 async function callProvider<T>(label: string, fn: () => Promise<T>): Promise<{ ok: true; value: T } | { ok: false; reason: string }> {
   try {
     return { ok: true, value: await fn() };
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
-    return { ok: false, reason: `${label}: ${message}` };
+    return { ok: false, reason: safeFailureReason(label, e) };
   }
 }
 

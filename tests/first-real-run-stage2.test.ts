@@ -1,17 +1,21 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { EntitlementSnapshot } from "../src/server/domain/types";
 import {
   evidence,
+  interpretations,
   projects,
   researchAttempts,
+  researchClaimSupport,
   researchComponentResults,
   researchJobs,
+  researchPlans,
   researchTraceEvents,
   topics,
   users,
 } from "../src/server/db/schema";
+import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { ContentFetchError } from "../src/server/engine/providers/content-fetcher";
 import {
@@ -21,8 +25,11 @@ import {
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { recordTraceEvent, TracePersistenceError } from "../src/server/engine/trace-store";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
-import { createResearchJob } from "../src/server/jobs/research-jobs";
+import { claimResearchJob, createResearchJob } from "../src/server/jobs/research-jobs";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
+import { createInterpretation } from "../src/server/interpreter/interpret";
+import { __setInterpreterGateway } from "../src/server/interpreter/gateway";
+import { fakeGateway } from "../src/server/interpreter/fake";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) —
@@ -342,6 +349,75 @@ describe("First Real Run Stage 2 — secret/adversarial safety (#14)", () => {
     expect(serialized).not.toContain("Bearer");
     const fetchFailed = trace.find((t) => t.operationType === "FETCH_FAILED");
     expect(fetchFailed?.reasonCode).toBe("PROVIDER_ERROR"); // closed vocabulary, never the raw message
+
+    // MEDIUM-2 closure (E): the SAME secret must not survive into
+    // research_attempts.reason either — controller.ts persists
+    // WorkExecutionResult.reason verbatim, and callProvider() used to
+    // interpolate the caught exception's own message into that reason.
+    const attempts = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+    expect(attempts.length).toBeGreaterThan(0);
+    const attemptReasons = attempts.map((a) => a.reason).join(" | ");
+    expect(attemptReasons).not.toContain("SECRET_TOKEN_DO_NOT_LEAK");
+    expect(attemptReasons).not.toContain("Authorization");
+    expect(attemptReasons).not.toContain("Bearer");
+    expect(attemptReasons).toContain("CONTENT_FETCHER_FAILED:ContentFetchError"); // safe, closed category — provider role + failure class, no raw text
+  });
+});
+
+describe("First Real Run Stage 2 acceptance closure — trace URL redaction (MEDIUM-1, §F/§G)", () => {
+  it("a search-result candidate URL carrying a credential query param is persisted to trace only in redacted form, while the REAL url is what is actually fetched", async () => {
+    const topicId = await activeTopicId();
+    const project = await makeProject();
+    const jobId = await queueJob(project.id, topicId, coreEntitlement());
+    const secretUrl = "https://example.com/candidate?api_key=SECRET_TOKEN_DO_NOT_LEAK&other=1";
+    let fetchedWith: string | null = null;
+
+    const executor = createS4WorkExecutor({
+      db: ctx.db,
+      project,
+      queryProposer: { name: NON_LIVE_FIXTURE_PROVIDER_NAME, async proposeQueries() { return ["q"]; } },
+      searchGateway: {
+        name: NON_LIVE_FIXTURE_PROVIDER_NAME,
+        async search() {
+          return [{ url: secretUrl, title: "t", snippet: "s" }];
+        },
+      },
+      contentFetcher: {
+        name: NON_LIVE_FIXTURE_PROVIDER_NAME,
+        async fetch(url: string) {
+          // §G: this is the REAL url ContentFetcher receives — trace
+          // sanitization must never mutate what is actually fetched.
+          fetchedWith = url;
+          return {
+            finalUrl: url,
+            requestedUrl: url,
+            httpStatus: 200,
+            contentType: "text/html",
+            normalizedText: `${project.name}: unrelated content`,
+            contentHash: "sha256:fixturehash",
+            fetchedAt: new Date(),
+            byteLength: 100,
+          };
+        },
+      },
+      evidenceExtractor: { name: NON_LIVE_FIXTURE_PROVIDER_NAME, async extract() { return []; } },
+      queryProposerCostProfile: { modelId: "t", inputPriceMicroUsdPerToken: 1, outputPriceMicroUsdPerToken: 1, maxInputTokens: 1, maxOutputTokens: 1, priceVersion: "t" },
+      evidenceExtractorCostProfile: { modelId: "t", inputPriceMicroUsdPerToken: 1, outputPriceMicroUsdPerToken: 1, maxInputTokens: 1, maxOutputTokens: 1, priceVersion: "t" },
+    });
+    await handleResearchJobTask(ctx.db, jobId, executor);
+
+    expect(fetchedWith).toBe(secretUrl); // §G: fetch received the unredacted, original url
+
+    const trace = await traceRowsFor(jobId);
+    const withUrl = trace.filter((t) => t.targetRef?.includes("example.com/candidate"));
+    expect(withUrl.length).toBeGreaterThan(0); // CANDIDATE_RETURNED, FETCH_ATTEMPTED, FETCH_OK, etc all carry this url
+    for (const t of withUrl) {
+      expect(t.targetRef).not.toContain("SECRET_TOKEN_DO_NOT_LEAK");
+      expect(t.targetRef).toContain("api_key=[REDACTED]");
+      expect(t.targetRef).toContain("other=1"); // a non-sensitive param survives untouched
+    }
+    const serialized = JSON.stringify(trace);
+    expect(serialized).not.toContain("SECRET_TOKEN_DO_NOT_LEAK");
   });
 });
 
@@ -352,13 +428,174 @@ describe("First Real Run Stage 2 — replay does not duplicate trace", () => {
     const jobId = await queueJob(project.id, topicId, coreEntitlement());
     const executor = createTraceFixtureExecutor({ db: ctx.db, project, defaultScenario: "ADMISSIBLE_EVIDENCE" });
 
-    await handleResearchJobTask(ctx.db, jobId, executor);
+    const first = await handleResearchJobTask(ctx.db, jobId, executor);
+    expect(first.claimed).toBe(true);
     const traceBefore = await traceRowsFor(jobId);
     expect(traceBefore.length).toBeGreaterThan(0);
 
-    await handleResearchJobTask(ctx.db, jobId, executor); // job already left QUEUED — guard makes this a no-op
+    // §K: job already left QUEUED — atomic claim makes this a no-op, and
+    // the caller can SEE it was a no-op via the structured return.
+    const second = await handleResearchJobTask(ctx.db, jobId, executor);
+    expect(second.claimed).toBe(false);
+    if (!second.claimed) expect(second.reason).toBe("NOT_QUEUED");
     const traceAfter = await traceRowsFor(jobId);
     expect(traceAfter).toEqual(traceBefore);
+  });
+});
+
+describe("First Real Run Stage 2 acceptance closure — atomic job claim (HIGH-1, §A/§B)", () => {
+  it("two concurrent handleResearchJobTask calls on one QUEUED job: exactly one claims it, the loser performs zero research work", async () => {
+    const topicId = await activeTopicId();
+    const project = await makeProject();
+
+    // Baseline: one job run alone, to know exactly how many rows ONE
+    // execution of this deterministic fixture scenario produces.
+    const baselineJobId = await queueJob(project.id, topicId, coreEntitlement());
+    await handleResearchJobTask(ctx.db, baselineJobId, createTraceFixtureExecutor({ db: ctx.db, project, defaultScenario: "ADMISSIBLE_EVIDENCE" }));
+    const baselineTrace = await traceRowsFor(baselineJobId);
+    const baselineAttempts = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, baselineJobId));
+    const baselineEvidence = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, baselineJobId));
+    expect(baselineTrace.length).toBeGreaterThan(0);
+
+    const jobId = await queueJob(project.id, topicId, coreEntitlement());
+    const executor = createTraceFixtureExecutor({ db: ctx.db, project, defaultScenario: "ADMISSIBLE_EVIDENCE" });
+    const [r1, r2] = await Promise.all([
+      handleResearchJobTask(ctx.db, jobId, executor),
+      handleResearchJobTask(ctx.db, jobId, executor),
+    ]);
+
+    const results = [r1, r2];
+    expect(results.filter((r) => r.claimed).length).toBe(1); // exactly one claims it
+    const loser = results.find((r) => !r.claimed);
+    expect(loser).toBeDefined();
+    if (loser && !loser.claimed) expect(loser.reason).toBe("NOT_QUEUED");
+
+    // §B: the loser created zero planning duplication, zero extra
+    // attempts, zero extra trace, zero extra Evidence — this job's rows
+    // match the baseline (ONE execution) exactly, never doubled.
+    const plans = await ctx.db.select().from(researchPlans).where(eq(researchPlans.researchJobId, jobId));
+    expect(plans.length).toBe(1);
+    const trace = await traceRowsFor(jobId);
+    expect(trace.length).toBe(baselineTrace.length);
+    const attempts = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+    expect(attempts.length).toBe(baselineAttempts.length);
+    const evidenceRows = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, jobId));
+    expect(evidenceRows.length).toBe(baselineEvidence.length);
+
+    // No terminal-state corruption from two writers racing the terminal
+    // transition — exactly one coherent terminal state.
+    const job = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId)))[0];
+    expect(["SUCCEEDED", "BUDGET_LIMIT_REACHED"]).toContain(job.state);
+  });
+
+  it("§C: handleResearchJobTask returns claimed:false and performs zero work when another handler already claimed the job", async () => {
+    const topicId = await activeTopicId();
+    const project = await makeProject();
+    const jobId = await queueJob(project.id, topicId, coreEntitlement());
+
+    // Simulate a competing worker (or a real pg-boss worker racing
+    // alpha-run) claiming the job first.
+    const claimed = await claimResearchJob(ctx.db, jobId);
+    expect(claimed).not.toBeNull();
+
+    const executor = createTraceFixtureExecutor({ db: ctx.db, project, defaultScenario: "ADMISSIBLE_EVIDENCE" });
+    const result = await handleResearchJobTask(ctx.db, jobId, executor);
+    expect(result.claimed).toBe(false);
+    if (!result.claimed) expect(result.reason).toBe("NOT_QUEUED");
+
+    const trace = await traceRowsFor(jobId);
+    expect(trace.length).toBe(0);
+    const attempts = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+    expect(attempts.length).toBe(0);
+  });
+
+  it("§D: createResearchJob({ skipEnqueue: true }) leaves zero pg-boss queue rows for the job — alpha-run's design leaves no orphan task", async () => {
+    const topicId = await activeTopicId();
+    const project = await makeProject();
+    const userId = await makeUser();
+    const { job } = await createResearchJob(
+      ctx.db,
+      ctx.boss,
+      {
+        userId,
+        topicId,
+        projectId: project.id,
+        originalQuestion: "does protocol revenue reach token holders?",
+        normalizedTask: null,
+        normalizedTaskHash: uniq("hash"),
+        idempotencyKey: uniq("idem"),
+        entitlement: coreEntitlement(),
+        demoLifetimeProofLimit: 1000,
+      },
+      { skipEnqueue: true },
+    );
+    const rows = await ctx.db.execute(sql`SELECT count(*)::int AS c FROM pgboss.job WHERE data->>'jobId' = ${job.id}`);
+    expect((rows.rows[0] as { c: number }).c).toBe(0);
+
+    // A job created WITHOUT skipEnqueue (the normal production path,
+    // used by every other test in this file via queueJob) does get one
+    // — proving skipEnqueue is what changed, not enqueue itself breaking.
+    const normalJobId = await queueJob(project.id, topicId, coreEntitlement());
+    const normalRows = await ctx.db.execute(sql`SELECT count(*)::int AS c FROM pgboss.job WHERE data->>'jobId' = ${normalJobId}`);
+    expect((normalRows.rows[0] as { c: number }).c).toBe(1);
+  });
+});
+
+describe("First Real Run Stage 2 acceptance closure — real Interpreter path (MEDIUM-3, §H/§I/§J)", () => {
+  it("a real Interpretation (fake gateway, non-live) classifies DEEP_RESEARCH and S7 evaluates the resulting intent — never falls back to UNKNOWN", async () => {
+    __setInterpreterGateway(fakeGateway);
+    try {
+      const topicId = await activeTopicId();
+      const projectSlug = uniq("aave_test");
+      const [project] = await ctx.db.insert(projects).values({ slug: projectSlug, name: "Aave", status: "ACTIVE_CORE" }).returning();
+      const userId = await makeUser();
+
+      const interpretResult = await createInterpretation(ctx.db, DEFAULT_PRODUCT_CONFIG, {
+        userId,
+        question: "does protocol revenue reach Aave token holders?",
+      });
+      const interp = interpretResult.interpretation;
+      // §I: a classified alpha-run-style question does NOT default to
+      // normalized_intent=UNKNOWN — this is the real Interpreter
+      // contract's own product behaviour for a named, in-scope asset.
+      expect(interp.status).toBe("READY");
+      expect(interp.route).toBe("DEEP_RESEARCH");
+      expect(interp.understood?.projectSlug).toBe(projectSlug);
+
+      const { job } = await createResearchJob(
+        ctx.db,
+        ctx.boss,
+        {
+          userId,
+          topicId,
+          projectId: project.id,
+          originalQuestion: "does protocol revenue reach Aave token holders?",
+          normalizedTask: {
+            project_slug: interp.understood!.projectSlug,
+            project_slugs: [interp.understood!.projectSlug],
+            task: interp.understood!.researchTask,
+          },
+          normalizedTaskHash: uniq("hash"),
+          idempotencyKey: uniq("idem"),
+          entitlement: coreEntitlement(),
+          demoLifetimeProofLimit: 1000,
+        },
+        { skipEnqueue: true },
+      );
+      await ctx.db.update(interpretations).set({ researchJobId: job.id }).where(eq(interpretations.id, interp.id));
+
+      const executor = createTraceFixtureExecutor({ db: ctx.db, project, defaultScenario: "ADMISSIBLE_EVIDENCE" });
+      const result = await handleResearchJobTask(ctx.db, job.id, executor);
+      expect(result.claimed).toBe(true);
+
+      // §J: S7's result is driven by the classified intent (read from the
+      // linked interpretation row), never by manually injected prose.
+      const [s7] = await ctx.db.select().from(researchClaimSupport).where(eq(researchClaimSupport.researchJobId, job.id));
+      expect(s7).toBeDefined();
+      expect(s7.intent).toBe("PROTOCOL_REVENUE_TO_TOKEN"); // the fake gateway's real classification for this question — not "UNKNOWN"
+    } finally {
+      __setInterpreterGateway(null);
+    }
   });
 });
 
