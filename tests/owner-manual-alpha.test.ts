@@ -128,6 +128,34 @@ describe("Owner Manual PUMP App Test (D-123)", () => {
     expect(row.userId).toBe(c.userId);
   });
 
+  it("B2. interpretation preview (drives the real Proof button): ADMIN sees research=AVAILABLE, USER still DISABLED (D-124)", async () => {
+    await setConfig("internal_alpha_enabled", true);
+    try {
+      const admin = await makeAuthedClient("ADMIN");
+      const adminRes = await interpretPOST(
+        req("/api/interpretations", admin, { question: "Does Pump.fun revenue reach token holders?" }),
+      );
+      const adminBody = (await adminRes.json()) as {
+        interpretation: { status: string; route: string };
+        gates: { research: string; scope: string; entitlement: string };
+      };
+      expect(adminBody.interpretation.status).toBe("READY");
+      expect(adminBody.interpretation.route).toBe("DEEP_RESEARCH");
+      // Exactly what ask/page.tsx's canStart reads — no client-side ADMIN
+      // special-casing needed, the server preview already says AVAILABLE.
+      expect(adminBody.gates.research).toBe("AVAILABLE");
+
+      const user = await makeAuthedClient("USER");
+      const userRes = await interpretPOST(
+        req("/api/interpretations", user, { question: "Does Pump.fun revenue reach token holders?" }),
+      );
+      const userBody = (await userRes.json()) as { gates: { research: string } };
+      expect(userBody.gates.research).toBe("DISABLED");
+    } finally {
+      await setConfig("internal_alpha_enabled", false);
+    }
+  });
+
   it("C. owner job + internal_alpha_enabled=false → live execution refused", async () => {
     const [pumpProject] = await ctx.db.select().from(projects).where(eq(projects.slug, "pump_fun"));
     const [admin] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();

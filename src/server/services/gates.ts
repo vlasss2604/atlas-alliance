@@ -2,7 +2,8 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 
 import type { ProductConfig } from "../config/product";
 import type { Database } from "../db/client";
-import { ACTIVE_JOB_STATES, projects, researchJobs, topics } from "../db/schema";
+import { ACTIVE_JOB_STATES, projects, researchJobs, topics, users } from "../db/schema";
+import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../engine/live-executor";
 import { resolveEntitlement, type EntitlementView } from "./entitlement";
 
 // Scope ≠ Entitlement (канон atlas-intent). Две разные проверки,
@@ -85,6 +86,37 @@ export async function evaluateGates(
       ? "CORE_REQUIRED"
       : "OK";
 
+  // Owner Manual Alpha App Test (D-123) preview parity — the interpretation
+  // preview must never promise more than the backend actually allows, and
+  // must never grant less than it will. startOwnerManualAlphaResearch
+  // (start-owner-alpha-research.ts) is reachable ONLY for role=ADMIN while
+  // research_enabled=false, and its job only goes LIVE (as opposed to being
+  // created and then refused at worker pickup) when internal_alpha_enabled
+  // is true AND the resolved project is in INTERNAL_ALPHA_LIVE_PROJECT_SLUGS
+  // (owner-alpha-routing.ts, re-checked independently at execution time —
+  // this preview check does not replace that, it only decides what the
+  // Proof button may show). Mirrors that same allowlist read-only (never a
+  // second list) and only ever runs the extra role lookup while
+  // research_enabled=false, so this is a strict no-op for every normal
+  // request once research goes public. Neither entitlement nor DEMO quota
+  // apply to this path — start-owner-alpha-research.ts checks neither (it
+  // uses a fixed ARI_CORE/INTERNAL_ALPHA_V1 snapshot, never DEMO) — so
+  // those two gates are the ones this eligibility is allowed to skip;
+  // scope and "one active job" still apply exactly as for any other job.
+  let ownerAlphaEligible = false;
+  if (!config.research_enabled) {
+    const [actor] = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, subject.userId));
+    ownerAlphaEligible =
+      actor?.role === "ADMIN" &&
+      config.internal_alpha_enabled &&
+      scope === "SUPPORTED" &&
+      subject.projectSlugs.length > 0 &&
+      subject.projectSlugs.every((s) => INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has(s));
+  }
+
   // Порядок причин — от свойства самой задачи к состоянию системы:
   // маршрут и scope не зависят от рубильника research_enabled, иначе при
   // выключенном движке «объяснение» неотличимо от «исследование выключено».
@@ -93,11 +125,11 @@ export async function evaluateGates(
     research = "NOT_DEEP_RESEARCH";
   } else if (scope === "OUT_OF_SCOPE") {
     research = "OUT_OF_SCOPE";
-  } else if (entitlement === "CORE_REQUIRED") {
+  } else if (entitlement === "CORE_REQUIRED" && !ownerAlphaEligible) {
     research = "CORE_REQUIRED";
-  } else if (!config.research_enabled) {
+  } else if (!config.research_enabled && !ownerAlphaEligible) {
     research = "DISABLED";
-  } else if (demo && demo.used >= demo.limit) {
+  } else if (demo && demo.used >= demo.limit && !ownerAlphaEligible) {
     research = "DEMO_QUOTA_EXHAUSTED";
   } else {
     const active = await db
