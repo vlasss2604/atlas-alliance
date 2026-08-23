@@ -1,3 +1,4 @@
+import { loadEnvConfig } from "@next/env";
 import { eq, sql } from "drizzle-orm";
 
 import { deleteStaleRateLimits } from "../auth/rate-limit";
@@ -13,6 +14,14 @@ import { runMemoryPlanningStage } from "../memory/plan-job";
 import { resolveOwnerAlphaWorkExecutor } from "./owner-alpha-routing";
 import { createBoss, RESEARCH_QUEUE } from "./queue";
 import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
+
+// Standalone entrypoint (tsx, outside the Next.js runtime) — Next's own
+// dev-server env loading (.env.local etc.) never applies here, so this
+// worker preloads the same files itself via Next's own loader. Safe to
+// run unconditionally at import time: nothing else in this module's
+// import graph reads process.env at module-init scope (only inside
+// function bodies / default-parameter positions evaluated at call time).
+loadEnvConfig(process.cwd());
 
 // First Real Run, Stage 1 (pipeline-integration-stage.md, D-113) —
 // terminal contract mapping. `job.state` is the execution result,
