@@ -78,6 +78,7 @@ async function insertEvidence(
   sourceId: string,
   overrides: Partial<typeof evidence.$inferInsert> = {},
 ): Promise<string> {
+  const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
   const [row] = await ctx.db
     .insert(evidence)
     .values({
@@ -91,8 +92,19 @@ async function insertEvidence(
       fragment: "the protocol fee accrues directly to the treasury contract",
       summary: "protocol fee accrues to the treasury",
       mechanismState: null,
-      sourceClass: "OFFICIAL_DOCS",
+      sourceClass,
       officiality: "CONFIRMED",
+      // D-134: these tests predate the entity-binding axis and use
+      // ONCHAIN_VERIFIABLE as "an admissible class" while actually
+      // exercising some OTHER dimension (mechanism state, freshness,
+      // the per-component Pattern matrix). Defaulting a seeded
+      // ONCHAIN_VERIFIABLE row to CONFIRMED preserves each test's real
+      // intent — without it the mechanism_state=PROPOSED case would
+      // still "pass", but for the wrong reason (ENTITY_NOT_CONFIRMED
+      // instead of the state check it is meant to prove). A test that
+      // wants D-134's own exclusion path overrides entityBinding
+      // explicitly (the spread below always wins).
+      entityBinding: sourceClass === "ONCHAIN_VERIFIABLE" ? "CONFIRMED" : null,
       fetchedAt: NOW,
       publishedAt: NOW,
       doesNotProve: "does not prove distribution to holders",
@@ -257,6 +269,28 @@ describe("Фаза 6, S5 — персистенция (research_component_result
 
     const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
     expect(result.status).toBe("SUPPORTED");
+  });
+
+  it("D-134: ONCHAIN_VERIFIABLE с entity_binding=UNVERIFIED не устанавливает компонент ЧЕРЕЗ ПЕРСИСТЕНЦИЮ (колонка реально читается из БД, а не только в in-memory reconciler)", async () => {
+    // The historical incident lived at exactly this seam: the row is read
+    // back FROM the database, so this proves evidence.entity_binding is
+    // actually loaded and honoured — not just handled by a hand-built
+    // in-memory fixture. Same seeded row as the positive control directly
+    // above, differing ONLY in the entity-binding axis.
+    const { jobId } = await makeJob();
+    const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
+    const evId = await insertEvidence(jobId, sourceId, {
+      patternStep: 4,
+      component: "EXECUTION_EVIDENCE",
+      sourceClass: "ONCHAIN_VERIFIABLE",
+      mechanismState: "LIVE",
+      entityBinding: "UNVERIFIED",
+    });
+
+    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
+    expect(result.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(result.supportingEvidenceIds).not.toContain(evId);
+    expect(result.excludedEvidence.find((e) => e.evidenceId === evId)?.reason).toBe("ENTITY_NOT_CONFIRMED");
   });
 
   it("mutation 19/20 teeth: reconcileAndPersistComponent не пишет ни в evidence, ни в project_memory_items — только в research_component_results (проверено и на SUPPORTED-исходе, а не только CLAIMED/partial)", async () => {

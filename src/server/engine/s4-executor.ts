@@ -30,6 +30,7 @@ import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./sour
 import { blendQueries, buildTargetedQueries, genericSearchMayEstablish } from "./acquisition-targeting";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
+import { computeEntityBinding } from "../domain/project-identity";
 import { findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
@@ -1331,6 +1332,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // class (and every shared multi-tenant platform base domain) has
         // had a chance to positively recognize/exclude the domain.
         const sourceClass = resolveSourceClass(doc.finalUrl, sourceInfo.sourceType, route.routeClass);
+        // D-134 (RISK 2) — computed once per document, exactly like
+        // sourceClass/officiality above: whether this ONCHAIN_VERIFIABLE
+        // URL is deterministically attributable to the project's
+        // confirmed (chain, tokenAddress). null for every other class —
+        // the axis simply does not apply. Never re-derived by S5; S5 only
+        // ever reads this precomputed column, same discipline as
+        // sourceClass/officiality.
+        const entityBinding = computeEntityBinding(doc.finalUrl, sourceClass, plan.confirmedIdentity);
 
         for (const fact of facts) {
           // D-070/D-072 structural containment: a fact for any OTHER
@@ -1393,6 +1402,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               // deterministically, by source-authority.ts.
               sourceClass,
               officiality: route.officiality,
+              entityBinding,
               fetchedAt: doc.fetchedAt,
               publishedAt: fact.publishedAt,
               doesNotProve: fact.doesNotProve,

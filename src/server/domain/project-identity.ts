@@ -1,4 +1,8 @@
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
+
+import type { Database, Transaction } from "../db/client";
+import { projectMemoryItems } from "../db/schema";
 
 // D-133 — confirmed project identity and locators.
 //
@@ -136,4 +140,91 @@ export function explorerLocatorsForIdentity(
   return explorerHostsForChain(identity.chain)
     .slice(0, maxHosts)
     .map((host) => `site:${host} ${identity.tokenAddress}`);
+}
+
+// D-134 — RISK 2 closure: query targeting by exact address is much safer
+// than by name, but targeting alone does not PROVE the page acquired is
+// about the right entity (a search result can still surface an unrelated
+// page). This is the deterministic check applied at evidence-persist
+// time: does the URL itself name the confirmed address, as a distinct
+// path segment or an exact query-parameter value — never a substring
+// match, which could accidentally match inside an unrelated longer token.
+//
+// Solana addresses are compared case-sensitively (base58 is
+// case-significant). EVM addresses are compared case-insensitively,
+// because checksummed (EIP-55) and lowercase forms of the SAME address
+// are both valid and appear interchangeably across explorers.
+function chainAddressesEqual(chain: SupportedChain, a: string, b: string): boolean {
+  return chain === "solana" ? a === b : a.toLowerCase() === b.toLowerCase();
+}
+
+export function urlReferencesAddress(
+  url: string,
+  chain: SupportedChain,
+  address: string,
+): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+  const segments = parsed.pathname.split("/").filter(Boolean);
+  if (segments.some((seg) => chainAddressesEqual(chain, seg, address))) return true;
+  for (const value of parsed.searchParams.values()) {
+    if (chainAddressesEqual(chain, value, address)) return true;
+  }
+  return false;
+}
+
+// D-134 — the eligibility gate itself: whether a piece of ONCHAIN_VERIFIABLE
+// evidence, from this URL, may be treated as evidence FOR this project's
+// confirmed identity. Deliberately fail-closed: no confirmed identity, no
+// confirmed address, or a URL that simply does not name the address, all
+// resolve to UNVERIFIED — never a guess, never "probably fine".
+//
+// This does NOT change what evidenceSourceClass a page IS (a wrong-asset
+// Etherscan page is still genuinely ONCHAIN_VERIFIABLE data, per its own
+// axis) — it only decides whether that ONCHAIN_VERIFIABLE page may
+// establish a component FOR THIS PROJECT. SOURCE != EVIDENCE != FACT: this
+// is a THIRD axis (entity binding), independent of sourceClass and
+// officiality (D-074's two axes) — see evidence.entity_binding.
+export function computeEntityBinding(
+  url: string,
+  sourceClass: string | null,
+  identity: ConfirmedProjectIdentity | null,
+): "CONFIRMED" | "UNVERIFIED" | null {
+  if (sourceClass !== "ONCHAIN_VERIFIABLE") return null; // axis not applicable
+  if (!identity?.tokenAddress) return "UNVERIFIED";
+  return urlReferencesAddress(url, identity.chain, identity.tokenAddress) ? "CONFIRMED" : "UNVERIFIED";
+}
+
+// D-134 — the DB-aware counterpart to parseProjectIdentity: the project's
+// confirmed identity, read the SAME way SOURCE_ROUTE is (ACTIVE
+// project_memory_items rows only — D-074). When multiple ACTIVE rows
+// exist, the first structurally-valid one (by createdAt) is used; this
+// mirrors SOURCE_ROUTE's "one confirmed record wins" simplicity rather
+// than inventing a conflict-resolution scheme this module was not asked
+// to have.
+export async function resolveConfirmedIdentity(
+  db: Database | Transaction,
+  projectId: string | null,
+): Promise<ConfirmedProjectIdentity | null> {
+  if (!projectId) return null;
+  const rows = await db
+    .select({ content: projectMemoryItems.content, createdAt: projectMemoryItems.createdAt })
+    .from(projectMemoryItems)
+    .where(
+      and(
+        eq(projectMemoryItems.projectId, projectId),
+        eq(projectMemoryItems.kind, "PROJECT_IDENTITY"),
+        eq(projectMemoryItems.lifecycleState, "ACTIVE"),
+      ),
+    );
+  rows.sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime());
+  for (const row of rows) {
+    const identity = parseProjectIdentity(row.content);
+    if (identity) return identity;
+  }
+  return null;
 }

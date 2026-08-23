@@ -101,6 +101,7 @@ async function loadEvidenceRows(
     mechanismState: r.mechanismState,
     sourceClass: r.sourceClass,
     officiality: r.officiality,
+    entityBinding: r.entityBinding,
     fetchedAt: r.fetchedAt,
     publishedAt: r.publishedAt,
     extractionUnitKey: r.extractionUnitKey,

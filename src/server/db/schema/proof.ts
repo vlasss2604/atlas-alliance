@@ -14,6 +14,7 @@ import {
 import { projects, topics } from "./catalog";
 import {
   evidenceDirectness,
+  evidenceEntityBinding,
   evidenceOfficiality,
   evidenceRelationship,
   evidenceSourceClass,
@@ -170,6 +171,13 @@ export const evidence = pgTable(
     // Evidence не несёт этих значений.
     sourceClass: evidenceSourceClass("source_class"),
     officiality: evidenceOfficiality("officiality"),
+    // D-134 — Axis C, independent of sourceClass/officiality: for
+    // ONCHAIN_VERIFIABLE evidence only, whether the URL is deterministically
+    // attributable to the project's confirmed (chain, tokenAddress). NULL
+    // for every other class (axis not applicable) — never part of the v2
+    // completeness CHECK below, since most evidence legitimately has no
+    // on-chain identity to bind against.
+    entityBinding: evidenceEntityBinding("entity_binding"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }),
     dataAsOf: timestamp("data_as_of", { withTimezone: true }),

@@ -333,13 +333,50 @@ export function deriveSourceType(
 }
 
 // project_memory_items.content is untyped jsonb at the DB layer. §7.2a
-// (D-089) extends the S4-introduced `{ domain }` convention with one
-// OPTIONAL field — no migration required, existing `{ domain }` rows stay
+// (D-089) extends the S4-introduced `{ domain }` convention with two
+// OPTIONAL fields — no migration required, existing `{ domain }` rows stay
 // fully valid and simply carry no project-specific class:
-//   { domain: string, routeClass?: "OFFICIAL_DOCS" | "GOVERNANCE" | "OFFICIAL_REPORT" }
+//   { domain: string, routeClass?: RouteClass, pathPrefix?: string }
+//
+// D-135 — pathPrefix is what separates "this domain is CONFIRMED as the
+// project's own" (officiality, domain-wide — a human really does own the
+// whole domain) from "this SPECIFIC path is documentation/governance/a
+// report" (routeClass, which must not silently spread across an entire
+// official domain just because one page on it was confirmed). Without
+// this, confirming pump.fun/docs as OFFICIAL_DOCS made pump.fun/anything
+// classify as OFFICIAL_DOCS too — too broad, and not what "confirmed
+// docs live at /docs" actually means.
+//
+// Omitting pathPrefix keeps the pre-D-135 domain-wide behaviour exactly —
+// existing routes with no pathPrefix are unaffected.
 interface SourceRouteContent {
   domain?: unknown;
   routeClass?: unknown;
+  pathPrefix?: unknown;
+}
+
+// Safe prefix match with a segment boundary, same discipline as
+// matchesPlatformDomain's dot-boundary check: "/doc" must not match
+// "/documentation". "/docs" matches "/docs" and "/docs/x", never
+// "/docsomething".
+function matchesPathPrefix(pathname: string, prefix: string): boolean {
+  const normalize = (p: string) => {
+    const withLeadingSlash = p.startsWith("/") ? p : `/${p}`;
+    return withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")
+      ? withLeadingSlash.slice(0, -1)
+      : withLeadingSlash;
+  };
+  const normalizedPrefix = normalize(prefix);
+  const normalizedPath = normalize(pathname);
+  return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`);
+}
+
+function pathnameOf(url: string): string {
+  try {
+    return new URL(url).pathname;
+  } catch {
+    return "/";
+  }
 }
 
 export interface ResolvedSourceRoute {
@@ -394,6 +431,13 @@ export async function resolveSourceRoute(
       ),
     );
 
+  // D-135: officiality is decided by domain match alone (a human really
+  // does own the whole domain), but routeClass is decided only among rows
+  // whose pathPrefix — if any — the REQUESTED url's path actually matches.
+  // A row with no pathPrefix still applies domain-wide, unchanged from
+  // before D-135; this is purely additive.
+  const requestedPath = pathnameOf(url);
+
   // MEDIUM-2: collect EVERY matching row for this exact domain — never
   // return on the first hit, which is exactly what makes a resolver
   // row-order-dependent.
@@ -405,7 +449,17 @@ export async function resolveSourceRoute(
     if (typeof content?.domain !== "string") continue;
     const routeDomain = content.domain.toLowerCase().replace(/^www\./, "");
     if (routeDomain !== host) continue;
+    // Officiality (domain ownership) is confirmed by this match
+    // regardless of path — a human confirmed the DOMAIN is theirs.
     anyMatch = true;
+
+    const pathPrefix = typeof content.pathPrefix === "string" ? content.pathPrefix : null;
+    if (pathPrefix !== null && !matchesPathPrefix(requestedPath, pathPrefix)) {
+      // This row's routeClass does not apply to THIS url's path — it
+      // contributes to officiality above and nothing else for this call.
+      continue;
+    }
+
     if (content.routeClass === undefined || content.routeClass === null) {
       matchingRouteClasses.push(null);
     } else if (isValidRouteClass(content.routeClass)) {

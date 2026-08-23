@@ -190,6 +190,20 @@ export const evidenceOfficiality = pgEnum("evidence_officiality", [
   "CLAIMED",
 ]);
 
+// D-134 — Ось C, независимая от sourceClass и officiality: для
+// ONCHAIN_VERIFIABLE-строки — привязан ли URL детерминированно к
+// подтверждённому (chain, tokenAddress) проекта. Класс источника не
+// меняется (страница чужого Etherscan-контракта остаётся подлинными
+// ONCHAIN_VERIFIABLE данными) — меняется только то, годна ли она
+// установить компонент ИМЕННО этого проекта. NULL — ось неприменима
+// (не ONCHAIN_VERIFIABLE); CONFIRMED — адрес найден в URL как отдельный
+// сегмент/параметр; UNVERIFIED — подтверждённой идентичности нет либо
+// URL её не называет (fail-closed default для on-chain).
+export const evidenceEntityBinding = pgEnum("evidence_entity_binding", [
+  "CONFIRMED",
+  "UNVERIFIED",
+]);
+
 // Фаза 6, S3 (phase-6-plan.md §19 S3) — статус одной попытки исполнения
 // по (job, step, component). Лексикон контроллера, не Evidence и не
 // research_component_results (та таблица — задача сопоставления, S5).

@@ -12,7 +12,8 @@ import { loadActivePatternVersion } from "./active-pattern";
 import { intentRequiredComponents } from "./budget-fairness";
 import {
   explorerLocatorsForIdentity,
-  parseProjectIdentity,
+  resolveConfirmedIdentity,
+  type ConfirmedProjectIdentity,
 } from "../domain/project-identity";
 import type { EvidenceSourceClass } from "./providers/types";
 import { researchPatterns } from "../db/schema";
@@ -39,6 +40,10 @@ export interface AcquisitionPlan {
   // PROJECT_IDENTITY record with a token address exists, which is the
   // safe default: an explorer is never searched by project name.
   onchainLocators: string[];
+  // D-134 — the parsed identity itself, reused by s4-executor.ts at
+  // evidence-persist time for entity binding (RISK 2), so this is the
+  // single DB read for both purposes.
+  confirmedIdentity: ConfirmedProjectIdentity | null;
   intentRequired: ReadonlySet<string>;
   intent: string;
 }
@@ -47,6 +52,7 @@ const EMPTY_PLAN: AcquisitionPlan = {
   establishingClasses: [],
   confirmedRouteDomainsByClass: {},
   onchainLocators: [],
+  confirmedIdentity: null,
   intentRequired: new Set<string>(),
   intent: "UNKNOWN",
 };
@@ -102,30 +108,8 @@ async function loadConfirmedRouteDomains(
 // ACTIVEd one. Only the identity's own chain bounds which explorers may
 // be addressed, and only its token address is used as the query text, so
 // neither a project name nor another chain's explorer can leak in.
-async function loadOnchainLocators(
-  db: Database | Transaction,
-  projectId: string | null,
-): Promise<string[]> {
-  if (!projectId) return [];
-  const rows = await db
-    .select({ content: projectMemoryItems.content })
-    .from(projectMemoryItems)
-    .where(
-      and(
-        eq(projectMemoryItems.projectId, projectId),
-        eq(projectMemoryItems.kind, "PROJECT_IDENTITY"),
-        eq(projectMemoryItems.lifecycleState, "ACTIVE"),
-      ),
-    );
-  const locators: string[] = [];
-  for (const row of rows) {
-    const identity = parseProjectIdentity(row.content);
-    if (!identity) continue;
-    for (const locator of explorerLocatorsForIdentity(identity)) {
-      if (!locators.includes(locator)) locators.push(locator);
-    }
-  }
-  return locators;
+function onchainLocatorsFor(identity: ConfirmedProjectIdentity | null): string[] {
+  return identity ? explorerLocatorsForIdentity(identity) : [];
 }
 
 export async function loadAcquisitionPlan(
@@ -170,10 +154,12 @@ export async function loadAcquisitionPlan(
       requirementSet = null;
     }
 
+    const confirmedIdentity = await resolveConfirmedIdentity(db, projectId);
     return {
       establishingClasses,
       confirmedRouteDomainsByClass: await loadConfirmedRouteDomains(db, projectId),
-      onchainLocators: await loadOnchainLocators(db, projectId),
+      onchainLocators: onchainLocatorsFor(confirmedIdentity),
+      confirmedIdentity,
       intentRequired: intentRequiredComponents(requirementSet),
       intent,
     };

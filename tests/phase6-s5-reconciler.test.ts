@@ -44,6 +44,7 @@ const COMPONENT_STEP: Record<string, number> = {
 function row(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
   const id = overrides.id ?? nextId();
   const component = overrides.component ?? "MECHANISM_SPEC";
+  const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
   return {
     id,
     researchJobId: JOB,
@@ -56,8 +57,16 @@ function row(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
     fragment: "the protocol burns 50% of fees",
     summary: "protocol burns half of fees",
     mechanismState: null,
-    sourceClass: "OFFICIAL_DOCS",
+    sourceClass,
     officiality: "CONFIRMED",
+    // D-134: every test in this file predates the entity-binding axis and
+    // uses ONCHAIN_VERIFIABLE as "a valid admissible class" while actually
+    // exercising some OTHER dimension (directness, freshness,
+    // contradiction, ...). Defaulting a resolved ONCHAIN_VERIFIABLE row to
+    // CONFIRMED here preserves every existing test's real intent; a test
+    // that wants to exercise D-134's own exclusion path overrides
+    // entityBinding explicitly (spread below always wins).
+    entityBinding: sourceClass === "ONCHAIN_VERIFIABLE" ? "CONFIRMED" : null,
     fetchedAt: NOW,
     publishedAt: NOW,
     extractionUnitKey: `unit-${id}`,

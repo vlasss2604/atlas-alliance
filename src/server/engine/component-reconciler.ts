@@ -39,7 +39,14 @@ export type ExclusionReason =
   | "MISSING_PUBLICATION_DATE"
   | "STALE_FOR_CURRENT_STATE"
   | "SUPERSEDED_BY_NEWER"
-  | "DUPLICATE_UNIT";
+  | "DUPLICATE_UNIT"
+  // D-134 (RISK 2) — the ONE new reason this owner decision adds: an
+  // ONCHAIN_VERIFIABLE row whose entity_binding is not CONFIRMED against
+  // the project's own confirmed (chain, tokenAddress). The row's
+  // sourceClass is untouched (it is still genuinely ONCHAIN_VERIFIABLE
+  // data) — it simply cannot establish THIS project's component. Every
+  // other class is unaffected; this axis is null (inapplicable) for them.
+  | "ENTITY_NOT_CONFIRMED";
 
 // §10 — closed.
 export type ResultReasonCode =
@@ -70,6 +77,9 @@ export interface EvidenceRow {
   mechanismState: string | null;
   sourceClass: EvidenceSourceClass | null;
   officiality: "CONFIRMED" | "CLAIMED" | null;
+  // D-134 — Axis C, independent of sourceClass/officiality. null when the
+  // axis does not apply (any class other than ONCHAIN_VERIFIABLE).
+  entityBinding: "CONFIRMED" | "UNVERIFIED" | null;
   fetchedAt: Date;
   publishedAt: Date | null;
   extractionUnitKey: string | null;
@@ -387,6 +397,17 @@ function evaluateCoreEligibility(
 ): { ok: true; reason: null } | { ok: false; reason: ExclusionReason } {
   if (row.sourceClass === null || !requirements.establishingClasses.includes(row.sourceClass)) {
     return { ok: false, reason: "CLASS_NOT_ADMISSIBLE" };
+  }
+  // D-134 (RISK 2) — an ONCHAIN_VERIFIABLE row must additionally be bound
+  // to THIS project's confirmed on-chain identity to establish anything.
+  // The class check above already proved it is genuinely ONCHAIN_VERIFIABLE
+  // data; this proves it is ONCHAIN_VERIFIABLE data ABOUT THIS PROJECT. A
+  // wrong-asset explorer page (unrelated chain, unrelated mint, a testnet)
+  // stops here, not by being reclassified — it stays genuinely
+  // ONCHAIN_VERIFIABLE, it simply cannot establish this project's
+  // component. Every other class is unaffected by this check.
+  if (row.sourceClass === "ONCHAIN_VERIFIABLE" && row.entityBinding !== "CONFIRMED") {
+    return { ok: false, reason: "ENTITY_NOT_CONFIRMED" };
   }
   const normalizedState = normalizeMechanismState(row.mechanismState);
   if (requirements.requiresLiveMechanismState) {
