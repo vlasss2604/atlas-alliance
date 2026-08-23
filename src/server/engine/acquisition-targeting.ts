@@ -1,4 +1,4 @@
-import { classRequiresConfirmedRoute, targetDomainsForClass } from "./source-authority";
+import { targetDomainsForClass } from "./source-authority";
 import type { EvidenceSourceClass } from "./providers/types";
 
 // D-129 — component-aware source-class targeting (acquisition).
@@ -36,6 +36,36 @@ export const MAX_TARGETED_QUERIES_PER_ATTEMPT = 2;
 // enumerate every explorer for one class.
 const MAX_DOMAINS_PER_CLASS = 2;
 
+// D-132 — every class-owned domain list in source-authority.ts is a
+// SHARED, MULTI-TENANT platform: etherscan.io hosts millions of unrelated
+// tokens, snapshot.org hosts every DAO, defillama.com every protocol.
+// Steering `site:<platform> <project name>` at one of them therefore
+// returns a page about SOMETHING THAT MATCHED THE NAME — not a verified
+// page about this project's entity.
+//
+// That is not hypothetical. A live run steered `site:etherscan.io` for
+// pump.fun and admitted an unrelated Ethereum ERC-20 ("PPF") plus a
+// Sepolia testnet token, then used them to PARTIALLY_SUPPORT NET_EFFECT
+// and FLOW_PATH claims about $PUMP — a Solana asset. Wrong chain, wrong
+// contract, wrong asset, presented as on-chain proof.
+//
+// source-authority.ts already states exactly this principle for other
+// shared hosts: "A human who registers 'github.com' as their project's
+// confirmed domain has confirmed nothing about which tenant on that
+// shared host is theirs." Explorers and governance portals are the same
+// class of host; they were simply never reachable before D-129 gave
+// acquisition the ability to steer at them.
+//
+// So a shared platform is only a SAFE target once the project has a
+// human-confirmed, project-specific locator on it (a confirmed
+// SOURCE_ROUTE domain, which is by definition project-specific). Without
+// one, the platform is not targeted at all: fewer admissible rows, but
+// never a confident claim about the wrong asset. SOURCE != EVIDENCE !=
+// FACT, and "same name" is not "same asset".
+//
+// This is an ACQUISITION rule only. It changes where search is aimed, not
+// what counts as evidence: S5's establishingClasses, S7's support logic
+// and the officiality axis are all untouched.
 export interface TargetingInput {
   // The component's admissible classes, verbatim from the Pattern's
   // componentRequirements.establishingClasses. An empty array means the
@@ -73,7 +103,7 @@ export function buildTargetedQueries(input: TargetingInput): TargetingResult {
     // target with — the caller wants that signal regardless.
     for (const cls of input.establishingClasses) {
       const confirmed = input.confirmedRouteDomainsByClass?.[cls] ?? [];
-      if (classRequiresConfirmedRoute(cls) && confirmed.length === 0) unreachableClasses.push(cls);
+      if (confirmed.length === 0) unreachableClasses.push(cls);
     }
     return { targetedQueries, unreachableClasses };
   }
@@ -86,9 +116,20 @@ export function buildTargetedQueries(input: TargetingInput): TargetingResult {
   const perClassDomains = new Map<EvidenceSourceClass, string[]>();
   for (const cls of input.establishingClasses) {
     const confirmed = input.confirmedRouteDomainsByClass?.[cls] ?? [];
-    const domains = targetDomainsForClass(cls, confirmed).slice(0, MAX_DOMAINS_PER_CLASS);
+    // D-132: ONLY human-confirmed, project-specific domains are safe
+    // acquisition targets. The code-owned platform lists identify what a
+    // host IS (its class) — they never identify WHOSE page it is, and a
+    // name-matched page on a shared platform is not this project's
+    // entity. targetDomainsForClass is still the single source of the
+    // ordering/dedup rules; it is simply given nothing but confirmed
+    // domains to work with.
+    const domains = confirmed.length > 0
+      ? targetDomainsForClass(cls, confirmed).filter((d) => confirmed.includes(d)).slice(0, MAX_DOMAINS_PER_CLASS)
+      : [];
     if (domains.length === 0) {
-      if (classRequiresConfirmedRoute(cls) && confirmed.length === 0) unreachableClasses.push(cls);
+      // Every class is now unreachable-without-confirmation, not just the
+      // two that have no code-owned list at all.
+      if (confirmed.length === 0) unreachableClasses.push(cls);
       continue;
     }
     perClassDomains.set(cls, domains);

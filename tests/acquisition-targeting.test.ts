@@ -31,6 +31,13 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
   it("A. a component requiring authoritative classes gets site-targeted queries at hosts the classifier already recognises", () => {
     const { targetedQueries } = buildTargetedQueries({
       establishingClasses: ["ONCHAIN_VERIFIABLE", "GOVERNANCE"],
+      // D-132: only human-confirmed, project-specific locators are safe
+      // targets. Without these the platforms are shared multi-tenant hosts
+      // and are deliberately not targeted at all.
+      confirmedRouteDomainsByClass: {
+        ONCHAIN_VERIFIABLE: ["solscan.io"],
+        GOVERNANCE: ["snapshot.org"],
+      },
       baseQueries: ["pump.fun buyback supply effect"],
     });
     expect(targetedQueries.length).toBeGreaterThan(0);
@@ -60,6 +67,7 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
     // SOCIAL domain proposed as a target for those classes.
     const { targetedQueries } = buildTargetedQueries({
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      confirmedRouteDomainsByClass: { ONCHAIN_VERIFIABLE: ["solscan.io"] },
       baseQueries: ["supply"],
     });
     for (const q of targetedQueries) {
@@ -73,6 +81,7 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
     // whose establishingClasses exclude it never receives SOCIAL targets.
     const { targetedQueries } = buildTargetedQueries({
       establishingClasses: ["GOVERNANCE"],
+      confirmedRouteDomainsByClass: { GOVERNANCE: ["snapshot.org"] },
       baseQueries: ["governance proposal"],
     });
     for (const q of targetedQueries) {
@@ -179,10 +188,12 @@ describe("acquisition targeting — class-aware query steering (D-129)", () => {
   it("G. contains no project-specific hardcoding — the same call shape works for any project", () => {
     const a = buildTargetedQueries({
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      confirmedRouteDomainsByClass: { ONCHAIN_VERIFIABLE: ["solscan.io"] },
       baseQueries: ["alpha protocol emissions"],
     });
     const b = buildTargetedQueries({
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      confirmedRouteDomainsByClass: { ONCHAIN_VERIFIABLE: ["solscan.io"] },
       baseQueries: ["beta protocol emissions"],
     });
     expect(a.targetedQueries.map((q) => q.replace(/ .*$/, ""))).toEqual(
@@ -307,5 +318,62 @@ describe("source authority — test networks are never production on-chain autho
   it("does not catch an unrelated host that merely contains the text inside a longer label", () => {
     expect(isTestNetworkHost("https://sepoliaanalytics.example.com/x")).toBe(false);
     expect(isTestNetworkHost("https://sepolia.etherscan.io/x")).toBe(true);
+  });
+});
+
+// D-132 — the live false positive this exists to prevent.
+//
+// A run steered `site:etherscan.io pump.fun ...` and admitted an
+// unrelated Ethereum ERC-20 ("PPF") plus a Sepolia testnet token, then
+// used them to PARTIALLY_SUPPORT NET_EFFECT and FLOW_PATH claims about
+// $PUMP — a Solana asset. Wrong chain, wrong contract, wrong asset,
+// presented as on-chain proof. Every class-owned domain list is a SHARED
+// MULTI-TENANT platform, so `site:<platform> <project name>` returns a
+// page that merely MATCHED THE NAME, never a verified page about this
+// project's entity.
+describe("acquisition targeting — shared platforms need a confirmed project locator (D-132)", () => {
+  it("does NOT target a shared explorer platform when the project has no confirmed locator", () => {
+    const { targetedQueries, unreachableClasses } = buildTargetedQueries({
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      baseQueries: ["pump.fun buyback supply effect"],
+    });
+    // This is the exact query shape that produced the false positive.
+    expect(targetedQueries).toEqual([]);
+    expect(targetedQueries.some((q) => q.includes("etherscan.io"))).toBe(false);
+    // And the reason is reported, not silently swallowed.
+    expect(unreachableClasses).toContain("ONCHAIN_VERIFIABLE");
+  });
+
+  it("does NOT target shared governance or data-provider platforms unconfirmed either", () => {
+    for (const cls of ["GOVERNANCE", "DATA_PROVIDER", "RESEARCH_MEDIA"] as const) {
+      const { targetedQueries, unreachableClasses } = buildTargetedQueries({
+        establishingClasses: [cls],
+        baseQueries: ["anything"],
+      });
+      expect(targetedQueries, cls).toEqual([]);
+      expect(unreachableClasses, cls).toContain(cls);
+    }
+  });
+
+  it("targets ONLY the human-confirmed domain, never the rest of the platform list", () => {
+    const { targetedQueries } = buildTargetedQueries({
+      establishingClasses: ["ONCHAIN_VERIFIABLE"],
+      confirmedRouteDomainsByClass: { ONCHAIN_VERIFIABLE: ["solscan.io"] },
+      baseQueries: ["supply"],
+    });
+    expect(targetedQueries).toEqual(["site:solscan.io supply"]);
+    // The confirmation for solscan.io must not drag in every other
+    // explorer the code-owned list happens to contain.
+    expect(targetedQueries.some((q) => q.includes("etherscan.io"))).toBe(false);
+    expect(targetedQueries.some((q) => q.includes("bscscan.com"))).toBe(false);
+  });
+
+  it("a confirmed locator for one class never leaks into another class", () => {
+    const { targetedQueries } = buildTargetedQueries({
+      establishingClasses: ["ONCHAIN_VERIFIABLE", "GOVERNANCE"],
+      confirmedRouteDomainsByClass: { GOVERNANCE: ["snapshot.org"] },
+      baseQueries: ["x"],
+    });
+    expect(targetedQueries).toEqual(["site:snapshot.org x"]);
   });
 });
