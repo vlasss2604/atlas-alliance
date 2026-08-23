@@ -2,6 +2,7 @@ import { desc, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { researchJobs, researchPlans } from "../db/schema";
+import { BudgetExhaustedError } from "./budget-exhausted-error";
 import { buildContractView } from "./contract-view";
 import type { ContractView } from "./contract-view";
 import { runResearchController } from "./controller";
@@ -93,14 +94,51 @@ export async function runS4ResearchJob(
     activePatternVersion,
   });
 
-  const result = await runResearchController({
-    db,
-    jobId,
-    view,
-    executor,
-    now,
-    reconcile: reconcileAndPersistComponent,
-  });
+  let result: ControllerRunResult;
+  try {
+    result = await runResearchController({
+      db,
+      jobId,
+      view,
+      executor,
+      now,
+      reconcile: reconcileAndPersistComponent,
+    });
+  } catch (e) {
+    // D-127 — dimensional budget exhaustion must still produce the derived
+    // projections. s4-executor.ts signals an exhausted job budget AXIS
+    // (searchQueries/sourceOpens/modelCostMicro) by THROWING
+    // BudgetExhaustedError, which propagated straight past the S5 sweep /
+    // S6 assembly / S7 claim-support steps below and left the job with
+    // evidence and component results persisted but NO mechanism and NO
+    // research_claim_support row at all — a blank "stopped, no finding"
+    // screen despite fully paid-for research.
+    //
+    // That contradicts the terminal contract worker.ts already documents
+    // for this exact case: "budget exhaustion with incomplete evidence is
+    // NOT a system/provider failure — research_claim_support may
+    // legitimately be INSUFFICIENT_EVIDENCE for this job, and that is an
+    // honest evidentiary outcome". The controller's OWN attempt-count
+    // BUDGET_EXHAUSTED stop reason (returned, not thrown) already reaches
+    // those steps normally — so the same logical condition produced two
+    // different behaviours depending only on which mechanism detected it.
+    //
+    // These three steps are pure derived projections over ALREADY-persisted
+    // rows (see their own doc comments: "never re-spends S4 budget or
+    // repeats paid research"), so running them here spends nothing, calls
+    // no provider, and cannot manufacture evidence or support. The
+    // exception is re-thrown unchanged afterwards, so the job's terminal
+    // state stays exactly BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED.
+    //
+    // Deliberately NARROW: only BudgetExhaustedError. A CapabilityFatalError
+    // or any other exception still propagates immediately, untouched.
+    if (e instanceof BudgetExhaustedError) {
+      await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
+      await assembleAndPersistMechanism(db, jobId, now);
+      await evaluateAndPersistClaimSupport(db, jobId, now);
+    }
+    throw e;
+  }
 
   // HIGH-2: cover every workQueue component whose S4 attempt is already
   // terminal, not just the ones this call's own inner loop attempted —
