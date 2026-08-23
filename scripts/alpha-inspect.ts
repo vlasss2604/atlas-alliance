@@ -128,8 +128,12 @@ async function main() {
     const modelCallEvents = byOp(["MODEL_CALL_ATTEMPTED", "MODEL_CALL_SKIPPED"]);
     if (modelCallEvents.length === 0) console.log("  (no model-call trace)");
     for (const t of modelCallEvents) {
+      // LOW (S10 LAST HIGH CLOSURE, D-121): providerName distinguishes a
+      // fixture MODEL_CALL_ATTEMPTED ("non-live-fixture") from a real
+      // live call ("anthropic") — shown explicitly, never just providerKind
+      // (role), so this cannot be visually mistaken for live traffic.
       console.log(
-        `  [#${t.sequence}] ${t.operationType} provider=${t.providerKind ?? "(none)"} status=${t.status} reason=${t.reasonCode} ` +
+        `  [#${t.sequence}] ${t.operationType} role=${t.providerKind ?? "(none)"} providerName=${t.providerName ?? "(none)"} status=${t.status} reason=${t.reasonCode} ` +
           `budgetAmount=${t.budgetAmount ?? "(none)"} inputTokens=${t.actualInputTokens ?? "(n/a)"} outputTokens=${t.actualOutputTokens ?? "(n/a)"} ` +
           `actualCostMicro=${t.actualCostMicro ?? "(n/a)"}`,
       );

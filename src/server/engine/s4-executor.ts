@@ -471,37 +471,63 @@ interface UsageCapture {
   evidenceExtractor: ModelUsage | null;
 }
 
+// S10 LAST HIGH CLOSURE (HIGH-2, D-121) — structured preflight failure:
+// `kind` is the execution classification (never inferred by parsing
+// `reason`'s human-readable text), `code` a closed, safe diagnostic
+// identifier, `reason` the existing safe human-readable string kept for
+// research_attempts.reason. Every CURRENT preflight resolver failure
+// (missing credential, missing exact role-qualified cost profile,
+// unresolvable required SearchGateway/ContentFetcher/model-provider
+// configuration) means the underlying capability cannot function AT ALL
+// this attempt — none of today's preflight failure sites represent a
+// local/continuable condition, so all five below classify
+// CAPABILITY_FATAL. The `kind` field exists so a FUTURE preflight check
+// that genuinely is local/continuable does not have to be force-fit into
+// this bucket — see the implementation report's classification table for
+// why each of the five is fatal, not local.
+type PreflightFailureKind = "CAPABILITY_FATAL" | "LOCAL";
+interface PreflightFailure {
+  ok: false;
+  kind: PreflightFailureKind;
+  code: string;
+  reason: string;
+}
+
+function capabilityFatalPreflight(code: string, reason: string): PreflightFailure {
+  return { ok: false, kind: "CAPABILITY_FATAL", code, reason };
+}
+
 // MEDIUM-4/LOW-1 (S4 final acceptance fix): every resolver this attempt
 // will need — cost profiles AND providers, for every stage — is resolved
 // and verified HERE, before a single reservation is made. A resolver that
 // throws (missing BRAVE_SEARCH_API_KEY, MODEL_GATEWAY=fake with no
 // fixture, a missing cost profile) becomes a deterministic, zero-cost
-// FAILED result instead of an uncaught exception escaping after
+// preflight failure instead of an uncaught exception escaping after
 // already-reserved/spent budget (the exact "QueryProposer reserved, then
 // SearchGateway resolution throws uncaught" scenario the review names).
 async function preflight(
   deps: S4ExecutorDeps,
   config: { query_proposer_model: string; evidence_extractor_model: string },
   usage: UsageCapture,
-): Promise<{ ok: true; value: Preflight } | { ok: false; reason: string }> {
+): Promise<{ ok: true; value: Preflight } | PreflightFailure> {
   const qp = resolveCostProfile("QUERY_PROPOSER", config.query_proposer_model, deps.queryProposerCostProfile);
-  if (!qp.ok) return { ok: false, reason: qp.reason };
+  if (!qp.ok) return capabilityFatalPreflight("MODEL_COST_PROFILE_MISSING", qp.reason);
 
   const ep = resolveCostProfile("EVIDENCE_EXTRACTOR", config.evidence_extractor_model, deps.evidenceExtractorCostProfile);
-  if (!ep.ok) return { ok: false, reason: ep.reason };
+  if (!ep.ok) return capabilityFatalPreflight("MODEL_COST_PROFILE_MISSING", ep.reason);
 
   let searchGateway: SearchGateway;
   try {
     searchGateway = deps.searchGateway ?? resolveSearchGateway();
   } catch (e) {
-    return { ok: false, reason: `SEARCH_GATEWAY: ${e instanceof Error ? e.message : String(e)}` };
+    return capabilityFatalPreflight("SEARCH_GATEWAY_UNAVAILABLE", `SEARCH_GATEWAY: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   let contentFetcher: ContentFetcher;
   try {
     contentFetcher = deps.contentFetcher ?? resolveContentFetcher();
   } catch (e) {
-    return { ok: false, reason: `CONTENT_FETCHER: ${e instanceof Error ? e.message : String(e)}` };
+    return capabilityFatalPreflight("CONTENT_FETCHER_UNAVAILABLE", `CONTENT_FETCHER: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   let queryProposer: QueryProposer;
@@ -512,7 +538,7 @@ async function preflight(
         usage.queryProposer = u;
       }));
   } catch (e) {
-    return { ok: false, reason: `QUERY_PROPOSER: ${e instanceof Error ? e.message : String(e)}` };
+    return capabilityFatalPreflight("QUERY_PROPOSER_UNAVAILABLE", `QUERY_PROPOSER: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   let evidenceExtractor: EvidenceExtractor;
@@ -528,7 +554,7 @@ async function preflight(
         },
       ));
   } catch (e) {
-    return { ok: false, reason: `EVIDENCE_EXTRACTOR: ${e instanceof Error ? e.message : String(e)}` };
+    return capabilityFatalPreflight("EVIDENCE_EXTRACTOR_UNAVAILABLE", `EVIDENCE_EXTRACTOR: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   return {
@@ -593,6 +619,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const usage: UsageCapture = { queryProposer: null, evidenceExtractor: null };
       const pre = await preflight(deps, config, usage);
       if (!pre.ok) {
+        // HIGH-2 (S10 LAST HIGH CLOSURE, D-121): a capability-fatal
+        // preflight failure (missing credential, missing exact
+        // role-qualified cost profile, unresolvable required provider
+        // configuration) must never become an ordinary FAILED result the
+        // controller could fold into WORK_QUEUE_EXHAUSTED -> SUCCEEDED —
+        // throw, exactly like a real-call CapabilityFatalError, before a
+        // single reservation is made (zero cost, zero provider calls).
+        if (pre.kind === "CAPABILITY_FATAL") {
+          throw new CapabilityFatalError(pre.code, pre.reason);
+        }
         return { status: "FAILED", reason: pre.reason, spent };
       }
       const { queryProposerProfile, evidenceExtractorProfile, searchGateway, contentFetcher, queryProposer, evidenceExtractor } =
@@ -778,7 +814,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // equals the real number of Brave HTTP attempts, never one
       // reservation authorizing two calls.
       const candidateUrls = new Map<string, { url: string }>();
-      let searchBudgetExhausted = false;
       // LOW-A: keep the most recent typed provider failure reason around
       // so a terminal SKIPPED/FAILED result can surface it for
       // observability, instead of only a generic NO_SEARCH_CANDIDATES/
@@ -799,15 +834,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         spent.searchQueries += searchOutcome.attempts;
 
         if (searchOutcome.kind === "budget_exhausted") {
-          // HIGH-1 (S10 final pre-smoke closure, D-120): a required
-          // reservation could not be authorized — never proven capability
-          // unavailability. Recorded and the query loop stops here (the
-          // ceiling is job-lifetime and monotonic, so a later query in
-          // this same loop would hit the identical refusal) — whether
-          // this becomes the job's terminal BUDGET_LIMIT_REACHED is
-          // decided once, after the loop, by whether ANY usable candidate
-          // was found at all (see the zero-candidates check below).
-          searchBudgetExhausted = true;
+          // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): a required reservation
+          // could not be authorized — never proven capability
+          // unavailability, but budget denial is itself the terminal
+          // execution fact. Throw AT the denial boundary, regardless of
+          // whether earlier queries in this same loop already produced
+          // candidate URLs — a non-empty partial result is not research
+          // completion, and S4 is not the sufficiency adjudicator (owner
+          // instruction, explicit). Anything already recorded/persisted
+          // before this point (candidate/trace rows) is left in place.
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -821,7 +856,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAxis: "searchQueries",
             budgetAmount: searchOutcome.attempts,
           });
-          break;
+          throw new BudgetExhaustedError("searchQueries", searchOutcome.reason ?? "SEARCH_QUERY_BUDGET_EXHAUSTED");
         }
         if (searchOutcome.kind === "fatal") {
           // BLOCKER-1: SearchGateway unavailable after the approved
@@ -895,18 +930,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         }
       }
       if (candidateUrls.size === 0) {
-        // HIGH-1 (S10 final pre-smoke closure, §3 G1/G3, D-120): zero
-        // candidates AND the reason is (at least in part) a required
-        // reservation being refused — this attempt could not do any
-        // usable search work, and the axis is job-lifetime/monotonic so
-        // no later component in this job will fare any better. Throw,
-        // never let this collapse into an ordinary FAILED result the
-        // controller could fold into WORK_QUEUE_EXHAUSTED -> SUCCEEDED.
-        if (searchBudgetExhausted) {
-          throw new BudgetExhaustedError("searchQueries", lastSearchFailureReason ?? "SEARCH_QUERY_BUDGET_EXHAUSTED");
-        }
-        // LOW-A: prefer the actual typed provider failure reason over the
-        // generic label when one exists.
+        // A budget denial for this axis already threw above, at the
+        // point of denial — reaching here with zero candidates means
+        // every query failed for a non-budget (local/capability-already-
+        // handled) reason. LOW-A: prefer the actual typed provider
+        // failure reason over the generic label when one exists.
         const reason = lastSearchFailureReason ?? "NO_SEARCH_CANDIDATES";
         return { status: "FAILED", reason, spent };
       }
@@ -915,17 +943,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
-      let sourceOpenBudgetExhausted = false;
       for (const { url } of candidateUrls.values()) {
         if (opensAttempted >= MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT) break;
         const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
         if (!reserved) {
-          // §4 (S10 final pre-smoke closure, D-120): the third
-          // authoritative dimensional budget axis — same treatment as
-          // searchQueries/modelCostMicro below: recorded here, decided
-          // once after the loop by whether ANY document was actually
-          // fetched at all (see the zero-fetched-docs check below).
-          sourceOpenBudgetExhausted = true;
+          // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
+          // dimensional budget axis — throw AT the denial boundary,
+          // regardless of whether an earlier candidate in this same loop
+          // was already fetched. A non-empty partial result (one document
+          // already fetched) is not proof that the planned source-open
+          // work was complete — S4 is not the sufficiency adjudicator.
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -938,7 +965,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAxis: "sourceOpens",
             budgetAmount: 1,
           });
-          break; // job-lifetime source-open ceiling reached
+          throw new BudgetExhaustedError("sourceOpens", lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED");
         }
         opensAttempted += 1;
         await recordTraceEvent(deps.db, {
@@ -973,14 +1000,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         spent.sourceOpens += 1;
       }
       if (fetchedDocs.length === 0) {
-        // §4 (S10 final pre-smoke closure, D-120): zero documents fetched
-        // AND the source-open budget ran out — same rule as
-        // searchQueries above: nothing usable came out of this attempt,
-        // the axis is job-lifetime/monotonic, so throw rather than
-        // returning an ordinary FAILED result.
-        if (sourceOpenBudgetExhausted) {
-          throw new BudgetExhaustedError("sourceOpens", lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED");
-        }
+        // A source-open budget denial already threw above, at the point
+        // of denial — reaching here with zero documents means every
+        // candidate failed for a non-budget reason.
         return {
           status: "FAILED",
           reason: lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED",
@@ -993,7 +1015,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const insertedEvidenceIds: string[] = [];
       let extractionFailures = 0;
       let nonOversizedExtractionFailures = 0;
-      let extractionBudgetExhausted = false;
       for (const doc of fetchedDocs) {
         // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
         // BEFORE every real extraction attempt, including a retry —
@@ -1050,15 +1071,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
 
         if (extractOutcome.kind === "budget_exhausted") {
-          // §3/§4 (S10 final pre-smoke closure, D-120): recorded here;
-          // whether this becomes the job's terminal BUDGET_LIMIT_REACHED
-          // is decided once, after the loop, by whether ANY evidence was
-          // already produced from an earlier document (see the
-          // post-loop check below) — a component that already succeeded
-          // from prior documents is not retroactively turned into a
-          // budget failure just because a later document couldn't be
-          // reserved.
-          extractionBudgetExhausted = true;
+          // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): throw AT the denial
+          // boundary, regardless of whether an earlier document in this
+          // same loop already produced admitted Evidence — a non-empty
+          // partial result is not proof the planned extraction work was
+          // complete. Evidence already inserted for prior documents
+          // stays persisted (never deleted); only the terminal execution
+          // outcome for THIS attempt changes from "succeeded" to
+          // "budget-constrained", honestly.
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -1071,7 +1091,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAxis: "modelCostMicro",
             budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
           });
-          break; // job-lifetime model-cost ceiling reached
+          throw new BudgetExhaustedError("modelCostMicro", extractOutcome.reason ?? "MODEL_COST_BUDGET_EXHAUSTED");
         }
         if (extractOutcome.kind === "fatal") {
           // BLOCKER-1: EvidenceExtractor unavailable after the approved
@@ -1300,16 +1320,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           spent,
         };
       }
-      // §3/§4 (S10 final pre-smoke closure, D-120): zero evidence AND the
-      // model-cost budget ran out during extraction — nothing usable came
-      // out of this attempt, and the axis is job-lifetime/monotonic, so
-      // throw rather than returning an ordinary FAILED/SKIPPED result the
-      // controller could fold into WORK_QUEUE_EXHAUSTED -> SUCCEEDED. A
-      // component that already produced evidence from an earlier document
-      // took the SUCCEEDED branch above and never reaches this check.
-      if (extractionBudgetExhausted) {
-        throw new BudgetExhaustedError("modelCostMicro", "MODEL_COST_BUDGET_EXHAUSTED_DURING_EXTRACTION");
-      }
+      // A model-cost budget denial during extraction already threw above,
+      // at the point of denial — reaching here means every document
+      // either had zero admitted facts or failed for a non-budget reason.
       if (extractionFailures > 0 && extractionFailures === fetchedDocs.length && nonOversizedExtractionFailures > 0) {
         return { status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent };
       }

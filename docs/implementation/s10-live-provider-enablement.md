@@ -617,3 +617,92 @@ S5/S6/S7 — нулевой diff. `research_enabled=false`;
 
 **Этот closure pass сам себя не замораживает.** Freeze S10 остаётся
 отдельным решением владельца после повторного независимого ревью.
+
+---
+
+## 22. Last HIGH Closure (D-121) — partial-success budget denial +
+preflight capability classification
+
+Независимое ревью HEAD `539e000` (§21 выше) вернуло **REJECT / DO NOT
+ACCEPT** (BLOCKER 0, HIGH 2, MEDIUM 0, LOW 3).
+
+**HIGH-1 — partial success swallowed budget denial.** §21's
+`BudgetExhaustedError` throw was gated on an END-OF-LOOP sufficiency
+check (`candidateUrls.size===0`/`fetchedDocs.length===0`/
+`insertedEvidenceIds.length===0`) — if an EARLIER call in the same loop
+already produced a usable partial result, a LATER reservation denial in
+that same loop was silently absorbed and the component could still
+report `SUCCEEDED`. Fixed: `BudgetExhaustedError` now throws AT the
+denial boundary — the moment a reservation is refused — regardless of
+what was already collected earlier in the same loop. S4 is not the
+sufficiency adjudicator; a non-empty partial result is not research
+completion. Already-persisted Evidence/trace rows are never deleted —
+only the terminal outcome of the CURRENT attempt changes.
+
+**HIGH-2 — preflight capability failures.** `preflight()`'s failure
+return was untyped (`{ok:false, reason}`), so `execute()` always
+returned `WorkExecutionResult.FAILED` for it — a missing credential or
+cost profile could then be folded by the controller into
+`WORK_QUEUE_EXHAUSTED → SUCCEEDED → S7 INSUFFICIENT_EVIDENCE`. Fixed
+with a structured `PreflightFailureKind` (`CAPABILITY_FATAL` | `LOCAL`)
+— `execute()` throws `CapabilityFatalError` for a `CAPABILITY_FATAL`
+result, before any reservation.
+
+### Preflight classification table
+
+| Code | Classification | Why |
+|---|---|---|
+| `MODEL_COST_PROFILE_MISSING` (QueryProposer) | CAPABILITY_FATAL | No approved (role, model) cost profile exists — QueryProposer cannot legally be called at all this attempt, not a per-call condition. |
+| `MODEL_COST_PROFILE_MISSING` (EvidenceExtractor) | CAPABILITY_FATAL | Same reasoning, EvidenceExtractor role. |
+| `SEARCH_GATEWAY_UNAVAILABLE` | CAPABILITY_FATAL | `resolveSearchGateway()` throws only for an unknown `SEARCH_GATEWAY_PROVIDER` or missing `BRAVE_SEARCH_API_KEY` — both environment/config facts, never a per-call outcome. |
+| `CONTENT_FETCHER_UNAVAILABLE` | CAPABILITY_FATAL | Currently unreachable (`resolveContentFetcher()` never throws today) — classified defensively; a future construction failure would mean FETCH cannot function at all this attempt. |
+| `QUERY_PROPOSER_UNAVAILABLE` | CAPABILITY_FATAL | `resolveQueryProposer()` throws for `MODEL_GATEWAY=fake` with no fixture, or (new this round) an eagerly-checked missing `ANTHROPIC_API_KEY` — both environment/config facts. |
+| `EVIDENCE_EXTRACTOR_UNAVAILABLE` | CAPABILITY_FATAL | Same reasoning, mirrored for the extraction role. |
+
+No current preflight failure classifies `LOCAL` — none represents "the
+capability exists but this one call happened to fail for an ordinary
+reason" (that classification belongs to `reserveAndCallWithRetry` at
+runtime, not preflight).
+
+**Architecture correction (provider seams, outside S4):**
+`resolveQueryProposer()`/`resolveEvidenceExtractor()` previously
+deferred the `ANTHROPIC_API_KEY` check to the first REAL call (lazy-
+failure discipline inherited from `resolveInterpreterGateway`) — this
+gave preflight nothing to catch, since the failure happened AFTER a
+reservation was already made. Both now throw immediately for a missing
+key, mirroring `resolveSearchGateway()`'s existing eager
+`BRAVE_SEARCH_API_KEY` check. This is the one behavioral change outside
+S4 this round, scoped to the provider-seam layer only.
+
+Test fixture note: `depsFor()` helpers in `s10-acceptance-closure.test.ts`/
+`s10-final-pre-smoke-closure.test.ts` now default ALL four provider
+roles (previously only cost profiles) — eager credential validation
+otherwise caught the test environment's missing `ANTHROPIC_API_KEY` for
+any test that left EvidenceExtractor unfixtured, even when that test's
+scenario never needed it.
+
+New closure regression block in `tests/s10-final-pre-smoke-closure.test.ts`
+(+6 HIGH-2 tests A–F, on top of the prior 12). 3 tests in
+`phase6-s4-executor.test.ts` and 2 in `phase6-provider-seams.test.ts`
+updated — their assertions matched the PRE-fix (non-throw / lazy-failure)
+contract, not a regression in coverage.
+
+### Регрессия этого closure pass
+
+- `npx vitest run` → **766 passed, 4 skipped, 0 failed** (760 baseline +
+  6 new HIGH-2 tests)
+- `tsc --noEmit` → чисто
+- `eslint .` → чисто
+- `next build` → успех
+- `drizzle-kit generate` → без дрейфа (миграция не потребовалась)
+- `npm run eval:memory` → не изменился
+- `npx playwright test` → 7 passed, 1 skipped
+
+S4 изменён только execution/accounting-only; `query-proposer.ts`/
+`evidence-extractor.ts` — единственные затронутые файлы вне S4,
+ограничено credential-eagerness. `controller.ts`/`run-job.ts`/S5/S6/S7 —
+нулевой diff. `research_enabled=false`; `internal_alpha_enabled`
+остаётся default `false`. Живого трафика провайдеров не было.
+
+**Этот closure pass сам себя не замораживает.** Freeze S10 остаётся
+отдельным решением владельца после повторного независимого ревью.

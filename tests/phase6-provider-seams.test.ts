@@ -72,23 +72,16 @@ describe("Фаза 6, S1 — SearchGateway: без provider'а production пад
   });
 });
 
-describe("Фаза 6, S1/S4 — QueryProposer: без ключа production падает явно (лениво), тесты подставляют фикстуру", () => {
+describe("Фаза 6, S1/S4 — QueryProposer: без ключа production падает явно и сразу, тесты подставляют фикстуру", () => {
   afterEach(() => __setQueryProposer(null));
 
-  // S4 resolved P3: resolveQueryProposer() itself no longer throws for
-  // "no credentials" (it resolves to the live Anthropic-backed
-  // implementation, same lazy-failure discipline as
-  // resolveInterpreterGateway/anthropic.ts) — the throw now happens on
-  // the first real call, when ANTHROPIC_API_KEY turns out to be unset.
-  it("без ключа первый реальный вызов .proposeQueries() бросает, а не тихо использует fake", async () => {
-    const proposer = await resolveQueryProposer();
-    await expect(
-      proposer.proposeQueries({
-        target: { step: 1, stepName: "Economic Source", component: "SOURCE_OF_VALUE", projectId: "test-project-id", projectName: "Test Project", projectSlug: "test_project" },
-        hint: "no memory for this component",
-        maxQueries: 3,
-      }),
-    ).rejects.toThrow(QueryProposerUnavailableError);
+  // S10 LAST HIGH CLOSURE (HIGH-2, D-121): resolveQueryProposer() now
+  // throws EAGERLY for a missing ANTHROPIC_API_KEY — corrected from the
+  // prior lazy-failure discipline (first real call throws), so
+  // s4-executor.ts's preflight() can classify this as capability-fatal
+  // BEFORE any reservation is made, never after.
+  it("без ключа резолвер бросает сразу — .proposeQueries() никогда не вызывается", async () => {
+    await expect(resolveQueryProposer()).rejects.toThrow(QueryProposerUnavailableError);
   });
 
   it("тестовая фикстура возвращает НЕ БОЛЬШЕ maxQueries формулировок", async () => {
@@ -119,26 +112,14 @@ describe("Фаза 6, S1/S4 — QueryProposer: без ключа production па
   });
 });
 
-describe("Фаза 6, S1/S4 — EvidenceExtractor: без ключа production падает явно (лениво), тесты подставляют фикстуру", () => {
+describe("Фаза 6, S1/S4 — EvidenceExtractor: без ключа production падает явно и сразу, тесты подставляют фикстуру", () => {
   afterEach(() => __setEvidenceExtractor(null));
 
-  it("без ключа первый реальный вызов .extract() бросает, а не тихо использует fake", async () => {
-    const extractor = await resolveEvidenceExtractor();
-    await expect(
-      extractor.extract({
-        target: { step: 4, stepName: "Actual Execution", component: "EXECUTION_EVIDENCE", projectId: "test-project-id", projectName: "Test Project", projectSlug: "test_project" },
-        document: {
-          finalUrl: "https://example.com/doc",
-          requestedUrl: "https://example.com/doc",
-          httpStatus: 200,
-          contentType: "text/html",
-          normalizedText: "the buyback executed on-chain",
-          contentHash: "sha256:deadbeef",
-          fetchedAt: new Date(),
-          byteLength: 100,
-        },
-      }),
-    ).rejects.toThrow(EvidenceExtractorUnavailableError);
+  // S10 LAST HIGH CLOSURE (HIGH-2, D-121): resolveEvidenceExtractor() now
+  // throws EAGERLY for a missing ANTHROPIC_API_KEY — see the matching
+  // QueryProposer describe block above for the full reasoning.
+  it("без ключа резолвер бросает сразу — .extract() никогда не вызывается", async () => {
+    await expect(resolveEvidenceExtractor()).rejects.toThrow(EvidenceExtractorUnavailableError);
   });
 
   it("тестовая фикстура извлекает факты по заданной схеме", async () => {

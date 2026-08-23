@@ -136,6 +136,21 @@ function depsFor(p: { jobId: string; projectId: string; projectName: string; pro
     project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
     queryProposerCostProfile: FIXTURE_COST_PROFILE,
     evidenceExtractorCostProfile: FIXTURE_COST_PROFILE,
+    // S10 LAST HIGH CLOSURE (D-121): every role now defaults to a
+    // harmless, never-invoked-unless-actually-reached fixture — HIGH-2
+    // made the real resolvers eagerly validate credentials at preflight,
+    // so a test exercising only SearchGateway/QueryProposer (leaving
+    // EvidenceExtractor unfixtured, as most tests below do) would
+    // otherwise hit the real resolveEvidenceExtractor() and fail on the
+    // test environment's missing ANTHROPIC_API_KEY before ever reaching
+    // what the test actually exercises. Tests that specifically want the
+    // REAL resolver to run (to test a missing-credential/profile
+    // scenario itself) must NOT use depsFor — construct deps directly,
+    // as the HIGH-2 preflight tests below do.
+    queryProposer: fixedQueryProposer([]),
+    searchGateway: fixedSearchGateway([]),
+    contentFetcher: fixedContentFetcher({}),
+    evidenceExtractor: fixedEvidenceExtractor([]),
     ...overrides,
   };
 }
@@ -578,4 +593,8 @@ function fixedContentFetcher(byUrl: Record<string, FetchedDocument | "BLOCK">): 
       return item;
     },
   };
+}
+
+function fixedEvidenceExtractor(facts: ExtractedFact[]): EvidenceExtractor {
+  return { name: "fixture", async extract() { return facts; } };
 }

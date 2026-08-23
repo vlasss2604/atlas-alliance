@@ -43,11 +43,12 @@ export function __setEvidenceExtractor(e: EvidenceExtractor | null): void {
 
 export const DEFAULT_EVIDENCE_EXTRACTOR_MODEL = "claude-haiku-4-5";
 
-// P3 resolved (S4) — same shape as resolveQueryProposer(): async,
-// MODEL_GATEWAY-driven, lazy-failure (no credentials -> the live
-// implementation's first real call throws, not this resolver).
-// `maxOutputTokens` (D-090, phase-6-plan.md §5.6): see resolveQueryProposer's
-// doc comment — same discipline.
+// S10 LAST HIGH CLOSURE (HIGH-2, D-121) — same shape as
+// resolveQueryProposer(): async, MODEL_GATEWAY-driven, now EAGER on a
+// missing ANTHROPIC_API_KEY (corrected from the prior lazy-failure
+// discipline — see resolveQueryProposer's doc comment for the full
+// reasoning). `maxOutputTokens` (D-090, phase-6-plan.md §5.6): see
+// resolveQueryProposer's doc comment — same discipline.
 export async function resolveEvidenceExtractor(
   model?: string,
   maxOutputTokens?: number,
@@ -61,6 +62,9 @@ export async function resolveEvidenceExtractor(
       "MODEL_GATEWAY=fake has no built-in EvidenceExtractor fixture — " +
         "tests must call __setEvidenceExtractor() with a fixture-backed implementation",
     );
+  }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new EvidenceExtractorUnavailableError("ANTHROPIC_API_KEY is not set");
   }
   const { createAnthropicEvidenceExtractor } = await import("./evidence-extractor-anthropic");
   return createAnthropicEvidenceExtractor(

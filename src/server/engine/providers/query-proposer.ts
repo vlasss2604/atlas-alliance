@@ -41,14 +41,15 @@ export function __setQueryProposer(p: QueryProposer | null): void {
 
 export const DEFAULT_QUERY_PROPOSER_MODEL = "claude-haiku-4-5";
 
-// P3 resolved (S4): same MODEL_GATEWAY-driven kind switch and lazy-
-// failure discipline as resolveInterpreterGateway() — this function
-// itself no longer throws for "no credentials"; it resolves to a live
-// implementation whose first real call fails honestly with
-// QueryProposerUnavailableError if ANTHROPIC_API_KEY is unset. Async
-// (like resolveInterpreterGateway, unlike resolveContentFetcher) so the
-// Anthropic SDK module is dynamically imported and never loads on a path
-// that doesn't need it. `model` lets a caller that already loaded
+// S10 LAST HIGH CLOSURE (HIGH-2, D-121): P3's original lazy-failure
+// discipline (this function resolving successfully, with the missing-
+// credential failure only surfacing on the first REAL call, already
+// budget-reserved) is corrected here — a missing ANTHROPIC_API_KEY is a
+// preflight-time capability/configuration fact, not a per-call outcome,
+// and s4-executor.ts's preflight() must be able to catch it BEFORE any
+// reservation is made (mirrors resolveSearchGateway()'s own eager
+// BRAVE_SEARCH_API_KEY check, same file layout, same reasoning). `model`
+// lets a caller that already loaded
 // product_config.query_proposer_model pass it through; omitted, it falls
 // back to QUERY_PROPOSER_MODEL / the D-026-style default — config key,
 // not deploy.
@@ -73,6 +74,9 @@ export async function resolveQueryProposer(
       "MODEL_GATEWAY=fake has no built-in QueryProposer fixture — " +
         "tests must call __setQueryProposer() with a fixture-backed implementation",
     );
+  }
+  if (!process.env.ANTHROPIC_API_KEY) {
+    throw new QueryProposerUnavailableError("ANTHROPIC_API_KEY is not set");
   }
   const { createAnthropicQueryProposer } = await import("./query-proposer-anthropic");
   return createAnthropicQueryProposer(

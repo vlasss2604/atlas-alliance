@@ -1,16 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { evidence, projects, researchClaimSupport, researchJobs, researchTraceEvents, topics, users } from "../src/server/db/schema";
+import { evidence, productConfig, projects, researchClaimSupport, researchJobs, researchTraceEvents, topics, users } from "../src/server/db/schema";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { BudgetExhaustedError } from "../src/server/engine/budget-exhausted-error";
 import { CapabilityFatalError } from "../src/server/engine/capability-fatal-error";
+import { ContentFetchError } from "../src/server/engine/providers/content-fetcher";
+import type { ContentFetcher } from "../src/server/engine/providers/content-fetcher";
+import type { EvidenceExtractor } from "../src/server/engine/providers/evidence-extractor";
 import { QueryProposerUnavailableError } from "../src/server/engine/providers/query-proposer";
 import type { QueryProposer } from "../src/server/engine/providers/query-proposer";
 import { SearchProviderUnavailableError } from "../src/server/engine/providers/search-gateway";
 import type { SearchGateway } from "../src/server/engine/providers/search-gateway";
-import type { FetchedDocument } from "../src/server/engine/providers/types";
+import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
 import type { ModelCostProfile } from "../src/server/engine/model-cost-profile";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
@@ -117,6 +120,18 @@ function depsFor(p: { jobId: string; projectId: string; projectName: string; pro
     project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
     queryProposerCostProfile: FIXTURE_COST_PROFILE,
     evidenceExtractorCostProfile: FIXTURE_COST_PROFILE,
+    // S10 LAST HIGH CLOSURE (D-121): default every role to a harmless,
+    // never-invoked-unless-actually-reached fixture — HIGH-2 made the
+    // real resolvers eagerly validate credentials at preflight, so
+    // leaving a role unfixtured would hit the real resolver and fail on
+    // this test environment's missing ANTHROPIC_API_KEY/
+    // BRAVE_SEARCH_API_KEY before the test's own scenario is even
+    // reached. Tests that specifically want the REAL resolver to run
+    // (HIGH-2 preflight tests) must NOT use depsFor.
+    queryProposer: fixedQueryProposer([]),
+    searchGateway: fixedSearchGateway([]),
+    contentFetcher: fixedContentFetcher({}),
+    evidenceExtractor: fixedEvidenceExtractor([]),
     ...overrides,
   };
 }
@@ -137,6 +152,23 @@ function fixedSearchGateway(urls: string[]): SearchGateway {
       return urls.map((url) => ({ url, title: `result for ${query}`, snippet: "a search snippet, never evidence" }));
     },
   };
+}
+
+function fixedContentFetcher(byUrl: Record<string, FetchedDocument | "BLOCK">): ContentFetcher {
+  return {
+    name: "fixture",
+    async fetch(url) {
+      const item = byUrl[url];
+      if (!item || item === "BLOCK") {
+        throw new ContentFetchError("HTTP_ERROR", "not found in fixture", url);
+      }
+      return item;
+    },
+  };
+}
+
+function fixedEvidenceExtractor(facts: ExtractedFact[]): EvidenceExtractor {
+  return { name: "fixture", async extract() { return facts; } };
 }
 
 // ============================================================
@@ -311,6 +343,152 @@ describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion 
     );
     await expect(executor.execute(ITEM, ctxFor(p.jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
     expect(calls).toBe(2);
+  });
+});
+
+// ============================================================
+// HIGH-2 tests A-F: preflight capability/config failures must become
+// CapabilityFatalError — never an ordinary FAILED work attempt the
+// controller could fold into WORK_QUEUE_EXHAUSTED -> SUCCEEDED -> S7
+// INSUFFICIENT_EVIDENCE. Full live executor path, offline transport only
+// (no fixture-injected provider for the role under test — forces the
+// REAL resolver to run and fail/succeed on its own).
+// ============================================================
+describe("S10 final pre-smoke closure — HIGH-2: preflight capability failures", () => {
+  const ORIGINAL_ANTHROPIC_KEY = process.env.ANTHROPIC_API_KEY;
+  const ORIGINAL_BRAVE_KEY = process.env.BRAVE_SEARCH_API_KEY;
+  const ORIGINAL_MODEL_GATEWAY = process.env.MODEL_GATEWAY;
+
+  afterEach(() => {
+    if (ORIGINAL_ANTHROPIC_KEY === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = ORIGINAL_ANTHROPIC_KEY;
+    if (ORIGINAL_BRAVE_KEY === undefined) delete process.env.BRAVE_SEARCH_API_KEY;
+    else process.env.BRAVE_SEARCH_API_KEY = ORIGINAL_BRAVE_KEY;
+    if (ORIGINAL_MODEL_GATEWAY === undefined) delete process.env.MODEL_GATEWAY;
+    else process.env.MODEL_GATEWAY = ORIGINAL_MODEL_GATEWAY;
+  });
+
+  async function expectPreflightCapabilityFatal(
+    executor: ReturnType<typeof createS4WorkExecutor>,
+    jobId: string,
+    expectedCapability: string,
+  ) {
+    let thrown: unknown;
+    try {
+      await executor.execute(ITEM, ctxFor(jobId));
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(CapabilityFatalError);
+    expect((thrown as CapabilityFatalError).capability).toBe(expectedCapability);
+    const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId)))[0];
+    // 0 reservations — preflight failure is always zero-cost.
+    expect(jobRow.searchQueriesReserved).toBe(0);
+    expect(jobRow.modelCostMicroReserved).toBe(0);
+    const s7 = await ctx.db.select().from(researchClaimSupport).where(eq(researchClaimSupport.researchJobId, jobId));
+    expect(s7.length).toBe(0);
+  }
+
+  it("A. BRAVE_SEARCH_API_KEY missing -> CapabilityFatalError('SEARCH_GATEWAY_UNAVAILABLE'), 0 provider calls, 0 S7 rows", async () => {
+    delete process.env.BRAVE_SEARCH_API_KEY;
+    const p = await makeJob();
+    let proposerCalled = false;
+    const executor = createS4WorkExecutor({
+      db: ctx.db,
+      project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+      queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
+      queryProposerCostProfile: FIXTURE_COST_PROFILE,
+      evidenceExtractorCostProfile: FIXTURE_COST_PROFILE,
+      // searchGateway deliberately omitted — forces the real resolver.
+    });
+    await expectPreflightCapabilityFatal(executor, p.jobId, "SEARCH_GATEWAY_UNAVAILABLE");
+    expect(proposerCalled).toBe(false);
+  });
+
+  it("B. ANTHROPIC_API_KEY missing -> CapabilityFatalError('QUERY_PROPOSER_UNAVAILABLE'), 0 provider calls, 0 S7 rows", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.MODEL_GATEWAY;
+    const p = await makeJob();
+    const executor = createS4WorkExecutor({
+      db: ctx.db,
+      project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+      searchGateway: fixedSearchGateway([]),
+      queryProposerCostProfile: FIXTURE_COST_PROFILE,
+      evidenceExtractorCostProfile: FIXTURE_COST_PROFILE,
+      // queryProposer deliberately omitted — forces the real resolver.
+    });
+    await expectPreflightCapabilityFatal(executor, p.jobId, "QUERY_PROPOSER_UNAVAILABLE");
+  });
+
+  it("C. QueryProposer exact role/model cost profile missing -> CapabilityFatalError('MODEL_COST_PROFILE_MISSING'), 0 provider calls", async () => {
+    await ctx.db.update(productConfig).set({ value: "claude-opus-5" }).where(eq(productConfig.key, "query_proposer_model"));
+    try {
+      const p = await makeJob();
+      let proposerCalled = false;
+      const executor = createS4WorkExecutor({
+        db: ctx.db,
+        project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+        queryProposer: { name: "fixture", async proposeQueries() { proposerCalled = true; return ["q1"]; } },
+        searchGateway: fixedSearchGateway([]),
+        // cost profiles deliberately omitted — forces the real (empty
+        // outside approved pairs) production catalogue lookup.
+      });
+      await expectPreflightCapabilityFatal(executor, p.jobId, "MODEL_COST_PROFILE_MISSING");
+      expect(proposerCalled).toBe(false);
+    } finally {
+      await ctx.db.update(productConfig).set({ value: "claude-haiku-4-5" }).where(eq(productConfig.key, "query_proposer_model"));
+    }
+  });
+
+  it("D. EvidenceExtractor exact role/model cost profile missing -> CapabilityFatalError('MODEL_COST_PROFILE_MISSING'), 0 provider calls", async () => {
+    await ctx.db.update(productConfig).set({ value: "claude-opus-5" }).where(eq(productConfig.key, "evidence_extractor_model"));
+    try {
+      const p = await makeJob();
+      let searchCalled = false;
+      const executor = createS4WorkExecutor({
+        db: ctx.db,
+        project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+        searchGateway: { name: "fixture", async search() { searchCalled = true; return []; } },
+        // queryProposerCostProfile deliberately omitted too — preflight
+        // checks QP's profile before EE's; both must resolve from the
+        // real (empty) catalogue for this test to isolate EE specifically
+        // would require QP to already be approved, so assert on the
+        // actually-reached failure instead of assuming which one fires.
+      });
+      await expectPreflightCapabilityFatal(executor, p.jobId, "MODEL_COST_PROFILE_MISSING");
+      expect(searchCalled).toBe(false);
+    } finally {
+      await ctx.db.update(productConfig).set({ value: "claude-haiku-4-5" }).where(eq(productConfig.key, "evidence_extractor_model"));
+    }
+  });
+
+  it("E. invalid SearchGateway provider configuration -> CapabilityFatalError('SEARCH_GATEWAY_UNAVAILABLE')", async () => {
+    process.env.SEARCH_GATEWAY_PROVIDER = "not-a-real-provider";
+    try {
+      const p = await makeJob();
+      const executor = createS4WorkExecutor({
+        db: ctx.db,
+        project: { id: p.projectId, name: p.projectName, slug: p.projectSlug, ticker: null },
+        queryProposer: fixedQueryProposer(["q1"]),
+        queryProposerCostProfile: FIXTURE_COST_PROFILE,
+        evidenceExtractorCostProfile: FIXTURE_COST_PROFILE,
+        // searchGateway deliberately omitted.
+      });
+      await expectPreflightCapabilityFatal(executor, p.jobId, "SEARCH_GATEWAY_UNAVAILABLE");
+    } finally {
+      delete process.env.SEARCH_GATEWAY_PROVIDER;
+    }
+  });
+
+  it("F. normal valid preflight proceeds normally (all fixtures injected, no credential/profile issue)", async () => {
+    const p = await makeJob();
+    const executor = createS4WorkExecutor(depsFor(p, { queryProposer: fixedQueryProposer(["q1"]) }));
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    // No preflight failure — resolves to an ordinary result (FAILED here,
+    // since the fixture SearchGateway returns zero candidates for the one
+    // proposed query), not a throw.
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toBe("NO_SEARCH_CANDIDATES");
   });
 });
 

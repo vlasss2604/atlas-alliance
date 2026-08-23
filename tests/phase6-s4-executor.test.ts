@@ -14,6 +14,7 @@ import {
 } from "../src/server/db/schema";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { BudgetExhaustedError } from "../src/server/engine/budget-exhausted-error";
+import { CapabilityFatalError } from "../src/server/engine/capability-fatal-error";
 import { runResearchController } from "../src/server/engine/controller";
 import type { WorkExecutor } from "../src/server/engine/controller";
 import type { ContractView } from "../src/server/engine/contract-view";
@@ -1523,14 +1524,19 @@ describe("Фаза 6/S10, D-090/D-118 — production profile fail-closed вне 
           searchGateway: { name: "fixture", async search() { searchCalled = true; return []; } },
         }),
       );
-      const result = await executor.execute(ITEM, ctxFor(p.jobId));
-      expect(result.status).toBe("FAILED");
-      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
+      // S10 LAST HIGH CLOSURE (HIGH-2, D-121): a missing exact
+      // role-qualified cost profile is capability-fatal preflight —
+      // throws, never an ordinary FAILED result.
+      let thrown: unknown;
+      try {
+        await executor.execute(ITEM, ctxFor(p.jobId));
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(CapabilityFatalError);
+      expect((thrown as CapabilityFatalError).capability).toBe("MODEL_COST_PROFILE_MISSING");
       expect(proposerCalled).toBe(false); // preflight fails before ANY reservation or call
       expect(searchCalled).toBe(false);
-      expect(result.spent?.searchQueries).toBe(0);
-      expect(result.spent?.sourceOpens).toBe(0);
-      expect(result.spent?.authorizedModelCostMicro).toBe(0);
       const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
       expect(jobRow.modelCostMicroReserved).toBe(0);
       expect(jobRow.searchQueriesReserved).toBe(0);
@@ -1550,16 +1556,19 @@ describe("Фаза 6/S10, D-090/D-118 — production profile fail-closed вне 
           evidenceExtractor: { name: "fixture", async extract() { extractorCalled = true; return []; } },
         }),
       );
-      const result = await executor.execute(ITEM, ctxFor(p.jobId));
-      expect(result.status).toBe("FAILED");
-      expect(result.reason).toContain("MODEL_COST_PROFILE_MISSING");
-      // LOW-1/item 11: the whole point of the preflight is that EvidenceExtractor's
-      // missing profile is discovered BEFORE search/fetch budget is spent —
-      // not merely before the extractor is called.
+      // S10 LAST HIGH CLOSURE (HIGH-2, D-121): capability-fatal preflight
+      // throws — LOW-1/item 11's original point (discovered BEFORE
+      // search/fetch budget is spent) still holds.
+      let thrown: unknown;
+      try {
+        await executor.execute(ITEM, ctxFor(p.jobId));
+      } catch (e) {
+        thrown = e;
+      }
+      expect(thrown).toBeInstanceOf(CapabilityFatalError);
+      expect((thrown as CapabilityFatalError).capability).toBe("MODEL_COST_PROFILE_MISSING");
       expect(searchCalled).toBe(false);
       expect(extractorCalled).toBe(false);
-      expect(result.spent?.searchQueries).toBe(0);
-      expect(result.spent?.sourceOpens).toBe(0);
     });
   });
 });
@@ -1588,7 +1597,7 @@ describe("Фаза 6, S4 — MEDIUM-4: SearchGateway резолвер (не .sea
     else process.env.SEARCH_GATEWAY_PROVIDER = ORIGINAL_PROVIDER;
   });
 
-  it("BRAVE_SEARCH_API_KEY отсутствует + SearchGateway НЕ инжектирован -> FAILED до QueryProposer-резервации, без throw", async () => {
+  it("BRAVE_SEARCH_API_KEY отсутствует + SearchGateway НЕ инжектирован -> CapabilityFatalError до QueryProposer-резервации", async () => {
     const p = await makeJob();
     let proposerCalled = false;
     // Deliberately NOT depsFor — depsFor always defaults searchGateway to a
@@ -1606,17 +1615,20 @@ describe("Фаза 6, S4 — MEDIUM-4: SearchGateway резолвер (не .sea
       // searchGateway deliberately omitted — forces the real
       // resolveSearchGateway() to run and throw.
     });
-    // The whole point of this test: execute() must not throw past the
-    // executor boundary — preflight converts the resolver's throw into a
-    // typed FAILED result.
-    const result = await executor.execute(ITEM, ctxFor(p.jobId));
-    expect(result.status).toBe("FAILED");
-    expect(result.reason).toContain("SEARCH_GATEWAY");
-    expect(result.reason).toContain("BRAVE_SEARCH_API_KEY is not set");
+    // S10 LAST HIGH CLOSURE (HIGH-2, D-121): preflight converts the
+    // resolver's throw into CapabilityFatalError — never an ordinary
+    // FAILED result the controller could fold into WORK_QUEUE_EXHAUSTED
+    // -> SUCCEEDED.
+    let thrown: unknown;
+    try {
+      await executor.execute(ITEM, ctxFor(p.jobId));
+    } catch (e) {
+      thrown = e;
+    }
+    expect(thrown).toBeInstanceOf(CapabilityFatalError);
+    expect((thrown as CapabilityFatalError).capability).toBe("SEARCH_GATEWAY_UNAVAILABLE");
+    expect(String((thrown as CapabilityFatalError).cause)).toContain("BRAVE_SEARCH_API_KEY is not set");
     expect(proposerCalled).toBe(false); // no paid work occurred before the resolver failure was discovered
-    expect(result.spent?.searchQueries).toBe(0);
-    expect(result.spent?.sourceOpens).toBe(0);
-    expect(result.spent?.authorizedModelCostMicro).toBe(0);
     const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
     expect(jobRow.modelCostMicroReserved).toBe(0);
   });
