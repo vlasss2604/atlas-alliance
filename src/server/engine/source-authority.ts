@@ -390,6 +390,17 @@ export interface ResolvedSourceRoute {
   // dump of arbitrary jsonb (item 13). Absent when there was nothing to
   // observe (no match, or a clean single-row result).
   observation: "INVALID_ROUTE_CLASS" | "SOURCE_ROUTE_CONFLICT" | null;
+  // Stage 0 (embedded docs payload recovery) — the pathPrefix that
+  // actually matched this url, when the routeClass came from a
+  // path-scoped row. NULL when the class came from a bare domain-wide row
+  // (or when there is no class at all).
+  //
+  // Needed because routeClass === "OFFICIAL_DOCS" alone does not
+  // distinguish "this SPECIFIC path is confirmed documentation" from "the
+  // whole domain was confirmed as docs" — and the Stage 0 capability is
+  // deliberately granted only to the former. Purely informational: no
+  // existing decision reads it, and officiality/routeClass are unchanged.
+  matchedPathPrefix: string | null;
 }
 
 function isValidRouteClass(value: unknown): value is RouteClass {
@@ -415,7 +426,7 @@ export async function resolveSourceRoute(
   projectId: string | null,
   url: string,
 ): Promise<ResolvedSourceRoute> {
-  const notFound: ResolvedSourceRoute = { officiality: "CLAIMED", routeClass: null, observation: null };
+  const notFound: ResolvedSourceRoute = { officiality: "CLAIMED", routeClass: null, observation: null, matchedPathPrefix: null };
   if (!projectId) return notFound;
   const host = hostnameOf(url);
   if (!host) return notFound;
@@ -442,6 +453,8 @@ export async function resolveSourceRoute(
   // return on the first hit, which is exactly what makes a resolver
   // row-order-dependent.
   const matchingRouteClasses: (RouteClass | null)[] = [];
+  // Prefixes of rows whose routeClass applied to THIS url (path-scoped only).
+  const matchedPathPrefixes: string[] = [];
   let anyMatch = false;
   let sawInvalidRouteClass = false;
   for (const row of rows) {
@@ -460,6 +473,7 @@ export async function resolveSourceRoute(
       continue;
     }
 
+    if (pathPrefix !== null) matchedPathPrefixes.push(pathPrefix);
     if (content.routeClass === undefined || content.routeClass === null) {
       matchingRouteClasses.push(null);
     } else if (isValidRouteClass(content.routeClass)) {
@@ -481,11 +495,19 @@ export async function resolveSourceRoute(
     // for the same project+domain — never choose an arbitrary winner.
     // routeClass becomes absent; officiality (domain ownership) is
     // preserved since that part is not in conflict.
-    return { officiality: "CONFIRMED", routeClass: null, observation: "SOURCE_ROUTE_CONFLICT" };
+    return { officiality: "CONFIRMED", routeClass: null, observation: "SOURCE_ROUTE_CONFLICT", matchedPathPrefix: null };
   }
   const resolvedRouteClass = distinctNonNullRouteClasses.size === 1 ? [...distinctNonNullRouteClasses][0] : null;
   if (resolvedRouteClass === null && sawInvalidRouteClass) {
-    return { officiality: "CONFIRMED", routeClass: null, observation: "INVALID_ROUTE_CLASS" };
+    return { officiality: "CONFIRMED", routeClass: null, observation: "INVALID_ROUTE_CLASS", matchedPathPrefix: null };
   }
-  return { officiality: "CONFIRMED", routeClass: resolvedRouteClass, observation: null };
+  return {
+    officiality: "CONFIRMED",
+    routeClass: resolvedRouteClass,
+    observation: null,
+    // Only meaningful alongside a resolved class, and only when exactly
+    // one path-scoped row supplied it.
+    matchedPathPrefix:
+      resolvedRouteClass !== null && matchedPathPrefixes.length === 1 ? matchedPathPrefixes[0] : null,
+  };
 }

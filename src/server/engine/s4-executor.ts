@@ -36,6 +36,7 @@ import {
 } from "./acquisition-targeting";
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
+import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { computeEntityBinding } from "../domain/project-identity";
@@ -1253,7 +1254,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           targetRef: url,
           status: "OK",
         });
-        const fetchResult = await callProvider("CONTENT_FETCHER", () => contentFetcher.fetch(url));
+        // Stage 0 gate. Resolved BEFORE the fetch because the recovery
+        // flag has to be decided up front, and deliberately re-resolved
+        // on doc.finalUrl at persist time below — a redirect must not let
+        // a pre-fetch decision speak for where we actually landed. This
+        // read is a cheap local query over the project's own confirmed
+        // routes; it consults no provider.
+        const preFetchRoute = await resolveSourceRoute(deps.db, deps.project.id, url);
+        const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
+        const fetchResult = await callProvider("CONTENT_FETCHER", () =>
+          contentFetcher.fetch(url, recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : undefined),
+        );
         await recordTraceEvent(deps.db, {
           researchJobId: ctx.jobId,
           researchAttemptId: attemptId,
@@ -1269,6 +1280,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         if (!fetchResult.ok) {
           lastFetchFailureReason = fetchResult.reason;
           continue; // typed/unexpected fetch failure — try the next candidate
+        }
+        // Bounded, safe-to-persist observability: WHICH payload kinds were
+        // recovered and that recovery happened at all — never the text.
+        // Without this, a document's text could silently have two very
+        // different provenances with no way to tell them apart later.
+        const recovered = fetchResult.value.embeddedPayload;
+        if (recovered) {
+          observations.add(`DOCS_PAYLOAD_RECOVERED:${recovered.kinds.join("+")}`);
         }
         fetchedDocs.push(fetchResult.value);
         spent.sourceOpens += 1;

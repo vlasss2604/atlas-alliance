@@ -5,6 +5,11 @@ import * as https from "node:https";
 import { isIP } from "node:net";
 
 import type { ContentType, FetchedDocument } from "./types";
+import {
+  extractEmbeddedPayloadText,
+  mergeDocumentText,
+  type EmbeddedPayloadResult,
+} from "./embedded-payload";
 
 // Phase 6, S1 — ContentFetcher (phase-6-plan.md §7.1, §16, D-076).
 //
@@ -35,6 +40,11 @@ export interface FetchOptions {
   maxBytes?: number;
   timeoutMs?: number;
   maxRedirects?: number;
+  // Stage 0 opt-in. Only set by a caller that has already confirmed this
+  // url is a human-confirmed OFFICIAL_DOCS route with a matched
+  // pathPrefix. Default off: an ordinary search candidate never receives
+  // this treatment.
+  recoverEmbeddedPayloads?: boolean;
 }
 
 export type ContentFetchFailureReason =
@@ -523,6 +533,8 @@ export function createContentFetcher(
         maxBytes: opts?.maxBytes ?? DEFAULT_MAX_BYTES,
         timeoutMs: opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxRedirects: opts?.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
+        // Off unless the caller explicitly opted in.
+        recoverEmbeddedPayloads: opts?.recoverEmbeddedPayloads ?? false,
       };
       // Validate before any network activity — REDIRECT_TARGET_BLOCKED vs
       // BLOCKED_ADDRESS both flow through resolveAndValidate per hop
@@ -550,10 +562,31 @@ export function createContentFetcher(
       }
 
       const rawText = raw.body.toString("utf-8");
-      const normalizedText =
+      const staticText =
         contentType === "text/html"
           ? normalizeHtmlToText(rawText)
           : rawText.trim();
+
+      // Stage 0 — embedded structured-payload recovery. OPT-IN per call and
+      // never on by default: the caller must have already established that
+      // this url is a human-confirmed OFFICIAL_DOCS route with a matched
+      // pathPrefix (see docsPayloadRecoveryEligible). Done HERE because the
+      // fetcher is the only place holding the raw bytes — recovering inside
+      // it means raw HTML never has to be handed downstream just so someone
+      // else can re-parse it.
+      //
+      // Parse-only: extractEmbeddedPayloadText runs JSON.parse over
+      // recognized structured-data containers. No page JavaScript is ever
+      // executed, here or anywhere in this path.
+      let normalizedText = staticText;
+      let embeddedPayload: EmbeddedPayloadResult | null = null;
+      if (opts?.recoverEmbeddedPayloads && contentType === "text/html") {
+        const recovered = extractEmbeddedPayloadText(rawText);
+        if (recovered.text.length > 0) {
+          embeddedPayload = recovered;
+          normalizedText = mergeDocumentText(staticText, recovered);
+        }
+      }
 
       return {
         finalUrl: raw.finalUrl,
@@ -564,6 +597,11 @@ export function createContentFetcher(
         contentHash: `sha256:${createHash("sha256").update(raw.body).digest("hex")}`,
         fetchedAt: new Date(),
         byteLength: raw.body.length,
+        // Non-null ONLY when recovery ran AND found something, so a reader
+        // can always tell whether a document's text came purely from
+        // visible HTML or was augmented from embedded payloads.
+        embeddedPayload,
+        staticTextLength: staticText.length,
       };
     },
   };

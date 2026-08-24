@@ -92,6 +92,19 @@ export interface FetchedDocument {
   contentHash: string; // sha256 of the raw bytes actually received
   fetchedAt: Date;
   byteLength: number;
+  // Stage 0 — set ONLY when embedded structured-payload recovery ran for
+  // a confirmed OFFICIAL_DOCS page AND recovered something. Null on every
+  // ordinary fetch, so "was this text augmented?" is always answerable.
+  embeddedPayload?: {
+    kinds: string[];
+    recoveredStrings: number;
+    truncated: boolean;
+    text: string;
+  } | null;
+  // Length of the text extracted from visible HTML alone, before any
+  // recovery — the before/after pair is what makes the augmentation
+  // auditable rather than invisible.
+  staticTextLength?: number;
 }
 
 // S4 additive extension (phase-6-plan.md §19 S4, D-077/D-076): S1 shipped
