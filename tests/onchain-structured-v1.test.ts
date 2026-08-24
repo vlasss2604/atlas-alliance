@@ -34,6 +34,8 @@ import {
 import {
   createSolanaOnchainAdapter,
   MAX_SIGNATURES_PER_INTENT,
+  OnchainRpcError,
+  rpcParamsFor,
   SOLANA_ALLOWED_RPC_METHODS,
 } from "../src/server/engine/providers/onchain-solana";
 import {
@@ -819,6 +821,205 @@ describe("budget — one bounded operation, one reservation", () => {
     });
     expect(outcome.evidenceIds).toEqual([]);
     expect(outcome.observations).toContain("ONCHAIN_RETRIEVAL_FAILED");
+  });
+});
+
+// THE REGRESSION THE FIRST LIVE SMOKE BOUGHT.
+//
+// getTokenSupply was sent `{ encoding: "jsonParsed" }`. solana-core
+// validates config objects strictly and rejected it, so the call returned
+// a JSON-RPC error instead of a supply. No fixture could catch that,
+// because a fixture transport validates our REQUEST against nothing — it
+// answers whatever it was told to answer regardless of what we asked.
+//
+// These tests are the offline stand-in for a real node's validation: they
+// capture the exact outbound method and config and assert it against what
+// Solana actually accepts, per method. An `encoding` field reappearing on
+// getTokenSupply now fails here instead of on a paid live call.
+describe("request shape — exact outbound RPC method and config per intent", () => {
+  function capturing() {
+    const calls: { method: string; params: unknown[] }[] = [];
+    const transport: OnchainRpcTransport = {
+      async call(method, params) {
+        calls.push({ method, params });
+        // Shape-only: the response is irrelevant to these assertions, and
+        // several will legitimately fail normalization afterwards.
+        return JSON.stringify({ jsonrpc: "2.0", id: 1, result: null });
+      },
+    };
+    return { calls, transport };
+  }
+
+  async function outbound(intent: OnchainIntent) {
+    const { calls, transport } = capturing();
+    const adapter = createSolanaOnchainAdapter({
+      transport,
+      providerId: "fixture-rpc",
+      finality: "finalized",
+    });
+    await adapter.retrieve(intent).catch(() => {});
+    expect(calls.length).toBe(1); // exactly one request per intent, always
+    return calls[0];
+  }
+
+  it("getTokenSupply sends { commitment } and NEVER encoding", async () => {
+    const call = await outbound(supplyIntent());
+    expect(call.method).toBe("getTokenSupply");
+    expect(call.params).toEqual([MINT, { commitment: "finalized" }]);
+    expect(JSON.stringify(call.params)).not.toContain("encoding");
+  });
+
+  it("getTokenAccountBalance sends { commitment } and NEVER encoding", async () => {
+    const call = await outbound({
+      kind: "TOKEN_ACCOUNT_BALANCE",
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: MINT,
+      subjectKind: "account",
+      subject: ACCOUNT,
+    });
+    expect(call.method).toBe("getTokenAccountBalance");
+    expect(call.params).toEqual([ACCOUNT, { commitment: "finalized" }]);
+    expect(JSON.stringify(call.params)).not.toContain("encoding");
+  });
+
+  it("getAccountInfo DOES send jsonParsed encoding", async () => {
+    const call = await outbound({
+      kind: "ACCOUNT_INFO",
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: MINT,
+      subjectKind: "account",
+      subject: ACCOUNT,
+    });
+    expect(call.method).toBe("getAccountInfo");
+    expect(call.params).toEqual([
+      ACCOUNT,
+      { encoding: "jsonParsed", commitment: "finalized" },
+    ]);
+  });
+
+  it("getTransaction sends its own method-specific config", async () => {
+    const call = await outbound({
+      kind: "TRANSACTION_DETAIL",
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: MINT,
+      subjectKind: "tx",
+      subject: SIGNATURE,
+    });
+    expect(call.method).toBe("getTransaction");
+    expect(call.params).toEqual([
+      SIGNATURE,
+      { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment: "finalized" },
+    ]);
+  });
+
+  it("getSignaturesForAddress sends a bounded limit plus commitment", async () => {
+    const call = await outbound({
+      kind: "SIGNATURES_FOR_ADDRESS",
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: MINT,
+      subjectKind: "account",
+      subject: ACCOUNT,
+      limit: 9999,
+    });
+    expect(call.method).toBe("getSignaturesForAddress");
+    expect(call.params).toEqual([
+      ACCOUNT,
+      { limit: MAX_SIGNATURES_PER_INTENT, commitment: "finalized" },
+    ]);
+  });
+
+  it("commitment follows the adapter's configured finality, never a hard-coded value", () => {
+    expect(rpcParamsFor(supplyIntent(), "confirmed")).toEqual([
+      MINT,
+      { commitment: "confirmed" },
+    ]);
+  });
+
+  it("no intent sends a config field Solana would reject for its method", async () => {
+    // Whole-surface guard: the union of legal config keys per method.
+    const LEGAL: Record<string, Set<string>> = {
+      getTokenSupply: new Set(["commitment"]),
+      getTokenAccountBalance: new Set(["commitment"]),
+      getAccountInfo: new Set(["encoding", "commitment", "dataSlice", "minContextSlot"]),
+      getSignaturesForAddress: new Set(["limit", "commitment", "before", "until", "minContextSlot"]),
+      getTransaction: new Set(["encoding", "commitment", "maxSupportedTransactionVersion"]),
+    };
+    const intents: OnchainIntent[] = [
+      supplyIntent(),
+      { kind: "TOKEN_ACCOUNT_BALANCE", chain: "solana", network: "mainnet", projectAnchor: MINT, subjectKind: "account", subject: ACCOUNT },
+      { kind: "ACCOUNT_INFO", chain: "solana", network: "mainnet", projectAnchor: MINT, subjectKind: "account", subject: ACCOUNT },
+      { kind: "SIGNATURES_FOR_ADDRESS", chain: "solana", network: "mainnet", projectAnchor: MINT, subjectKind: "account", subject: ACCOUNT },
+      { kind: "TRANSACTION_DETAIL", chain: "solana", network: "mainnet", projectAnchor: MINT, subjectKind: "tx", subject: SIGNATURE },
+    ];
+    for (const intent of intents) {
+      const call = await outbound(intent);
+      const config = call.params[1] as Record<string, unknown>;
+      for (const key of Object.keys(config)) {
+        expect(LEGAL[call.method].has(key), `${call.method} sent illegal config key "${key}"`).toBe(
+          true,
+        );
+      }
+    }
+  });
+});
+
+describe("rpc error observability — code preserved, message discarded", () => {
+  function erroringAdapter(error: unknown) {
+    return createSolanaOnchainAdapter({
+      transport: {
+        async call() {
+          return JSON.stringify({ jsonrpc: "2.0", id: 1, error });
+        },
+      },
+      providerId: "fixture-rpc",
+      finality: "finalized",
+    });
+  }
+
+  it("the numeric code survives, so a failed call is diagnosable", async () => {
+    const err = await erroringAdapter({
+      code: -32602,
+      message: "Invalid param: unknown field `encoding`",
+    })
+      .retrieve(supplyIntent())
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OnchainRpcError);
+    expect((err as OnchainRpcError).rpcCode).toBe(-32602);
+    expect((err as OnchainRpcError).method).toBe("getTokenSupply");
+    expect((err as OnchainRpcError).message).toContain("-32602");
+  });
+
+  it("the provider-controlled message never leaks into the error", async () => {
+    const err = (await erroringAdapter({
+      code: -32000,
+      message: "boom at https://secret-host.example/APIKEY123 while reading account",
+      data: { endpoint: "https://secret-host.example/APIKEY123" },
+    })
+      .retrieve(supplyIntent())
+      .catch((e: unknown) => e)) as Error;
+    expect(err.message).not.toContain("APIKEY123");
+    expect(err.message).not.toContain("secret-host");
+    expect(err.message).not.toContain("boom");
+    expect(err.message).not.toContain("http");
+  });
+
+  it("a missing code degrades safely rather than inventing one", async () => {
+    const err = (await erroringAdapter({ message: "no code here" })
+      .retrieve(supplyIntent())
+      .catch((e: unknown) => e)) as OnchainRpcError;
+    expect(err.rpcCode).toBeNull();
+    expect(err.message).toContain("unknown");
+  });
+
+  it("an rpc error still produces no artifact and no fact", async () => {
+    const err = await erroringAdapter({ code: -32602, message: "x" })
+      .retrieve(supplyIntent())
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(OnchainRetrieverUnavailableError); // fail closed
   });
 });
 

@@ -33,6 +33,30 @@ const SPL_TOKEN_PROGRAM_IDS = new Set([
 const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE58_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
+// A node answered, parsed our request, and refused it. Distinct from a
+// transport failure (the request never completed) and from a schema
+// failure (the response was not the shape we expect): this one means WE
+// asked for something the node would not serve, which is almost always our
+// bug, not theirs.
+//
+// Carries the numeric JSON-RPC code and nothing else. -32602 (invalid
+// params) is the code the first live smoke produced, and preserving it is
+// what turns "something went wrong" into a one-line diagnosis.
+export class OnchainRpcError extends OnchainRetrieverUnavailableError {
+  constructor(
+    public readonly method: string,
+    public readonly rpcCode: number | null,
+  ) {
+    super(
+      `rpc returned error code ${rpcCode ?? "unknown"} for ${method}`,
+      // -32005 is a node-defined rate limit; treat only that as transient.
+      // Nothing here retries automatically — the flag is classification.
+      rpcCode === -32005,
+    );
+    this.name = "OnchainRpcError";
+  }
+}
+
 export function isValidSolanaAddress(value: string): boolean {
   return BASE58_ADDRESS.test(value);
 }
@@ -70,7 +94,18 @@ export const MAX_SIGNATURES_PER_INTENT = 25;
 const envelopeSchema = z.object({
   jsonrpc: z.literal("2.0"),
   result: z.unknown().optional(),
-  error: z.unknown().optional(),
+  // The numeric CODE is preserved; the message is not. A JSON-RPC code is
+  // a small integer from a defined range (-32700..-32000 plus
+  // implementation-defined values) — it carries no provider text and
+  // cannot contain an endpoint, a key, or response content, so it is safe
+  // to surface and is exactly what makes a failed call diagnosable. The
+  // accompanying `message` is provider-controlled free text and stays
+  // discarded. `.loose()` tolerates the extra fields real nodes attach
+  // (e.g. `data`) without reading any of them.
+  error: z
+    .object({ code: z.number().optional() })
+    .loose()
+    .optional(),
 });
 
 const uiAmount = z.object({
@@ -200,19 +235,49 @@ export interface SolanaAdapterDeps {
   finality: "finalized" | "confirmed";
 }
 
-function rpcParamsFor(intent: OnchainIntent): unknown[] {
+// Per-method parameter construction.
+//
+// The first bounded live smoke failed here: three intents shared one
+// branch that sent `{ encoding: "jsonParsed" }` to all of them. That is
+// valid for getAccountInfo, but solana-core validates config objects
+// STRICTLY and rejects an unknown field — so getTokenSupply answered with
+// a JSON-RPC error rather than a supply. A fixture transport could never
+// have caught it, because a fixture validates our REQUEST against nothing;
+// only a real node does. The regression tests added alongside this fix
+// assert the exact outbound method and config, which is the offline
+// equivalent of that check.
+//
+// Each method now states only the config Solana actually accepts for it.
+export function rpcParamsFor(
+  intent: OnchainIntent,
+  commitment: "finalized" | "confirmed",
+): unknown[] {
   switch (intent.kind) {
+    // getTokenSupply config: { commitment } ONLY — no encoding.
     case "TOKEN_SUPPLY":
-    case "ACCOUNT_INFO":
+      return [intent.subject, { commitment }];
+    // getTokenAccountBalance config: { commitment } ONLY — no encoding.
     case "TOKEN_ACCOUNT_BALANCE":
-      return [intent.subject, { encoding: "jsonParsed" }];
+      return [intent.subject, { commitment }];
+    // getAccountInfo DOES accept encoding; jsonParsed is what makes the
+    // owner/executable fields readable without base64 decoding.
+    case "ACCOUNT_INFO":
+      return [intent.subject, { encoding: "jsonParsed", commitment }];
     case "SIGNATURES_FOR_ADDRESS":
       return [
         intent.subject,
-        { limit: Math.min(intent.limit ?? MAX_SIGNATURES_PER_INTENT, MAX_SIGNATURES_PER_INTENT) },
+        {
+          limit: Math.min(intent.limit ?? MAX_SIGNATURES_PER_INTENT, MAX_SIGNATURES_PER_INTENT),
+          commitment,
+        },
       ];
+    // getTransaction accepts encoding and requires an explicit
+    // maxSupportedTransactionVersion to return versioned transactions.
     case "TRANSACTION_DETAIL":
-      return [intent.subject, { encoding: "jsonParsed", maxSupportedTransactionVersion: 0 }];
+      return [
+        intent.subject,
+        { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment },
+      ];
   }
 }
 
@@ -331,7 +396,7 @@ export function createSolanaOnchainAdapter(deps: SolanaAdapterDeps) {
       }
 
       const method = METHOD_FOR_INTENT[intent.kind];
-      const params = rpcParamsFor(intent);
+      const params = rpcParamsFor(intent, deps.finality);
       const retrievedAt = new Date();
 
       const rawText = await deps.transport.call(method, params);
@@ -351,7 +416,7 @@ export function createSolanaOnchainAdapter(deps: SolanaAdapterDeps) {
         throw new OnchainRetrieverUnavailableError("rpc response is not a JSON-RPC 2.0 envelope");
       }
       if (rpc.data.error !== undefined) {
-        throw new OnchainRetrieverUnavailableError(`rpc returned an error for ${method}`);
+        throw new OnchainRpcError(method, rpc.data.error.code ?? null);
       }
       const raw = rpc.data.result;
 
