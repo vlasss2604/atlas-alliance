@@ -37,6 +37,7 @@ import {
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
+import { validateDocumentaryLocator, type LocatorRejection } from "./documentary-locator";
 import { evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
   renderedDocsAvailable,
@@ -170,6 +171,18 @@ function normalizeForContainment(s: string): string {
 // text before the call, so "the document" and "what the model saw" are
 // the same value; if a future round reintroduces input bounding, this
 // check must move to whatever bounded copy is actually sent.
+// Validator reason -> the closed trace vocabulary. Exhaustive by type:
+// a new rejection reason will not compile until it is given a code here,
+// so a refusal can never silently become untraceable.
+const LOCATOR_TRACE_REASON: Record<
+  Exclude<LocatorRejection, "NOT_CLAIMED">,
+  "LOCATOR_TRUNCATED" | "LOCATOR_INCOMPLETE" | "LOCATOR_NOT_IN_DOCUMENT"
+> = {
+  TRUNCATED_DISPLAY_FORM: "LOCATOR_TRUNCATED",
+  NOT_A_COMPLETE_IDENTIFIER: "LOCATOR_INCOMPLETE",
+  NOT_LITERAL_IN_DOCUMENT: "LOCATOR_NOT_IN_DOCUMENT",
+};
+
 function isTraceable(documentText: string, supportFragment: string): boolean {
   if (supportFragment.trim().length === 0) return false;
   return normalizeForContainment(documentText).includes(normalizeForContainment(supportFragment));
@@ -1609,6 +1622,39 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             continue;
           }
 
+          // EXACT DOCUMENTARY LOCATOR. The model may PROPOSE a concrete
+          // on-chain identifier; this is where the proposal is checked,
+          // and the check — not the prompt — is what decides. A truncated
+          // display form ("99mRw3…pm4F3c") is refused outright, because
+          // the elided characters are not recoverable from it by any
+          // means we would be willing to use. So is an incomplete shape,
+          // and so is a value that does not appear literally in the exact
+          // document text the extractor was given, which is what makes a
+          // reconstructed identifier structurally impossible to admit.
+          //
+          // A refused locator NEVER costs the fact. The fact is still
+          // ordinary documentary evidence and is admitted on its own
+          // merits with the column left NULL: "the page says tokens go to
+          // an address it displays as 99mRw3…pm4F3c" is true, useful, and
+          // simply not a locator.
+          const locatorOutcome = validateDocumentaryLocator({
+            claimedLocator: fact.onchainLocator,
+            documentText: doc.normalizedText,
+          });
+          if (locatorOutcome.locator === "NONE" && locatorOutcome.reason !== "NOT_CLAIMED") {
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "LOCATOR_REJECTED",
+              patternStep: fact.step,
+              component: fact.component,
+              targetRef: doc.finalUrl,
+              status: "SKIPPED",
+              reasonCode: LOCATOR_TRACE_REASON[locatorOutcome.reason],
+              sourceId: sourceInfo.id,
+            });
+          }
+
           // MEDIUM-1: deterministic identity for THIS extracted unit —
           // a replayed identical (job, source, step, component, fragment)
           // extraction is a no-op, not a duplicate row.
@@ -1632,6 +1678,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               sourceClass,
               officiality: route.officiality,
               entityBinding,
+              // Never fact.onchainLocator — only the validator's own
+              // output can reach this column.
+              documentaryLocator:
+                locatorOutcome.locator === "CONFIRMED" ? locatorOutcome.value : null,
               fetchedAt: doc.fetchedAt,
               publishedAt: fact.publishedAt,
               doesNotProve: fact.doesNotProve,

@@ -63,6 +63,10 @@ export interface RenderedDocument extends FetchedDocument {
       host: string | null;
       heading?: string | null;
       context?: string | null;
+      // The exact identifier this anchor's truncated visible text
+      // abbreviates, when exactly one candidate in the SAME element
+      // agrees. Null on ambiguity — never a guess.
+      resolvedIdentifier?: string | null;
     }[];
     identifiers: { attribute: string; value: string; shape: string }[];
     hosts: string[];

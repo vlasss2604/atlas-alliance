@@ -191,6 +191,19 @@ export const evidence = pgTable(
     // the FK added in the migration, since onchain_artifacts lives in
     // engine.ts and importing it here would create a schema import cycle.
     onchainArtifactId: uuid("onchain_artifact_id"),
+    // EXACT DOCUMENTARY LOCATOR — the complete on-chain identifier this
+    // fact identifies, as the DOCUMENT states it. NULL for the ordinary
+    // case (most evidence names no account) and NULL whenever the
+    // deterministic validator refused what extraction proposed: a
+    // truncated display form, an incomplete shape, or a value that does
+    // not appear literally in the document text.
+    //
+    // A third, independent axis from sourceClass/officiality (which say
+    // how much the SOURCE is worth) and entity_binding (which says whether
+    // an identifier is the project's). This one says only: the document
+    // states this exact identifier. It is never evidence that the
+    // identifier does what the document claims.
+    documentaryLocator: text("documentary_locator"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }),
     dataAsOf: timestamp("data_as_of", { withTimezone: true }),

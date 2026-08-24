@@ -50,6 +50,10 @@ const extractedFactSchema = z.object({
   publishedAt: z.string().nullable(), // ISO string over the wire; parsed to Date below
   doesNotProve: z.string().min(1),
   relationship: z.enum(["SUPPORTS", "CONTRADICTS", "CONTEXT", "LIMITS"]),
+  // Proposed only. documentary-locator.ts is the authority — see the
+  // field's doc comment on ExtractedFact. Nullable because most facts
+  // identify no account, and an empty answer must be cheap to give.
+  onchainLocator: z.string().nullable(),
 });
 const extractionResultSchema = z.object({ facts: z.array(extractedFactSchema).max(20) });
 
@@ -95,6 +99,16 @@ Every fact you report must be traceable to a literal excerpt from the document (
 that the document does not actually contain.
 If the document contains no relevant fact for this component, return an empty facts array. That is a normal, valid
 outcome, not a failure.
+
+ON-CHAIN IDENTIFIERS. Set onchainLocator only when the fact identifies one concrete on-chain address, account, program
+or transaction signature, and set it to the COMPLETE identifier exactly as the document writes it. Pages routinely
+abbreviate identifiers for display ("99mRw3…pm4F3c"); that abbreviated form is never acceptable — the missing
+characters cannot be recovered from it. When the document shows an abbreviated identifier, look for the complete one:
+the document text may carry a RECOVERED DOCUMENT LINKS section whose lines pair the abbreviated text with the exact
+value in a "resolves=" field, or state the identifier in full in an href or in ordinary prose. Copy the complete value
+character for character. Never reconstruct, complete, correct or infer any character of an identifier. If the document
+does not state the complete identifier anywhere, set onchainLocator to null and still report the fact — a fact without
+a locator is normal and useful. Set it to null whenever the fact identifies no specific on-chain entity.
 
 Output must be a JSON object matching the provided schema. No prose, no explanation.`;
 

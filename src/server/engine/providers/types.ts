@@ -152,4 +152,22 @@ export interface ExtractedFact {
   // 6 (§12.2) requires every SUPPORTS-leaning extraction to carry this.
   doesNotProve: string;
   relationship: "SUPPORTS" | "CONTRADICTS" | "CONTEXT" | "LIMITS";
+  // EXACT DOCUMENTARY LOCATOR — a concrete on-chain identifier (address,
+  // account, program, transaction signature) this fact identifies, when
+  // it identifies one. null for the overwhelming majority of facts, which
+  // name no account at all.
+  //
+  // PROPOSED, NEVER TRUSTED. Like every other field here it is untrusted
+  // model output, and unlike most of them it is checked by a dedicated
+  // deterministic validator (documentary-locator.ts) before it can reach
+  // the database: a truncated display form is refused, an incomplete
+  // shape is refused, and a value that does not appear literally in the
+  // document is refused. A model that ignores the instruction to prefer
+  // the exact identifier therefore produces NO locator, never a wrong
+  // one, and the fact itself is still admitted on its own merits.
+  //
+  // Not the same axis as entityBinding: this records WHICH identifier the
+  // document states, never that the identifier is the project's. D-134
+  // remains the only authority on that.
+  onchainLocator?: string | null;
 }

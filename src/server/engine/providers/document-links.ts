@@ -42,6 +42,18 @@ export interface DocumentLink {
   // it in a div, a table header, or a caption. Null when nothing legible
   // precedes it.
   context: string | null;
+  // UNIQUE CONTEXT RESOLUTION. Set ONLY when this anchor's own visible
+  // text is a truncated rendering of an identifier ("99mRw3…pm4F3c") AND
+  // exactly one complete identifier in THIS SAME element's href or data-*
+  // values agrees with the visible prefix and suffix. Null in every other
+  // case — including two candidates, a prefix/suffix disagreement, and a
+  // full identifier that lives in some other element.
+  //
+  // Fail-closed by construction rather than by policy: the resolution is
+  // scoped to one element, so an unrelated external link elsewhere on the
+  // page has no path to being substituted here, and ambiguity produces
+  // null rather than a guess.
+  resolvedIdentifier: string | null;
 }
 
 export interface DocumentIdentifier {
@@ -107,13 +119,48 @@ function classifyShape(value: string): DocumentIdentifier["shape"] | null {
   return null;
 }
 
+// Named entities are a long tail; NUMERIC references are not, and both
+// carry the characters that matter here. A page writing its ellipsis as
+// "&#8230;" or "&hellip;" is writing exactly the same abbreviation as one
+// writing "…", and unless it is decoded the truncated-text matcher simply
+// does not see it — which is how a resolvable identifier goes missing.
+//
+// Decoding also HARDENS the scheme check rather than weakening it:
+// href="&#106;avascript:alert(1)" reads as a scheme-less relative href
+// undecoded, and as the javascript: scheme once decoded, where the
+// allowlist refuses it. Browsers decode; so must this.
+//
+// Order matters at the call sites: stripTags removes markup BEFORE
+// decoding, so a decoded "&lt;" can never be re-read as a tag.
+const NAMED_ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+  hellip: "…",
+  mldr: "…",
+  middot: "·",
+  ndash: "–",
+  mdash: "—",
+};
+
 function decodeEntities(raw: string): string {
-  return raw
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return raw.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]{1,31});/g, (whole, body: string) => {
+    if (body.startsWith("#")) {
+      const hex = body[1] === "x" || body[1] === "X";
+      const code = Number.parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+      // Out-of-range or unpaired-surrogate values are left as written
+      // rather than replaced with a substitution character, so nothing is
+      // silently altered.
+      if (!Number.isFinite(code) || code <= 0 || code > 0x10ffff) return whole;
+      if (code >= 0xd800 && code <= 0xdfff) return whole;
+      return String.fromCodePoint(code);
+    }
+    const named = NAMED_ENTITIES[body.toLowerCase()];
+    return named ?? whole;
+  });
 }
 
 function stripTags(raw: string): string {
@@ -126,6 +173,50 @@ function hostOf(href: string): string | null {
   } catch {
     return null; // relative href
   }
+}
+
+// A page's abbreviated rendering of an identifier: a base58 head, an
+// elision marker, a base58 tail. Both sides must be long enough to carry
+// real information — a one-character head would "agree" with far too much.
+const TRUNCATED_DISPLAY =
+  /^([1-9A-HJ-NP-Za-km-z]{3,})\s*(?:…|⋯|‥|\.{2,}|·{2,})\s*([1-9A-HJ-NP-Za-km-z]{3,})$/;
+
+// UNIQUE CONTEXT RESOLUTION (owner requirement). Given ONE element's
+// visible text and the complete identifiers found in THAT SAME element's
+// href and data-* values, return the single identifier the visible text is
+// an abbreviation of — or null.
+//
+// Null is returned, deliberately, in every case that is not a single
+// unambiguous answer:
+//   * the visible text is not an abbreviation at all;
+//   * no candidate agrees with the visible prefix AND suffix — mere shape
+//     similarity is not agreement;
+//   * more than one distinct candidate agrees.
+//
+// The caller cannot widen this: candidates come from one element, so an
+// identifier on an unrelated link elsewhere in the document is not a
+// candidate here at all, and nothing in this function can reach it.
+//
+// It also never CONSTRUCTS a value. Every result is a candidate string
+// taken whole from the document; the abbreviation is only ever used to
+// choose between candidates, never to fill in what it elides.
+export function resolveTruncatedText(
+  visibleText: string,
+  elementIdentifiers: readonly string[],
+): string | null {
+  const m = TRUNCATED_DISPLAY.exec(visibleText.trim());
+  if (!m) return null;
+  const [, head, tail] = m;
+  const agreeing = [...new Set(elementIdentifiers)].filter(
+    (candidate) =>
+      classifyShape(candidate) !== null &&
+      // Long enough that head and tail cannot overlap — otherwise a short
+      // candidate could satisfy both ends with the same characters.
+      candidate.length > head.length + tail.length &&
+      candidate.startsWith(head) &&
+      candidate.endsWith(tail),
+  );
+  return agreeing.length === 1 ? agreeing[0] : null;
 }
 
 // Pulls every base58-looking run out of a URL's path segments and query
@@ -209,6 +300,19 @@ export function extractDocumentLinks(html: string): DocumentLinkResult {
     return text.slice(-MAX_CONTEXT_CHARS);
   };
 
+  // Identifier-shaped values among ONE element's own data-* attributes.
+  // Scoped to the element deliberately — see resolveTruncatedText.
+  const dataIdentifiersOf = (attrs: string): string[] => {
+    const out: string[] = [];
+    const attr = /\bdata-[a-z0-9-]+\s*=\s*("([^"]*)"|'([^']*)')/gi;
+    let a: RegExpExecArray | null;
+    while ((a = attr.exec(attrs)) !== null) {
+      const value = decodeEntities(a[2] ?? a[3] ?? "").trim();
+      if (classifyShape(value)) out.push(value);
+    }
+    return out;
+  };
+
   // Anchors, with their inner text.
   const anchor = /<a\b([^>]*)>([\s\S]*?)<\/a\s*>/gi;
   let m: RegExpExecArray | null;
@@ -231,6 +335,10 @@ export function extractDocumentLinks(html: string): DocumentLinkResult {
           host,
           heading: headingBefore(m.index),
           context: contextBefore(m.index),
+          resolvedIdentifier: resolveTruncatedText(text, [
+            ...identifiersFromHref(href).map((i) => i.value),
+            ...dataIdentifiersOf(attrs),
+          ]),
         });
         if (host) hosts.add(host);
       }
@@ -312,6 +420,17 @@ export function renderLinkAppendix(result: DocumentLinkResult): string {
     `${APPENDIX_PREFIX} Anchor text may be truncated by the page; href is verbatim.`,
     `${APPENDIX_PREFIX} A link confers no authority, officiality or entity binding of its own.`,
   ];
+  // Explained only when at least one link actually resolved. Emitting it
+  // unconditionally would put the string "resolves=" in every document,
+  // including ones where nothing resolved — noise, and an invitation to
+  // read the legend as data.
+  if (result.links.some((l) => l.resolvedIdentifier)) {
+    lines.splice(
+      1,
+      0,
+      `${APPENDIX_PREFIX} resolves= is the exact identifier a truncated text abbreviates; prefer it over the truncated text.`,
+    );
+  }
   let used = lines.join("\n").length;
   let omitted = 0;
   for (const [i, link] of result.links.entries()) {
@@ -322,6 +441,11 @@ export function renderLinkAppendix(result: DocumentLinkResult): string {
     const line =
       `${APPENDIX_PREFIX} href=${link.href}` +
       appendixField("text", link.text) +
+      // The exact identifier the visible text abbreviates, when exactly
+      // one candidate in this same element agrees. Emitted right after
+      // the truncated text it belongs to, on the same line, so extraction
+      // quoting the pair quotes one contiguous excerpt.
+      appendixField("resolves", link.resolvedIdentifier) +
       appendixField("heading", link.heading) +
       appendixField("context", link.context);
     if (used + line.length + 1 > MAX_APPENDIX_CHARS) {

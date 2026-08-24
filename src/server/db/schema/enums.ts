@@ -261,6 +261,10 @@ export const traceOperationType = pgEnum("trace_operation_type", [
   // duplicated usage — summing actual_cost_micro over MODEL_CALL_ATTEMPTED
   // rows alone gives the true cost, never an overstated multiple.
   "MODEL_CALL_ATTEMPTED",
+  // A fact PROPOSED a concrete on-chain locator and the deterministic
+  // validator refused it. The fact itself is still admitted — only the
+  // locator is dropped — so this is never a rejection of evidence.
+  "LOCATOR_REJECTED",
 ]);
 
 // Outcome of the ONE operation this row records — deliberately the same
@@ -306,6 +310,13 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   // profile cannot safely price (prompt caching is not used in S10) —
   // actual_cost_micro is left null rather than silently understated.
   "UNSUPPORTED_BILLING_USAGE",
+  // Why a proposed locator was refused. Distinct codes because the
+  // findings differ: the page only ever displayed an abbreviation; the
+  // value is not a recognised complete identifier; or the value does not
+  // appear literally in the document (reconstructed or foreign).
+  "LOCATOR_TRUNCATED",
+  "LOCATOR_INCOMPLETE",
+  "LOCATOR_NOT_IN_DOCUMENT",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,
