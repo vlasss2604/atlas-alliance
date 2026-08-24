@@ -37,6 +37,12 @@ import {
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
+import { evaluateRenderEligibility } from "./rendered-docs-policy";
+import {
+  renderedDocsAvailable,
+  renderedDocsEnabled,
+  resolveRenderedDocsFetcher,
+} from "./providers/rendered-docs-fetcher";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { computeEntityBinding } from "../domain/project-identity";
@@ -1289,8 +1295,57 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         if (recovered) {
           observations.add(`DOCS_PAYLOAD_RECOVERED:${recovered.kinds.join("+")}`);
         }
-        fetchedDocs.push(fetchResult.value);
+        let acquiredDoc = fetchResult.value;
         spent.sourceOpens += 1;
+
+        // --- Stage 1: rendered docs -------------------------------------
+        // Static-first, always. Rendering runs only when the STATIC
+        // extraction (before Stage 0 recovery) shows an SPA shell on a
+        // confirmed, path-scoped OFFICIAL_DOCS page. Judging this on the
+        // Stage 0 merged text would suppress rendering on exactly the
+        // pages that need it — a measured page produced 134 static chars
+        // and 57,640 recovered chars of CSS tokens and React internals.
+        const eligibility = evaluateRenderEligibility({
+          url: acquiredDoc.finalUrl,
+          route: preFetchRoute,
+          staticHtmlBytes: acquiredDoc.byteLength,
+          staticTextLength: acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length,
+          rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
+        });
+        if (eligibility.eligible) {
+          // A render is its own bounded external action, so it takes its
+          // own reservation. The static fetch above keeps the one it
+          // already spent; no ceiling is raised.
+          const renderReserved = await reserveJobBudget(
+            deps.db,
+            ctx.jobId,
+            "sourceOpens",
+            1,
+            ctx.budget.maxSourceOpens,
+          );
+          if (renderReserved) {
+            spent.sourceOpens += 1;
+            try {
+              const rendered = await resolveRenderedDocsFetcher().render(acquiredDoc.finalUrl, {
+                confirmedHost: eligibility.confirmedHost,
+                matchedPathPrefix: eligibility.matchedPathPrefix,
+              });
+              // The renderer does not know the static measurement that
+              // justified it; the caller does, so it is stamped here.
+              rendered.staticTextLength =
+                acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length;
+              acquiredDoc = rendered;
+              observations.add("DOCS_RENDERED");
+            } catch {
+              // Fail closed: a failed render is never evidence, and never
+              // fails the attempt — the static document stands as-is.
+              observations.add("DOCS_RENDER_FAILED");
+            }
+          } else {
+            observations.add("DOCS_RENDER_SKIPPED_BUDGET");
+          }
+        }
+        fetchedDocs.push(acquiredDoc);
       }
       if (fetchedDocs.length === 0) {
         // A source-open budget denial already threw above, at the point
