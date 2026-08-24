@@ -204,6 +204,20 @@ export const evidenceOfficiality = pgEnum("evidence_officiality", [
 // database so a stored row cannot claim a shape the validator has no
 // notion of. A shape is a claim about LENGTH AND ALPHABET, never about
 // which chain or project an identifier belongs to.
+// What KIND of thing a derived on-chain subject is. Deliberately not
+// reusing OnchainSubjectKind: that describes what an intent reads,
+// this describes what a confirmed observation produced.
+export const onchainDerivedSubjectKind = pgEnum("onchain_derived_subject_kind", [
+  "TOKEN_ACCOUNT",
+]);
+
+// CLOSED allowlist of ways a subject may be derived. Adding one is a
+// reviewed code change in two places — this enum and the gate's own
+// allowlist — never a runtime value.
+export const onchainDerivationMethod = pgEnum("onchain_derivation_method", [
+  "TOKEN_ACCOUNTS_BY_OWNER",
+]);
+
 export const evidenceLocatorShape = pgEnum("evidence_locator_shape", [
   "ADDRESS_LIKE",
   "SIGNATURE_LIKE",

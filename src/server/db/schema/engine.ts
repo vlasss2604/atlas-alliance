@@ -18,6 +18,8 @@ import type { ClaimReasonCode, ClaimRequirementResult, MechanismGapRef } from ".
 
 import {
   componentReconciliationStatus,
+  onchainDerivationMethod,
+  onchainDerivedSubjectKind,
   researchAttemptStatus,
   traceBudgetAxis,
   traceOperationType,
@@ -369,5 +371,71 @@ export const onchainArtifacts = pgTable(
     // Replaying the identical observation within one job is a no-op rather
     // than a duplicate row — same discipline as evidence.extraction_unit_key.
     uniqueIndex("uq_onchain_artifacts_job_artifact").on(t.researchJobId, t.artifactHash),
+  ],
+);
+
+// DERIVED ON-CHAIN SUBJECTS — technical provenance, never authority.
+//
+// A token account returned by getTokenAccountsByOwner is not stated by
+// any document, so it can never be a documentary locator. It is also
+// not arbitrary: a confirmed structured read bound its identity —
+// parsed owner == the documented wallet, parsed mint == the confirmed
+// project mint, program owner == an SPL Token program.
+//
+// A row here answers exactly one question: "why is this exact subject
+// eligible for the next structured read?" It grants no source class, no
+// officiality, no documentary authority and no economic role. That the
+// account is called a burn address by a page is a DIFFERENT record with
+// a different provenance, and the two must never be merged.
+//
+// Both lineage links — parent_subject and onchain_artifact_id — are
+// re-validated when the gate reads this row, not trusted because the row
+// exists. If the parent's documentary evidence goes away, the derived
+// subject stops being eligible on the next read.
+export const onchainDerivedSubjects = pgTable(
+  "onchain_derived_subjects",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    onchainArtifactId: uuid("onchain_artifact_id")
+      .notNull()
+      .references(() => onchainArtifacts.id, { onDelete: "cascade" }),
+    chain: text("chain").notNull(),
+    network: text("network").notNull(),
+    projectAnchor: text("project_anchor").notNull(),
+    subject: text("subject").notNull(),
+    subjectKind: onchainDerivedSubjectKind("subject_kind").notNull(),
+    // The subject whose query returned this one.
+    parentSubject: text("parent_subject").notNull(),
+    derivationMethod: onchainDerivationMethod("derivation_method").notNull(),
+    bindingStatus: text("binding_status").notNull(),
+    observedSlot: bigint("observed_slot", { mode: "number" }).notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ix_onchain_derived_subject").on(t.subject),
+    index("ix_onchain_derived_anchor_subject").on(t.projectAnchor, t.subject),
+    index("ix_onchain_derived_parent").on(t.parentSubject),
+    uniqueIndex("uq_onchain_derived_artifact_subject").on(t.onchainArtifactId, t.subject),
+    // An unverified derived subject is not a weaker row — it is not a row.
+    check("ck_onchain_derived_binding", sql`${t.bindingStatus} = 'CONFIRMED'`),
+    check(
+      "ck_onchain_derived_subject_shape",
+      sql`${t.subject} ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'`,
+    ),
+    check(
+      "ck_onchain_derived_parent_shape",
+      sql`${t.parentSubject} ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'`,
+    ),
+    check(
+      "ck_onchain_derived_anchor_shape",
+      sql`${t.projectAnchor} ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'`,
+    ),
+    // A subject derived from itself is a loop, not a lineage.
+    check("ck_onchain_derived_not_self", sql`${t.subject} <> ${t.parentSubject}`),
   ],
 );

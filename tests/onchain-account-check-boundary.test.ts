@@ -98,13 +98,19 @@ describe("account check — the subject must be documented", () => {
     const c = await code();
     // The command-line address is checked AGAINST evidence.documentary_locator;
     // an undocumented address is refused before the retriever exists.
-    // The gate is the shared lookup, which matches BOTH the normalized
-    // locator table and the legacy scalar column — so a fact carrying
-    // several locators and a historical single-locator row are both
-    // answerable, and neither script needs its own query.
-    expect(c).toContain("findAdmittedLocator(db, address)");
+    // The gate is the shared subject gate. Documentary provenance still
+    // resolves exactly as before — the normalized locator table and the
+    // legacy scalar column both answer — and a derived on-chain subject
+    // is a SEPARATE class that never inherits document authority.
+    // The shared subject gate: it answers for BOTH provenance classes
+    // (documentary locator and derived on-chain subject) and keeps them
+    // distinct. Neither class is queried by substring — equality only.
+    expect(c).toContain("resolveOnchainSubject(db, {");
+    expect(c).toContain("subject: address,");
+    expect(c).toContain("projectAnchor: anchor,");
+    expect(c).not.toContain("documentaryLocator, ");
     expect(c).not.toContain("documentaryLocator, address");
-    const gate = c.indexOf("refusing — this address is not a confirmed documentary locator");
+    const gate = c.indexOf("refusing — this address has no admitted on-chain subject provenance");
     const retriever = c.indexOf("createProductionOnchainRetriever(");
     expect(gate).toBeGreaterThan(-1);
     expect(gate).toBeLessThan(retriever);

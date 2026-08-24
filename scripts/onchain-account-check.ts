@@ -48,7 +48,10 @@ import { eq } from "drizzle-orm";
 import { createDatabase } from "../src/server/db/client";
 import { projects } from "../src/server/db/schema";
 import { resolveConfirmedIdentity } from "../src/server/domain/project-identity";
-import { findAdmittedLocator } from "../src/server/engine/documentary-locator-store";
+import {
+  resolveOnchainSubject,
+  type OnchainSubjectProvenance,
+} from "../src/server/engine/onchain-subject-provenance";
 import { validateOnchainBinding } from "../src/server/engine/onchain-binding";
 import { synthesizeOnchainFacts } from "../src/server/engine/onchain-facts";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
@@ -65,6 +68,7 @@ async function main(): Promise<void> {
 
   const { db, pool } = createDatabase();
   let anchor: string;
+  let provenance: OnchainSubjectProvenance;
   try {
     const [project] = await db.select().from(projects).where(eq(projects.slug, slug));
     if (!project) throw new Error(`project not found: ${slug}`);
@@ -82,23 +86,48 @@ async function main(): Promise<void> {
     }
     anchor = identity.tokenAddress;
 
-    // PROVENANCE GATE. The subject must already exist as an admitted
-    // documentary locator for this project, so the read is attached to a
-    // record of where the address came from.
-    const supporting = await findAdmittedLocator(db, address);
-    if (supporting.length === 0) {
+    // PROVENANCE GATE. Refused BEFORE the retriever is constructed, so
+    // an ineligible subject never reaches transport.
+    // Two provenance classes, kept distinct. A DOCUMENTARY_LOCATOR is
+    // stated by a confirmed document; a DERIVED_ONCHAIN_SUBJECT was
+    // returned by a previous confirmed structured read. Both make a
+    // subject eligible to be READ; neither makes it authoritative, and
+    // the derived class carries no document authority whatsoever.
+    const eligibility = await resolveOnchainSubject(db, {
+      subject: address,
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: anchor,
+    });
+    if (!eligibility.eligible) {
       console.error(
-        "[account-check] refusing — this address is not a confirmed documentary locator in Evidence.",
+        "[account-check] refusing — this address has no admitted on-chain subject provenance: " +
+          eligibility.reason,
       );
       process.exit(1);
     }
+    provenance = eligibility.provenance;
     console.log("projectAnchor:    " + anchor);
     console.log("subject:          " + address);
-    console.log("documentedBy:     " + supporting.length + " evidence row(s)");
-    for (const row of supporting) {
-      console.log("  " + row.retrievedUrl + " :: " + String(row.summary));
-      console.log("    authority:  " + String(row.sourceClass) + " / " + String(row.officiality));
-      console.log("    evidenceId: " + row.evidenceId + "  shape: " + String(row.shape));
+    console.log("provenance:       " + provenance.class);
+    if (provenance.class === "DOCUMENTARY_LOCATOR") {
+      console.log("documentedBy:     " + provenance.documents.length + " evidence row(s)");
+      for (const row of provenance.documents) {
+        console.log("  " + row.retrievedUrl + " :: " + String(row.summary));
+        console.log("    authority:  " + String(row.sourceClass) + " / " + String(row.officiality));
+        console.log("    evidenceId: " + row.evidenceId);
+      }
+    } else {
+      // Technical provenance only: this says WHERE the subject came
+      // from, never what it is for. No source class and no officiality
+      // exist on this branch to print.
+      console.log("derivedFrom:      " + provenance.parentSubject);
+      console.log("  method:         " + provenance.derivationMethod);
+      console.log("  subjectKind:    " + provenance.subjectKind);
+      console.log("  artifactId:     " + provenance.onchainArtifactId);
+      console.log("  artifactUri:    " + provenance.canonicalUri);
+      console.log("  observedSlot:   " + provenance.observedSlot);
+      console.log("  NOTE:           technical provenance only — no documentary authority");
     }
   } finally {
     // Closed BEFORE the read: the RPC call runs with no open handle to

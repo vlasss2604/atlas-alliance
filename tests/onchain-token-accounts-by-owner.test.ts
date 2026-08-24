@@ -382,8 +382,14 @@ describe("2. the owner provenance gate — structural", () => {
 
   it("an undocumented owner is refused BEFORE transport is constructed", async () => {
     const c = await code();
-    expect(c).toContain("findAdmittedLocator(db, wallet)");
-    const gate = c.indexOf("refusing — this address is not a confirmed documentary locator");
+    // The shared subject gate: it answers for BOTH provenance classes
+    // (documentary locator and derived on-chain subject) and keeps them
+    // distinct. Neither class is queried by substring — equality only.
+    expect(c).toContain("resolveOnchainSubject(db, {");
+    expect(c).toContain("subject: wallet,");
+    expect(c).toContain("projectAnchor: anchor,");
+    expect(c).not.toContain("documentaryLocator, ");
+    const gate = c.indexOf("refusing — this address has no admitted on-chain subject provenance");
     const retriever = c.indexOf("createProductionOnchainRetriever(");
     expect(gate).toBeGreaterThan(-1);
     expect(gate).toBeLessThan(retriever);
