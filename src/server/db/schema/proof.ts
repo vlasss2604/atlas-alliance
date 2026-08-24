@@ -178,6 +178,19 @@ export const evidence = pgTable(
     // completeness CHECK below, since most evidence legitimately has no
     // on-chain identity to bind against.
     entityBinding: evidenceEntityBinding("entity_binding"),
+    // Structured on-chain V1 (AMENDMENT B) — the retrieval artifact this
+    // deterministic fact was derived from. NULL for every ordinary
+    // fetched-document evidence row (the overwhelming majority), and for
+    // those rows nothing about this column applies.
+    //
+    // MANY facts may reference ONE artifact: a single transaction read can
+    // yield several burn facts, and they must share one stored retrieval
+    // rather than duplicating provenance per row. The artifact table owns
+    // chain position, provider, hashes and re-verification data; evidence
+    // keeps its existing meaning untouched. Declared as a plain uuid with
+    // the FK added in the migration, since onchain_artifacts lives in
+    // engine.ts and importing it here would create a schema import cycle.
+    onchainArtifactId: uuid("onchain_artifact_id"),
     fetchedAt: timestamp("fetched_at", { withTimezone: true }).notNull(),
     observedAt: timestamp("observed_at", { withTimezone: true }),
     dataAsOf: timestamp("data_as_of", { withTimezone: true }),

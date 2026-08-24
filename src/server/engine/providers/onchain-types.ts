@@ -1,0 +1,202 @@
+// Structured on-chain retrieval — shared types (owner-approved V1).
+//
+// ONCHAIN_VERIFIABLE is an EVIDENCE CLASS, never a website, a provider, or
+// a transport. This module defines what a structured on-chain observation
+// IS, independent of who served it: a typed intent, a typed result, and
+// the provenance needed to re-verify it later.
+//
+// Nothing here is chain-specific beyond the chain enum; per-chain address
+// encoding, RPC method mapping and response decoding live in adapters.
+
+export type OnchainChain = "solana";
+
+// D-131 — production networks only. A test network is not weaker
+// authority, it is a DIFFERENT asset universe, so v1 does not model one
+// at all: there is no enum member for it and no endpoint configured, which
+// makes testnet data structurally unreachable rather than filtered later.
+export type OnchainNetwork = "mainnet";
+
+export type OnchainIntentKind =
+  | "TOKEN_SUPPLY"
+  | "ACCOUNT_INFO"
+  | "TOKEN_ACCOUNT_BALANCE"
+  | "SIGNATURES_FOR_ADDRESS"
+  | "TRANSACTION_DETAIL";
+
+// AMENDMENT C — the project ANCHOR and the queried SUBJECT are distinct
+// and both are preserved. The anchor is the project's confirmed identity
+// (its mint/contract); the subject is what this particular intent reads,
+// which may be a derived account or a transaction. Collapsing them would
+// make "some account related to something" indistinguishable from "this
+// project's own token", which is exactly the confusion D-134 exists to
+// prevent.
+export type OnchainSubjectKind = "token" | "account" | "tx";
+
+export interface OnchainIntent {
+  kind: OnchainIntentKind;
+  chain: OnchainChain;
+  network: OnchainNetwork;
+  // The project's confirmed identity address. Never derived, never
+  // model-supplied — it comes from an ACTIVE PROJECT_IDENTITY record.
+  projectAnchor: string;
+  subjectKind: OnchainSubjectKind;
+  // What this intent reads. Equal to projectAnchor for a direct token
+  // read; a derived account or transaction otherwise (see AMENDMENT D:
+  // a derived subject requires admitted provenance, never a guess).
+  subject: string;
+  // Bounded, intent-specific parameters. Never a free-form RPC payload.
+  limit?: number;
+}
+
+// ---- typed results ---------------------------------------------------
+// Each is a normalized projection of a validated RPC response. No field
+// is optional-by-convenience: a missing value means the fact cannot be
+// synthesized, not that a default is assumed.
+
+export interface TokenSupplyResult {
+  kind: "TOKEN_SUPPLY";
+  mint: string;
+  amountRaw: string; // integer string — never a float, never rounded
+  decimals: number;
+}
+
+export interface AccountInfoResult {
+  kind: "ACCOUNT_INFO";
+  address: string;
+  exists: boolean;
+  ownerProgram: string | null;
+  executable: boolean | null;
+  lamports: string | null;
+}
+
+export interface TokenAccountBalanceResult {
+  kind: "TOKEN_ACCOUNT_BALANCE";
+  account: string;
+  mint: string | null;
+  amountRaw: string;
+  decimals: number;
+}
+
+export interface SignatureRef {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  err: boolean;
+}
+
+export interface SignaturesForAddressResult {
+  kind: "SIGNATURES_FOR_ADDRESS";
+  address: string;
+  signatures: SignatureRef[];
+}
+
+// A deterministically decoded SPL Token Burn / BurnChecked instruction.
+// Recognized ONLY by the adapter, from the actual instruction, never
+// inferred from a transfer to an address that "looks like" a burn address
+// (owner instruction, explicit).
+export interface BurnInstructionRef {
+  programId: string;
+  instructionType: "Burn" | "BurnChecked";
+  mint: string;
+  sourceAccount: string;
+  authority: string | null;
+  amountRaw: string;
+  decimals: number | null;
+}
+
+export interface TransactionDetailResult {
+  kind: "TRANSACTION_DETAIL";
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  succeeded: boolean;
+  // Empty when the transaction contains no SPL burn instruction. An empty
+  // list is NEVER a fact that no burn happened — absence of evidence is
+  // not evidence of absence.
+  burns: BurnInstructionRef[];
+}
+
+export type OnchainResult =
+  | TokenSupplyResult
+  | AccountInfoResult
+  | TokenAccountBalanceResult
+  | SignaturesForAddressResult
+  | TransactionDetailResult;
+
+// ---- provenance ------------------------------------------------------
+// Everything required to re-verify the observation later. Incomplete
+// provenance makes an artifact ineligible to establish anything.
+
+export interface OnchainProvenance {
+  chain: OnchainChain;
+  network: OnchainNetwork;
+  projectAnchor: string;
+  subjectKind: OnchainSubjectKind;
+  subject: string;
+  // Chain position of the observation.
+  slot: number;
+  blockTime: number | null;
+  blockHash: string | null;
+  finality: "finalized" | "confirmed";
+  // How it was obtained. providerId identifies the endpoint by a
+  // code-owned LABEL, never a URL and never a credential.
+  retrievalMethod: "RPC";
+  providerId: string;
+  providerMethod: string;
+  // Request parameters after redaction. Addresses are public; nothing
+  // credential-bearing is ever placed here.
+  requestParams: Record<string, string | number | boolean>;
+  transactionSignature: string | null;
+  retrievedAt: Date;
+  rawResponseHash: string;
+  artifactHash: string;
+}
+
+// ---- the trusted artifact -------------------------------------------
+// SOURCE CLASS SAFETY (owner amendment): eligibility for
+// ONCHAIN_VERIFIABLE must depend on trusted internal metadata produced by
+// the registered retriever path — NOT on a URI prefix, which our own code
+// generates and which any caller could imitate.
+//
+// The brand below is a module-private symbol. A structurally identical
+// object literal built anywhere else does not carry it and cannot be
+// forged: nothing outside this module can obtain the symbol's value, and
+// TypeScript will not let an unbranded object satisfy the type. This is
+// the "trusted structured-artifact marker" — the in-process half; the
+// persisted half is the onchain_artifacts row, which only the retriever
+// path writes.
+declare const ONCHAIN_ARTIFACT_BRAND: unique symbol;
+
+export interface OnchainArtifact {
+  readonly [ONCHAIN_ARTIFACT_BRAND]: true;
+  canonicalUri: string;
+  intent: OnchainIntent;
+  result: OnchainResult;
+  provenance: OnchainProvenance;
+  // Canonical JSON serialization of `result` — the literal text a
+  // deterministic fact quotes from, so traceability is exact rather than
+  // paraphrased.
+  normalizedText: string;
+}
+
+// The ONLY constructor. Adapters call this; nothing else can produce a
+// value of type OnchainArtifact.
+export function brandOnchainArtifact(
+  artifact: Omit<OnchainArtifact, typeof ONCHAIN_ARTIFACT_BRAND>,
+): OnchainArtifact {
+  return artifact as OnchainArtifact;
+}
+
+// Runtime companion to the compile-time brand, for the persistence and
+// classification boundaries where a value may arrive as `unknown`.
+export function isOnchainArtifact(value: unknown): value is OnchainArtifact {
+  if (!value || typeof value !== "object") return false;
+  const a = value as Partial<OnchainArtifact>;
+  return (
+    typeof a.canonicalUri === "string" &&
+    typeof a.normalizedText === "string" &&
+    !!a.intent &&
+    !!a.result &&
+    !!a.provenance
+  );
+}

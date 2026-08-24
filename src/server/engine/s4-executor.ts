@@ -35,6 +35,7 @@ import {
   orderCandidatesForComponent,
 } from "./acquisition-targeting";
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
+import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { computeEntityBinding } from "../domain/project-identity";
@@ -707,6 +708,55 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       target.researchTask = plan.researchTask;
       target.intent = plan.intent;
       target.evidenceGoal = plan.evidenceGoal;
+
+      // --- 0b. Structured on-chain acquisition -----------------------------
+      // Tried BEFORE search, because a canonical chain read is the
+      // strongest source a component admitting ONCHAIN_VERIFIABLE can get,
+      // and it costs one bounded reservation instead of a search + fetch +
+      // model extraction chain.
+      //
+      // Entirely skipped unless the Pattern says this component admits
+      // ONCHAIN_VERIFIABLE, the project has a confirmed identity, and a
+      // retriever is actually configured. An unconfigured environment is a
+      // configuration boundary, never a research failure — the attempt
+      // simply falls through to the normal path.
+      const onchainOutcome = await runStructuredOnchainAcquisition({
+        db: deps.db,
+        jobId: ctx.jobId,
+        attemptId,
+        item,
+        plan,
+        maxSourceOpens: ctx.budget.maxSourceOpens,
+        recordTrace: async (event) =>
+          recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: event.operationType,
+            providerKind: "FETCH",
+            patternStep: item.step,
+            component: item.component,
+            targetRef: event.targetRef,
+            status: event.status,
+            reasonCode: event.reasonCode ?? "NONE",
+            budgetAxis: "sourceOpens",
+            budgetAmount: 1,
+          }),
+      });
+      spent.sourceOpens += onchainOutcome.sourceOpensSpent;
+      for (const code of onchainOutcome.observations) observations.add(code);
+      if (onchainOutcome.evidenceIds.length > 0) {
+        // Establishing on-chain evidence was obtained deterministically.
+        // Returning here conserves the search/model budget for components
+        // that got nothing — which is exactly the starvation the audit
+        // found. Meaning-of-the-mechanism questions belong to OTHER
+        // components (MECHANISM_SPEC / GOVERNANCE_BASIS), each with its
+        // own attempt and its own doc-oriented targeting.
+        return {
+          status: "SUCCEEDED",
+          reason: withObservations("ONCHAIN_EVIDENCE_ESTABLISHED"),
+          spent,
+        };
+      }
 
       // D-130: how many search units this component may spend, so that a
       // later component the job's INTENT actually requires cannot be

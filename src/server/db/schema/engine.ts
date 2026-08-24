@@ -26,6 +26,7 @@ import {
   traceStatus,
 } from "./enums";
 import { researchJobs } from "./research";
+import { sources } from "./proof";
 
 // Фаза 6, S3 (phase-6-plan.md §19 S3, §6.3 item 5) — сырой журнал попыток
 // исполнения контроллера: персист для idempotent-enough семантики и
@@ -291,5 +292,82 @@ export const researchTraceEvents = pgTable(
     // §M — bounded target_ref: a generous but finite cap, defense in
     // depth against ever storing an unbounded document/response body.
     check("ck_research_trace_events_target_ref_len", sql`char_length(${t.targetRef}) <= 2048`),
+  ],
+);
+
+// Structured on-chain retrieval artifacts (owner-approved V1, AMENDMENT B).
+//
+// WHY A SEPARATE TABLE, and why it does not hang off `sources`:
+//
+// `sources` is a GLOBAL row keyed by url_hash and reused across jobs and
+// projects (see findOrCreateSource). A structured on-chain observation is
+// the opposite: the canonical URI is stable ("total supply of this mint"),
+// but every retrieval of it is a DIFFERENT point-in-time fact — different
+// slot, different value, different response hash. Attaching provenance to
+// the shared source row would either overwrite one job's observation with
+// another's or make the row mean two things at once.
+//
+// The relationship the amendment asks for is therefore:
+//
+//   sources (canonical URI identity, shared)
+//     -> onchain_artifacts (ONE row per retrieval, owns all provenance)
+//        -> evidence.onchain_artifact_id (MANY deterministic facts)
+//
+// One retrieval is stored once; several facts (e.g. two burn instructions
+// inside one transaction) reference it without duplicating provenance;
+// and everything needed for later re-verification survives on the artifact
+// rather than being smeared across evidence rows.
+//
+// Existing Evidence semantics are untouched: the only change to `evidence`
+// is one NULLABLE foreign key, which no existing constraint reads.
+export const onchainArtifacts = pgTable(
+  "onchain_artifacts",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    researchJobId: uuid("research_job_id")
+      .notNull()
+      .references(() => researchJobs.id, { onDelete: "cascade" }),
+    // The canonical URI's shared identity row.
+    sourceId: uuid("source_id")
+      .notNull()
+      .references(() => sources.id, { onDelete: "restrict" }),
+    canonicalUri: text("canonical_uri").notNull(),
+    // --- identity / subject (AMENDMENT C: anchor and subject stay distinct)
+    chain: text("chain").notNull(),
+    network: text("network").notNull(),
+    projectAnchor: text("project_anchor").notNull(),
+    subjectKind: text("subject_kind").notNull(),
+    subject: text("subject").notNull(),
+    intentKind: text("intent_kind").notNull(),
+    // --- chain position
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    blockTime: timestamp("block_time", { withTimezone: true }),
+    blockHash: text("block_hash"),
+    finality: text("finality").notNull(),
+    transactionSignature: text("transaction_signature"),
+    // --- retrieval
+    retrievalMethod: text("retrieval_method").notNull(),
+    providerId: text("provider_id").notNull(),
+    providerMethod: text("provider_method").notNull(),
+    // Addresses and bounded limits only — never a credential, never a URL.
+    requestParams: jsonb("request_params").notNull(),
+    retrievedAt: timestamp("retrieved_at", { withTimezone: true }).notNull(),
+    // --- integrity
+    rawResponseHash: text("raw_response_hash").notNull(),
+    artifactHash: text("artifact_hash").notNull(),
+    // The canonical normalized result the facts quote from.
+    normalizedResult: jsonb("normalized_result").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ix_onchain_artifacts_job").on(t.researchJobId),
+    index("ix_onchain_artifacts_uri").on(t.canonicalUri),
+    // Replaying the identical observation within one job is a no-op rather
+    // than a duplicate row — same discipline as evidence.extraction_unit_key.
+    uniqueIndex("uq_onchain_artifacts_job_artifact").on(t.researchJobId, t.artifactHash),
   ],
 );
