@@ -505,9 +505,14 @@ export async function resolveSourceRoute(
     officiality: "CONFIRMED",
     routeClass: resolvedRouteClass,
     observation: null,
-    // Only meaningful alongside a resolved class, and only when exactly
-    // one path-scoped row supplied it.
-    matchedPathPrefix:
-      resolvedRouteClass !== null && matchedPathPrefixes.length === 1 ? matchedPathPrefixes[0] : null,
+    // Reported whenever exactly one PATH-SCOPED row matched this url,
+    // INDEPENDENT of whether that row carried a routeClass. A confirmed
+    // route may legitimately grant officiality without granting
+    // documentation authority, and a caller needs to distinguish "a
+    // path-scoped row matched but conferred no class" from "no path-scoped
+    // row matched at all". Both existing consumers additionally require
+    // routeClass === "OFFICIAL_DOCS", so widening this cannot change what
+    // they admit.
+    matchedPathPrefix: matchedPathPrefixes.length === 1 ? matchedPathPrefixes[0] : null,
   };
 }

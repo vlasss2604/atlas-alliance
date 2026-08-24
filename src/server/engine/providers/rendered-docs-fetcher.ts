@@ -40,6 +40,16 @@ export interface RenderedDocument extends FetchedDocument {
   rawHtmlHash: string | null;
   blockedRequestCount: number;
   renderDurationMs: number;
+  // OBSERVATIONS ONLY, recovered from the settled DOM that plain-text
+  // conversion discards. Carries no class, no officiality and no entity
+  // binding: a link found on a confirmed page is still just a link until
+  // the existing identity/provenance checks pass on their own terms.
+  documentLinks?: {
+    links: { href: string; text: string; host: string | null }[];
+    identifiers: { attribute: string; value: string; shape: string }[];
+    hosts: string[];
+    truncated: boolean;
+  } | null;
 }
 
 export type RenderedDocsFailureReason =

@@ -7,6 +7,7 @@ import {
 } from "../rendered-docs-policy";
 import { normalizeHtmlToText } from "./content-fetcher";
 import { proxyChromiumArgs } from "./renderer-env";
+import { extractDocumentLinks } from "./document-links";
 import {
   BROWSER_LOCKDOWN,
   DEFAULT_RENDER_LIMITS,
@@ -225,6 +226,9 @@ export function createPlaywrightRenderedDocsFetcher(
           rawHtmlHash: sha256(html),
           blockedRequestCount,
           renderDurationMs: Date.now() - startedAt,
+          // Parsed from the settled DOM string already in hand. No click,
+          // no evaluate, no second navigation — the browser's work is done.
+          documentLinks: extractDocumentLinks(html),
         };
       } catch (e) {
         if (e instanceof RenderedDocsError) throw e;
