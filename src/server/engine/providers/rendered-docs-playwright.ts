@@ -7,7 +7,7 @@ import {
 } from "../rendered-docs-policy";
 import { normalizeHtmlToText } from "./content-fetcher";
 import { proxyChromiumArgs } from "./renderer-env";
-import { extractDocumentLinks } from "./document-links";
+import { extractDocumentLinks, renderLinkAppendix } from "./document-links";
 import {
   BROWSER_LOCKDOWN,
   DEFAULT_RENDER_LIMITS,
@@ -204,14 +204,35 @@ export function createPlaywrightRenderedDocsFetcher(
           renderedText = renderedText.slice(0, limits.maxRenderedTextLength);
         }
 
+        // Links recovered from the settled DOM string already in hand. No
+        // click, no evaluate, no second navigation — the browser's work is
+        // done before this runs.
+        const documentLinks = extractDocumentLinks(html);
+        // The appendix is BOUNDED SEPARATELY and appended AFTER the body
+        // text is truncated, so a long page can never squeeze the
+        // recovered hrefs out of the document — the two limits are
+        // independent by construction.
+        //
+        // It is part of normalizedText, not a sibling field, and that is
+        // deliberate: D-076 admits a fact only when its support fragment
+        // appears literally in the text the extractor was given. Carrying
+        // the hrefs beside the text instead would make every fact quoting
+        // an exact address untraceable and correctly rejected. Being
+        // inside normalizedText also means contentHash covers it, so what
+        // was hashed and what the model read remain the same value.
+        const linkAppendix = renderLinkAppendix(documentLinks);
+        const normalizedText = linkAppendix
+          ? `${renderedText}\n\n${linkAppendix}`
+          : renderedText;
+
         return {
           // FetchedDocument-compatible half.
           finalUrl,
           requestedUrl: url,
           httpStatus: 200,
           contentType: "text/html",
-          normalizedText: renderedText,
-          contentHash: sha256(renderedText),
+          normalizedText,
+          contentHash: sha256(normalizedText),
           fetchedAt: new Date(),
           byteLength: Buffer.byteLength(html),
           // Stage 1 audit half.
@@ -222,13 +243,17 @@ export function createPlaywrightRenderedDocsFetcher(
           confirmedRouteDomain: route.confirmedHost,
           matchedPathPrefix: route.matchedPathPrefix,
           staticTextLength: 0, // filled by the caller, which knows it
+          // The PAGE's own text only — deliberately NOT normalizedText's
+          // length. This is the figure that answers "did rendering
+          // actually recover prose", and folding the appendix into it
+          // would let a link-heavy SPA shell look like a rendered
+          // document.
           renderedTextLength: renderedText.length,
+          linkAppendixLength: linkAppendix.length,
           rawHtmlHash: sha256(html),
           blockedRequestCount,
           renderDurationMs: Date.now() - startedAt,
-          // Parsed from the settled DOM string already in hand. No click,
-          // no evaluate, no second navigation — the browser's work is done.
-          documentLinks: extractDocumentLinks(html),
+          documentLinks,
         };
       } catch (e) {
         if (e instanceof RenderedDocsError) throw e;

@@ -18,6 +18,7 @@ import {
   __setRenderedDocsFetcher,
   type RenderedDocsFetcher,
 } from "../src/server/engine/providers/rendered-docs-fetcher";
+import { LINK_APPENDIX_HEADER } from "../src/server/engine/providers/document-links";
 import { createPlaywrightRenderedDocsFetcher } from "../src/server/engine/providers/rendered-docs-playwright";
 import type { ResolvedSourceRoute } from "../src/server/engine/source-authority";
 
@@ -510,5 +511,87 @@ describe("generalization", () => {
         expect(lower, `${path} contains "${banned}"`).not.toContain(banned);
       }
     }
+  });
+});
+
+// ---- recovered links inside the rendered document ---------------------
+//
+// The renderer is the only place that holds BOTH the settled DOM string
+// and the text that will be handed to extraction, so it is where the two
+// are joined. What matters here is that joining them does not corrupt
+// either: the page's own text stays measurable on its own, and the hash
+// covers exactly what a reader of the document would see.
+
+describe("rendered document — recovered link appendix", () => {
+  const LINKED_ID = "4Hs9TzKqWnErYuPbVdMxLcJgFhRtSaZeQwNyBuCvDkGm";
+  const HTML_WITH_LINK = `<html><body><h2>Destination addresses</h2>
+    <a href="https://explorer.example.test/account/${LINKED_ID}">4Hs9Tz&hellip;DkGm</a>
+    </body></html>`;
+
+  it("presents the exact href in normalizedText when the visible text truncates it", async () => {
+    const { fetcher } = fetcherWith({
+      html: HTML_WITH_LINK,
+      bodyText: "Destination addresses\n4Hs9Tz…DkGm",
+    });
+    const doc = await fetcher.render(URL_IN, ROUTE);
+    // The page's own text does NOT contain the identifier...
+    expect(doc.normalizedText.split(LINK_APPENDIX_HEADER)[0]).not.toContain(LINKED_ID);
+    // ...but the document presented to extraction does.
+    expect(doc.normalizedText).toContain(LINKED_ID);
+    expect(doc.normalizedText).toContain("heading=Destination addresses");
+  });
+
+  it("contentHash covers the appendix, so what was hashed is what was read", async () => {
+    const { fetcher } = fetcherWith({ html: HTML_WITH_LINK, bodyText: "same body text" });
+    const withLinks = await fetcher.render(URL_IN, ROUTE);
+    const { fetcher: plainFetcher } = fetcherWith({
+      html: "<html><body>same body text</body></html>",
+      bodyText: "same body text",
+    });
+    const withoutLinks = await plainFetcher.render(URL_IN, ROUTE);
+    // Identical page text, different recovered links -> different hash.
+    expect(withoutLinks.normalizedText).toBe("same body text");
+    expect(withLinks.contentHash).not.toBe(withoutLinks.contentHash);
+  });
+
+  it("renderedTextLength measures the PAGE's text, not the appendix", async () => {
+    const bodyText = "Destination addresses";
+    const { fetcher } = fetcherWith({ html: HTML_WITH_LINK, bodyText });
+    const doc = await fetcher.render(URL_IN, ROUTE);
+    expect(doc.renderedTextLength).toBe(bodyText.length);
+    expect(doc.linkAppendixLength).toBeGreaterThan(0);
+    expect(doc.normalizedText.length).toBe(
+      doc.renderedTextLength + 2 + (doc.linkAppendixLength ?? 0),
+    );
+  });
+
+  it("a page with no link gets no appendix and no trailing whitespace", async () => {
+    const { fetcher } = fetcherWith({
+      html: "<html><body>no links</body></html>",
+      bodyText: "no links",
+    });
+    const doc = await fetcher.render(URL_IN, ROUTE);
+    expect(doc.normalizedText).toBe("no links");
+    expect(doc.linkAppendixLength).toBe(0);
+  });
+
+  it("the appendix survives body truncation — the two limits are independent", async () => {
+    // A page long enough to hit maxRenderedTextLength must not be able to
+    // push the recovered hrefs out of the document.
+    const longBody = "x".repeat(DEFAULT_RENDER_LIMITS.maxRenderedTextLength + 5_000);
+    const { fetcher } = fetcherWith({ html: HTML_WITH_LINK, bodyText: longBody });
+    const doc = await fetcher.render(URL_IN, ROUTE);
+    expect(doc.renderedTextLength).toBe(DEFAULT_RENDER_LIMITS.maxRenderedTextLength);
+    expect(doc.normalizedText).toContain(LINKED_ID);
+  });
+
+  it("an unsafe href never reaches the document text", async () => {
+    const { fetcher } = fetcherWith({
+      html: `<html><body><a href="javascript:steal()">click</a></body></html>`,
+      bodyText: "click",
+    });
+    const doc = await fetcher.render(URL_IN, ROUTE);
+    expect(doc.normalizedText).toBe("click");
+    expect(doc.normalizedText).not.toContain("javascript");
   });
 });

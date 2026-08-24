@@ -36,7 +36,15 @@ export interface RenderedDocument extends FetchedDocument {
   // The static extraction that justified rendering — kept so the
   // before/after pair is auditable rather than asserted.
   staticTextLength: number;
+  // Length of the PAGE's own rendered text, excluding the recovered-link
+  // appendix that normalizedText may carry. Kept separate so a link-heavy
+  // shell cannot read as a page that rendered real prose.
   renderedTextLength: number;
+  // Length of that appendix, 0 when the page had no recoverable link.
+  // normalizedText.length is renderedTextLength + linkAppendixLength (+2
+  // for the blank line) — stated as two figures rather than one so the
+  // provenance of the text stays legible after the fact.
+  linkAppendixLength?: number;
   rawHtmlHash: string | null;
   blockedRequestCount: number;
   renderDurationMs: number;
@@ -44,8 +52,18 @@ export interface RenderedDocument extends FetchedDocument {
   // conversion discards. Carries no class, no officiality and no entity
   // binding: a link found on a confirmed page is still just a link until
   // the existing identity/provenance checks pass on their own terms.
+  //
+  // `heading`/`context` are the page's OWN words near the link — what the
+  // page calls the thing it is pointing at. Page text is a claim, never a
+  // verified fact, and reading it here changes nothing about that.
   documentLinks?: {
-    links: { href: string; text: string; host: string | null }[];
+    links: {
+      href: string;
+      text: string;
+      host: string | null;
+      heading?: string | null;
+      context?: string | null;
+    }[];
     identifiers: { attribute: string; value: string; shape: string }[];
     hosts: string[];
     truncated: boolean;
