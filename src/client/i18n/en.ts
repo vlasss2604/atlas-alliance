@@ -84,6 +84,32 @@ export const en = {
       evidenceTitle: "Evidence",
       sourcesTitle: "Sources",
       noEvidence: "No evidence was admitted for this research.",
+      // Shown when the displayed finding has NO structurally linked
+      // supporting evidence. This section previously rendered the job's
+      // entire evidence table, so an "insufficient evidence" finding could
+      // appear to be backed by evidence belonging to another component.
+      noSupportingEvidence: "No supporting evidence was established for this finding.",
+      contradictingTitle: "Contradicting evidence",
+      excludedTitle: "Considered but not admitted",
+      excludedNote: "These were found but not admitted as proof for this finding:",
+      exclusionLabel: {
+        WRONG_COMPONENT: "belongs to a different component",
+        WRONG_PROJECT: "belongs to a different project",
+        LEGACY_CONTRACT_VERSION: "superseded evidence contract version",
+        CLASS_NOT_ADMISSIBLE: "source class not admissible for this component",
+        DIRECTNESS_INSUFFICIENT: "too indirect to establish the claim",
+        RELATIONSHIP_NOT_SUPPORTING: "does not support the claim",
+        NOT_CURRENT_STATE_BEARING: "does not carry current state",
+        MISSING_PUBLICATION_DATE: "no publication date",
+        STALE_FOR_CURRENT_STATE: "too old to establish current state",
+        SUPERSEDED_BY_NEWER: "superseded by a newer source",
+        DUPLICATE_UNIT: "duplicate of material already counted",
+        ENTITY_NOT_CONFIRMED: "not confirmed to be about this asset",
+      } as Record<string, string>,
+      stepsTraced: (steps: number, components: number) =>
+        `${steps} research step${steps === 1 ? "" : "s"} attempted, ${components} component${
+          components === 1 ? "" : "s"
+        } checked.`,
       debugTitle: "Research Debug",
       statusLabel: {
         SUPPORTED: "Supported by the evidence",

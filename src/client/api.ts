@@ -197,7 +197,43 @@ export interface ResearchJobDetail {
     flows: unknown[];
     unassignedGaps: unknown[];
   } | null;
-  evidence: ResearchEvidenceView[];
+  // Authoritative execution counts. attemptedSteps is the number of
+  // distinct Pattern steps the controller actually attempted — NOT
+  // mechanism.flows.length, which counts mechanism branches and reported
+  // "1 step" for a job that attempted all eight.
+  execution: {
+    attemptedSteps: number;
+    attemptedComponents: number;
+    succeededComponents: number;
+    establishedComponents: number;
+  };
+  // The ONLY valid source for the Proof evidence section: evidence
+  // structurally linked to the displayed claim by S7 provenance / S5
+  // component results. `evidence` below is the whole job and must never
+  // be rendered as this finding's proof.
+  finding: {
+    componentKeys: { step: number; component: string }[];
+    supporting: ResearchEvidenceView[];
+    contradicting: ResearchEvidenceView[];
+    excluded: (ResearchEvidenceView & { exclusionReason: string })[];
+  };
+  components: {
+    patternStep: number;
+    component: string;
+    status: string;
+    reasonCodes: unknown[];
+    supportingEvidenceIds: string[];
+    contradictingEvidenceIds: string[];
+    excludedEvidence: { evidenceId: string; reason: string }[];
+  }[];
+  evidence: (ResearchEvidenceView & {
+    links: {
+      patternStep: number;
+      component: string;
+      role: "SUPPORTING" | "CONTRADICTING" | "EXCLUDED";
+      exclusionReason: string | null;
+    }[];
+  })[];
 }
 
 export const api = {

@@ -42,33 +42,39 @@ function JobDetail({ detail }: { detail: ResearchJobDetail }) {
         )}
       </section>
 
-      {detail.mechanism && detail.mechanism.flows.length > 0 && (
+      {detail.execution.attemptedSteps > 0 && (
         <section>
           <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
             {d.mechanismTitle}
           </h3>
+          {/* Counts come from research_attempts (what the controller
+              actually attempted), never from mechanism.flows.length —
+              flows are mechanism branches, so an unbranched path read as
+              "1 step traced" even when all eight steps were researched. */}
           <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">
-            {detail.mechanism.flows.length} step
-            {detail.mechanism.flows.length === 1 ? "" : "s"} traced
-            {detail.mechanism.unassignedGaps.length > 0
-              ? `, ${detail.mechanism.unassignedGaps.length} gap${
-                  detail.mechanism.unassignedGaps.length === 1 ? "" : "s"
-                }`
-              : ""}
-            .
+            {d.stepsTraced(
+              detail.execution.attemptedSteps,
+              detail.execution.attemptedComponents,
+            )}
           </p>
         </section>
       )}
 
+      {/* Proof evidence is read ONLY from detail.finding, which the API
+          scopes to this claim's own components. detail.evidence is the
+          whole job and must never be rendered here — doing exactly that
+          is what put GOVERNANCE_BASIS rows under a NET_EFFECT finding. */}
       <section>
         <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
           {d.evidenceTitle}
         </h3>
-        {detail.evidence.length === 0 ? (
-          <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">{d.noEvidence}</p>
+        {detail.finding.supporting.length === 0 ? (
+          <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">
+            {d.noSupportingEvidence}
+          </p>
         ) : (
           <ul className="mt-1 flex flex-col gap-2">
-            {detail.evidence.map((e) => (
+            {detail.finding.supporting.map((e) => (
               <li key={e.id} className="text-sm">
                 <p>{e.summary ?? e.fragment}</p>
                 {e.doesNotProve && (
@@ -82,26 +88,64 @@ function JobDetail({ detail }: { detail: ResearchJobDetail }) {
         )}
       </section>
 
-      {detail.evidence.length > 0 && (
+      {detail.finding.contradicting.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
+            {d.contradictingTitle}
+          </h3>
+          <ul className="mt-1 flex flex-col gap-2">
+            {detail.finding.contradicting.map((e) => (
+              <li key={e.id} className="text-sm">
+                <p>{e.summary ?? e.fragment}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Excluded material is shown only in its OWN section, never mixed
+          into the proof list, and always with the reason it was refused. */}
+      {detail.finding.excluded.length > 0 && (
+        <section>
+          <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
+            {d.excludedTitle}
+          </h3>
+          <p className="mt-1 text-xs text-[var(--atlas-text-dim)]">{d.excludedNote}</p>
+          <ul className="mt-1 flex flex-col gap-2">
+            {detail.finding.excluded.map((e) => (
+              <li key={e.id} className="text-sm text-[var(--atlas-text-dim)]">
+                <p>{e.summary ?? e.fragment}</p>
+                <p className="text-xs">
+                  {d.exclusionLabel[e.exclusionReason] ?? e.exclusionReason}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {detail.finding.supporting.length > 0 && (
         <section>
           <h3 className="text-xs font-semibold text-[var(--atlas-text-dim)]">
             {d.sourcesTitle}
           </h3>
           <ul className="mt-1 flex flex-col gap-1">
-            {[...new Map(detail.evidence.map((e) => [e.retrievedUrl, e])).values()].map(
-              (e) => (
-                <li key={e.retrievedUrl} className="truncate text-xs">
-                  <a
-                    href={e.retrievedUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-[var(--atlas-cyan)]"
-                  >
-                    {e.sourceTitle ?? e.retrievedUrl}
-                  </a>
-                </li>
-              ),
-            )}
+            {[
+              ...new Map(
+                detail.finding.supporting.map((e) => [e.retrievedUrl, e]),
+              ).values(),
+            ].map((e) => (
+              <li key={e.retrievedUrl} className="truncate text-xs">
+                <a
+                  href={e.retrievedUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[var(--atlas-cyan)]"
+                >
+                  {e.sourceTitle ?? e.retrievedUrl}
+                </a>
+              </li>
+            ))}
           </ul>
         </section>
       )}
