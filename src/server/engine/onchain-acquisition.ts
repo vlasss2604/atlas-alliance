@@ -323,18 +323,33 @@ export interface PersistOnchainResult {
 // metadata. resolveSourceClass is deliberately NOT consulted — it
 // classifies by hostname, and a canonical URI has no meaningful host. No
 // model and no document can reach this assignment.
-export async function persistOnchainArtifactAndFacts(input: {
+export interface PersistArtifactResult {
+  artifactId: string | null;
+  sourceId: string | null;
+  rejectedReason: StructuredContainmentFailure | null;
+}
+
+// Persists ONE retrieval artifact and its canonical-URI source row, and
+// nothing else. Extracted from persistOnchainArtifactAndFacts so a caller
+// that must NOT write Evidence — establishing durable subject provenance
+// is such a caller — can reuse the identical containment check, source
+// resolution and idempotent artifact insert instead of a second copy that
+// could drift from it.
+//
+// Containment/binding is still checked here: an artifact that fails it is
+// not persisted at all, so there is no path that stores an unbound
+// observation and decides what to do about it afterwards.
+export async function persistOnchainArtifact(input: {
   db: Database | Transaction;
   jobId: string;
   artifact: OnchainArtifact;
   identity: ConfirmedProjectIdentity | null;
-  target: { step: number; component: string };
-}): Promise<PersistOnchainResult> {
-  const { db, jobId, artifact, identity, target } = input;
+}): Promise<PersistArtifactResult> {
+  const { db, jobId, artifact, identity } = input;
 
   const containment = evaluateStructuredContainment(artifact, identity);
   if (!containment.contained) {
-    return { artifactId: null, evidenceIds: [], rejectedReason: containment.reason };
+    return { artifactId: null, sourceId: null, rejectedReason: containment.reason };
   }
 
   const p = artifact.provenance;
@@ -398,7 +413,33 @@ export async function persistOnchainArtifactAndFacts(input: {
       .where(eq(onchainArtifacts.artifactHash, p.artifactHash));
     artifactId = existing?.id;
   }
-  if (!artifactId) return { artifactId: null, evidenceIds: [], rejectedReason: null };
+  if (!artifactId) return { artifactId: null, sourceId, rejectedReason: null };
+  return { artifactId, sourceId, rejectedReason: null };
+}
+
+// Persists ONE retrieval artifact and the deterministic facts derived
+// from it. The artifact row is written once; every fact references it.
+//
+// SOURCE CLASS SAFETY: sourceClass is set to ONCHAIN_VERIFIABLE here, by
+// code, only AFTER containment/binding succeeded on trusted artifact
+// metadata. resolveSourceClass is deliberately NOT consulted — it
+// classifies by hostname, and a canonical URI has no meaningful host. No
+// model and no document can reach this assignment.
+export async function persistOnchainArtifactAndFacts(input: {
+  db: Database | Transaction;
+  jobId: string;
+  artifact: OnchainArtifact;
+  identity: ConfirmedProjectIdentity | null;
+  target: { step: number; component: string };
+}): Promise<PersistOnchainResult> {
+  const { db, jobId, artifact, identity, target } = input;
+  const stored = await persistOnchainArtifact({ db, jobId, artifact, identity });
+  if (stored.rejectedReason !== null) {
+    return { artifactId: null, evidenceIds: [], rejectedReason: stored.rejectedReason };
+  }
+  const { artifactId, sourceId } = stored;
+  if (!artifactId || !sourceId) return { artifactId: null, evidenceIds: [], rejectedReason: null };
+  const p = artifact.provenance;
 
   // MANY facts, ONE artifact.
   const facts = synthesizeOnchainFacts(artifact, target);
