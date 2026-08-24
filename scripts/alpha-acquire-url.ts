@@ -42,15 +42,19 @@ import { eq } from "drizzle-orm";
 
 import { INTERNAL_ALPHA_V1, loadProductConfig } from "../src/server/config/product";
 import { createDatabase } from "../src/server/db/client";
-import { evidence, projects, topics, users } from "../src/server/db/schema";
+import { evidence, projects, researchTraceEvents, topics, users } from "../src/server/db/schema";
 import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import type { EntitlementSnapshot } from "../src/server/domain/types";
 import { reconcileAndPersistComponent } from "../src/server/engine/component-reconciliation-store";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
+import { literallyPresent } from "../src/server/engine/documentary-locator";
 import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
 import { loadModelCostProfile, ModelCostProfileMissingError } from "../src/server/engine/model-cost-profile";
 import { createIsolatedRenderedDocsFetcher } from "../src/server/engine/providers/rendered-docs-isolated";
-import { __setRenderedDocsFetcher } from "../src/server/engine/providers/rendered-docs-fetcher";
+import {
+  __setRenderedDocsFetcher,
+  type RenderedDocument,
+} from "../src/server/engine/providers/rendered-docs-fetcher";
 import type { QueryProposer } from "../src/server/engine/providers/query-proposer";
 import type { SearchGateway } from "../src/server/engine/providers/search-gateway";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
@@ -178,7 +182,26 @@ async function main(): Promise<void> {
     // child process, scrubbed env, deny-by-default egress proxy pinned to
     // the confirmed host, one navigation, zero retry.
     process.env.RENDERED_DOCS_ENABLED = "1";
-    __setRenderedDocsFetcher(createIsolatedRenderedDocsFetcher());
+    // Wrapped in a RECORDER so this script can report the document the
+    // engine actually read, without fetching it a second time. It is a
+    // pass-through: it performs no navigation of its own, alters nothing
+    // it forwards, and the engine sees the isolated fetcher unchanged.
+    // Without it a locator could be reported with no way to show WHERE in
+    // the document it came from, which is the difference between a result
+    // and an assertion.
+    const isolated = createIsolatedRenderedDocsFetcher();
+    // A holder rather than a bare `let`: TypeScript narrows a closure-assigned
+    // local to `never` at the read site, which is exactly wrong here.
+    const captured: { doc: RenderedDocument | null } = { doc: null };
+    __setRenderedDocsFetcher({
+      name: isolated.name,
+      version: isolated.version,
+      async render(target, route) {
+        const doc = await isolated.render(target, route);
+        captured.doc = doc;
+        return doc;
+      },
+    });
 
     // NARROWING injections. Neither can admit anything the engine would
     // otherwise refuse; both only reduce what the run may reach.
@@ -250,6 +273,55 @@ async function main(): Promise<void> {
       console.log("  summary:        " + row.summary);
       console.log("  fragment:       " + row.fragment);
       console.log("  doesNotProve:   " + String(row.doesNotProve));
+      console.log("  LOCATOR:        " + String(row.documentaryLocator));
+    }
+
+    // Every locator the validator REFUSED, and why. A refusal that leaves
+    // no visible record is a refusal nobody can audit.
+    console.log("--- Locator rejections ---");
+    const rejections = await db
+      .select()
+      .from(researchTraceEvents)
+      .where(eq(researchTraceEvents.researchJobId, job.id));
+    const refused = rejections.filter((t) => t.operationType === "LOCATOR_REJECTED");
+    console.log("count:            " + refused.length);
+    for (const r of refused) console.log("  reason:         " + String(r.reasonCode));
+
+    // Where each admitted locator actually came from, read back out of the
+    // document the engine already fetched. No second retrieval.
+    console.log("--- Document provenance ---");
+    const doc = captured.doc;
+    if (!doc) {
+      console.log("  (no rendered document — the static path was used)");
+    } else {
+      console.log("  renderMode:     " + doc.renderMode);
+      console.log("  renderedText:   " + doc.renderedTextLength);
+      console.log("  linkAppendix:   " + String(doc.linkAppendixLength));
+      console.log("  anchors:        " + String(doc.documentLinks?.links.length ?? 0));
+      console.log("  identifiers:    " + String(doc.documentLinks?.identifiers.length ?? 0));
+      const resolved = (doc.documentLinks?.links ?? []).filter((l) => l.resolvedIdentifier);
+      console.log("  resolvedLinks:  " + resolved.length);
+      for (const l of resolved) {
+        console.log("    text=" + l.text + " | resolves=" + String(l.resolvedIdentifier));
+        console.log("      href=" + l.href);
+        console.log("      heading=" + String(l.heading));
+      }
+      for (const row of rows) {
+        const locator = row.documentaryLocator;
+        if (!locator) continue;
+        console.log("  --- locator " + locator);
+        console.log("    literallyPresent: " + literallyPresent(doc.normalizedText, locator));
+        const link = (doc.documentLinks?.links ?? []).find(
+          (l) => l.resolvedIdentifier === locator || l.href.includes(locator),
+        );
+        console.log("    href:             " + (link ? link.href : "(not from an anchor)"));
+        console.log("    visibleText:      " + (link ? link.text : "(none)"));
+        console.log("    heading:          " + (link ? String(link.heading) : "(none)"));
+        console.log("    context:          " + (link ? String(link.context) : "(none)"));
+        for (const line of doc.normalizedText.split("\n").filter((l) => l.includes(locator))) {
+          console.log("    line: " + line.slice(0, 400));
+        }
+      }
     }
 
     // The ordinary S5 path — the same function the controller calls after
