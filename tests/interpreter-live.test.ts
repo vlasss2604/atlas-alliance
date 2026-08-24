@@ -5,8 +5,15 @@ import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 
 // Живой smoke-тест реального Interpreter. Не входит в обязательный прогон:
 // без ANTHROPIC_API_KEY пропускается (CI не зависит от внешнего сервиса
-// и не тратит бюджет). Запуск: ANTHROPIC_API_KEY=... npx vitest run
-// tests/interpreter-live.test.ts
+// и не тратит бюджет).
+//
+// tests/setup-provider-env.ts по умолчанию вычищает провайдерские креды из
+// process.env, чтобы унаследованное окружение разработчика не могло
+// случайно включить живой вызов. Поэтому живой прогон теперь требует
+// ВТОРОГО явного сигнала — живой вызов всегда осознанное действие:
+//
+//   ATLAS_ALLOW_LIVE_PROVIDER_ENV=1 ANTHROPIC_API_KEY=... \
+//     npx vitest run tests/interpreter-live.test.ts
 const enabled = Boolean(process.env.ANTHROPIC_API_KEY);
 const model = process.env.INTERPRETER_MODEL ?? DEFAULT_PRODUCT_CONFIG.interpreter_model;
 

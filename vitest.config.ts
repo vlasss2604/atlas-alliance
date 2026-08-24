@@ -9,6 +9,9 @@ export default defineConfig({
   },
   test: {
     include: ["tests/**/*.test.ts"],
+    // Provider credentials inherited from the developer's ambient shell
+    // must never decide how a test behaves — see tests/setup-provider-env.ts.
+    setupFiles: ["tests/setup-provider-env.ts"],
     // Тесты БД делят одну базу atlas_test — строго последовательно.
     fileParallelism: false,
     sequence: { concurrent: false },
