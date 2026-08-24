@@ -10,13 +10,16 @@
 // the read-only one stays provably read-only.
 //
 // WHAT IT WRITES, and nothing else:
-//   onchain_artifacts          the retrieval itself
+//   onchain_artifacts          the retrieval itself, in
+//                              STANDALONE_STRUCTURED_OBSERVATION mode
 //   onchain_derived_subjects   one row per bound token account
 //
-// Plus the rows those two structurally REQUIRE and cannot exist without:
-// a research_jobs row (artifacts are job-scoped, NOT NULL), the user row
-// that job needs, and the canonical-URI sources row (also NOT NULL). Those
-// are consequences of the schema, not additional purposes.
+// NO synthetic user, research job or source row. An earlier cut created
+// all three purely to satisfy NOT NULL foreign keys, which meant storing
+// rows asserting that a research job had occurred and a document had been
+// fetched — neither true. Provenance that has to lie to be stored is not
+// provenance, so the artifact table now carries an explicit origin mode
+// and this entrypoint uses the standalone one.
 //
 // It writes NO Evidence, NO documentary locator, NO research memory, NO
 // Proof and NO route change — none of those modules is in its import graph,
@@ -36,10 +39,9 @@ loadEnvConfig(process.cwd());
 
 import { eq } from "drizzle-orm";
 
-import { INTERNAL_ALPHA_V1, loadProductConfig } from "../src/server/config/product";
+import { loadProductConfig } from "../src/server/config/product";
 import { createDatabase } from "../src/server/db/client";
-import { onchainArtifacts, onchainDerivedSubjects, projects, topics, users } from "../src/server/db/schema";
-import type { EntitlementSnapshot } from "../src/server/domain/types";
+import { onchainArtifacts, onchainDerivedSubjects, projects } from "../src/server/db/schema";
 import { resolveConfirmedIdentity } from "../src/server/domain/project-identity";
 import { persistOnchainArtifact } from "../src/server/engine/onchain-acquisition";
 import { validateOnchainBinding } from "../src/server/engine/onchain-binding";
@@ -55,8 +57,6 @@ import type {
   OnchainIntent,
   TokenAccountsByOwnerResult,
 } from "../src/server/engine/providers/onchain-types";
-import { createBoss } from "../src/server/jobs/queue";
-import { createResearchJob } from "../src/server/jobs/research-jobs";
 
 async function main(): Promise<void> {
   const wallet = process.argv[2];
@@ -67,7 +67,6 @@ async function main(): Promise<void> {
   }
 
   const { db, pool } = createDatabase();
-  const boss = createBoss();
   try {
     const config = await loadProductConfig(db);
     if (!config.internal_alpha_enabled) {
@@ -142,38 +141,6 @@ async function main(): Promise<void> {
     console.log("mintFilter:       " + anchor + "  (= projectAnchor, not a parameter)");
     console.log("canonicalUri:     " + buildCanonicalOnchainUri(intent));
 
-    // The job the artifact hangs from. Created BEFORE the read so a failed
-    // read leaves an empty job rather than an orphaned artifact.
-    const entitlement: EntitlementSnapshot = {
-      level: "ARI_CORE",
-      capability: "FRESH_RESEARCH",
-      budget: { ...INTERNAL_ALPHA_V1, maxSearchQueries: 0, maxSourceOpens: 1 },
-    };
-    const [topic] = await db.select().from(topics).where(eq(topics.isActive, true));
-    if (!topic) throw new Error("no active topic found — is the database seeded?");
-    const [user] = await db.insert(users).values({}).returning();
-    const createdAt = new Date();
-    const { job } = await createResearchJob(
-      db,
-      boss,
-      {
-        userId: user.id,
-        topicId: topic.id,
-        projectId: project.id,
-        originalQuestion: `which token accounts does ${wallet} hold for ${project.name}'s confirmed mint?`,
-        normalizedTask: {
-          project_slug: project.slug,
-          project_slugs: [project.slug],
-          task: "establish durable provenance for token accounts of a documented wallet",
-        },
-        normalizedTaskHash: `derive-token-accounts-${createdAt.getTime()}`,
-        idempotencyKey: `derive-token-accounts-${user.id}-${createdAt.getTime()}`,
-        entitlement,
-        demoLifetimeProofLimit: config.demo_lifetime_proof_limit,
-      },
-      { skipEnqueue: true },
-    );
-    console.log("jobId:            " + job.id);
 
     console.log("--- performing ONE rpc read ---");
     const artifact = await retriever.retrieve(intent);
@@ -205,7 +172,14 @@ async function main(): Promise<void> {
     // --- persistence -------------------------------------------------
     // The artifact first: a derived subject with no observation behind it
     // is exactly what this design refuses to represent.
-    const stored = await persistOnchainArtifact({ db, jobId: job.id, artifact, identity });
+    // STANDALONE mode: no research job, no user, no source row. The
+    // observation stands on its own provenance.
+    const stored = await persistOnchainArtifact({
+      db,
+      origin: { kind: "STANDALONE_STRUCTURED_OBSERVATION" },
+      artifact,
+      identity,
+    });
     console.log("--- persistence ---");
     console.log("artifactId:       " + String(stored.artifactId));
     console.log("rejectedReason:   " + String(stored.rejectedReason));
@@ -226,9 +200,12 @@ async function main(): Promise<void> {
     const artifactRows = await db
       .select()
       .from(onchainArtifacts)
-      .where(eq(onchainArtifacts.researchJobId, job.id));
+      .where(eq(onchainArtifacts.id, stored.artifactId));
     for (const row of artifactRows) {
       console.log("  artifact:       " + row.id);
+      console.log("    originKind:   " + row.originKind);
+      console.log("    researchJob:  " + String(row.researchJobId));
+      console.log("    sourceId:     " + String(row.sourceId));
       console.log("    method:       " + row.providerMethod);
       console.log("    anchor:       " + row.projectAnchor);
       console.log("    parent:       " + row.subject);
@@ -263,7 +240,6 @@ async function main(): Promise<void> {
     }
     console.log("--- done: one rpc read ---");
   } finally {
-    await boss.stop().catch(() => {});
     await pool.end();
   }
 }

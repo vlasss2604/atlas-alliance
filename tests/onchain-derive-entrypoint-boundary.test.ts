@@ -29,15 +29,20 @@ async function codeOf(url: URL): Promise<string> {
 }
 
 describe("what it writes", () => {
-  it("inserts into NO table other than the two it exists for", async () => {
+  it("inserts into NO table directly, and needs no synthetic rows", async () => {
     const code = await codeOf(ENTRYPOINT);
-    // Direct inserts in this file: the users row a job requires, and
-    // nothing else. Artifacts and derived subjects go through the shared
-    // persistence functions, which is the point — no hand-rolled INSERT.
+    // NO direct insert at all. Artifacts and derived subjects go through the
+    // shared persistence functions, and the standalone origin mode means no
+    // synthetic user, job or source row is needed to satisfy a foreign key —
+    // so there is nothing left for this file to insert.
     const inserts = code.match(/\.insert\(([a-zA-Z]+)\)/g) ?? [];
-    expect(inserts).toEqual([".insert(users)"]);
+    expect(inserts).toEqual([]);
     expect(code).toContain("persistOnchainArtifact(");
     expect(code).toContain("persistDerivedOnchainSubjects(");
+    expect(code).toContain('origin: { kind: "STANDALONE_STRUCTURED_OBSERVATION" }');
+    for (const banned of ["createResearchJob", "createBoss", "EntitlementSnapshot"]) {
+      expect(code, `entrypoint references "${banned}"`).not.toContain(banned);
+    }
   });
 
   it("writes NO Evidence — the fact-writing path is not imported", async () => {

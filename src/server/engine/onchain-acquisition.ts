@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, onchainArtifacts, sources } from "../db/schema";
@@ -339,13 +339,21 @@ export interface PersistArtifactResult {
 // Containment/binding is still checked here: an artifact that fails it is
 // not persisted at all, so there is no path that stores an unbound
 // observation and decides what to do about it afterwards.
+// The two provenance modes a structured observation may be stored in.
+// A discriminated union rather than an optional jobId, so a caller
+// cannot omit the job by accident and land in the standalone mode: it
+// has to name the mode it wants.
+export type OnchainArtifactOrigin =
+  | { kind: "RESEARCH_JOB"; jobId: string }
+  | { kind: "STANDALONE_STRUCTURED_OBSERVATION" };
+
 export async function persistOnchainArtifact(input: {
   db: Database | Transaction;
-  jobId: string;
+  origin: OnchainArtifactOrigin;
   artifact: OnchainArtifact;
   identity: ConfirmedProjectIdentity | null;
 }): Promise<PersistArtifactResult> {
-  const { db, jobId, artifact, identity } = input;
+  const { db, origin, artifact, identity } = input;
 
   const containment = evaluateStructuredContainment(artifact, identity);
   if (!containment.contained) {
@@ -353,22 +361,29 @@ export async function persistOnchainArtifact(input: {
   }
 
   const p = artifact.provenance;
+  const jobId = origin.kind === "RESEARCH_JOB" ? origin.jobId : null;
 
-  // The canonical URI's shared identity row. sourceType ONCHAIN is
+  // The canonical URI's shared identity row — created ONLY for a
+  // research-job artifact. A standalone observation has no document to
+  // point at, and inventing a sources row to say otherwise is exactly the
+  // false assertion this mode exists to avoid. sourceType ONCHAIN is
   // descriptive only; it grants no class by itself.
-  const urlHash = hashUrl(artifact.canonicalUri);
-  const [existingSource] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
-  let sourceId = existingSource?.id;
-  if (!sourceId) {
-    const [created] = await db
-      .insert(sources)
-      .values({ url: artifact.canonicalUri, urlHash, sourceType: "ONCHAIN" })
-      .onConflictDoNothing({ target: sources.urlHash })
-      .returning({ id: sources.id });
-    if (created) sourceId = created.id;
-    else {
-      const [afterRace] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
-      sourceId = afterRace!.id;
+  let sourceId: string | null = null;
+  if (origin.kind === "RESEARCH_JOB") {
+    const urlHash = hashUrl(artifact.canonicalUri);
+    const [existingSource] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
+    sourceId = existingSource?.id ?? null;
+    if (!sourceId) {
+      const [created] = await db
+        .insert(sources)
+        .values({ url: artifact.canonicalUri, urlHash, sourceType: "ONCHAIN" })
+        .onConflictDoNothing({ target: sources.urlHash })
+        .returning({ id: sources.id });
+      if (created) sourceId = created.id;
+      else {
+        const [afterRace] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
+        sourceId = afterRace!.id;
+      }
     }
   }
 
@@ -377,6 +392,7 @@ export async function persistOnchainArtifact(input: {
   const [insertedArtifact] = await db
     .insert(onchainArtifacts)
     .values({
+      originKind: origin.kind,
       researchJobId: jobId,
       sourceId,
       canonicalUri: artifact.canonicalUri,
@@ -400,17 +416,38 @@ export async function persistOnchainArtifact(input: {
       artifactHash: p.artifactHash,
       normalizedResult: JSON.parse(artifact.normalizedText),
     })
-    .onConflictDoNothing({
-      target: [onchainArtifacts.researchJobId, onchainArtifacts.artifactHash],
-    })
+    // A standalone row's job id is NULL, and Postgres treats NULLs as
+    // distinct — so the job-scoped arbiter constrains nothing there. The
+    // partial unique index on artifact_hash is what makes a standalone
+    // replay idempotent, and it is named explicitly for that mode.
+    .onConflictDoNothing(
+      origin.kind === "RESEARCH_JOB"
+        ? { target: [onchainArtifacts.researchJobId, onchainArtifacts.artifactHash] }
+        : {
+            target: onchainArtifacts.artifactHash,
+            where: sql`${onchainArtifacts.researchJobId} IS NULL`,
+          },
+    )
     .returning({ id: onchainArtifacts.id });
 
   let artifactId = insertedArtifact?.id;
   if (!artifactId) {
+    // SCOPED to the same mode. Looking up by hash alone would let a
+    // research-job insert that hit a conflict resolve to a STANDALONE
+    // row with identical content — a different row, in a different mode,
+    // silently returned as if it were this job's. The hash is a content
+    // address, so identical content across modes is expected, not rare.
     const [existing] = await db
       .select({ id: onchainArtifacts.id })
       .from(onchainArtifacts)
-      .where(eq(onchainArtifacts.artifactHash, p.artifactHash));
+      .where(
+        and(
+          eq(onchainArtifacts.artifactHash, p.artifactHash),
+          jobId === null
+            ? isNull(onchainArtifacts.researchJobId)
+            : eq(onchainArtifacts.researchJobId, jobId),
+        ),
+      );
     artifactId = existing?.id;
   }
   if (!artifactId) return { artifactId: null, sourceId, rejectedReason: null };
@@ -433,7 +470,15 @@ export async function persistOnchainArtifactAndFacts(input: {
   target: { step: number; component: string };
 }): Promise<PersistOnchainResult> {
   const { db, jobId, artifact, identity, target } = input;
-  const stored = await persistOnchainArtifact({ db, jobId, artifact, identity });
+  // Facts require a job — evidence.research_job_id is NOT NULL — so this
+  // path is RESEARCH_JOB by construction. That is also why a standalone
+  // artifact cannot become Evidence: there is no route from it to here.
+  const stored = await persistOnchainArtifact({
+    db,
+    origin: { kind: "RESEARCH_JOB", jobId },
+    artifact,
+    identity,
+  });
   if (stored.rejectedReason !== null) {
     return { artifactId: null, evidenceIds: [], rejectedReason: stored.rejectedReason };
   }

@@ -676,11 +676,15 @@ describe("persistence — one artifact, many facts", () => {
       expect(row.sourceClass).toBe("ONCHAIN_VERIFIABLE");
       expect(row.entityBinding).toBe("CONFIRMED");
     }
-    // One shared canonical-URI source row, not one per fact.
+    // One shared canonical-URI source row, not one per fact. A
+    // RESEARCH_JOB artifact always has one — the origin CHECK requires it —
+    // so the non-null assertion here is the invariant, not an assumption.
+    expect(artifactRows[0].originKind).toBe("RESEARCH_JOB");
+    expect(artifactRows[0].sourceId).not.toBeNull();
     const srcRows = await ctx.db
       .select()
       .from(sources)
-      .where(eq(sources.id, artifactRows[0].sourceId));
+      .where(eq(sources.id, artifactRows[0].sourceId!));
     expect(srcRows.length).toBe(1);
   });
 

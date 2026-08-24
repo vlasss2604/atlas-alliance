@@ -18,6 +18,7 @@ import type { ClaimReasonCode, ClaimRequirementResult, MechanismGapRef } from ".
 
 import {
   componentReconciliationStatus,
+  onchainArtifactOrigin,
   onchainDerivationMethod,
   onchainDerivedSubjectKind,
   researchAttemptStatus,
@@ -328,13 +329,22 @@ export const onchainArtifacts = pgTable(
     id: uuid("id")
       .primaryKey()
       .default(sql`gen_random_uuid()`),
-    researchJobId: uuid("research_job_id")
-      .notNull()
-      .references(() => researchJobs.id, { onDelete: "cascade" }),
-    // The canonical URI's shared identity row.
-    sourceId: uuid("source_id")
-      .notNull()
-      .references(() => sources.id, { onDelete: "restrict" }),
+    // Which of the two provenance modes this row is in. Defaulting to
+    // RESEARCH_JOB is the fail-closed choice: a writer that omits the
+    // mode gets the one that REQUIRES a job and a source, so an omission
+    // fails loudly rather than silently creating an unattached row.
+    originKind: onchainArtifactOrigin("origin_kind").notNull().default("RESEARCH_JOB"),
+    // Nullable ONLY for a standalone structured observation, and in that
+    // mode it must be null — see ckOnchainArtifactsOrigin below. The two
+    // modes are mutually exclusive, not a spectrum.
+    researchJobId: uuid("research_job_id").references(() => researchJobs.id, {
+      onDelete: "cascade",
+    }),
+    // The canonical URI's shared identity row. Same rule: present for a
+    // job artifact, absent for a standalone one. A standalone read has no
+    // document to point at, and inventing a sources row to say otherwise
+    // is the lie this mode exists to avoid.
+    sourceId: uuid("source_id").references(() => sources.id, { onDelete: "restrict" }),
     canonicalUri: text("canonical_uri").notNull(),
     // --- identity / subject (AMENDMENT C: anchor and subject stay distinct)
     chain: text("chain").notNull(),
@@ -371,6 +381,31 @@ export const onchainArtifacts = pgTable(
     // Replaying the identical observation within one job is a no-op rather
     // than a duplicate row — same discipline as evidence.extraction_unit_key.
     uniqueIndex("uq_onchain_artifacts_job_artifact").on(t.researchJobId, t.artifactHash),
+    // Postgres treats NULLs as distinct, so the index above constrains
+    // nothing once the job id is null. Content-addressing the standalone
+    // rows keeps a re-observation of identical content a no-op.
+    uniqueIndex("uq_onchain_artifacts_standalone_hash")
+      .on(t.artifactHash)
+      .where(sql`${t.researchJobId} IS NULL`),
+    // Every invalid combination of mode and links is unrepresentable,
+    // rather than merely discouraged.
+    check(
+      "ck_onchain_artifacts_origin",
+      sql`(${t.originKind} = 'RESEARCH_JOB' AND ${t.researchJobId} IS NOT NULL AND ${t.sourceId} IS NOT NULL)
+        OR (${t.originKind} = 'STANDALONE_STRUCTURED_OBSERVATION' AND ${t.researchJobId} IS NULL AND ${t.sourceId} IS NULL)`,
+    ),
+    // ABSENCE OF A JOB IS NEVER ABSENCE OF PROVENANCE. Required of every
+    // artifact in both modes — what an artifact has always had to carry,
+    // now an invariant instead of a convention.
+    check(
+      "ck_onchain_artifacts_provenance_complete",
+      sql`length(${t.canonicalUri}) > 0 AND length(${t.chain}) > 0 AND length(${t.network}) > 0
+        AND length(${t.projectAnchor}) > 0 AND length(${t.subject}) > 0 AND length(${t.subjectKind}) > 0
+        AND length(${t.intentKind}) > 0 AND length(${t.retrievalMethod}) > 0
+        AND length(${t.providerId}) > 0 AND length(${t.providerMethod}) > 0
+        AND length(${t.finality}) > 0 AND length(${t.rawResponseHash}) > 0
+        AND length(${t.artifactHash}) > 0 AND ${t.slot} >= 0`,
+    ),
   ],
 );
 

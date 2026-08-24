@@ -211,6 +211,13 @@
       "when": 1787598500000,
       "tag": "0029_onchain_derived_subjects",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1787598600000,
+      "tag": "0030_onchain_artifact_origin",
+      "breakpoints": true
     }
   ]
 }

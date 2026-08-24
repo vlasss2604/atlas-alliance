@@ -207,6 +207,16 @@ export const evidenceOfficiality = pgEnum("evidence_officiality", [
 // What KIND of thing a derived on-chain subject is. Deliberately not
 // reusing OnchainSubjectKind: that describes what an intent reads,
 // this describes what a confirmed observation produced.
+// How a structured on-chain artifact came to exist. Two modes, never
+// blurred: one belongs to a research job, the other stands on its own.
+// A standalone observation must not have to invent a job, a user and a
+// source row merely to satisfy foreign keys — rows that would assert
+// research happened when it did not.
+export const onchainArtifactOrigin = pgEnum("onchain_artifact_origin", [
+  "RESEARCH_JOB",
+  "STANDALONE_STRUCTURED_OBSERVATION",
+]);
+
 export const onchainDerivedSubjectKind = pgEnum("onchain_derived_subject_kind", [
   "TOKEN_ACCOUNT",
 ]);
