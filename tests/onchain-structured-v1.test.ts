@@ -36,6 +36,11 @@ import {
   MAX_SIGNATURES_PER_INTENT,
   SOLANA_ALLOWED_RPC_METHODS,
 } from "../src/server/engine/providers/onchain-solana";
+import {
+  createHttpsRpcTransport,
+  createProductionOnchainRetriever,
+  OnchainTransportError,
+} from "../src/server/engine/providers/onchain-transport";
 import { deriveSourceType, resolveSourceClass } from "../src/server/engine/source-authority";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
@@ -67,8 +72,11 @@ const SPL_TOKEN = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
 
 const identity: ConfirmedProjectIdentity = { chain: "solana", tokenAddress: MINT, ticker: "TST" };
 
+// Fixtures mirror a REAL node: a JSON-RPC 2.0 envelope, not a bare
+// result. An earlier cut of these tests passed bare payloads and hid the
+// fact that the adapter never unwrapped the envelope.
 function fixtureTransport(payload: unknown): OnchainRpcTransport {
-  return { async call() { return JSON.stringify(payload); } };
+  return { async call() { return JSON.stringify({ jsonrpc: "2.0", id: 1, result: payload }); } };
 }
 
 function adapterWith(payload: unknown) {
@@ -282,6 +290,32 @@ describe("adapter safety", () => {
         finality: "finalized",
       }).retrieve(supplyIntent()),
     ).rejects.toThrow(OnchainRetrieverUnavailableError);
+  });
+
+  it("a JSON-RPC error envelope is a provider failure, never a fact", async () => {
+    const adapter = createSolanaOnchainAdapter({
+      transport: {
+        async call() {
+          return JSON.stringify({
+            jsonrpc: "2.0",
+            id: 1,
+            error: { code: -32602, message: "Invalid param" },
+          });
+        },
+      },
+      providerId: "fixture-rpc",
+      finality: "finalized",
+    });
+    await expect(adapter.retrieve(supplyIntent())).rejects.toThrow(OnchainRetrieverUnavailableError);
+  });
+
+  it("a response that is not a JSON-RPC envelope is rejected", async () => {
+    const adapter = createSolanaOnchainAdapter({
+      transport: { async call() { return JSON.stringify({ context: { slot: 1 } }); } },
+      providerId: "fixture-rpc",
+      finality: "finalized",
+    });
+    await expect(adapter.retrieve(supplyIntent())).rejects.toThrow(OnchainRetrieverUnavailableError);
   });
 
   it("a malformed address never reaches the transport", async () => {
@@ -785,6 +819,60 @@ describe("budget — one bounded operation, one reservation", () => {
     });
     expect(outcome.evidenceIds).toEqual([]);
     expect(outcome.observations).toContain("ONCHAIN_RETRIEVAL_FAILED");
+  });
+});
+
+describe("production transport — configuration and secret containment", () => {
+  const ENV = "SOLANA_MAINNET_RPC_URL";
+  const original = process.env[ENV];
+  afterAll(() => {
+    if (original === undefined) delete process.env[ENV];
+    else process.env[ENV] = original;
+  });
+
+  it("an unlisted (chain, network) is unreachable no matter what is configured", () => {
+    process.env[ENV] = "https://rpc.example.test";
+    expect(createProductionOnchainRetriever("solana", "devnet")).toBeNull();
+    expect(createProductionOnchainRetriever("ethereum", "mainnet")).toBeNull();
+  });
+
+  it("an unset or unacceptable endpoint yields no retriever, never a partial one", () => {
+    delete process.env[ENV];
+    expect(createProductionOnchainRetriever("solana", "mainnet")).toBeNull();
+    process.env[ENV] = "http://rpc.example.test"; // not https
+    expect(createProductionOnchainRetriever("solana", "mainnet")).toBeNull();
+    process.env[ENV] = "https://user:secret@rpc.example.test"; // credential in userinfo
+    expect(createProductionOnchainRetriever("solana", "mainnet")).toBeNull();
+  });
+
+  it("a configured endpoint yields a retriever whose provider label leaks no part of the URL", () => {
+    // A key embedded in the path is the common provider shape, so the URL
+    // itself must be treated as a credential.
+    process.env[ENV] = "https://rpc.example.test/SUPER_SECRET_KEY_VALUE";
+    const retriever = createProductionOnchainRetriever("solana", "mainnet");
+    expect(retriever).not.toBeNull();
+    expect(retriever!.name).toBe("solana-rpc:solana-mainnet-rpc");
+    const serialized = JSON.stringify({ name: retriever!.name });
+    expect(serialized).not.toContain("SUPER_SECRET_KEY_VALUE");
+    expect(serialized).not.toContain("rpc.example.test");
+  });
+
+  it("transport errors never carry the endpoint or the response body", () => {
+    const err = new OnchainTransportError("HTTP_ERROR", "solana-mainnet-rpc");
+    expect(err.message).toContain("solana-mainnet-rpc");
+    expect(err.message).not.toContain("http");
+    expect(err.message).not.toContain("SECRET");
+  });
+
+  it("the transport interface exposes no way to supply a URL", () => {
+    const transport = createHttpsRpcTransport(
+      "https://rpc.example.test",
+      "label",
+      { timeoutMs: 1 },
+    );
+    // call(method, params) only — there is no endpoint parameter.
+    expect(transport.call.length).toBe(2);
+    expect(Object.keys(transport)).toEqual(["call"]);
   });
 });
 

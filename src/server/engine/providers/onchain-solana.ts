@@ -64,6 +64,15 @@ export const MAX_SIGNATURES_PER_INTENT = 25;
 // fields are ignored; a missing or malformed required field is a typed
 // failure, never a default.
 
+// JSON-RPC 2.0 envelope. `result` may legitimately be null (an account or
+// transaction that does not exist), so its presence is not required — the
+// discriminator is the absence of `error`.
+const envelopeSchema = z.object({
+  jsonrpc: z.literal("2.0"),
+  result: z.unknown().optional(),
+  error: z.unknown().optional(),
+});
+
 const uiAmount = z.object({
   amount: z.string().regex(/^\d+$/),
   decimals: z.number().int().min(0).max(32),
@@ -326,12 +335,25 @@ export function createSolanaOnchainAdapter(deps: SolanaAdapterDeps) {
       const retrievedAt = new Date();
 
       const rawText = await deps.transport.call(method, params);
-      let raw: unknown;
+      let envelope: unknown;
       try {
-        raw = JSON.parse(rawText);
+        envelope = JSON.parse(rawText);
       } catch {
         throw new OnchainRetrieverUnavailableError("rpc response is not valid JSON");
       }
+      // JSON-RPC 2.0 envelope. A node answers {jsonrpc,id,result} on
+      // success and {jsonrpc,id,error} on failure — an `error` body is a
+      // provider failure, never a result, and must not be normalized into
+      // a fact. The error's own message is deliberately not interpolated:
+      // it is provider-controlled text.
+      const rpc = envelopeSchema.safeParse(envelope);
+      if (!rpc.success) {
+        throw new OnchainRetrieverUnavailableError("rpc response is not a JSON-RPC 2.0 envelope");
+      }
+      if (rpc.data.error !== undefined) {
+        throw new OnchainRetrieverUnavailableError(`rpc returned an error for ${method}`);
+      }
+      const raw = rpc.data.result;
 
       let normalized: { result: OnchainResult; slot: number };
       try {
