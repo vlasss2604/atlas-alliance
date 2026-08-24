@@ -21,7 +21,12 @@ export type OnchainIntentKind =
   | "ACCOUNT_INFO"
   | "TOKEN_ACCOUNT_BALANCE"
   | "SIGNATURES_FOR_ADDRESS"
-  | "TRANSACTION_DETAIL";
+  | "TRANSACTION_DETAIL"
+  // Which SPL token accounts a given wallet holds FOR ONE SPECIFIC MINT.
+  // The mint filter is not a parameter a caller chooses: it is the
+  // intent's projectAnchor, so this intent structurally cannot ask about
+  // any mint other than the project's confirmed identity.
+  | "TOKEN_ACCOUNTS_BY_OWNER";
 
 // AMENDMENT C — the project ANCHOR and the queried SUBJECT are distinct
 // and both are preserved. The anchor is the project's confirmed identity
@@ -77,6 +82,41 @@ export interface TokenAccountBalanceResult {
   decimals: number;
 }
 
+// ONE SPL token account, as the node parsed it and as this adapter
+// re-validated it. Every field here was checked against the REQUEST
+// before the row was admitted: the account address is well-formed, its
+// program owner is an SPL Token program, and the parsed owner and mint
+// equal the ones asked for. An entry that failed any of those is not
+// present at all — it is dropped, never downgraded.
+export interface TokenAccountRef {
+  // The token account's own pubkey — a THIRD address, distinct from both
+  // the project anchor and the documentary wallet that owns it.
+  account: string;
+  // Echoed back from the parsed response, having been checked equal to
+  // the requested owner. Kept rather than assumed so the artifact records
+  // what the node actually said.
+  owner: string;
+  mint: string;
+  // Integer string, exactly as served. Never a number: a u64 balance
+  // exceeds what a double can represent without loss, and a silently
+  // rounded balance is a wrong fact that looks right.
+  amountRaw: string;
+  decimals: number;
+}
+
+export interface TokenAccountsByOwnerResult {
+  kind: "TOKEN_ACCOUNTS_BY_OWNER";
+  // The wallet asked about — an admitted documentary locator.
+  owner: string;
+  // The confirmed project mint the query was filtered to.
+  mint: string;
+  accounts: TokenAccountRef[];
+  // How many returned entries failed binding and were dropped. An
+  // observation about the RESPONSE, not about the chain: it exists so a
+  // silently filtered result cannot be mistaken for a clean one.
+  rejectedCount: number;
+}
+
 export interface SignatureRef {
   signature: string;
   slot: number;
@@ -130,6 +170,7 @@ export interface TransactionDetailResult {
 }
 
 export type OnchainResult =
+  | TokenAccountsByOwnerResult
   | TokenSupplyResult
   | AccountInfoResult
   | TokenAccountBalanceResult

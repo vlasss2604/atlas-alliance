@@ -85,6 +85,11 @@ function responseSubject(result: OnchainResult): string | null {
       return result.account;
     case "SIGNATURES_FOR_ADDRESS":
       return result.address;
+    // The subject is the WALLET that was asked about, not any token
+    // account the query returned. A discovered account is an answer,
+    // never the thing whose identity the request is bound to.
+    case "TOKEN_ACCOUNTS_BY_OWNER":
+      return result.owner;
     case "TRANSACTION_DETAIL":
       return result.signature;
     default:

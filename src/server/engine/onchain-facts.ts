@@ -45,6 +45,12 @@ export const ONCHAIN_DOES_NOT_PROVE = {
     "These are transactions involving the address at the observed slot range. It does not establish what any of " +
     "them did, that they relate to any particular mechanism, or that the list is complete beyond the queried " +
     "window.",
+  TOKEN_ACCOUNTS_BY_OWNER:
+    "This shows which SPL token accounts the queried wallet holds for the queried mint, and their balances, at " +
+    "the observed slot. It does not establish how any balance got there, who funded it, who controls the " +
+    "wallet beyond the owner field the RPC reports, what role the wallet plays in any mechanism, that any " +
+    "token was burned or bought back, or that circulating or total supply changed. A balance is a position at " +
+    "a moment, never a history and never a purpose.",
   TRANSACTION_DETAIL:
     "This is the on-chain content of one transaction. It does not establish the economic purpose of the " +
     "transaction, who funded it, or that it belongs to any particular mechanism or policy.",
@@ -156,6 +162,29 @@ export function synthesizeOnchainFacts(
           ONCHAIN_DOES_NOT_PROVE.TOKEN_ACCOUNT_BALANCE,
         ),
       ];
+
+    case "TOKEN_ACCOUNTS_BY_OWNER": {
+      // Absence is not a fact: a wallet holding no token account for
+      // this mint yields nothing, never a claim that it holds none.
+      if (r.accounts.length === 0) return [];
+      // ONE fact per token account. They are independent positions and
+      // collapsing them into a total would invent an aggregate the
+      // chain never reported.
+      return r.accounts.map((a, index) =>
+        fact(
+          target,
+          `Wallet ${r.owner} holds SPL token account ${a.account} for mint ${r.mint} with balance ` +
+            `${formatTokenAmount(a.amountRaw, a.decimals)} (raw ${a.amountRaw}, ${a.decimals} decimals) ` +
+            `as observed at slot ${slot}.`,
+          // A PER-ACCOUNT fragment, not the whole result: two accounts of
+          // the same wallet must not quote identical bytes, or they would
+          // deduplicate into one fact downstream.
+          JSON.stringify({ owner: r.owner, mint: r.mint, account: r.accounts[index] }),
+          ONCHAIN_DOES_NOT_PROVE.TOKEN_ACCOUNTS_BY_OWNER,
+          { relationship: "CONTEXT" },
+        ),
+      );
+    }
 
     case "SIGNATURES_FOR_ADDRESS":
       if (r.signatures.length === 0) return []; // absence is not a fact

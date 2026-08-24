@@ -266,12 +266,17 @@ describe("source class safety — a URI can never manufacture ONCHAIN_VERIFIABLE
 });
 
 describe("adapter safety", () => {
-  it("only the five approved RPC methods exist, and no pass-through", () => {
+  it("only the six approved RPC methods exist, and no pass-through", () => {
+    // A CLOSED allowlist, enumerated here so adding a method is a
+    // deliberate, reviewed act rather than a side effect of adding an
+    // intent. getTokenAccountsByOwner was added under owner authorization
+    // for typed token-account discovery; the guard's point is unchanged.
     expect([...SOLANA_ALLOWED_RPC_METHODS].sort()).toEqual(
       [
         "getAccountInfo",
         "getSignaturesForAddress",
         "getTokenAccountBalance",
+        "getTokenAccountsByOwner",
         "getTokenSupply",
         "getTransaction",
       ].sort(),

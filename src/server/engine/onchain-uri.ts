@@ -36,6 +36,10 @@ const INTENT_PATH: Record<OnchainIntent["kind"], string> = {
   TOKEN_ACCOUNT_BALANCE: "balance",
   SIGNATURES_FOR_ADDRESS: "signatures",
   TRANSACTION_DETAIL: "detail",
+  // The SUBJECT is the wallet asked about; the token accounts it turns
+  // out to hold are in the RESULT, never in the URI. A third address
+  // discovered by a query does not belong in the identity of the query.
+  TOKEN_ACCOUNTS_BY_OWNER: "token-accounts",
 };
 
 export function buildCanonicalOnchainUri(intent: OnchainIntent): string {

@@ -6,6 +6,7 @@ import { buildCanonicalOnchainUri } from "../onchain-uri";
 import {
   brandOnchainArtifact,
   type BurnInstructionRef,
+  type TokenAccountRef,
   type OnchainArtifact,
   type OnchainIntent,
   type OnchainResult,
@@ -73,6 +74,7 @@ const METHOD_FOR_INTENT = {
   TOKEN_ACCOUNT_BALANCE: "getTokenAccountBalance",
   SIGNATURES_FOR_ADDRESS: "getSignaturesForAddress",
   TRANSACTION_DETAIL: "getTransaction",
+  TOKEN_ACCOUNTS_BY_OWNER: "getTokenAccountsByOwner",
 } as const satisfies Record<OnchainIntent["kind"], string>;
 
 export const SOLANA_ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set(
@@ -157,6 +159,35 @@ const signaturesSchema = z.array(
     // here must yield null, not a parse failure that loses the whole page.
     memo: z.unknown().nullable().optional(),
   }),
+);
+
+// getTokenAccountsByOwner (jsonParsed). Every field the binding check
+// below needs is REQUIRED here — a missing owner, mint or amount is a
+// malformed entry, not a defaulted one. `amount` is a STRING in the RPC
+// response and is kept a string all the way through: parsing a u64
+// balance into a double loses precision silently, and a silently
+// rounded balance is a wrong fact that looks right.
+const tokenAccountsByOwnerSchema = contextual(
+  z.array(
+    z.object({
+      pubkey: z.string(),
+      account: z.object({
+        owner: z.string(),
+        data: z.object({
+          parsed: z.object({
+            info: z.object({
+              owner: z.string(),
+              mint: z.string(),
+              tokenAmount: z.object({
+                amount: z.string(),
+                decimals: z.number().int().min(0),
+              }),
+            }),
+          }),
+        }),
+      }),
+    }),
+  ),
 );
 
 const parsedInstructionSchema = z.object({
@@ -299,6 +330,17 @@ export function rpcParamsFor(
         intent.subject,
         { encoding: "jsonParsed", maxSupportedTransactionVersion: 0, commitment },
       ];
+    // getTokenAccountsByOwner takes owner, a FILTER, then config. The
+    // filter's mint is intent.projectAnchor and nothing else — there is
+    // no parameter here a caller could point at a different mint, so
+    // "only the confirmed project mint" is a property of the shape
+    // rather than a rule someone has to remember.
+    case "TOKEN_ACCOUNTS_BY_OWNER":
+      return [
+        intent.subject,
+        { mint: intent.projectAnchor },
+        { encoding: "jsonParsed", commitment },
+      ];
   }
 }
 
@@ -342,6 +384,44 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           mint: null,
           amountRaw: parsed.value.amount,
           decimals: parsed.value.decimals,
+        },
+      };
+    }
+    case "TOKEN_ACCOUNTS_BY_OWNER": {
+      const parsed = tokenAccountsByOwnerSchema.parse(raw);
+      const accounts: TokenAccountRef[] = [];
+      let rejectedCount = 0;
+      for (const entry of parsed.value) {
+        const info = entry.account.data.parsed.info;
+        // Four independent checks, every one of them against what WE
+        // asked for. A node that answers about a different owner, a
+        // different mint, or an account owned by something that is not
+        // an SPL Token program has not answered our question — and an
+        // entry that fails is DROPPED, never included with a caveat.
+        const wellFormed = BASE58_ADDRESS.test(entry.pubkey);
+        const splOwned = SPL_TOKEN_PROGRAM_IDS.has(entry.account.owner);
+        const ownerMatches = info.owner === intent.subject;
+        const mintMatches = info.mint === intent.projectAnchor;
+        if (!wellFormed || !splOwned || !ownerMatches || !mintMatches) {
+          rejectedCount += 1;
+          continue;
+        }
+        accounts.push({
+          account: entry.pubkey,
+          owner: info.owner,
+          mint: info.mint,
+          amountRaw: info.tokenAmount.amount,
+          decimals: info.tokenAmount.decimals,
+        });
+      }
+      return {
+        slot: parsed.context.slot,
+        result: {
+          kind: "TOKEN_ACCOUNTS_BY_OWNER",
+          owner: intent.subject,
+          mint: intent.projectAnchor,
+          accounts,
+          rejectedCount,
         },
       };
     }
