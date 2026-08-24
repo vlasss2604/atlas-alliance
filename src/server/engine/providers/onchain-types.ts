@@ -82,6 +82,19 @@ export interface SignatureRef {
   slot: number;
   blockTime: number | null;
   err: boolean;
+  // The transaction's SPL Memo, when it carries one. Present in the RPC
+  // response and previously discarded by the typed projection, which made
+  // it impossible to tell a labelled operational transaction apart from an
+  // unlabelled one without fetching each transaction in full — the
+  // expensive read this field exists to avoid needing.
+  //
+  // UNTRUSTED, AND NOT A FACT. A memo is arbitrary text written by
+  // whoever signed the transaction. Anyone can write "daily burn" into
+  // one. It is a HINT for choosing which transaction is worth fetching,
+  // never evidence of what a transaction did — that remains the job of
+  // decoding the actual instructions. Bounded on the way in, because it
+  // is externally controlled content entering artifact text.
+  memo: string | null;
 }
 
 export interface SignaturesForAddressResult {

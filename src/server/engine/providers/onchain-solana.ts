@@ -129,12 +129,33 @@ const accountInfoSchema = contextual(
     .nullable(),
 );
 
+// Hard bound on memo text entering an artifact. A memo is arbitrary,
+// externally-authored content; without a ceiling a single transaction
+// could inflate normalizedText without limit. Truncation is visible in the
+// value rather than silent, so a reader can never mistake a cut string for
+// the whole memo.
+const MAX_MEMO_CHARS = 256;
+const MEMO_TRUNCATION_SUFFIX = "…[truncated]";
+
+function boundMemo(raw: string | null | undefined): string | null {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length <= MAX_MEMO_CHARS) return trimmed;
+  return trimmed.slice(0, MAX_MEMO_CHARS) + MEMO_TRUNCATION_SUFFIX;
+}
+
 const signaturesSchema = z.array(
   z.object({
     signature: z.string(),
     slot: z.number().int().min(0),
     blockTime: z.number().int().nullable().optional(),
     err: z.unknown().nullable().optional(),
+    // Declared so it survives the projection. zod strips undeclared keys,
+    // which is why this field was silently discarded before. Typed as
+    // unknown-nullable rather than string: a node that returns a non-string
+    // here must yield null, not a parse failure that loses the whole page.
+    memo: z.unknown().nullable().optional(),
   }),
 );
 
@@ -339,6 +360,7 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
             slot: s.slot,
             blockTime: s.blockTime ?? null,
             err: s.err !== null && s.err !== undefined,
+            memo: boundMemo(typeof s.memo === "string" ? s.memo : null),
           })),
         },
       };
