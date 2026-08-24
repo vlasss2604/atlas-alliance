@@ -199,6 +199,16 @@ export const evidenceOfficiality = pgEnum("evidence_officiality", [
 // (не ONCHAIN_VERIFIABLE); CONFIRMED — адрес найден в URL как отдельный
 // сегмент/параметр; UNVERIFIED — подтверждённой идентичности нет либо
 // URL её не называет (fail-closed default для on-chain).
+// Shape of ONE admitted documentary locator. The same two-value
+// vocabulary documentary-locator.ts computes — stated once in the
+// database so a stored row cannot claim a shape the validator has no
+// notion of. A shape is a claim about LENGTH AND ALPHABET, never about
+// which chain or project an identifier belongs to.
+export const evidenceLocatorShape = pgEnum("evidence_locator_shape", [
+  "ADDRESS_LIKE",
+  "SIGNATURE_LIKE",
+]);
+
 export const evidenceEntityBinding = pgEnum("evidence_entity_binding", [
   "CONFIRMED",
   "UNVERIFIED",

@@ -16,10 +16,12 @@
 // than honoured.
 //
 // THE SUBJECT MUST BE A CONFIRMED DOCUMENTARY LOCATOR, read from
-// evidence.documentary_locator — a value the deterministic validator
-// already admitted — never from a model and never merely from the command
-// line. The ANCHOR stays the project's confirmed identity: listing an
-// account's transactions never makes that account the project's.
+// the admitted documentary locators — a value the deterministic validator
+// confirmed — never from a model and never merely from the command line.
+// The lookup answers for a fact carrying SEVERAL locators as well as for a
+// historical scalar row, so one address can be targeted specifically. The
+// ANCHOR stays the project's confirmed identity: listing an account's
+// transactions never makes that account the project's.
 //
 // IT WRITES NOTHING. Read-and-report only; the persistence path is
 // deliberately not invoked.
@@ -42,8 +44,9 @@ loadEnvConfig(process.cwd());
 import { eq } from "drizzle-orm";
 
 import { createDatabase } from "../src/server/db/client";
-import { evidence, projects } from "../src/server/db/schema";
+import { projects } from "../src/server/db/schema";
 import { resolveConfirmedIdentity } from "../src/server/domain/project-identity";
+import { findAdmittedLocator } from "../src/server/engine/documentary-locator-store";
 import { validateOnchainBinding } from "../src/server/engine/onchain-binding";
 import { synthesizeOnchainFacts } from "../src/server/engine/onchain-facts";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
@@ -83,10 +86,7 @@ async function main(): Promise<void> {
 
     // PROVENANCE GATE — same rule as the account check: an address with no
     // documentary record of where it came from is not a subject.
-    const supporting = await db
-      .select({ url: evidence.retrievedUrl, summary: evidence.summary })
-      .from(evidence)
-      .where(eq(evidence.documentaryLocator, address));
+    const supporting = await findAdmittedLocator(db, address);
     if (supporting.length === 0) {
       console.error(
         "[signature-discovery] refusing — this address is not a confirmed documentary locator in Evidence.",
@@ -96,7 +96,11 @@ async function main(): Promise<void> {
     console.log("projectAnchor:    " + anchor);
     console.log("subject:          " + address);
     console.log("documentedBy:     " + supporting.length + " evidence row(s)");
-    for (const row of supporting) console.log("  " + row.url + " :: " + String(row.summary));
+    for (const row of supporting) {
+      console.log("  " + row.retrievedUrl + " :: " + String(row.summary));
+      console.log("    authority:  " + String(row.sourceClass) + " / " + String(row.officiality));
+      console.log("    evidenceId: " + row.evidenceId + "  shape: " + String(row.shape));
+    }
   } finally {
     // Closed BEFORE the read: the RPC call runs with no open handle to
     // ATLAS data, and nothing after this point can write.

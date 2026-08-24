@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import {
+  boolean,
   check,
   index,
   jsonb,
@@ -15,6 +16,7 @@ import { projects, topics } from "./catalog";
 import {
   evidenceDirectness,
   evidenceEntityBinding,
+  evidenceLocatorShape,
   evidenceOfficiality,
   evidenceRelationship,
   evidenceSourceClass,
@@ -295,4 +297,79 @@ export const proofGaps = pgTable(
       .defaultNow(),
   },
   (t) => [index("ix_proof_gaps_proof").on(t.proofId)],
+);
+
+// EVIDENCE -> DOCUMENTARY LOCATORS (one-to-many).
+//
+// evidence.documentary_locator holds ONE value, and that was a modelling
+// error rather than a limit of the pages being read: a single admitted
+// documentary fact can legitimately identify more than one concrete
+// on-chain account. A page listing two burn addresses under one heading
+// states one fact about two accounts, and forcing it into one scalar
+// silently discarded the second.
+//
+// A NORMALIZED CHILD TABLE, deliberately, rather than a delimited string
+// or a jsonb array. Each locator is a row that can be queried, joined,
+// counted and targeted on its own — which is exactly what the on-chain
+// provenance gate needs ("is THIS address admitted, and from where?").
+// Packing several addresses into one opaque column would make that gate a
+// substring match, and a substring match over identifiers is the kind of
+// thing that admits an address nobody actually documented.
+//
+// EVERY ROW HERE IS ALREADY VALIDATED. Rows are written only by the
+// deterministic documentary-locator validator: complete shape, not a
+// truncated display form, and literally present in the exact document
+// text the extractor was given. The two CHECKs below make an unvalidated
+// row unrepresentable at rest, so a future writer that skips the
+// validator fails at the database rather than quietly storing a guess.
+//
+// AUTHORITY IS NOT STORED HERE and cannot be. A locator row says "this
+// document states this identifier". Whether that carries weight comes
+// from the parent Evidence row's confirmed route (sourceClass/
+// officiality), never from the link the identifier was recovered from and
+// never from this table.
+export const evidenceDocumentaryLocators = pgTable(
+  "evidence_documentary_locators",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // The fact this locator belongs to. CASCADE because a locator has no
+    // meaning without the fact that identified it — it is not independent
+    // evidence, it is part of one.
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => evidence.id, { onDelete: "cascade" }),
+    // Position within the fact, so "the first locator" is a stable
+    // concept rather than whatever the heap returns. Ordinal 0 is the
+    // value mirrored into evidence.documentary_locator for compatibility.
+    ordinal: smallint("ordinal").notNull(),
+    value: text("value").notNull(),
+    shape: evidenceLocatorShape("shape").notNull(),
+    // Recorded rather than assumed: the validator confirmed this exact
+    // string appears literally in the document text. Constrained true, so
+    // the column is a stored assertion AND a backstop.
+    literallyPresent: boolean("literally_present").notNull(),
+    // The deterministic validation outcome that admitted this row.
+    validationResult: text("validation_result").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ix_evidence_locators_evidence").on(t.evidenceId),
+    // Targeting a specific admitted locator is the on-chain gate's whole
+    // question, so the value is indexed on its own.
+    index("ix_evidence_locators_value").on(t.value),
+    uniqueIndex("uq_evidence_locators_value").on(t.evidenceId, t.value),
+    uniqueIndex("uq_evidence_locators_ordinal").on(t.evidenceId, t.ordinal),
+    check(
+      "ck_evidence_locators_complete",
+      sql`${t.value} ~ '^[1-9A-HJ-NP-Za-km-z]{32,88}$'`,
+    ),
+    check(
+      "ck_evidence_locators_validated",
+      sql`${t.literallyPresent} = true AND ${t.validationResult} = 'CONFIRMED'`,
+    ),
+  ],
 );

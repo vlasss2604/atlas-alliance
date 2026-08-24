@@ -123,7 +123,12 @@ describe("signature discovery — one window, no pagination", () => {
 describe("signature discovery — the subject must be documented", () => {
   it("reads the subject's provenance from admitted Evidence before the retriever exists", async () => {
     const c = await code();
-    expect(c).toContain("evidence.documentaryLocator");
+    // The gate is the shared lookup, which matches BOTH the normalized
+    // locator table and the legacy scalar column — so a fact carrying
+    // several locators and a historical single-locator row are both
+    // answerable, and neither script needs its own query.
+    expect(c).toContain("findAdmittedLocator(db, address)");
+    expect(c).not.toContain("documentaryLocator, address");
     const gate = c.indexOf("refusing — this address is not a confirmed documentary locator");
     const retriever = c.indexOf("createProductionOnchainRetriever(");
     expect(gate).toBeGreaterThan(-1);

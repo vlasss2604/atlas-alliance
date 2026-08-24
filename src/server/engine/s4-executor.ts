@@ -37,7 +37,8 @@ import {
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
-import { validateDocumentaryLocator, type LocatorRejection } from "./documentary-locator";
+import type { LocatorRejection } from "./documentary-locator";
+import { persistFactLocators, validateFactLocators } from "./documentary-locator-store";
 import { evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
   renderedDocsAvailable,
@@ -1637,11 +1638,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // merits with the column left NULL: "the page says tokens go to
           // an address it displays as 99mRw3…pm4F3c" is true, useful, and
           // simply not a locator.
-          const locatorOutcome = validateDocumentaryLocator({
-            claimedLocator: fact.onchainLocator,
+          //
+          // ONE FACT MAY IDENTIFY SEVERAL ACCOUNTS, and every one of them
+          // is validated INDEPENDENTLY: a bad entry never contaminates a
+          // good one, and a good entry never launders a bad one. The
+          // scalar proposal and the array are merged here so a model using
+          // either shape reaches the same check.
+          const locatorOutcome = validateFactLocators({
+            claimed: [fact.onchainLocator, ...(fact.onchainLocators ?? [])],
             documentText: doc.normalizedText,
           });
-          if (locatorOutcome.locator === "NONE" && locatorOutcome.reason !== "NOT_CLAIMED") {
+          for (const refused of locatorOutcome.rejected) {
             await recordTraceEvent(deps.db, {
               researchJobId: ctx.jobId,
               researchAttemptId: attemptId,
@@ -1650,7 +1657,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               component: fact.component,
               targetRef: doc.finalUrl,
               status: "SKIPPED",
-              reasonCode: LOCATOR_TRACE_REASON[locatorOutcome.reason],
+              reasonCode: LOCATOR_TRACE_REASON[refused.reason],
               sourceId: sourceInfo.id,
             });
           }
@@ -1679,9 +1686,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               officiality: route.officiality,
               entityBinding,
               // Never fact.onchainLocator — only the validator's own
-              // output can reach this column.
-              documentaryLocator:
-                locatorOutcome.locator === "CONFIRMED" ? locatorOutcome.value : null,
+              // output can reach this column. Now a COMPATIBILITY
+              // PROJECTION of ordinal 0: every locator lives in
+              // evidence_documentary_locators, and this column keeps
+              // showing the first one so existing readers and historical
+              // rows behave identically.
+              documentaryLocator: locatorOutcome.confirmed[0]?.value ?? null,
               fetchedAt: doc.fetchedAt,
               publishedAt: fact.publishedAt,
               doesNotProve: fact.doesNotProve,
@@ -1694,7 +1704,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               where: sql`${evidence.extractionUnitKey} IS NOT NULL`,
             })
             .returning({ id: evidence.id });
-          if (row) insertedEvidenceIds.push(row.id);
+          if (row) {
+            insertedEvidenceIds.push(row.id);
+            // Written only when the Evidence row is genuinely NEW — a
+            // replayed extraction unit returns no row, and re-inserting
+            // its locators would be writing children for a fact this
+            // attempt did not create.
+            await persistFactLocators(deps.db, row.id, locatorOutcome.confirmed);
+          }
           // §J item 18 — links trace to the resulting source/evidence ids
           // without making the trace table itself readable as Evidence
           // (no fragment/statement/provenance is copied here, only ids).

@@ -170,4 +170,14 @@ export interface ExtractedFact {
   // document states, never that the identifier is the project's. D-134
   // remains the only authority on that.
   onchainLocator?: string | null;
+  // The SAME axis, for a fact that identifies MORE THAN ONE account — a
+  // page listing two burn addresses under one heading states one fact
+  // about two accounts, and splitting it into two facts to fit a scalar
+  // would invent a distinction the document does not make.
+  //
+  // Merged with `onchainLocator` and validated PER VALUE: one bad entry
+  // never contaminates a good one, and one good entry never launders a
+  // bad one. Kept alongside the scalar rather than replacing it so every
+  // existing caller and every historical row is untouched.
+  onchainLocators?: readonly string[] | null;
 }

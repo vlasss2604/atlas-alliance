@@ -54,6 +54,10 @@ const extractedFactSchema = z.object({
   // field's doc comment on ExtractedFact. Nullable because most facts
   // identify no account, and an empty answer must be cheap to give.
   onchainLocator: z.string().nullable(),
+  // Bounded at the schema so a single fact cannot propose an unbounded
+  // list. Every entry is still validated independently downstream — the
+  // array is a shape, never an approval.
+  onchainLocators: z.array(z.string()).max(10).nullable(),
 });
 const extractionResultSchema = z.object({ facts: z.array(extractedFactSchema).max(20) });
 
@@ -109,6 +113,10 @@ value in a "resolves=" field, or state the identifier in full in an href or in o
 character for character. Never reconstruct, complete, correct or infer any character of an identifier. If the document
 does not state the complete identifier anywhere, set onchainLocator to null and still report the fact — a fact without
 a locator is normal and useful. Set it to null whenever the fact identifies no specific on-chain entity.
+When one fact identifies SEVERAL accounts — a page listing two or more addresses under one heading states one fact
+about all of them — put every complete identifier in onchainLocators instead of splitting the fact up, and set
+onchainLocator to null. Do not invent separate facts to fit one identifier each, and do not include an identifier the
+document does not state in full. Set onchainLocators to null when the fact names at most one account.
 
 Output must be a JSON object matching the provided schema. No prose, no explanation.`;
 

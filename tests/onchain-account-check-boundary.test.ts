@@ -98,7 +98,12 @@ describe("account check — the subject must be documented", () => {
     const c = await code();
     // The command-line address is checked AGAINST evidence.documentary_locator;
     // an undocumented address is refused before the retriever exists.
-    expect(c).toContain("evidence.documentaryLocator");
+    // The gate is the shared lookup, which matches BOTH the normalized
+    // locator table and the legacy scalar column — so a fact carrying
+    // several locators and a historical single-locator row are both
+    // answerable, and neither script needs its own query.
+    expect(c).toContain("findAdmittedLocator(db, address)");
+    expect(c).not.toContain("documentaryLocator, address");
     const gate = c.indexOf("refusing — this address is not a confirmed documentary locator");
     const retriever = c.indexOf("createProductionOnchainRetriever(");
     expect(gate).toBeGreaterThan(-1);
