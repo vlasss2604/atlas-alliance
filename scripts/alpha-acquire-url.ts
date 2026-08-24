@@ -48,6 +48,7 @@ import type { EntitlementSnapshot } from "../src/server/domain/types";
 import { reconcileAndPersistComponent } from "../src/server/engine/component-reconciliation-store";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { literallyPresent } from "../src/server/engine/documentary-locator";
+import { locatorsForEvidence } from "../src/server/engine/documentary-locator-store";
 import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
 import { loadModelCostProfile, ModelCostProfileMissingError } from "../src/server/engine/model-cost-profile";
 import { createIsolatedRenderedDocsFetcher } from "../src/server/engine/providers/rendered-docs-isolated";
@@ -273,7 +274,15 @@ async function main(): Promise<void> {
       console.log("  summary:        " + row.summary);
       console.log("  fragment:       " + row.fragment);
       console.log("  doesNotProve:   " + String(row.doesNotProve));
-      console.log("  LOCATOR:        " + String(row.documentaryLocator));
+      // The legacy scalar — now a projection of ordinal 0, kept visible
+      // beside the child rows so the two can be compared rather than
+      // assumed consistent.
+      console.log("  LOCATOR(scalar):" + String(row.documentaryLocator));
+      const locators = await locatorsForEvidence(db, row.id);
+      console.log("  LOCATORS:       " + locators.length);
+      for (const [ordinal, l] of locators.entries()) {
+        console.log("    [" + ordinal + "] " + l.shape + " " + l.value);
+      }
     }
 
     // Every locator the validator REFUSED, and why. A refusal that leaves
