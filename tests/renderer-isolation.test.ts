@@ -1,3 +1,5 @@
+import * as path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,7 +12,10 @@ import {
   FORBIDDEN_ENV_KEYS,
   proxyChromiumArgs,
 } from "../src/server/engine/providers/renderer-env";
-import { createIsolatedRenderedDocsFetcher } from "../src/server/engine/providers/rendered-docs-isolated";
+import {
+  buildChildCommand,
+  createIsolatedRenderedDocsFetcher,
+} from "../src/server/engine/providers/rendered-docs-isolated";
 import {
   DEFAULT_RENDER_LIMITS,
   RenderedDocsError,
@@ -318,6 +323,90 @@ describe("process supervision — fail closed", () => {
     await mk(JSON.stringify({ ok: true, document: goodDocument }), 0).render(URL_IN, ROUTE);
     await mk("", 1).render(URL_IN, ROUTE).catch(() => {});
     expect(closed).toBe(2);
+  });
+});
+
+describe("child process invocation — no shell, no injection surface", () => {
+  // Regression for DEP0190, observed on the first live render:
+  // spawn("npx", ["tsx", path], { shell: true }) concatenates arguments
+  // into a cmd.exe command STRING on Windows, so any shell metacharacter
+  // in a path is interpreted rather than treated as a filename. The path
+  // was code-owned and therefore not exploitable, but a shell-
+  // concatenating spawn inside the isolation boundary is the wrong place
+  // to leave a latent injection primitive.
+  it("spawns an absolute executable with argv, never a shell", () => {
+    const cmd = buildChildCommand("/tmp/child.ts");
+    expect(cmd.useShell).toBe(false);
+    // The running Node binary, resolved absolutely — no PATH lookup for
+    // "npx" that could be hijacked.
+    expect(cmd.command).toBe(process.execPath);
+    expect(path.isAbsolute(cmd.command)).toBe(true);
+    // tsx resolved to a real absolute file, not a bare package name.
+    expect(path.isAbsolute(cmd.args[0])).toBe(true);
+    expect(cmd.args[0]).toMatch(/tsx/);
+    expect(cmd.args[1]).toBe("/tmp/child.ts");
+  });
+
+  it("shell metacharacters in a path stay ONE argv element", () => {
+    // If this were ever shell-concatenated, cmd.exe would split on && and
+    // run a second command. As argv, it is just an (absurd) filename.
+    const hostile = 'C:\\tmp\\child.ts" && calc.exe && "';
+    const cmd = buildChildCommand(hostile);
+    // The property that matters is CONTAINMENT, not that the text
+    // disappears: the whole hostile string is exactly ONE argv element, so
+    // there is no command line for cmd.exe to re-split on `&&`. It reaches
+    // the OS as an (absurd) filename, which simply fails to open.
+    expect(cmd.args).toHaveLength(2);
+    expect(cmd.args[1]).toBe(hostile); // verbatim, unsplit, unquoted
+    expect(cmd.useShell).toBe(false);
+    // And nothing was appended into the executable or the loader slot.
+    expect(cmd.command).toBe(process.execPath);
+    expect(cmd.args[0]).not.toContain("calc.exe");
+  });
+
+  it("a path with spaces needs no quoting because there is no shell", () => {
+    const spaced = "C:\\Program Files\\atlas\\child.ts";
+    const cmd = buildChildCommand(spaced);
+    expect(cmd.args[1]).toBe(spaced);
+    expect(cmd.args[1]).not.toContain('"'); // no manual quoting anywhere
+  });
+
+  it("the source contains no shell:true and no npx invocation", async () => {
+    const fs = await import("node:fs/promises");
+    const raw = await fs.readFile(
+      new URL("../src/server/engine/providers/rendered-docs-isolated.ts", import.meta.url),
+      "utf-8",
+    );
+    const code = raw
+      .split("\n")
+      .filter((l) => {
+        const t = l.trim();
+        return t !== "" && !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+      })
+      .join("\n");
+    expect(code).not.toMatch(/shell:\s*true/);
+    expect(code).not.toMatch(/shell:\s*process\.platform/);
+    expect(code).not.toContain('spawn("npx"');
+    expect(code).toMatch(/shell:\s*false/);
+  });
+
+  it("isolation guarantees survive the spawn change", async () => {
+    // The fix must not have quietly dropped anything the boundary relies
+    // on: scrubbed env, one request, no retry, timeout, output validation.
+    let calls = 0;
+    let seenEnv: Record<string, string> | null = null;
+    const f = createIsolatedRenderedDocsFetcher({
+      spawnChild: async (a) => {
+        calls += 1;
+        seenEnv = a.env;
+        return { stdout: "not json", code: 0 };
+      },
+      startProxy: (async () => ({ port: 1, decisions: [], close: async () => {} })) as never,
+      parentEnv: PARENT_ENV,
+    });
+    await expect(f.render(URL_IN, ROUTE)).rejects.toBeInstanceOf(RenderedDocsError);
+    expect(calls).toBe(1); // one request, zero retry
+    expect(JSON.stringify(seenEnv)).not.toContain("SECRET"); // still scrubbed
   });
 });
 

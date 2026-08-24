@@ -42,8 +42,41 @@ export interface IsolatedRendererDeps {
 
 const CHILD_SCRIPT = path.join(__dirname, "rendered-docs-child.ts");
 
-// The one place a child process is created. tsx runs the TypeScript child
-// directly, matching how every other ATLAS script entrypoint runs.
+export interface ChildCommand {
+  command: string;
+  args: string[];
+  useShell: false;
+}
+
+// Builds the exact process invocation, as data, so the shape is directly
+// assertable by test.
+//
+// WHY THIS IS NOT `spawn("npx", ["tsx", path], { shell: true })`:
+// on Windows that form emits DEP0190 because the arguments are
+// CONCATENATED INTO A SHELL COMMAND STRING rather than passed as argv.
+// Any shell metacharacter in a path — `&`, `|`, `&&`, quotes — would then
+// be interpreted by cmd.exe instead of treated as part of a filename. The
+// script path here is code-owned (path.join(__dirname, ...)), so it was
+// not exploitable, but a shell-concatenating spawn sitting INSIDE the
+// isolation boundary is precisely the wrong place to leave a latent
+// injection primitive.
+//
+// Instead: spawn the running Node binary directly (process.execPath, an
+// absolute path) with tsx's CLI resolved to an absolute path, and pass
+// every argument as a separate argv element. No shell is involved on any
+// platform, so there is no string for a metacharacter to escape into, and
+// no PATH lookup for `npx` to be hijacked.
+export function buildChildCommand(scriptPath: string): ChildCommand {
+  // Resolved, never assumed from PATH.
+  const tsxCli = require.resolve("tsx/cli");
+  return {
+    command: process.execPath,
+    args: [tsxCli, scriptPath],
+    useShell: false,
+  };
+}
+
+// The one place a child process is created.
 async function defaultSpawn(args: {
   scriptPath: string;
   env: Record<string, string>;
@@ -52,7 +85,8 @@ async function defaultSpawn(args: {
   return new Promise((resolve, reject) => {
     let child: ChildProcess;
     try {
-      child = spawn("npx", ["tsx", args.scriptPath], {
+      const cmd = buildChildCommand(args.scriptPath);
+      child = spawn(cmd.command, cmd.args, {
         // THE isolation boundary: the child's environment is exactly what
         // buildRendererEnv produced. process.env is NOT inherited.
         // Cast only to satisfy Next.js's ProcessEnv augmentation, which
@@ -60,7 +94,9 @@ async function defaultSpawn(args: {
         // set it, and a plain record is what spawn actually wants.
         env: args.env as NodeJS.ProcessEnv,
         stdio: ["pipe", "pipe", "ignore"],
-        shell: process.platform === "win32",
+        // Explicit and permanent: argv is passed as argv.
+        shell: false,
+        windowsHide: true,
       });
     } catch (e) {
       reject(e);
