@@ -111,6 +111,30 @@ function boundTargetRef(ref: string | null | undefined): string | null {
   return redacted.length > MAX_TARGET_REF_LENGTH ? redacted.slice(0, MAX_TARGET_REF_LENGTH) : redacted;
 }
 
+// The exact canonical form a target_ref takes once persisted (redaction +
+// length bound). Exported so the acquisition ledger can compare a LIVE
+// candidate URL / query against what trace recorded by applying the same
+// transformation to both sides — otherwise a redacted parameter or a
+// truncated long URL would silently never match, and the ledger would
+// re-buy work it had already recorded. Pure function; no behaviour change
+// to what is written.
+export function canonicalTargetRef(ref: string): string {
+  return boundTargetRef(ref) ?? "";
+}
+
+// Is a value READ BACK from trace a lossy copy of the original?
+//
+// target_ref is written for observability, so it is deliberately
+// redacted and length-bounded. That makes it safe to compare against
+// (canonicalTargetRef applies the same transformation to both sides) but
+// UNSAFE to use as a real URL: a redacted credential parameter or a
+// truncated tail produces a different resource, and handing that to the
+// fetcher would request the wrong thing. Any consumer that wants to reuse
+// a trace value as an actual URL must exclude these first.
+export function isLossyTargetRef(ref: string): boolean {
+  return ref.includes(REDACTED) || ref.length >= MAX_TARGET_REF_LENGTH;
+}
+
 export class TracePersistenceError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
     super(message);

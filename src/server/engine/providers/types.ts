@@ -22,6 +22,29 @@ export interface ComponentTarget {
   projectId: string | null;
   projectName: string;
   projectSlug: string;
+  // ACQUISITION MINIMUM SAFE V1 (A) — what this research is actually
+  // trying to find out. Before this, a provider received only the
+  // component NAME, so the best a QueryProposer could do for NET_EFFECT
+  // was search the label ("<project> net token effect mechanism") and the
+  // EvidenceExtractor had to guess what would count as a relevant fact.
+  //
+  // researchTask is the job's normalized task (the user's question, as
+  // normalized by the Interpreter); intent is its normalized intent;
+  // evidenceGoal is the Pattern's human-authored proposition for THIS
+  // component (pattern.ts componentRequirements.evidenceGoal — CORE data,
+  // never model-invented).
+  //
+  // All three are CONTEXT for query/fact generation only. They never
+  // reach S5: admissibility remains establishingClasses plus the existing
+  // axes, and no provider output can widen scope — the structural
+  // containment checks in s4-executor.ts (project naming, component
+  // match) are unchanged and still the real enforcement.
+  //
+  // Optional so every existing fixture and caller stays valid; absent
+  // simply means the prompt omits that line, never a fabricated one.
+  researchTask?: string | null;
+  intent?: string | null;
+  evidenceGoal?: string | null;
 }
 
 // S10 (live-provider-enablement.md §7, D-118) — real token usage from a

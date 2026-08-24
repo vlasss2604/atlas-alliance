@@ -46,6 +46,14 @@ export interface AcquisitionPlan {
   confirmedIdentity: ConfirmedProjectIdentity | null;
   intentRequired: ReadonlySet<string>;
   intent: string;
+  // ACQUISITION MINIMUM SAFE V1 (A) — context that tells the provider
+  // roles WHAT would resolve this component, not merely which project it
+  // belongs to. evidenceGoal is the Pattern's own human-authored
+  // proposition for this component (CORE data); researchTask is the job's
+  // normalized task. Both are null when unavailable — this module's
+  // degrade-never-throw contract applies to them exactly as to targeting.
+  evidenceGoal: string | null;
+  researchTask: string | null;
 }
 
 const EMPTY_PLAN: AcquisitionPlan = {
@@ -55,7 +63,18 @@ const EMPTY_PLAN: AcquisitionPlan = {
   confirmedIdentity: null,
   intentRequired: new Set<string>(),
   intent: "UNKNOWN",
+  evidenceGoal: null,
+  researchTask: null,
 };
+
+// The job's normalized task text, when the Interpreter produced one.
+// normalized_task is untyped jsonb; only a non-empty string `task` field
+// is used, never a guessed shape.
+function normalizedTaskText(raw: unknown): string | null {
+  if (!raw || typeof raw !== "object") return null;
+  const task = (raw as { task?: unknown }).task;
+  return typeof task === "string" && task.trim().length > 0 ? task.trim() : null;
+}
 
 async function loadIntent(db: Database | Transaction, jobId: string): Promise<string> {
   const [row] = await db
@@ -135,8 +154,11 @@ export async function loadAcquisitionPlan(
     const pattern = parsed.data;
 
     let establishingClasses: readonly EvidenceSourceClass[] = [];
+    let evidenceGoal: string | null = null;
     try {
-      establishingClasses = componentRequirementsFor(pattern, component).establishingClasses;
+      const requirements = componentRequirementsFor(pattern, component);
+      establishingClasses = requirements.establishingClasses;
+      evidenceGoal = requirements.evidenceGoal ?? null;
     } catch {
       // Component not configured in CORE for targeting purposes — S5 will
       // surface that as its own configuration failure at reconciliation
@@ -162,6 +184,8 @@ export async function loadAcquisitionPlan(
       confirmedIdentity,
       intentRequired: intentRequiredComponents(requirementSet),
       intent,
+      evidenceGoal,
+      researchTask: normalizedTaskText(job.normalizedTask),
     };
   } catch {
     return EMPTY_PLAN;

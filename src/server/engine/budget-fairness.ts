@@ -36,6 +36,19 @@ export interface ComponentAllowanceInput {
   isIntentRequired: boolean;
   // The historic flat cap, still the per-attempt upper bound.
   hardCapPerAttempt: number;
+  // ACQUISITION MINIMUM SAFE V1 (E) — how many OTHER intent-required
+  // components still have no terminal attempt. D-130's fair share already
+  // reserves one unit per pending component, but it treats every pending
+  // component alike: with the axis nearly gone, a non-required component
+  // could still take the last unit an unresolved intent-required
+  // component needed, because "1 per pending" is satisfied by units that
+  // the non-required component is itself about to consume. A real run
+  // ended with a non-required step 8 spending the final searches after
+  // the intent-critical component had already failed.
+  //
+  // Optional and defaulting to 0, so every existing caller and test keeps
+  // its exact current behaviour.
+  intentRequiredPending?: number;
 }
 
 // Never let a component take so much that a still-pending component
@@ -48,6 +61,7 @@ export function componentSearchAllowance(input: ComponentAllowanceInput): number
     remainingComponents,
     isIntentRequired,
     hardCapPerAttempt,
+    intentRequiredPending = 0,
   } = input;
 
   const remainingBudget = Math.max(0, maxSearchQueries - alreadyReserved);
@@ -81,7 +95,18 @@ export function componentSearchAllowance(input: ComponentAllowanceInput): number
   const fairShare = Math.max(1, Math.floor(remainingBudget / Math.max(1, remainingComponents)));
   const desired = isIntentRequired ? hardCapPerAttempt : fairShare;
 
-  return Math.max(0, Math.min(desired, hardCapPerAttempt, Math.max(1, spendableNow)));
+  // E — priority, not deletion. A NON-required component must leave one
+  // unit standing for every still-unresolved intent-required component,
+  // over and above the generic per-pending floor. It is still floored at
+  // 1 (below), so no component is ever starved out of the Pattern
+  // entirely; it simply cannot take the LAST unit that the question's own
+  // critical component needs. An intent-required component is unaffected,
+  // and no ceiling anywhere is raised.
+  const priorityFloor = isIntentRequired
+    ? spendableNow
+    : Math.max(0, spendableNow - intentRequiredPending);
+
+  return Math.max(0, Math.min(desired, hardCapPerAttempt, Math.max(1, priorityFloor)));
 }
 
 // Requirement kinds that name their component STRUCTURALLY rather than

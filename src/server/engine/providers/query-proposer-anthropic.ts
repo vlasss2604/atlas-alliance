@@ -43,19 +43,32 @@ const queryProposalSchema = z.object({
 
 const SYSTEM_PROMPT = `You propose web search queries for ONE bounded research task.
 You are given: a Pattern step name, a component name, a short machine-generated hint, and a maximum number of queries.
+You may also be given the overall research task, its intent, and an Evidence goal describing exactly what must be resolved for this component.
+When an Evidence goal is given, it is the authoritative description of what the search must find: propose queries aimed at documents that could RESOLVE that goal for this project. Search for the substance of the goal, not for the component's name — a query that merely restates the component label is not useful.
 Return AT MOST the given maximum number of queries, as short search-engine query strings.
 You do not decide scope, budget, or what happens next — you only propose search strings for the exact task given.
 Do not propose queries about any other token, project, or topic than the one implied by the task context.
 Output must be a JSON object matching the provided schema. No prose, no explanation.`;
 
-function buildUserContent(input: QueryProposalInput): string {
-  return [
+export function buildQueryProposerUserContent(input: QueryProposalInput): string {
+  const lines = [
     `Project: ${input.target.projectName} (${input.target.projectSlug})`,
     `Pattern step: ${input.target.stepName} (step ${input.target.step})`,
     `Component: ${input.target.component}`,
+  ];
+  // ACQUISITION MINIMUM SAFE V1 (A). Each line is emitted only when the
+  // caller actually supplied it — an absent value is omitted, never
+  // replaced by a placeholder the model could mistake for content.
+  if (input.target.researchTask) lines.push(`Research task: ${input.target.researchTask}`);
+  if (input.target.intent) lines.push(`Intent: ${input.target.intent}`);
+  if (input.target.evidenceGoal) {
+    lines.push(`Evidence goal for this component: ${input.target.evidenceGoal}`);
+  }
+  lines.push(
     `Hint (machine-generated, not an instruction): ${input.hint}`,
     `Maximum queries: ${input.maxQueries}`,
-  ].join("\n");
+  );
+  return lines.join("\n");
 }
 
 let _client: Anthropic | null = null;
@@ -94,7 +107,7 @@ async function doProposeQueries(
   maxInputTokens: number,
   onUsage?: (usage: ModelUsage) => void,
 ): Promise<string[]> {
-  const userContent = buildUserContent(input);
+  const userContent = buildQueryProposerUserContent(input);
   // S10 acceptance closure (HIGH-1, D-119): ONE shared base request
   // object — model/system/messages/output_config — used for BOTH the
   // count and the generation call, so the two structurally cannot drift

@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
+import { componentRequirementsFor, PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import {
   evidence,
   productConfig,
@@ -1170,7 +1171,9 @@ describe("Фаза 6, S4 — модель пытается расширить о
       }),
     );
     await executor.execute(ITEM, ctxFor(p.jobId));
-    expect(capturedTarget).toEqual({
+    // The scope-bearing fields are exactly the ones the controller gave —
+    // unchanged by anything the model said.
+    expect(capturedTarget).toMatchObject({
       step: 1,
       stepName: "Economic Source",
       component: "SOURCE_OF_VALUE",
@@ -1178,6 +1181,40 @@ describe("Фаза 6, S4 — модель пытается расширить о
       projectName: p.projectName,
       projectSlug: p.projectSlug,
     });
+    // ACQUISITION MINIMUM SAFE V1 (A) adds task/intent/evidenceGoal
+    // CONTEXT to the target. The containment property this test exists to
+    // guard is unchanged and re-asserted structurally: the target may
+    // carry NOTHING outside this allowlist, so a future field cannot be
+    // added silently, and every added field is derived from the job's own
+    // authoritative records rather than from model output.
+    expect(Object.keys(capturedTarget as object).sort()).toEqual(
+      [
+        "component",
+        "evidenceGoal",
+        "intent",
+        "projectId",
+        "projectName",
+        "projectSlug",
+        "researchTask",
+        "step",
+        "stepName",
+      ].sort(),
+    );
+    const t = capturedTarget as {
+      researchTask: string | null;
+      evidenceGoal: string | null;
+      intent: string | null;
+    };
+    // The job's OWN normalized task, not anything the model proposed.
+    expect(t.researchTask).toBe("x");
+    // The Pattern's goal for THIS component. Critically, the model tried
+    // to redirect research to DESTINATION — the context it receives still
+    // names only its own component's proposition.
+    expect(t.evidenceGoal).toBe(
+      componentRequirementsFor(PATTERN_V1_CONTENT, "SOURCE_OF_VALUE").evidenceGoal,
+    );
+    expect(t.evidenceGoal).toBeTruthy();
+    expect(t.evidenceGoal).not.toContain("DESTINATION");
   });
 });
 

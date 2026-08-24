@@ -93,6 +93,27 @@ const componentRequirementsEntrySchema = z.object({
   // infers it. null = equality not established by Pattern data (the
   // common case for Pattern v1, which is not query-specific).
   requiredTokenState: z.string().min(1).nullable(),
+  // ACQUISITION MINIMUM SAFE V1 (A) — the evidential PROPOSITION this
+  // component must resolve, in one human-authored sentence.
+  //
+  // Why this is Pattern data and not a model's job: establishingClasses
+  // already says WHICH classes may establish the component, but nothing
+  // anywhere said WHAT would resolve it. Acquisition therefore had only
+  // the component's NAME to search with, and a real run produced the
+  // query "<project> net token effect mechanism" for NET_EFFECT — a label
+  // search, not an evidence search. Letting the model infer the
+  // requirement would make CORE methodology model-generated, which D-095
+  // forbids; so the proposition is authored here, next to the classes it
+  // pairs with, and is consumed verbatim.
+  //
+  // This is ACQUISITION guidance only. It never reaches S5: it cannot
+  // establish, exclude, or reweigh any evidence, and admissibility stays
+  // exactly establishingClasses + the axes above.
+  //
+  // Optional in the schema so a Pattern predating this field still parses
+  // (same discipline as componentRequirements itself). Absent = no
+  // guidance available, never a fabricated one.
+  evidenceGoal: z.string().min(1).optional(),
 });
 
 export type ComponentRequirementsEntry = z.infer<typeof componentRequirementsEntrySchema>;
@@ -320,6 +341,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "identify the concrete economic activity that produces the value or cash flow in question, and the evidence that this activity actually generates it rather than being an aspiration",
     },
     FLOW_PATH: {
       establishingClasses: ["OFFICIAL_DOCS", "ONCHAIN_VERIFIABLE"],
@@ -328,6 +351,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "trace each hop the value takes from where it is produced to where it ends up, identifying the specific accounts, contracts, or entities it passes through at every step",
     },
     MECHANISM_SPEC: {
       establishingClasses: ["OFFICIAL_DOCS", "GOVERNANCE"],
@@ -336,6 +361,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "find the specification of how the mechanism is defined to work - its rules, triggers, formulas, rates and conditions - as stated by the project itself or its governing documents",
     },
     GOVERNANCE_BASIS: {
       establishingClasses: ["GOVERNANCE"],
@@ -344,6 +371,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "find the governing decision, vote, proposal or charter that authorises the mechanism, and what it permits, requires or constrains",
     },
     EXECUTION_EVIDENCE: {
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT"],
@@ -352,6 +381,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "MEDIUM_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "find evidence that the mechanism has actually executed in practice - real transactions, operations or reported executions - not merely that it is specified or announced",
     },
     CURRENT_STATE: {
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS", "OFFICIAL_REPORT"],
@@ -364,6 +395,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "HIGH_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "determine whether the mechanism is operating right now, and if not whether it is paused, deprecated, superseded or not yet started, with evidence current enough to prove present state",
     },
     DESTINATION: {
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS"],
@@ -372,6 +405,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: true,
       requiredTokenState: null,
+      evidenceGoal:
+        "identify where the assets end up after the mechanism executes - the specific destination account, contract, address or pool - and whether that destination retains, redistributes or retires them",
     },
     RECIPIENT: {
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS", "GOVERNANCE"],
@@ -380,6 +415,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: true,
       requiredTokenState: null,
+      evidenceGoal:
+        "identify who ultimately receives the economic benefit, and whether that party is the token holder, the protocol treasury, the team, liquidity providers or another party",
     },
     NET_EFFECT: {
       establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT", "DATA_PROVIDER"],
@@ -388,6 +425,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: true,
       requiredTokenState: null,
+      evidenceGoal:
+        "determine what happened to the relevant tokens or assets after the mechanism executed, and whether circulating supply, total supply, holder ownership or another economically relevant state actually changed as a result",
     },
     DURABILITY_BASIS: {
       establishingClasses: ["GOVERNANCE", "OFFICIAL_DOCS"],
@@ -396,6 +435,8 @@ export const PATTERN_V1_CONTENT: PatternContent = {
       freshnessClass: "LOW_CHANGE",
       tokenStateSensitive: false,
       requiredTokenState: null,
+      evidenceGoal:
+        "determine how durable the mechanism is - whether it is permanent, time-limited, discretionary or revocable - and what could change or end it",
     },
   },
   // Phase 6, S7 (phase-6-s7-plan.md §28) — the 8 in-scope v1 intents.

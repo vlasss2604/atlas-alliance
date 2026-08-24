@@ -80,6 +80,13 @@ export interface WorkExecutor {
       // INCLUDING the one now being executed (always >= 1 here).
       workQueueSize?: number;
       remainingComponents?: number;
+      // ACQUISITION MINIMUM SAFE V1 (E) — the component NAMES still
+      // pending after this one, so the executor can tell how many of them
+      // the job's intent actually requires. The controller deliberately
+      // does not evaluate intent itself: which components an intent
+      // requires is Pattern data resolved in acquisition-plan.ts, and this
+      // stays a plain list of names.
+      pendingComponents?: string[];
     },
   ): Promise<WorkExecutionResult>;
 }
@@ -587,6 +594,8 @@ export async function runResearchController(
       // the current item) is what still needs a share.
       workQueueSize: view.workQueue.length,
       remainingComponents: Math.max(1, pending.length - processedFromPending),
+      // Everything after the current item in this run's pending set.
+      pendingComponents: pending.slice(processedFromPending + 1).map((p) => p.component),
     });
     processedFromPending += 1;
     attemptsThisRun += 1;

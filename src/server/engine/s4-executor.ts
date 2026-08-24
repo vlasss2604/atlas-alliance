@@ -27,7 +27,14 @@ import { isTransientError } from "./providers/retry";
 import { ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
 import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
-import { blendQueries, buildTargetedQueries, genericSearchMayEstablish } from "./acquisition-targeting";
+import {
+  blendQueries,
+  buildTargetedQueries,
+  genericSearchMayEstablish,
+  modelQueriesCanBeUsed,
+  orderCandidatesForComponent,
+} from "./acquisition-targeting";
+import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { computeEntityBinding } from "../domain/project-identity";
@@ -685,12 +692,95 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // or alters the attempt itself; only trace linkage degrades.
       const attemptId = await findAttemptId(deps.db, ctx.jobId, item.step, item.component, ctx.attemptNumber);
 
+      // --- 0. Acquisition plan + allowance ---------------------------------
+      // Loaded BEFORE the QueryProposer call (it used to run after). Three
+      // things now depend on it existing first: the evidence-goal/task
+      // context threaded into the proposer prompt (A), the decision to skip
+      // a provably-useless proposer call (D), and the allowance that
+      // decision reads. It is pure DB reads over authoritative records —
+      // no provider, no budget, no reservation — so moving it earlier
+      // cannot change cost or ordering of any external action.
+      const plan = await loadAcquisitionPlan(deps.db, ctx.jobId, item.component, deps.project.id);
+
+      // A: what this component must actually resolve, and for which task.
+      // Context for query/fact generation only — never an admissibility input.
+      target.researchTask = plan.researchTask;
+      target.intent = plan.intent;
+      target.evidenceGoal = plan.evidenceGoal;
+
+      // D-130: how many search units this component may spend, so that a
+      // later component the job's INTENT actually requires cannot be
+      // starved by earlier Pattern steps walking the queue first. Reads
+      // the live reserved counter, never a stale snapshot.
+      const reservedNow = await currentSearchQueriesReserved(deps.db, ctx.jobId);
+      const searchAllowance = componentSearchAllowance({
+        maxSearchQueries: ctx.budget.maxSearchQueries,
+        alreadyReserved: reservedNow,
+        workQueueSize: ctx.workQueueSize ?? 1,
+        remainingComponents: ctx.remainingComponents ?? 1,
+        isIntentRequired: plan.intentRequired.has(item.component),
+        hardCapPerAttempt: MAX_QUERIES_PER_ATTEMPT,
+        // E: an intent-required component still pending must keep a usable
+        // search opportunity — a non-required component may not take the
+        // last one out from under it. Counted here (not in the
+        // controller) because which components an intent requires is
+        // Pattern data, resolved by loadAcquisitionPlan above.
+        intentRequiredPending: (ctx.pendingComponents ?? []).filter((c) =>
+          plan.intentRequired.has(c),
+        ).length,
+      });
+      // An allowance of 0 means the JOB's searchQueries axis is already
+      // exhausted, not that this component is being throttled. That case
+      // must keep its existing, accepted behaviour exactly: fall through
+      // with one query so reserveJobBudget refuses it and
+      // BudgetExhaustedError is thrown (D-120's terminal contract), never
+      // silently degraded into a SKIPPED result the controller could fold
+      // into WORK_QUEUE_EXHAUSTED -> SUCCEEDED. This module never decides
+      // budget exhaustion itself; the atomic reservation does.
+      const effectiveAllowance = Math.max(1, searchAllowance);
+
       // --- 1. QueryProposer -----------------------------------------------
       // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
       // BEFORE every external attempt, including a retry — one
       // reservation can never authorize two real calls.
       const queryProposerCostMicro = calculateMaxAuthorizedCostMicro(queryProposerProfile);
-      const queryProposerOutcome = await reserveAndCallWithRetry({
+
+      // D: skip the call entirely when the blend below provably cannot use
+      // a single model query. Deterministic (blendQueries is), conservative
+      // (counts only self-contained on-chain locators), and zero-risk: when
+      // it skips, deterministic targeting alone already fills every slot,
+      // so the attempt searches exactly what it would have searched anyway
+      // — minus one paid model call that produced discarded output.
+      const canUseModelQueries = modelQueriesCanBeUsed({
+        establishingClasses: plan.establishingClasses,
+        onchainLocators: plan.onchainLocators,
+        maxTotal: effectiveAllowance,
+      });
+      if (!canUseModelQueries) {
+        // The trace vocabulary is closed and deliberately not extended
+        // here. Among MODEL_CALL_SKIPPED rows the reason code is already
+        // discriminating: MODEL_INPUT_OVERSIZED / TOKEN_COUNT_UNAVAILABLE
+        // / MODEL_COST_BUDGET_EXHAUSTED each mark a real failure, so NONE
+        // uniquely marks this case — nothing failed, the call was simply
+        // not worth making. budgetAmount 0 records that nothing was
+        // reserved. The human-readable detail rides the existing
+        // observations channel below.
+        observations.add("MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER");
+        await recordTraceEvent(deps.db, {
+          researchJobId: ctx.jobId,
+          researchAttemptId: attemptId,
+          operationType: "MODEL_CALL_SKIPPED",
+          providerKind: "QUERY_PROPOSE",
+          patternStep: item.step,
+          component: item.component,
+          status: "SKIPPED",
+          reasonCode: "NONE",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: 0,
+        });
+      }
+      const queryProposerOutcome = canUseModelQueries
+        ? await reserveAndCallWithRetry({
         db: deps.db,
         jobId: ctx.jobId,
         budgetAxis: "modelCostMicro",
@@ -719,7 +809,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAmount: queryProposerCostMicro,
           });
         },
-      });
+      })
+        : // Skipped: no reservation was made and no call happened, so this
+          // stands in as a zero-attempt, zero-cost "ok" with no queries.
+          ({ kind: "ok" as const, attempts: 0, value: [] as string[] });
       spent.authorizedModelCostMicro += queryProposerOutcome.attempts * queryProposerCostMicro;
 
       if (queryProposerOutcome.kind === "budget_exhausted") {
@@ -803,7 +896,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         queryProposerUsage && !queryProposerUsage.unsupportedBillingUsage
           ? calculateActualCostMicro(queryProposerProfile, queryProposerUsage)
           : null;
-      await recordTraceEvent(deps.db, {
+      // D: no call was made, so there is no attempt to record here — the
+      // MODEL_CALL_SKIPPED row above is this decision's only trace.
+      if (canUseModelQueries) await recordTraceEvent(deps.db, {
         researchJobId: ctx.jobId,
         researchAttemptId: attemptId,
         operationType: "MODEL_CALL_ATTEMPTED",
@@ -832,39 +927,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const modelQueries = queryProposerOutcome
         .value!.filter((q) => typeof q === "string" && q.trim().length > 0)
         .slice(0, MAX_QUERIES_PER_ATTEMPT);
-      if (modelQueries.length === 0) {
+      // A proposer that RAN and returned nothing is still an unusable
+      // attempt. A proposer that was deliberately skipped is not — the
+      // deterministic locators below are this attempt's queries.
+      if (modelQueries.length === 0 && canUseModelQueries) {
         return { status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent };
       }
-
-      // D-129/D-130 — component-aware acquisition. Loaded from
-      // authoritative records only (Pattern componentRequirements, the
-      // job's own normalized_intent, human-confirmed SOURCE_ROUTE); a
-      // failure to resolve any of it degrades to "no steering", never to
-      // a failed attempt.
-      const plan = await loadAcquisitionPlan(deps.db, ctx.jobId, item.component, deps.project.id);
-
-      // D-130: how many search units this component may spend, so that a
-      // later component the job's INTENT actually requires cannot be
-      // starved by earlier Pattern steps walking the queue first. Reads
-      // the live reserved counter, never a stale snapshot.
-      const reservedNow = await currentSearchQueriesReserved(deps.db, ctx.jobId);
-      const searchAllowance = componentSearchAllowance({
-        maxSearchQueries: ctx.budget.maxSearchQueries,
-        alreadyReserved: reservedNow,
-        workQueueSize: ctx.workQueueSize ?? 1,
-        remainingComponents: ctx.remainingComponents ?? 1,
-        isIntentRequired: plan.intentRequired.has(item.component),
-        hardCapPerAttempt: MAX_QUERIES_PER_ATTEMPT,
-      });
-      // An allowance of 0 means the JOB's searchQueries axis is already
-      // exhausted, not that this component is being throttled. That case
-      // must keep its existing, accepted behaviour exactly: fall through
-      // with one query so reserveJobBudget refuses it and
-      // BudgetExhaustedError is thrown (D-120's terminal contract), never
-      // silently degraded into a SKIPPED result the controller could fold
-      // into WORK_QUEUE_EXHAUSTED -> SUCCEEDED. This module never decides
-      // budget exhaustion itself; the atomic reservation does.
-      const effectiveAllowance = Math.max(1, searchAllowance);
 
       // D-129: steer part of this attempt's allowance at hosts whose
       // class source-authority.ts ALREADY recognizes as one this
@@ -888,10 +956,18 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // bounded by the fair-share allowance). Steering changes WHERE the
       // searches point, never how many search units a component spends —
       // so per-component budget accounting is identical to before D-129.
+      // When the proposer ran, its own output still bounds the attempt's
+      // query count (targeting REPLACES, never ADDS). When it was skipped,
+      // there is no model output to bound by, so the deterministic
+      // targeted queries bound it instead — still inside the same
+      // fair-share allowance, so no component can spend more than before.
+      const queryCountBound = canUseModelQueries
+        ? Math.min(effectiveAllowance, modelQueries.length)
+        : Math.min(effectiveAllowance, targetedQueries.length);
       const queries = blendQueries(
         targetedQueries,
         modelQueries,
-        Math.min(effectiveAllowance, modelQueries.length),
+        queryCountBound,
         genericSearchMayEstablish(plan.establishingClasses),
       );
       for (const q of queries) {
@@ -922,7 +998,23 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // NO_SOURCE_COULD_BE_FETCHED reason that hides WHY every candidate/
       // query failed.
       let lastSearchFailureReason: string | null = null;
-      for (const query of queries) {
+      // B: what this JOB has already searched and already proven dead.
+      // Derived from persisted trace, so it spans components, attempts and
+      // recovery without any new state.
+      const ledger = await loadAcquisitionLedger(deps.db, ctx.jobId);
+      for (const entry of planQueries(queries, ledger)) {
+        const query = entry.query;
+        if (!entry.needsSearch) {
+          // Already searched in this job: re-running it would spend a unit
+          // of the scarce axis to receive the identical result set. Reuse
+          // what it found instead — the candidates are still subject to
+          // every downstream check, so nothing is admitted by shortcut.
+          observations.add("QUERY_ALREADY_SEARCHED_IN_JOB");
+          for (const url of entry.knownCandidates) {
+            if (!candidateUrls.has(url)) candidateUrls.set(url, { url });
+          }
+          continue;
+        }
         const searchOutcome = await reserveAndCallWithRetry({
           db: deps.db,
           jobId: ctx.jobId,
@@ -1062,7 +1154,20 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
-      for (const { url } of candidateUrls.values()) {
+      // C: open candidates whose predicted class could ESTABLISH this
+      // component first, ranked across ALL of this attempt's queries — not
+      // in discovery order, which drained query #1's list and never
+      // reached a later query's admissible candidate.
+      // B: and never re-open a URL this job has already proven dead.
+      const orderedCandidates = orderCandidatesForComponent(
+        [...candidateUrls.keys()],
+        plan.establishingClasses,
+      ).filter((url) => {
+        if (!isKnownDeadUrl(url, ledger)) return true;
+        observations.add("SKIPPED_KNOWN_DEAD_URL");
+        return false;
+      });
+      for (const url of orderedCandidates) {
         if (opensAttempted >= openAllowance) break;
         const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
         if (!reserved) {

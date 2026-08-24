@@ -1,4 +1,5 @@
-import { targetDomainsForClass } from "./source-authority";
+import { deriveSourceType, resolveSourceClass, targetDomainsForClass } from "./source-authority";
+import type { RouteClass } from "./source-authority";
 import type { EvidenceSourceClass } from "./providers/types";
 
 // D-129 — component-aware source-class targeting (acquisition).
@@ -105,7 +106,22 @@ export function buildTargetedQueries(input: TargetingInput): TargetingResult {
   const base = input.baseQueries.find((q) => typeof q === "string" && q.trim().length > 0)?.trim();
   const unreachableClasses: EvidenceSourceClass[] = [];
   const targetedQueries: string[] = [];
+  // ACQUISITION MINIMUM SAFE V1 (D): on-chain locators are SELF-CONTAINED
+  // — D-133 builds them as `site:<explorer> <confirmed address>`, so they
+  // carry their own query text and need no model topic. Previously the
+  // absence of model text returned zero targeted queries, which meant a
+  // component whose only reachable class is ONCHAIN_VERIFIABLE could not
+  // be searched at all unless a model call had been paid for first. That
+  // is what made skipping a provably-unusable QueryProposer call
+  // impossible. Domain-scoped (`site:<domain> <topic>`) targeting still
+  // requires model text and is still skipped without it.
+  const selfContainedLocators =
+    input.establishingClasses.includes("ONCHAIN_VERIFIABLE") ? (input.onchainLocators ?? []) : [];
   if (!base || maxTargeted <= 0) {
+    for (const locator of selfContainedLocators) {
+      if (targetedQueries.length >= maxTargeted) break;
+      targetedQueries.push(locator);
+    }
     // Still report unreachable classes even when there is nothing to
     // target with — the caller wants that signal regardless.
     for (const cls of input.establishingClasses) {
@@ -236,4 +252,103 @@ export function genericSearchMayEstablish(
   establishingClasses: readonly EvidenceSourceClass[],
 ): boolean {
   return establishingClasses.some((c) => GENERIC_REACHABLE_CLASSES.has(c));
+}
+
+// ACQUISITION MINIMUM SAFE V1 (C) — order candidates by whether their
+// class could ESTABLISH this component, before any fetch allowance is
+// spent.
+//
+// The defect this closes: candidates were opened in discovery order
+// (query order x provider order). In a real run the intent-critical
+// component spent all five of its source-open slots on explorer URLs that
+// six earlier components had already proven unfetchable, and never
+// reached the DATA_PROVIDER candidate from its own later query — the one
+// class it admits that a generic search can actually produce. Ranking is
+// GLOBAL across the attempt's candidates, so an establishing candidate
+// discovered by query #3 is opened before an inadmissible one from query
+// #1; it never simply drains query #1's list first.
+//
+// This is ordering only. It changes which admissible-looking candidate is
+// tried FIRST, never which evidence is admissible: the pre-fetch class
+// here is a prediction from the URL alone, and S5 still classifies the
+// fetched document independently and decides establishment on its own.
+//
+// Conservative on the unknown: a host nothing recognizes cannot be
+// distinguished from the project's own site, so it ranks BETWEEN
+// positively-establishing and positively-non-establishing candidates —
+// demoting it below a recognized-but-useless aggregator would be a guess
+// in the wrong direction.
+export type CandidateRank = 0 | 1 | 2;
+
+export function rankCandidateForComponent(
+  url: string,
+  establishingClasses: readonly EvidenceSourceClass[],
+  activeRouteClass: RouteClass | null = null,
+): CandidateRank {
+  const predicted = resolveSourceClass(url, deriveSourceType(url), activeRouteClass);
+  if (establishingClasses.includes(predicted)) return 0;
+  return isUnrecognisedHost(url) ? 1 : 2;
+}
+
+// Is this host one source-authority.ts positively recognizes at all?
+//
+// resolveSourceClass returns SOCIAL both for a recognized social platform
+// AND as its fallback for anything unknown, so the returned class alone
+// cannot tell those apart — and they deserve opposite treatment. Rather
+// than export its internal domain lists, this probes the documented
+// behaviour: a supplied routeClass is honoured ONLY at the final
+// fall-through branch, i.e. only when every positive-recognition rule
+// missed. If the probe class survives, nothing recognized the host.
+function isUnrecognisedHost(url: string): boolean {
+  return resolveSourceClass(url, "OTHER", "OFFICIAL_DOCS") === "OFFICIAL_DOCS";
+}
+
+// Stable: candidates of equal rank keep their discovery order, so query
+// priority still decides ties and the ordering stays deterministic.
+export function orderCandidatesForComponent(
+  urls: readonly string[],
+  establishingClasses: readonly EvidenceSourceClass[],
+  activeRouteClass: RouteClass | null = null,
+): string[] {
+  return urls
+    .map((url, index) => ({
+      url,
+      index,
+      rank: rankCandidateForComponent(url, establishingClasses, activeRouteClass),
+    }))
+    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index))
+    .map((c) => c.url);
+}
+
+// ACQUISITION MINIMUM SAFE V1 (D) — can a model-proposed query reach the
+// executed query list at all for this attempt?
+//
+// blendQueries is deterministic, so this is decidable BEFORE paying for
+// the QueryProposer call. A model query survives the blend when either:
+//   * a generic slot is reserved for it (the component admits a class an
+//     untargeted web search can produce, AND more than one slot exists), or
+//   * self-contained targeting cannot already fill every slot.
+// When neither holds, every model query is provably discarded, and the
+// call that produced them was pure waste — a live run paid for six such
+// calls in one job.
+//
+// Deliberately CONSERVATIVE: it counts only self-contained on-chain
+// locators, never the `site:<domain> <topic>` queries that would exist if
+// the model HAD been called. So it returns false only when the slots are
+// provably full without any model text — never on a maybe.
+export function modelQueriesCanBeUsed(input: {
+  establishingClasses: readonly EvidenceSourceClass[];
+  onchainLocators: readonly string[];
+  maxTotal: number;
+  maxTargeted?: number;
+}): boolean {
+  if (input.maxTotal <= 0) return false;
+  const reserveGenericSlot =
+    genericSearchMayEstablish(input.establishingClasses) && input.maxTotal > 1;
+  if (reserveGenericSlot) return true;
+  const maxTargeted = input.maxTargeted ?? MAX_TARGETED_QUERIES_PER_ATTEMPT;
+  const selfContained = input.establishingClasses.includes("ONCHAIN_VERIFIABLE")
+    ? Math.min(input.onchainLocators.length, maxTargeted)
+    : 0;
+  return selfContained < input.maxTotal;
 }
