@@ -6,6 +6,7 @@ import {
   subresourceAllowed,
 } from "../rendered-docs-policy";
 import { normalizeHtmlToText } from "./content-fetcher";
+import { proxyChromiumArgs } from "./renderer-env";
 import {
   BROWSER_LOCKDOWN,
   DEFAULT_RENDER_LIMITS,
@@ -64,16 +65,25 @@ export interface PlaywrightRenderDeps {
   // Injected so the offline suite performs no DNS query. A DNS lookup is
   // still network activity, and these tests must make none.
   hostAllowed?: (host: string) => Promise<boolean>;
+  // Loopback egress proxy every browser request must traverse. When set,
+  // the browser is launched with no bypass route, so page.route() becomes
+  // defence in depth rather than the security boundary.
+  proxyPort?: number;
 }
 
-async function defaultLaunch(): Promise<BrowserLike> {
+async function defaultLaunch(proxyPort?: number): Promise<BrowserLike> {
   // Lazy: only reached when rendering is actually enabled and invoked.
   const pw = (await import("playwright")) as unknown as {
     chromium: { launch(opts: unknown): Promise<BrowserLike> };
   };
   return pw.chromium.launch({
     headless: BROWSER_LOCKDOWN.headless,
-    args: [...BROWSER_LOCKDOWN.chromiumArgs],
+    args: [
+      ...BROWSER_LOCKDOWN.chromiumArgs,
+      // Forces ALL traffic through the boundary, with no bypass — the
+      // empty-loopback bypass list is the load-bearing part.
+      ...(proxyPort ? proxyChromiumArgs(proxyPort) : []),
+    ],
   });
 }
 
@@ -85,7 +95,7 @@ export function createPlaywrightRenderedDocsFetcher(
   deps: PlaywrightRenderDeps = {},
 ): RenderedDocsFetcher {
   const limits = deps.limits ?? DEFAULT_RENDER_LIMITS;
-  const launch = deps.launchBrowser ?? defaultLaunch;
+  const launch = deps.launchBrowser ?? (() => defaultLaunch(deps.proxyPort));
   const hostAllowed = deps.hostAllowed ?? resolvedHostAllowed;
   const name = "playwright-chromium";
   const version = deps.rendererVersion ?? "1";
