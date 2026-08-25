@@ -164,7 +164,7 @@ describe("coverage semantics — a negative requires COMPLETE", () => {
     const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
     expect(out.matches.length).toBe(0);
     expect(out.coverage.coverage).toBe("COMPLETE");
-    expect(embeddedSearchVerdict(out)).toBe("SEARCHED_SUPPORTED_PAYLOAD_NO_MATCH");
+    expect(embeddedSearchVerdict(out)).toBe("SEARCHED_SUPPORTED_PAYLOAD_EVENT_RECORD_NOT_FOUND");
   });
 
   it("zero matches after PARTIAL traversal is NOT a negative", () => {
@@ -202,7 +202,7 @@ describe("coverage semantics — a negative requires COMPLETE", () => {
     ]);
     const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
     expect(out.coverage.coverage).toBe("PARTIAL");
-    expect(embeddedSearchVerdict(out)).toBe("EVENT_IDENTIFIER_PATH_FOUND");
+    expect(embeddedSearchVerdict(out)).toBe("EVENT_RECORD_AND_IDENTIFIER_FOUND");
   });
 
   it("no sources at all is NONE, never a negative", () => {
@@ -293,5 +293,105 @@ describe("nothing new was granted", () => {
     for (const banned of ["pump", "burn", "buyback", "solana", "solscan", "hyperliquid"]) {
       expect(code, `frames mention "${banned}"`).not.toContain(banned);
     }
+  });
+});
+
+// LOCATING THE ROW IS NOT LINKING IT TO A TRANSACTION.
+//
+// A live inspection found the Aug 23 daily row and reported
+// EVENT_IDENTIFIER_PATH_FOUND for it. The row contains nine numeric and
+// date fields and NO identifier of any kind. The verdict said the page
+// points at an on-chain event; what actually happened is that a field
+// path matched a date. These two claims must never share a name.
+//
+// The real recovered shape, field-for-field, so the case that produced
+// the wrong verdict is the case under test.
+const AGGREGATE_ROW_NO_IDENTIFIER = {
+  date: "2026-08-23",
+  stableRevenue: 17077.47464050746,
+  revenueUsd: 1640199.803001146,
+  buybacksSol: 8851.320033461001,
+  buybacksUsd: 842575.6055289571,
+  buybackPercentage: 51.37030281233172,
+  pumpTokensBought: 160148975.60070893,
+  transactionCount: 14345,
+  cumulativeUsd: 435585392.681677,
+};
+
+describe("verdict semantics — record found and identifier found are separate", () => {
+  it("an event record with ZERO identifiers can NEVER report identifier found", () => {
+    const html = flightHtml([
+      `3:{"data":[${JSON.stringify(AGGREGATE_ROW_NO_IDENTIFIER)}]}`,
+    ]);
+    const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
+    expect(out.matches.length).toBe(1);
+    expect(out.matches[0].identifiers.length).toBe(0);
+    expect(out.coverage.coverage).toBe("COMPLETE");
+    expect(embeddedSearchVerdict(out)).toBe("EVENT_RECORD_FOUND_NO_IDENTIFIER_IN_RECORD");
+  });
+
+  it("an event record carrying a valid signature DOES report identifier found", () => {
+    const html = flightHtml([`3:{"burns":[${JSON.stringify(AUG23_ROW)}]}`]);
+    const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
+    expect(out.matches[0].identifiers.length).toBeGreaterThan(0);
+    expect(embeddedSearchVerdict(out)).toBe("EVENT_RECORD_AND_IDENTIFIER_FOUND");
+  });
+
+  it("a signature in a SIBLING record is not this record's identifier", () => {
+    // The page is full of base58 strings. Only what sits inside the
+    // matched record can speak for the matched record.
+    const html = flightHtml([
+      `3:{"data":[${JSON.stringify(AGGREGATE_ROW_NO_IDENTIFIER)}],"other":[${JSON.stringify(AUG22_ROW)}]}`,
+    ]);
+    const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
+    expect(out.matches.length).toBe(1);
+    expect(out.matches[0].identifiers.length).toBe(0);
+    expect(embeddedSearchVerdict(out)).toBe("EVENT_RECORD_FOUND_NO_IDENTIFIER_IN_RECORD");
+  });
+
+  it("the no-identifier verdict is INDEPENDENT of coverage", () => {
+    // Coverage decides whether a negative is available. It has no say in
+    // whether a located record carried an identifier.
+    const html = flightHtml([
+      "5:T2a,unsupported",
+      `3:{"data":[${JSON.stringify(AGGREGATE_ROW_NO_IDENTIFIER)}]}`,
+    ]);
+    const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
+    expect(out.coverage.coverage).toBe("PARTIAL");
+    expect(embeddedSearchVerdict(out)).toBe("EVENT_RECORD_FOUND_NO_IDENTIFIER_IN_RECORD");
+  });
+
+  it("partial coverage with nothing matched stays PARTIAL, not a negative", () => {
+    const html = flightHtml([
+      "5:T2a,unsupported",
+      `3:{"data":[${JSON.stringify(AUG22_ROW)}]}`,
+    ]);
+    const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
+    expect(out.matches.length).toBe(0);
+    expect(out.coverage.coverage).toBe("PARTIAL");
+    expect(embeddedSearchVerdict(out)).toBe("PAYLOAD_PRESENT_BUT_NOT_FULLY_INSPECTED");
+  });
+
+  it("complete coverage with no event record is a TRUE no-event result", () => {
+    const html = flightHtml([`3:{"data":[${JSON.stringify(AUG22_ROW)}]}`]);
+    const out = recoverEmbeddedRecords(html, { needles: ["2026-08-23"] });
+    expect(out.matches.length).toBe(0);
+    expect(out.coverage.coverage).toBe("COMPLETE");
+    expect(embeddedSearchVerdict(out)).toBe("SEARCHED_SUPPORTED_PAYLOAD_EVENT_RECORD_NOT_FOUND");
+  });
+
+  it("every verdict is one of the four, and no-identifier is not FOUND", () => {
+    // Guards the vocabulary itself: a future rename must not quietly
+    // reintroduce a single collapsed FOUND outcome.
+    const noId = recoverEmbeddedRecords(
+      flightHtml([`3:{"data":[${JSON.stringify(AGGREGATE_ROW_NO_IDENTIFIER)}]}`]),
+      { needles: ["2026-08-23"] },
+    );
+    const withId = recoverEmbeddedRecords(
+      flightHtml([`3:{"burns":[${JSON.stringify(AUG23_ROW)}]}`]),
+      { needles: ["2026-08-23"] },
+    );
+    expect(embeddedSearchVerdict(noId)).not.toBe(embeddedSearchVerdict(withId));
+    expect(embeddedSearchVerdict(noId)).not.toContain("AND_IDENTIFIER_FOUND");
   });
 });

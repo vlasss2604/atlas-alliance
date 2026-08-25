@@ -127,27 +127,48 @@ export const EMPTY_EMBEDDED_RECORDS: EmbeddedRecordsResult = {
   coverage: EMPTY_COVERAGE,
 };
 
-// The three states a caller may report. Deliberately NOT a boolean: the
-// whole point is that 'no match' and 'not searched' are different
-// answers, and a boolean would collapse them again.
+// The states a caller may report. Deliberately NOT a boolean: the whole
+// point is that 'no match' and 'not searched' are different answers, and
+// a boolean would collapse them again.
+//
+// FINDING THE RECORD IS NOT FINDING AN IDENTIFIER.
+//
+// The previous version returned EVENT_IDENTIFIER_PATH_FOUND whenever any
+// record matched, and a live inspection duly reported an identifier path
+// for a record containing zero identifiers. "We located the row" and "the
+// row points at a transaction" are different claims, and collapsing them
+// is how a locating success gets read as a linkage success.
+//
+// Four outcomes, along two INDEPENDENT axes: did we find the record, and
+// did that record carry an identifier. Coverage remains a separate axis
+// again — it decides only whether a NEGATIVE is available.
 export type EmbeddedSearchVerdict =
-  | "EVENT_IDENTIFIER_PATH_FOUND"
-  | "SEARCHED_SUPPORTED_PAYLOAD_NO_MATCH"
+  | "EVENT_RECORD_AND_IDENTIFIER_FOUND"
+  | "EVENT_RECORD_FOUND_NO_IDENTIFIER_IN_RECORD"
+  | "SEARCHED_SUPPORTED_PAYLOAD_EVENT_RECORD_NOT_FOUND"
   | "PAYLOAD_PRESENT_BUT_NOT_FULLY_INSPECTED";
 
 // A NEGATIVE IS ONLY AVAILABLE AFTER COMPLETE COVERAGE. Anything less
 // reports that the payload was not fully inspected, which is a statement
 // about this system rather than about the page.
+//
 // Takes only what the decision needs, so a caller holding a widened
 // projection of the result (the cross-process document shape) can still
 // ask the question without re-deriving it.
 export function embeddedSearchVerdict(result: {
-  matches: readonly unknown[];
+  matches: readonly { identifiers: readonly unknown[] }[];
   coverage: { coverage: string };
 }): EmbeddedSearchVerdict {
-  if (result.matches.length > 0) return "EVENT_IDENTIFIER_PATH_FOUND";
+  if (result.matches.length > 0) {
+    // An identifier counts only when it was found INSIDE a matched
+    // record. Identifiers elsewhere in the payload are not this row's.
+    const withIdentifier = result.matches.some((m) => m.identifiers.length > 0);
+    return withIdentifier
+      ? "EVENT_RECORD_AND_IDENTIFIER_FOUND"
+      : "EVENT_RECORD_FOUND_NO_IDENTIFIER_IN_RECORD";
+  }
   if (result.coverage.coverage === "COMPLETE") {
-    return "SEARCHED_SUPPORTED_PAYLOAD_NO_MATCH";
+    return "SEARCHED_SUPPORTED_PAYLOAD_EVENT_RECORD_NOT_FOUND";
   }
   return "PAYLOAD_PRESENT_BUT_NOT_FULLY_INSPECTED";
 }

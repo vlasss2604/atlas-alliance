@@ -188,6 +188,15 @@ async function main(): Promise<void> {
     console.log("    parseErrors:       " + c.parseErrors);
     console.log("    recordsScanned:    " + c.recordsScanned);
     console.log("    SEARCH COVERAGE:   " + c.coverage);
+    // The two axes stay visible side by side: how many records matched,
+    // and how many of THOSE carried an identifier. A verdict that reads
+    // "record found" is not a claim about linkage to a transaction.
+    console.log(
+      "    matched records with an identifier: " +
+        rec.matches.filter((m) => m.identifiers.length > 0).length +
+        " of " +
+        rec.matches.length,
+    );
     console.log("    VERDICT:           " + embeddedSearchVerdict(rec));
     for (const [i, m] of rec.matches.entries()) {
       console.log("  --- match " + (i + 1) + " (" + m.kind + ", script " + m.scriptIndex + ")");
