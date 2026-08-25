@@ -157,6 +157,39 @@ export interface BurnInstructionRef {
   decimals: number | null;
 }
 
+// ONE parsed SPL Token instruction, of a kind this adapter recognises.
+// Deliberately NOT interpreted: a Transfer to an address someone calls a
+// burn address is a TRANSFER, and CloseAccount is CloseAccount. Naming
+// what an instruction IS is decoding; naming what it MEANS is not this
+// layer's job and never becomes one.
+export interface TokenInstructionRef {
+  programId: string;
+  // "burn" | "burnChecked" | "transfer" | "transferChecked" |
+  // "closeAccount" — the RPC's own parsed type, lowercased by the node.
+  type: string;
+  mint: string | null;
+  // Source/subject token account, where the instruction names one.
+  account: string | null;
+  destination: string | null;
+  authority: string | null;
+  amountRaw: string | null;
+  decimals: number | null;
+  // True when this came from meta.innerInstructions rather than the
+  // top-level message — a CPI, not something the signer wrote directly.
+  inner: boolean;
+}
+
+// A token balance as the RPC reported it, before or after execution.
+// amountRaw stays a string for the same reason every other balance does.
+export interface TokenBalanceRef {
+  accountIndex: number;
+  account: string | null;
+  mint: string;
+  owner: string | null;
+  amountRaw: string;
+  decimals: number;
+}
+
 export interface TransactionDetailResult {
   kind: "TRANSACTION_DETAIL";
   signature: string;
@@ -167,6 +200,14 @@ export interface TransactionDetailResult {
   // list is NEVER a fact that no burn happened — absence of evidence is
   // not evidence of absence.
   burns: BurnInstructionRef[];
+  // Every distinct program the transaction invoked, outer and inner.
+  programs: string[];
+  // The transaction's account keys, in order, bounded.
+  accountKeys: string[];
+  // Recognised SPL Token instructions, decoded but never interpreted.
+  tokenInstructions: TokenInstructionRef[];
+  preTokenBalances: TokenBalanceRef[];
+  postTokenBalances: TokenBalanceRef[];
 }
 
 export type OnchainResult =

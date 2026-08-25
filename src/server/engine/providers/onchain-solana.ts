@@ -6,6 +6,8 @@ import { buildCanonicalOnchainUri } from "../onchain-uri";
 import {
   brandOnchainArtifact,
   type BurnInstructionRef,
+  type TokenBalanceRef,
+  type TokenInstructionRef,
   type TokenAccountRef,
   type OnchainArtifact,
   type OnchainIntent,
@@ -200,13 +202,34 @@ const parsedInstructionSchema = z.object({
     .optional(),
 });
 
+// jsonParsed account keys arrive as objects ({ pubkey, signer, writable })
+// on modern nodes and as bare strings on older ones. Both are accepted;
+// anything else yields no key rather than a guess.
+const accountKeySchema = z.union([
+  z.string(),
+  z.object({ pubkey: z.string() }).loose(),
+]);
+
+const tokenBalanceSchema = z.object({
+  accountIndex: z.number().int().min(0),
+  mint: z.string(),
+  owner: z.string().optional(),
+  uiTokenAmount: z.object({
+    amount: z.string(),
+    decimals: z.number().int().min(0),
+  }),
+});
+
 const transactionSchema = z
   .object({
     slot: z.number().int().min(0),
     blockTime: z.number().int().nullable().optional(),
     transaction: z.object({
       signatures: z.array(z.string()).min(1),
-      message: z.object({ instructions: z.array(parsedInstructionSchema).default([]) }),
+      message: z.object({
+        instructions: z.array(parsedInstructionSchema).default([]),
+        accountKeys: z.array(accountKeySchema).default([]),
+      }),
     }),
     meta: z
       .object({
@@ -214,11 +237,82 @@ const transactionSchema = z
         innerInstructions: z
           .array(z.object({ instructions: z.array(parsedInstructionSchema).default([]) }))
           .optional(),
+        preTokenBalances: z.array(tokenBalanceSchema).nullable().optional(),
+        postTokenBalances: z.array(tokenBalanceSchema).nullable().optional(),
       })
       .nullable()
       .optional(),
   })
   .nullable();
+
+// Bounds on what one transaction may contribute to an artifact. A
+// transaction is externally authored; without ceilings a pathological
+// one could inflate the stored result without limit.
+const MAX_TX_ACCOUNT_KEYS = 128;
+const MAX_TX_INSTRUCTIONS = 128;
+const MAX_TX_TOKEN_BALANCES = 128;
+
+// The SPL Token instruction types this adapter recognises. A closed set:
+// an unrecognised type is simply not reported, never guessed at.
+const RECOGNISED_TOKEN_INSTRUCTIONS = new Set([
+  "burn",
+  "burnChecked",
+  "transfer",
+  "transferChecked",
+  "closeAccount",
+]);
+
+function firstString(info: Record<string, unknown>, keys: string[]): string | null {
+  for (const k of keys) {
+    const v = info[k];
+    if (typeof v === "string") return v;
+  }
+  return null;
+}
+
+// Decodes ONE parsed instruction into a typed reference. Decoding is not
+// interpretation: a transfer to an address someone calls a burn address
+// is reported as a transfer, and nothing here can say otherwise.
+function decodeTokenInstruction(raw: unknown, inner: boolean): TokenInstructionRef | null {
+  const parsed = parsedInstructionSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const ix = parsed.data;
+  const programId = ix.programId;
+  if (!programId || !SPL_TOKEN_PROGRAM_IDS.has(programId)) return null;
+  const type = ix.parsed?.type;
+  if (!type || !RECOGNISED_TOKEN_INSTRUCTIONS.has(type)) return null;
+  const info = ix.parsed?.info ?? {};
+  const tokenAmount = info.tokenAmount as { amount?: unknown; decimals?: unknown } | undefined;
+  const amountRaw =
+    typeof info.amount === "string"
+      ? info.amount
+      : typeof tokenAmount?.amount === "string"
+        ? tokenAmount.amount
+        : null;
+  const decimals =
+    typeof info.decimals === "number"
+      ? info.decimals
+      : typeof tokenAmount?.decimals === "number"
+        ? tokenAmount.decimals
+        : null;
+  return {
+    programId,
+    type,
+    mint: firstString(info, ["mint"]),
+    account: firstString(info, ["account", "source"]),
+    destination: firstString(info, ["destination"]),
+    authority: firstString(info, ["authority", "owner", "multisigAuthority"]),
+    amountRaw,
+    decimals,
+    inner,
+  };
+}
+
+function programIdOf(raw: unknown): string | null {
+  const parsed = parsedInstructionSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  return parsed.data.programId ?? null;
+}
 
 // ---- SPL burn decoding -----------------------------------------------
 // Owner instruction, explicit: a BURN fact may come ONLY from a genuine
@@ -450,11 +544,42 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
       if (parsed === null) {
         throw new OnchainRetrieverUnavailableError("transaction not found");
       }
-      const outer = parsed.transaction.message.instructions;
-      const inner = (parsed.meta?.innerInstructions ?? []).flatMap((g) => g.instructions);
+      const outer = parsed.transaction.message.instructions.slice(0, MAX_TX_INSTRUCTIONS);
+      const inner = (parsed.meta?.innerInstructions ?? [])
+        .flatMap((g) => g.instructions)
+        .slice(0, MAX_TX_INSTRUCTIONS);
       const burns = [...outer, ...inner]
         .map(decodeBurnInstruction)
         .filter((b): b is BurnInstructionRef => b !== null);
+      const tokenInstructions = [
+        ...outer.map((ix) => decodeTokenInstruction(ix, false)),
+        ...inner.map((ix) => decodeTokenInstruction(ix, true)),
+      ].filter((i): i is TokenInstructionRef => i !== null);
+      const programs = [
+        ...new Set(
+          [...outer, ...inner]
+            .map(programIdOf)
+            .filter((id): id is string => id !== null),
+        ),
+      ];
+      const accountKeys = parsed.transaction.message.accountKeys
+        .slice(0, MAX_TX_ACCOUNT_KEYS)
+        .map((k) => (typeof k === "string" ? k : k.pubkey));
+      const balance = (b: {
+        accountIndex: number;
+        mint: string;
+        owner?: string;
+        uiTokenAmount: { amount: string; decimals: number };
+      }): TokenBalanceRef => ({
+        accountIndex: b.accountIndex,
+        // Resolved through the account-key table when the index is in
+        // range; null rather than a guess when it is not.
+        account: accountKeys[b.accountIndex] ?? null,
+        mint: b.mint,
+        owner: b.owner ?? null,
+        amountRaw: b.uiTokenAmount.amount,
+        decimals: b.uiTokenAmount.decimals,
+      });
       return {
         slot: parsed.slot,
         result: {
@@ -464,6 +589,15 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           blockTime: parsed.blockTime ?? null,
           succeeded: !parsed.meta?.err,
           burns,
+          programs,
+          accountKeys,
+          tokenInstructions,
+          preTokenBalances: (parsed.meta?.preTokenBalances ?? [])
+            .slice(0, MAX_TX_TOKEN_BALANCES)
+            .map(balance),
+          postTokenBalances: (parsed.meta?.postTokenBalances ?? [])
+            .slice(0, MAX_TX_TOKEN_BALANCES)
+            .map(balance),
         },
       };
     }
