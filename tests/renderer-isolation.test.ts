@@ -254,10 +254,17 @@ describe("process supervision — fail closed", () => {
       return { stdout: JSON.stringify({ ok: true, document: goodDocument }), code: 0 };
     });
     await f.render(URL_IN, ROUTE);
+    // A CLOSED field list. The child's request payload is a security
+    // surface: everything the isolated process learns about the parent
+    // arrives through it, so adding a field must be a deliberate, reviewed
+    // act rather than a side effect. observeNetwork was added under owner
+    // authorization for passive observation and is a plain boolean.
     expect(Object.keys(seen!).sort()).toEqual(
-      ["confirmedHost", "limits", "matchedPathPrefix", "proxyPort", "url"].sort(),
+      ["confirmedHost", "limits", "matchedPathPrefix", "observeNetwork", "proxyPort", "url"].sort(),
     );
     expect(JSON.stringify(seen)).not.toContain("SECRET");
+    // Default OFF: an ordinary render tells the child to observe nothing.
+    expect((seen as unknown as { observeNetwork: boolean }).observeNetwork).toBe(false);
   });
 
   it("the child is spawned with the scrubbed environment", async () => {

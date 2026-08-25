@@ -72,6 +72,30 @@ export interface RenderedDocument extends FetchedDocument {
     hosts: string[];
     truncated: boolean;
   } | null;
+  // PASSIVE OBSERVATIONS of requests the browser already made while
+  // rendering this one page. Null unless the caller explicitly opted in —
+  // an ordinary evidentiary render records nothing.
+  //
+  // AUTHORITY: none. An observed URL is a URL the page asked for. It is not
+  // OFFICIAL_DOCS, not evidence, not project identity, and not a mechanism;
+  // nothing in this shape can express approval. Bodies are present only for
+  // same-origin textual responses, bounded, and never adopted from a
+  // cross-origin host.
+  networkObservations?: {
+    observations: {
+      url: string;
+      method: string;
+      resourceType: string;
+      status: number;
+      contentType: string | null;
+      contentLength: number | null;
+      sameOrigin: boolean;
+      body: string | null;
+      bodyTruncated: boolean;
+    }[];
+    droppedCount: number;
+    totalBodyBytes: number;
+  } | null;
 }
 
 export type RenderedDocsFailureReason =

@@ -38,6 +38,11 @@ export interface IsolatedRendererDeps {
   }) => Promise<{ stdout: string; code: number | null }>;
   startProxy?: typeof startEgressProxy;
   parentEnv?: NodeJS.ProcessEnv;
+  // OPT-IN passive network observation, forwarded to the child.
+  // Off unless a caller explicitly asks: an ordinary evidentiary
+  // render must not begin recording what a page fetched merely
+  // because the capability exists.
+  observeNetwork?: boolean;
 }
 
 const CHILD_SCRIPT = path.join(__dirname, "rendered-docs-child.ts");
@@ -152,6 +157,7 @@ export function createIsolatedRenderedDocsFetcher(
   const spawnChild = deps.spawnChild ?? defaultSpawn;
   const startProxy = deps.startProxy ?? startEgressProxy;
   const parentEnv = deps.parentEnv ?? process.env;
+  const observeNetwork = deps.observeNetwork === true;
 
   return {
     name: "isolated-playwright-chromium",
@@ -171,6 +177,7 @@ export function createIsolatedRenderedDocsFetcher(
           matchedPathPrefix: route.matchedPathPrefix,
           limits,
           proxyPort: proxy.port,
+          observeNetwork,
         };
 
         // EXACTLY ONE child render request. No loop, no retry — a failed

@@ -9,6 +9,10 @@ import { normalizeHtmlToText } from "./content-fetcher";
 import { proxyChromiumArgs } from "./renderer-env";
 import { extractDocumentLinks, renderLinkAppendix } from "./document-links";
 import {
+  mayCaptureBody,
+  NetworkObservationCollector,
+} from "./network-observation";
+import {
   BROWSER_LOCKDOWN,
   DEFAULT_RENDER_LIMITS,
   RenderedDocsError,
@@ -70,6 +74,10 @@ export interface PlaywrightRenderDeps {
   // the browser is launched with no bypass route, so page.route() becomes
   // defence in depth rather than the security boundary.
   proxyPort?: number;
+  // OPT-IN passive network observation. Off by default: an ordinary
+  // evidentiary render must not start recording what a page fetched
+  // just because the capability exists.
+  observeNetwork?: boolean;
 }
 
 async function defaultLaunch(proxyPort?: number): Promise<BrowserLike> {
@@ -118,6 +126,12 @@ export function createPlaywrightRenderedDocsFetcher(
 
       const startedAt = Date.now();
       let blockedRequestCount = 0;
+      // Present only when the caller asked to observe. Absent by
+      // default, so an ordinary evidentiary render records nothing.
+      const observer = deps.observeNetwork
+        ? new NetworkObservationCollector(route.confirmedHost)
+        : null;
+      const bodyReads: Promise<void>[] = [];
       let totalBytes = 0;
       let navigations = 0;
 
@@ -159,10 +173,55 @@ export function createPlaywrightRenderedDocsFetcher(
           const dl = args[0] as { cancel?: () => void } | undefined;
           dl?.cancel?.();
         });
+        // PASSIVE. This handler is called for responses the browser has
+        // ALREADY received while rendering the one page we navigated to.
+        // It issues nothing: response.text() reads a body the browser is
+        // already holding, and there is no request object, no continue(),
+        // no fetch and no evaluate anywhere in it. A body is read only
+        // when the policy allows — same-origin and textual — and the
+        // policy lives in a pure module so it is testable without a
+        // browser.
         page.on("response", (...args: unknown[]) => {
-          const res = args[0] as { headers?: () => Record<string, string> } | undefined;
-          const len = Number(res?.headers?.()["content-length"] ?? 0);
+          const res = args[0] as
+            | {
+                headers?: () => Record<string, string>;
+                url?: () => string;
+                status?: () => number;
+                request?: () => { method?: () => string; resourceType?: () => string };
+                text?: () => Promise<string>;
+              }
+            | undefined;
+          const headers = res?.headers?.() ?? {};
+          const len = Number(headers["content-length"] ?? 0);
           if (Number.isFinite(len)) totalBytes += len;
+          if (!observer) return;
+          const url = res?.url?.() ?? "";
+          const contentType = headers["content-type"] ?? null;
+          const meta = {
+            url,
+            method: res?.request?.()?.method?.() ?? "",
+            resourceType: res?.request?.()?.resourceType?.() ?? "",
+            status: res?.status?.() ?? 0,
+            contentType,
+            contentLength: Number.isFinite(len) && len > 0 ? len : null,
+          };
+          if (!mayCaptureBody({ url, confirmedHost: route.confirmedHost, contentType })) {
+            observer.record({ ...meta, body: null });
+            return;
+          }
+          // Reading the buffered body is asynchronous; the promise is
+          // tracked so the render does not finish mid-read. A failure to
+          // read is recorded as no body, never retried.
+          const pending = (async () => {
+            let body: string | null = null;
+            try {
+              body = (await res?.text?.()) ?? null;
+            } catch {
+              body = null;
+            }
+            observer.record({ ...meta, body });
+          })();
+          bodyReads.push(pending);
         });
 
         navigations += 1;
@@ -220,6 +279,11 @@ export function createPlaywrightRenderedDocsFetcher(
         // an exact address untraceable and correctly rejected. Being
         // inside normalizedText also means contentHash covers it, so what
         // was hashed and what the model read remain the same value.
+        // Settle any body reads started while rendering. These are reads
+        // of buffered responses, not new requests.
+        await Promise.allSettled(bodyReads);
+        const networkObservations = observer ? observer.result() : null;
+
         const linkAppendix = renderLinkAppendix(documentLinks);
         const normalizedText = linkAppendix
           ? `${renderedText}\n\n${linkAppendix}`
@@ -254,6 +318,7 @@ export function createPlaywrightRenderedDocsFetcher(
           blockedRequestCount,
           renderDurationMs: Date.now() - startedAt,
           documentLinks,
+          networkObservations,
         };
       } catch (e) {
         if (e instanceof RenderedDocsError) throw e;

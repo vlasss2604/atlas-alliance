@@ -39,7 +39,14 @@
 // bounded time and size, zero retry, teardown after use. One render per
 // invocation: no click, no scroll, no pagination, no second navigation.
 //
-// Run: npx tsx scripts/inspect-official-docs.ts <https url> [projectSlug]
+// PASSIVE NETWORK OBSERVATION is available behind --observe-network. It
+// records metadata about requests the browser ALREADY made while
+// rendering this one page, and bounded bodies for same-origin textual
+// responses only. It issues nothing: no click, no pagination, no second
+// navigation, no fetch. An observed URL confers NO authority — it is a
+// URL the page asked for, not documentation, not evidence, not identity.
+//
+// Run: npx tsx scripts/inspect-official-docs.ts <https url> [projectSlug] [--observe-network]
 import { loadEnvConfig } from "@next/env";
 
 loadEnvConfig(process.cwd());
@@ -54,8 +61,12 @@ import { createIsolatedRenderedDocsFetcher } from "../src/server/engine/provider
 import { RenderedDocsError } from "../src/server/engine/providers/rendered-docs-fetcher";
 
 async function main(): Promise<void> {
-  const url = process.argv[2];
-  const slug = process.argv[3] ?? "pump_fun";
+  const args = process.argv.slice(2);
+  const flags = args.filter((a) => a.startsWith("--"));
+  const positional = args.filter((a) => !a.startsWith("--"));
+  const url = positional[0];
+  const slug = positional[1] ?? "pump_fun";
+  const observeNetwork = flags.includes("--observe-network");
   if (!url) {
     console.error("usage: npx tsx scripts/inspect-official-docs.ts <https url> [projectSlug]");
     process.exit(1);
@@ -84,7 +95,8 @@ async function main(): Promise<void> {
   }
 
   console.log("--- NON-EVIDENTIARY docs inspection render (one navigation) ---");
-  const doc = await createIsolatedRenderedDocsFetcher().render(url, {
+  console.log("observeNetwork:   " + observeNetwork);
+  const doc = await createIsolatedRenderedDocsFetcher({ observeNetwork }).render(url, {
     confirmedHost: eligible.confirmedHost,
     matchedPathPrefix: eligible.matchedPathPrefix,
   });
@@ -118,6 +130,25 @@ async function main(): Promise<void> {
     console.log(`  --- anchors (${dl.links.length}) ---`);
     for (const l of dl.links) {
       console.log("    <a> " + l.href + "   :: " + l.text.slice(0, 120));
+    }
+  }
+  // Observations only. Printed so a human can read what the page
+  // fetched; nothing here is promoted, classified or trusted.
+  const net = doc.networkObservations;
+  if (net) {
+    console.log("--- network observations (no authority conferred) ---");
+    console.log("  requests:     " + net.observations.length);
+    console.log("  dropped:      " + net.droppedCount);
+    console.log("  bodyBytes:    " + net.totalBodyBytes);
+    for (const o of net.observations) {
+      console.log(
+        "  [" + o.status + "] " + o.method + " " + (o.sameOrigin ? "same-origin" : "CROSS-ORIGIN") +
+          " " + String(o.contentType) + "  " + o.url,
+      );
+      if (o.body !== null) {
+        console.log("    bodyBytes:  " + o.body.length + (o.bodyTruncated ? " (truncated)" : ""));
+        console.log("    body:       " + o.body.replace(/\s+/g, " ").slice(0, 4000));
+      }
     }
   }
   console.log("--- rendered text ---");

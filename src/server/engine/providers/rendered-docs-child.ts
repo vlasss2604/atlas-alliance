@@ -19,6 +19,9 @@ export interface ChildRenderRequest {
   matchedPathPrefix: string;
   limits: RenderLimits;
   proxyPort: number;
+  // OPT-IN passive network observation. Absent means off, so a
+  // request that predates this field renders exactly as before.
+  observeNetwork?: boolean;
 }
 
 export type ChildRenderResponse =
@@ -38,6 +41,7 @@ export async function runChild(): Promise<void> {
     const fetcher = createPlaywrightRenderedDocsFetcher({
       limits: request.limits,
       proxyPort: request.proxyPort,
+      observeNetwork: request.observeNetwork === true,
     });
     const document = await fetcher.render(request.url, {
       confirmedHost: request.confirmedHost,
