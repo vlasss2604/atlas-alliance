@@ -191,6 +191,65 @@ function expandFlightStrings(values: unknown[], opts: Required<EmbeddedPayloadOp
   return out;
 }
 
+// ONE payload-source discovery, shared by every recovery path.
+//
+// Which script bodies are structured data, and how each is parsed, is a
+// security-relevant decision: it is the line between reading a literal
+// and interpreting a program. Two copies of that decision means one
+// eventually drifts, and the one that drifts is the one that reads
+// something it should not. So the flat-text path (Stage 0) and the
+// record-preserving path both consume this.
+export interface EmbeddedPayloadSource {
+  kind: EmbeddedPayloadKind;
+  // Position of the <script> in document order.
+  scriptIndex: number;
+  // Parsed literals. NEVER executed — see parseFlightPushes.
+  values: unknown[];
+}
+
+export function embeddedPayloadSources(
+  html: string,
+  options: EmbeddedPayloadOptions = {},
+): EmbeddedPayloadSource[] {
+  const opts = { ...DEFAULTS, ...options };
+  if (typeof html !== "string" || html.length === 0) return [];
+  if (html.length > opts.maxHtmlBytes) return [];
+
+  const out: EmbeddedPayloadSource[] = [];
+  let scriptIndex = -1;
+  for (const tag of scriptTags(html, opts.maxPayloadBytes)) {
+    scriptIndex += 1;
+    // 1. __NEXT_DATA__ — a single application/json blob.
+    if (attrHas(tag.attrs, "id", "__NEXT_DATA__")) {
+      const parsed = safeParse(tag.body);
+      if (parsed !== undefined) out.push({ kind: "NEXT_DATA", scriptIndex, values: [parsed] });
+      continue;
+    }
+    // 2. JSON-LD — one object or an array of them.
+    if (attrHas(tag.attrs, "type", "application/ld\\+json")) {
+      const parsed = safeParse(tag.body);
+      if (parsed !== undefined) out.push({ kind: "JSON_LD", scriptIndex, values: [parsed] });
+      continue;
+    }
+    // 3. RSC flight chunks — parsed as literals, never executed.
+    if (tag.body.includes("self.__next_f.push(")) {
+      const pushes = parseFlightPushes(tag.body, opts.maxPayloadBytes);
+      if (pushes.length > 0) {
+        out.push({ kind: "RSC_FLIGHT", scriptIndex, values: expandFlightStrings(pushes, opts) });
+      }
+      continue;
+    }
+    // 4. Any other application/json blob that is genuinely structured
+    // data. An unrecognized/plain script is IGNORED — never scraped for
+    // text, never interpreted.
+    if (attrHas(tag.attrs, "type", "application/json")) {
+      const parsed = safeParse(tag.body);
+      if (parsed !== undefined) out.push({ kind: "NEXT_DATA", scriptIndex, values: [parsed] });
+    }
+  }
+  return out;
+}
+
 export function extractEmbeddedPayloadText(
   html: string,
   options: EmbeddedPayloadOptions = {},
@@ -203,46 +262,10 @@ export function extractEmbeddedPayloadText(
   const strings: string[] = [];
   const seen = new Set<string>();
 
-  for (const tag of scriptTags(html, opts.maxPayloadBytes)) {
-    // 1. __NEXT_DATA__ — a single application/json blob.
-    if (attrHas(tag.attrs, "id", "__NEXT_DATA__")) {
-      const parsed = safeParse(tag.body);
-      if (parsed !== undefined) {
-        kinds.add("NEXT_DATA");
-        collectStrings(parsed, strings, seen, opts);
-      }
-      continue;
-    }
-    // 2. JSON-LD — one object or an array of them.
-    if (attrHas(tag.attrs, "type", "application/ld\\+json")) {
-      const parsed = safeParse(tag.body);
-      if (parsed !== undefined) {
-        kinds.add("JSON_LD");
-        collectStrings(parsed, strings, seen, opts);
-      }
-      continue;
-    }
-    // 3. RSC flight chunks — parsed as literals, never executed.
-    if (tag.body.includes("self.__next_f.push(")) {
-      const pushes = parseFlightPushes(tag.body, opts.maxPayloadBytes);
-      if (pushes.length > 0) {
-        kinds.add("RSC_FLIGHT");
-        collectStrings(expandFlightStrings(pushes, opts), strings, seen, opts);
-      }
-      continue;
-    }
-    // 4. Any other application/json blob that is genuinely structured
-    // data. An unrecognized/plain script is IGNORED — never scraped for
-    // text, never interpreted.
-    if (attrHas(tag.attrs, "type", "application/json")) {
-      const parsed = safeParse(tag.body);
-      if (parsed !== undefined) {
-        kinds.add("NEXT_DATA");
-        collectStrings(parsed, strings, seen, opts);
-      }
-    }
+  for (const source of embeddedPayloadSources(html, options)) {
+    kinds.add(source.kind);
+    for (const value of source.values) collectStrings(value, strings, seen, opts);
   }
-
   if (strings.length === 0) return EMPTY_EMBEDDED_PAYLOAD;
 
   let text = strings.join("\n");

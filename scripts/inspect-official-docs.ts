@@ -46,7 +46,15 @@
 // navigation, no fetch. An observed URL confers NO authority — it is a
 // URL the page asked for, not documentation, not evidence, not identity.
 //
-// Run: npx tsx scripts/inspect-official-docs.ts <https url> [projectSlug] [--observe-network]
+// RENDERED-HTML RECORD RECOVERY is available behind --recover=<needle>
+// (repeatable). It parses the SETTLED html this render already captured,
+// reusing Stage 0's payload discovery, and returns the smallest record
+// containing each needle together with the identifiers found INSIDE THAT
+// SAME RECORD. Parse only: no execution, no second navigation, no
+// request. It confers no authority — a value recovered from a page's
+// embedded payload means the page shipped it, nothing more.
+//
+// Run: npx tsx scripts/inspect-official-docs.ts <https url> [projectSlug] [--observe-network] [--recover=<needle> ...]
 import { loadEnvConfig } from "@next/env";
 
 loadEnvConfig(process.cwd());
@@ -67,6 +75,10 @@ async function main(): Promise<void> {
   const url = positional[0];
   const slug = positional[1] ?? "pump_fun";
   const observeNetwork = flags.includes("--observe-network");
+  const recoverNeedles = flags
+    .filter((f) => f.startsWith("--recover="))
+    .map((f) => f.slice("--recover=".length))
+    .filter((n) => n.length > 0);
   if (!url) {
     console.error("usage: npx tsx scripts/inspect-official-docs.ts <https url> [projectSlug]");
     process.exit(1);
@@ -96,7 +108,11 @@ async function main(): Promise<void> {
 
   console.log("--- NON-EVIDENTIARY docs inspection render (one navigation) ---");
   console.log("observeNetwork:   " + observeNetwork);
-  const doc = await createIsolatedRenderedDocsFetcher({ observeNetwork }).render(url, {
+  console.log("recoverNeedles:   " + (recoverNeedles.length > 0 ? recoverNeedles.join(" | ") : "(none)"));
+  const doc = await createIsolatedRenderedDocsFetcher({
+    observeNetwork,
+    recoverNeedles,
+  }).render(url, {
     confirmedHost: eligible.confirmedHost,
     matchedPathPrefix: eligible.matchedPathPrefix,
   });
@@ -149,6 +165,27 @@ async function main(): Promise<void> {
         console.log("    bodyBytes:  " + o.body.length + (o.bodyTruncated ? " (truncated)" : ""));
         console.log("    body:       " + o.body.replace(/\s+/g, " ").slice(0, 4000));
       }
+    }
+  }
+  // Observations only. A recovered record says the page shipped these
+  // bytes; it classifies nothing and promotes nothing.
+  const rec = doc.embeddedRecords;
+  if (rec) {
+    console.log("--- embedded records (no authority conferred) ---");
+    console.log("  kinds:        " + (rec.kinds.join(", ") || "(none)"));
+    console.log("  scanned:      " + rec.recordsScanned);
+    console.log("  matches:      " + rec.matches.length);
+    console.log("  truncated:    " + rec.truncated);
+    for (const [i, m] of rec.matches.entries()) {
+      console.log("  --- match " + (i + 1) + " (" + m.kind + ", script " + m.scriptIndex + ")");
+      console.log("    path:       " + m.path);
+      console.log("    needles:    " + m.matchedNeedles.join(" | "));
+      console.log("    fields:     " + m.fields.join(", "));
+      console.log("    identifiers in THIS record: " + m.identifiers.length);
+      for (const id of m.identifiers) {
+        console.log("      [" + id.shape + "] " + id.field + " = " + id.value);
+      }
+      console.log("    json:       " + m.json + (m.jsonTruncated ? "  (truncated)" : ""));
     }
   }
   console.log("--- rendered text ---");

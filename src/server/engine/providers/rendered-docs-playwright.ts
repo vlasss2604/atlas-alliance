@@ -12,6 +12,7 @@ import {
   mayCaptureBody,
   NetworkObservationCollector,
 } from "./network-observation";
+import { recoverEmbeddedRecords } from "./embedded-records";
 import {
   BROWSER_LOCKDOWN,
   DEFAULT_RENDER_LIMITS,
@@ -78,6 +79,10 @@ export interface PlaywrightRenderDeps {
   // evidentiary render must not start recording what a page fetched
   // just because the capability exists.
   observeNetwork?: boolean;
+  // OPT-IN record-preserving recovery from the SETTLED html this render
+  // already captured. Parse only — no second navigation, no execution,
+  // no request. Absent means the recovery never runs.
+  recoverRecords?: { needles: readonly string[] };
 }
 
 async function defaultLaunch(proxyPort?: number): Promise<BrowserLike> {
@@ -284,6 +289,14 @@ export function createPlaywrightRenderedDocsFetcher(
         await Promise.allSettled(bodyReads);
         const networkObservations = observer ? observer.result() : null;
 
+        // Record-preserving recovery from the SAME settled html string
+        // already in hand. The browser's work is finished; this is
+        // string parsing, and it is bounded inside this process so a
+        // multi-megabyte document never crosses the boundary.
+        const embeddedRecords = deps.recoverRecords
+          ? recoverEmbeddedRecords(html, { needles: deps.recoverRecords.needles })
+          : null;
+
         const linkAppendix = renderLinkAppendix(documentLinks);
         const normalizedText = linkAppendix
           ? `${renderedText}\n\n${linkAppendix}`
@@ -319,6 +332,7 @@ export function createPlaywrightRenderedDocsFetcher(
           renderDurationMs: Date.now() - startedAt,
           documentLinks,
           networkObservations,
+          embeddedRecords,
         };
       } catch (e) {
         if (e instanceof RenderedDocsError) throw e;

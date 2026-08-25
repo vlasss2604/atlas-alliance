@@ -96,6 +96,29 @@ export interface RenderedDocument extends FetchedDocument {
     droppedCount: number;
     totalBodyBytes: number;
   } | null;
+  // RECORDS recovered from the settled html's embedded payloads, for
+  // needles the caller supplied. Null unless the caller opted in.
+  //
+  // AUTHORITY: none. Recovering a value from a page's embedded payload
+  // says the page shipped that value — not that it is true, not that it
+  // is documentation, and not that any identifier inside it is bound to
+  // anything. Identifiers are reported per RECORD, so a value from an
+  // unrelated record is never attached to this one.
+  embeddedRecords?: {
+    kinds: string[];
+    recordsScanned: number;
+    matches: {
+      kind: string;
+      scriptIndex: number;
+      path: string;
+      json: string;
+      jsonTruncated: boolean;
+      fields: string[];
+      matchedNeedles: string[];
+      identifiers: { field: string; value: string; shape: string }[];
+    }[];
+    truncated: boolean;
+  } | null;
 }
 
 export type RenderedDocsFailureReason =

@@ -43,6 +43,9 @@ export interface IsolatedRendererDeps {
   // render must not begin recording what a page fetched merely
   // because the capability exists.
   observeNetwork?: boolean;
+  // OPT-IN record-recovery needles, forwarded to the child. Empty or
+  // absent means the recovery never runs.
+  recoverNeedles?: readonly string[];
 }
 
 const CHILD_SCRIPT = path.join(__dirname, "rendered-docs-child.ts");
@@ -158,6 +161,7 @@ export function createIsolatedRenderedDocsFetcher(
   const startProxy = deps.startProxy ?? startEgressProxy;
   const parentEnv = deps.parentEnv ?? process.env;
   const observeNetwork = deps.observeNetwork === true;
+  const recoverNeedles = [...(deps.recoverNeedles ?? [])];
 
   return {
     name: "isolated-playwright-chromium",
@@ -178,6 +182,7 @@ export function createIsolatedRenderedDocsFetcher(
           limits,
           proxyPort: proxy.port,
           observeNetwork,
+          recoverNeedles,
         };
 
         // EXACTLY ONE child render request. No loop, no retry — a failed

@@ -260,11 +260,22 @@ describe("process supervision — fail closed", () => {
     // act rather than a side effect. observeNetwork was added under owner
     // authorization for passive observation and is a plain boolean.
     expect(Object.keys(seen!).sort()).toEqual(
-      ["confirmedHost", "limits", "matchedPathPrefix", "observeNetwork", "proxyPort", "url"].sort(),
+      [
+        "confirmedHost",
+        "limits",
+        "matchedPathPrefix",
+        "observeNetwork",
+        "proxyPort",
+        "recoverNeedles",
+        "url",
+      ].sort(),
     );
     expect(JSON.stringify(seen)).not.toContain("SECRET");
-    // Default OFF: an ordinary render tells the child to observe nothing.
-    expect((seen as unknown as { observeNetwork: boolean }).observeNetwork).toBe(false);
+    // Both opt-ins default OFF: an ordinary render tells the child to
+    // observe nothing and to recover nothing.
+    const request = seen as unknown as { observeNetwork: boolean; recoverNeedles: string[] };
+    expect(request.observeNetwork).toBe(false);
+    expect(request.recoverNeedles).toEqual([]);
   });
 
   it("the child is spawned with the scrubbed environment", async () => {

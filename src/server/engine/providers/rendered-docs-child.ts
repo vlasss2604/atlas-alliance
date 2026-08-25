@@ -22,6 +22,9 @@ export interface ChildRenderRequest {
   // OPT-IN passive network observation. Absent means off, so a
   // request that predates this field renders exactly as before.
   observeNetwork?: boolean;
+  // OPT-IN record recovery needles. Absent means the recovery never
+  // runs. Bounded by the recovery itself, not by the caller.
+  recoverNeedles?: string[];
 }
 
 export type ChildRenderResponse =
@@ -42,6 +45,10 @@ export async function runChild(): Promise<void> {
       limits: request.limits,
       proxyPort: request.proxyPort,
       observeNetwork: request.observeNetwork === true,
+      recoverRecords:
+        Array.isArray(request.recoverNeedles) && request.recoverNeedles.length > 0
+          ? { needles: request.recoverNeedles }
+          : undefined,
     });
     const document = await fetcher.render(request.url, {
       confirmedHost: request.confirmedHost,
