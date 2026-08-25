@@ -474,3 +474,65 @@ export const onchainDerivedSubjects = pgTable(
     check("ck_onchain_derived_not_self", sql`${t.subject} <> ${t.parentSubject}`),
   ],
 );
+
+// OBSERVED TRANSACTION SIGNATURES — technical provenance, never execution.
+//
+// A signature returned by getSignaturesForAddress is not documentary
+// evidence and must never be recorded as one. It is also not arbitrary: a
+// confirmed structured read returned it for a subject that itself had
+// provenance. Same shape as onchain_derived_subjects, same reason.
+//
+// It answers ONE question — why is this exact signature eligible for
+// getTransaction — and confers nothing else. Being listed for an address
+// does not say what the transaction did, which tokens moved, in which
+// direction, or whether anything was burned. `err` is the RPC's own
+// metadata; `memo` is SELECTION metadata, arbitrary text written by
+// whoever signed, useful for choosing what to read and never proof of
+// what executed.
+export const onchainObservedSignatures = pgTable(
+  "onchain_observed_signatures",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    onchainArtifactId: uuid("onchain_artifact_id")
+      .notNull()
+      .references(() => onchainArtifacts.id, { onDelete: "cascade" }),
+    chain: text("chain").notNull(),
+    network: text("network").notNull(),
+    projectAnchor: text("project_anchor").notNull(),
+    // The address whose signatures were requested.
+    parentSubject: text("parent_subject").notNull(),
+    signature: text("signature").notNull(),
+    slot: bigint("slot", { mode: "number" }).notNull(),
+    blockTime: timestamp("block_time", { withTimezone: true }),
+    err: boolean("err").notNull(),
+    memo: text("memo"),
+    bindingStatus: text("binding_status").notNull(),
+    observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ix_onchain_observed_sig_signature").on(t.signature),
+    index("ix_onchain_observed_sig_anchor").on(t.projectAnchor, t.signature),
+    index("ix_onchain_observed_sig_parent").on(t.parentSubject),
+    uniqueIndex("uq_onchain_observed_sig_artifact_signature").on(t.onchainArtifactId, t.signature),
+    check("ck_onchain_observed_sig_binding", sql`${t.bindingStatus} = 'CONFIRMED'`),
+    // A complete base58 signature. A truncated display form is
+    // unrepresentable at rest — the same discipline documentary locators use.
+    check(
+      "ck_onchain_observed_sig_shape",
+      sql`${t.signature} ~ '^[1-9A-HJ-NP-Za-km-z]{64,88}$'`,
+    ),
+    check(
+      "ck_onchain_observed_sig_parent_shape",
+      sql`${t.parentSubject} ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'`,
+    ),
+    check(
+      "ck_onchain_observed_sig_anchor_shape",
+      sql`${t.projectAnchor} ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'`,
+    ),
+  ],
+);
