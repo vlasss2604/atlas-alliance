@@ -65,6 +65,7 @@ import { createDatabase } from "../src/server/db/client";
 import { projects } from "../src/server/db/schema";
 import { evaluateDocsInspectionEligibility } from "../src/server/engine/docs-inspection-eligibility";
 import { resolveSourceRoute } from "../src/server/engine/source-authority";
+import { embeddedSearchVerdict } from "../src/server/engine/providers/embedded-records";
 import { createIsolatedRenderedDocsFetcher } from "../src/server/engine/providers/rendered-docs-isolated";
 import { RenderedDocsError } from "../src/server/engine/providers/rendered-docs-fetcher";
 
@@ -173,9 +174,21 @@ async function main(): Promise<void> {
   if (rec) {
     console.log("--- embedded records (no authority conferred) ---");
     console.log("  kinds:        " + (rec.kinds.join(", ") || "(none)"));
-    console.log("  scanned:      " + rec.recordsScanned);
     console.log("  matches:      " + rec.matches.length);
     console.log("  truncated:    " + rec.truncated);
+    // COVERAGE. Finding a source is not searching it: a zero-match result
+    // is only a real negative when coverage is COMPLETE.
+    const c = rec.coverage;
+    console.log("  --- coverage ---");
+    console.log("    sourcesFound:      " + c.sourcesFound);
+    console.log("    sourcesTraversed:  " + c.sourcesTraversed);
+    console.log("    framesSeen:        " + c.framesSeen);
+    console.log("    framesParsed:      " + c.framesParsed);
+    console.log("    framesUnsupported: " + c.framesUnsupported);
+    console.log("    parseErrors:       " + c.parseErrors);
+    console.log("    recordsScanned:    " + c.recordsScanned);
+    console.log("    SEARCH COVERAGE:   " + c.coverage);
+    console.log("    VERDICT:           " + embeddedSearchVerdict(rec));
     for (const [i, m] of rec.matches.entries()) {
       console.log("  --- match " + (i + 1) + " (" + m.kind + ", script " + m.scriptIndex + ")");
       console.log("    path:       " + m.path);

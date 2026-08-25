@@ -3,6 +3,7 @@ import {
   type EmbeddedPayloadKind,
   type EmbeddedPayloadOptions,
 } from "./embedded-payload";
+import { parseFlightFrames } from "./flight-frames";
 
 // RECORD-PRESERVING EMBEDDED PAYLOAD RECOVERY.
 //
@@ -70,6 +71,31 @@ export interface EmbeddedRecordMatch {
   identifiers: RecordIdentifier[];
 }
 
+// WAS THE PAYLOAD ACTUALLY SEARCHED?
+//
+// Finding a source is not searching it. A live inspection once reported
+// zero matches after traversing four objects on a two-megabyte page and
+// that was read as "no identifier exists" — a false negative produced by
+// unsupported framing, not by absence. These counters exist so the
+// difference between (A) searched and found nothing and (B) found a
+// payload and could not read it is visible in the result rather than
+// inferred by a reader.
+export interface EmbeddedRecordsCoverage {
+  sourcesFound: number;
+  sourcesTraversed: number;
+  framesSeen: number;
+  framesParsed: number;
+  framesUnsupported: number;
+  parseErrors: number;
+  recordsScanned: number;
+  // COMPLETE — every discovered source was traversed, every frame was
+  //            parsed, and no cap was hit. A zero-match result here is a
+  //            real negative.
+  // PARTIAL  — something was searched, but something else was not.
+  // NONE     — nothing was traversed at all.
+  coverage: "COMPLETE" | "PARTIAL" | "NONE";
+}
+
 export interface EmbeddedRecordsResult {
   kinds: EmbeddedPayloadKind[];
   // How many objects were examined — evidence that recovery ran, without
@@ -79,14 +105,52 @@ export interface EmbeddedRecordsResult {
   // A cap was hit: there may be more matches, more record text, or more
   // records than were examined.
   truncated: boolean;
+  coverage: EmbeddedRecordsCoverage;
 }
+
+export const EMPTY_COVERAGE: EmbeddedRecordsCoverage = {
+  sourcesFound: 0,
+  sourcesTraversed: 0,
+  framesSeen: 0,
+  framesParsed: 0,
+  framesUnsupported: 0,
+  parseErrors: 0,
+  recordsScanned: 0,
+  coverage: "NONE",
+};
 
 export const EMPTY_EMBEDDED_RECORDS: EmbeddedRecordsResult = {
   kinds: [],
   recordsScanned: 0,
   matches: [],
   truncated: false,
+  coverage: EMPTY_COVERAGE,
 };
+
+// The three states a caller may report. Deliberately NOT a boolean: the
+// whole point is that 'no match' and 'not searched' are different
+// answers, and a boolean would collapse them again.
+export type EmbeddedSearchVerdict =
+  | "EVENT_IDENTIFIER_PATH_FOUND"
+  | "SEARCHED_SUPPORTED_PAYLOAD_NO_MATCH"
+  | "PAYLOAD_PRESENT_BUT_NOT_FULLY_INSPECTED";
+
+// A NEGATIVE IS ONLY AVAILABLE AFTER COMPLETE COVERAGE. Anything less
+// reports that the payload was not fully inspected, which is a statement
+// about this system rather than about the page.
+// Takes only what the decision needs, so a caller holding a widened
+// projection of the result (the cross-process document shape) can still
+// ask the question without re-deriving it.
+export function embeddedSearchVerdict(result: {
+  matches: readonly unknown[];
+  coverage: { coverage: string };
+}): EmbeddedSearchVerdict {
+  if (result.matches.length > 0) return "EVENT_IDENTIFIER_PATH_FOUND";
+  if (result.coverage.coverage === "COMPLETE") {
+    return "SEARCHED_SUPPORTED_PAYLOAD_NO_MATCH";
+  }
+  return "PAYLOAD_PRESENT_BUT_NOT_FULLY_INSPECTED";
+}
 
 export interface EmbeddedRecordsOptions extends EmbeddedPayloadOptions {
   // Values to look for. Compared case-insensitively against a record's own
@@ -166,6 +230,7 @@ function identifiersIn(
 interface WalkState {
   needles: string[];
   matches: EmbeddedRecordMatch[];
+  seen: Set<string>;
   kind: EmbeddedPayloadKind;
   scriptIndex: number;
   scanned: { n: number };
@@ -243,6 +308,12 @@ function walk(node: unknown, path: string, depth: number, st: WalkState): boolea
   }
 
   const bounded = safeStringify(node, st.opts.maxRecordChars);
+  // The same record can be reached through frame parsing AND through the
+  // whole-string re-parse. Reporting it twice would suggest two
+  // independent occurrences, which is a different claim.
+  const dedupKey = `${st.kind}|${st.scriptIndex}|${path}|${bounded.json}`;
+  if (st.seen.has(dedupKey)) return true;
+  st.seen.add(dedupKey);
   const identifiers: RecordIdentifier[] = [];
   identifiersIn(node, identifiers, new Set<string>(), "", 0);
 
@@ -285,27 +356,96 @@ export function recoverEmbeddedRecords(
   const scanned = { n: 0 };
   const totalChars = { n: 0 };
   const truncated = { v: false };
+  const matchKeys = new Set<string>();
+  let sourcesTraversed = 0;
+  let framesSeen = 0;
+  let framesParsed = 0;
+  let framesUnsupported = 0;
+  let parseErrors = 0;
 
   for (const source of sources) {
     kinds.add(source.kind);
-    for (const value of source.values) {
-      walk(value, "", 0, {
-        needles,
-        matches,
-        kind: source.kind,
-        scriptIndex: source.scriptIndex,
-        scanned,
-        totalChars,
-        truncated,
-        opts,
+    const st = {
+      needles,
+      matches,
+      seen: matchKeys,
+      kind: source.kind,
+      scriptIndex: source.scriptIndex,
+      scanned,
+      totalChars,
+      truncated,
+      opts,
+    };
+
+    if (source.kind === "RSC_FLIGHT") {
+      // A flight stream is newline-delimited FRAMES, not one JSON
+      // document, and Next splits frames across pushes freely — so the
+      // chunk strings are joined in document order before framing.
+      const stream = collectFlightStream(source.values, opts);
+      const framed = parseFlightFrames(stream, {
+        maxFrameChars: opts.maxEmbeddedJsonChars,
       });
+      framesSeen += framed.stats.seen;
+      framesParsed += framed.stats.parsed;
+      framesUnsupported += framed.stats.unsupported;
+      parseErrors += framed.stats.parseErrors;
+      for (const value of framed.values) walk(value, "", 0, st);
+      // A chunk may also be a whole JSON string rather than a frame
+      // stream. Both are walked and matches deduped, so supporting one
+      // shape never costs the other.
+      for (const value of source.values) walk(value, "", 0, st);
+      if (framed.values.length > 0 || source.values.length > 0) sourcesTraversed += 1;
+      continue;
     }
+
+    let walkedAny = false;
+    for (const value of source.values) {
+      walk(value, "", 0, st);
+      walkedAny = true;
+    }
+    if (walkedAny) sourcesTraversed += 1;
   }
+
+  const complete =
+    sources.length > 0 &&
+    sourcesTraversed === sources.length &&
+    framesUnsupported === 0 &&
+    parseErrors === 0 &&
+    !truncated.v;
 
   return {
     kinds: [...kinds].sort(),
     recordsScanned: scanned.n,
     matches,
     truncated: truncated.v,
+    coverage: {
+      sourcesFound: sources.length,
+      sourcesTraversed,
+      framesSeen,
+      framesParsed,
+      framesUnsupported,
+      parseErrors,
+      recordsScanned: scanned.n,
+      coverage: sourcesTraversed === 0 ? "NONE" : complete ? "COMPLETE" : "PARTIAL",
+    },
   };
+}
+
+// Every string inside a flight source's parsed pushes, in document
+// order, joined into one stream. Depth-bounded.
+function collectFlightStream(values: unknown[], opts: typeof RECORD_DEFAULTS): string {
+  const parts: string[] = [];
+  const visit = (node: unknown, depth: number): void => {
+    if (depth > 16 || parts.length > 100_000) return;
+    if (typeof node === "string") {
+      parts.push(node);
+      return;
+    }
+    if (Array.isArray(node)) {
+      for (const child of node) visit(child, depth + 1);
+    }
+  };
+  for (const v of values) visit(v, 0);
+  const joined = parts.join("");
+  return joined.length > opts.maxEmbeddedJsonChars ? joined.slice(0, opts.maxEmbeddedJsonChars) : joined;
 }

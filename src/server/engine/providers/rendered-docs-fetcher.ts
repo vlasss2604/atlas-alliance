@@ -118,6 +118,18 @@ export interface RenderedDocument extends FetchedDocument {
       identifiers: { field: string; value: string; shape: string }[];
     }[];
     truncated: boolean;
+    // COVERAGE. Finding a payload source is not searching it — a zero-
+    // match result is only a real negative when this says COMPLETE.
+    coverage: {
+      sourcesFound: number;
+      sourcesTraversed: number;
+      framesSeen: number;
+      framesParsed: number;
+      framesUnsupported: number;
+      parseErrors: number;
+      recordsScanned: number;
+      coverage: "COMPLETE" | "PARTIAL" | "NONE";
+    };
   } | null;
 }
 
