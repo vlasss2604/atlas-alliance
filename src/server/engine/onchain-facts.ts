@@ -37,6 +37,21 @@ export const ONCHAIN_DOES_NOT_PROVE = {
     "This shows that the account exists on-chain and which program owns it. It does not establish who controls " +
     "the account, what role it plays in any mechanism, or whether it is a treasury, a vault, a burn address or " +
     "an ordinary holder — those are economic labels, not chain facts.",
+  // The account IS this project's token account. What that does and does
+  // not mean is the whole reason this entry is authored by hand.
+  ACCOUNT_TOKEN_RELATION:
+    "This shows that the queried account is an SPL token account for this project's confirmed mint, as parsed " +
+    "by the node at the observed slot. It does not establish who controls the account, how any balance in it " +
+    "arrived, that any token ever moved through it, what role it plays in any mechanism, or whether it is a " +
+    "treasury, a vault, a burn address or an ordinary holder. A document calling this address something is a " +
+    "separate claim, established separately, and this observation neither confirms nor contradicts it.",
+  // The account is a token account for SOMEONE ELSE'S mint. The point of
+  // this entry is that the reader must not carry the project across.
+  ACCOUNT_TOKEN_RELATION_FOREIGN:
+    "This shows that the queried account is an SPL token account for a mint that is NOT this project's " +
+    "confirmed mint. It says nothing about this project's token: the account holds a different asset. That a " +
+    "document about this project named this address does not make the account this project's, and no " +
+    "conclusion about this project's supply, holdings or mechanisms may rest on it.",
   TOKEN_ACCOUNT_BALANCE:
     "This is the token balance held by the account at the observed slot. It does not establish how the balance " +
     "arrived there, who controls the account, whether the holding is permanent, or what the holding means " +
@@ -140,9 +155,20 @@ export function synthesizeOnchainFacts(
         ),
       ];
 
-    case "ACCOUNT_INFO":
+    // TWO SEPARATE QUESTIONS, TWO SEPARATE FACTS.
+    //
+    // What the account IS (exists, owned by which program) has always been
+    // stated. What RELATIONSHIP it has to this project's token was parsed
+    // by the adapter and then went no further than the artifact, so the
+    // Evidence layer could not see it.
+    //
+    // The relation fact is emitted ONLY when the node actually parsed a
+    // mint. Program ownership alone says the account is a token account,
+    // not which one — and "we could not tell which" is never written as a
+    // relationship, in either direction.
+    case "ACCOUNT_INFO": {
       if (!r.exists) return []; // absence is not a fact
-      return [
+      const facts: ExtractedFact[] = [
         fact(
           target,
           `Account ${r.address} exists on-chain and is owned by program ${r.ownerProgram ?? "unknown"} ` +
@@ -151,6 +177,48 @@ export function synthesizeOnchainFacts(
           ONCHAIN_DOES_NOT_PROVE.ACCOUNT_INFO,
         ),
       ];
+
+      // NOT_TOKEN_PROGRAM_OWNED adds nothing here on purpose: the fact
+      // above already names the exact owning program, which is the whole
+      // of what was established. Restating it as "is not a token account"
+      // would read as a classification of the address, and the next step
+      // from there is calling it a wallet.
+      //
+      // TOKEN_PROGRAM_OWNED_UNRESOLVED adds nothing either, for the
+      // opposite reason: something IS established (it is a token account)
+      // but the mint is not, and there is no honest relationship sentence
+      // that omits the mint without implying one.
+      const parsed = r.tokenAccountRelation === "TOKEN_ACCOUNT_PARSED" ? r.tokenAccount : null;
+      if (parsed !== null) {
+        // The anchor comes from provenance — the project's confirmed
+        // identity — and the mint from the observation. They are compared,
+        // never conflated, and the subject is a third address again.
+        const anchor = artifact.provenance.projectAnchor;
+        const isAnchorMint = parsed.mint === anchor;
+        const ownerClause = parsed.owner === null ? "" : ` with token-account owner ${parsed.owner}`;
+        facts.push(
+          fact(
+            target,
+            isAnchorMint
+              ? `Account ${r.address} is an SPL token account for mint ${parsed.mint}, this project's ` +
+                  `confirmed mint, held under program ${r.ownerProgram ?? "unknown"}${ownerClause}, ` +
+                  `as observed at slot ${slot}.`
+              : `Account ${r.address} is an SPL token account for mint ${parsed.mint}, which is NOT this ` +
+                  `project's confirmed mint ${anchor}, held under program ${r.ownerProgram ?? "unknown"}` +
+                  `${ownerClause}, as observed at slot ${slot}.`,
+            fragmentFor(artifact, ["address", "tokenAccountRelation", "tokenAccount"]),
+            isAnchorMint
+              ? ONCHAIN_DOES_NOT_PROVE.ACCOUNT_TOKEN_RELATION
+              : ONCHAIN_DOES_NOT_PROVE.ACCOUNT_TOKEN_RELATION_FOREIGN,
+            // A foreign-mint account is not evidence FOR anything about
+            // this project. It is context that bounds what the documentary
+            // mention of the address can mean — never support.
+            isAnchorMint ? {} : { relationship: "CONTEXT" },
+          ),
+        );
+      }
+      return facts;
+    }
 
     case "TOKEN_ACCOUNT_BALANCE":
       return [
