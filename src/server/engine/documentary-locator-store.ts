@@ -1,7 +1,12 @@
-import { and, eq, or } from "drizzle-orm";
+import { and, eq, inArray, ne, or } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { evidence, evidenceDocumentaryLocators } from "../db/schema";
+import {
+  evidence,
+  evidenceDocumentaryLocators,
+  researchJobs,
+  sources,
+} from "../db/schema";
 import {
   validateDocumentaryLocator,
   type DocumentaryLocatorOutcome,
@@ -206,49 +211,100 @@ export async function locatorsForEvidence(
     .map((r) => ({ value: r.value, shape: r.shape as LocatorShape }));
 }
 
-// EVERY ADMITTED LOCATOR THIS JOB MAY ADDRESS.
+// EVERY ADMITTED DOCUMENTARY LOCATOR THIS JOB MAY ADDRESS.
 //
 // The gate that made structured on-chain research unreachable in
 // production: acquisition accepted a `locators` parameter and nothing ever
-// filled it, so the only subject a normal research job could ever address
-// was the project's own mint. This is the query that fills it.
+// filled it, so the only subject a normal research job could address was
+// the project's own mint. This is the query that fills it.
 //
-// SCOPED TO THE JOB, deliberately. A locator becomes addressable because
-// THIS job admitted the document that states it — which makes project
-// containment structural rather than a filter that could be forgotten: an
-// address admitted while researching another project is not reachable from
-// here at all.
+// SCOPED TO THE PROJECT, NOT THE JOB. Job scoping looked safer and was
+// unusable: EXECUTION_EVIDENCE is step 4 and DESTINATION is step 6, so the
+// component that needs a documented account runs two steps before the one
+// that admits it, and a fresh job reached the on-chain path with nothing to
+// address. A document stating where a project sends its tokens does not
+// stop being true because a different job read it.
 //
-// CONFIRMED ROWS ONLY. The table's own CHECK already makes an unvalidated
-// row unrepresentable, and the predicate is restated here so the guarantee
-// survives someone loosening the schema. A model's claimed address that
-// the deterministic validator refused never reached this table and cannot
-// be returned by this query.
+// The project boundary is the SAME deterministic boundary the rest of the
+// engine uses: a locator is reachable only through an Evidence row whose
+// research job belongs to this job's project_id. Never a ticker, never a
+// name, never a domain — an address admitted while researching another
+// project is unreachable here, and a job with no project is refused
+// outright rather than falling back to "all locators".
+//
+// SAME PROJECT IS NOT ENOUGH AUTHORITY. Reuse additionally requires that
+// the originating fact was itself admissible documentary evidence:
+//
+//   * validation_result = CONFIRMED and literally_present = true — the
+//     deterministic validator's own verdict, restated here so the
+//     guarantee survives someone loosening the schema CHECK;
+//   * officiality = CONFIRMED — a CLAIMED or UNVERIFIED source may state
+//     an address, and that is a claim about an address, not a locator;
+//   * a documentary source class — SOCIAL, NEWS, RESEARCH_MEDIA and
+//     DATA_PROVIDER never independently establish anything, so they never
+//     hand the on-chain path a subject either;
+//   * the source row still resolves and is not BROKEN — provenance that
+//     cannot be re-checked is provenance that cannot be relied on.
+//
+// Every one of those is an AND. Anything unresolvable fails closed: the
+// locator is simply not returned, and research continues without it.
 //
 // The scalar `documentary_locator` column is deliberately NOT read here.
 // Migration 0028 backfilled every scalar into this table as ordinal 0, so
-// the child rows are complete, and reading both would return historical
+// the child rows are complete and reading both would return historical
 // rows twice.
+//
+// NOTHING IS COPIED. The historical Evidence row is read, never rewritten,
+// never duplicated into this job — the new job addresses the same account
+// through the original fact's provenance, which is why a reused locator
+// can still be traced to the document that stated it.
+//
+// THIS IS NOT RESEARCH MEMORY. No lesson, no confidence, no reuse policy
+// and no learning writeback: it is one exact identifier, still attached to
+// the document that stated it, still validated the same way.
+const ADMISSIBLE_LOCATOR_SOURCE_CLASSES = [
+  "OFFICIAL_DOCS",
+  "GOVERNANCE",
+  "OFFICIAL_REPORT",
+] as const;
+
 export async function admittedLocatorsForJob(
   db: Database | Transaction,
   jobId: string,
   limit = MAX_ADMITTED_LOCATORS_PER_JOB,
 ): Promise<ConfirmedLocator[]> {
   if (typeof jobId !== "string" || jobId.length === 0) return [];
+
+  // The project boundary is resolved from the JOB, never passed in — a
+  // caller cannot widen the scope by handing over a different project.
+  const [job] = await db
+    .select({ projectId: researchJobs.projectId })
+    .from(researchJobs)
+    .where(eq(researchJobs.id, jobId));
+  // No job, or a job with no project, has no project boundary to enforce.
+  // Fail closed rather than returning every locator ever admitted.
+  if (!job?.projectId) return [];
+
   const rows = await db
     .select({
       value: evidenceDocumentaryLocators.value,
       shape: evidenceDocumentaryLocators.shape,
       ordinal: evidenceDocumentaryLocators.ordinal,
-      evidenceId: evidenceDocumentaryLocators.evidenceId,
     })
     .from(evidenceDocumentaryLocators)
     .innerJoin(evidence, eq(evidence.id, evidenceDocumentaryLocators.evidenceId))
+    // INNER joins throughout: an Evidence row whose job or source no longer
+    // resolves drops out instead of being reused on trust.
+    .innerJoin(researchJobs, eq(researchJobs.id, evidence.researchJobId))
+    .innerJoin(sources, eq(sources.id, evidence.sourceId))
     .where(
       and(
-        eq(evidence.researchJobId, jobId),
+        eq(researchJobs.projectId, job.projectId),
         eq(evidenceDocumentaryLocators.literallyPresent, true),
         eq(evidenceDocumentaryLocators.validationResult, "CONFIRMED"),
+        eq(evidence.officiality, "CONFIRMED"),
+        inArray(evidence.sourceClass, [...ADMISSIBLE_LOCATOR_SOURCE_CLASSES]),
+        ne(sources.health, "BROKEN"),
       ),
     );
 
