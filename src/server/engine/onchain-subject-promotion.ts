@@ -203,19 +203,47 @@ export function promoteFromObservation(input: PromotionInput): PromotionOutcome 
   });
 
   switch (result.kind) {
-    // An account that EXISTS may own token accounts for the project's
-    // mint. Asking is one bounded call and the answer is useful either
-    // way — an account owning none is a finding, not a dead end.
+    // A documented address is one of three things, and the difference
+    // decides what is worth asking next.
     //
-    // The account's owner PROGRAM is deliberately not consulted. Reading
-    // it would mean hard-coding the System program id into research
-    // logic, and the question "which of our token accounts does this
-    // address own?" is well-formed for any account that exists.
+    // getAccountInfo already requests jsonParsed encoding, so this ONE
+    // observation answers "is it itself a token account, and for which
+    // mint?" — no second read, and no guess.
     case "ACCOUNT_INFO": {
+      if (!result.exists) return none("NO_ELIGIBLE_SUBJECT");
+
+      const asTokenAccount = result.tokenAccount;
+      if (asTokenAccount !== null) {
+        // (1) THE LOCATOR IS ITSELF A TOKEN ACCOUNT. Asking which token
+        // accounts it owns is meaningless — a token account owns none —
+        // so the old rule would have spent a bounded call to learn
+        // nothing.
+        //
+        // MINT BINDING IS MANDATORY HERE. A token account for some other
+        // mint is another project's account that this document happens to
+        // name; reading its history would be researching a stranger. Fail
+        // closed rather than fall back to the discovery rule.
+        if (asTokenAccount.mint !== p.projectAnchor) return none("NO_ELIGIBLE_SUBJECT");
+        if (!componentAllowsRule(input.component, "TOKEN_ACCOUNT_TO_SIGNATURES")) {
+          return none("COMPONENT_NOT_PERMITTED");
+        }
+        if (input.visited.has(`SIGNATURES_FOR_ADDRESS::${result.address}`)) {
+          return none("NO_ELIGIBLE_SUBJECT");
+        }
+        // Bound to this project's mint by the observation itself, so the
+        // window is legitimately about this project.
+        return {
+          promoted: [build(result.address, "TOKEN_ACCOUNT_TO_SIGNATURES", result.address)],
+          refusal: null,
+        };
+      }
+
+      // (2) AN ORDINARY ACCOUNT. It may own token accounts for the
+      // project's mint; asking is one bounded call and an answer of none
+      // is itself a finding.
       if (!componentAllowsRule(input.component, "ACCOUNT_TO_TOKEN_ACCOUNTS")) {
         return none("COMPONENT_NOT_PERMITTED");
       }
-      if (!result.exists) return none("NO_ELIGIBLE_SUBJECT");
       if (input.visited.has(`TOKEN_ACCOUNTS_BY_OWNER::${result.address}`)) {
         return none("NO_ELIGIBLE_SUBJECT");
       }
@@ -225,10 +253,6 @@ export function promoteFromObservation(input: PromotionInput): PromotionOutcome 
       };
     }
 
-    // Each returned token account is a real subject with real provenance.
-    // The owner and mint are re-checked against the query's own answer, so
-    // an adapter that ever returned a foreign account could not launder it
-    // into a subject here.
     case "TOKEN_ACCOUNTS_BY_OWNER": {
       if (!componentAllowsRule(input.component, "TOKEN_ACCOUNT_TO_SIGNATURES")) {
         return none("COMPONENT_NOT_PERMITTED");

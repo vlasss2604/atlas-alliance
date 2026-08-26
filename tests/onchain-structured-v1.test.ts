@@ -33,6 +33,7 @@ import {
 } from "../src/server/engine/providers/onchain-retriever";
 import {
   createSolanaOnchainAdapter,
+  isSplTokenProgramId,
   MAX_SIGNATURES_PER_INTENT,
   OnchainRpcError,
   rpcParamsFor,
@@ -1178,5 +1179,125 @@ describe("generalization", () => {
     );
     expect(raw.toLowerCase()).not.toContain("pump");
     expect(raw.toLowerCase()).not.toContain("buyback");
+  });
+});
+
+// THE DOCUMENTARY-LOCATOR → TOKEN BRIDGE, at the adapter.
+//
+// getAccountInfo has always been sent with jsonParsed encoding, so a node
+// answering about an SPL token account already returns its mint and owning
+// wallet. The projection dropped both, which left "is this documented
+// address a token account, and for which mint?" unanswerable from the one
+// call that could answer it.
+//
+// The field is gated on the PROGRAM OWNER, not on a mint-shaped field
+// appearing in the response: any program may return data containing a key
+// called "mint", and only an SPL Token program's account is a token account.
+describe("account info — parsed token-account projection", () => {
+  const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+  const TOKEN_2022 = "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb";
+  const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+  const HOLDER = "9WtcfpuiF6dVKroycsi3E1k7vYQP8XmT7RBjcptdcfjX";
+
+  function accountPayload(owner: string, info: Record<string, unknown> | null) {
+    return {
+      context: { slot: 500 },
+      value: {
+        owner,
+        executable: false,
+        lamports: 2039280,
+        ...(info === null ? {} : { data: { program: "spl-token", parsed: { type: "account", info } } }),
+      },
+    };
+  }
+
+  const infoIntent = (subject: string): OnchainIntent => ({
+    kind: "ACCOUNT_INFO",
+    chain: "solana",
+    network: "mainnet",
+    projectAnchor: MINT,
+    subjectKind: "account",
+    subject,
+  });
+
+  it("projects mint and owner for an SPL token account", async () => {
+    const artifact = await adapterWith(
+      accountPayload(TOKEN_PROGRAM, {
+        mint: MINT,
+        owner: HOLDER,
+        tokenAmount: { amount: "7723746661", decimals: 6 },
+        state: "initialized",
+      }),
+    ).retrieve(infoIntent(HOLDER));
+    const r = artifact.result as { kind: string; tokenAccount: unknown };
+    expect(r.kind).toBe("ACCOUNT_INFO");
+    expect(r.tokenAccount).toEqual({
+      mint: MINT,
+      owner: HOLDER,
+      amountRaw: "7723746661",
+      decimals: 6,
+      state: "initialized",
+    });
+  });
+
+  it("works for Token-2022 as well as SPL Token", async () => {
+    const artifact = await adapterWith(
+      accountPayload(TOKEN_2022, { mint: MINT, owner: HOLDER }),
+    ).retrieve(infoIntent(HOLDER));
+    const r = artifact.result as { tokenAccount: { mint: string } | null };
+    expect(r.tokenAccount?.mint).toBe(MINT);
+  });
+
+  it("a System-owned account projects NO token account", async () => {
+    const artifact = await adapterWith(accountPayload(SYSTEM_PROGRAM, null)).retrieve(
+      infoIntent(HOLDER),
+    );
+    const r = artifact.result as { tokenAccount: unknown; ownerProgram: string };
+    expect(r.tokenAccount).toBeNull();
+    expect(r.ownerProgram).toBe(SYSTEM_PROGRAM);
+  });
+
+  it("a non-token program returning a mint-shaped field is NOT a token account", async () => {
+    // The gate is the program owner. Without it, any program could hand
+    // ATLAS a token-account claim by naming a field "mint".
+    const artifact = await adapterWith(
+      accountPayload("SomeOtherProgram11111111111111111111111111", { mint: MINT, owner: HOLDER }),
+    ).retrieve(infoIntent(HOLDER));
+    expect((artifact.result as { tokenAccount: unknown }).tokenAccount).toBeNull();
+  });
+
+  it("a malformed mint yields null rather than a guess", async () => {
+    for (const bad of ["", "not-base58!", "tooShort", 12345]) {
+      const artifact = await adapterWith(
+        accountPayload(TOKEN_PROGRAM, { mint: bad, owner: HOLDER }),
+      ).retrieve(infoIntent(HOLDER));
+      expect((artifact.result as { tokenAccount: unknown }).tokenAccount, String(bad)).toBeNull();
+    }
+  });
+
+  it("a missing owner is null without discarding the mint", async () => {
+    const artifact = await adapterWith(accountPayload(TOKEN_PROGRAM, { mint: MINT })).retrieve(
+      infoIntent(HOLDER),
+    );
+    const r = artifact.result as { tokenAccount: { mint: string; owner: string | null } | null };
+    expect(r.tokenAccount?.mint).toBe(MINT);
+    expect(r.tokenAccount?.owner).toBeNull();
+  });
+
+  it("a non-existent account projects null throughout", async () => {
+    const artifact = await adapterWith({ context: { slot: 500 }, value: null }).retrieve(
+      infoIntent(HOLDER),
+    );
+    const r = artifact.result as { exists: boolean; tokenAccount: unknown };
+    expect(r.exists).toBe(false);
+    expect(r.tokenAccount).toBeNull();
+  });
+
+  it("isSplTokenProgramId answers only for the two token programs", () => {
+    expect(isSplTokenProgramId(TOKEN_PROGRAM)).toBe(true);
+    expect(isSplTokenProgramId(TOKEN_2022)).toBe(true);
+    expect(isSplTokenProgramId(SYSTEM_PROGRAM)).toBe(false);
+    expect(isSplTokenProgramId(null)).toBe(false);
+    expect(isSplTokenProgramId(undefined)).toBe(false);
   });
 });

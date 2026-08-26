@@ -159,6 +159,9 @@ interface FixtureOptions {
   burns?: (typeof BURN)[];
   accountExists?: boolean;
   failOn?: string;
+  // When set, the fixture answers ACCOUNT_INFO as if the queried address
+  // were itself an SPL token account with this parsed shape.
+  tokenAccountFor?: { mint: string; owner: string | null; amountRaw: string | null; decimals: number | null; state: string | null } | null;
 }
 
 // Answers by intent KIND only. It has no idea which subject "should" come
@@ -182,6 +185,7 @@ function fixtureRetriever(opts: FixtureOptions = {}) {
               ownerProgram: "SysProg11111111111111111111111111111111111",
               executable: false,
               lamports: "64850000000",
+              tokenAccount: opts.tokenAccountFor === undefined ? null : opts.tokenAccountFor,
             });
           case "TOKEN_ACCOUNTS_BY_OWNER":
             return artifactFor(intent, {

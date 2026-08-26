@@ -9,6 +9,7 @@ import {
   type BurnInstructionRef,
   type TokenBalanceRef,
   type TokenInstructionRef,
+  type ParsedTokenAccountRef,
   type TokenAccountRef,
   type OnchainArtifact,
   type OnchainIntent,
@@ -59,6 +60,13 @@ export class OnchainRpcError extends OnchainRetrieverUnavailableError {
     );
     this.name = "OnchainRpcError";
   }
+}
+
+// Exported so research logic can ask "is this account program-owned by an
+// SPL Token program?" without an address literal of its own. The constants
+// stay here, in the adapter, where chain infrastructure belongs.
+export function isSplTokenProgramId(programId: string | null | undefined): boolean {
+  return typeof programId === "string" && SPL_TOKEN_PROGRAM_IDS.has(programId);
 }
 
 export function isValidSolanaAddress(value: string): boolean {
@@ -130,6 +138,25 @@ const accountInfoSchema = contextual(
       owner: z.string(),
       executable: z.boolean(),
       lamports: z.number().int().min(0),
+      // jsonParsed encoding is ALREADY requested for this method, and an
+      // SPL token account comes back with its mint and owning wallet
+      // parsed by the node. Not reading them meant the one call that could
+      // say "this documented address IS a token account, and it is a token
+      // account for THIS mint" threw that answer away and left the
+      // question to a second, weaker read. Optional and loose: a non-token
+      // account has no parsed shape at all, and that is the ordinary case.
+      data: z
+        .object({
+          program: z.string().optional(),
+          parsed: z
+            .object({
+              type: z.string().optional(),
+              info: z.record(z.string(), z.unknown()).optional(),
+            })
+            .optional(),
+        })
+        .loose()
+        .optional(),
     })
     .nullable(),
 );
@@ -409,6 +436,33 @@ function decodeLifecycleInstruction(raw: unknown, inner: boolean): AccountLifecy
   };
 }
 
+// Reads the token-account shape out of jsonParsed account data.
+//
+// GATED ON THE PROGRAM OWNER, not on the presence of a mint-looking field.
+// Any program may return parsed data with a field called "mint"; only an
+// SPL Token program's account is an SPL token account. Both conditions must
+// hold, and a malformed mint yields null rather than a guess.
+function readParsedTokenAccount(
+  ownerProgram: string | null,
+  data: { program?: string; parsed?: { type?: string; info?: Record<string, unknown> } } | undefined,
+): ParsedTokenAccountRef | null {
+  if (!ownerProgram || !SPL_TOKEN_PROGRAM_IDS.has(ownerProgram)) return null;
+  const info = data?.parsed?.info;
+  if (!info) return null;
+  const mint = typeof info.mint === "string" ? info.mint : null;
+  // No mint, no binding, no row. This is the whole point of the field.
+  if (!mint || !BASE58_ADDRESS.test(mint)) return null;
+  const owner = typeof info.owner === "string" && BASE58_ADDRESS.test(info.owner) ? info.owner : null;
+  const amount = info.tokenAmount as { amount?: unknown; decimals?: unknown } | undefined;
+  return {
+    mint,
+    owner,
+    amountRaw: typeof amount?.amount === "string" ? amount.amount : null,
+    decimals: typeof amount?.decimals === "number" ? amount.decimals : null,
+    state: typeof info.state === "string" ? info.state : null,
+  };
+}
+
 function programIdOf(raw: unknown): string | null {
   const parsed = parsedInstructionSchema.safeParse(raw);
   if (!parsed.success) return null;
@@ -564,6 +618,10 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           ownerProgram: parsed.value?.owner ?? null,
           executable: parsed.value?.executable ?? null,
           lamports: parsed.value ? String(parsed.value.lamports) : null,
+          tokenAccount: readParsedTokenAccount(
+            parsed.value?.owner ?? null,
+            parsed.value?.data,
+          ),
         },
       };
     }

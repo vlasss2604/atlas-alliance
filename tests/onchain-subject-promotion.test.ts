@@ -64,6 +64,8 @@ function artifact(result: OnchainResult): OnchainArtifact {
   });
 }
 
+// An ordinary (non-token) account: tokenAccount is null, which is what
+// getAccountInfo yields for anything the SPL Token programs do not own.
 const accountInfo = (exists = true) =>
   artifact({
     kind: "ACCOUNT_INFO",
@@ -72,6 +74,20 @@ const accountInfo = (exists = true) =>
     ownerProgram: "SomeProgram1111111111111111111111111111111",
     executable: false,
     lamports: "1",
+    tokenAccount: null,
+  });
+
+// The same address, but the node parsed it AS a token account. `mint` is
+// what decides whether it is this project's business.
+const accountInfoAsTokenAccount = (mint: string, owner: string | null = WALLET) =>
+  artifact({
+    kind: "ACCOUNT_INFO",
+    address: WALLET,
+    exists: true,
+    ownerProgram: "TokenProgram11111111111111111111111111111",
+    executable: false,
+    lamports: "2039280",
+    tokenAccount: { mint, owner, amountRaw: "0", decimals: 6, state: "initialized" },
   });
 
 const tokenAccounts = (accounts: { account: string; owner: string; mint: string }[]) =>
@@ -472,5 +488,95 @@ describe("promotion — mutation checks", () => {
       ]),
     });
     expect(foreign.promoted).toHaveLength(0);
+  });
+});
+
+// THE DOCUMENTARY-LOCATOR → TOKEN BRIDGE.
+//
+// A documented address is one of three things, and getAccountInfo already
+// requests jsonParsed encoding, so ONE observation settles which:
+//
+//   an ordinary account   → ask which token accounts it owns
+//   OUR mint's token acct → it IS the token account; read its history
+//   another mint's acct   → not this project's business; stop
+//
+// The third case is the one that matters. Falling back to the discovery
+// rule there would spend a bounded call asking a token account which token
+// accounts it owns — a question with no meaningful answer — and reading its
+// history would be researching a stranger's account that our document
+// happened to name.
+describe("promotion — the locator may itself be a token account", () => {
+  it("a token account FOR THE ANCHOR MINT is read directly, not asked what it owns", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfoAsTokenAccount(ANCHOR) });
+    expect(out.promoted).toHaveLength(1);
+    expect(out.promoted[0].intentKind).toBe("SIGNATURES_FOR_ADDRESS");
+    expect(out.promoted[0].rule).toBe("TOKEN_ACCOUNT_TO_SIGNATURES");
+    expect(out.promoted[0].subject).toBe(WALLET);
+  });
+
+  it("a token account for ANOTHER mint promotes nothing at all", () => {
+    const foreign = "ForeignMint11111111111111111111111111111111";
+    const out = promoteFromObservation({ ...base, artifact: accountInfoAsTokenAccount(foreign) });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("NO_ELIGIBLE_SUBJECT");
+  });
+
+  it("a wrong-mint token account never falls back to the discovery rule", () => {
+    // The specific regression: before the bridge, ANY existing account was
+    // promoted to TOKEN_ACCOUNTS_BY_OWNER regardless of what it was.
+    const foreign = "ForeignMint11111111111111111111111111111111";
+    const out = promoteFromObservation({ ...base, artifact: accountInfoAsTokenAccount(foreign) });
+    expect(out.promoted.some((pr) => pr.intentKind === "TOKEN_ACCOUNTS_BY_OWNER")).toBe(false);
+  });
+
+  it("an ordinary account still takes the discovery rule unchanged", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfo() });
+    expect(out.promoted[0].intentKind).toBe("TOKEN_ACCOUNTS_BY_OWNER");
+    expect(out.promoted[0].rule).toBe("ACCOUNT_TO_TOKEN_ACCOUNTS");
+  });
+
+  it("a component that may not read history gets nothing from a token-account locator", () => {
+    // DESTINATION may discover, but may not reach a signature window.
+    const out = promoteFromObservation({
+      ...base,
+      component: "DESTINATION",
+      artifact: accountInfoAsTokenAccount(ANCHOR),
+    });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("COMPONENT_NOT_PERMITTED");
+  });
+
+  it("the bridge respects the visited set like every other rule", () => {
+    const out = promoteFromObservation({
+      ...base,
+      visited: new Set([`SIGNATURES_FOR_ADDRESS::${WALLET}`]),
+      artifact: accountInfoAsTokenAccount(ANCHOR),
+    });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("NO_ELIGIBLE_SUBJECT");
+  });
+
+  it("an unparsed account is treated as ordinary, never guessed at", () => {
+    // tokenAccount === null means "not established", which must behave as
+    // the ordinary case rather than as a token account with an unknown mint.
+    const out = promoteFromObservation({ ...base, artifact: accountInfo() });
+    expect(out.promoted[0].intentKind).toBe("TOKEN_ACCOUNTS_BY_OWNER");
+  });
+
+  it("binding and depth still gate the bridge", () => {
+    expect(
+      promoteFromObservation({
+        ...base,
+        bindingConfirmed: false,
+        artifact: accountInfoAsTokenAccount(ANCHOR),
+      }).promoted,
+    ).toHaveLength(0);
+    expect(
+      promoteFromObservation({
+        ...base,
+        depth: MAX_PROMOTION_DEPTH,
+        artifact: accountInfoAsTokenAccount(ANCHOR),
+      }).refusal,
+    ).toBe("DEPTH_LIMIT");
   });
 });

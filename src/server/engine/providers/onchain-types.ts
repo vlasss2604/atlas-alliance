@@ -65,13 +65,40 @@ export interface TokenSupplyResult {
   decimals: number;
 }
 
+// A token account, as jsonParsed account data described it. Present ONLY
+// when the account is program-owned by an SPL Token program AND the node
+// returned a parsed mint — so a null here means "not established", never
+// "not a token account".
+//
+// WHY THE MINT MATTERS MORE THAN THE BALANCE. A documented address that
+// turns out to be a token account is only relevant to this project if it
+// is a token account for THIS project.s mint. Without that field the
+// binding cannot be made from this observation at all, and the honest
+// alternative is to fail closed.
+//
+// `owner` here is the SPL token-account OWNER (the wallet with authority
+// over it), which is a different concept from AccountInfoResult.ownerProgram
+// (the program that owns the account.s data). They are never merged.
+export interface ParsedTokenAccountRef {
+  mint: string;
+  owner: string | null;
+  amountRaw: string | null;
+  decimals: number | null;
+  state: string | null;
+}
+
 export interface AccountInfoResult {
   kind: "ACCOUNT_INFO";
   address: string;
   exists: boolean;
+  // The program that owns the account.s DATA. Not an economic owner.
   ownerProgram: string | null;
   executable: boolean | null;
   lamports: string | null;
+  // Non-null only when this account is itself an SPL token account whose
+  // mint the node parsed. Null covers both "ordinary account" and
+  // "unparseable" — a caller must not read one as the other.
+  tokenAccount: ParsedTokenAccountRef | null;
 }
 
 export interface TokenAccountBalanceResult {
