@@ -49,6 +49,7 @@ function tx(
     programs: [],
     accountKeys: [],
     tokenInstructions: [],
+    lifecycleInstructions: [],
     preTokenBalances: pre,
     postTokenBalances: post,
     ...over,

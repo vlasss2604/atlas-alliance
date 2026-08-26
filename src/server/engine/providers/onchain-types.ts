@@ -206,6 +206,10 @@ export interface TransactionDetailResult {
   accountKeys: string[];
   // Recognised SPL Token instructions, decoded but never interpreted.
   tokenInstructions: TokenInstructionRef[];
+  // Creation/initialization/sync instructions, kept apart from movement.
+  // Empty is NEVER a fact that an account was not created or initialized —
+  // only that no such instruction was decoded from this transaction.
+  lifecycleInstructions: AccountLifecycleRef[];
   preTokenBalances: TokenBalanceRef[];
   postTokenBalances: TokenBalanceRef[];
 }
@@ -294,4 +298,54 @@ export function isOnchainArtifact(value: unknown): value is OnchainArtifact {
     !!a.result &&
     !!a.provenance
   );
+}
+
+// ---- account lifecycle ------------------------------------------------
+// ONE parsed instruction that says something about how a token account
+// came to exist, what it is, or that its wrapped-SOL balance was synced.
+//
+// WHY THIS IS SEPARATE FROM TokenInstructionRef. That type answers "what
+// moved?" and its `authority` field is whoever signed a movement — an
+// owner, a delegate or a multisig signer, indistinguishably. This type
+// answers "who owns this account?", and the only fields that can answer it
+// are an initialization's `owner` and an ATA creation's `wallet`. Keeping
+// them in one shape would let an authority be read as an owner, which is
+// the exact confusion that made an ephemeral account's ownership
+// unrecoverable.
+//
+// FOUR CONCEPTS, NEVER COLLAPSED: owner, authority, payer and close
+// destination are distinct roles. They are frequently the same address and
+// that coincidence proves nothing, so each has its own field and no field
+// is ever populated from another.
+export interface AccountLifecycleRef {
+  programId: string;
+  // The RPC's own parsed type: createAccount | createAccountWithSeed |
+  // transfer | create | createIdempotent | initializeAccount |
+  // initializeAccount2 | initializeAccount3 | syncNative.
+  type: string;
+  inner: boolean;
+  // The account being created, initialized or synced, where the
+  // instruction names one.
+  account: string | null;
+  mint: string | null;
+  // THE TOKEN-ACCOUNT OWNER, and only ever that. Populated exclusively
+  // from an initializeAccount* `owner` or an ATA create `wallet`. Never
+  // from an authority. Never from System createAccount's `owner`, which
+  // names a PROGRAM, not a person — see assignedProgram.
+  owner: string | null;
+  // The program a System-created account was assigned to. A token account
+  // is assigned to the SPL Token program; reading this as an owner would
+  // report the Token program as the owner of every token account on
+  // Solana.
+  assignedProgram: string | null;
+  // Who funded the account. Distinct from owner: paying rent for an
+  // account confers no control over it.
+  payer: string | null;
+  source: string | null;
+  destination: string | null;
+  // String for the same reason every other on-chain amount is.
+  lamports: string | null;
+  // Named explicitly by ATA creation, so the token program behind an ATA
+  // is decoded rather than assumed.
+  tokenProgram: string | null;
 }

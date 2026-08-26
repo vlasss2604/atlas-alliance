@@ -1142,7 +1142,7 @@ describe("generalization", () => {
     }
   });
 
-  it("the only addresses in the Solana adapter are the two SPL Token program ids", async () => {
+  it("the only addresses in the Solana adapter are chain infrastructure program ids", async () => {
     const fs = await import("node:fs/promises");
     const raw = await fs.readFile(
       new URL("../src/server/engine/providers/onchain-solana.ts", import.meta.url),
@@ -1154,8 +1154,16 @@ describe("generalization", () => {
       .join("\n");
     const found = code.match(/["'][1-9A-HJ-NP-Za-km-z]{32,44}["']/g) ?? [];
     const cleaned = found.map((f) => f.slice(1, -1)).sort();
-    expect(cleaned).toEqual(
+    // Every entry must be a program id that is the SAME constant for every
+      // project on Solana. Account-lifecycle decoding added the System and
+      // Associated Token Account programs, which qualify on exactly the same
+      // ground as the two token programs: they are the chain, not a tenant.
+      // Any address that is not one of these four fails, which is what keeps
+      // a project mint or wallet from ever being written into the adapter.
+      expect(cleaned).toEqual(
       [
+        "11111111111111111111111111111111",
+        "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL",
         "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
         "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
       ].sort(),

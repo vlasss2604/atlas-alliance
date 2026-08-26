@@ -5,6 +5,7 @@ import { z } from "zod";
 import { buildCanonicalOnchainUri } from "../onchain-uri";
 import {
   brandOnchainArtifact,
+  type AccountLifecycleRef,
   type BurnInstructionRef,
   type TokenBalanceRef,
   type TokenInstructionRef,
@@ -308,6 +309,106 @@ function decodeTokenInstruction(raw: unknown, inner: boolean): TokenInstructionR
   };
 }
 
+// ---- account lifecycle decoding ---------------------------------------
+// System, Associated Token Account and SPL Token instructions that
+// establish how an account came to exist and who owns it.
+//
+// THE ONLY PATH TO AN OWNER. Nothing else in this adapter can populate
+// AccountLifecycleRef.owner: not a transfer authority, not a close
+// authority, not a close destination, not a payer. Those are all separate
+// fields on separate types, and an ephemeral account whose transaction
+// contains no initialization simply has no recoverable owner here.
+
+// Chain infrastructure constants, like the token program ids above.
+const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+const ASSOCIATED_TOKEN_PROGRAM_ID = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
+
+// Closed sets, per program. An unrecognised type is not reported.
+const SYSTEM_LIFECYCLE_TYPES = new Set([
+  "createAccount",
+  "createAccountWithSeed",
+  "transfer",
+]);
+const ATA_LIFECYCLE_TYPES = new Set(["create", "createIdempotent"]);
+const TOKEN_LIFECYCLE_TYPES = new Set([
+  "initializeAccount",
+  "initializeAccount2",
+  "initializeAccount3",
+  "syncNative",
+]);
+
+// The instruction types whose `owner`/`wallet` field is the token
+// account's owner by protocol definition. Deliberately a set rather than a
+// condition spread through the decoder: adding a type to it is the single
+// visible act that grants a new instruction ownership-establishing power.
+const OWNER_ESTABLISHING_TYPES = new Set([
+  "initializeAccount",
+  "initializeAccount2",
+  "initializeAccount3",
+  "create",
+  "createIdempotent",
+]);
+
+function lamportsOf(info: Record<string, unknown>): string | null {
+  const v = info["lamports"];
+  if (typeof v === "string") return v;
+  // The RPC emits lamports as a JSON number. Converting through a string
+  // keeps the stored shape uniform with every other amount; values above
+  // 2^53 cannot survive the node's own JSON either, so nothing is lost
+  // here that was not already lost upstream.
+  if (typeof v === "number" && Number.isSafeInteger(v)) return String(v);
+  return null;
+}
+
+function decodeLifecycleInstruction(raw: unknown, inner: boolean): AccountLifecycleRef | null {
+  const parsed = parsedInstructionSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const ix = parsed.data;
+  const programId = ix.programId;
+  const type = ix.parsed?.type;
+  if (!programId || !type) return null;
+  const info = ix.parsed?.info ?? {};
+
+  const isSystem = programId === SYSTEM_PROGRAM_ID && SYSTEM_LIFECYCLE_TYPES.has(type);
+  const isAta =
+    programId === ASSOCIATED_TOKEN_PROGRAM_ID && ATA_LIFECYCLE_TYPES.has(type);
+  const isToken = SPL_TOKEN_PROGRAM_IDS.has(programId) && TOKEN_LIFECYCLE_TYPES.has(type);
+  if (!isSystem && !isAta && !isToken) return null;
+
+  // System createAccount names the account under `newAccount`; ATA
+  // creation and token initialization both use `account`.
+  const account = firstString(info, ["newAccount", "account"]);
+
+  // OWNER IS GATED ON THE INSTRUCTION TYPE, not on which key happens to be
+  // present. System createAccount also carries an `owner` key, and it
+  // means the assigned program — reading it here would name the SPL Token
+  // program as the owner of every token account ever created.
+  const owner = OWNER_ESTABLISHING_TYPES.has(type)
+    ? firstString(info, isAta ? ["wallet"] : ["owner"])
+    : null;
+
+  const assignedProgram = isSystem ? firstString(info, ["owner"]) : null;
+
+  // ATA creation names the funder as `source`; System createAccount uses
+  // `source` for the funding account as well. Neither is an owner.
+  const payer = isSystem || isAta ? firstString(info, ["source", "payer"]) : null;
+
+  return {
+    programId,
+    type,
+    inner,
+    account,
+    mint: firstString(info, ["mint"]),
+    owner,
+    assignedProgram,
+    payer,
+    source: firstString(info, ["source"]),
+    destination: firstString(info, ["destination"]),
+    lamports: lamportsOf(info),
+    tokenProgram: isAta ? firstString(info, ["tokenProgram"]) : null,
+  };
+}
+
 function programIdOf(raw: unknown): string | null {
   const parsed = parsedInstructionSchema.safeParse(raw);
   if (!parsed.success) return null;
@@ -554,7 +655,11 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
       const tokenInstructions = [
         ...outer.map((ix) => decodeTokenInstruction(ix, false)),
         ...inner.map((ix) => decodeTokenInstruction(ix, true)),
-      ].filter((i): i is TokenInstructionRef => i !== null);
+].filter((i): i is TokenInstructionRef => i !== null);
+      const lifecycleInstructions = [
+        ...outer.map((ix) => decodeLifecycleInstruction(ix, false)),
+        ...inner.map((ix) => decodeLifecycleInstruction(ix, true)),
+      ].filter((i): i is AccountLifecycleRef => i !== null);
       const programs = [
         ...new Set(
           [...outer, ...inner]
@@ -592,6 +697,7 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           programs,
           accountKeys,
           tokenInstructions,
+          lifecycleInstructions,
           preTokenBalances: (parsed.meta?.preTokenBalances ?? [])
             .slice(0, MAX_TX_TOKEN_BALANCES)
             .map(balance),
@@ -705,4 +811,4 @@ export function createSolanaOnchainAdapter(deps: SolanaAdapterDeps) {
   };
 }
 
-export const __testing = { canonicalJson, decodeBurnInstruction };
+export const __testing = { canonicalJson, decodeBurnInstruction, decodeLifecycleInstruction };
