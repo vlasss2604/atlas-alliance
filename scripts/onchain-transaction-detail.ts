@@ -35,6 +35,7 @@ import { resolveConfirmedIdentity } from "../src/server/domain/project-identity"
 import { persistOnchainArtifact } from "../src/server/engine/onchain-acquisition";
 import { validateOnchainBinding } from "../src/server/engine/onchain-binding";
 import { formatTokenAmount } from "../src/server/engine/onchain-facts";
+import { reconstructAccountLifecycle } from "../src/server/engine/onchain-account-lifecycle";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
 import { resolveObservedSignature } from "../src/server/engine/onchain-signature-provenance";
 import { createProductionOnchainRetriever } from "../src/server/engine/providers/onchain-transport";
@@ -174,6 +175,50 @@ async function main(): Promise<void> {
         console.log("    formatted:    " + formatTokenAmount(b.amountRaw, b.decimals));
       }
       console.log("    mintIsAnchor: " + (b.mint === anchor));
+    }
+
+    // Lifecycle instructions, kept visibly apart from movement: these are
+    // the only ones that can answer "who owns this account?".
+    console.log("--- account lifecycle instructions (" + r.lifecycleInstructions.length + ") ---");
+    for (const ix of r.lifecycleInstructions) {
+      console.log("  " + (ix.inner ? "inner " : "outer ") + ix.type);
+      console.log("    program:        " + ix.programId);
+      console.log("    account:        " + String(ix.account));
+      console.log("    mint:           " + String(ix.mint));
+      console.log("    owner:          " + String(ix.owner));
+      console.log("    assignedProgram:" + String(ix.assignedProgram));
+      console.log("    payer:          " + String(ix.payer));
+      console.log("    source:         " + String(ix.source));
+      console.log("    destination:    " + String(ix.destination));
+      console.log("    lamports:       " + String(ix.lamports));
+      console.log("    tokenProgram:   " + String(ix.tokenProgram));
+    }
+
+    // Per-account reconstruction, for every account any lifecycle or close
+    // instruction named. Generic: the script picks no account by identity.
+    const lifecycleSubjects = [
+      ...new Set(
+        [
+          ...r.lifecycleInstructions.map((i) => i.account),
+          ...r.tokenInstructions.filter((i) => i.type === "closeAccount").map((i) => i.account),
+        ].filter((a): a is string => a !== null),
+      ),
+    ];
+    console.log("--- reconstructed lifecycles (" + lifecycleSubjects.length + ") ---");
+    for (const subject of lifecycleSubjects) {
+      const life = reconstructAccountLifecycle(r, subject);
+      const d = (f: { value: unknown; basis: string; fromInstruction: string | null }) =>
+        String(f.value) + "   [" + f.basis + (f.fromInstruction ? " :: " + f.fromInstruction : "") + "]";
+      console.log("  account:        " + subject);
+      console.log("    created:      " + d(life.created));
+      console.log("    initialized:  " + d(life.initialized));
+      console.log("    tokenProgram: " + d(life.tokenProgram));
+      console.log("    mint:         " + d(life.mint));
+      console.log("    owner:        " + d(life.owner));
+      console.log("    payer:        " + d(life.payer));
+      console.log("    syncNative:   " + d(life.syncNative));
+      console.log("    closed:       " + d(life.closed));
+      console.log("    closeDest:    " + d(life.closeDestination));
     }
 
     const show = (label: string, rows: TransactionDetailResult["preTokenBalances"]) => {
