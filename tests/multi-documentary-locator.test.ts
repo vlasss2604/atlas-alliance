@@ -488,3 +488,122 @@ describe("backwards compatibility and the on-chain gate", () => {
     expect(await locatorsForEvidence(ctx.db, rows[0].id)).toEqual(before);
   });
 });
+
+// F — DETERMINISTIC ORDERING.
+//
+// "The first locator" has to be a stable concept, not whatever the heap
+// returns. Two things could break that: validation reordering its own
+// output, and readback trusting database row order. The ordinal column
+// exists to close the second, and these tests pin both — a fact whose
+// locators come back in a different order on a later read would silently
+// change which value the compatibility scalar mirrors.
+describe("ordering — the same input always yields the same locators, in the same order", () => {
+  it("validation preserves input order and repeats it exactly", () => {
+    const documentText = `first ${FULL_A} then ${FULL_B} then ${FULL_C}`;
+    const once = validateFactLocators({ claimed: [FULL_C, FULL_A, FULL_B], documentText });
+    const twice = validateFactLocators({ claimed: [FULL_C, FULL_A, FULL_B], documentText });
+    // Input order, not document order and not sorted order.
+    expect(once.confirmed.map((c) => c.value)).toEqual([FULL_C, FULL_A, FULL_B]);
+    expect(twice.confirmed).toEqual(once.confirmed);
+  });
+
+  it("a different input order yields a different, equally stable result", () => {
+    // Proves the order is genuinely carried rather than incidentally
+    // matching some internal canonical sort.
+    const documentText = `first ${FULL_A} then ${FULL_B}`;
+    const ab = validateFactLocators({ claimed: [FULL_A, FULL_B], documentText });
+    const ba = validateFactLocators({ claimed: [FULL_B, FULL_A], documentText });
+    expect(ab.confirmed.map((c) => c.value)).toEqual([FULL_A, FULL_B]);
+    expect(ba.confirmed.map((c) => c.value)).toEqual([FULL_B, FULL_A]);
+  });
+
+  it("a rejected entry does not renumber the survivors' relative order", () => {
+    const documentText = `first ${FULL_A} then ${FULL_B}`;
+    const out = validateFactLocators({
+      claimed: [TRUNCATED_A, FULL_A, FULL_B],
+      documentText,
+    });
+    expect(out.confirmed.map((c) => c.value)).toEqual([FULL_A, FULL_B]);
+  });
+
+  it("ordinals are assigned by position, contiguously from zero", async () => {
+    const { rows } = await runWith({ onchainLocators: [FULL_A, FULL_B] });
+    const stored = await ctx.db
+      .select()
+      .from(evidenceDocumentaryLocators)
+      .where(eq(evidenceDocumentaryLocators.evidenceId, rows[0].id));
+    const byOrdinal = [...stored].sort((a, b) => a.ordinal - b.ordinal);
+    expect(byOrdinal.map((r) => r.ordinal)).toEqual([0, 1]);
+    expect(byOrdinal.map((r) => r.value)).toEqual([FULL_A, FULL_B]);
+  });
+
+  it("readback order comes from the ordinal, never from row order", async () => {
+    const { rows } = await runWith({ onchainLocators: [FULL_A, FULL_B] });
+    // Repeated reads of the same fact are identical. A readback that
+    // depended on heap order could differ between calls.
+    const first = await locatorsForEvidence(ctx.db, rows[0].id);
+    const second = await locatorsForEvidence(ctx.db, rows[0].id);
+    expect(first.map((l) => l.value)).toEqual([FULL_A, FULL_B]);
+    expect(second).toEqual(first);
+  });
+
+  it("the compatibility scalar always mirrors ordinal 0, whichever value that is", async () => {
+    // The scalar is a projection of the ordered set, so the ordering
+    // guarantee is what keeps it from drifting.
+    const ab = await runWith({ onchainLocators: [FULL_A, FULL_B] });
+    expect(ab.locators.map((l) => l.value)).toEqual([FULL_A, FULL_B]);
+    expect(ab.rows[0].documentaryLocator).toBe(FULL_A);
+
+    const ba = await runWith({ onchainLocators: [FULL_B, FULL_A] });
+    expect(ba.locators.map((l) => l.value)).toEqual([FULL_B, FULL_A]);
+    expect(ba.rows[0].documentaryLocator).toBe(FULL_B);
+  });
+
+  it("a replay writes no new ordinals and does not reorder the fact", async () => {
+    const { rows } = await runWith({ onchainLocators: [FULL_A, FULL_B] });
+    const before = await locatorsForEvidence(ctx.db, rows[0].id);
+    await persistFactLocators(ctx.db, rows[0].id, before);
+    await persistFactLocators(ctx.db, rows[0].id, before);
+    const after = await ctx.db
+      .select()
+      .from(evidenceDocumentaryLocators)
+      .where(eq(evidenceDocumentaryLocators.evidenceId, rows[0].id));
+    expect(after).toHaveLength(2);
+    expect(await locatorsForEvidence(ctx.db, rows[0].id)).toEqual(before);
+  });
+});
+
+// G — PROVENANCE IS PER FACT, AND DEDUPLICATION NEVER CROSSES ONE.
+//
+// Locator identity is (evidence_id, value): the same address stated by two
+// separate documents is two rows with two lineages, because each is
+// traceable to the document that stated it. Collapsing them on value alone
+// would destroy that lineage, and the gate reports BOTH documents when it
+// is asked about the address.
+describe("provenance — the same address in two facts keeps two lineages", () => {
+  it("deduplication is scoped to one fact, never across facts", async () => {
+    const first = await runWith({ onchainLocators: [FULL_A] });
+    const second = await runWith({ onchainLocators: [FULL_A] });
+    expect(first.rows[0].id).not.toBe(second.rows[0].id);
+
+    const found = await findAdmittedLocator(ctx.db, FULL_A);
+    const ids = found.map((f) => f.evidenceId);
+    expect(ids).toContain(first.rows[0].id);
+    expect(ids).toContain(second.rows[0].id);
+    // Each match carries its OWN document, not a merged one.
+    for (const row of found) {
+      expect(row.value).toBe(FULL_A);
+      expect(row.retrievedUrl.length).toBeGreaterThan(0);
+    }
+  });
+
+  it("within one fact the same address collapses to a single lineage", async () => {
+    const { rows, locators } = await runWith({ onchainLocators: [FULL_A, FULL_A] });
+    expect(locators.map((l) => l.value)).toEqual([FULL_A]);
+    const stored = await ctx.db
+      .select()
+      .from(evidenceDocumentaryLocators)
+      .where(eq(evidenceDocumentaryLocators.evidenceId, rows[0].id));
+    expect(stored).toHaveLength(1);
+  });
+});
