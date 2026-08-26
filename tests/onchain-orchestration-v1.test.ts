@@ -185,7 +185,11 @@ function fixtureRetriever(opts: FixtureOptions = {}) {
               ownerProgram: "SysProg11111111111111111111111111111111111",
               executable: false,
               lamports: "64850000000",
-              tokenAccount: opts.tokenAccountFor === undefined ? null : opts.tokenAccountFor,
+              tokenAccountRelation:
+                opts.tokenAccountFor === undefined || opts.tokenAccountFor === null
+                  ? ("NOT_TOKEN_PROGRAM_OWNED" as const)
+                  : ("TOKEN_ACCOUNT_PARSED" as const),
+              tokenAccount: opts.tokenAccountFor ?? null,
             });
           case "TOKEN_ACCOUNTS_BY_OWNER":
             return artifactFor(intent, {

@@ -400,7 +400,15 @@ export async function runStructuredOnchainAcquisition(
           status: "SKIPPED",
           reasonCode: "PROMOTION_BINDING_NOT_CONFIRMED",
         });
-      } else if (outcome.refusal === "NO_ELIGIBLE_SUBJECT") {
+      } else if (
+        outcome.refusal === "NO_ELIGIBLE_SUBJECT" ||
+        // Recorded under the same closed reason code: no new enum value is
+        // added for it, because the trace vocabulary is a migration and the
+        // distinction that matters — we stopped rather than guessed — is
+        // already carried by "no eligible subject". The refusal type keeps
+        // the finer meaning for callers.
+        outcome.refusal === "RELATIONSHIP_UNRESOLVED"
+      ) {
         await trace({
           operationType: "SUBJECT_PROMOTION_REJECTED",
           targetRef: uri,

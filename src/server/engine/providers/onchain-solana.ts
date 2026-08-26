@@ -10,6 +10,7 @@ import {
   type TokenBalanceRef,
   type TokenInstructionRef,
   type ParsedTokenAccountRef,
+  type TokenAccountRelation,
   type TokenAccountRef,
   type OnchainArtifact,
   type OnchainIntent,
@@ -436,30 +437,46 @@ function decodeLifecycleInstruction(raw: unknown, inner: boolean): AccountLifecy
   };
 }
 
-// Reads the token-account shape out of jsonParsed account data.
+// Classifies the account's relationship to SPL token accounts, and reads
+// the parsed identity when there is one.
 //
-// GATED ON THE PROGRAM OWNER, not on the presence of a mint-looking field.
-// Any program may return parsed data with a field called "mint"; only an
-// SPL Token program's account is an SPL token account. Both conditions must
-// hold, and a malformed mint yields null rather than a guess.
-function readParsedTokenAccount(
+// THREE OUTCOMES, NEVER TWO. The program owner decides whether this is a
+// token account at all; the parsed data decides whether we know WHICH mint.
+// Those are separate questions, and the second failing does not answer the
+// first in the negative.
+//
+// The program-owner gate comes first for a reason: any program may return
+// parsed data containing a field called "mint", and only an SPL Token
+// program's account is an SPL token account.
+function classifyTokenAccount(
   ownerProgram: string | null,
   data: { program?: string; parsed?: { type?: string; info?: Record<string, unknown> } } | undefined,
-): ParsedTokenAccountRef | null {
-  if (!ownerProgram || !SPL_TOKEN_PROGRAM_IDS.has(ownerProgram)) return null;
+): { tokenAccountRelation: TokenAccountRelation; tokenAccount: ParsedTokenAccountRef | null } {
+  if (!ownerProgram || !SPL_TOKEN_PROGRAM_IDS.has(ownerProgram)) {
+    // Established: not a token account.
+    return { tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED", tokenAccount: null };
+  }
+  // From here on we KNOW it is a token account. Every remaining failure is
+  // "which mint?" going unanswered — never a demotion to ordinary.
+  const unresolved = {
+    tokenAccountRelation: "TOKEN_PROGRAM_OWNED_UNRESOLVED" as const,
+    tokenAccount: null,
+  };
   const info = data?.parsed?.info;
-  if (!info) return null;
+  if (!info) return unresolved;
   const mint = typeof info.mint === "string" ? info.mint : null;
-  // No mint, no binding, no row. This is the whole point of the field.
-  if (!mint || !BASE58_ADDRESS.test(mint)) return null;
+  if (!mint || !BASE58_ADDRESS.test(mint)) return unresolved;
   const owner = typeof info.owner === "string" && BASE58_ADDRESS.test(info.owner) ? info.owner : null;
   const amount = info.tokenAmount as { amount?: unknown; decimals?: unknown } | undefined;
   return {
-    mint,
-    owner,
-    amountRaw: typeof amount?.amount === "string" ? amount.amount : null,
-    decimals: typeof amount?.decimals === "number" ? amount.decimals : null,
-    state: typeof info.state === "string" ? info.state : null,
+    tokenAccountRelation: "TOKEN_ACCOUNT_PARSED",
+    tokenAccount: {
+      mint,
+      owner,
+      amountRaw: typeof amount?.amount === "string" ? amount.amount : null,
+      decimals: typeof amount?.decimals === "number" ? amount.decimals : null,
+      state: typeof info.state === "string" ? info.state : null,
+    },
   };
 }
 
@@ -618,10 +635,7 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           ownerProgram: parsed.value?.owner ?? null,
           executable: parsed.value?.executable ?? null,
           lamports: parsed.value ? String(parsed.value.lamports) : null,
-          tokenAccount: readParsedTokenAccount(
-            parsed.value?.owner ?? null,
-            parsed.value?.data,
-          ),
+          ...classifyTokenAccount(parsed.value?.owner ?? null, parsed.value?.data),
         },
       };
     }

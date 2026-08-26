@@ -137,7 +137,11 @@ export type PromotionRefusal =
   | "DEPTH_LIMIT"
   | "TERMINAL_OBSERVATION"
   | "NO_ELIGIBLE_SUBJECT"
-  | "COMPONENT_NOT_PERMITTED";
+  | "COMPONENT_NOT_PERMITTED"
+  // Known to BE a token account, but which mint could not be established.
+  // Deliberately distinct from NO_ELIGIBLE_SUBJECT: this is not "there was
+  // nothing to promote", it is "we could not tell, so we stopped".
+  | "RELATIONSHIP_UNRESOLVED";
 
 export interface PromotionOutcome {
   promoted: PromotedSubject[];
@@ -203,54 +207,69 @@ export function promoteFromObservation(input: PromotionInput): PromotionOutcome 
   });
 
   switch (result.kind) {
-    // A documented address is one of three things, and the difference
-    // decides what is worth asking next.
+    // A documented address is one of FOUR things, and the difference
+    // decides what — if anything — is worth asking next.
     //
     // getAccountInfo already requests jsonParsed encoding, so this ONE
-    // observation answers "is it itself a token account, and for which
-    // mint?" — no second read, and no guess.
+    // observation carries both the program owner and, when there is one,
+    // the parsed token-account identity.
+    //
+    // THE FOURTH CASE IS THE ONE THAT MATTERS. An account the SPL Token
+    // program owns whose mint we could not parse is a token account whose
+    // mint is UNKNOWN. Treating that as an ordinary wallet and asking which
+    // token accounts it owns would convert a failure to establish identity
+    // into positive evidence of non-token status — and would spend a
+    // bounded call on a question that has no meaningful answer.
     case "ACCOUNT_INFO": {
       if (!result.exists) return none("NO_ELIGIBLE_SUBJECT");
 
-      const asTokenAccount = result.tokenAccount;
-      if (asTokenAccount !== null) {
-        // (1) THE LOCATOR IS ITSELF A TOKEN ACCOUNT. Asking which token
-        // accounts it owns is meaningless — a token account owns none —
-        // so the old rule would have spent a bounded call to learn
-        // nothing.
-        //
-        // MINT BINDING IS MANDATORY HERE. A token account for some other
-        // mint is another project's account that this document happens to
-        // name; reading its history would be researching a stranger. Fail
-        // closed rather than fall back to the discovery rule.
-        if (asTokenAccount.mint !== p.projectAnchor) return none("NO_ELIGIBLE_SUBJECT");
-        if (!componentAllowsRule(input.component, "TOKEN_ACCOUNT_TO_SIGNATURES")) {
-          return none("COMPONENT_NOT_PERMITTED");
-        }
-        if (input.visited.has(`SIGNATURES_FOR_ADDRESS::${result.address}`)) {
-          return none("NO_ELIGIBLE_SUBJECT");
-        }
-        // Bound to this project's mint by the observation itself, so the
-        // window is legitimately about this project.
-        return {
-          promoted: [build(result.address, "TOKEN_ACCOUNT_TO_SIGNATURES", result.address)],
-          refusal: null,
-        };
-      }
+      switch (result.tokenAccountRelation) {
+        // (D) Known to be a token account, mint not established. STOP.
+        case "TOKEN_PROGRAM_OWNED_UNRESOLVED":
+          return none("RELATIONSHIP_UNRESOLVED");
 
-      // (2) AN ORDINARY ACCOUNT. It may own token accounts for the
-      // project's mint; asking is one bounded call and an answer of none
-      // is itself a finding.
-      if (!componentAllowsRule(input.component, "ACCOUNT_TO_TOKEN_ACCOUNTS")) {
-        return none("COMPONENT_NOT_PERMITTED");
+        // (B/C) A token account whose mint we know.
+        case "TOKEN_ACCOUNT_PARSED": {
+          const parsed = result.tokenAccount;
+          // Defence in depth: the relation and the payload must agree, and
+          // a disagreement is unresolved rather than either answer.
+          if (parsed === null) return none("RELATIONSHIP_UNRESOLVED");
+          // (C) Another project's token account that this document happens
+          // to name. Reading its history would be researching a stranger.
+          if (parsed.mint !== p.projectAnchor) return none("NO_ELIGIBLE_SUBJECT");
+          if (!componentAllowsRule(input.component, "TOKEN_ACCOUNT_TO_SIGNATURES")) {
+            return none("COMPONENT_NOT_PERMITTED");
+          }
+          if (input.visited.has(`SIGNATURES_FOR_ADDRESS::${result.address}`)) {
+            return none("NO_ELIGIBLE_SUBJECT");
+          }
+          // (B) Bound to this project's mint by the observation itself.
+          return {
+            promoted: [build(result.address, "TOKEN_ACCOUNT_TO_SIGNATURES", result.address)],
+            refusal: null,
+          };
+        }
+
+        // (A) Established as NOT a token account, so asking which token
+        // accounts it owns is a well-formed question. An answer of none is
+        // itself a finding.
+        case "NOT_TOKEN_PROGRAM_OWNED": {
+          if (!componentAllowsRule(input.component, "ACCOUNT_TO_TOKEN_ACCOUNTS")) {
+            return none("COMPONENT_NOT_PERMITTED");
+          }
+          if (input.visited.has(`TOKEN_ACCOUNTS_BY_OWNER::${result.address}`)) {
+            return none("NO_ELIGIBLE_SUBJECT");
+          }
+          return {
+            promoted: [build(result.address, "ACCOUNT_TO_TOKEN_ACCOUNTS", result.address)],
+            refusal: null,
+          };
+        }
+
+        // An unrecognised relation is not a licence to guess.
+        default:
+          return none("RELATIONSHIP_UNRESOLVED");
       }
-      if (input.visited.has(`TOKEN_ACCOUNTS_BY_OWNER::${result.address}`)) {
-        return none("NO_ELIGIBLE_SUBJECT");
-      }
-      return {
-        promoted: [build(result.address, "ACCOUNT_TO_TOKEN_ACCOUNTS", result.address)],
-        refusal: null,
-      };
     }
 
     case "TOKEN_ACCOUNTS_BY_OWNER": {

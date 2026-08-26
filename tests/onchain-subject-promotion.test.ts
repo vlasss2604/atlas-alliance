@@ -74,6 +74,7 @@ const accountInfo = (exists = true) =>
     ownerProgram: "SomeProgram1111111111111111111111111111111",
     executable: false,
     lamports: "1",
+    tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED",
     tokenAccount: null,
   });
 
@@ -87,7 +88,22 @@ const accountInfoAsTokenAccount = (mint: string, owner: string | null = WALLET) 
     ownerProgram: "TokenProgram11111111111111111111111111111",
     executable: false,
     lamports: "2039280",
+    tokenAccountRelation: "TOKEN_ACCOUNT_PARSED",
     tokenAccount: { mint, owner, amountRaw: "0", decimals: 6, state: "initialized" },
+  });
+
+// KNOWN to be a token account; WHICH mint is unknown. The case that must
+// never be demoted to an ordinary wallet.
+const accountInfoTokenUnresolved = () =>
+  artifact({
+    kind: "ACCOUNT_INFO",
+    address: WALLET,
+    exists: true,
+    ownerProgram: "TokenProgram11111111111111111111111111111",
+    executable: false,
+    lamports: "2039280",
+    tokenAccountRelation: "TOKEN_PROGRAM_OWNED_UNRESOLVED",
+    tokenAccount: null,
   });
 
 const tokenAccounts = (accounts: { account: string; owner: string; mint: string }[]) =>
@@ -556,9 +572,9 @@ describe("promotion — the locator may itself be a token account", () => {
     expect(out.refusal).toBe("NO_ELIGIBLE_SUBJECT");
   });
 
-  it("an unparsed account is treated as ordinary, never guessed at", () => {
-    // tokenAccount === null means "not established", which must behave as
-    // the ordinary case rather than as a token account with an unknown mint.
+  it("an account ESTABLISHED as non-token takes the ordinary path", () => {
+    // NOT_TOKEN_PROGRAM_OWNED is a positive finding: the program owner
+    // settles it. Only this relation licenses owner-discovery.
     const out = promoteFromObservation({ ...base, artifact: accountInfo() });
     expect(out.promoted[0].intentKind).toBe("TOKEN_ACCOUNTS_BY_OWNER");
   });
@@ -578,5 +594,97 @@ describe("promotion — the locator may itself be a token account", () => {
         artifact: accountInfoAsTokenAccount(ANCHOR),
       }).refusal,
     ).toBe("DEPTH_LIMIT");
+  });
+});
+
+// FAIL-CLOSED ACCOUNT RELATIONSHIP SEMANTICS.
+//
+// The rule these pin: FAILING TO ESTABLISH that an account is a token
+// account is not evidence that it is an ordinary one. The first cut of this
+// bridge used a nullable field, so "not a token account" and "could not
+// tell" arrived as the same value and both took the owner-discovery path —
+// turning an unresolved identity into a positive non-token finding and
+// spending a bounded call on a meaningless question.
+describe("account relationship — the four states are distinct and fail closed", () => {
+  const FOREIGN = "ForeignMint11111111111111111111111111111111";
+
+  it("1. a non-token-program account is ORDINARY and may be asked what it owns", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfo() });
+    expect(out.promoted).toHaveLength(1);
+    expect(out.promoted[0].intentKind).toBe("TOKEN_ACCOUNTS_BY_OWNER");
+  });
+
+  it("2/4. a parsed token account for the ANCHOR mint is read directly", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfoAsTokenAccount(ANCHOR) });
+    expect(out.promoted[0].intentKind).toBe("SIGNATURES_FOR_ADDRESS");
+    expect(out.promoted[0].rule).toBe("TOKEN_ACCOUNT_TO_SIGNATURES");
+  });
+
+  it("3. a parsed token account for a FOREIGN mint stops", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfoAsTokenAccount(FOREIGN) });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("NO_ELIGIBLE_SUBJECT");
+  });
+
+  it("5/6. UNRESOLVED stops, and is reported as unresolved rather than empty", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfoTokenUnresolved() });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("RELATIONSHIP_UNRESOLVED");
+  });
+
+  it("5/6. UNRESOLVED must NEVER promote TOKEN_ACCOUNTS_BY_OWNER", () => {
+    // The regression this whole change exists to prevent.
+    const out = promoteFromObservation({ ...base, artifact: accountInfoTokenUnresolved() });
+    expect(out.promoted.some((p) => p.intentKind === "TOKEN_ACCOUNTS_BY_OWNER")).toBe(false);
+    expect(out.promoted.some((p) => p.rule === "ACCOUNT_TO_TOKEN_ACCOUNTS")).toBe(false);
+  });
+
+  it("UNRESOLVED must NEVER promote a signature window either", () => {
+    // Unknown mint means no binding, so history is equally off-limits.
+    const out = promoteFromObservation({ ...base, artifact: accountInfoTokenUnresolved() });
+    expect(out.promoted.some((p) => p.intentKind === "SIGNATURES_FOR_ADDRESS")).toBe(false);
+  });
+
+  it("UNRESOLVED is refused for every component, not just permissive ones", () => {
+    for (const component of ["EXECUTION_EVIDENCE", "DESTINATION", "RECIPIENT", "CURRENT_STATE"]) {
+      const out = promoteFromObservation({
+        ...base,
+        component,
+        artifact: accountInfoTokenUnresolved(),
+      });
+      expect(out.promoted, component).toHaveLength(0);
+    }
+  });
+
+  it("the unresolved refusal is distinguishable from an ordinary empty result", () => {
+    // "we could not tell, so we stopped" and "there was nothing to promote"
+    // are different research statements and must not share a name.
+    const unresolved = promoteFromObservation({ ...base, artifact: accountInfoTokenUnresolved() });
+    const foreign = promoteFromObservation({ ...base, artifact: accountInfoAsTokenAccount(FOREIGN) });
+    expect(unresolved.refusal).not.toBe(foreign.refusal);
+  });
+
+  it("a relation/payload disagreement resolves to UNRESOLVED, not to either answer", () => {
+    // Defence in depth: PARSED with a null payload is a contradiction, and
+    // a contradiction is not a licence to pick a side.
+    const contradictory = artifact({
+      kind: "ACCOUNT_INFO",
+      address: WALLET,
+      exists: true,
+      ownerProgram: "TokenProgram11111111111111111111111111111",
+      executable: false,
+      lamports: "2039280",
+      tokenAccountRelation: "TOKEN_ACCOUNT_PARSED",
+      tokenAccount: null,
+    });
+    const out = promoteFromObservation({ ...base, artifact: contradictory });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("RELATIONSHIP_UNRESOLVED");
+  });
+
+  it("8. a non-existent account keeps its existing stop semantics", () => {
+    const out = promoteFromObservation({ ...base, artifact: accountInfo(false) });
+    expect(out.promoted).toHaveLength(0);
+    expect(out.refusal).toBe("NO_ELIGIBLE_SUBJECT");
   });
 });

@@ -87,6 +87,31 @@ export interface ParsedTokenAccountRef {
   state: string | null;
 }
 
+// WHY THIS IS AN EXPLICIT THREE-STATE AND NOT A NULLABLE FIELD.
+//
+// A nullable tokenAccount collapses two different answers into one value:
+// "this is not a token account" and "this MIGHT be one and we could not
+// tell". A consumer reading null cannot distinguish them, and the first
+// version of this projection duly had one that treated both as an ordinary
+// wallet — turning a failure to establish token-account identity into
+// positive evidence of non-token status. That is the exact inversion the
+// engine refuses everywhere else.
+//
+// So the relation is stated, not inferred from a null.
+export type TokenAccountRelation =
+  // The account.s data is owned by a program that is not an SPL Token
+  // program. It is genuinely not a token account, and asking which token
+  // accounts it owns is a well-formed question.
+  | "NOT_TOKEN_PROGRAM_OWNED"
+  // Program-owned by SPL Token or Token-2022 AND the node parsed a
+  // well-formed mint. `tokenAccount` carries it.
+  | "TOKEN_ACCOUNT_PARSED"
+  // Program-owned by an SPL Token program, but the parsed identity is
+  // absent, malformed or unsupported. We know it is a token account and we
+  // do NOT know which mint. Fail closed: it is neither usable as a bound
+  // subject nor demotable to an ordinary wallet.
+  | "TOKEN_PROGRAM_OWNED_UNRESOLVED";
+
 export interface AccountInfoResult {
   kind: "ACCOUNT_INFO";
   address: string;
@@ -95,9 +120,13 @@ export interface AccountInfoResult {
   ownerProgram: string | null;
   executable: boolean | null;
   lamports: string | null;
-  // Non-null only when this account is itself an SPL token account whose
-  // mint the node parsed. Null covers both "ordinary account" and
-  // "unparseable" — a caller must not read one as the other.
+  // Which of the three the account is. ALWAYS read this before
+  // tokenAccount: it is the field that separates "not a token account"
+  // from "could not be established".
+  tokenAccountRelation: TokenAccountRelation;
+  // Populated ONLY when tokenAccountRelation === "TOKEN_ACCOUNT_PARSED".
+  // Null on both other relations, which is why it must never be read as a
+  // classification on its own.
   tokenAccount: ParsedTokenAccountRef | null;
 }
 

@@ -1248,11 +1248,12 @@ describe("account info — parsed token-account projection", () => {
     expect(r.tokenAccount?.mint).toBe(MINT);
   });
 
-  it("a System-owned account projects NO token account", async () => {
+  it("a System-owned account is ESTABLISHED as not token-program owned", async () => {
     const artifact = await adapterWith(accountPayload(SYSTEM_PROGRAM, null)).retrieve(
       infoIntent(HOLDER),
     );
-    const r = artifact.result as { tokenAccount: unknown; ownerProgram: string };
+    const r = artifact.result as { tokenAccount: unknown; ownerProgram: string; tokenAccountRelation: string };
+    expect(r.tokenAccountRelation).toBe("NOT_TOKEN_PROGRAM_OWNED");
     expect(r.tokenAccount).toBeNull();
     expect(r.ownerProgram).toBe(SYSTEM_PROGRAM);
   });
@@ -1266,13 +1267,35 @@ describe("account info — parsed token-account projection", () => {
     expect((artifact.result as { tokenAccount: unknown }).tokenAccount).toBeNull();
   });
 
-  it("a malformed mint yields null rather than a guess", async () => {
+  it("6. a malformed mint is UNRESOLVED, never demoted to a non-token account", async () => {
     for (const bad of ["", "not-base58!", "tooShort", 12345]) {
       const artifact = await adapterWith(
         accountPayload(TOKEN_PROGRAM, { mint: bad, owner: HOLDER }),
       ).retrieve(infoIntent(HOLDER));
-      expect((artifact.result as { tokenAccount: unknown }).tokenAccount, String(bad)).toBeNull();
+      const r = artifact.result as { tokenAccount: unknown; tokenAccountRelation: string };
+      expect(r.tokenAccountRelation, String(bad)).toBe("TOKEN_PROGRAM_OWNED_UNRESOLVED");
+      expect(r.tokenAccount, String(bad)).toBeNull();
     }
+  });
+
+  it("5. token-program owned with NO parsed data at all is UNRESOLVED", async () => {
+    // The node returned the account but not a parsed shape. We know it is a
+    // token account; we do not know its mint.
+    const artifact = await adapterWith(accountPayload(TOKEN_PROGRAM, null)).retrieve(
+      infoIntent(HOLDER),
+    );
+    const r = artifact.result as { tokenAccount: unknown; tokenAccountRelation: string };
+    expect(r.tokenAccountRelation).toBe("TOKEN_PROGRAM_OWNED_UNRESOLVED");
+    expect(r.tokenAccount).toBeNull();
+  });
+
+  it("an empty parsed info object is UNRESOLVED, not non-token", async () => {
+    const artifact = await adapterWith(accountPayload(TOKEN_PROGRAM, {})).retrieve(
+      infoIntent(HOLDER),
+    );
+    expect((artifact.result as { tokenAccountRelation: string }).tokenAccountRelation).toBe(
+      "TOKEN_PROGRAM_OWNED_UNRESOLVED",
+    );
   });
 
   it("a missing owner is null without discarding the mint", async () => {
@@ -1288,9 +1311,11 @@ describe("account info — parsed token-account projection", () => {
     const artifact = await adapterWith({ context: { slot: 500 }, value: null }).retrieve(
       infoIntent(HOLDER),
     );
-    const r = artifact.result as { exists: boolean; tokenAccount: unknown };
+    const r = artifact.result as { exists: boolean; tokenAccount: unknown; tokenAccountRelation: string };
     expect(r.exists).toBe(false);
     expect(r.tokenAccount).toBeNull();
+    // A non-existent account is not token-program owned by anything.
+    expect(r.tokenAccountRelation).toBe("NOT_TOKEN_PROGRAM_OWNED");
   });
 
   it("isSplTokenProgramId answers only for the two token programs", () => {
