@@ -133,31 +133,54 @@ const contextual = <T extends z.ZodTypeAny>(value: T) =>
 const tokenSupplySchema = contextual(uiAmount);
 const tokenAccountBalanceSchema = contextual(uiAmount);
 
+// ACCOUNT DATA HAS TWO VALID SHAPES, AND ONLY ONE WAS ACCEPTED.
+//
+// jsonParsed is a REQUEST, not a guarantee. The node parses account data
+// when it has a parser for the owning program and otherwise falls back to
+// the encoded form [<data>, <encoding>] — a standards-valid answer, not an
+// error. A System-owned account has no parser at all, so the fallback is
+// the ORDINARY case for exactly the addresses a documentary locator most
+// often names. Accepting only the object form made the adapter reject a
+// correct response and report "schema validation failed", which reads as a
+// provider fault when the provider did nothing wrong.
+//
+// A UNION, NOT A LOOSENING. The fallback is admitted in its exact shape —
+// a two-element tuple whose second element is one of the encodings this
+// RPC actually emits — so an unknown shape is still refused. There is no
+// z.any() and no passthrough anywhere on this path.
+//
+// The fallback carries NO parsed identity, which is the point: it says
+// what the account is not parseable as, never what it is. Classification
+// therefore falls to the program owner alone, and a token-program-owned
+// account whose data could not be parsed stays UNRESOLVED rather than
+// being demoted to an ordinary account.
+const encodedAccountDataSchema = z.tuple([
+  z.string(),
+  // The encodings getAccountInfo genuinely returns for the array form.
+  // Deliberately closed: a form this adapter cannot interpret must not be
+  // silently accepted as if it had been understood.
+  z.enum(["base64", "base58", "base64+zstd"]),
+]);
+
+const parsedAccountDataSchema = z
+  .object({
+    program: z.string().optional(),
+    parsed: z
+      .object({
+        type: z.string().optional(),
+        info: z.record(z.string(), z.unknown()).optional(),
+      })
+      .optional(),
+  })
+  .loose();
+
 const accountInfoSchema = contextual(
   z
     .object({
       owner: z.string(),
       executable: z.boolean(),
       lamports: z.number().int().min(0),
-      // jsonParsed encoding is ALREADY requested for this method, and an
-      // SPL token account comes back with its mint and owning wallet
-      // parsed by the node. Not reading them meant the one call that could
-      // say "this documented address IS a token account, and it is a token
-      // account for THIS mint" threw that answer away and left the
-      // question to a second, weaker read. Optional and loose: a non-token
-      // account has no parsed shape at all, and that is the ordinary case.
-      data: z
-        .object({
-          program: z.string().optional(),
-          parsed: z
-            .object({
-              type: z.string().optional(),
-              info: z.record(z.string(), z.unknown()).optional(),
-            })
-            .optional(),
-        })
-        .loose()
-        .optional(),
+      data: z.union([parsedAccountDataSchema, encodedAccountDataSchema]).optional(),
     })
     .nullable(),
 );
@@ -450,7 +473,13 @@ function decodeLifecycleInstruction(raw: unknown, inner: boolean): AccountLifecy
 // program's account is an SPL token account.
 function classifyTokenAccount(
   ownerProgram: string | null,
-  data: { program?: string; parsed?: { type?: string; info?: Record<string, unknown> } } | undefined,
+  // Either shape the RPC may return. The encoded fallback is an ARRAY and
+  // carries no parsed identity, so it can only ever narrow to "unresolved"
+  // — never to a mint, and never to "not a token account".
+  data:
+    | { program?: string; parsed?: { type?: string; info?: Record<string, unknown> } }
+    | [string, string]
+    | undefined,
 ): { tokenAccountRelation: TokenAccountRelation; tokenAccount: ParsedTokenAccountRef | null } {
   if (!ownerProgram || !SPL_TOKEN_PROGRAM_IDS.has(ownerProgram)) {
     // Established: not a token account.
@@ -462,7 +491,10 @@ function classifyTokenAccount(
     tokenAccountRelation: "TOKEN_PROGRAM_OWNED_UNRESOLVED" as const,
     tokenAccount: null,
   };
-  const info = data?.parsed?.info;
+  // An encoded fallback is not a parsed object: no identity, no mint, and
+  // no basis for anything but the unresolved answer.
+  const parsedData = Array.isArray(data) ? undefined : data;
+  const info = parsedData?.parsed?.info;
   if (!info) return unresolved;
   const mint = typeof info.mint === "string" ? info.mint : null;
   if (!mint || !BASE58_ADDRESS.test(mint)) return unresolved;

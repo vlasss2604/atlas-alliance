@@ -369,3 +369,107 @@ describe("account relation facts — 9. the documentary label never crosses over
     expect(/["'][1-9A-HJ-NP-Za-km-z]{32,44}["']/.test(codeOnly)).toBe(false);
   });
 });
+
+// OWNER IS NOT WALLET.
+//
+// The first live TOKEN_ACCOUNTS_BY_OWNER read synthesized "Wallet <owner>
+// holds SPL token account ...". The RPC field is called `owner` and that is
+// the whole of what it reports: the owning address may be a system account,
+// a program-derived address, a multisig or an authority. "Wallet" asserts a
+// shape and an agency the response never established, on the very address a
+// document had already given a name to.
+describe("token-accounts-by-owner facts — owner is not a wallet", () => {
+  const OWNER = "OwnerBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+  const TOKEN_ACCT = "TokAcctAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const SECOND_ACCT = "TokAcctBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB";
+
+  function byOwnerArtifact(accounts: { account: string; amountRaw: string }[]): OnchainArtifact {
+    const intent: OnchainIntent = {
+      kind: "TOKEN_ACCOUNTS_BY_OWNER",
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: ANCHOR,
+      subjectKind: "account",
+      subject: OWNER,
+    };
+    return brandOnchainArtifact({
+      intent,
+      canonicalUri: `atlas-onchain://solana/mainnet/project/${ANCHOR}/account/${OWNER}/token-accounts`,
+      result: {
+        kind: "TOKEN_ACCOUNTS_BY_OWNER",
+        owner: OWNER,
+        mint: ANCHOR,
+        rejectedCount: 0,
+        accounts: accounts.map((a) => ({ ...a, owner: OWNER, mint: ANCHOR, decimals: 6 })),
+      },
+      normalizedText: "{}",
+      provenance: {
+        chain: "solana",
+        network: "mainnet",
+        projectAnchor: ANCHOR,
+        subjectKind: "account",
+        subject: OWNER,
+        slot: 441_840_975,
+        blockTime: null,
+        blockHash: null,
+        finality: "finalized",
+        retrievalMethod: "RPC",
+        providerId: "fixture",
+        providerMethod: "getTokenAccountsByOwner",
+        requestParams: { subject: OWNER },
+        retrievedAt: new Date(0),
+        rawResponseHash: "sha256:raw",
+        artifactHash: "sha256:art",
+        transactionSignature: null,
+      },
+    });
+  }
+
+  const facts = synthesizeOnchainFacts(byOwnerArtifact([{ account: TOKEN_ACCT, amountRaw: "0" }]), TARGET);
+
+  it("the statement contains no wallet claim", () => {
+    expect(facts).toHaveLength(1);
+    expect(facts[0].statement.toLowerCase()).not.toContain("wallet");
+    expect(facts[0].statement).toContain(`Address ${OWNER} owns`);
+  });
+
+  it("doesNotProve carries no wallet claim either", () => {
+    expect(facts[0].doesNotProve.toLowerCase()).not.toContain("wallet");
+    expect(facts[0].doesNotProve).toContain("who controls the owning address");
+  });
+
+  it("no other economic-role noun is introduced", () => {
+    const text = `${facts[0].statement} ${facts[0].doesNotProve}`.toLowerCase();
+    for (const role of ["treasury", "user wallet", "burn wallet", "project wallet", "holder"]) {
+      expect(text, role).not.toContain(role);
+    }
+  });
+
+  it("the owner, token account and mint are preserved exactly", () => {
+    expect(facts[0].statement).toContain(OWNER);
+    expect(facts[0].statement).toContain(TOKEN_ACCT);
+    expect(facts[0].statement).toContain(ANCHOR);
+  });
+
+  it("the balance stays an observed-at-slot state, and zero implies nothing", () => {
+    expect(facts[0].statement).toContain("as observed at slot 441840975");
+    const text = facts[0].statement.toLowerCase();
+    for (const forbidden of ["burn", "transfer", "destroy", "supply", "never held", "emptied"]) {
+      expect(text, forbidden).not.toContain(forbidden);
+    }
+    expect(facts[0].doesNotProve).toContain("never a history and never a purpose");
+  });
+
+  it("two accounts of one owner stay two facts with distinct fragments", () => {
+    const many = synthesizeOnchainFacts(
+      byOwnerArtifact([
+        { account: TOKEN_ACCT, amountRaw: "0" },
+        { account: SECOND_ACCT, amountRaw: "5" },
+      ]),
+      TARGET,
+    );
+    expect(many).toHaveLength(2);
+    expect(many[0].supportFragment).not.toBe(many[1].supportFragment);
+    for (const f of many) expect(f.statement.toLowerCase()).not.toContain("wallet");
+  });
+});
