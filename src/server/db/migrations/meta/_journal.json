@@ -232,6 +232,13 @@
       "when": 1787598800000,
       "tag": "0032_onchain_subject_promotion_trace",
       "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "7",
+      "when": 1787598900000,
+      "tag": "0033_promotion_relationship_unresolved",
+      "breakpoints": true
     }
   ]
 }

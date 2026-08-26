@@ -234,7 +234,8 @@ export interface OnchainTraceEvent {
     | "PROMOTION_NO_ELIGIBLE_SUBJECT"
     | "PROMOTION_BINDING_NOT_CONFIRMED"
     | "PROMOTION_INTENT_CAP_REACHED"
-    | "PROMOTION_TERMINAL_OBSERVATION";
+    | "PROMOTION_TERMINAL_OBSERVATION"
+    | "PROMOTION_RELATIONSHIP_UNRESOLVED";
 }
 
 export async function runStructuredOnchainAcquisition(
@@ -400,15 +401,18 @@ export async function runStructuredOnchainAcquisition(
           status: "SKIPPED",
           reasonCode: "PROMOTION_BINDING_NOT_CONFIRMED",
         });
-      } else if (
-        outcome.refusal === "NO_ELIGIBLE_SUBJECT" ||
-        // Recorded under the same closed reason code: no new enum value is
-        // added for it, because the trace vocabulary is a migration and the
-        // distinction that matters — we stopped rather than guessed — is
-        // already carried by "no eligible subject". The refusal type keeps
-        // the finer meaning for callers.
-        outcome.refusal === "RELATIONSHIP_UNRESOLVED"
-      ) {
+      } else if (outcome.refusal === "RELATIONSHIP_UNRESOLVED") {
+        // NOT the same as "no eligible subject". The account is known to be
+        // a token account whose mint could not be established, so the
+        // engine stopped rather than guessed — and a reader of the trace
+        // must be able to tell that apart from an exhausted search.
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_RELATIONSHIP_UNRESOLVED",
+        });
+      } else if (outcome.refusal === "NO_ELIGIBLE_SUBJECT") {
         await trace({
           operationType: "SUBJECT_PROMOTION_REJECTED",
           targetRef: uri,

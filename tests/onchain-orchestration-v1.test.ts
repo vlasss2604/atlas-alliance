@@ -579,3 +579,186 @@ describe("orchestration — trace rows are real and safe", () => {
     expect(rows.length).toBeGreaterThan(0);
   });
 });
+
+// TRACE FIDELITY — "nothing to promote" vs "could not tell".
+//
+// A fail-closed unresolved token-account identity and a genuinely exhausted
+// search are different research statements. They were briefly recorded under
+// one reason code, which made them indistinguishable at readback — the same
+// collapse this engine refuses everywhere else: not found is not not
+// inspected, and failing to establish something is not establishing its
+// opposite.
+describe("trace fidelity — unresolved relationship is durably distinguishable", () => {
+  const UNRESOLVED_ACCOUNT_INFO = {
+    exists: true,
+    // Program-owned by an SPL Token program, mint unparseable: we know it
+    // IS a token account and not which one.
+    ownerProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    tokenAccountRelation: "TOKEN_PROGRAM_OWNED_UNRESOLVED" as const,
+    tokenAccount: null,
+  };
+
+  // Drives acquisition with an ACCOUNT_INFO answer we control, persisting
+  // every trace row through the normal path so readback is exercised.
+  async function runAccountInfoCase(
+    jobId: string,
+    accountInfo: Record<string, unknown>,
+  ): Promise<string[]> {
+    const locators = await admittedLocatorsForJob(ctx.db, jobId);
+    let seq = 0;
+    await runStructuredOnchainAcquisition({
+      db: ctx.db,
+      jobId,
+      attemptId: null,
+      // DESTINATION maps to ACCOUNT_INFO first, so the relationship
+      // decision is the one under test.
+      item: { step: 6, component: "DESTINATION" },
+      plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
+      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      maxSourceOpens: 24,
+      retriever: {
+        name: "fixture",
+        supports: (_c: string, _n: string, kind: string) => kind === "ACCOUNT_INFO",
+        retrieve: async (intent: OnchainIntent) =>
+          artifactFor(intent, {
+            kind: "ACCOUNT_INFO",
+            address: intent.subject,
+            executable: false,
+            lamports: "2039280",
+            ...accountInfo,
+          } as OnchainResult),
+      },
+      reserve: async () => true,
+      recordTrace: async (e) => {
+        seq += 1;
+        await ctx.db.insert(researchTraceEvents).values({
+          researchJobId: jobId,
+          sequence: seq,
+          operationType: e.operationType,
+          providerKind: "FETCH",
+          patternStep: 6,
+          component: "DESTINATION",
+          targetRef: e.targetRef,
+          status: e.status,
+          reasonCode: e.reasonCode ?? "NONE",
+        });
+      },
+    });
+    const rows = await ctx.db
+      .select()
+      .from(researchTraceEvents)
+      .where(
+        and(
+          eq(researchTraceEvents.researchJobId, jobId),
+          eq(researchTraceEvents.operationType, "SUBJECT_PROMOTION_REJECTED"),
+        ),
+      );
+    return rows.map((r) => r.reasonCode);
+  }
+
+  it("1/3. an unresolved relationship persists its own distinct reason", async () => {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    const reasons = await runAccountInfoCase(jobId, UNRESOLVED_ACCOUNT_INFO);
+    expect(reasons).toContain("PROMOTION_RELATIONSHIP_UNRESOLVED");
+    expect(reasons).not.toContain("PROMOTION_NO_ELIGIBLE_SUBJECT");
+  });
+
+  it("2/3. a genuinely absent subject still persists NO_ELIGIBLE_SUBJECT", async () => {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    // The account does not exist: nothing to promote, and that is a
+    // different finding from being unable to classify one.
+    const reasons = await runAccountInfoCase(jobId, {
+      exists: false,
+      ownerProgram: null,
+      tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED" as const,
+      tokenAccount: null,
+    });
+    expect(reasons).toContain("PROMOTION_NO_ELIGIBLE_SUBJECT");
+    expect(reasons).not.toContain("PROMOTION_RELATIONSHIP_UNRESOLVED");
+  });
+
+  it("3. the two survive readback as different values", async () => {
+    const unresolvedJob = await makeJob();
+    await admitLocator(unresolvedJob, WALLET);
+    const unresolved = await runAccountInfoCase(unresolvedJob, UNRESOLVED_ACCOUNT_INFO);
+
+    const absentJob = await makeJob();
+    await admitLocator(absentJob, WALLET);
+    const absent = await runAccountInfoCase(absentJob, {
+      exists: false,
+      ownerProgram: null,
+      tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED" as const,
+      tokenAccount: null,
+    });
+
+    expect(unresolved).not.toEqual(absent);
+    expect(new Set([...unresolved, ...absent]).size).toBeGreaterThan(1);
+  });
+
+  it("4. a confirmed FOREIGN-mint stop is not reclassified as unresolved", async () => {
+    // Foreign mint is an established finding, not a failure to establish.
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    const reasons = await runAccountInfoCase(jobId, {
+      exists: true,
+      ownerProgram: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      tokenAccountRelation: "TOKEN_ACCOUNT_PARSED" as const,
+      tokenAccount: {
+        mint: "ForeignMint1111111111111111111111111111111",
+        owner: WALLET,
+        amountRaw: "0",
+        decimals: 6,
+        state: "initialized",
+      },
+    });
+    expect(reasons).toContain("PROMOTION_NO_ELIGIBLE_SUBJECT");
+    expect(reasons).not.toContain("PROMOTION_RELATIONSHIP_UNRESOLVED");
+  });
+
+  it("5/6. an unresolved account PROMOTES nothing — no SUBJECT_PROMOTED at all", async () => {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    const locators = await admittedLocatorsForJob(ctx.db, jobId);
+    const asked: OnchainIntent[] = [];
+    const promotedEvents: string[] = [];
+    await runStructuredOnchainAcquisition({
+      db: ctx.db,
+      jobId,
+      attemptId: null,
+      item: { step: 6, component: "DESTINATION" },
+      plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
+      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      maxSourceOpens: 24,
+      retriever: {
+        name: "fixture",
+        supports: () => true,
+        retrieve: async (intent: OnchainIntent) => {
+          asked.push(intent);
+          return artifactFor(intent, {
+            kind: "ACCOUNT_INFO",
+            address: intent.subject,
+            executable: false,
+            lamports: "2039280",
+            ...UNRESOLVED_ACCOUNT_INFO,
+          } as OnchainResult);
+        },
+      },
+      reserve: async () => true,
+      recordTrace: async (e) => {
+        promotedEvents.push(e.operationType);
+      },
+    });
+    // Promotion produced NOTHING from the unresolved observation.
+    expect(promotedEvents.filter((o) => o === "SUBJECT_PROMOTED")).toHaveLength(0);
+    // Fail-closed intact: the chain never deepens past discovery. Note
+    // TOKEN_ACCOUNTS_BY_OWNER may still appear ONCE as a BASE intent for
+    // DESTINATION — base intents are chosen before any observation exists,
+    // so they cannot depend on a relation that is not yet known. What must
+    // not happen is a SECOND one issued BY promotion, or any history read.
+    expect(asked.filter((i) => i.kind === "TOKEN_ACCOUNTS_BY_OWNER").length).toBeLessThanOrEqual(1);
+    expect(asked.some((i) => i.kind === "SIGNATURES_FOR_ADDRESS")).toBe(false);
+    expect(asked.some((i) => i.kind === "TRANSACTION_DETAIL")).toBe(false);
+  });
+});

@@ -367,6 +367,11 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   "PROMOTION_BINDING_NOT_CONFIRMED",
   "PROMOTION_INTENT_CAP_REACHED",
   "PROMOTION_TERMINAL_OBSERVATION",
+  // Distinct from PROMOTION_NO_ELIGIBLE_SUBJECT on purpose: the engine
+  // knows the account IS a token account and could not establish which
+  // mint, so it stopped. "Nothing to promote" and "could not tell" are
+  // different findings and must not share a name at readback.
+  "PROMOTION_RELATIONSHIP_UNRESOLVED",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,
