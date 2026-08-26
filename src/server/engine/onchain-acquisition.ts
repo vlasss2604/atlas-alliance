@@ -113,7 +113,12 @@ const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
   // subject that is cannot be known before classification.
   EXECUTION_EVIDENCE: ["ACCOUNT_INFO"],
   SOURCE_OF_VALUE: ["TOKEN_SUPPLY"],
-  FLOW_PATH: ["SIGNATURES_FOR_ADDRESS"],
+  // How value MOVES before it reaches anyone. Same start as the other
+  // account-kind components: a raw window on an unclassified documentary
+  // address is history that has not been shown to be about this project at
+  // all, and the manual investigation established that a documented
+  // operational wallet is exactly where such a window says least.
+  FLOW_PATH: ["ACCOUNT_INFO"],
 };
 
 export function selectOnchainIntents(input: {

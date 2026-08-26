@@ -102,6 +102,16 @@ const INTENT_FOR_RULE: Record<PromotionRule, OnchainIntentKind> = {
 const RULES_BY_COMPONENT: Record<string, readonly PromotionRule[]> = {
   DESTINATION: ["ACCOUNT_TO_TOKEN_ACCOUNTS"],
   RECIPIENT: ["ACCOUNT_TO_TOKEN_ACCOUNTS"],
+  // FLOW_PATH traces how value moves, so it legitimately needs history —
+  // but history OF WHAT. An ordinary account becomes eligible only through
+  // the deterministic bridge that already exists: the token accounts it
+  // owns FOR THE CONFIRMED MINT. That makes the window mint-bound instead
+  // of a raw scan of whatever else the wallet does.
+  //
+  // It stops at the window. Reading one transaction in full is
+  // EXECUTION_EVIDENCE's question — whether a mechanism RAN — and granting
+  // it here would be inventing a need the pattern has not stated.
+  FLOW_PATH: ["ACCOUNT_TO_TOKEN_ACCOUNTS", "TOKEN_ACCOUNT_TO_SIGNATURES"],
   EXECUTION_EVIDENCE: [
     "ACCOUNT_TO_TOKEN_ACCOUNTS",
     "TOKEN_ACCOUNT_TO_SIGNATURES",
@@ -125,6 +135,11 @@ export const PROMOTION_ONLY_INTENTS: ReadonlySet<OnchainIntentKind> = new Set([
   // that the subject is NOT itself a token account. As a base intent it
   // ran before that was known; as a promotion-only intent it cannot.
   "TOKEN_ACCOUNTS_BY_OWNER",
+  // History is only meaningful on a subject bound to this project. As a
+  // base intent it read whatever a documentary address happened to do;
+  // reached by promotion it is always a token account for the confirmed
+  // mint.
+  "SIGNATURES_FOR_ADDRESS",
 ]);
 
 export interface PromotionInput {

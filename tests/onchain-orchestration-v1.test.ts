@@ -959,4 +959,115 @@ describe("acquisition — owner discovery is gated by ACCOUNT_INFO", () => {
       }).map((i) => i.kind),
     ).not.toContain("TOKEN_ACCOUNTS_BY_OWNER");
   });
+
+// FLOW_PATH — history is earned, not assumed.
+//
+// FLOW_PATH traces how value moves, and it had exactly one on-chain
+// capability: a signature window opened directly on a documentary locator,
+// before anything established what that address was or that its history had
+// any relation to this project. It also had NO promotion rules at all, so
+// that ungated window was the whole of it.
+//
+// An ordinary account is not prohibited from history here — it is required
+// to earn it through the bridge that already exists: the token accounts it
+// owns FOR THE CONFIRMED MINT. That makes the window mint-bound rather than
+// a raw scan of whatever else the wallet does.
+describe("FLOW_PATH — relationship-gated history access", () => {
+  // Reuses the relation fixtures declared above; only the absent case is
+  // new here.
+  const targetMint = targetMintAccount;
+  const foreignMint = foreignMintAccount;
+  const ABSENT = {
+    exists: false,
+    ownerProgram: null,
+    tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED" as const,
+    tokenAccount: null,
+  };
+
+  it("1/6. a TARGET-mint token account: classify first, then ONE bounded window", async () => {
+    const { kinds } = await askedFor("FLOW_PATH", targetMint);
+    expect(kinds).toEqual(["ACCOUNT_INFO", "SIGNATURES_FOR_ADDRESS"]);
+    // Deterministic ordering: classification cannot follow the window.
+    expect(kinds.indexOf("ACCOUNT_INFO")).toBeLessThan(kinds.indexOf("SIGNATURES_FOR_ADDRESS"));
+  });
+
+  it("2. a FOREIGN-mint token account gets no signature history", async () => {
+    const { kinds } = await askedFor("FLOW_PATH", foreignMint);
+    expect(kinds).toEqual(["ACCOUNT_INFO"]);
+  });
+
+  it("3. UNRESOLVED gets no signature history, and the unresolved trace survives", async () => {
+    const { kinds, reasons } = await askedFor("FLOW_PATH", UNRESOLVED);
+    expect(kinds).toEqual(["ACCOUNT_INFO"]);
+    expect(reasons).toContain("PROMOTION_RELATIONSHIP_UNRESOLVED");
+  });
+
+  it("4. a non-existent account gets no signature history", async () => {
+    const { kinds } = await askedFor("FLOW_PATH", ABSENT);
+    expect(kinds).toEqual(["ACCOUNT_INFO"]);
+  });
+
+  it("5. an ORDINARY account earns history only through its token account", async () => {
+    // Not prohibited, not assumed: the window lands on the token account
+    // for the confirmed mint, never on the wallet itself.
+    const { kinds } = await askedFor("FLOW_PATH", ORDINARY);
+    expect(kinds).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+    ]);
+  });
+
+  it("5. FLOW_PATH stops at the window — it never reads a transaction", async () => {
+    // Reading one transaction in full is EXECUTION_EVIDENCE's question.
+    for (const info of [ORDINARY, targetMint]) {
+      const { kinds } = await askedFor("FLOW_PATH", info);
+      expect(kinds).not.toContain("TRANSACTION_DETAIL");
+    }
+  });
+
+  it("7. every stop path costs exactly one classification read", async () => {
+    for (const info of [foreignMint, UNRESOLVED, ABSENT]) {
+      expect((await askedFor("FLOW_PATH", info)).kinds).toHaveLength(1);
+    }
+  });
+
+  it("history can never be dispatched as a base intent again", async () => {
+    // Structural: promotion-only is enforced in selection, so returning
+    // SIGNATURES_FOR_ADDRESS to a base map cannot reintroduce the ungated
+    // window.
+    for (const component of ["FLOW_PATH", "EXECUTION_EVIDENCE", "DESTINATION"]) {
+      expect(
+        selectOnchainIntents({
+          component,
+          establishingClasses: ["ONCHAIN_VERIFIABLE"],
+          identity,
+          locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+          maxIntents: 8,
+        }).map((i) => i.kind),
+        component,
+      ).not.toContain("SIGNATURES_FOR_ADDRESS");
+    }
+  });
+
+  it("8. the components gated in 4a5b4bf are unchanged", async () => {
+    expect((await askedFor("DESTINATION", ORDINARY)).kinds).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+    ]);
+    expect((await askedFor("EXECUTION_EVIDENCE", ORDINARY)).kinds).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+      "TRANSACTION_DETAIL",
+    ]);
+    expect((await askedFor("RECIPIENT", foreignMint)).kinds).toEqual(["ACCOUNT_INFO"]);
+  });
+
+  it("9. terminal-before-depth still holds for the full chain", async () => {
+    const { reasons } = await askedFor("EXECUTION_EVIDENCE", ORDINARY);
+    expect(reasons).toContain("PROMOTION_TERMINAL_OBSERVATION");
+    expect(reasons).not.toContain("PROMOTION_DEPTH_LIMIT");
+  });
+});
 });
