@@ -20,6 +20,7 @@ import {
   intentForPromotedSubject,
   MAX_PROMOTED_INTENTS_PER_ATTEMPT,
   promoteFromObservation,
+  PROMOTION_ONLY_INTENTS,
 } from "./onchain-subject-promotion";
 import {
   onchainRetrievalAvailable,
@@ -79,24 +80,38 @@ export function eligibleSubjects(
 // Which intents could bear on a component, given the Pattern's own
 // establishingClasses. Pure data, no project knowledge: a component that
 // cannot be established by ONCHAIN_VERIFIABLE gets nothing.
+// EVERY ACCOUNT-KIND CHAIN NOW STARTS AT ACCOUNT_INFO.
+//
+// A base intent is chosen before any observation exists, so a base intent
+// can never depend on what an earlier one found. That made owner-discovery
+// a question asked before the relationship that gives it meaning was
+// established: a documentary locator that is itself a token account was
+// asked which token accounts it owns — a question a token account cannot
+// answer — and a token-program-owned account with an unresolvable mint was
+// asked it too, despite the classifier having just refused to promote it.
+//
+// The fix is not a call-count optimisation. It is evidence-dependent
+// planning: ACCOUNT_INFO establishes WHAT the subject is, and only then
+// does promotion decide which downstream question is meaningful.
+//
+// TOKEN_ACCOUNT_BALANCE left the account-level maps for the same reason,
+// and because it is now redundant where it was valid: ACCOUNT_INFO's parsed
+// projection already carries amount and decimals for a token account, so
+// the balance arrives with the classification instead of costing a second
+// bounded read of an address that might not be a token account at all.
 const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
   CURRENT_STATE: ["TOKEN_SUPPLY"],
   NET_EFFECT: ["TOKEN_SUPPLY"],
-  // Where value LANDS. A documented account is characterised, and the
-  // token accounts it owns for the project mint are discovered — a wallet
-  // owning none is itself an answer about destination.
-  DESTINATION: ["ACCOUNT_INFO", "TOKEN_ACCOUNTS_BY_OWNER", "TOKEN_ACCOUNT_BALANCE"],
-  RECIPIENT: ["ACCOUNT_INFO", "TOKEN_ACCOUNTS_BY_OWNER", "TOKEN_ACCOUNT_BALANCE"],
-  // Whether a mechanism actually RAN. Discovery comes first: a signature
-  // window on a project token account is worth far more than one on a
-  // busy wallet, and promotion carries it from there to one transaction.
-  // DISCOVERY ONLY as a base intent. A documented wallet is often a busy
-  // operational account whose signature history is far too dense for one
-  // bounded window to say anything — the manual investigation established
-  // exactly that. The project TOKEN ACCOUNT reached by promotion is the
-  // subject whose history is actually about this project, so signatures
-  // are reached from there and never from the wallet directly.
-  EXECUTION_EVIDENCE: ["TOKEN_ACCOUNTS_BY_OWNER"],
+  // Where value LANDS. Classify the documented account first; promotion
+  // then either discovers the token accounts it owns, or — when the
+  // locator IS a token account for our mint — stops there, because the
+  // holding has already been observed.
+  DESTINATION: ["ACCOUNT_INFO"],
+  RECIPIENT: ["ACCOUNT_INFO"],
+  // Whether a mechanism actually RAN. Same start: a signature window is
+  // worth having only on a subject bound to this project, and which
+  // subject that is cannot be known before classification.
+  EXECUTION_EVIDENCE: ["ACCOUNT_INFO"],
   SOURCE_OF_VALUE: ["TOKEN_SUPPLY"],
   FLOW_PATH: ["SIGNATURES_FOR_ADDRESS"],
 };
@@ -118,6 +133,11 @@ export function selectOnchainIntents(input: {
   const subjects = eligibleSubjects(input.identity, input.locators ?? []);
   const intents: OnchainIntent[] = [];
   for (const kind of kinds) {
+    // STRUCTURAL GATE, not a convention. An intent that may only be
+    // reached by promotion is skipped here even if a component map names
+    // it, so re-adding one to a base map cannot silently reintroduce a
+    // question asked before its prerequisite was established.
+    if (PROMOTION_ONLY_INTENTS.has(kind)) continue;
     for (const s of subjects) {
       if (intents.length >= input.maxIntents) return intents;
       // A token-level read is only meaningful against the anchor itself;

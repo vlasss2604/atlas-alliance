@@ -13,7 +13,10 @@ import {
   users,
 } from "../src/server/db/schema";
 import { admittedLocatorsForJob, persistFactLocators } from "../src/server/engine/documentary-locator-store";
-import { runStructuredOnchainAcquisition } from "../src/server/engine/onchain-acquisition";
+import {
+  runStructuredOnchainAcquisition,
+  selectOnchainIntents,
+} from "../src/server/engine/onchain-acquisition";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
 import { MAX_PROMOTED_INTENTS_PER_ATTEMPT } from "../src/server/engine/onchain-subject-promotion";
 import type { ConfirmedProjectIdentity } from "../src/server/domain/project-identity";
@@ -760,5 +763,200 @@ describe("trace fidelity — unresolved relationship is durably distinguishable"
     expect(asked.filter((i) => i.kind === "TOKEN_ACCOUNTS_BY_OWNER").length).toBeLessThanOrEqual(1);
     expect(asked.some((i) => i.kind === "SIGNATURES_FOR_ADDRESS")).toBe(false);
     expect(asked.some((i) => i.kind === "TRANSACTION_DETAIL")).toBe(false);
+  });
+});
+
+// RELATIONSHIP-GATED DISCOVERY.
+//
+// A base intent is chosen before any observation exists, so owner discovery
+// as a base intent asked "which token accounts does this own?" before
+// anything had established that the subject was capable of owning any. The
+// classification is now the gate, and discovery is reachable only through it.
+describe("acquisition — owner discovery is gated by ACCOUNT_INFO", () => {
+  const TOKEN_PROGRAM = "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA";
+
+  // Drives a full attempt with a scripted ACCOUNT_INFO answer and records
+  // every intent the retriever was actually asked for, in order.
+  async function askedFor(
+    component: string,
+    accountInfo: Record<string, unknown>,
+  ): Promise<{ kinds: string[]; reasons: string[] }> {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    const locators = await admittedLocatorsForJob(ctx.db, jobId);
+    const asked: OnchainIntent[] = [];
+    const reasons: string[] = [];
+    await runStructuredOnchainAcquisition({
+      db: ctx.db,
+      jobId,
+      attemptId: null,
+      item: { step: 6, component },
+      plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
+      locators: locators.map((l) => ({
+        address: l.value,
+        origin: "ADMITTED_EVIDENCE_SOURCE" as const,
+      })),
+      maxSourceOpens: 24,
+      retriever: {
+        name: "fixture",
+        supports: () => true,
+        retrieve: async (intent: OnchainIntent) => {
+          asked.push(intent);
+          if (intent.kind === "ACCOUNT_INFO") {
+            return artifactFor(intent, {
+              kind: "ACCOUNT_INFO",
+              address: intent.subject,
+              executable: false,
+              lamports: "2039280",
+              ...accountInfo,
+            } as OnchainResult);
+          }
+          if (intent.kind === "TOKEN_ACCOUNTS_BY_OWNER") {
+            return artifactFor(intent, {
+              kind: "TOKEN_ACCOUNTS_BY_OWNER",
+              owner: intent.subject,
+              mint: MINT,
+              rejectedCount: 0,
+              accounts: [
+                { account: TOKEN_ACCOUNT, owner: intent.subject, mint: MINT, amountRaw: "0", decimals: 6 },
+              ],
+            });
+          }
+          if (intent.kind === "SIGNATURES_FOR_ADDRESS") {
+            return artifactFor(intent, {
+              kind: "SIGNATURES_FOR_ADDRESS",
+              address: intent.subject,
+              signatures: [{ signature: SIG_NEW, slot: 20, err: false, blockTime: 1, memo: null }],
+            });
+          }
+          return artifactFor(intent, {
+            kind: "TRANSACTION_DETAIL",
+            signature: intent.subject,
+            slot: 500,
+            blockTime: 1,
+            succeeded: true,
+            burns: [BURN],
+            programs: [],
+            accountKeys: [],
+            tokenInstructions: [],
+            lifecycleInstructions: [],
+            preTokenBalances: [],
+            postTokenBalances: [],
+          });
+        },
+      },
+      reserve: async () => true,
+      recordTrace: async (e) => {
+        if (e.reasonCode) reasons.push(e.reasonCode);
+      },
+    });
+    return { kinds: asked.map((i) => i.kind), reasons };
+  }
+
+  const ORDINARY = {
+    exists: true,
+    ownerProgram: "SysProg11111111111111111111111111111111111",
+    tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED" as const,
+    tokenAccount: null,
+  };
+  const targetMintAccount = {
+    exists: true,
+    ownerProgram: TOKEN_PROGRAM,
+    tokenAccountRelation: "TOKEN_ACCOUNT_PARSED" as const,
+    tokenAccount: { mint: MINT, owner: WALLET, amountRaw: "0", decimals: 6, state: "initialized" },
+  };
+  const foreignMintAccount = {
+    ...targetMintAccount,
+    tokenAccount: {
+      ...targetMintAccount.tokenAccount,
+      mint: "ForeignMint1111111111111111111111111111111",
+    },
+  };
+  const UNRESOLVED = {
+    exists: true,
+    ownerProgram: TOKEN_PROGRAM,
+    tokenAccountRelation: "TOKEN_PROGRAM_OWNED_UNRESOLVED" as const,
+    tokenAccount: null,
+  };
+
+  it("7. ACCOUNT_INFO is always FIRST, and discovery never precedes it", async () => {
+    const { kinds } = await askedFor("DESTINATION", ORDINARY);
+    expect(kinds[0]).toBe("ACCOUNT_INFO");
+    expect(kinds.indexOf("TOKEN_ACCOUNTS_BY_OWNER")).toBeGreaterThan(kinds.indexOf("ACCOUNT_INFO"));
+  });
+
+  it("1. an ordinary account allows owner discovery — after classification", async () => {
+    const { kinds } = await askedFor("DESTINATION", ORDINARY);
+    expect(kinds).toEqual(["ACCOUNT_INFO", "TOKEN_ACCOUNTS_BY_OWNER"]);
+  });
+
+  it("2. a TARGET-mint token account never triggers owner discovery", async () => {
+    const { kinds } = await askedFor("EXECUTION_EVIDENCE", targetMintAccount);
+    expect(kinds).not.toContain("TOKEN_ACCOUNTS_BY_OWNER");
+    // The history path is eligible instead, on the locator itself.
+    expect(kinds).toContain("SIGNATURES_FOR_ADDRESS");
+  });
+
+  it("3. a FOREIGN-mint token account triggers neither discovery nor history", async () => {
+    const { kinds } = await askedFor("EXECUTION_EVIDENCE", foreignMintAccount);
+    expect(kinds).toEqual(["ACCOUNT_INFO"]);
+  });
+
+  it("4. UNRESOLVED triggers neither discovery nor history, and says why", async () => {
+    const { kinds, reasons } = await askedFor("EXECUTION_EVIDENCE", UNRESOLVED);
+    expect(kinds).toEqual(["ACCOUNT_INFO"]);
+    // 9. The trace vocabulary from the previous commits is unchanged.
+    expect(reasons).toContain("PROMOTION_RELATIONSHIP_UNRESOLVED");
+  });
+
+  it("5. a non-existent account stops after classification", async () => {
+    const { kinds, reasons } = await askedFor("DESTINATION", {
+      exists: false,
+      ownerProgram: null,
+      tokenAccountRelation: "NOT_TOKEN_PROGRAM_OWNED" as const,
+      tokenAccount: null,
+    });
+    expect(kinds).toEqual(["ACCOUNT_INFO"]);
+    expect(reasons).toContain("PROMOTION_NO_ELIGIBLE_SUBJECT");
+  });
+
+  it("6/8. the bounded plan costs no more than classify plus one next step", async () => {
+    // DESTINATION: classify, then discover. Two reads, not three.
+    expect((await askedFor("DESTINATION", ORDINARY)).kinds).toHaveLength(2);
+    // A token-account locator skips discovery entirely.
+    const direct = await askedFor("EXECUTION_EVIDENCE", targetMintAccount);
+    expect(direct.kinds.filter((k) => k === "TOKEN_ACCOUNTS_BY_OWNER")).toHaveLength(0);
+    // Every stop path costs exactly the one classification read.
+    for (const info of [foreignMintAccount, UNRESOLVED]) {
+      expect((await askedFor("EXECUTION_EVIDENCE", info)).kinds).toHaveLength(1);
+    }
+  });
+
+  it("the full EXECUTION_EVIDENCE chain still completes for an ordinary wallet", async () => {
+    const { kinds, reasons } = await askedFor("EXECUTION_EVIDENCE", ORDINARY);
+    expect(kinds).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+      "TRANSACTION_DETAIL",
+    ]);
+    // The chain ends because a transaction is terminal, not because a
+    // counter ran out.
+    expect(reasons).toContain("PROMOTION_TERMINAL_OBSERVATION");
+    expect(reasons).not.toContain("PROMOTION_DEPTH_LIMIT");
+  });
+
+  it("owner discovery cannot be reintroduced as a base intent", async () => {
+    // Structural: selection skips promotion-only kinds even if a component
+    // map names one.
+    expect(
+      selectOnchainIntents({
+        component: "DESTINATION",
+        establishingClasses: ["ONCHAIN_VERIFIABLE"],
+        identity,
+        locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+        maxIntents: 8,
+      }).map((i) => i.kind),
+    ).not.toContain("TOKEN_ACCOUNTS_BY_OWNER");
   });
 });

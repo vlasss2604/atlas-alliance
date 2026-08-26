@@ -36,15 +36,19 @@ import type {
 // addresses that ever become subjects are ones the project's OWN
 // documented account or its own token accounts led to.
 
-// The deepest chain V1 permits:
+// The deepest chain V1 permits. Depth is the depth of the SUBJECT an
+// intent addresses:
 //
-//   depth 0  documentary locator (or the project anchor)
-//   depth 1  token account owned by it
-//   depth 2  a signature observed on that token account
+//   depth 0  the documentary locator itself, classified by ACCOUNT_INFO
+//   depth 1  that same locator, asked which token accounts it owns
+//            (or, when the locator IS our mint's token account, skipped)
+//   depth 2  a signature observed on the token account
 //   depth 3  the transaction behind that signature   <- terminal
 //
-// Four levels, and the fourth promotes nothing. A rule that wanted depth 4
-// would have to be written, reviewed and given a reason.
+// Four levels, and the fourth promotes nothing — by terminality, checked
+// before this ceiling, so the honest reason is recorded rather than
+// whichever limit happened to bite first. A rule wanting depth 4 would
+// have to be written, reviewed and given a reason.
 export const MAX_PROMOTION_DEPTH = 3;
 
 // How many promoted operations one attempt may perform, over and above the
@@ -114,7 +118,13 @@ export function componentAllowsRule(component: string, rule: PromotionRule): boo
 // subject is a signature — there is nowhere for one to come from except an
 // observation that produced it.
 export const PROMOTION_ONLY_INTENTS: ReadonlySet<OnchainIntentKind> = new Set([
+  // A transaction subject is a SIGNATURE, and nothing but an observation
+  // can produce one.
   "TRANSACTION_DETAIL",
+  // Owner discovery is only meaningful once ACCOUNT_INFO has established
+  // that the subject is NOT itself a token account. As a base intent it
+  // ran before that was known; as a promotion-only intent it cannot.
+  "TOKEN_ACCOUNTS_BY_OWNER",
 ]);
 
 export interface PromotionInput {
@@ -183,9 +193,18 @@ export function promoteFromObservation(input: PromotionInput): PromotionOutcome 
   const none = (refusal: PromotionRefusal): PromotionOutcome => ({ promoted: [], refusal });
 
   if (!input.bindingConfirmed) return none("BINDING_NOT_CONFIRMED");
-  if (input.depth >= MAX_PROMOTION_DEPTH) return none("DEPTH_LIMIT");
 
   const result = input.artifact.result;
+
+  // TERMINALITY IS CHECKED BEFORE DEPTH, and the order is the point.
+  // A transaction promotes nothing because a transaction is where a chain
+  // ENDS — not because a counter ran out. Reporting DEPTH_LIMIT for one
+  // would name the wrong reason for the right behaviour, and a reader of
+  // the trace would think a deeper ceiling might have carried the research
+  // further. It would not.
+  if (result.kind === "TRANSACTION_DETAIL") return none("TERMINAL_OBSERVATION");
+
+  if (input.depth >= MAX_PROMOTION_DEPTH) return none("DEPTH_LIMIT");
   const p = input.artifact.provenance;
   const childDepth = input.depth + 1;
 
@@ -304,13 +323,13 @@ export function promoteFromObservation(input: PromotionInput): PromotionOutcome 
       };
     }
 
-    // TERMINAL. A transaction is where a chain ends, whether or not it
-    // contained what anyone hoped for. Promoting from here is what
-    // "keep looking until you find a burn" would look like in code, and
-    // it is not written.
-    case "TRANSACTION_DETAIL":
-      return none("TERMINAL_OBSERVATION");
-
+    // TRANSACTION_DETAIL never reaches this switch — it returned above,
+    // before the depth ceiling, so that a terminal chain reports why it
+    // truly ended. "Keep looking until you find a burn" is not written
+    // anywhere, and the early return is where that is enforced.
+    //
+    // Any other observation kind promotes nothing. An unrecognised kind is
+    // not a licence to guess.
     default:
       return none("TERMINAL_OBSERVATION");
   }
