@@ -38,7 +38,11 @@ import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisitio
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
 import type { LocatorRejection } from "./documentary-locator";
-import { persistFactLocators, validateFactLocators } from "./documentary-locator-store";
+import {
+  admittedLocatorsForJob,
+  persistFactLocators,
+  validateFactLocators,
+} from "./documentary-locator-store";
 import { evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
   renderedDocsAvailable,
@@ -741,12 +745,26 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // retriever is actually configured. An unconfigured environment is a
       // configuration boundary, never a research failure — the attempt
       // simply falls through to the normal path.
+      // ADMITTED LOCATORS ARE THE SUBJECTS. Without this the only address
+      // normal research could ever address was the project's own mint, and
+      // every account-kind structured intent was unreachable in production
+      // — declared in the component map and never once issued. Only
+      // persisted, deterministically validated locators admitted BY THIS
+      // JOB are loaded: never extractor output the validator refused,
+      // never a string a model proposed, never an address from anywhere
+      // else. The document's authority stays on the document; a locator
+      // only says where to look.
+      const admittedLocators = await admittedLocatorsForJob(deps.db, ctx.jobId);
       const onchainOutcome = await runStructuredOnchainAcquisition({
         db: deps.db,
         jobId: ctx.jobId,
         attemptId,
         item,
         plan,
+        locators: admittedLocators.map((l) => ({
+          address: l.value,
+          origin: "ADMITTED_EVIDENCE_SOURCE" as const,
+        })),
         maxSourceOpens: ctx.budget.maxSourceOpens,
         recordTrace: async (event) =>
           recordTraceEvent(deps.db, {

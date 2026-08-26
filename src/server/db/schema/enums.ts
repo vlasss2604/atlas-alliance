@@ -299,6 +299,16 @@ export const traceOperationType = pgEnum("trace_operation_type", [
   // validator refused it. The fact itself is still admitted — only the
   // locator is dropped — so this is never a rejection of evidence.
   "LOCATOR_REJECTED",
+  // Bounded subject promotion (V1). A confirmed observation may derive ONE
+  // next research subject; these record that the engine did so, refused
+  // to, ran out of budget, hit the depth ceiling, or reached an
+  // observation that promotes nothing further. TRACE != EVIDENCE: a
+  // promotion is an action taken, never a claim about the project.
+  "SUBJECT_PROMOTED",
+  "SUBJECT_PROMOTION_REJECTED",
+  "SUBJECT_PROMOTION_BUDGET_EXHAUSTED",
+  "SUBJECT_PROMOTION_DEPTH_LIMIT",
+  "SUBJECT_PROMOTION_TERMINAL",
 ]);
 
 // Outcome of the ONE operation this row records — deliberately the same
@@ -351,6 +361,12 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   "LOCATOR_TRUNCATED",
   "LOCATOR_INCOMPLETE",
   "LOCATOR_NOT_IN_DOCUMENT",
+  // Why a subject was not promoted.
+  "PROMOTION_DEPTH_LIMIT",
+  "PROMOTION_NO_ELIGIBLE_SUBJECT",
+  "PROMOTION_BINDING_NOT_CONFIRMED",
+  "PROMOTION_INTENT_CAP_REACHED",
+  "PROMOTION_TERMINAL_OBSERVATION",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,

@@ -225,6 +225,13 @@
       "when": 1787598700000,
       "tag": "0031_onchain_observed_signatures",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "7",
+      "when": 1787598800000,
+      "tag": "0032_onchain_subject_promotion_trace",
+      "breakpoints": true
     }
   ]
 }

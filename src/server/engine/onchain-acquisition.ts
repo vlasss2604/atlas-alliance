@@ -13,6 +13,15 @@ import { synthesizeOnchainFacts } from "./onchain-facts";
 import { buildCanonicalOnchainUri, subjectKindOf } from "./onchain-uri";
 import { reserveJobBudget } from "./budget-reservation";
 import {
+  persistDerivedOnchainSubjects,
+} from "./onchain-subject-provenance";
+import { persistObservedSignatures } from "./onchain-signature-provenance";
+import {
+  intentForPromotedSubject,
+  MAX_PROMOTED_INTENTS_PER_ATTEMPT,
+  promoteFromObservation,
+} from "./onchain-subject-promotion";
+import {
   onchainRetrievalAvailable,
   resolveOnchainRetriever,
   type OnchainRetriever,
@@ -73,9 +82,21 @@ export function eligibleSubjects(
 const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
   CURRENT_STATE: ["TOKEN_SUPPLY"],
   NET_EFFECT: ["TOKEN_SUPPLY"],
-  DESTINATION: ["ACCOUNT_INFO", "TOKEN_ACCOUNT_BALANCE"],
-  RECIPIENT: ["ACCOUNT_INFO", "TOKEN_ACCOUNT_BALANCE"],
-  EXECUTION_EVIDENCE: ["SIGNATURES_FOR_ADDRESS"],
+  // Where value LANDS. A documented account is characterised, and the
+  // token accounts it owns for the project mint are discovered — a wallet
+  // owning none is itself an answer about destination.
+  DESTINATION: ["ACCOUNT_INFO", "TOKEN_ACCOUNTS_BY_OWNER", "TOKEN_ACCOUNT_BALANCE"],
+  RECIPIENT: ["ACCOUNT_INFO", "TOKEN_ACCOUNTS_BY_OWNER", "TOKEN_ACCOUNT_BALANCE"],
+  // Whether a mechanism actually RAN. Discovery comes first: a signature
+  // window on a project token account is worth far more than one on a
+  // busy wallet, and promotion carries it from there to one transaction.
+  // DISCOVERY ONLY as a base intent. A documented wallet is often a busy
+  // operational account whose signature history is far too dense for one
+  // bounded window to say anything — the manual investigation established
+  // exactly that. The project TOKEN ACCOUNT reached by promotion is the
+  // subject whose history is actually about this project, so signatures
+  // are reached from there and never from the wallet directly.
+  EXECUTION_EVIDENCE: ["TOKEN_ACCOUNTS_BY_OWNER"],
   SOURCE_OF_VALUE: ["TOKEN_SUPPLY"],
   FLOW_PATH: ["SIGNATURES_FOR_ADDRESS"],
 };
@@ -192,10 +213,28 @@ export interface RunStructuredOnchainDeps {
 }
 
 export interface OnchainTraceEvent {
-  operationType: "FETCH_ATTEMPTED" | "FETCH_OK" | "FETCH_FAILED" | "CANDIDATE_SKIPPED_BUDGET";
+  operationType:
+    | "FETCH_ATTEMPTED"
+    | "FETCH_OK"
+    | "FETCH_FAILED"
+    | "CANDIDATE_SKIPPED_BUDGET"
+    // Promotion decisions. An action the engine took, never a claim.
+    | "SUBJECT_PROMOTED"
+    | "SUBJECT_PROMOTION_REJECTED"
+    | "SUBJECT_PROMOTION_BUDGET_EXHAUSTED"
+    | "SUBJECT_PROMOTION_DEPTH_LIMIT"
+    | "SUBJECT_PROMOTION_TERMINAL";
   targetRef: string;
   status: "OK" | "FAILED" | "SKIPPED";
-  reasonCode?: "NONE" | "PROVIDER_ERROR" | "SOURCE_OPEN_BUDGET_EXHAUSTED";
+  reasonCode?:
+    | "NONE"
+    | "PROVIDER_ERROR"
+    | "SOURCE_OPEN_BUDGET_EXHAUSTED"
+    | "PROMOTION_DEPTH_LIMIT"
+    | "PROMOTION_NO_ELIGIBLE_SUBJECT"
+    | "PROMOTION_BINDING_NOT_CONFIRMED"
+    | "PROMOTION_INTENT_CAP_REACHED"
+    | "PROMOTION_TERMINAL_OBSERVATION";
 }
 
 export async function runStructuredOnchainAcquisition(
@@ -233,15 +272,34 @@ export async function runStructuredOnchainAcquisition(
   const observations: string[] = [];
   let sourceOpensSpent = 0;
 
-  for (const intent of intents) {
+  // STAGED EXPANSION, NOT RECURSION. A work list that starts with the base
+  // intents and may gain AT MOST MAX_PROMOTED_INTENTS_PER_ATTEMPT more,
+  // each one depth-stamped and each one refused past MAX_PROMOTION_DEPTH.
+  // The loop cannot outlive those two counters, and every iteration must
+  // still win its own budget reservation before it may call anything.
+  const queue: { intent: OnchainIntent; depth: number; parent: string | null }[] = intents.map(
+    (intent) => ({ intent, depth: 0, parent: null }),
+  );
+  // Every (kind, subject) this attempt has already addressed. A promoted
+  // subject that would repeat one is refused, so a chain cannot loop back
+  // on itself or re-read the same account twice.
+  const visited = new Set<string>();
+  let promotedIssued = 0;
+
+  while (queue.length > 0) {
+    const step = queue.shift()!;
+    const intent = step.intent;
     if (!retriever.supports(intent.chain, intent.network, intent.kind)) continue;
+    const visitKey = `${intent.kind}::${intent.subject}`;
+    if (visited.has(visitKey)) continue;
+    visited.add(visitKey);
     const uri = buildCanonicalOnchainUri(intent);
 
     // Reservation BEFORE the call, always.
     const reserved = await reserve("sourceOpens", 1, deps.maxSourceOpens);
     if (!reserved) {
       await trace({
-        operationType: "CANDIDATE_SKIPPED_BUDGET",
+        operationType: step.depth === 0 ? "CANDIDATE_SKIPPED_BUDGET" : "SUBJECT_PROMOTION_BUDGET_EXHAUSTED",
         targetRef: uri,
         status: "SKIPPED",
         reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
@@ -256,7 +314,8 @@ export async function runStructuredOnchainAcquisition(
     try {
       artifact = await retriever.retrieve(intent);
     } catch {
-      // Fail closed: a provider failure is never evidence about the chain.
+      // Fail closed: a provider failure is never evidence about the chain,
+      // and never a reason to try the same call again.
       await trace({
         operationType: "FETCH_FAILED",
         targetRef: uri,
@@ -286,6 +345,95 @@ export async function runStructuredOnchainAcquisition(
     }
     await trace({ operationType: "FETCH_OK", targetRef: uri, status: "OK" });
     evidenceIds.push(...persisted.evidenceIds);
+
+    // DURABLE PROVENANCE FOR WHAT THIS OBSERVATION DISCOVERED. The same
+    // stores the owner scripts write, written by the normal path now, so a
+    // promoted subject is not a value held in memory for the length of a
+    // loop — it is a row anything can later re-check.
+    const binding = validateOnchainBinding(artifact, identity);
+    const bindingConfirmed = binding.binding === "CONFIRMED";
+    if (persisted.artifactId && bindingConfirmed) {
+      await persistDerivedOnchainSubjects({
+        db: deps.db,
+        artifactId: persisted.artifactId,
+        artifact,
+        binding,
+      });
+      await persistObservedSignatures({
+        db: deps.db,
+        artifactId: persisted.artifactId,
+        artifact,
+        binding,
+      });
+    }
+
+    // PROMOTION. At most one step further, and only when a typed rule
+    // says this observation earned it.
+    const outcome = promoteFromObservation({
+      artifact,
+      bindingConfirmed,
+      depth: step.depth,
+      component: deps.item.component,
+      visited,
+    });
+    if (outcome.promoted.length === 0) {
+      // Not a failure. Most of these are the system declining to go
+      // further, which is the behaviour the bounds exist to produce.
+      if (outcome.refusal === "TERMINAL_OBSERVATION") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_TERMINAL",
+          targetRef: uri,
+          status: "OK",
+          reasonCode: "PROMOTION_TERMINAL_OBSERVATION",
+        });
+      } else if (outcome.refusal === "DEPTH_LIMIT") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_DEPTH_LIMIT",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_DEPTH_LIMIT",
+        });
+      } else if (outcome.refusal === "BINDING_NOT_CONFIRMED") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_BINDING_NOT_CONFIRMED",
+        });
+      } else if (outcome.refusal === "NO_ELIGIBLE_SUBJECT") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_NO_ELIGIBLE_SUBJECT",
+        });
+      }
+      continue;
+    }
+
+    for (const promoted of outcome.promoted) {
+      if (promotedIssued >= MAX_PROMOTED_INTENTS_PER_ATTEMPT) {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_INTENT_CAP_REACHED",
+        });
+        break;
+      }
+      const nextIntent = intentForPromotedSubject(promoted);
+      promotedIssued += 1;
+      // The canonical URI of the NEXT read is the safe identifier for this
+      // decision: addresses and signatures are public, and no endpoint,
+      // credential or provider string can reach a trace row.
+      await trace({
+        operationType: "SUBJECT_PROMOTED",
+        targetRef: buildCanonicalOnchainUri(nextIntent),
+        status: "OK",
+        reasonCode: "NONE",
+      });
+      queue.push({ intent: nextIntent, depth: promoted.depth, parent: promoted.parentSubject });
+    }
   }
 
   return { evidenceIds, sourceOpensSpent, observations };

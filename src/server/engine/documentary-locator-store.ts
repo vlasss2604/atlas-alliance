@@ -1,4 +1,4 @@
-import { eq, or } from "drizzle-orm";
+import { and, eq, or } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, evidenceDocumentaryLocators } from "../db/schema";
@@ -205,3 +205,69 @@ export async function locatorsForEvidence(
     .sort((a, b) => a.ordinal - b.ordinal)
     .map((r) => ({ value: r.value, shape: r.shape as LocatorShape }));
 }
+
+// EVERY ADMITTED LOCATOR THIS JOB MAY ADDRESS.
+//
+// The gate that made structured on-chain research unreachable in
+// production: acquisition accepted a `locators` parameter and nothing ever
+// filled it, so the only subject a normal research job could ever address
+// was the project's own mint. This is the query that fills it.
+//
+// SCOPED TO THE JOB, deliberately. A locator becomes addressable because
+// THIS job admitted the document that states it — which makes project
+// containment structural rather than a filter that could be forgotten: an
+// address admitted while researching another project is not reachable from
+// here at all.
+//
+// CONFIRMED ROWS ONLY. The table's own CHECK already makes an unvalidated
+// row unrepresentable, and the predicate is restated here so the guarantee
+// survives someone loosening the schema. A model's claimed address that
+// the deterministic validator refused never reached this table and cannot
+// be returned by this query.
+//
+// The scalar `documentary_locator` column is deliberately NOT read here.
+// Migration 0028 backfilled every scalar into this table as ordinal 0, so
+// the child rows are complete, and reading both would return historical
+// rows twice.
+export async function admittedLocatorsForJob(
+  db: Database | Transaction,
+  jobId: string,
+  limit = MAX_ADMITTED_LOCATORS_PER_JOB,
+): Promise<ConfirmedLocator[]> {
+  if (typeof jobId !== "string" || jobId.length === 0) return [];
+  const rows = await db
+    .select({
+      value: evidenceDocumentaryLocators.value,
+      shape: evidenceDocumentaryLocators.shape,
+      ordinal: evidenceDocumentaryLocators.ordinal,
+      evidenceId: evidenceDocumentaryLocators.evidenceId,
+    })
+    .from(evidenceDocumentaryLocators)
+    .innerJoin(evidence, eq(evidence.id, evidenceDocumentaryLocators.evidenceId))
+    .where(
+      and(
+        eq(evidence.researchJobId, jobId),
+        eq(evidenceDocumentaryLocators.literallyPresent, true),
+        eq(evidenceDocumentaryLocators.validationResult, "CONFIRMED"),
+      ),
+    );
+
+  // Deterministic order, and one entry per distinct address: the same
+  // account documented by two facts is one subject, not two reads.
+  const seen = new Set<string>();
+  const out: ConfirmedLocator[] = [];
+  for (const r of [...rows].sort((a, b) =>
+    a.value === b.value ? a.ordinal - b.ordinal : a.value.localeCompare(b.value),
+  )) {
+    if (seen.has(r.value)) continue;
+    seen.add(r.value);
+    out.push({ value: r.value, shape: r.shape as LocatorShape });
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+// Ceiling on how many documented accounts one job may address. Not a
+// research limit — a bound on how much a single document full of addresses
+// can cost, before the per-call budget reservation even applies.
+export const MAX_ADMITTED_LOCATORS_PER_JOB = 8;
