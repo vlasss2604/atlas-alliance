@@ -29,21 +29,30 @@ import type {
 // initialized the account yields UNKNOWN ownership no matter how many
 // instructions the wallet signed within it.
 //
-// NO IS NOT AN ANSWER THIS CAN GIVE. There is no "this account was not
-// created" outcome, because absence of a creation instruction is absence
-// of evidence, not evidence of absence — the account may simply have
-// existed beforehand. Every determination is therefore YES or UNKNOWN.
+// NO IS ANSWERED ONLY BY POSITIVE EVIDENCE, never by silence. Absence of a
+// creation instruction is absence of evidence, not evidence of absence —
+// the account may simply have existed beforehand. The ONE thing that does
+// deterministically establish prior existence is the account appearing in
+// preTokenBalances: the RPC reports what it held BEFORE execution, and an
+// account created during the transaction has no such entry. Everything
+// else stays YES or UNKNOWN.
 //
 // IT NAMES NO ECONOMIC ROLE. Account lifecycle is plumbing. Whether an
 // account is a treasury, a burn address, a vault or a user's wallet is not
 // visible here and never becomes so.
 
-export type LifecycleAnswer = "YES" | "UNKNOWN";
+export type LifecycleAnswer = "YES" | "NO" | "UNKNOWN";
 
 // Where a determination came from. Present on every field so a reader
 // never has to ask whether a value was decoded or assumed — nothing here
 // is ever assumed, and the basis says so explicitly.
-export type EvidenceBasis = "DECODED_FROM_INSTRUCTION" | "UNKNOWN";
+export type EvidenceBasis =
+  | "DECODED_FROM_INSTRUCTION"
+  // The account carried a token balance BEFORE this transaction executed,
+  // which is the RPC.s own statement that it already existed. A separate
+  // basis because it comes from meta, not from an instruction.
+  | "OBSERVED_IN_PRE_BALANCES"
+  | "UNKNOWN";
 
 export interface Determination<T> {
   value: T;
@@ -61,6 +70,11 @@ export interface AccountLifecycle {
   // The token account's owner. UNKNOWN unless an initialization or an ATA
   // creation named it in this transaction.
   owner: Determination<string | null>;
+  // Whether an idempotent "ensure this exists" instruction ran. Kept apart
+  // from `created` on purpose: it succeeds whether or not anything was
+  // created, so it answers a different question and must never be read as
+  // an answer to that one.
+  ensureInvoked: Determination<LifecycleAnswer>;
   syncNative: Determination<LifecycleAnswer>;
   closed: Determination<LifecycleAnswer>;
   closeDestination: Determination<string | null>;
@@ -74,7 +88,9 @@ export const ACCOUNT_LIFECYCLE_DOES_NOT_PROVE =
   "was created, initialized, synced or closed. It does not establish what the account is for, " +
   "who benefits from it, what any balance in it represented, or that the transaction " +
   "accomplished any economic purpose. An UNKNOWN field means this transaction did not say — " +
-  "never that the thing did not happen.";
+  "never that the thing did not happen. An idempotent create instruction succeeds whether or not " +
+  "the account already existed, so its presence never establishes that the transaction created " +
+  "anything.";
 
 const UNKNOWN_ANSWER: Determination<LifecycleAnswer> = {
   value: "UNKNOWN",
@@ -88,12 +104,24 @@ const UNKNOWN_VALUE: Determination<string | null> = {
   fromInstruction: null,
 };
 
-const CREATION_TYPES = new Set([
+// CREATION AND ENSURING ARE DIFFERENT INSTRUCTIONS.
+//
+// createAccount, createAccountWithSeed and the non-idempotent ATA create
+// fail if the account already exists, so their success IS the creation.
+const DEFINITE_CREATION_TYPES = new Set([
   "createAccount",
   "createAccountWithSeed",
   "create",
-  "createIdempotent",
 ]);
+
+// createIdempotent means "ensure it exists" and SUCCEEDS EITHER WAY. A live
+// transaction proved the difference: it invoked createIdempotent for a token
+// account an earlier bounded observation had already seen, and the
+// reconstruction reported the account as created by that transaction. The
+// instruction did not create anything; it confirmed something already true.
+//
+// Success of an idempotent operation is never evidence that state changed.
+const ENSURE_TYPES = new Set(["createIdempotent"]);
 
 // The two instruction families whose owner field is definitional. Mirrors
 // the adapter's own gate: an instruction type reaches ownership here only
@@ -140,6 +168,7 @@ export function reconstructAccountLifecycle(
     tokenProgram: UNKNOWN_VALUE,
     mint: UNKNOWN_VALUE,
     owner: UNKNOWN_VALUE,
+    ensureInvoked: UNKNOWN_ANSWER,
     syncNative: UNKNOWN_ANSWER,
     closed: UNKNOWN_ANSWER,
     closeDestination: UNKNOWN_VALUE,
@@ -151,9 +180,24 @@ export function reconstructAccountLifecycle(
   // contradiction resolves to UNKNOWN rather than to whichever came first.
   const ownerClaims = new Map<string, string>();
 
+  // PRIOR EXISTENCE, from the RPC.s own before-picture. Checked first
+  // because it outranks any instruction: an account that already held a
+  // balance was not created by the transaction that mentions it.
+  const existedBefore = result.preTokenBalances.some((b) => b.account === account);
+  let definiteCreation: string | null = null;
+
   for (const ix of mine) {
-    if (CREATION_TYPES.has(ix.type)) {
-      lifecycle.created = decoded("YES", ix.type);
+    if (ENSURE_TYPES.has(ix.type)) {
+      // Records that the ensure RAN. Deliberately does NOT touch `created`.
+      lifecycle.ensureInvoked = decoded("YES", ix.type);
+      if (ix.payer !== null) lifecycle.payer = decoded(ix.payer, ix.type);
+      if (ix.tokenProgram !== null) {
+        lifecycle.tokenProgram = decoded(ix.tokenProgram, ix.type);
+      }
+    }
+
+    if (DEFINITE_CREATION_TYPES.has(ix.type)) {
+      definiteCreation = ix.type;
       if (ix.payer !== null) lifecycle.payer = decoded(ix.payer, ix.type);
       // A System creation assigns the account to a program. That program
       // is NOT the token program of an initialized token account until an
@@ -182,6 +226,27 @@ export function reconstructAccountLifecycle(
       lifecycle.syncNative = decoded("YES", ix.type);
     }
   }
+
+  // RESOLVING `created`, in strict precedence.
+  //
+  // A pre-transaction balance and a definite-creation instruction cannot
+  // both be true of the same account: one says it existed before, the other
+  // that it did not. A contradiction resolves to UNKNOWN rather than to
+  // whichever was checked first — the same discipline as contradictory
+  // owners below.
+  if (existedBefore && definiteCreation !== null) {
+    lifecycle.created = UNKNOWN_ANSWER;
+  } else if (existedBefore) {
+    lifecycle.created = {
+      value: "NO",
+      basis: "OBSERVED_IN_PRE_BALANCES",
+      fromInstruction: null,
+    };
+  } else if (definiteCreation !== null) {
+    lifecycle.created = decoded("YES", definiteCreation);
+  }
+  // Otherwise UNKNOWN. An idempotent ensure on its own lands here: it ran,
+  // it succeeded, and it says nothing about whether anything was created.
 
   if (ownerClaims.size === 1) {
     const [[owner, from]] = [...ownerClaims.entries()];

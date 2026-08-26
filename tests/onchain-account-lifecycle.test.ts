@@ -514,3 +514,261 @@ describe("lifecycle — mutation check on the ownership-establishing path", () =
     expect(ownsAccountInTransaction(tx(), EPHEMERAL, WALLET)).toBe(false);
   });
 });
+
+// CREATE_IDEMPOTENT DOES NOT MEAN CREATED.
+//
+// A live transaction invoked ATA createIdempotent for a token account that
+// an earlier bounded observation had already seen, and the reconstruction
+// reported `created: YES [DECODED_FROM_INSTRUCTION :: createIdempotent]`.
+// The account demonstrably existed beforehand. The instruction had ensured
+// something already true and succeeded, as it is designed to.
+//
+// The general rule these pin: the success of an idempotent operation is
+// never evidence that state changed.
+describe("lifecycle — an idempotent ensure is not a creation", () => {
+  const ATA_MINT = "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+  function balance(account: string, mint = ATA_MINT) {
+    return {
+      accountIndex: 3,
+      account,
+      mint,
+      owner: WALLET,
+      amountRaw: "0",
+      decimals: 6,
+    };
+  }
+
+  it("1. a NON-idempotent ATA create still establishes creation", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "create", {
+          account: EPHEMERAL,
+          mint: ATA_MINT,
+          source: WALLET,
+          wallet: WALLET,
+          tokenProgram: TOKEN,
+        }),
+      ]),
+    });
+    const life = reconstructAccountLifecycle(t, EPHEMERAL);
+    expect(life.created.value).toBe("YES");
+    expect(life.created.fromInstruction).toBe("create");
+  });
+
+  it("1. a System createAccount still establishes creation", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(SYSTEM, "createAccount", {
+          source: WALLET,
+          newAccount: EPHEMERAL,
+          lamports: 2039280,
+          owner: TOKEN,
+        }),
+      ]),
+    });
+    expect(reconstructAccountLifecycle(t, EPHEMERAL).created.value).toBe("YES");
+  });
+
+  it("2. createIdempotent ALONE never yields created = YES", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", {
+          account: EPHEMERAL,
+          mint: ATA_MINT,
+          source: WALLET,
+          wallet: WALLET,
+          tokenProgram: TOKEN,
+        }),
+      ]),
+    });
+    const life = reconstructAccountLifecycle(t, EPHEMERAL);
+    expect(life.created.value).not.toBe("YES");
+    expect(life.created.value).toBe("UNKNOWN");
+    expect(life.created.basis).toBe("UNKNOWN");
+    // What DID happen is still recorded, under its own name.
+    expect(life.ensureInvoked.value).toBe("YES");
+    expect(life.ensureInvoked.fromInstruction).toBe("createIdempotent");
+  });
+
+  it("3. createIdempotent + a pre-transaction balance yields created = NO", () => {
+    // The RPC's own before-picture: the account held a balance before this
+    // transaction executed, so this transaction did not create it.
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", {
+          account: EPHEMERAL,
+          mint: ATA_MINT,
+          source: WALLET,
+          wallet: WALLET,
+          tokenProgram: TOKEN,
+        }),
+      ]),
+      preTokenBalances: [balance(EPHEMERAL)],
+    });
+    const life = reconstructAccountLifecycle(t, EPHEMERAL);
+    expect(life.created.value).toBe("NO");
+    expect(life.created.basis).toBe("OBSERVED_IN_PRE_BALANCES");
+    expect(life.created.fromInstruction).toBeNull();
+    expect(life.ensureInvoked.value).toBe("YES");
+  });
+
+  it("4. the decoded relationships survive even though creation does not", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", {
+          account: EPHEMERAL,
+          mint: ATA_MINT,
+          source: OTHER,
+          wallet: WALLET,
+          tokenProgram: TOKEN_2022,
+        }),
+      ]),
+      preTokenBalances: [balance(EPHEMERAL)],
+    });
+    const life = reconstructAccountLifecycle(t, EPHEMERAL);
+    expect(life.owner.value).toBe(WALLET);
+    expect(life.mint.value).toBe(ATA_MINT);
+    expect(life.tokenProgram.value).toBe(TOKEN_2022);
+    expect(life.payer.value).toBe(OTHER);
+    expect(ownsAccountInTransaction(t, EPHEMERAL, WALLET)).toBe(true);
+  });
+
+  it("5. repeated idempotent invocation never manufactures a creation", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", { account: EPHEMERAL, mint: ATA_MINT, source: WALLET, wallet: WALLET, tokenProgram: TOKEN }),
+        ix(ATA, "createIdempotent", { account: EPHEMERAL, mint: ATA_MINT, source: WALLET, wallet: WALLET, tokenProgram: TOKEN }),
+      ]),
+      preTokenBalances: [balance(EPHEMERAL)],
+    });
+    const life = reconstructAccountLifecycle(t, EPHEMERAL);
+    expect(life.created.value).toBe("NO");
+    // `created` must never carry an idempotent instruction as its basis —
+    // ensureInvoked legitimately does, and that is a different field.
+    expect(life.created.fromInstruction).not.toBe("createIdempotent");
+    expect(life.created.basis).not.toBe("DECODED_FROM_INSTRUCTION");
+    expect(life.ensureInvoked.fromInstruction).toBe("createIdempotent");
+  });
+
+  it("6. no unsupported creation wording reaches the reconstruction", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", { account: EPHEMERAL, mint: ATA_MINT, source: WALLET, wallet: WALLET, tokenProgram: TOKEN }),
+      ]),
+    });
+    const life = reconstructAccountLifecycle(t, EPHEMERAL);
+    // The only field that could say "created" says UNKNOWN.
+    expect(life.created.value).toBe("UNKNOWN");
+    expect(ACCOUNT_LIFECYCLE_DOES_NOT_PROVE).toContain(
+      "succeeds whether or not the account already existed",
+    );
+  });
+
+  it("D. a POST-only account is not promoted to created = YES", () => {
+    // Absent from preTokenBalances, present afterwards. Absence of a pre
+    // entry is not evidence the account did not exist, so with only an
+    // idempotent ensure the answer stays UNKNOWN.
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", { account: EPHEMERAL, mint: ATA_MINT, source: WALLET, wallet: WALLET, tokenProgram: TOKEN }),
+      ]),
+      postTokenBalances: [balance(EPHEMERAL)],
+    });
+    expect(reconstructAccountLifecycle(t, EPHEMERAL).created.value).toBe("UNKNOWN");
+  });
+
+  it("a contradiction between a definite create and a pre-balance is UNKNOWN", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(SYSTEM, "createAccount", { source: WALLET, newAccount: EPHEMERAL, lamports: 1, owner: TOKEN }),
+      ]),
+      preTokenBalances: [balance(EPHEMERAL)],
+    });
+    expect(reconstructAccountLifecycle(t, EPHEMERAL).created.value).toBe("UNKNOWN");
+  });
+
+  it("another account's pre-balance never answers for this one", () => {
+    const t = tx({
+      lifecycleInstructions: decode([
+        ix(ATA, "createIdempotent", { account: EPHEMERAL, mint: ATA_MINT, source: WALLET, wallet: WALLET, tokenProgram: TOKEN }),
+      ]),
+      preTokenBalances: [balance(UNRELATED)],
+    });
+    expect(reconstructAccountLifecycle(t, EPHEMERAL).created.value).toBe("UNKNOWN");
+  });
+});
+
+// THE LIVE SHAPE, in synthetic form.
+//
+// Target token account already present in preTokenBalances; the transaction
+// invokes ATA createIdempotent for that same account, then receives a token
+// transfer; the transaction succeeds.
+describe("lifecycle — the live-shaped regression", () => {
+  const ATA_MINT = "MintAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+  const SOURCE_ACCT = "SourceAcctAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+
+  const live = tx({
+    succeeded: true,
+    lifecycleInstructions: decode([
+      ix(ATA, "createIdempotent", {
+        account: EPHEMERAL,
+        mint: ATA_MINT,
+        source: WALLET,
+        wallet: WALLET,
+        tokenProgram: TOKEN,
+      }),
+    ]),
+    tokenInstructions: [
+      {
+        programId: TOKEN,
+        type: "transferChecked",
+        mint: ATA_MINT,
+        account: SOURCE_ACCT,
+        destination: EPHEMERAL,
+        authority: OTHER,
+        amountRaw: "7723746661",
+        decimals: 6,
+        inner: true,
+      },
+    ],
+    preTokenBalances: [
+      { accountIndex: 3, account: EPHEMERAL, mint: ATA_MINT, owner: WALLET, amountRaw: "0", decimals: 6 },
+    ],
+    postTokenBalances: [
+      { accountIndex: 3, account: EPHEMERAL, mint: ATA_MINT, owner: WALLET, amountRaw: "7723746661", decimals: 6 },
+    ],
+  });
+
+  it("ATLAS must NOT say the token account was created by this transaction", () => {
+    const life = reconstructAccountLifecycle(live, EPHEMERAL);
+    expect(life.created.value).not.toBe("YES");
+    expect(life.created.value).toBe("NO");
+    expect(life.created.basis).toBe("OBSERVED_IN_PRE_BALANCES");
+  });
+
+  it("it still records that the ensure ran, and the relationships it carried", () => {
+    const life = reconstructAccountLifecycle(live, EPHEMERAL);
+    expect(life.ensureInvoked.value).toBe("YES");
+    expect(life.owner.value).toBe(WALLET);
+    expect(life.mint.value).toBe(ATA_MINT);
+    expect(life.tokenProgram.value).toBe(TOKEN);
+  });
+
+  it("7/8. transfer and burn decoding are untouched by any of this", () => {
+    // The transfer is still a transfer, decoded as movement, never as
+    // lifecycle — and no burn is invented from a transfer into the account.
+    expect(live.tokenInstructions[0].type).toBe("transferChecked");
+    expect(live.burns).toHaveLength(0);
+    const burn = __testing.decodeBurnInstruction(
+      ix(TOKEN_2022, "burnChecked", {
+        account: EPHEMERAL,
+        mint: ATA_MINT,
+        authority: WALLET,
+        tokenAmount: { amount: "7723746661", decimals: 6 },
+      }),
+    );
+    expect(burn?.instructionType).toBe("BurnChecked");
+    expect(burn?.amountRaw).toBe("7723746661");
+  });
+});

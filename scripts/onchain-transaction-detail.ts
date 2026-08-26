@@ -211,6 +211,7 @@ async function main(): Promise<void> {
         String(f.value) + "   [" + f.basis + (f.fromInstruction ? " :: " + f.fromInstruction : "") + "]";
       console.log("  account:        " + subject);
       console.log("    created:      " + d(life.created));
+      console.log("    ensureInvoked:" + d(life.ensureInvoked));
       console.log("    initialized:  " + d(life.initialized));
       console.log("    tokenProgram: " + d(life.tokenProgram));
       console.log("    mint:         " + d(life.mint));
