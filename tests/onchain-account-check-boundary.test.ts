@@ -149,3 +149,90 @@ describe("account check — the subject must be documented", () => {
     expect((c.match(/pump/g) ?? []).length).toBeLessThanOrEqual(1);
   });
 });
+
+// EVERY GATED ENTRYPOINT DESCRIBES THE GATE IT ACTUALLY USES.
+//
+// resolveOnchainSubject admits two provenance classes. Three owner
+// entrypoints call it, and their headers had drifted into claiming the
+// documentary class was the only one accepted — a guarantee stricter than
+// the code enforces, which is the direction that misleads: a reader
+// auditing the comment concludes an address without documentary backing
+// cannot be read here, when in fact a derived one can.
+//
+// Checked across all of them together so a future entrypoint added with
+// copied prose is caught by this test rather than by a live run.
+const GATED_ENTRYPOINTS = [
+  "onchain-account-check.ts",
+  "onchain-signature-discovery.ts",
+  "onchain-token-accounts.ts",
+] as const;
+
+// Comment prose wraps across lines, so a phrase is matched with the
+// comment markers and line breaks flattened away.
+function normalizeHeader(header: string): string {
+  return header
+    .split("\n")
+    .map((l) => l.trim())
+    .map((l) => (l.startsWith("//") ? l.slice(2).trim() : l))
+    .join(" ")
+    .split(" ")
+    .filter((w) => w !== "")
+    .join(" ")
+    .toLowerCase();
+}
+
+async function headerOf(script: string): Promise<string> {
+  const fs = await import("node:fs/promises");
+  const raw = await fs.readFile(new URL(`../scripts/${script}`, import.meta.url), "utf-8");
+  return raw.slice(0, raw.indexOf("import "));
+}
+
+async function codeOf(script: string): Promise<string> {
+  const fs = await import("node:fs/promises");
+  const raw = await fs.readFile(new URL(`../scripts/${script}`, import.meta.url), "utf-8");
+  return raw
+    .split("\n")
+    .filter((l) => {
+      const t = l.trim();
+      return t !== "" && !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+    })
+    .join("\n");
+}
+
+describe("gated entrypoints — documented provenance matches enforced provenance", () => {
+  it("each one actually calls the two-class gate", async () => {
+    for (const script of GATED_ENTRYPOINTS) {
+      expect(await codeOf(script), `${script} skips the gate`).toContain("resolveOnchainSubject(");
+    }
+  });
+
+  it("no header claims the documentary class is the only one accepted", async () => {
+    for (const script of GATED_ENTRYPOINTS) {
+      const header = await headerOf(script);
+      expect(header, `${script} header overstates the gate`).not.toContain(
+        "THE SUBJECT MUST BE A CONFIRMED DOCUMENTARY LOCATOR",
+      );
+    }
+  });
+
+  it("each header names BOTH classes", async () => {
+    for (const script of GATED_ENTRYPOINTS) {
+      const header = await headerOf(script);
+      expect(header, `${script} header omits DOCUMENTARY_LOCATOR`).toContain("DOCUMENTARY_LOCATOR");
+      expect(header, `${script} header omits DERIVED_ONCHAIN_SUBJECT`).toContain(
+        "DERIVED_ONCHAIN_SUBJECT",
+      );
+    }
+  });
+
+  it("naming the derived class never grants it authority", async () => {
+    // The correction must not overshoot: a derived subject is eligible to
+    // be READ and nothing more.
+    for (const script of GATED_ENTRYPOINTS) {
+      const header = normalizeHeader(await headerOf(script));
+      expect(header, `${script} header grants the derived class authority`).toMatch(
+        /no document authority|confers authority|neither confers|never makes it authoritative/,
+      );
+    }
+  });
+});

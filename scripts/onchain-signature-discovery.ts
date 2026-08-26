@@ -15,13 +15,19 @@
 // (MAX_SIGNATURES_PER_INTENT), so an over-large --limit is clamped rather
 // than honoured.
 //
-// THE SUBJECT MUST BE A CONFIRMED DOCUMENTARY LOCATOR, read from
-// the admitted documentary locators — a value the deterministic validator
-// confirmed — never from a model and never merely from the command line.
-// The lookup answers for a fact carrying SEVERAL locators as well as for a
-// historical scalar row, so one address can be targeted specifically. The
-// ANCHOR stays the project's confirmed identity: listing an account's
-// transactions never makes that account the project's.
+// THE SUBJECT MUST HAVE ADMITTED ON-CHAIN PROVENANCE, resolved from the
+// database — never from a model and never merely from the command line.
+// Two classes qualify, and the gate accepts either: a DOCUMENTARY_LOCATOR,
+// a value the deterministic validator confirmed against a confirmed
+// document, or a DERIVED_ONCHAIN_SUBJECT, an address a previous confirmed
+// structured read returned. Both make an address eligible to be READ;
+// neither makes it authoritative, and the derived class carries no
+// document authority whatsoever.
+//
+// The documentary lookup answers for a fact carrying SEVERAL locators as
+// well as for a historical scalar row, so one address can be targeted
+// specifically. The ANCHOR stays the project's confirmed identity: listing
+// an account's transactions never makes that account the project's.
 //
 // IT WRITES NOTHING. Read-and-report only; the persistence path is
 // deliberately not invoked.
@@ -182,6 +188,12 @@ async function main(): Promise<void> {
         (s.blockTime === null ? "(none)" : `${s.blockTime} (${new Date(s.blockTime * 1000).toISOString()})`),
     );
     console.log("    err:          " + s.err);
+    // Projected by the adapter and previously dropped here, which made a
+    // labelled transaction indistinguishable from an unlabelled one in
+    // this script's output — and made memo look absent rather than
+    // unreported. SELECTION METADATA ONLY: arbitrary text the sender
+    // chose, never evidence of what the transaction did.
+    console.log("    memo:         " + String(s.memo) + "   (selection metadata only)");
   }
 
   const binding = validateOnchainBinding(artifact, {

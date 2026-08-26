@@ -8,10 +8,13 @@
 // path capable of any of those, which is asserted by test.
 //
 // THREE ADDRESSES, KEPT APART. The project ANCHOR is the confirmed mint,
-// read from PROJECT_IDENTITY. The SUBJECT is the documented wallet, read
-// from the admitted documentary locators. The token accounts the query
-// RETURNS are a third thing — answers, never inputs, and never promoted
-// into either of the first two roles.
+// read from PROJECT_IDENTITY. The SUBJECT is a wallet with admitted
+// on-chain provenance, resolved from the database — either a
+// DOCUMENTARY_LOCATOR stated by a confirmed document, or a
+// DERIVED_ONCHAIN_SUBJECT returned by a previous confirmed structured
+// read; the gate accepts either, and neither confers authority. The token
+// accounts the query RETURNS are a third thing — answers, never inputs,
+// and never promoted into either of the first two roles.
 //
 // THE MINT FILTER IS NOT A PARAMETER. The adapter builds the RPC filter
 // from intent.projectAnchor, so this cannot ask about any mint other than

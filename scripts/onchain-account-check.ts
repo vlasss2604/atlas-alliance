@@ -14,14 +14,19 @@
 // the anchor/subject distinction (D-134, AMENDMENT D) visible at the call
 // site instead of hidden behind a mode flag.
 //
-// THE SUBJECT MUST BE A CONFIRMED DOCUMENTARY LOCATOR, matched against the
-// admitted locators for this project — a value the deterministic validator
-// confirmed — never from the command line and never from a model. The
-// lookup answers for a fact carrying SEVERAL locators as well as for a
-// historical scalar row, so one address can be targeted specifically.
+// THE SUBJECT MUST HAVE ADMITTED ON-CHAIN PROVENANCE, resolved from the
+// database — never from the command line and never from a model. Two
+// classes qualify, and the gate accepts either: a DOCUMENTARY_LOCATOR,
+// matched against the admitted locators for this project, or a
+// DERIVED_ONCHAIN_SUBJECT, an address a previous confirmed structured read
+// returned. The documentary lookup answers for a fact carrying SEVERAL
+// locators as well as for a historical scalar row, so one address can be
+// targeted specifically.
+//
 // An address a human merely believes in is not a subject here: without a
-// documentary record of where it came from, the read would have no
-// provenance to attach it to.
+// record of where it came from, the read would have no provenance to
+// attach it to. Neither class makes an address authoritative — the derived
+// one carries no document authority at all.
 //
 // IT WRITES NOTHING. This is a read-and-report characterization, so the
 // persistence path is deliberately not invoked. Binding is still validated
