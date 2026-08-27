@@ -4,73 +4,52 @@
 
 ## NONE — awaiting owner direction
 
-Fourth `fees.pump.fun` window analysed offline. **Recommendation: stop
-diagnosing this branch.** No retry, no network call, nothing persisted, no code
-changed.
+**The PUMP case is closed: `CLOSED_WITH_UNRESOLVED_BRIDGES`.** Documentation
+only; no production code touched, no research attempted, no network call.
 
-### What the window established
+Everything the proof plan justified was learned. The two bridges remain
+unresolved, and **no negative conclusion is implied** — nothing says the
+mechanism does not exist, only that ATLAS cannot establish it from what it holds.
 
-`NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`, `1 denied, 1 allowed`, the
-denial being `HOST_NOT_CONFIRMED`.
+### Where the closure lives
 
-**The stale-DNS hypothesis is refuted.** `BLOCKED_ADDRESS` 0, `DNS_FAILED` 0 —
-proposed as checkable last round, checked, negative. Also not `NOT_HTTPS`, not
-`MALFORMED_TARGET`, and not `BLOCKED_BY_ROUTE_POLICY`, so our Playwright
-containment did not refuse the main-frame navigation.
+- `PUMP_CASE.md`, **"CASE CLOSURE"** at the top — the fact inventory separated
+  into documentary / deterministic on-chain / composed / unresolved, the exact
+  canonical statement ATLAS may make, the list it must not, the component state,
+  and the criteria for the next case.
+- `CURRENT_STATE.md` — a bounded summary in place of the round-by-round
+  narrative, which had grown to 360 lines. The document is 188 lines again.
+- `CORE_RULES.md` — the generic lessons, five added to *Authority and identity*
+  and two to *Research brakes*. Candidates already durable were not duplicated.
+- `BACKLOG.md` — six closure items, each classified, none BLOCKING.
 
-**"1 allowed" is weaker than it looks.** The proxy records the allow at
-policy-decision time, *before* `netConnect` is attempted; if the upstream connect
-or TLS then fails, the error path destroys both sockets and records nothing. So
-it proves policy said yes — resolution happened, the address was public — and
-proves nothing about the connection succeeding.
+### Verified at closure, from persisted state
 
-**One CONNECT to an unconfirmed host was refused.** The destination is not
-recorded and is not inferred. One thing does follow structurally: it was **not**
-the main-frame navigation, since that case would have surfaced as
-`BLOCKED_BY_ROUTE_POLICY`. So something reached the proxy that `context.route`
-did not intercept — page traffic escaping interception and browser-level traffic
-both fit, and the closed signals do not separate them. **Whether that denial
-caused the failure is unknown and is not claimed.**
+- `onchain_artifact_id` is **null on all 401 Evidence rows**; no `snapshot_ref`
+  anywhere. The Solana work has never entered Evidence.
+- The most recent result for **all ten components** is
+  `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. The three `PARTIALLY_SUPPORTED`
+  `DESTINATION` results are from 2026-08-24 and were not reproduced later — a
+  correction to how the case narrative read.
+- The 53 `ONCHAIN_VERIFIABLE` rows are model-extracted explorer text with
+  `entity_binding = UNVERIFIED`, including EVM Solidity for a Solana project.
+  They establish nothing, correctly.
 
-### The one remaining blind spot, and why I am not proposing to fix it
+### What PUMP left untested, and it is the important part
 
-After an allowed CONNECT, the tunnel's outcome is never recorded — connected,
-errored and zero-bytes-transferred are indistinguishable. A counts-only,
-host-free diagnostic would close it, and it is the last unlit segment.
+**Whether any project can carry an on-chain fact all the way into Evidence and
+out through a component.** Every deterministic chain fact here lives in a
+standalone artifact. Until a case does that end to end, the on-chain half of the
+pipeline is unproven in production — and PUMP could not do it, because getting
+there requires a live retrieval inside a research job and there is deliberately
+no offline adoption path.
 
-**But it should not be built for this.** Four windows have now gone into
-transport plumbing and produced no evidence. Each fix was correct and each paid
-for itself in information — and the thing being illuminated has drifted from the
-research question to our own network stack. CORE_RULES: *stop when the proof plan
-no longer justifies another branch; over-research is a defect, not diligence.*
+That is the sharpest selection criterion for project #2, alongside: a different
+mechanism shape (not buy-and-burn), **address-level role assignment published by
+the project itself** so the actor → acquisition bridge can be tested rather than
+merely missed again, and documentation reachable by the static fetcher.
 
-Worth restating plainly: **it was always speculative that this page carries what
-is needed.** The missing bridge is an explicit first-party assignment of the
-acquisition role to `99mRw3…`. Nothing establishes that a fees dashboard's root
-page contains such a sentence, and a dashboard is a poor candidate for one —
-role assignments live in prose, not in a metrics surface.
-
-### If the owner wants to continue anyway
-
-In increasing cost, and each is a decision rather than a recommendation:
-
-1. **`ipconfig /flushdns` then one more run** — free, and the proxy line would
-   now show whether resolution changed. Given `DNS_FAILED` 0 already, expect
-   little.
-2. **Tunnel-outcome diagnostic** (offline, counts-only, host-free) then one run —
-   would separate "connect/TLS failed" from "connected and the page still
-   failed". Engineering, not research.
-3. **Confirm `fees.pump.fun/api` as its own route** and inspect the JSON
-   endpoint. Different transport shape, settles instantly, no `networkidle`
-   dependency. Still unlikely to *assign a role* — an endpoint named `buybacks`
-   is not a statement, and records containing the address are locator
-   co-occurrence.
-
-### Unchanged
-
-Actor → acquisition remains **unresolved**. The page is unread, so the address's
-absence from it is **not** established. `fees.pump.fun` stays CONFIRMED and
-unclassified; both `pump.fun` routes are untouched.
+Not selected here, and not browsed for.
 
 ### Standing boundaries
 

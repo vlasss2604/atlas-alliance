@@ -3,6 +3,164 @@
 Read only for a PUMP task. **Nothing here may drive generic code.** These are
 observations about one project; the rules they taught are in `CORE_RULES.md`.
 
+---
+
+# CASE CLOSURE — 2026-08-28
+
+## Status: CLOSED WITH UNRESOLVED BRIDGES
+
+Everything the proof plan justified was learned. The two unresolved bridges
+remain unresolved, and **no negative conclusion is implied** — nothing below says
+the mechanism does not exist, only that ATLAS cannot establish it from what it
+holds. `INSUFFICIENT_EVIDENCE` with the missing bridge named correctly is a
+successful outcome, and this is one.
+
+Everything in this section was re-verified from persisted state at closure, not
+carried forward from the narrative below.
+
+## A. Documentary — established
+
+Four distinct fragments, all `OFFICIAL_DOCS / CONFIRMED`, all from
+`https://pump.fun/pump-token`, all filed at step 6 / `DESTINATION`. **That is the
+entire first-party corpus** — no document body is stored anywhere, so the
+fragments *are* the corpus.
+
+1. "Half of every dollar Pump.fun earns buys $PUMP on the open market, then burns
+   it forever." — an official revenue-funded purchase-and-burn **claim**.
+2. "Burn addresses / `99mRw3…pm4F3c` / `9jHrTC…6KVCXM`" — an official assignment
+   of the **burn** role. The page renders both addresses truncated; the complete
+   values exist in ATLAS only because link recovery read the `href`.
+3. "Every burn, on-chain — A verifiable record of each daily purchase and burn,
+   settled on Solana." — an existence claim about records. It names no address.
+4. "As of 28 Apr 2026, 50% of revenue is programmatically locked and allocated to
+   be burned for one year."
+
+## B. Deterministic on-chain — established, in standalone artifacts
+
+- **Confirmed mint** `pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn`.
+- **A genuine `BurnChecked`**: 7723.746661 PUMP destroyed from the locator's own
+  token account, under the locator's own authority, balance to zero, slot
+  `441840980`.
+- **An exchange, decoded deterministically**: within outer instruction 5 of the
+  transaction five slots earlier, the documented address paid `382202589` raw
+  wSOL and received `7723746661` raw units of the confirmed mint from one
+  counterparty. The venue instruction's method reproduces
+  `sha256("global:swap_v2")[0..8]` exactly, and an emitted event states both
+  mints and both amounts, each corroborated against a transfer the transaction
+  independently records. Account roles were never read from array position.
+- **Ownership and authority binding**: the transient wrapped-SOL account resolves
+  from same-transaction instructions that establish ownership by protocol
+  definition, and the two sources must agree or the account resolves to nothing.
+
+## C. Structural / composed
+
+- **Account-level quantity continuity**, `441840975`–`441840980`: the same raw
+  quantity entered the account from a balance of zero and was destroyed, the
+  quantities reconcile, and the window lists nothing between them. Stated as
+  **closed under the observed index** — deliberately weaker than complete,
+  because ATLAS holds no contract for what the RPC address-signature index
+  covers and models address lookup tables nowhere.
+- **Nothing else composed.** Verified at closure: `onchain_artifact_id` is
+  **null on all 401 Evidence rows**, and no row carries a `snapshot_ref`. The
+  Solana work has never entered Evidence.
+- The 53 rows classified `ONCHAIN_VERIFIABLE` are **model-extracted explorer
+  text** with `entity_binding = UNVERIFIED` — including EVM Solidity source for a
+  Solana project. They establish nothing, correctly.
+
+## D. Unresolved — two bridges, kept strictly separate
+
+**1. Actor → acquisition role.** No authoritative first-party statement assigns
+the acquisition role to `99mRw3…`. Established by exhaustion, not assumed: all
+**115 text-bearing columns** in the database were enumerated from
+`information_schema` and scanned, and **no single text contains both any form of
+the address and any of** `buyback`, `buy back`, `purchase`, `acquir…`,
+`treasury`, `buying`, `executes`. The documents bind the address to burning and
+describe the buying, and never join the two.
+
+**2. Revenue → observed acquisition.** Nothing binds the revenue Pump.fun
+describes to the specific observed acquisition transaction. No evidence at all —
+this bridge was never even approached, and it is not a weaker version of the
+first.
+
+## E. The strongest statement ATLAS is permitted to make
+
+> Pump.fun's own documentation states that half of its revenue buys $PUMP on the
+> open market and burns it, and separately lists `99mRw3…` under the heading
+> "Burn addresses". Independently of those documents, ATLAS observed on Solana
+> that this address paid wrapped SOL and received 7723746661 raw units of the
+> confirmed PUMP mint in one decoded exchange, and that the same quantity was
+> destroyed from its own token account, under its own authority, in the
+> immediately following transaction the observed index lists — an account-level
+> continuity that holds across slots `441840975`–`441840980`, closed under that
+> index rather than complete.
+>
+> **No first-party source assigns the acquisition role to that address, and
+> nothing binds the revenue described in the documents to the acquisition
+> observed on chain.** Whether this address is the executor of Pump.fun's
+> published mechanism is therefore not established.
+
+## F. Statements ATLAS must NOT make
+
+- "`99mRw3…` executes Pump.fun's buybacks" — the actor → acquisition bridge is
+  the thing that is missing.
+- "The buyback was executed" / "a buyback occurred" — an exchange is an economic
+  fact about two parties, not evidence that a published mechanism ran.
+- "These tokens were burned" — fungible units have no individual identity; the
+  claim available is quantity continuity over a bounded interval.
+- "Revenue funded the purchase" — bridge 2, with no evidence whatever.
+- "The two listed burn addresses are the two buyback wallets" — cardinality
+  equality is not identity.
+- "Nothing else happened in that interval" — the observed index is not a census.
+- "The address is not a buyback wallet" — absence of evidence is not evidence of
+  absence, and this case proves nothing negative.
+
+## G. Component / S5 state at closure
+
+The most recent result for **every one of the ten Pattern v1 components is
+`INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`**, including `MECHANISM_SPEC`
+(last run 2026-08-27). Three `PARTIALLY_SUPPORTED` `DESTINATION` results exist
+from 2026-08-24 jobs with reason `TOKEN_STATE_UNQUALIFIED`; the later
+full-pattern runs did not reproduce them.
+
+`MECHANISM_SPEC` holds 112 Evidence rows, **all `SOCIAL / CLAIMED`**, which
+establish nothing ever (D-074).
+
+The distinction that matters at closure: **a truth observed in a standalone
+artifact is not component-establishing Evidence.** The `BurnChecked` is real and
+deterministic and would establish `EXECUTION_EVIDENCE` at
+`PARTIALLY_SUPPORTED / INSUFFICIENT_AUTHORITY` — the ceiling for every on-chain
+fact — *if it were written the way production writes on-chain evidence*. It was
+not. There is no offline adoption path, by design.
+
+## H. What the next case should test
+
+PUMP is project #1 of a target ~10. It exercised documentary recovery, typed
+chain retrieval, decoding and reconciliation hard, and left one whole half of the
+pipeline unproven.
+
+**The single most valuable thing to test next: whether any project can carry an
+on-chain fact all the way into Evidence and out through a component.** Every
+deterministic chain fact in this repository lives in a standalone artifact and no
+Evidence row references one.
+
+Criteria for project #2 — a *different mechanism shape*, not a second PUMP:
+
+- an explicit, dated value-capture claim in first-party documentation;
+- **address-level role assignment published by the project itself**, so the
+  actor → acquisition bridge can actually be tested rather than merely missed
+  again;
+- on-chain execution ATLAS can reach with existing typed intents;
+- a mechanism that is *not* buy-and-burn — fee-sharing to stakers, a
+  treasury-funded distribution, or a governance-gated emission change — so
+  Pattern components other than `DESTINATION` and `EXECUTION_EVIDENCE` carry the
+  weight;
+- ideally a project whose documentation is reachable by the **static** fetcher,
+  since four windows on a JS dashboard produced no page.
+
+Do not select it inside a closure task, and do not browse for it.
+
+---
+
 ## Identity
 
 | | |

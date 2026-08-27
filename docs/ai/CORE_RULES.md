@@ -31,6 +31,25 @@ willing to assert. Collapsing any two of these is the most common failure.
   them agree.
 - Model output is not authoritative for a deterministic fact. Chain data is read
   by code, never restated by a model.
+- **A subdomain is a different host.** Confirming a domain confirms that host and
+  nothing beneath or beside it; authority does not flow from `example.com` to
+  `fees.example.com`. Route matching is exact for the same reason.
+- **Confirming a host and classifying a page are different decisions.** That a
+  domain belongs to a project says nothing about whether a particular page is its
+  documentation. Classification should follow reading the page, never precede it.
+- **Source class `ONCHAIN_VERIFIABLE` is not a chain read.** An explorer page
+  scraped by a model is a *document about* the chain — text, unbound, and as
+  capable of being wrong or off-project as any other page. Only code-read,
+  entity-bound chain data is a chain fact.
+- **Cardinality equality is not identity.** Two documents each describing "two"
+  of something does not make them the same two. |X| = 2 and |Y| = 2 entails
+  nothing about X = Y, and shared mechanism context does not supply the missing
+  premise — it is the setting in which the wrong join is least detectable.
+- **Chain behaviour cannot assign an institutional role.** The forward rule above
+  says a documentary role label is never a chain fact; the converse holds
+  identically. Observing that an account does what a role would do is affirming
+  the consequent — many actors produce the same trace. Roles are assigned by
+  authoritative sources, never inferred from activity.
 
 ## Economic reading of technical facts
 
@@ -95,6 +114,19 @@ Brakes are as much a capability as skills. Do not:
 
 **Stop when the proof plan no longer justifies another branch.** Over-research is
 a defect, not diligence.
+
+**Classify the failure before repeating the attempt.** A bounded live window
+spent on a failure that cannot say which failure it was buys one bit of
+information at full price — and the same window spent again buys the same bit.
+When an attempt fails opaquely, the cheapest next move is almost always to make
+the failure name itself, offline, before spending another. Every acquisition
+stage that can fail independently deserves its own reason, and every reason its
+own closed sub-vocabulary, so that "it did not work" is never the whole answer.
+
+**Know when the diagnosis has stopped being research.** Fixing observability to
+reach a source is justified while the source is plausibly load-bearing. Once the
+thing being illuminated is your own network stack rather than the question, the
+branch is over — however tractable the next fix looks.
 
 ## An index is not a census
 

@@ -38,6 +38,47 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   observation as visually neutral. It is neutral in reconciliation; nothing yet
   guarantees it reads that way to a user.
 
+### From the PUMP case closure (2026-08-28)
+
+Every item here is **NON_BLOCKING or DEFERRED**. None of them may silently
+restart the PUMP investigation, and none is a correctness defect.
+
+- **Proxy tunnel-outcome observability** — *DEFERRED.* After the egress proxy
+  allows a CONNECT, the tunnel's outcome is never recorded: connected, errored
+  and zero-bytes-transferred are indistinguishable, because the error path
+  destroys both sockets silently. The allow itself is pushed at policy-decision
+  time, *before* `netConnect`, so it proves policy said yes and nothing more.
+  A counts-only, host-free diagnostic would close the last unlit segment of the
+  render path. Deferred deliberately: it diagnoses our own network stack, and
+  the branch that wanted it is closed.
+- **`fees.pump.fun` API lead** — *DEFERRED.* `fees.pump.fun/api/buybacks` is
+  known only from a third-party adapter. Reaching it needs **its own** confirmed
+  route at prefix `/api`; the existing `/` grant does not cover it. Expectation
+  set honestly in advance: an endpoint *named* `buybacks` is not a statement, and
+  records merely containing an address are locator co-occurrence. Only a payload
+  that **assigns the role** would move anything.
+- **`fees.pump.fun` root is unread** — *DEFERRED, not failed.* Four windows ended
+  in transport failures, never in a page. Its content is unknown, so the
+  address's absence from it is **not** established.
+- **Artifact → Evidence adoption path** — *DEFERRED, and architectural.* Every
+  deterministic chain fact in this repository lives in a standalone artifact;
+  `onchain_artifact_id` is null on all 401 Evidence rows. Getting one into
+  Evidence requires a live retrieval inside a research job, by design — there is
+  no offline adoption path and there should not be a back door. Worth designing
+  deliberately when a case needs it, not improvised.
+- **Explorer text classified `ONCHAIN_VERIFIABLE`** — *NON_BLOCKING, observed.*
+  53 Evidence rows carry that class while being model-extracted explorer prose
+  with `entity_binding = UNVERIFIED` — some of it EVM Solidity for a Solana
+  project. They establish nothing and the architecture refuses them correctly, so
+  this is not a defect. Recorded because the naming invites a reader to mistake
+  the class for a chain read; the rule is now in `CORE_RULES.md`.
+- **Documentary re-extraction cleanup** — *REJECTED as a task.* The three
+  `PARTIALLY_SUPPORTED` `DESTINATION` results rest on sets where only one row is
+  really destination evidence, but they are historical: the later full-pattern
+  runs did not reproduce them, and every component's current result is
+  `INSUFFICIENT_EVIDENCE`. Rows are never edited by hand, and re-extraction
+  through the pipeline needs the page, which is unreachable. Nothing to do.
+
 ### Case-specific, deferred
 
 - ~~**Second PUMP burn address** needs documentary provenance.~~ **Resolved.**

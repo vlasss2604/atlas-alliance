@@ -4,12 +4,9 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 ## Repository
 
-- **Last production-behaviour commit: `d04dff9`** — "A transfer is not a
-  mechanism, wherever it is offered". The commit that adds this document set is
-  documentation-only and sits directly on top of it.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite: **1979 passing, 4 skipped, 2 failing**. Both failures are
+- Full suite: **2126 passing, 4 skipped, 2 failing**. Both failures are
   pre-existing and unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
     `s4-executor.ts`. **Now understood: it is a line-ending artifact.** The
@@ -97,365 +94,55 @@ is named correctly.
 **PUMP is project #1** — the deep crash/training case. Details in `PUMP_CASE.md`;
 read it only for a PUMP task.
 
-Abbreviated PUMP position:
+### PUMP — CLOSED WITH UNRESOLVED BRIDGES (2026-08-28)
 
-- Official buyback-and-burn claim and both official burn addresses were recovered
-  through documentary provenance and are CONFIRMED locators.
-- The first locator is System-Program-owned and owns exactly one confirmed-PUMP
-  token account; the second owns exactly one as well. Both were observed at zero.
-- **A genuine `BurnChecked` of the confirmed mint is established as a chain
-  fact**: 7723.746661 PUMP destroyed from the locator's own token account, under
-  the locator's own authority, balance to zero, at slot `441840980`.
-- **That burn's own interval is closed under the observed index** — deliberately
-  weaker than "complete". The transaction five slots earlier moved exactly the
-  same raw quantity INTO the same account from a balance of zero, the window
-  lists nothing further between them, and the quantities reconcile. An
-  account-level inflow → burn continuity statement holds across
-  `441840975`–`441840980`, from persisted rows with no further chain read.
-  Its ceiling: "nothing further was listed" is not "nothing else happened" —
-  ATLAS holds no contract for what the RPC address-signature index covers, and
-  models address lookup tables nowhere. The inflow is also a transfer and nothing
-  more: not a buyback, not a purchase, not revenue-funded, and one cycle is not a
-  policy.
-- **That inflow transaction now produces the reciprocal flow.** It carries the
-  shape — the documented address pays out native SOL, the counterparty's account
-  pays in the project's token — routed through a transient wrapped-SOL account
-  the payer creates and closes in the same transaction. That account is in no
-  balance metadata, so the flow used to be underivable; its owner now resolves
-  from the same-transaction instructions that establish ownership by protocol
-  definition. Legs and pairing stay DIRECT + CONTEXT.
-- A separate transaction at slot `441977087` contains an exact reciprocal
-  SOL/PUMP flow and zero burns. It is **later** than the burn, so the two are
-  different cycles.
-- Nothing about buyback, purchase, revenue funding, causality or supply reduction
-  is proven, and no acquisition → burn bridge exists.
-- **The inflow transaction was re-read once, and the opaque material is now
-  captured.** Artifact `bff0290c-…` (2026-08-27, one `getTransaction`, zero
-  retries) carries five preserved unparsed instructions including both
-  unidentified programs, with their accounts, blobs and positions. Its
-  `raw_response_hash` is identical to the earlier reads, so the observations
-  agree byte for byte.
-- **Same program invocation is now established for that transaction.** All three
-  token movements and the `CAMMCzo5…` instruction share `parentIndex = 5`, and
-  outer instruction 5 is a `JUP6LkbZ…` instruction — so the opposing legs are
-  CPIs of one invocation, not merely two movements in one transaction. That rung
-  was previously not establishable.
-- **The exchange is decoded.** The venue instruction's own method reproduces
-  `sha256("global:swap_v2")[0..8]` exactly, and an event emitted in the same
-  invocation states both mints and both amounts — each corroborated against a
-  transfer the transaction independently records. So: within outer instruction 5,
-  the documented address paid `382202589` raw wSOL and received `7723746661`
-  raw units of the confirmed mint from the same counterparty. Account roles were
-  never read from array position; the ordering contract is not available locally.
-- **It is still CONTEXT and establishes no component.** An exchange is an economic
-  fact about two parties, not evidence that a published mechanism ran.
-- **Buyback is NOT established, and the missing piece is evidential, not just
-  architectural.** The documents bind `99mRw3…` to the BURN role — it is
-  published under the heading "Burn addresses" — and describe the mechanism in a
-  sentence that names no address. Nothing binds the address to the ACQUISITION
-  step. Concluding buyback from "the documents call it the burn address" plus
-  "it bought" is affirming the consequent. See `PUMP_CASE.md`.
-- **Nothing can be composed today in any case.** Zero Evidence rows reference any
-  on-chain artifact — the Solana work has never entered Evidence — and S6 carries
-  no verdict, proven or confidence field by design (D-103). Revenue funding is a
-  third, wholly separate bridge with no evidence at all.
-- **The missing bridge is confirmed by exhaustion.** The entire official corpus is
-  four distinct fragments from one page; no document body is stored anywhere, so
-  fragments ARE the corpus. The actor appears in exactly one of them, the "Burn
-  addresses" heading. Nothing anywhere places it near a buying statement.
-- **Component assignment: investigated, no routing defect.** One document reaching
-  several components is supported and happens — that page was opened under six.
-  MECHANISM_SPEC simply never got a successful extraction of it with current
-  guidance (one pre-`evidenceGoal` attempt returned nothing; two later ones died
-  at FETCH_FAILED), while DESTINATION over-reported inside its own lane. S4's
-  wrong-component guard cannot catch that — the extractor is told the component
-  and echoes it — and it has never fired in this database.
-  The cost: all three PARTIALLY_SUPPORTED DESTINATION results rest on sets where
-  only one of three or four rows is really destination evidence. Remedy is
-  re-extraction, not row edits. No code changed. See `PUMP_CASE.md`.
-- **The re-extraction ran and failed at the fetch.** Job `168ac103-…` passed the
-  scope gate, then `FETCH_FAILED / PROVIDER_ERROR` with `sourceOpens 0`.
-  Zero Evidence, no source row, MECHANISM_SPEC unchanged (SOCIAL only), S5
-  `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. DESTINATION untouched. Whether
-  the pipeline would file the sentence correctly is **still unknown** — the model
-  never saw the page.
-- **Fetch-failure observability is fixed.** A terminal reason now reads
-  `CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS` — enough to tell a
-  refusal from a block from a timeout. Two gates guard it: `instanceof` the
-  owned error class, and membership of the closed list the reason type is derived
-  from. Message, stack, url and headers are still never surfaced. The trace enum
-  is untouched, so no migration. See `ARCHITECTURE.md`.
-- **The blocker is identified: `pump.fun` refuses the static fetcher.** A second
-  authorized run returned `CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR` —
-  raised only after DNS resolved and the connection succeeded, so the server
-  answered with a non-2xx status. Not `BLOCKED_ADDRESS`, which also proves the
-  tunnel was genuinely off and the window genuinely open. The first run's reason
-  predates the fix and stays unknowable.
-- **Render-on-refusal exists now.** A static request declined by `401`, `403`
-  or `429` on an already renderer-eligible OFFICIAL_DOCS route attempts
-  exactly one isolated render, on its own source-open reservation. `404`,
-  ordinary 5xx (503 included), and every failure that never reached a server are
-  excluded. Same renderer, same gates, no evasion, zero retry. The failure
-  string also carries the status now — `…:HTTP_ERROR:403` — taken from the
-  Response, never parsed from a message. See `ARCHITECTURE.md`.
-- **A failed render now names its stage.** The renderer had typed reasons all
-  along and the parent supervisor discarded them; three further stages had no
-  reason at all. See `ARCHITECTURE.md`, "What a failure may say about itself".
-- **The refusal is `403`, and the render fired.** Third authorized window, job
-  `0f28d892-…`, 2026-08-27, owner-executed. The scope gate passed, the static
-  fetch was refused with a renderable status, and the refusal path opened
-  exactly as designed — its own reservation, `sourceOpensReserved` 2 against a
-  ceiling of 2.
-- **But OUR browser never started.**
-  `DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED`, raised before any
-  navigation. **`pump.fun` is not implicated in the render at all, and the
-  hypothesis that the page defeats the renderer has still never been tested.**
-  Under the previous code this would have read as a bare
-  `DOCS_RENDER_AFTER_REFUSAL_FAILED` and the natural conclusion would have been
-  the opposite one — the observability fix earned itself back on first use, for
-  the second time in this case.
-- **The launch failure does NOT reproduce offline, and the renderer is
-  healthy.** Investigated through the production isolated path — real egress
-  proxy, real scrubbed environment, real argv-only spawn, real child, real
-  launch — and it starts Chromium `151.0.7922.34` in about 2.5–5 seconds, every
-  time, well inside the 20-second parent deadline. Each candidate cause was
-  tested and cleared individually: the scrubbed environment (launches fine),
-  the production proxy launch arguments (fine), the child's `stdio` with stderr
-  ignored (fine), and a bogus `TEMP`/`TMP` (fine — Chromium does not depend on
-  it). **No speculative fix was made**, and no environment variable was added.
-- **The live failure is therefore transient or environmental**, not a defect in
-  this code. It remains unexplained, and the honest reading is that something
-  about that moment — the run was made seconds after the VPN tunnel was taken
-  down — refused the browser process. Do not write it down as understood.
-- **The renderer can now be checked without spending a window.**
-  `npx tsx scripts/renderer-selftest.ts` answers "can this machine start the
-  locked-down browser?" offline in a few seconds, navigating nowhere. **Run it
-  immediately before any future live window.**
-- **And if it does fail again, it will say which local fault it was.**
-  `…:BROWSER_LAUNCH_FAILED:EXECUTABLE_NOT_FOUND`, `:PROCESS_START_FAILED`,
-  `:PROCESS_EXITED_DURING_LAUNCH`, or `:UNKNOWN_BROWSER_LAUNCH_FAILURE`. All
-  three named values were observed by inducing the failure offline, not taken
-  from documentation.
-- **A rendered page must now have answered with a success status.** A browser
-  does not throw on `403` — it renders the refusal page — so the renderer would
-  have handed a server's "access denied" HTML to extraction as the document.
-  `page.goto()`'s Response was being discarded although the adapter's own type
-  declared it. It is read now, and a non-success status fails closed as
-  `HTTP_ERROR` with the trusted number: `…:HTTP_ERROR:403`. Taken from
-  `Response.status()` only — never from markup, a title, a body, a header or an
-  error string. The success rule `200..299` is one shared predicate, used by the
-  static fetcher and the renderer alike. See `ARCHITECTURE.md`.
-- **Consequence for the next window.** If `pump.fun` refuses Chromium the run
-  will now say so precisely, instead of reporting a successful render of the
-  refusal page. That failure mode was named as an open risk in the prepared run
-  and is closed.
-- **Fourth window run, 2026-08-27, job `d4da299a-…`: the browser is moved off
-  the page.** Static refusal `403` again; the render fired and ended
-  `FINAL_URL_OUTSIDE_ROUTE`. **The browser launched and navigated**, which
-  retires the previous window's launch failure as transient. The final URL was
-  on `pump.fun` but outside `/pump-token` — derived from the code, since a
-  cross-host redirect would have been aborted as a thrown navigation instead.
-  The rendered status is unavailable by design: the route check precedes the
-  status check, because a status for a page we were not allowed to read is a
-  statement about the wrong document.
-- **The same URL under the same prefix rendered successfully on 2026-08-24.**
-  The inspection gate requires a non-empty prefix and refuses a classified
-  route, so that render used the `/pump-token` row — not a broader one. Why it
-  now moves off-route is **not established**: a site change, headless-specific
-  handling and intermittent behaviour all fit one observation equally.
-- **That page can no longer be inspected.** `evaluateInspectionEligibility`
-  refuses an already-classified route, and `/pump-token` is now OFFICIAL_DOCS —
-  promoting it closed the non-evidentiary tool that discovered it. Reported, not
-  changed.
-- **Still nothing written.** Four windows spent; Evidence unchanged at 401 rows,
-  `MECHANISM_SPEC` unchanged at 112 SOCIAL / CLAIMED rows, and the model has
-  still never been shown the page.
-- **Actor → acquisition: re-verified schema-wide, and still UNRESOLVED.** All 115
-  text-bearing columns were enumerated from `information_schema` and scanned. No
-  `evidence.fragment` anywhere contains the address; the one fragment naming it
-  carries it **truncated** under "Burn addresses", and the full value exists only
-  because link recovery read the href. **No single text contains both any form of
-  the address and any of `buyback`, `purchase`, `acquir…`, `treasury`, `buying`
-  or `executes`.** The acquisition vocabulary is abundant but almost entirely
-  SOCIAL/CLAIMED, which establishes nothing.
-- **The whole first-party corpus is four fragments from one URL.** All ten
-  `OFFICIAL_DOCS` rows come from `https://pump.fun/pump-token`. The closest text —
-  "a verifiable record of each daily purchase and burn" — is an existence claim
-  about records and binds no address to purchasing.
-- **`OFFICIAL_REPORT` and `GOVERNANCE` have zero rows.** Those tiers were never
-  acquired, which is absence of acquisition rather than evidence of absence.
-  `pump.fun/docs/fees` and `pump.fun/coin/GT9G…` were seen and never read — named
-  leads, not findings.
-- **"Buyback" stays impermissible for `99mRw3…`.** Unresolved, not disproven:
-  deciding it needs material ATLAS has never acquired, and the one known
-  first-party host refuses both transports.
-- **The two-wallet cardinality join was examined and refused.** A first-party
-  Pump.fun thread says two "buyback & burn wallets" carry out the buybacks; the
-  docs list two "Burn addresses". Two and two does not entail the same two — the
-  thread itself names a separate class of intermediary wallets, so an
-  architecture of buyback wallets feeding distinct burn addresses fits both
-  documents equally. Shared mechanism context does not establish identity either;
-  that is locator co-occurrence in a better disguise.
-- **Chain behaviour cannot resolve documentary identity.** Not circular — the
-  observation is independent — but affirming the consequent, and a category
-  error: a role is an institutional fact, and as a documentary label is never a
-  chain fact, chain behaviour is never a role assignment. It does legitimately
-  rule out a passive reading of `99mRw3…`, which acquires and burns under its
-  own authority. Plausibility, not identity.
-- **Acquiring that thread would change nothing.** `twitter.com` is not
-  `pump.fun`, and SOCIAL establishes nothing however official the account
-  (D-074). Its value is as a pointer to **`fees.pump.fun`**, now the
-  highest-value target in the case. DefiLlama's adapter corroborates as
-  DATA_PROVIDER only.
-- **No architectural defect.** Identity binding is already refused by
-  construction in two places: documentary locators require the complete
-  identifier to appear literally in the document, and S6 slot identity is
-  structural only, with no classifier ever reaching identity (D-101).
-- **`fees.pump.fun` is unreachable today, and the blocker is source authority.**
-  ATLAS knows nothing of the host — zero sources, zero Evidence mentions, zero
-  routes, no repository reference — and `resolveSourceRoute` returns
-  `CLAIMED / null`. Routes are **host-exact**, so the subdomain inherits nothing
-  from `pump.fun`. The evidentiary script, both renderer entry points and the
-  inspection gate all refuse.
-- **The smallest opener is one ACTIVE SOURCE_ROUTE for `fees.pump.fun`,
-  CONFIRMED and UNCLASSIFIED** — which opens non-evidentiary inspection without
-  asserting documentation authority over an unread page.
-- **It could not be created: there is no supported owner route-management
-  path.** Nothing in `src/` or `scripts/` inserts a `project_memory_items` row;
-  `promoteProjectMemoryItem` exists but has no caller; `promote-memory.ts`
-  operates on `research_memory`, a different table; and four boundary tests
-  actively ban `promoteProjectMemoryItem` / `projectMemoryItems` /
-  `memory/lifecycle` / `routeClass: "` from every owner entrypoint. Route
-  confirmation is deliberately absent from acquisition and was never given a
-  home of its own — a real gap.
-- **The intended semantics were verified against the real gates anyway**, using
-  the route object such a row would produce: inspection **eligible** at the root
-  url; both renderer entry points refused `NOT_OFFICIAL_DOCS`; the evidentiary
-  scope gate refused on a null routeClass; and any sub-path refused
-  `NO_PATH_PREFIX`. The grant would be exactly as bounded as intended.
-- **That gap is now closed: `scripts/confirm-source-route.ts` exists**, with the
-  operation in `memory/source-route-confirmation.ts`. It reuses
-  `promoteProjectMemoryItem` for the transitions and inserts only the OBSERVED
-  state the database guard permits. **It assigns no `routeClass` and has no
-  parameter that could** — a class flag is refused loudly rather than ignored.
-  Result: CONFIRMED + null, which opens non-evidentiary inspection and nothing
-  else. See `ARCHITECTURE.md`, "Confirming a source route".
-- **Building it surfaced two silent-breakage hazards, now refused.** A prefix
-  overlapping an existing ACTIVE one would null that route's
-  `matchedPathPrefix` (reported only when exactly one path-scoped row matches),
-  disabling rendering and inspection for a route that worked. And an ACTIVE
-  domain-wide row carrying a class would be inherited, so a confirmation
-  promising "unclassified" would quietly grant authority. Both mutation-checked.
-- **`fees.pump.fun` is now CONFIRMED and UNCLASSIFIED.** Owner-authorized,
-  created 2026-08-27 through `confirm-source-route.ts` — memory item
-  `0aec2717-…`, ACTIVE, content exactly `{"domain":"fees.pump.fun",
-  "pathPrefix":"/"}` with no `routeClass` key. Verified independently against
-  the real resolver: `CONFIRMED / null / "/"`.
-  - **Inspection is now eligible** at `https://fees.pump.fun/`.
-  - **Everything evidentiary still refuses**: the acquisition scope gate on a
-    null class, and both renderer-as-Evidence entry points with
-    `NOT_OFFICIAL_DOCS`.
-  - **Sub-paths are outside the grant** — `/api/buybacks` and any other path
-    resolve `CONFIRMED` host-wide but with prefix null, so inspection refuses
-    `NO_PATH_PREFIX`. Reaching the API would need its own confirmed route.
-  - Nothing was superseded; both existing `pump.fun` routes still resolve
-    `OFFICIAL_DOCS` at `/docs` and `/pump-token` unchanged.
-- **Operational note: run that script from PowerShell, not Git Bash.** MSYS path
-  conversion rewrites a bare `--prefix=/` into `C:/Program Files/Git/`. The tool
-  refused it as `PREFIX_HAS_WHITESPACE` and wrote nothing, which is the
-  validation working — but the command silently means something else in that
-  shell.
-- **The root inspection ran once and failed `RENDER_FAILED`.** Non-evidentiary,
-  nothing persisted; Evidence still 401, `sources` still 62 with zero naming the
-  host, route row untouched. No content of any kind was returned.
-- **What that excludes is the finding.** The browser launched; the child, proxy
-  and envelope were all fine; the pre-flight passed; and crucially it is **not**
-  `FINAL_URL_OUTSIDE_ROUTE`, so the `pump.fun/pump-token` same-host move did not
-  recur — and **not** `HTTP_ERROR`, so no status was ever obtained. The throw is
-  at `page.goto`, after launch and before any response.
-- **Three causes remain and the capture cannot separate them**: a navigation
-  timeout (`networkidle` never settling), our own containment aborting a
-  cross-host redirect, or a transport error. Their next actions differ
-  completely.
-- **That third gap is now closed.** A navigation that never completed is its own
-  stage, `NAVIGATION_FAILED`, with a closed diagnostic — `NAVIGATION_TIMEOUT`,
-  `BLOCKED_BY_ROUTE_POLICY`, `UNCLASSIFIED_NAVIGATION_ERROR`. The timeout is
-  Playwright's typed error matched on a pinned name, re-checked by contract test
-  against the installed package. The containment case is **recorded by our own
-  route handler when it aborts the main-frame navigation**, never inferred, and
-  a driver that cannot prove it claims nothing. `net::ERR_*` codes live only in
-  the message and are deliberately not parsed. See `ARCHITECTURE.md`.
-- **The inspection script now prints the sub-reason too.** It printed only the
-  stage, which is how a window came back saying `RENDER_FAILED` and nothing
-  else. Only closed-set values are shown.
-- **Navigation behaviour is unchanged.** `waitUntil`, the goto timeout, the
-  one-attempt rule, route scope, allowed hosts and resource policy were all left
-  exactly as they were — this was observability only.
-- **The re-run returned `NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`**
-  (2026-08-28). The classifier earned itself back immediately by **retiring two
-  hypotheses**: not `NAVIGATION_TIMEOUT`, so the `networkidle` mismatch proposed
-  the round before is refuted for this observation; and not
-  `BLOCKED_BY_ROUTE_POLICY`, so our own containment did not abort a main-frame
-  navigation — the proof channel was available, since production Playwright
-  exposes the frame API. The navigation threw at transport level.
-- **The branch is not exhausted: one typed local signal is still discarded.**
-  `startEgressProxy` records every decision with a closed `EgressDenialReason`
-  (`NOT_HTTPS`, `HOST_NOT_CONFIRMED`, `BLOCKED_ADDRESS`, `DNS_FAILED`,
-  `MALFORMED_TARGET`), and **nothing in `src/` or `scripts/` reads
-  `.decisions`** — the isolated fetcher closes the proxy and drops the log. Even
-  an empty log is informative: it separates "we refused it" from "the network
-  failed after we allowed it". Only the closed reason and counts are safe to
-  surface; the raw `target`, `host` and `address` are not.
-- **A checkable hypothesis it would settle:** a stale MantaRay fake-IP DNS entry
-  (`198.18.0.0/15`) surviving the tunnel going down would make the proxy deny
-  with `BLOCKED_ADDRESS` while the browser reported only a generic connection
-  failure — exactly what was observed. Unverified.
-- **That log is now surfaced, counts only.** A failed render carries a summary
-  of the proxy's decisions beside the browser's verdict — an independent
-  witness, never a replacement. Every closed reason key is always present, so
-  zero is explicit; `allowedCount` separates a proxy that permitted traffic from
-  one never consulted. The raw `target`, host, port and resolved address do not
-  travel: the summary is rebuilt key by key from the closed list and has no
-  field that could hold a string. Printed by both owner scripts. See
-  `ARCHITECTURE.md`.
-- **Fourth window, 2026-08-28: `1 denied, 1 allowed`, the denial being
-  `HOST_NOT_CONFIRMED`.** Result still
-  `NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`; nothing persisted.
-- **The stale-DNS hypothesis is refuted.** `BLOCKED_ADDRESS` 0 and `DNS_FAILED`
-  0 — named as checkable last round, checked, negative. Also not `NOT_HTTPS`,
-  not `MALFORMED_TARGET`, and not `BLOCKED_BY_ROUTE_POLICY`.
-- **"1 allowed" does not mean the connection succeeded.** The proxy records the
-  allow at POLICY-DECISION time, before `netConnect`; if the upstream connect or
-  TLS then fails, the error path destroys both sockets and records nothing. The
-  allow proves only that policy said yes — resolution happened and the address
-  was public.
-- **One CONNECT to an unconfirmed host was refused, destination not recorded and
-  not inferred.** It was **not** the main-frame navigation — that case is
-  covered by the route handler and would have surfaced as
-  `BLOCKED_BY_ROUTE_POLICY` — so something reached the proxy that
-  `context.route` did not intercept. Whether that denial caused the failure is
-  unknown and not claimed.
-- **The last blind spot is the tunnel outcome after an allowed CONNECT** —
-  connected, errored and zero-bytes are indistinguishable because the error path
-  is silent. A counts-only, host-free diagnostic would close it.
-- **And that is where the research value stops.** Four windows have produced
-  transport diagnostics and zero evidence. The page's content is still unknown,
-  and a dashboard root carrying an address-level role assignment was always
-  speculative. CORE_RULES' brake applies.
-- **`fees.pump.fun` stays unread and unclassified.** Nothing about its content
-  is known, and the address's absence from it is **not** established — failure
-  to read a source is not evidence of absence.
-- **Nothing was written by the run.** Zero Evidence, no new `sources` row,
-  Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
-  still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
-  NO_EVIDENCE_FOUND`. The extractor was never reached and no document was ever
-  handed to a model.
-- **The claim sentence is still filed only under `DESTINATION`.** Verified
-  offline: three rows carry it, all step 6, `OFFICIAL_DOCS` / `CONFIRMED` /
-  `SUPPORTS` / `DIRECT`; zero rows under `MECHANISM_SPEC`. Three windows have
-  now been spent and the model has still never seen the page.
-- The aggregator's OUTER instruction variant matched none of nineteen tested
-  method names and is recorded UNSUPPORTED. Nothing depends on it.
+Everything the proof plan justified was learned. The unresolved bridges stay
+unresolved, and **no negative conclusion is implied**: nothing here says the
+mechanism does not exist, only that ATLAS cannot establish it from what it holds.
+Full detail in `PUMP_CASE.md`, "CASE CLOSURE"; this is the bounded summary.
+
+**Documentary, established.** Four distinct fragments, all from
+`https://pump.fun/pump-token`, all `OFFICIAL_DOCS / CONFIRMED`, all filed at
+step 6 / `DESTINATION` — the buy-and-burn claim, the "Burn addresses" heading
+listing `99mRw3…` (truncated on the page; the full value came from the href) and
+`9jHrTC…`, the 50%-locked-for-a-year statement, and a claim that a record of each
+daily purchase and burn exists. That is the entire first-party corpus.
+
+**On-chain, deterministic, in standalone artifacts.** A genuine `BurnChecked` of
+the confirmed mint — 7723.746661 PUMP destroyed from the locator's own token
+account, under its own authority, balance to zero, slot `441840980`. Five slots
+earlier the same raw quantity entered that account from zero, and the quantities
+reconcile: an account-level inflow → burn continuity statement holds across
+`441840975`–`441840980`, **closed under the observed index**, which is weaker
+than complete. Within one invocation of that inflow transaction, the documented
+address paid `382202589` raw wSOL and received `7723746661` raw units of the
+confirmed mint from one counterparty — a decoded exchange, offered as CONTEXT.
+
+**Composed: nothing.** Verified at closure: `onchain_artifact_id` is **null on
+all 401 Evidence rows** and no row carries a `snapshot_ref`. The Solana work has
+never entered Evidence. The 53 rows classified `ONCHAIN_VERIFIABLE` are
+model-extracted explorer text with `entity_binding = UNVERIFIED` — some of it
+EVM Solidity for a Solana project — and establish nothing, correctly.
+
+**Component state.** The most recent result for **every one of the ten
+components is `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`.** Three
+`PARTIALLY_SUPPORTED` DESTINATION results exist from 2026-08-24 jobs
+(`TOKEN_STATE_UNQUALIFIED`) and were not reproduced by the later full-pattern
+runs. `MECHANISM_SPEC` holds 112 rows, all `SOCIAL / CLAIMED`, which establish
+nothing ever (D-074).
+
+**Two unresolved bridges, kept separate.**
+
+1. **Actor → acquisition.** No authoritative first-party statement assigns the
+   acquisition role to `99mRw3…`. Established by exhaustion across all 115
+   text-bearing columns: no single text contains both any form of the address and
+   any of `buyback`, `purchase`, `acquir…`, `treasury`, `buying`, `executes`.
+2. **Revenue → observed acquisition.** Nothing binds the revenue Pump.fun
+   describes to the specific observed acquisition. No evidence at all.
+
+**`fees.pump.fun`** is CONFIRMED and unclassified at prefix `/`, and unread —
+four windows ended in transport failures, never in a page. Its content is
+unknown, so the address's absence from it is **not** established.
 
 ## Done
 
@@ -464,50 +151,38 @@ Abbreviated PUMP position:
   classification, relationship-gated promotion, encoded-account fallback,
   `createIdempotent` lifecycle correctness, reciprocal-flow derivation.
 - The component-contract semantics of transfer facts, settled and regression-tested.
+- **Acquisition observability, in four stages**: a fetch failure names its typed
+  reason and HTTP status; a render names the stage that failed (launch,
+  navigation, data boundary, process) and its sub-reason; the isolated renderer
+  is testable offline without a live window; and the egress proxy's own decisions
+  reach the operator as counts. Each was paid for by a live window that could not
+  explain itself, and each retired at least one hypothesis on its next use.
+- **Owner route confirmation** — `confirm-source-route.ts`, unclassified only,
+  reusing the existing lifecycle. Confirming a host and classifying a page are
+  separate decisions.
 
 ## Open
 
-- The **mechanism** bridge is missing. Account-level continuity holds for one
-  26-second cycle at `441840975`–`441840980`, but nothing establishes that
-  inflow as a buyback, a market purchase or revenue-funded — and one cycle is not
-  a policy. The larger intervals stay unaccounted, and **nothing at all is
-  observed after slot `441977087`**; no persisted signature anywhere has a
-  higher slot.
-- The established burn is a standalone artifact owned by no research job, so it is
-  a chain fact and not yet Evidence. Verified offline: were it written as
-  production writes on-chain evidence, it WOULD establish `EXECUTION_EVIDENCE` —
-  at `PARTIALLY_SUPPORTED` / `INSUFFICIENT_AUTHORITY`, which is the ceiling for
-  every on-chain fact. Getting it there requires a live retrieval inside a
-  research job; there is no offline adoption path, by design.
+- **Both PUMP bridges stay unresolved** — see the closure summary above. That is
+  a legitimate research outcome, not a defect, and nothing should reopen the case
+  without new authoritative material.
 - The second burn address has one derived token account observed at zero; its
   history has never been read.
-- The Aug 23 daily record was recovered but carries no signature, address or
-  explorer identifier. That line of digging is closed.
 - Cumulative official burn totals are unverified.
-- **The one-off renderer launch failure is unexplained.** It does not reproduce
-  offline and the renderer is healthy, so it no longer blocks the documentary
-  line — but nothing establishes what caused it. If it recurs, the run will now
-  name the local fault, and `scripts/renderer-selftest.ts` distinguishes a
-  broken machine from a broken window before either is spent.
+- Nothing at all is observed after slot `441977087`; no persisted signature
+  anywhere has a higher slot.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
 ## Next research direction
 
-**Awaiting owner direction.** Step 0 ran offline and changed the picture enough
-that no new strategy should be written until the result is reviewed.
+**PUMP is closed. The next step is TVC project #2** — an unfamiliar project
+chosen to stress the parts of Pattern v1 that PUMP never reached, not to repeat
+what it already exercised. Selection criteria are in `PUMP_CASE.md`, "What the
+next case should test".
 
-What it established (`PUMP_CASE.md`, verified inventory):
-
-- A genuine `BurnChecked` was **already persisted** and nobody had looked. The
-  cheapest lesson in the case so far: read what is already stored before planning
-  to go and get it.
-- Step 1 — exhaustively reading the 25-signature window — is **rejected** for the
-  burn-after-acquisition question and was not run. That window ends AT the
-  acquisition; its other 24 signatures all precede it, so it cannot say what
-  happened afterwards. Structurally, not probabilistically.
-- The gap is now precise: forward coverage after slot `441977087`, and complete
-  interval accounting between known balance points.
-
-Not by paging signature history backward to a date, not by inspecting arbitrary
-transactions, not by counterparty-chasing.
+The single most valuable thing PUMP left untested: **whether any project can
+carry an on-chain fact all the way into Evidence and out through a component.**
+Every deterministic chain fact in this repository still lives in a standalone
+artifact, and no Evidence row references one. Until a case does that end to end,
+the on-chain half of the pipeline is unproven in production.
