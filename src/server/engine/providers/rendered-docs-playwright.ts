@@ -5,7 +5,11 @@ import {
   resolvedHostAllowed,
   subresourceAllowed,
 } from "../rendered-docs-policy";
-import { normalizeHtmlToText } from "./content-fetcher";
+import {
+  isHttpStatusCode,
+  isHttpSuccessStatus,
+  normalizeHtmlToText,
+} from "./content-fetcher";
 import { proxyChromiumArgs } from "./renderer-env";
 import { extractDocumentLinks, renderLinkAppendix } from "./document-links";
 import {
@@ -260,7 +264,12 @@ export function createPlaywrightRenderedDocsFetcher(
 
         // ONE navigation. No retry on failure — a failed render is a
         // failed render.
-        await page.goto(url, {
+        //
+        // The Response is KEPT. A browser does not throw on 403: it
+        // receives the refusal page, renders it, and reports success.
+        // Discarding this was how a server's "access denied" HTML could
+        // reach extraction dressed as the document we asked for.
+        const response = await page.goto(url, {
           timeout: limits.navigationTimeoutMs,
           waitUntil: "networkidle",
         });
@@ -274,9 +283,39 @@ export function createPlaywrightRenderedDocsFetcher(
 
         // Re-validate where we actually LANDED. A redirect chain must not
         // be able to carry the render outside the confirmed route.
+        //
+        // DELIBERATELY BEFORE the status check: landing outside the
+        // confirmed route is a containment failure, and it is the more
+        // serious statement to make about a render that did both.
         const finalUrl = page.url();
         if (!navigationAllowed(finalUrl, route.confirmedHost, route.matchedPathPrefix)) {
           throw new RenderedDocsError("FINAL_URL_OUTSIDE_ROUTE", name);
+        }
+
+        // THE STATUS OF THE FINAL MAIN-DOCUMENT NAVIGATION.
+        //
+        // Playwright follows redirects itself and returns the LAST
+        // response, so this is the status of the page actually in the
+        // browser — the same thing `page.url()` above was checked against.
+        //
+        // Trusted numerically and nowhere else: `Response.status()` and
+        // not the html, the title, the body, a header or an error string.
+        // A page is free to claim any status it likes in its own markup
+        // and none of that is read here.
+        if (response === null || response === undefined) {
+          // No response means no status to check, and unverifiable is not
+          // the same as fine.
+          throw new RenderedDocsError("NO_NAVIGATION_RESPONSE", name);
+        }
+        const status: unknown = response.status();
+        if (!isHttpStatusCode(status)) {
+          throw new RenderedDocsError("NO_NAVIGATION_RESPONSE", name);
+        }
+        // The SAME success rule the static fetcher applies, from one
+        // shared predicate, so the two transports cannot drift into
+        // disagreeing about which statuses yield a document.
+        if (!isHttpSuccessStatus(status)) {
+          throw new RenderedDocsError("HTTP_ERROR", name, null, status);
         }
 
         const html = await page.content();

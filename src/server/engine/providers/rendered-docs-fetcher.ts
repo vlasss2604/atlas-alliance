@@ -1,3 +1,4 @@
+import { isHttpStatusCode } from "./content-fetcher";
 import type { FetchedDocument } from "./types";
 
 // Stage 1 — RenderedDocsFetcher.
@@ -154,6 +155,16 @@ export const RENDERED_DOCS_FAILURE_REASONS = [
   "HOST_NOT_ALLOWED",
   "TIMEOUT",
   "TOO_LARGE",
+  // The navigation completed and the server answered with a non-success
+  // status. A BROWSER DOES NOT THROW ON 403: it receives the refusal page
+  // and renders it, so without this the renderer would hand a server's
+  // "access denied" HTML to extraction as though it were the document.
+  // Carries the trusted numeric status.
+  "HTTP_ERROR",
+  // The navigation produced no Response at all, so no status could be
+  // checked. Fail closed: unverifiable is not the same as fine, and it is
+  // a different statement from the server having refused us.
+  "NO_NAVIGATION_RESPONSE",
   // The browser itself could not be started: the module is absent, the
   // binary is missing, or the launch was refused. Distinct from every
   // page-level failure because the site is not implicated at all.
@@ -203,6 +214,8 @@ export const CHILD_REPORTABLE_RENDER_REASONS: ReadonlySet<string> = new Set<stri
   "HOST_NOT_ALLOWED",
   "TIMEOUT",
   "TOO_LARGE",
+  "HTTP_ERROR",
+  "NO_NAVIGATION_RESPONSE",
   "BROWSER_LAUNCH_FAILED",
   "RENDER_FAILED",
 ] satisfies RenderedDocsFailureReason[]);
@@ -283,16 +296,25 @@ export class RenderedDocsError extends Error {
   // closed set above.
   readonly diagnostic: BrowserLaunchDiagnostic | null;
 
+  // Present only for HTTP_ERROR. TRUSTED NUMERIC ONLY: it comes from
+  // Playwright's navigation `Response.status()`, exactly as the static
+  // path takes its own from the fetch Response — never parsed out of a
+  // message, a title, a body or any markup. A number cannot carry a URL,
+  // a header or a page, whatever the server sent.
+  readonly httpStatus: number | null;
+
   constructor(
     public readonly reason: RenderedDocsFailureReason,
     public readonly rendererName = "unknown",
     diagnostic: BrowserLaunchDiagnostic | null = null,
+    httpStatus: number | null = null,
   ) {
     super(`rendered docs retrieval failed (${reason}) via ${rendererName}`);
     this.name = "RenderedDocsError";
     // Re-checked here rather than trusted from the caller: this class is
     // the boundary, so it validates at its own edge.
     this.diagnostic = isBrowserLaunchDiagnostic(diagnostic) ? diagnostic : null;
+    this.httpStatus = isHttpStatusCode(httpStatus) ? httpStatus : null;
   }
 }
 

@@ -53,10 +53,11 @@ export type ChildRenderResponse =
   | { ok: true; document: unknown }
   | { ok: true; selfTest: true; browserVersion: string }
   // `detail` is present only for BROWSER_LAUNCH_FAILED and is always a
-  // member of the closed BROWSER_LAUNCH_DIAGNOSTICS set. Typed as string
-  // because this is the wire: the parent re-checks it against the set
-  // rather than believing the type.
-  | { ok: false; reason: string; detail?: string };
+  // member of the closed BROWSER_LAUNCH_DIAGNOSTICS set. `httpStatus` is
+  // present only for HTTP_ERROR and comes from Playwright's navigation
+  // Response. Both are typed loosely because this is the wire: the parent
+  // re-checks them rather than believing the type.
+  | { ok: false; reason: string; detail?: string; httpStatus?: number };
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -128,12 +129,13 @@ export async function runChild(): Promise<void> {
     // never a URL, never a stack. `detail` is a member of a closed
     // code-owned set or it is omitted; the class validated it on the way
     // in and the parent validates it again on the way out.
-    response =
-      e instanceof RenderedDocsError
-        ? e.diagnostic === null
-          ? { ok: false, reason: e.reason }
-          : { ok: false, reason: e.reason, detail: e.diagnostic }
-        : { ok: false, reason: "RENDER_FAILED" };
+    if (e instanceof RenderedDocsError) {
+      response = { ok: false, reason: e.reason };
+      if (e.diagnostic !== null) response.detail = e.diagnostic;
+      if (e.httpStatus !== null) response.httpStatus = e.httpStatus;
+    } else {
+      response = { ok: false, reason: "RENDER_FAILED" };
+    }
   }
   process.stdout.write(JSON.stringify(response));
 }

@@ -236,6 +236,19 @@ Abbreviated PUMP position:
   `:PROCESS_EXITED_DURING_LAUNCH`, or `:UNKNOWN_BROWSER_LAUNCH_FAILURE`. All
   three named values were observed by inducing the failure offline, not taken
   from documentation.
+- **A rendered page must now have answered with a success status.** A browser
+  does not throw on `403` — it renders the refusal page — so the renderer would
+  have handed a server's "access denied" HTML to extraction as the document.
+  `page.goto()`'s Response was being discarded although the adapter's own type
+  declared it. It is read now, and a non-success status fails closed as
+  `HTTP_ERROR` with the trusted number: `…:HTTP_ERROR:403`. Taken from
+  `Response.status()` only — never from markup, a title, a body, a header or an
+  error string. The success rule `200..299` is one shared predicate, used by the
+  static fetcher and the renderer alike. See `ARCHITECTURE.md`.
+- **Consequence for the next window.** If `pump.fun` refuses Chromium the run
+  will now say so precisely, instead of reporting a successful render of the
+  refusal page. That failure mode was named as an open risk in the prepared run
+  and is closed.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /

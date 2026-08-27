@@ -4,42 +4,35 @@
 
 ## NONE — awaiting owner direction
 
-The Chromium launch failure was investigated offline. **It does not reproduce**,
-and no speculative fix was made.
+The last correctness gap in the rendered-docs path is closed. Written up in
+`ARCHITECTURE.md`, "Rendering: two ways in, one set of gates".
 
-### What was established
+### What changed
 
-The isolated renderer is **healthy on this machine**. Driven through the
-production path — real egress proxy, real scrubbed environment, real argv-only
-spawn, real child script, real shared launch call — it starts Chromium
-`151.0.7922.34` in about 2.5–5 seconds, repeatably, well inside the 20-second
-parent deadline.
+**A rendered page must have answered with a success status.** A browser does not
+throw on `403` — it receives the refusal page, renders it, and reports success —
+so the renderer would have handed a server's "access denied" HTML to extraction
+as though it were the page we asked for. `page.goto()` returns the Response that
+says otherwise, and it was being discarded although the adapter's own type
+already declared it.
 
-Every candidate cause was tested and cleared on its own: the scrubbed
-environment, the production proxy launch arguments, the child's `stdio` with
-stderr ignored, and a `TEMP`/`TMP` pointed at a non-existent path. **No
-environment variable was added and nothing was loosened**, because nothing
-needed to be.
+It is read now. A non-success status fails closed as `HTTP_ERROR` carrying the
+trusted number, surfacing as `…:HTTP_ERROR:403`. The number comes from
+`Response.status()` and from nowhere else — never from markup, a title, a body, a
+header or an error string — so a page claiming `200 OK` in its own text changes
+nothing, and a page that merely discusses `403` is still a document.
 
-So the live failure was transient or environmental — the run was made seconds
-after the VPN tunnel was taken down — and it stays **unexplained**. It is not
-written down as understood.
+The success rule `200..299` is now **one shared predicate** used by both the
+static fetcher and the renderer. Which statuses yield a document is a property of
+HTTP, not of the transport, and two copies would eventually disagree. `204` sits
+inside that class and renders to an empty document, which cannot become evidence.
 
-### What changed, so this is never opaque again
+Redirects are unchanged: Playwright returns the last response, and the route
+check still runs first, because landing outside the confirmed route is a
+containment failure and the more serious statement. A navigation with no Response
+at all is `NO_NAVIGATION_RESPONSE` — unverifiable is not the same as fine.
 
-**A self-test.** `npx tsx scripts/renderer-selftest.ts` answers "can this
-machine start the locked-down browser?" offline, in seconds, with no
-authorization. It navigates nowhere: the self-test message carries no url, no
-confirmed host and no path prefix, so the child structurally cannot be pointed
-at anything, and the only page opened is `about:blank`.
-
-**A launch diagnostic.** A browser that fails to start now says which local
-fault it was — `…:BROWSER_LAUNCH_FAILED:EXECUTABLE_NOT_FOUND`,
-`:PROCESS_START_FAILED`, `:PROCESS_EXITED_DURING_LAUNCH`, or
-`:UNKNOWN_BROWSER_LAUNCH_FAILURE`. All three named values were observed by
-inducing the failure offline and reading what Playwright actually emitted; the
-raw message is classified once and dropped, because every real one carried an
-absolute filesystem path and two carried Chromium's whole command line.
+Nothing was relaxed, and the renderer self-test still passes offline.
 
 ### The next intended live action, unchanged
 
@@ -54,18 +47,14 @@ npx tsx scripts/alpha-acquire-url.ts \
   --project=pump_fun
 ```
 
-**Run the self-test first, in the same session.** If it fails, do not open the
-window — the outcome is already known.
+**Run `npx tsx scripts/renderer-selftest.ts` first, in the same session.** If it
+fails, do not open the window.
 
-What the last window established and this one does not change: `pump.fun`
-answers `403`, the scope gate passes, and the refusal path opens the render
-correctly. What is still untested is whether `pump.fun` serves the page to
-Chromium.
-
-One limit to hold while reading the next result: a browser served `403`
-receives a page, not an error. If `pump.fun` refuses Chromium, the run reports a
-*successful* render of the refusal page. Nothing distinguishes that from a real
-document today — known, and not changed here.
+What is established: `pump.fun` answers `403` to the static fetcher, the scope
+gate passes, and the refusal path opens the render correctly. What is still
+untested is whether `pump.fun` serves the page to Chromium — and that question
+now has an honest answer either way. The risk flagged in the prepared run, that a
+refusal to the browser would come back looking like a successful render, is gone.
 
 ### Standing boundaries
 

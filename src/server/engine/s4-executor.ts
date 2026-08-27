@@ -18,6 +18,7 @@ import type { ModelCostProfile, ModelRole } from "./model-cost-profile";
 import {
   CONTENT_FETCH_FAILURE_REASONS,
   ContentFetchError,
+  isHttpStatusCode,
   resolveContentFetcher,
 } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
@@ -379,8 +380,12 @@ function renderFailureObservation(label: string, e: unknown): string {
   // gated the same way, from its own closed set. A launch error's own
   // text can carry an absolute path and Chromium's whole command line;
   // none of it is here, only the classification.
-  if (!isBrowserLaunchDiagnostic(e.diagnostic)) return staged;
-  return `${staged}:${e.diagnostic}`;
+  if (isBrowserLaunchDiagnostic(e.diagnostic)) return `${staged}:${e.diagnostic}`;
+  // Or, when the server answered and refused, WHICH status it answered
+  // with. Same shape the static path already uses, and the same trusted
+  // source: a Response's own status, never anything parsed out of a page.
+  if (isHttpStatusCode(e.httpStatus)) return `${staged}:${e.httpStatus}`;
+  return staged;
 }
 
 function safeFailureReason(label: string, e: unknown): string {

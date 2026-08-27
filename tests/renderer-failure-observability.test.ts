@@ -600,6 +600,36 @@ describe("6. the reason reaches the owner-visible terminal path", () => {
     );
   });
 
+  it("a server that refused the BROWSER reports its trusted status to the owner", async () => {
+    // The whole point of reading page.goto()'s Response: a browser served
+    // 403 receives a page and renders it, so without the status check this
+    // run would have reported a SUCCESSFUL render of a refusal page.
+    const reason = await runWithFailingRender(
+      new RenderedDocsError("HTTP_ERROR", "isolated", null, 403),
+    );
+    expect(reason).toContain("DOCS_RENDER_AFTER_REFUSAL_FAILED:HTTP_ERROR:403");
+    // Both halves of the story in one line: the static client was refused
+    // with 403, and so was the browser.
+    expect(reason).toContain("CONTENT_FETCHER_FAILED");
+  });
+
+  it("a render with no verifiable status says so, and claims no number", async () => {
+    const reason = await runWithFailingRender(
+      new RenderedDocsError("NO_NAVIGATION_RESPONSE", "isolated"),
+    );
+    expect(reason).toContain("DOCS_RENDER_AFTER_REFUSAL_FAILED:NO_NAVIGATION_RESPONSE");
+    expect(reason).not.toMatch(/NO_NAVIGATION_RESPONSE:\d/);
+  });
+
+  it("an unrecognised status cannot be injected into the owner's line", async () => {
+    const e = new RenderedDocsError("HTTP_ERROR", "isolated");
+    Object.defineProperty(e, "httpStatus", { value: `403 ${SECRET}` });
+    const reason = await runWithFailingRender(e);
+    expect(reason).toContain("DOCS_RENDER_AFTER_REFUSAL_FAILED:HTTP_ERROR");
+    expect(reason).not.toContain(SECRET);
+    expect(reason).not.toMatch(/HTTP_ERROR:403 /);
+  });
+
   it("an unrecognised diagnostic is dropped, and the stage still stands alone", async () => {
     const e = new RenderedDocsError("BROWSER_LAUNCH_FAILED", "isolated");
     // Forced past the constructor's own check, which is exactly the case

@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import * as path from "node:path";
 
+import { isHttpStatusCode } from "./content-fetcher";
 import { startEgressProxy, type EgressProxyHandle } from "./render-egress-proxy";
 import { buildRendererEnv } from "./renderer-env";
 import {
@@ -159,14 +160,17 @@ function parseChildDocument(stdout: string): RenderedDocument {
     // read. A look-alike string is not a reason.
     const reported = (parsed as { reason?: unknown }).reason;
     if (isRenderedDocsFailureReason(reported) && CHILD_REPORTABLE_RENDER_REASONS.has(reported)) {
-      // The launch sub-reason travels the same way and is re-checked the
-      // same way: a member of its own closed set, or nothing. An
-      // unrecognised value is dropped, never passed along.
+      // The launch sub-reason and the HTTP status travel the same way and
+      // are re-checked the same way: a member of its own closed set, or an
+      // integer in 100..599, or nothing. An unrecognised value is dropped,
+      // never passed along.
       const detail = (parsed as { detail?: unknown }).detail;
+      const status = (parsed as { httpStatus?: unknown }).httpStatus;
       throw new RenderedDocsError(
         reported,
         "isolated",
         isBrowserLaunchDiagnostic(detail) ? detail : null,
+        isHttpStatusCode(status) ? status : null,
       );
     }
     throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");

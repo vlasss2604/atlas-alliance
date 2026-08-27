@@ -89,6 +89,25 @@ function coerceHttpStatus(value: number | undefined): number | null {
   return value >= 100 && value <= 599 ? value : null;
 }
 
+// EXPORTED so both acquisition transports share one rule.
+//
+// The static fetcher and the isolated renderer fetch the same documents
+// over the same protocol, and "which statuses yield a document" is a
+// property of HTTP, not of the transport. Two copies would eventually
+// disagree — and a status a browser accepted but a plain client refused
+// (or the reverse) is exactly the kind of divergence nobody notices until
+// it has already produced a wrong answer.
+export function isHttpSuccessStatus(status: number): boolean {
+  return Number.isInteger(status) && status >= 200 && status < 300;
+}
+
+// The same validation `coerceHttpStatus` performs, exposed for callers
+// that hold a status from somewhere other than a Response constructor —
+// the renderer takes one from Playwright's navigation Response.
+export function isHttpStatusCode(v: unknown): v is number {
+  return typeof v === "number" && Number.isInteger(v) && v >= 100 && v <= 599;
+}
+
 export class ContentFetchError extends Error {
   readonly httpStatus: number | null;
 
@@ -577,7 +596,7 @@ export function createContentFetcher(
 
       const raw = await fetchWithRedirects(url, resolved, isAddressBlocked);
 
-      if (raw.status < 200 || raw.status >= 300) {
+      if (!isHttpSuccessStatus(raw.status)) {
         // The status travels as a number beside the message, not inside it.
         throw new ContentFetchError(
           "HTTP_ERROR",

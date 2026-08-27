@@ -221,12 +221,30 @@ arguments — and it navigates nowhere: the self-test message carries no url, no
 confirmed host and no path prefix, so the child structurally cannot be pointed
 at anything, and the only page opened is `about:blank`.
 
-Two limits worth knowing before reading a result. A failed render is still never
-evidence and never fails the attempt, so the stage name is an observation rather
-than a verdict. And the render stage does **not** see a navigation's HTTP status
-at all: a browser served `403` receives a page, so a site refusing the renderer
-returns a successful render of its refusal page, not a failure. Nothing currently
-distinguishes that from a real document.
+**A rendered page must have answered with a success status.** A browser does not
+throw on `403` — it receives the refusal page and renders it — so `page.goto()`'s
+Response is read rather than discarded, and a non-success status fails closed as
+`HTTP_ERROR` carrying the trusted number. The status comes from
+`Response.status()` and from nowhere else: never from markup, a title, a body, a
+header or an error string, so a page claiming `200 OK` in its own text changes
+nothing, and a page that merely discusses `403` is still a document.
+
+The success rule itself — `200..299` — is **one shared predicate used by both
+transports**. Which statuses yield a document is a property of HTTP, not of the
+transport, and two copies would eventually disagree about a status one accepted
+and the other refused. `204` is inside that class and therefore renders to an
+empty document, which cannot become evidence because extraction has nothing to
+quote.
+
+Playwright follows redirects and returns the last response, so the status
+belongs to the page actually in the browser — the same one `page.url()` is
+checked against. The route check runs **first**: landing outside the confirmed
+route is a containment failure and the more serious statement about a render
+that did both. A navigation that produced no Response, or a status that is not a
+valid code, is `NO_NAVIGATION_RESPONSE` — unverifiable is not the same as fine.
+
+One limit remains: a failed render is still never evidence and never fails the
+attempt, so the stage name is an observation rather than a verdict.
 
 ## Rendering: two ways in, one set of gates
 
