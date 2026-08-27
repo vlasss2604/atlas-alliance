@@ -309,6 +309,14 @@ describe("2. a zero-burn reciprocal transaction cannot establish burn execution"
   });
 });
 
+// NOTE on what this block does and does not prove. asRow above sets
+// officiality CONFIRMED, which is NOT what production writes for an
+// on-chain fact — persistOnchainArtifactAndFacts writes CLAIMED, and
+// D-074 caps a component whose best establishing element is CLAIMED at
+// PARTIALLY_SUPPORTED. So "SUPPORTED" below isolates the live-state gate,
+// which is what this file is about; it is not a claim about the status a
+// real burn reaches in a real job. onchain-persisted-burn-evidence.test.ts
+// runs that shape against a real persisted artifact.
 describe("3. a genuine burn retains its execution support", () => {
   const { facts, outcome } = reconcileFor("EXECUTION_EVIDENCE", burnTx(), 4);
 

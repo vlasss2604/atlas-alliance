@@ -103,7 +103,64 @@ What it still does not establish: that the burned tokens came from a buyback,
 that the SOL that bought them was protocol revenue, that the published mechanism
 is what ran, the cumulative burn totals, the Aug 23 attribution, or
 circulating-supply semantics. It is also not yet Evidence — no research job owns
-it, so nothing has been reconciled against `EXECUTION_EVIDENCE`.
+it. What it WOULD reach, and why it cannot get there offline, is below.
+
+## What the burn would establish if it reached Evidence
+
+Verified offline through the real synthesizer and the real reconciler against the
+exact persisted payload — `tests/onchain-persisted-burn-evidence.test.ts` pins all
+of it. Nothing was inserted into the database and no chain read was made.
+
+The synthesizer produces **one** fact from this artifact (there is no native leg,
+so the reciprocal-flow derivation contributes nothing): `SUPPORTS`, `DIRECT`,
+`mechanismState = LIVE`, `publishedAt = null`, with a statement naming the
+signature, slot, `BurnChecked`, 7723.746661 PUMP formatted without rounding, the
+mint and the token account — and the hand-authored burn limits attached.
+
+Written as production writes on-chain evidence — class `ONCHAIN_VERIFIABLE`,
+officiality **`CLAIMED`**, `entityBinding CONFIRMED`, `fetchedAt` = the artifact's
+own `retrievedAt` — the reconciler returns:
+
+**`PARTIALLY_SUPPORTED`, reason `INSUFFICIENT_AUTHORITY`, with the burn row as the
+establishing element.**
+
+The component IS established: the row survives every gate, is returned as
+supporting, and `currentState` comes back `LIVE`. What caps it is D-074 (LOCKED) —
+officiality `CLAIMED` limits any component to `PARTIALLY_SUPPORTED`, and every
+on-chain fact is written `CLAIMED` on purpose. **`SUPPORTED` is unreachable for
+on-chain evidence**, and no configuration lifts it: `CONFIRMED` comes only from a
+human-approved `SOURCE_ROUTE` matched by hostname, and `atlas-onchain://` URIs
+have none.
+
+Two further checks: the same row with `entityBinding UNVERIFIED` establishes
+nothing (`ENTITY_NOT_CONFIRMED`), and no freshness window applies here, so a
+days-old retrieval is not stale — the temporal basis is the artifact's real
+`retrievedAt`, which means reuse can never make evidence look fresher than it is.
+
+The burn establishes step 4 and step 4 alone. Offered for any other component it
+is excluded — a fact does not drift to whichever component would find it
+convenient.
+
+## Why it is not Evidence today
+
+The artifact is `STANDALONE_STRUCTURED_OBSERVATION`: no research job, no source
+row. That is deliberate and regression-tested — *a standalone artifact gains
+nothing by existing: not Evidence, not a source class, not Proof eligibility.*
+
+It is unrepresentable rather than merely disallowed. `evidence.source_id` is NOT
+NULL, a standalone artifact has `source_id IS NULL` by CHECK constraint, and the
+only writer of on-chain Evidence requires a job and creates a fresh
+`RESEARCH_JOB`-mode artifact of its own. The conflict lookup is deliberately
+scoped by mode so a job insert can never resolve to a standalone row with
+identical content.
+
+**So the supported route to Evidence goes through a live retrieval inside a
+research job.** There is no offline adoption path, by design.
+
+One practical obstacle sits on top of that design question: the stored
+`normalized_result` is unversioned, and this artifact predates the
+`lifecycleInstructions` field. Replaying it through today's synthesizer throws.
+See `BACKLOG.md`.
 
 ## The temporal picture, and the hole in it
 

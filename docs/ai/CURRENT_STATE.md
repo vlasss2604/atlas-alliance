@@ -53,6 +53,12 @@ code-templated statements, literal artifact fragments, hand-authored
 own CORE contract. Closed exclusion-reason list. Downstream S6 assembly and S7
 claim evaluation exist.
 
+Two boundaries verified this round and now written down in `ARCHITECTURE.md`:
+on-chain evidence **cannot reach `SUPPORTED`** — D-074 caps officiality
+`CLAIMED` at `PARTIALLY_SUPPORTED`, and every on-chain fact is `CLAIMED` by
+design; and a standalone artifact **cannot become Evidence** — structurally, not
+by convention.
+
 ## Latest semantic result
 
 Reciprocal same-transaction asset flow is derived deterministically and named
@@ -115,8 +121,11 @@ Abbreviated PUMP position:
   points is unaccounted, and **nothing at all is observed after slot
   `441977087`** — no persisted signature anywhere has a higher slot.
 - The established burn is a standalone artifact owned by no research job, so it is
-  a chain fact and not yet Evidence. Nothing has been reconciled against
-  `EXECUTION_EVIDENCE`.
+  a chain fact and not yet Evidence. Verified offline: were it written as
+  production writes on-chain evidence, it WOULD establish `EXECUTION_EVIDENCE` —
+  at `PARTIALLY_SUPPORTED` / `INSUFFICIENT_AUTHORITY`, which is the ceiling for
+  every on-chain fact. Getting it there requires a live retrieval inside a
+  research job; there is no offline adoption path, by design.
 - The second burn address has one derived token account observed at zero; its
   history has never been read.
 - The Aug 23 daily record was recovered but carries no signature, address or

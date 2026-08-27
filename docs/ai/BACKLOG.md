@@ -22,6 +22,13 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   it earns its place or goes.
 - **`MAX_LOCATORS_PER_FACT = 10`** — overflow and coverage semantics are
   undefined. What does it mean when a fact has more locators than the cap?
+- **`onchain_artifacts.normalized_result` is unversioned.** The stored payload is
+  whatever the adapter produced on the day, and the row carries no contract
+  version. Verified: three of five persisted `TRANSACTION_DETAIL` rows predate
+  `lifecycleInstructions`, and replaying one through today's synthesizer throws.
+  Harmless today — nothing replays a stored artifact — and a hard precondition
+  for any future artifact-reuse path. Pinned by
+  `tests/onchain-persisted-burn-evidence.test.ts`.
 
 ### Data / migrations
 

@@ -98,6 +98,21 @@ It reconciles **one component from one pool**. It never waits for a binding to
 arrive from another component — which is why a fact's relationship label must be
 correct where the fact is authored.
 
+Two consequences worth knowing before you reason about outcomes:
+
+- **`SUPPORTED` is out of reach for on-chain evidence.** D-074 (LOCKED) caps any
+  component whose best establishing element carries officiality `CLAIMED`, and
+  every on-chain fact is written `CLAIMED` by design — a canonical chain read is
+  not the project's own published claim. The ceiling is `PARTIALLY_SUPPORTED`
+  with `INSUFFICIENT_AUTHORITY`. Officiality `CONFIRMED` comes only from a
+  human-approved `SOURCE_ROUTE` matched by hostname, and an
+  `atlas-onchain://` URI has no hostname. Established and `SUPPORTED` are not
+  the same thing.
+- **A standalone artifact cannot become Evidence.** `evidence.source_id` is NOT
+  NULL and a standalone artifact has no source row, so it is unrepresentable
+  rather than merely disallowed. Evidence is written only by
+  `persistOnchainArtifactAndFacts`, which requires a job.
+
 Downstream: `mechanism-assembler.ts` (S6) composes the chain,
 `claim-evaluator.ts` (S7) evaluates claim requirements.
 
