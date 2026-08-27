@@ -179,9 +179,18 @@ Abbreviated PUMP position:
   owned error class, and membership of the closed list the reason type is derived
   from. Message, stack, url and headers are still never surfaced. The trace enum
   is untouched, so no migration. See `ARCHITECTURE.md`.
-- **The failed Pump.fun fetch itself is not retroactively explained.** That run's
-  reason was recorded before the fix, so it still reads only
-  `CONTENT_FETCHER_FAILED:ContentFetchError`. A future attempt would say why.
+- **The blocker is identified: `pump.fun` refuses the static fetcher.** A second
+  authorized run returned `CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR` —
+  raised only after DNS resolved and the connection succeeded, so the server
+  answered with a non-2xx status. Not `BLOCKED_ADDRESS`, which also proves the
+  tunnel was genuinely off and the window genuinely open. The first run's reason
+  predates the fix and stays unknowable.
+- **Next blocker: the renderer is unreachable.** It exists for exactly this case
+  and is enabled for confirmed OFFICIAL_DOCS routes, but the render gate reads
+  the byte and text length of an ALREADY-FETCHED document — so it is an upgrade
+  path for a successful fetch, never a fallback for a refused one. Generic, not a
+  Pump.fun quirk. Adding a render-on-refusal branch is an undecided design
+  question with real cost. See `PUMP_CASE.md`.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

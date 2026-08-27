@@ -646,6 +646,60 @@ So the gap named last round is confirmed by exhaustion, not assumed: **the
 documents bind the address to burning and describe the buying, and never join
 the two.**
 
+### Second attempt: the page refuses the fetcher
+
+Job `cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, 2026-08-27T15:06:08Z, run with the
+observability fix in place. Same six trace events, same ending — but the terminal
+reason now reads:
+
+```
+CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR
+```
+
+**That single word settles what the first attempt could not.** `HTTP_ERROR` is
+raised only after DNS resolved and the connection succeeded — it is the server
+answering with a non-2xx status. So it was **not** `BLOCKED_ADDRESS`, which means
+the tunnel really was off and the live window genuinely open; not
+`DNS_RESOLUTION_FAILED`; not `TIMEOUT`; not `UNSUPPORTED_CONTENT_TYPE`.
+
+`pump.fun` refuses ATLAS's static fetcher. Nothing about the research engine is
+wrong, and nothing about the tunnel needs changing.
+
+Everything else is unchanged and verified: zero Evidence for the job, no new
+`sources` row, the Evidence table still 401 rows with nothing newer than
+2026-08-24, `MECHANISM_SPEC` still SOCIAL-only (112 rows), the ten
+OFFICIAL_DOCS DESTINATION rows untouched, and S5 returning
+`INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. `sourceOpens` stayed 0, so
+budget was never the constraint.
+
+The first attempt's reason is still unknowable — it was recorded before the fix.
+It plausibly failed the same way; that is not proven and should not be written
+as though it were.
+
+### The next blocker: the renderer cannot be reached
+
+The isolated Playwright renderer exists precisely for pages like this, is enabled
+for confirmed path-scoped OFFICIAL_DOCS routes, and a real browser is exactly
+what usually satisfies whatever refused the plain client. It cannot run here.
+
+The render gate is **static-first by construction**: it evaluates eligibility
+from `staticHtmlBytes` and `staticTextLength` of an already-fetched document,
+to detect an SPA shell worth re-reading in a browser. A static fetch that throws
+`continue`s to the next candidate and never reaches that block at all.
+
+So rendering is an **upgrade path for a successful fetch, never a fallback for a
+refused one** — and the gate has no branch for "the server refused us outright".
+That is generic, not a Pump.fun quirk: any bot-protected official-docs page is
+unreachable the same way.
+
+Whether to add a render-on-refusal fallback is a real design decision with real
+cost — a render is its own source open, and a fallback keyed on any 4xx/5xx would
+spend one on every refusal. **Not implemented, not decided.**
+
+A smaller open question alongside it: the HTTP status itself (403 vs 429 vs 404)
+lives in the exception message and is deliberately not surfaced. A status code is
+a bounded integer rather than free text, so it could join the closed allowlist —
+but that is a new decision, not a consequence of the last one.
 ### The re-extraction ran, and failed at the fetch
 
 Job `168ac103-9938-432e-bfc8-dbef29a942fa`, 2026-08-27T14:30:56Z. The scope gate
