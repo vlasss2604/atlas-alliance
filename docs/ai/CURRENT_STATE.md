@@ -206,3 +206,30 @@ non-Solana, so neither can test the on-chain path.
 **The fork: add an EVM read transport, or choose Solana projects until Pattern v1
 is mature.** No Solana TVC candidate exists in repository memory, so option two
 needs the owner to name one.
+
+**Resolved 2026-08-28: the owner named RAYDIUM / RAY buybacks**, which is on
+Solana, so the transport wall does not apply. Recorded as the **selected next
+case and an owner-supplied lead only** — nothing about its mechanism, fee split
+or published addresses is a finding, and none of it becomes one until acquired
+through the pipeline. Local state is a clean slate: no project, identity, route,
+source, job or artifact; the only `raydium` mentions anywhere are 11 SOCIAL
+Evidence rows belonging to `pump_fun` that name it as a venue.
+
+The shape is deliberately different from PUMP — fee → collection → conversion →
+**accumulation at a protocol-controlled destination, with no burn** — so it
+exercises **buyback ≠ supply reduction**, an invariant CORE_RULES states and
+nothing has ever tested.
+
+**Two owner capabilities are missing before it can start**, both the same shape
+as the gap closed for SOURCE_ROUTE:
+
+1. **`PROJECT_IDENTITY` has no supported creation path.** Nothing inserts one;
+   scripts read it and refuse without it, and S4 skips structured on-chain
+   acquisition entirely unless a confirmed identity exists — so the on-chain
+   half cannot be invoked at all.
+2. **Route classification has no supported path.** `confirm-source-route.ts`
+   assigns no `routeClass` by design, and the "separate later act" that would
+   assign `OFFICIAL_DOCS` was never built — so no documentary Evidence can be
+   admitted.
+
+Plan and pre-registered success criteria are in `CURRENT_TASK.md`.

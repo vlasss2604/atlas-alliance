@@ -27,6 +27,30 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   for any future artifact-reuse path. Pinned by
   `tests/onchain-persisted-burn-evidence.test.ts`.
 
+### Owner tooling gaps — BLOCKING for the next case
+
+Both are the same shape as the `SOURCE_ROUTE` gap already closed: a decision the
+architecture requires a human to make, with no controlled auditable tool to make
+it. Neither is a defect in research behaviour; both stop project #2 before it
+starts.
+
+- **`PROJECT_IDENTITY` confirmation has no supported path** — *BLOCKING.*
+  Nothing in `src/` or `scripts/` inserts one. `onchain-account-check.ts` and
+  `onchain-derive-token-accounts.ts` read it and refuse without it, and S4 skips
+  structured on-chain acquisition unless the project has a confirmed identity.
+  Smallest fix: one owner script mirroring `confirm-source-route.ts` — insert as
+  OBSERVED, reuse `promoteProjectMemoryItem`, validate chain and address shape at
+  the edge, refuse a duplicate ACTIVE identity, print what `resolveProjectIdentity`
+  then returns.
+- **Route classification has no supported path** — *BLOCKING.*
+  `confirm-source-route.ts` deliberately assigns no `routeClass`; the separate
+  later act that assigns `OFFICIAL_DOCS` was never built. Without it the
+  acquisition scope gate refuses and no documentary Evidence is admissible.
+  Smallest fix: a second owner script that classifies an **already ACTIVE,
+  unclassified** route, refusing to invent one — and it must respect the
+  overlap and inheritance hazards already documented, since adding a classified
+  row is exactly what can null a neighbouring route's matched prefix.
+
 ### Chain coverage
 
 - **`SUPPORTED_CHAINS` promises more than the transport delivers** —
