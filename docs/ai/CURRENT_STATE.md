@@ -142,9 +142,17 @@ Abbreviated PUMP position:
   raw units of the confirmed mint from the same counterparty. Account roles were
   never read from array position; the ordering contract is not available locally.
 - **It is still CONTEXT and establishes no component.** An exchange is an economic
-  fact about two parties, not evidence that a published mechanism ran. Buyback,
-  revenue funding, market-wide purchase and policy remain separate bridges, none
-  of them crossed. The reciprocal movement facts are unchanged beside it.
+  fact about two parties, not evidence that a published mechanism ran.
+- **Buyback is NOT established, and the missing piece is evidential, not just
+  architectural.** The documents bind `99mRw3…` to the BURN role — it is
+  published under the heading "Burn addresses" — and describe the mechanism in a
+  sentence that names no address. Nothing binds the address to the ACQUISITION
+  step. Concluding buyback from "the documents call it the burn address" plus
+  "it bought" is affirming the consequent. See `PUMP_CASE.md`.
+- **Nothing can be composed today in any case.** Zero Evidence rows reference any
+  on-chain artifact — the Solana work has never entered Evidence — and S6 carries
+  no verdict, proven or confidence field by design (D-103). Revenue funding is a
+  third, wholly separate bridge with no evidence at all.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

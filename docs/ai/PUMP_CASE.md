@@ -610,6 +610,79 @@ coverage PARTIAL, zero signature-like, zero address-like, zero explorer URLs. Th
 dated record exists and carries no on-chain identifier. **That line of digging is
 closed.**
 
+## Mechanism binding: what the documents actually bind
+
+Three OFFICIAL_DOCS Evidence rows exist for this case, all officiality
+**CONFIRMED**, all `SUPPORTS` + `DIRECT`, and all filed at **step 6 /
+DESTINATION**. Quoting fragments, not summaries — a summary is a model
+restatement, the fragment is the document's own words:
+
+| evidence | fragment |
+|---|---|
+| `082b505f-…` | "Half of every dollar Pump.fun earns buys $PUMP on the open market, then burns it forever." |
+| `7fbdba56-…` | "Burn addresses / 99mRw3…pm4F3c / 9jHrTC…6KVCXM" |
+| `e929d144-…` | same heading and the same two addresses |
+
+Both burn addresses are CONFIRMED documentary locators on those rows.
+
+### The bridge that exists, and the one that does not
+
+**Exists — actor ↔ burn role.** The project's own documentation publishes
+`99mRw3…` under the heading "Burn addresses". That binds the address to the
+project's published burn mechanism, at destination-role level. It is why this
+sequence is more than an anonymous acquisition followed by a destruction.
+
+**Does not exist — actor ↔ acquisition.** No documentary statement says this
+address buys, or that purchases it makes are the protocol's. The claim sentence
+describes the mechanism and **names no address**; the locators attached to that
+row mean those addresses appear literally somewhere in the DOCUMENT, which is
+what the locator validator checks — not that the sentence names them.
+
+So joining "the documents call it the burn address" to "it bought" in order to
+reach "the protocol bought back" is affirming the consequent. *The mechanism
+burns at X* does not entail *everything X does is the mechanism*.
+
+One further nuance worth keeping: the documented role is a burn DESTINATION —
+somewhere tokens end up. The chain shows the address itself acquiring. That is
+not a contradiction, and it is not what the label asserts either.
+
+### The strongest permitted statement
+
+> The address Pump.fun's official documentation publishes as a burn address
+> executed, in two adjacent transactions, an exchange acquiring 7,723,746,661 raw
+> units of the confirmed mint, and then a burn destroying exactly that quantity,
+> returning its balance to zero.
+
+Every term there is either a decoded chain fact or an attributed documentary
+claim. **Not** buyback, **not** revenue-funded, **not** open-market purchase,
+**not** execution of the published mechanism, and not a pattern — one cycle.
+
+### Where reconciliation actually stands
+
+Across the 22 persisted research jobs: `DESTINATION` reaches
+`PARTIALLY_SUPPORTED` with `TOKEN_STATE_UNQUALIFIED` (3 jobs) and nothing
+higher; `EXECUTION_EVIDENCE` is `INSUFFICIENT_EVIDENCE` /
+`MISSING_EXECUTION_EVIDENCE` everywhere; `MECHANISM_SPEC` is
+`INSUFFICIENT_EVIDENCE` in all 17 — the claim sentence is filed under
+DESTINATION, not under the component that would carry a specification.
+
+And the decisive practical fact: **zero Evidence rows reference any on-chain
+artifact.** The 53 ONCHAIN_VERIFIABLE rows are Etherscan pages belonging to
+other projects entirely. The whole Solana body of work — exchange, burn,
+reciprocal flows, preservation — lives in standalone artifacts and has never
+entered Evidence, so there is nothing on the chain side for any composition to
+reach.
+
+### Two separate blockers, in order
+
+1. **Evidential.** The actor ↔ acquisition bridge does not exist in any held
+   evidence. No composition engine, however good, could conclude buyback from
+   what is held.
+2. **Architectural.** Even the parts that ARE held cannot be combined: the chain
+   facts are not Evidence (standalone-artifact adoption remains undecided), and
+   S6 deliberately carries no verdict, proven or confidence field at all — D-103,
+   enforced by its own regression test. S6 assembles structure and names gaps; it
+   is designed not to make this leap.
 ## Not yet proven
 
 The reciprocal transaction is a buyback · the SOL came from protocol revenue ·

@@ -4,36 +4,41 @@
 
 ## NONE — awaiting owner direction
 
-The preserved blobs are decoded. **An asset exchange is now established** for the
-transaction at slot `441840975`. Details in `PUMP_CASE.md`, "The exchange,
-decoded".
+The mechanism-binding question is answered: **buyback is not established, and the
+gap is evidential before it is architectural.** Details in `PUMP_CASE.md`,
+"Mechanism binding: what the documents actually bind". No code changed.
 
-### What is established
+### What the documents bind
 
-> The transaction deterministically executes an asset exchange in which the
-> documented address's SOL/wSOL side is used and confirmed PUMP is received.
+`99mRw3…` is published by Pump.fun under the heading "Burn addresses" — that
+binds the actor to the BURN role, at CONFIRMED officiality. The mechanism claim
+("Half of every dollar Pump.fun earns buys $PUMP on the open market, then burns
+it forever") **names no address**.
 
-Within outer instruction 5: `382202589` raw wSOL paid, `7723746661` raw units of
-the confirmed mint received, same counterparty on both sides. The venue method
-reproduces `sha256("global:swap_v2")[0..8]` exactly; an event in the same
-invocation states both mints and both amounts, each corroborated against a
-transfer the transaction independently records.
+So nothing binds the address to the ACQUISITION step. Reaching "buyback" from
+"the documents call it the burn address" plus "it bought" is affirming the
+consequent.
 
-The fact is **CONTEXT** and establishes no component.
+### The strongest permitted statement
 
-### What is deliberately still open
+> The address Pump.fun's official documentation publishes as a burn address
+> executed, in two adjacent transactions, an exchange acquiring 7,723,746,661 raw
+> units of the confirmed mint, and then a burn destroying exactly that quantity,
+> returning its balance to zero.
 
-Buyback, revenue funding, published-mechanism execution, market-wide purchase and
-policy are all separate bridges, none crossed. One exchange is not a pattern. The
-acquisition → burn link remains account-level quantity continuity only, under the
-observed-index ceiling.
+### Three bridges, none crossed
 
-The aggregator's outer instruction variant is UNSUPPORTED — it matched none of
-nineteen tested method names, and nothing depends on it.
+1. **Actor → acquisition.** Missing evidentially. Would need a documentary or
+   governance statement that purchases by this address are the protocol's.
+2. **Revenue → acquisition.** Missing entirely; nothing observed touches the
+   source of the lamports.
+3. **Composition.** Blocked anyway: zero Evidence rows reference any on-chain
+   artifact, and S6 carries no verdict field by design (D-103).
 
 ### Standing boundaries
 
 - No live calls without separate authorization.
-- Do not call the exchange a buyback, a purchase, or a mechanism execution.
-- Do not connect this cycle to the later acquisition at slot `441977087`.
-- Do not broaden the decoder to general Jupiter or Raydium support.
+- Do not call this a buyback, revenue-funded, or execution of the published
+  mechanism.
+- Do not treat one cycle as a pattern, and do not claim cumulative totals, Aug 23
+  attribution, or supply reduction beyond the decoded burn.
