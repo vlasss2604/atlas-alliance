@@ -105,6 +105,88 @@ is what ran, the cumulative burn totals, the Aug 23 attribution, or
 circulating-supply semantics. It is also not yet Evidence — no research job owns
 it. What it WOULD reach, and why it cannot get there offline, is below.
 
+## The burn's own interval is already complete
+
+Verified offline from persisted rows only. No RPC call was made and none is
+needed for what follows.
+
+### The window around the burn
+
+Artifact `cdddfcc1-c5d0-466a-8f7f-2df0757680e5` — `SIGNATURES_FOR_ADDRESS` on
+`9Wtcf…`, `limit 10`, returned 10, slots `441840911`–`441840980`, 26 seconds,
+every row `err = false` and `binding_status = CONFIRMED`. The burn at
+`441840980` is the **newest** signature in it; nothing in the window is later.
+
+Two of the ten signatures already have `TRANSACTION_DETAIL` artifacts. They are
+the two newest, and they are adjacent:
+
+| slot | what the persisted detail shows for `9Wtcf…` |
+|---|---|
+| `441840975` | pre **0** → post **7723746661**, via one inner `transferChecked` of the confirmed mint, `amountRaw 7723746661`, into `9Wtcf…`. Zero burns. |
+| `441840980` | pre **7723746661** → post **0**, via `BurnChecked`, `amountRaw 7723746661`, authority `99mRw3…`. |
+
+The window lists **no signature between those two slots**. The quantities
+reconcile exactly: `+7723746661` in, `−7723746661` destroyed, and both outer
+balances are zero.
+
+That transaction was read twice (artifacts `bfb959f1-…` and `1c9f3afd-…`, the
+second carrying `lifecycleInstructions`). Both agree on the balances and the
+transfer — an unplanned but welcome consistency check.
+
+### The continuity statement this supports
+
+> Across the interval bounded by the transaction at slot `441840975` and the
+> transaction at slot `441840980`, token account `9Wtcf…` held zero units of the
+> confirmed mint at both ends, `7723746661` raw units entered it, `7723746661`
+> raw units were destroyed from it by a decoded `BurnChecked`, and no other
+> transaction touched the account in between.
+
+This is **account-level quantity continuity over a complete interval** — the
+condition `CORE_RULES.md` names. It never says "the same tokens"; fungible units
+have no individual identity and none is claimed. It says that everything which
+entered was destroyed, and that nothing else moved.
+
+**The load-bearing premise, stated rather than buried:** completeness rests on
+`getSignaturesForAddress` listing every transaction that touched the account in
+that range. A transaction mutating a token account must carry it as a writable
+account, so it is listed. Whether that index covers addresses loaded through
+address-lookup tables in every provider implementation is not something an
+offline inventory can verify, and it is not asserted here.
+
+### What it is not
+
+Not a buyback, purchase, swap, market buy or revenue-funded acquisition. The
+inflow is a decoded transfer and nothing more; who `48xDcrnn…` and `45ssPkUQ…`
+are, and what funded them, is unestablished and out of scope. Economic
+interpretation is a separate question with separate evidence.
+
+Not a pattern, a rate or a policy — one cycle observed in a 26-second window
+supports no claim about how often this happens.
+
+Not connected to the later acquisition at slot `441977087`. That is a different
+cycle, and this interval says nothing about it.
+
+Not yet Evidence: both artifacts are standalone, so nothing has been reconciled.
+
+### What remains unknown before the window
+
+Everything before slot `441840911`: how the account came to be in whatever state
+it was in, whether earlier inflow-and-burn cycles occurred, and when the account
+was created. There is also a boundary ambiguity at `441840911` itself — the
+window was saturated at its limit of 10, so a further transaction at that same
+slot could have been cut off. The guaranteed-complete region is therefore
+everything strictly after the oldest returned signature.
+
+### Cost of characterizing the rest of the window
+
+Eight signatures have no `TRANSACTION_DETAIL` artifact, none of them failed, so
+**eight** bounded RPC reads would characterize the whole window.
+
+They are not needed for the statement above. The pre-balance at `441840975` is
+zero, so whatever those eight transactions did, they left the account empty and
+cannot bear on this burn's accounting. Spending them would answer a different
+question — whether the cycle recurs — which ten signatures cannot answer anyway.
+
 ## What the burn would establish if it reached Evidence
 
 Verified offline through the real synthesizer and the real reconciler against the
@@ -185,8 +267,11 @@ different cycles, and pairing them would be inventing a link.
 anywhere has a higher slot. So what became of the 17,509.274333 PUMP is entirely
 unrecorded here.
 
-Every interval between the observed points is unaccounted. The endpoints are
-suggestive — fill, burn to zero, fill again — and suggestive is not established.
+One interval is now fully accounted: slots `441840975`–`441840980`, where the
+inflow and the burn sit adjacent with nothing between them (see above). The
+others — 342,044 slots before the burn, 136,107 after it, and everything past
+`441977087` — remain unaccounted. Those endpoints are suggestive, and suggestive
+is not established.
 
 ## Established on-chain observations
 
@@ -419,11 +504,16 @@ transaction between two known balance points were deterministically accounted fo
 what entered and what left would reconcile as quantities. The bridge holds on
 completeness of the interval, not on identity of the units.
 
-What is missing here is exactly that completeness. Every interval between the
-observed points is unaccounted — 342,044 slots before the burn, 136,107 after it,
-and everything after slot `441977087`. Two suggestive endpoints with a hole
-between them establish nothing about the hole. That is the honest statement of the
-gap, and it names what would close it.
+One such interval now exists, and it needed no further chain read: slots
+`441840975`–`441840980` are complete, and inflow and destruction reconcile
+exactly across them. That is a genuine inflow → burn continuity statement at
+account level, bounded to 26 seconds and one cycle.
+
+What it is not is the claimed MECHANISM. The inflow is a transfer; nothing
+establishes it as a buyback, a market purchase or revenue-funded, and one cycle
+is not a policy. The larger intervals stay unaccounted — 342,044 slots before the
+burn, 136,107 after it, and everything past slot `441977087`. Two suggestive
+endpoints with a hole between them still establish nothing about the hole.
 
 ### Reporting the sample honestly
 

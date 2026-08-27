@@ -100,6 +100,13 @@ Abbreviated PUMP position:
 - **A genuine `BurnChecked` of the confirmed mint is established as a chain
   fact**: 7723.746661 PUMP destroyed from the locator's own token account, under
   the locator's own authority, balance to zero, at slot `441840980`.
+- **That burn's own interval is complete.** The transaction five slots earlier
+  moved exactly the same raw quantity INTO the same account from a balance of
+  zero, the window lists nothing between them, and the quantities reconcile. An
+  account-level inflow → burn continuity statement holds across
+  `441840975`–`441840980` — established from persisted rows, with no further
+  chain read. The inflow is a transfer and nothing more: not a buyback, not a
+  purchase, not revenue-funded, and one cycle is not a policy.
 - A separate transaction at slot `441977087` contains an exact reciprocal
   SOL/PUMP flow and zero burns. It is **later** than the burn, so the two are
   different cycles.
@@ -116,10 +123,12 @@ Abbreviated PUMP position:
 
 ## Open
 
-- The **acquisition → burn bridge** for PUMP is missing. A burn exists and an
-  acquisition exists; nothing connects them. Every interval between the observed
-  points is unaccounted, and **nothing at all is observed after slot
-  `441977087`** — no persisted signature anywhere has a higher slot.
+- The **mechanism** bridge is missing. Account-level continuity holds for one
+  26-second cycle at `441840975`–`441840980`, but nothing establishes that
+  inflow as a buyback, a market purchase or revenue-funded — and one cycle is not
+  a policy. The larger intervals stay unaccounted, and **nothing at all is
+  observed after slot `441977087`**; no persisted signature anywhere has a
+  higher slot.
 - The established burn is a standalone artifact owned by no research job, so it is
   a chain fact and not yet Evidence. Verified offline: were it written as
   production writes on-chain evidence, it WOULD establish `EXECUTION_EVIDENCE` —
