@@ -4,42 +4,39 @@
 
 ## NONE — awaiting owner direction
 
-The MECHANISM_SPEC re-extraction is **prepared and gated, not run**. MantaRay is
-up, so both `pump.fun` and `api.anthropic.com` resolve into `198.18.0.0/15` and
-the fetch and the model call would both be SSRF-blocked. No semantic conclusion
-can be drawn about whether the current pipeline files the statement correctly.
+The bounded MECHANISM_SPEC re-extraction ran and **failed at the fetch**. The
+question it was meant to answer is still open: the model never saw the page.
+Details in `PUMP_CASE.md`, "The re-extraction ran, and failed at the fetch".
 
-Details and the full pre-flight in `PUMP_CASE.md`, "The supported re-extraction
-path, prepared and gated offline".
+### What the run did and did not do
 
-### Ready to run, in a tunnel-off window
+Job `168ac103-…` passed the scope gate (CONFIRMED / OFFICIAL_DOCS, prefix
+`/pump-token`), then `FETCH_FAILED / PROVIDER_ERROR` with `sourceOpens 0`. Zero
+Evidence rows, no `sources` row, MECHANISM_SPEC unchanged at SOCIAL-only, S5
+`INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. DESTINATION untouched, as instructed.
 
-```
-npx tsx scripts/alpha-acquire-url.ts \
-  --url=https://pump.fun/pump-token \
-  --component=MECHANISM_SPEC \
-  --step=3 \
-  --actor=owner \
-  --project=pump_fun
-```
+### The finding worth acting on
 
-Footprint: at most two source opens against `pump.fun` (static fetch, plus one
-isolated render if that gate opens) and **one** Anthropic call. No search query
-is issued and no query model is called.
+Fetch-failure observability is now a **proven** defect. `ContentFetchError`
+carries a typed reason from a closed eleven-value enum, but the trace hardcodes
+`PROVIDER_ERROR` and `safeFailureReason` keeps only the exception class name. So a
+spent live window cannot distinguish "the site refused the fetcher" from "the
+tunnel was still up and the window never opened".
 
-Every other gate was verified offline and passes — `internal_alpha_enabled`, the
-API key, the live allowlist, the extractor model, an active topic, and the scope
-gate at CONFIRMED / OFFICIAL_DOCS.
+The smallest generic fix is identified and **not implemented**: append the typed
+reason only when the error exposes one from a closed code-owned enum. It modifies
+a security-motivated boundary — the current design exists because a fetch error's
+*message* can carry credentials — so it wants explicit approval. No migration
+needed.
 
-### After it runs
+### Before any retry of the extraction
 
-Verify from persisted data only: source class, officiality, component,
-relationship/directness, exact fragment, documentary provenance, and whether S5
-now reconciles MECHANISM_SPEC differently. Do not re-run DESTINATION to improve
-it, and do not edit the old rows.
+Fixing observability first is worth more than another blind attempt, because a
+second failure would be equally unreadable.
 
 ### Standing boundaries
 
 - No live calls without a separate authorized window; no retries.
 - Never relax safe-http or SSRF to accommodate the tunnel.
+- Do not edit or re-run the old DESTINATION rows.
 - This task does not touch the actor → acquisition bridge.

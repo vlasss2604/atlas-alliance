@@ -167,11 +167,18 @@ Abbreviated PUMP position:
   The cost: all three PARTIALLY_SUPPORTED DESTINATION results rest on sets where
   only one of three or four rows is really destination evidence. Remedy is
   re-extraction, not row edits. No code changed. See `PUMP_CASE.md`.
-- **The re-extraction is prepared but not run.** `scripts/alpha-acquire-url.ts`
-  is the bounded supported path; every gate it checks passes offline, including
-  the scope gate (CONFIRMED / OFFICIAL_DOCS). It needs a tunnel-off window:
-  `pump.fun` and `api.anthropic.com` both resolve into 198.18.0.0/15 today,
-  so fetch and model call would both be SSRF-blocked. Command in `PUMP_CASE.md`.
+- **The re-extraction ran and failed at the fetch.** Job `168ac103-…` passed the
+  scope gate, then `FETCH_FAILED / PROVIDER_ERROR` with `sourceOpens 0`.
+  Zero Evidence, no source row, MECHANISM_SPEC unchanged (SOCIAL only), S5
+  `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. DESTINATION untouched. Whether
+  the pipeline would file the sentence correctly is **still unknown** — the model
+  never saw the page.
+- **Fetch-failure observability is a proven defect now, not a theoretical one.**
+  `ContentFetchError` carries a typed reason from a closed enum; the trace
+  hardcodes `PROVIDER_ERROR` and `safeFailureReason` keeps only the class name.
+  So a spent live window cannot distinguish "the site refused us" from "the
+  tunnel was still up". Smallest fix identified, not implemented — it touches a
+  security-motivated boundary. See `PUMP_CASE.md` and `BACKLOG.md`.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

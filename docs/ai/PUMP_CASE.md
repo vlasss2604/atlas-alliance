@@ -646,6 +646,59 @@ So the gap named last round is confirmed by exhaustion, not assumed: **the
 documents bind the address to burning and describe the buying, and never join
 the two.**
 
+### The re-extraction ran, and failed at the fetch
+
+Job `168ac103-9938-432e-bfc8-dbef29a942fa`, 2026-08-27T14:30:56Z. The scope gate
+passed exactly as predicted — officiality CONFIRMED, routeClass OFFICIAL_DOCS,
+matched prefix `/pump-token`. Then the fetch failed.
+
+Six trace events, and they stop early: query proposed (fixture), search executed
+(fixture), candidate returned, `FETCH_ATTEMPTED`, `FETCH_FAILED /
+`PROVIDER_ERROR`. Spend was `searchQueries 1, sourceOpens 0` — the fetch
+failed before a source was even opened.
+
+Consequences, all verified: **zero** Evidence rows for the job, no `sources`
+row created, the Evidence table still at 401 rows with nothing newer than
+2026-08-24, `MECHANISM_SPEC` still holding only SOCIAL/CLAIMED evidence (112
+rows), and S5 returning `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. The
+DESTINATION rows were not touched.
+
+**So the question the run was meant to answer is still open.** Whether the
+current pipeline files that sentence into MECHANISM_SPEC is unknown: the model
+was never given the page.
+
+### The observability defect, now proven at real cost
+
+The run reported `CONTENT_FETCHER_FAILED:ContentFetchError` and the trace
+recorded `PROVIDER_ERROR`. Neither says **why**, and the difference matters:
+`HTTP_ERROR` would mean the site refused the fetcher, `BLOCKED_ADDRESS` would
+mean the tunnel was still up and the window never actually opened, `TIMEOUT` and
+`UNSUPPORTED_CONTENT_TYPE` would each imply something different again. Each
+points at a different next action, and an owner-authorized live window was spent
+without being able to tell them apart.
+
+The information exists and is thrown away. `ContentFetchError` carries a typed
+`reason` from a **closed, code-authored** enum of eleven values. Two places
+discard it:
+
+- `s4-executor.ts` hardcodes `reasonCode: "PROVIDER_ERROR"` on every fetch
+  failure, so the trace cannot distinguish any of them.
+- `safeFailureReason()` reduces the exception to its CLASS NAME before anyone
+  sees it, so `ContentFetchError.reason` never escapes the fetcher.
+
+**The second one is deliberate and its reasoning is sound**: a fetch error's
+`message` can embed a credential-bearing URL or an Authorization header
+verbatim, which the code notes is confirmed reproducible. But that argument is
+about `message`. The `reason` enum is code-authored and structurally
+incapable of carrying provider text, so surfacing it leaks nothing.
+
+Smallest generic fix, **not implemented** — it modifies a security-motivated
+boundary and deserves explicit approval: have `safeFailureReason` append a
+typed reason when, and only when, the error exposes one from a closed code-owned
+enum, giving `CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS`. No
+database enum change and no migration — that string already flows to
+`termination_reason` and to owner-script output. Widening the trace's
+`reason_code` enum instead would need a migration and is the larger option.
 ### The supported re-extraction path, prepared and gated offline
 
 The bounded tool for this is `scripts/alpha-acquire-url.ts`: one component, one
