@@ -226,6 +226,99 @@ zero, so whatever those eight transactions did, they left the account empty and
 cannot bear on this burn's accounting. Spending them would answer a different
 question — whether the cycle recurs — which ten signatures cannot answer anyway.
 
+## The inflow transaction, and the fact it does not produce
+
+Artifact `1c9f3afd-f02f-4c04-a394-2aa78d0537c3` (and its earlier twin
+`bfb959f1-…`, same raw response, taken before `lifecycleInstructions` existed —
+use the former), signature `4eMRNdm…`, slot `441840975`, block time
+2026-08-26T09:50:24Z, succeeded, **zero burns**. Both are standalone artifacts.
+
+### The legs, all of them
+
+| leg | asset | amount (raw) | from | to |
+|---|---|---|---|---|
+| System `transfer` | native SOL | `382585174` | `99mRw3…` | `Dnpwdpj…` |
+| `transferChecked` | wSOL | `382202589` | `Dnpwdpj…` (authority `99mRw3…`) | `A5VBGEV5…` |
+| `transfer` | wSOL | `382585` | `Dnpwdpj…` (authority `99mRw3…`) | `2oL6my4Q…` |
+| `transferChecked` | **confirmed mint** | `7723746661` | `48xDcrnn…` (authority `45ssPkUQ…`) | `9Wtcf…` |
+
+`Dnpwdpj…` is created (`createIdempotent`, `createAccount`,
+`initializeAccount3` naming owner `99mRw3…`), funded, `syncNative`d, spent and
+`closeAccount`d — all inside this one transaction.
+
+Two exact reconciliations, computed rather than eyeballed:
+
+- `382202589 + 382585 = 382585174` — every lamport delivered to the wrapper
+  leaves it again in the same transaction.
+- `+7723746661` into `9Wtcf…` and `−7723746661` out of `48xDcrnn…`.
+
+### Ownership, from balance metadata
+
+`9Wtcf…` → `99mRw3…` · `48xDcrnn…` → `45ssPkUQ…` · `A5VBGEV5…` → `45ssPkUQ…` ·
+`2oL6my4Q…` → `7iWnBRRh…`.
+
+So the counterparty that sends the project's token, `45ssPkUQ…`, is the same
+party that receives the larger wSOL amount. The smaller wSOL amount goes to a
+third owner; what that is for is not established and is not guessed at here.
+
+`Dnpwdpj…` appears in **no** balance metadata — it did not exist before the
+transaction and did not survive it. Its owner is known only from the lifecycle
+instruction that initialized it.
+
+### Yes, there is a reciprocal shape — and ATLAS cannot see it
+
+Read by a person: the documented address pays out native SOL and a
+counterparty's account pays in the project's token, in one successful
+transaction, with the same counterparty on both sides.
+
+Read by `deriveReciprocalAssetFlows`: **nothing**. Verified, not assumed —
+`tests/onchain-persisted-inflow-shape.test.ts` runs the real function and the
+real synthesizer over this exact payload and gets an empty array from both.
+
+The derivation looks for a native transfer whose destination is a token account
+owned by the **counterparty**. Here the destination is a wrapper owned by the
+**payer**, and the counterparty is reached one hop later. Two things stop it:
+the wrapper's ownership cannot be read from balance metadata, so the leg is
+dropped before any pairing; and the shape is `A → A's own wrapper → C`, not
+`A → C`.
+
+**Consequence:** the single most informative acquisition-side transaction in this
+case currently yields **no fact at all** — no burn, no derivable flow, nothing for
+any component. Exactly the failure commit `9bc4aba` was written to fix, in a
+different shape.
+
+**The gap is generic, not PUMP-specific.** Wrapping SOL through a transient
+account is the ordinary way to pay with SOL down a token-program path; any
+project doing it produces this blind spot. Closing it means resolving a
+transient account's owner from its own `initializeAccount3`/`createIdempotent`
+instruction, and admitting a second pairing shape. That relaxes a deliberate
+rule — *ownership comes from the RPC, not from inference* — so it is an owner
+decision, not a patch. Not implemented.
+
+### Connection to the burn — quantity and account only
+
+`7723746661` raw units entered `9Wtcf…` at slot `441840975` from a balance of
+zero; `7723746661` raw units were destroyed from `9Wtcf…` at slot `441840980`,
+returning it to zero; the observed window lists nothing further involving the
+account between those slots.
+
+Never "the same tokens". The claim is account-level quantity continuity, and it
+carries the coverage ceiling recorded above: *nothing further was listed* is not
+*nothing else happened*.
+
+### What it still cannot prove
+
+Not a buyback. Not revenue funding — what funded `99mRw3…`'s lamports is outside
+this transaction, and no inbound native leg to that address appears anywhere in
+it. Not a market purchase. Not causality: the two directions are recorded as
+co-occurring in one transaction and nothing establishes that either caused the
+other, nor that they were exchanged for one another.
+
+The programs invoked — including `JUP6LkbZ…` and `CAMMCzo5…` — are recorded as
+opaque ids on purpose. Decoding what a program does is a separate, separately
+authorized step, and it is precisely the step that would license the words
+"swap" or "market purchase". One transaction is also not a policy.
+
 ## What the burn would establish if it reached Evidence
 
 Verified offline through the real synthesizer and the real reconciler against the

@@ -4,37 +4,42 @@
 
 ## NONE — awaiting owner direction
 
-The signature-coverage contract check is done, offline. No production code
-changed; the correction was to wording that had outrun its evidence.
+The inflow transaction at slot `441840975` has been inspected offline. No RPC, no
+production change. Findings in `PUMP_CASE.md`, "The inflow transaction, and the
+fact it does not produce", pinned by
+`tests/onchain-persisted-inflow-shape.test.ts`.
 
 ### What it found
 
-ATLAS has **no contract** for what the RPC address-signature index covers. There
-is no Solana SDK in the tree, address lookup tables are modelled nowhere
-(`meta.loadedAddresses` and `message.addressTableLookups` are unread), and the
-account-key schema keeps only `pubkey`, discarding the `source` field that would
-say whether an address arrived via a lookup table.
+The transaction really does carry a reciprocal shape — the documented address
+pays out `382585174` lamports, the counterparty `45ssPkUQ…` pays in `7723746661`
+raw units of the confirmed mint, one successful transaction, both sides
+reconciling exactly.
 
-So "no other transaction touched the account" was a census claim resting on an
-unverified premise. The correct, weaker statement — *nothing further was listed
-for that range by the observed window* — is what the data supports, and it still
-carries the burn cycle's quantity reconciliation.
+**ATLAS derives nothing from it.** The payment routes through a transient
+wrapped-SOL account the payer creates, funds, spends and closes in the same
+transaction; that account is in no balance metadata, so its owner is unresolvable
+and the native leg is dropped before pairing. No burn plus no derivable flow means
+no fact for any component. The case's most informative acquisition-side
+transaction is invisible to the Evidence path.
 
-No production path relied on the stronger reading: windows are treated as
-deterministic sampling, and the signature fact is CONTEXT-only. Details in
-`PUMP_CASE.md`, "Why 'complete' is the wrong word here"; the generic rule is in
-`CORE_RULES.md`, "An index is not a census".
+### The open decision, for the owner
 
-### Flagged, not fixed
+Closing that gap is generic work — wrap-then-pay is the ordinary way to spend SOL
+down a token-program path, so this blind spot is not PUMP's. It would mean
+resolving a transient account's owner from its own `initializeAccount3` /
+`createIdempotent` instruction, and admitting a second pairing shape,
+`A → A's own wrapper → C`.
 
-The `SIGNATURES_FOR_ADDRESS` fact statement reads "Address X has N on-chain
-transaction(s) in the observed window", which phrases an index reading as a
-count. It establishes nothing (CONTEXT, with its own limits attached), so it was
-left alone under this round's no-production-change rule. Worth a decision.
+That relaxes a deliberate rule — ownership comes from the RPC, never from
+inference — so it is a decision, not a patch. **Not implemented.** Nothing should
+be built here without approval.
 
 ### Standing boundaries
 
 - No live calls without separate authorization.
 - No paging, no signatures outside a persisted window, no counterparty-chasing.
-- Do not call the inflow a buyback, purchase, swap or revenue-funded acquisition.
+- Do not decode program ids; that is a separate authorized step and it is the one
+  that would license "swap" or "market purchase".
+- Do not call the inflow a buyback, purchase or revenue-funded acquisition.
 - Do not connect this cycle to the later acquisition at slot `441977087`.

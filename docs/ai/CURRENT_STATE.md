@@ -111,6 +111,12 @@ Abbreviated PUMP position:
   models address lookup tables nowhere. The inflow is also a transfer and nothing
   more: not a buyback, not a purchase, not revenue-funded, and one cycle is not a
   policy.
+- **That inflow transaction produces no fact.** It carries a reciprocal shape —
+  the documented address pays out native SOL, the counterparty's account pays in
+  the project's token — but the payment is routed through a transient wrapped-SOL
+  account the payer creates and closes in the same transaction. Its ownership is
+  absent from balance metadata, so `deriveReciprocalAssetFlows` drops the leg and
+  the synthesizer emits nothing. Verified against the real code, not assumed.
 - A separate transaction at slot `441977087` contains an exact reciprocal
   SOL/PUMP flow and zero burns. It is **later** than the burn, so the two are
   different cycles.
@@ -133,6 +139,13 @@ Abbreviated PUMP position:
   a policy. The larger intervals stay unaccounted, and **nothing at all is
   observed after slot `441977087`**; no persisted signature anywhere has a
   higher slot.
+- **A generic derivation gap, awaiting an owner decision.** Wrapping SOL through
+  a transient account is the ordinary way to pay with SOL down a token-program
+  path, and ATLAS is blind to the reciprocal shape whenever it is used. Closing it
+  means reading a transient account's owner from its own initialization
+  instruction and admitting an `A → A's wrapper → C` pairing — which relaxes the
+  deliberate rule that ownership comes from the RPC, never from inference. Not
+  implemented. See `PUMP_CASE.md`.
 - The established burn is a standalone artifact owned by no research job, so it is
   a chain fact and not yet Evidence. Verified offline: were it written as
   production writes on-chain evidence, it WOULD establish `EXECUTION_EVIDENCE` —
