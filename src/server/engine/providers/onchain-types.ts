@@ -211,6 +211,23 @@ export interface BurnInstructionRef {
   authority: string | null;
   amountRaw: string;
   decimals: number | null;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
 }
 
 // ONE parsed SPL Token instruction, of a kind this adapter recognises.
@@ -233,6 +250,23 @@ export interface TokenInstructionRef {
   // True when this came from meta.innerInstructions rather than the
   // top-level message — a CPI, not something the signer wrote directly.
   inner: boolean;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
 }
 
 // A token balance as the RPC reported it, before or after execution.
@@ -266,6 +300,15 @@ export interface TransactionDetailResult {
   // Empty is NEVER a fact that an account was not created or initialized —
   // only that no such instruction was decoded from this transaction.
   lifecycleInstructions: AccountLifecycleRef[];
+  // Instructions the node did not parse, preserved verbatim and
+  // uninterpreted.
+  //
+  // OPTIONAL, AND THE DIFFERENCE MATTERS. Absent means the artifact was
+  // stored before this field existed, so nothing is known either way. An
+  // empty array means the transaction was read with this capability and
+  // genuinely carried no unparsed instruction. Collapsing the two would
+  // turn a gap in the record into a finding about the chain.
+  rawInstructions?: RawInstructionRef[];
   preTokenBalances: TokenBalanceRef[];
   postTokenBalances: TokenBalanceRef[];
 }
@@ -404,4 +447,66 @@ export interface AccountLifecycleRef {
   // Named explicitly by ATA creation, so the token program behind an ATA
   // is decoded rather than assumed.
   tokenProgram: string | null;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
+}
+
+// AN INSTRUCTION THIS ADAPTER CANNOT READ, KEPT ANYWAY.
+//
+// The node parses the programs it knows; everything else comes back as a
+// program id, an account list and an opaque data blob. Until now those
+// were dropped, so a transaction's most consequential instruction could
+// leave nothing behind but its program id in `programs[]` — and once the
+// raw response was gone, no later decoding was possible even in
+// principle.
+//
+// THIS ASSIGNS NO MEANING. It records that a program was invoked, which
+// accounts it was handed and what bytes it was given. What the program
+// does, what the instruction asks it to do, and whether any of it
+// amounts to a swap, a purchase or anything else is not represented
+// here and is not knowable from here. Keeping the material is what
+// makes a later, separately-decided decoding possible; it is not that
+// decision.
+export interface RawInstructionRef {
+  programId: string;
+  // The accounts the instruction was handed, in order. Order is part of
+  // the meaning to whichever program reads it, so it is preserved as
+  // given and never sorted.
+  accounts: string[];
+  // Base58, exactly as the node reported it. Never truncated: a shortened
+  // blob looks decodable and is not, which is worse than keeping none.
+  data: string;
+  inner: boolean;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
 }

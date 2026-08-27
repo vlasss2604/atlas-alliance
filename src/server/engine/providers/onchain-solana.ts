@@ -7,6 +7,7 @@ import {
   brandOnchainArtifact,
   type AccountLifecycleRef,
   type BurnInstructionRef,
+  type RawInstructionRef,
   type TokenBalanceRef,
   type TokenInstructionRef,
   type ParsedTokenAccountRef,
@@ -244,6 +245,11 @@ const tokenAccountsByOwnerSchema = contextual(
   ),
 );
 
+// An instruction arrives in one of two shapes. A program the node knows
+// comes back parsed, with no data or accounts; anything else comes back
+// with the account list and the opaque blob instead. Both are accepted,
+// and which one arrived is what decides whether an instruction can be
+// decoded now or only preserved for later.
 const parsedInstructionSchema = z.object({
   programId: z.string().optional(),
   parsed: z
@@ -252,6 +258,8 @@ const parsedInstructionSchema = z.object({
       info: z.record(z.string(), z.unknown()).optional(),
     })
     .optional(),
+  accounts: z.array(z.string()).optional(),
+  data: z.string().optional(),
 });
 
 // jsonParsed account keys arrive as objects ({ pubkey, signer, writable })
@@ -286,8 +294,17 @@ const transactionSchema = z
     meta: z
       .object({
         err: z.unknown().nullable().optional(),
+        // `index` is the ordinal of the OUTER instruction these were
+        // invoked from. Optional because a node that omits it must not
+        // fail the whole read — the linkage is then simply absent, which
+        // is different from being reconstructed.
         innerInstructions: z
-          .array(z.object({ instructions: z.array(parsedInstructionSchema).default([]) }))
+          .array(
+            z.object({
+              index: z.number().int().min(0).optional(),
+              instructions: z.array(parsedInstructionSchema).default([]),
+            }),
+          )
           .optional(),
         preTokenBalances: z.array(tokenBalanceSchema).nullable().optional(),
         postTokenBalances: z.array(tokenBalanceSchema).nullable().optional(),
@@ -303,6 +320,23 @@ const transactionSchema = z
 const MAX_TX_ACCOUNT_KEYS = 128;
 const MAX_TX_INSTRUCTIONS = 128;
 const MAX_TX_TOKEN_BALANCES = 128;
+// Ceilings for a preserved unparsed instruction. An instruction beyond
+// them is DROPPED rather than shortened: a truncated blob still looks
+// decodable, and something that looks decodable and is not is worse than
+// nothing at all.
+const MAX_RAW_INSTRUCTION_ACCOUNTS = 64;
+const MAX_RAW_INSTRUCTION_DATA_CHARS = 4096;
+
+// Base58 with no length bound — an instruction blob is not an address.
+const BASE58_BLOB = /^[1-9A-HJ-NP-Za-km-z]+$/;
+
+// Where an instruction sat, carried alongside it so every decoder can
+// record the position without re-deriving it.
+interface InstructionPosition {
+  inner: boolean;
+  instructionIndex: number;
+  parentIndex: number | null;
+}
 
 // The SPL Token instruction types this adapter recognises. A closed set:
 // an unrecognised type is simply not reported, never guessed at.
@@ -325,7 +359,11 @@ function firstString(info: Record<string, unknown>, keys: string[]): string | nu
 // Decodes ONE parsed instruction into a typed reference. Decoding is not
 // interpretation: a transfer to an address someone calls a burn address
 // is reported as a transfer, and nothing here can say otherwise.
-function decodeTokenInstruction(raw: unknown, inner: boolean): TokenInstructionRef | null {
+function decodeTokenInstruction(
+  raw: unknown,
+  inner: boolean,
+  pos?: InstructionPosition,
+): TokenInstructionRef | null {
   const parsed = parsedInstructionSchema.safeParse(raw);
   if (!parsed.success) return null;
   const ix = parsed.data;
@@ -357,6 +395,7 @@ function decodeTokenInstruction(raw: unknown, inner: boolean): TokenInstructionR
     amountRaw,
     decimals,
     inner,
+    ...positionOf(pos),
   };
 }
 
@@ -411,7 +450,11 @@ function lamportsOf(info: Record<string, unknown>): string | null {
   return null;
 }
 
-function decodeLifecycleInstruction(raw: unknown, inner: boolean): AccountLifecycleRef | null {
+function decodeLifecycleInstruction(
+  raw: unknown,
+  inner: boolean,
+  pos?: InstructionPosition,
+): AccountLifecycleRef | null {
   const parsed = parsedInstructionSchema.safeParse(raw);
   if (!parsed.success) return null;
   const ix = parsed.data;
@@ -457,6 +500,7 @@ function decodeLifecycleInstruction(raw: unknown, inner: boolean): AccountLifecy
     destination: firstString(info, ["destination"]),
     lamports: lamportsOf(info),
     tokenProgram: isAta ? firstString(info, ["tokenProgram"]) : null,
+    ...positionOf(pos),
   };
 }
 
@@ -523,7 +567,10 @@ function programIdOf(raw: unknown): string | null {
 // SPL Token Burn / BurnChecked instruction. A transfer to an address that
 // looks like a burn address is a TRANSFER — calling it a burn would be an
 // economic interpretation, and this layer does not interpret.
-function decodeBurnInstruction(raw: unknown): BurnInstructionRef | null {
+function decodeBurnInstruction(
+  raw: unknown,
+  pos?: InstructionPosition,
+): BurnInstructionRef | null {
   const parsed = parsedInstructionSchema.safeParse(raw);
   if (!parsed.success) return null;
   const ix = parsed.data;
@@ -561,6 +608,58 @@ function decodeBurnInstruction(raw: unknown): BurnInstructionRef | null {
     authority: typeof info.authority === "string" ? info.authority : null,
     amountRaw,
     decimals,
+    ...positionOf(pos),
+  };
+}
+
+// Spread into a decoded reference. Returns nothing at all when the
+// caller did not supply a position, so a ref stays exactly the shape it
+// was before this existed rather than gaining undefined fields.
+function positionOf(pos: InstructionPosition | undefined): {
+  instructionIndex?: number;
+  parentIndex?: number | null;
+} {
+  if (pos === undefined) return {};
+  return { instructionIndex: pos.instructionIndex, parentIndex: pos.parentIndex };
+}
+
+// PRESERVATION, NOT DECODING.
+//
+// Only an instruction the node did NOT parse: a parsed one carries no
+// data or accounts to keep, and its meaning is already recorded by the
+// decoders above. Everything here is copied as reported and nothing is
+// inferred from it.
+//
+// FAIL CLOSED, ALWAYS BY DROPPING. A missing program id, a missing or
+// non-base58 blob, a missing account list, an account that is not a
+// valid address, or anything past the ceilings — each means this
+// instruction is not recorded. A partial record of an opaque instruction
+// would be indistinguishable from a complete one later, which is exactly
+// the kind of quiet corruption that outlives the code that caused it.
+function decodeRawInstruction(
+  raw: unknown,
+  pos: InstructionPosition,
+): RawInstructionRef | null {
+  const parsed = parsedInstructionSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  const ix = parsed.data;
+  if (ix.parsed !== undefined) return null; // the node read it; not ours to keep raw
+  const programId = ix.programId;
+  if (!programId || !isValidSolanaAddress(programId)) return null;
+  const data = ix.data;
+  if (typeof data !== "string" || data.length === 0 || !BASE58_BLOB.test(data)) return null;
+  if (data.length > MAX_RAW_INSTRUCTION_DATA_CHARS) return null;
+  const accounts = ix.accounts;
+  if (accounts === undefined) return null;
+  if (accounts.length > MAX_RAW_INSTRUCTION_ACCOUNTS) return null;
+  if (!accounts.every((a) => isValidSolanaAddress(a))) return null;
+  return {
+    programId,
+    accounts: [...accounts],
+    data,
+    inner: pos.inner,
+    instructionIndex: pos.instructionIndex,
+    parentIndex: pos.parentIndex,
   };
 }
 
@@ -749,25 +848,57 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
       if (parsed === null) {
         throw new OnchainRetrieverUnavailableError("transaction not found");
       }
-      const outer = parsed.transaction.message.instructions.slice(0, MAX_TX_INSTRUCTIONS);
-      const inner = (parsed.meta?.innerInstructions ?? [])
-        .flatMap((g) => g.instructions)
-        .slice(0, MAX_TX_INSTRUCTIONS);
-      const burns = [...outer, ...inner]
-        .map(decodeBurnInstruction)
+      // POSITION IS CARRIED, NOT RECOVERED LATER.
+      //
+      // The inner instructions used to be flattened straight into one list,
+      // which threw away the group index — the ordinal of the outer
+      // instruction each was invoked from. Nothing downstream could then say
+      // that two movements happened inside ONE invocation rather than merely
+      // in one transaction, and the difference is not recoverable from a
+      // stored artifact afterwards.
+      //
+      // Ordering is unchanged: outer instructions first, then inner ones in
+      // group order, exactly as before.
+      const positioned: { raw: unknown; pos: InstructionPosition }[] =
+        parsed.transaction.message.instructions
+          .slice(0, MAX_TX_INSTRUCTIONS)
+          .map((ix, i) => ({
+            raw: ix,
+            pos: { inner: false, instructionIndex: i, parentIndex: null },
+          }));
+      const innerPositioned: { raw: unknown; pos: InstructionPosition }[] = [];
+      for (const group of parsed.meta?.innerInstructions ?? []) {
+        // A group whose index the node omitted yields inner instructions with
+        // no parent recorded. `inner` still says what they are.
+        const parentIndex = group.index ?? null;
+        group.instructions.forEach((ix, i) => {
+          innerPositioned.push({
+            raw: ix,
+            pos: { inner: true, instructionIndex: i, parentIndex },
+          });
+        });
+      }
+      positioned.push(...innerPositioned.slice(0, MAX_TX_INSTRUCTIONS));
+
+      const burns = positioned
+        .map((p) => decodeBurnInstruction(p.raw, p.pos))
         .filter((b): b is BurnInstructionRef => b !== null);
-      const tokenInstructions = [
-        ...outer.map((ix) => decodeTokenInstruction(ix, false)),
-        ...inner.map((ix) => decodeTokenInstruction(ix, true)),
-].filter((i): i is TokenInstructionRef => i !== null);
-      const lifecycleInstructions = [
-        ...outer.map((ix) => decodeLifecycleInstruction(ix, false)),
-        ...inner.map((ix) => decodeLifecycleInstruction(ix, true)),
-      ].filter((i): i is AccountLifecycleRef => i !== null);
+      const tokenInstructions = positioned
+        .map((p) => decodeTokenInstruction(p.raw, p.pos.inner, p.pos))
+        .filter((i): i is TokenInstructionRef => i !== null);
+      const lifecycleInstructions = positioned
+        .map((p) => decodeLifecycleInstruction(p.raw, p.pos.inner, p.pos))
+        .filter((i): i is AccountLifecycleRef => i !== null);
+      // Everything the node did not parse, kept as given and read by nothing.
+      // An empty array here is a real observation; the field being absent
+      // altogether is what an artifact stored before this looks like.
+      const rawInstructions = positioned
+        .map((p) => decodeRawInstruction(p.raw, p.pos))
+        .filter((i): i is RawInstructionRef => i !== null);
       const programs = [
         ...new Set(
-          [...outer, ...inner]
-            .map(programIdOf)
+          positioned
+            .map((p) => programIdOf(p.raw))
             .filter((id): id is string => id !== null),
         ),
       ];
@@ -802,6 +933,7 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           accountKeys,
           tokenInstructions,
           lifecycleInstructions,
+          rawInstructions,
           preTokenBalances: (parsed.meta?.preTokenBalances ?? [])
             .slice(0, MAX_TX_TOKEN_BALANCES)
             .map(balance),

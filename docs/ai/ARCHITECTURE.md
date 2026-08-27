@@ -59,12 +59,23 @@ Chain reads use **typed intents only** — no arbitrary RPC. Intents:
 See `providers/onchain-*.ts`.
 
 The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
-Associated Token — and keeps only `programId` plus the node's own `parsed`
-projection. An instruction from any other program survives as its program id in
-`programs[]` and nothing else: its `data` and `accounts` are dropped, inner
-instructions are flattened so no parent linkage remains, and the raw response is
-kept only as a hash. Nothing stored can later be decoded into program semantics,
-and no swap, route or exchange is representable anywhere in the model.
+Associated Token. An instruction from any other program is **preserved, not
+decoded**: its program id, account list (in order) and opaque data blob are kept
+verbatim in `rawInstructions`, and every instruction — parsed or not — records
+its own position and the ordinal of the outer instruction it was invoked from.
+That is what makes "inside one invocation" distinguishable from "in one
+transaction".
+
+Preservation is not interpretation. Nothing reads a raw instruction, no program
+is identified anywhere, and no swap, route or exchange is representable in the
+model. Keeping the material is what makes a later, separately-decided decoding
+possible; it is not that decision. Malformed material is dropped whole rather
+than stored in part, and an over-long blob is dropped rather than truncated —
+something that looks decodable and is not is worse than nothing.
+
+The raw response itself is still kept only as a hash, so an artifact stored
+before this capability cannot be enriched retrospectively; only a fresh read can
+carry the new material.
 
 Chain facts **bypass the model entirely**. `src/server/engine/onchain-facts.ts`
 synthesizes statements by code template over validated values, with a literal

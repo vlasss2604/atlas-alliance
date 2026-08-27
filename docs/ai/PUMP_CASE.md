@@ -323,26 +323,28 @@ here can say what either program does, and nothing may pretend to.
 the payload belongs to the System program, an SPL Token program or the ATA
 program. What the two unknown programs actually did is not represented at all.
 
-Three things would be needed to decode them, and none survives:
+Three things would be needed to decode them. **Two are now preserved going
+forward; the third is why this artifact still cannot be decoded.**
 
-- **Instruction payloads.** `parsedInstructionSchema` keeps only `programId` and
-  `parsed.{type,info}`. An unknown program's instruction arrives with `data` and
-  `accounts` instead, and both are dropped — for every transaction, not just this
-  one.
-- **The raw response.** Only its hash is stored. The bytes are gone.
-- **Parent linkage.** `innerInstructions` groups are flattened with `flatMap`,
-  discarding the group index, so no decoded instruction names the outer
-  instruction it was a CPI of.
+- **Instruction payloads.** Preserved now. An unparsed instruction's program id,
+  account list and opaque blob are kept in `rawInstructions`.
+- **Parent linkage.** Preserved now. Every instruction records its position and
+  the ordinal of the outer instruction it was invoked from, so "inside one
+  invocation" is distinguishable from "in one transaction".
+- **The raw response.** Still only a hash. **The bytes for THIS artifact are
+  gone**, and preservation is not retrospective: the persisted payload predates
+  the capability and carries neither field. Only a fresh read would.
 
-That last one matters on its own. Without it ATLAS cannot even establish the
-weaker structural claim that both legs happened inside ONE invocation of the same
-program — only that they happened in the same transaction between the same two
-owners. Retaining the group index would be a small, program-agnostic addition and
-would still not establish a swap; it is not implemented.
+So the ladder for this transaction is unchanged, and no re-read is authorized.
+What changed is that the same shape read today would leave enough behind to make
+a later, separately-decided decoding possible — which is a preservation decision,
+not a semantic one. Nothing identifies either program, and nothing here
+establishes a swap.
 
-So the ladder stops early. Same transaction: yes. Same counterparty ownership:
-yes. Same program invocation: **not establishable**. Decoded swap instruction:
-**no**. Deterministic economic exchange: **no**.
+So the ladder stops early for this artifact. Same transaction: yes. Same
+counterparty ownership: yes. Same program invocation: **not establishable from
+what is stored** (a fresh read would now carry the linkage). Decoded swap
+instruction: **no**. Deterministic economic exchange: **no**.
 
 Decoding would require re-retrieving the transaction and a human-authored program
 registry — a label whose own provenance would then need answering. And even a

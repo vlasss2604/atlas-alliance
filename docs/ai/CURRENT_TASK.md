@@ -4,36 +4,37 @@
 
 ## NONE — awaiting owner direction
 
-The program-semantics question for the inflow transaction is answered: **no swap
-or acquisition fact can be established from what is stored.** Details in
-`PUMP_CASE.md`, "Why it cannot be called a swap, from what is stored". No code
-changed.
+Opaque-instruction preservation and inner-instruction parent linkage are
+implemented and accepted. See `ARCHITECTURE.md` for the shape and `PUMP_CASE.md`
+for what it does and does not change about the inflow transaction.
 
-### What it found
+### What changed
 
-The two non-infrastructure programs are **UNKNOWN** from local evidence — no
-dependency, no IDL, no registry, and their ids appear nowhere in the repository
-except a test that records them as opaque. They contributed **zero** decoded
-instructions.
+An instruction the node does not parse is now preserved rather than dropped:
+program id, ordered account list and opaque data blob, in `rawInstructions`.
+Every instruction — parsed or not — records its own position and the ordinal of
+the outer instruction it was invoked from, so "inside one invocation" is
+distinguishable from "in one transaction".
 
-Nothing stored could be decoded later either: instruction `data` and `accounts`
-are dropped at the schema level, only the raw response's hash is kept, and inner
-instructions are flattened so parent linkage is gone. So ATLAS cannot even reach
-the weaker claim that both legs happened inside one invocation of one program.
+Nothing reads this material. No program is identified anywhere, and no swap,
+purchase or exchange semantics exist in the model. Malformed material is dropped
+whole, never stored in part; an over-long blob is dropped rather than truncated.
 
-### Open, for the owner
+`rawInstructions` is optional, so artifacts stored before this remain valid.
+Absent means "unknown"; `[]` means "read with this capability, none present" —
+the two are deliberately not the same.
 
-Two separable items, neither started:
+### Known limit
 
-- **Inner-instruction parent linkage** — small, program-agnostic, filed in
-  `BACKLOG.md`. Would establish "one invocation", not "a swap".
-- **Program semantics** — would need re-retrieval plus a human-authored program
-  registry whose own provenance then needs answering. Even complete, it would
-  establish acquisition, never buyback.
+Preservation is not retrospective. The raw response is still kept only as a hash,
+so an existing artifact cannot be enriched; only a fresh read carries the new
+material. The inflow transaction at slot `441840975` is therefore unchanged, and
+no re-read is authorized.
 
 ### Standing boundaries
 
 - No live calls without separate authorization.
-- No paging, no signatures outside a persisted window, no counterparty-chasing.
-- Do not call the inflow a buyback, purchase, swap or revenue-funded acquisition.
+- Do not identify any program or decode an opaque instruction; that is a separate
+  decision, and it is the one that would license "swap" or "market purchase".
+- Do not call the inflow a buyback, purchase or revenue-funded acquisition.
 - Do not connect this cycle to the later acquisition at slot `441977087`.

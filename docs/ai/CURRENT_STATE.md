@@ -123,12 +123,15 @@ Abbreviated PUMP position:
   different cycles.
 - Nothing about buyback, purchase, revenue funding, causality or supply reduction
   is proven, and no acquisition → burn bridge exists.
-- **Swap/acquisition semantics are not reachable from stored data.** The inflow
-  transaction invokes two programs ATLAS cannot identify from any local evidence,
-  and they contributed zero decoded instructions. Instruction payloads, the raw
-  response and inner-instruction parent linkage are all discarded, so nothing
-  stored can be decoded later. Same transaction and same counterparty ownership
-  are established; same program invocation is not, and swap is not.
+- **Swap/acquisition semantics are not reachable from the stored inflow
+  artifact.** It invokes two programs ATLAS cannot identify from any local
+  evidence, and they contributed zero decoded instructions. Same transaction and
+  same counterparty ownership are established; same program invocation is not,
+  and swap is not. **Opaque instructions and parent linkage are preserved from
+  now on** — program id, ordered accounts, opaque blob, instruction position and
+  parent ordinal — but preservation is not retrospective and the raw response is
+  still kept only as a hash, so this artifact would need a fresh read. Nothing
+  identifies any program, and preserving material is not decoding it.
 
 ## Done
 

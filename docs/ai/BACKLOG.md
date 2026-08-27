@@ -22,11 +22,6 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   it earns its place or goes.
 - **`MAX_LOCATORS_PER_FACT = 10`** — overflow and coverage semantics are
   undefined. What does it mean when a fact has more locators than the cap?
-- **Inner-instruction parent linkage is discarded.** `innerInstructions` groups are
-  flattened, so a decoded instruction cannot be attributed to the outer
-  instruction it was a CPI of. Retaining the group index is small and
-  program-agnostic, and would let ATLAS state that two movements occurred inside
-  one invocation — which it currently cannot. It would NOT establish a swap.
 - **`onchain_artifacts.normalized_result` is unversioned.** The stored payload is
   whatever the adapter produced on the day, and the row carries no contract
   version. Verified: three of five persisted `TRANSACTION_DETAIL` rows predate
