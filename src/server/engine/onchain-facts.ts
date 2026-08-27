@@ -1,5 +1,9 @@
 import type { ExtractedFact } from "./providers/types";
 import type { OnchainArtifact } from "./providers/onchain-types";
+import {
+  deriveReciprocalAssetFlows,
+  RECIPROCAL_FLOW_DOES_NOT_PROVE,
+} from "./onchain-transaction-flow";
 
 // Deterministic on-chain fact synthesis (owner-approved: structured chain
 // facts BYPASS EvidenceExtractor).
@@ -73,6 +77,21 @@ export const ONCHAIN_DOES_NOT_PROVE = {
   TRANSACTION_DETAIL:
     "This is the on-chain content of one transaction. It does not establish the economic purpose of the " +
     "transaction, who funded it, or that it belongs to any particular mechanism or policy.",
+  // A native lamport transfer whose destination happens to be a token
+  // account. The destination's OWNER is the RPC's own metadata; everything
+  // about why the lamports moved is not.
+  NATIVE_TRANSFER:
+    "This is a transfer of native SOL recorded in one transaction, and the owner the transaction's balance " +
+    "metadata reports for the destination account. It does not establish why the transfer was made, what it " +
+    "paid for, who controls either party, where the lamports came from, or that anything was received in " +
+    "return. A syncNative instruction converts delivered lamports into a wrapped-SOL balance; it says nothing " +
+    "about purpose either.",
+  // A token transfer between two accounts whose owners the RPC reported.
+  TOKEN_TRANSFER:
+    "This is a transfer of the stated mint between two token accounts in one transaction, with the owners the " +
+    "transaction's balance metadata reports for each. It does not establish why the tokens moved, who decided " +
+    "it, what if anything was given for them, who controls either owner, or that the tokens were bought, " +
+    "sold, burned or destroyed. A transfer is a movement, never a purchase and never a destruction.",
   // Owner-specified verbatim requirements for the burn fact.
   BURN:
     "This is a genuine SPL Token burn instruction executed on-chain: the stated amount of the stated mint was " +
@@ -274,22 +293,92 @@ export function synthesizeOnchainFacts(
     case "TRANSACTION_DETAIL": {
       // A failed transaction executed nothing.
       if (!r.succeeded) return [];
+      const facts: ExtractedFact[] = [];
+
       // ONE artifact, MULTIPLE facts — the provenance model exists
       // precisely so several burn instructions in one transaction share a
       // single stored retrieval.
-      return r.burns.map((b, index) =>
-        fact(
-          target,
-          `Transaction ${r.signature} (slot ${r.slot}) executed an SPL Token ${b.instructionType} instruction ` +
-            `destroying ${b.decimals === null ? b.amountRaw : formatTokenAmount(b.amountRaw, b.decimals)} ` +
-            `of mint ${b.mint} from token account ${b.sourceAccount}.`,
-          JSON.stringify({ signature: r.signature, slot: r.slot, burn: r.burns[index] }),
-          ONCHAIN_DOES_NOT_PROVE.BURN,
-          // A confirmed on-chain execution is the mechanism running, which
-          // is what EXECUTION_EVIDENCE's live-state gate asks for.
-          { mechanismState: "LIVE" },
-        ),
-      );
+      for (const [index, b] of r.burns.entries()) {
+        facts.push(
+          fact(
+            target,
+            `Transaction ${r.signature} (slot ${r.slot}) executed an SPL Token ${b.instructionType} instruction ` +
+              `destroying ${b.decimals === null ? b.amountRaw : formatTokenAmount(b.amountRaw, b.decimals)} ` +
+              `of mint ${b.mint} from token account ${b.sourceAccount}.`,
+            JSON.stringify({ signature: r.signature, slot: r.slot, burn: r.burns[index] }),
+            ONCHAIN_DOES_NOT_PROVE.BURN,
+            // A confirmed on-chain execution is the mechanism running, which
+            // is what EXECUTION_EVIDENCE's live-state gate asks for.
+            { mechanismState: "LIVE" },
+          ),
+        );
+      }
+
+      // RECIPROCAL ASSET FLOW. A transaction can carry two assets moving
+      // opposite ways between the same two parties, and until now that
+      // produced NOTHING: this case synthesized burns and only burns, so a
+      // transaction with no burn yielded no fact at all however much it
+      // deterministically established.
+      //
+      // Each derived flow yields THREE facts, kept separate on purpose.
+      // The two legs are direct decoded movements. The pairing is a
+      // structural composition of them, and it is the one that invites an
+      // economic reading — so it is stated as co-occurrence and offered as
+      // CONTEXT, which cannot establish a component on its own.
+      for (const flow of deriveReciprocalAssetFlows(r, artifact.provenance.projectAnchor)) {
+        const legFragment = (leg: unknown, role: string) =>
+          JSON.stringify({ signature: r.signature, slot: r.slot, role, leg });
+
+        facts.push(
+          fact(
+            target,
+            `Transaction ${flow.signature} (slot ${flow.slot}) transferred ${flow.outbound.amountRaw} lamports ` +
+              `of native SOL from address ${flow.participant} to token account ${flow.outbound.to}, which the ` +
+              `transaction's balance metadata reports as owned by ${flow.counterparty}` +
+              `${flow.outbound.destinationSyncedNative ? ", and a syncNative instruction on that account was observed in the same transaction" : ""}.`,
+            legFragment(flow.outbound, "outbound"),
+            ONCHAIN_DOES_NOT_PROVE.NATIVE_TRANSFER,
+          ),
+        );
+
+        facts.push(
+          fact(
+            target,
+            `Transaction ${flow.signature} (slot ${flow.slot}) transferred ` +
+              `${flow.inbound.decimals === null ? flow.inbound.amountRaw : formatTokenAmount(flow.inbound.amountRaw, flow.inbound.decimals)} ` +
+              `of mint ${flow.inbound.mint} from token account ${flow.inbound.from}, owned by ${flow.counterparty}, ` +
+              `into token account ${flow.inbound.to}, owned by ${flow.participant}.`,
+            legFragment(flow.inbound, "inbound"),
+            ONCHAIN_DOES_NOT_PROVE.TOKEN_TRANSFER,
+          ),
+        );
+
+        facts.push(
+          fact(
+            target,
+            `The same successful transaction ${flow.signature} (slot ${flow.slot}) contains both movements: ` +
+              `native SOL from ${flow.participant} toward an account owned by ${flow.counterparty}, and mint ` +
+              `${flow.inbound.mint} from an account owned by ${flow.counterparty} into an account owned by ` +
+              `${flow.participant}.`,
+            JSON.stringify({
+              signature: r.signature,
+              slot: r.slot,
+              participant: flow.participant,
+              counterparty: flow.counterparty,
+              outbound: flow.outbound,
+              inbound: flow.inbound,
+            }),
+            RECIPROCAL_FLOW_DOES_NOT_PROVE,
+            // Structural co-occurrence, not an established exchange. CONTEXT
+            // is inert in reconciliation, so this can never push a component
+            // toward SUPPORTED by resembling a purchase.
+            { relationship: "CONTEXT" },
+          ),
+        );
+      }
+
+      return facts;
     }
+
   }
 }
