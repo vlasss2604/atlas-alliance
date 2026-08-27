@@ -823,6 +823,35 @@ source. The payload must actually assign the role: a field naming the wallet as
 the buyback wallet, or documented semantics saying these are the wallets that
 purchase. Read it against that standard, not against the URL.
 
+### `fees.pump.fun` is unreachable today — the reason is source authority
+
+Inventoried offline, 2026-08-27. ATLAS knows nothing of the host: zero `sources`
+rows, zero Evidence mentions, zero SOURCE_ROUTE rows, and no reference anywhere
+in the repository. `resolveSourceRoute` returns **`CLAIMED / null / null`**.
+
+**Routes are host-exact** — `source-authority.ts` compares `routeDomain !== host`
+and skips — so `fees.pump.fun` inherits nothing from `pump.fun`'s five confirmed
+routes. That is correct: confirming a domain is not confirming everything under
+it, and a subdomain is a different host that a human has not vouched for.
+
+Consequently all three doors are shut: the evidentiary script's scope gate wants
+CONFIRMED **and** a routeClass; both renderer entry points want CONFIRMED +
+OFFICIAL_DOCS + a prefix; and inspection wants CONFIRMED + a prefix + routeClass
+**null**. Today's `CLAIMED` fails every one.
+
+**The smallest opener is one ACTIVE SOURCE_ROUTE for `fees.pump.fun`, CONFIRMED
+and UNCLASSIFIED.** Officiality comes from an ACTIVE row naming the exact domain
+regardless of `routeClass`, so an unclassified row opens inspection while
+asserting no documentation authority over a page nobody has read — the same
+order `/pump-token` went through: inspected first, classified afterwards.
+
+**One prefix detail to plan around:** `pathWithinPrefix("/x", "/")` is false, so
+a route confirmed at `/` matches the root and nothing beneath it. A redirect or
+client-side route change from `fees.pump.fun/` therefore ends
+`FINAL_URL_OUTSIDE_ROUTE`, exactly as `/pump-token` did. Consistent with the
+stated design that a bare-domain confirmation must not authorize a whole site —
+a fact to plan around, not a defect.
+
 ### Second attempt: the page refuses the fetcher
 
 Job `cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, 2026-08-27T15:06:08Z, run with the

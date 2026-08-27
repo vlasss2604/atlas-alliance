@@ -311,6 +311,16 @@ Abbreviated PUMP position:
   construction in two places: documentary locators require the complete
   identifier to appear literally in the document, and S6 slot identity is
   structural only, with no classifier ever reaching identity (D-101).
+- **`fees.pump.fun` is unreachable today, and the blocker is source authority.**
+  ATLAS knows nothing of the host — zero sources, zero Evidence mentions, zero
+  routes, no repository reference — and `resolveSourceRoute` returns
+  `CLAIMED / null`. Routes are **host-exact**, so the subdomain inherits nothing
+  from `pump.fun`. The evidentiary script, both renderer entry points and the
+  inspection gate all refuse.
+- **The smallest opener is one ACTIVE SOURCE_ROUTE for `fees.pump.fun`,
+  CONFIRMED and UNCLASSIFIED** — which opens non-evidentiary inspection without
+  asserting documentation authority over an unread page. Not created; that is an
+  owner act. The prepared sequence is in `CURRENT_TASK.md`, with one live step.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
