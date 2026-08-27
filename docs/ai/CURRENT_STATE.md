@@ -194,7 +194,13 @@ Abbreviated PUMP position:
   Response, never parsed from a message. See `ARCHITECTURE.md`.
 - **Untested against the live page.** `pump.fun` was not re-run in that task, so
   whether its refusal is one of the three statuses, and whether a render would
-  then succeed, is unknown.
+  then succeed, is unknown. **The run is now prepared and gated offline** in
+  `CURRENT_TASK.md` — command, re-verified gate table, expected footprint and a
+  reading key for every outcome — and awaits an authorized window. Preparation
+  also surfaced one honest limit: a failed render records only
+  `DOCS_RENDER_AFTER_REFUSAL_FAILED`, so it cannot distinguish the site refusing
+  a browser from the renderer's own plumbing failing, which has never been
+  exercised live on this machine. Named, not fixed.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 
