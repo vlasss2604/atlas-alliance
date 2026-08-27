@@ -27,6 +27,21 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   for any future artifact-reuse path. Pinned by
   `tests/onchain-persisted-burn-evidence.test.ts`.
 
+### Chain coverage
+
+- **`SUPPORTED_CHAINS` promises more than the transport delivers** —
+  *NON_BLOCKING, and a real capability boundary.* Identity may be confirmed on
+  ethereum, bsc, polygon, arbitrum, base, optimism and avalanche, but
+  `onchain-transport.ts` returns `null` (`v1: Solana only`) and every intent is
+  gated on `chain === "solana" && network === "mainnet"`. A project confirmed on
+  an EVM chain therefore degrades silently to documentary-only — S4 treats a
+  missing retriever as a configuration boundary and falls through, which is
+  correct behaviour, not a bug. Recorded because it decides which projects can
+  ever exercise the on-chain half of the pipeline, and because the two
+  non-PUMP projects already seeded (`uniswap`, `hyperliquid`) are both affected.
+  **Whether to add an EVM read transport is an owner decision, not a backlog
+  item to pick up.**
+
 ### Data / migrations
 
 - **Stale Drizzle snapshot metadata for hand-authored migrations** — the snapshot

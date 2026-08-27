@@ -4,52 +4,83 @@
 
 ## NONE — awaiting owner direction
 
-**The PUMP case is closed: `CLOSED_WITH_UNRESOLVED_BRIDGES`.** Documentation
-only; no production code touched, no research attempted, no network call.
+Next-case selection ran offline. **Decision: B — ARCHITECTURE FIRST**, with one
+correction to the premise. No research started, no code changed.
 
-Everything the proof plan justified was learned. The two bridges remain
-unresolved, and **no negative conclusion is implied** — nothing says the
-mechanism does not exist, only that ATLAS cannot establish it from what it holds.
+### The premise needs correcting first
 
-### Where the closure lives
+The task supposed the blocker might be artifact → Evidence semantics. **It is
+not. That path exists and is fully wired**, verified by reading it:
+`onchain-acquisition.ts` stores the artifact, calls `synthesizeOnchainFacts`
+("MANY facts, ONE artifact"), and inserts Evidence with `onchainArtifactId` set,
+`sourceClass: ONCHAIN_VERIFIABLE`, `officiality: CLAIMED` and
+**`entityBinding: CONFIRMED`**.
 
-- `PUMP_CASE.md`, **"CASE CLOSURE"** at the top — the fact inventory separated
-  into documentary / deterministic on-chain / composed / unresolved, the exact
-  canonical statement ATLAS may make, the list it must not, the component state,
-  and the criteria for the next case.
-- `CURRENT_STATE.md` — a bounded summary in place of the round-by-round
-  narrative, which had grown to 360 lines. The document is 188 lines again.
-- `CORE_RULES.md` — the generic lessons, five added to *Authority and identity*
-  and two to *Research brakes*. Candidates already durable were not duplicated.
-- `BACKLOG.md` — six closure items, each classified, none BLOCKING.
+That also sharpens the closure finding: the 53 existing `ONCHAIN_VERIFIABLE` rows
+carry `entityBinding = UNVERIFIED` and a null artifact id, so they demonstrably
+did **not** come from this path — they are explorer pages read as documents.
 
-### Verified at closure, from persisted state
+**The real wall is chain coverage.** `onchain-transport.ts` returns `null` with
+the comment `v1: Solana only`, and the Solana adapter gates every intent on
+`chain === "solana" && network === "mainnet"`.
 
-- `onchain_artifact_id` is **null on all 401 Evidence rows**; no `snapshot_ref`
-  anywhere. The Solana work has never entered Evidence.
-- The most recent result for **all ten components** is
-  `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. The three `PARTIALLY_SUPPORTED`
-  `DESTINATION` results are from 2026-08-24 and were not reproduced later — a
-  correction to how the case narrative read.
-- The 53 `ONCHAIN_VERIFIABLE` rows are model-extracted explorer text with
-  `entity_binding = UNVERIFIED`, including EVM Solidity for a Solana project.
-  They establish nothing, correctly.
+### What repository memory actually holds
 
-### What PUMP left untested, and it is the important part
+Three projects are seeded. Verified per project:
 
-**Whether any project can carry an on-chain fact all the way into Evidence and
-out through a component.** Every deterministic chain fact here lives in a
-standalone artifact. Until a case does that end to end, the on-chain half of the
-pipeline is unproven in production — and PUMP could not do it, because getting
-there requires a live retrieval inside a research job and there is deliberately
-no offline adoption path.
+| project | chain | jobs | evidence | routes | identity |
+|---|---|---|---|---|---|
+| `pump_fun` | solana | 26 | 401 | 6 | CONFIRMED |
+| `hyperliquid` | (its own L1) | 0 | 0 | 0 | none |
+| `uniswap` | ethereum | 0 | 0 | 0 | none |
 
-That is the sharpest selection criterion for project #2, alongside: a different
-mechanism shape (not buy-and-burn), **address-level role assignment published by
-the project itself** so the actor → acquisition bridge can be tested rather than
-merely missed again, and documentation reachable by the static fetcher.
+Both non-PUMP projects are **completely unstarted**, and the repository holds
+**no documentary knowledge whatever** about either — no route, no fragment, no
+identity. Anything said about their mechanisms is general knowledge, not
+something ATLAS has read.
 
-Not selected here, and not browsed for.
+**Neither can test the production on-chain path**, because both are non-Solana.
+`SUPPORTED_CHAINS` admits ethereum and six other EVM chains **for identity**, but
+no transport exists for any of them — so a confirmed Ethereum project degrades
+silently to documentary-only. That asymmetry is a real capability boundary, not
+a defect: S4 treats a missing retriever as a configuration boundary and falls
+through to the normal path.
+
+### The smallest architecture question, and it is a fork
+
+**Does ATLAS add an EVM read transport, or does it choose Solana projects until
+Pattern v1 is mature?**
+
+Three consequences, and the owner's answer decides the next several cases:
+
+1. **Add EVM transport** — the largest option. It unlocks Uniswap-class cases
+   (real on-chain governance, a fee switch, proposal → execution), which stress
+   Pattern components PUMP never touched. Cost is a second chain adapter with its
+   own encoding, method allowlist and validation, plus everything D-134 identity
+   means on EVM.
+2. **Stay Solana-only** — cheapest, but **no Solana TVC candidate exists in
+   repository memory**, so it requires the owner to name a project. I will not
+   browse for one or invent one.
+3. **Run Uniswap now as a documentary/governance case**, accepting that the
+   on-chain half stays untested. Genuinely valuable — it would exercise
+   `GOVERNANCE_BASIS` and the *proposal ≠ execution* rule, neither of which PUMP
+   ever reached — but it does not answer the question this selection was for.
+
+### If it helps: what each candidate would and would not prove
+
+**Uniswap — fee switch / governance-approved distribution.** Mechanism type A+C,
+maximally different from PUMP. Documentation and governance records are
+authoritative and plausibly static-fetchable. Stresses `GOVERNANCE_BASIS`,
+`MECHANISM_SPEC`, `SOURCE_OF_VALUE`, `FLOW_PATH`, `RECIPIENT`,
+`DURABILITY_BASIS`. **Cannot** produce on-chain Evidence today. Cost: MEDIUM
+documentary, and the actor-identity risk is *lower* than PUMP's because
+governance proposals name contracts explicitly. Expected failure mode: proposal
+records that describe intent without observable execution — exactly the rule
+worth testing, and a legitimate `INSUFFICIENT_EVIDENCE`.
+
+**Hyperliquid — assistance-fund purchases.** Closest in shape to PUMP
+(buy-side), so it scores worst on mechanism diversity, and its own L1 is not in
+`SUPPORTED_CHAINS` at all. Cost: HIGH, value: lowest of the two.
 
 ### Standing boundaries
 

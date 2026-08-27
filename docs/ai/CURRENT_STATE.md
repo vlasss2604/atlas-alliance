@@ -176,13 +176,33 @@ unknown, so the address's absence from it is **not** established.
 
 ## Next research direction
 
-**PUMP is closed. The next step is TVC project #2** — an unfamiliar project
-chosen to stress the parts of Pattern v1 that PUMP never reached, not to repeat
-what it already exercised. Selection criteria are in `PUMP_CASE.md`, "What the
-next case should test".
+**PUMP is closed. Project #2 is blocked on one architectural fork**, not on
+finding a project. Selection ran 2026-08-28; the reasoning is in
+`CURRENT_TASK.md`.
 
 The single most valuable thing PUMP left untested: **whether any project can
 carry an on-chain fact all the way into Evidence and out through a component.**
 Every deterministic chain fact in this repository still lives in a standalone
-artifact, and no Evidence row references one. Until a case does that end to end,
-the on-chain half of the pipeline is unproven in production.
+artifact, and no Evidence row references one.
+
+**That path is not the blocker.** Verified by reading it: `onchain-acquisition.ts`
+stores the artifact and inserts Evidence with `onchainArtifactId` set,
+`sourceClass ONCHAIN_VERIFIABLE`, `officiality CLAIMED` and **`entityBinding
+CONFIRMED`**. It works; it has simply never succeeded end to end. (Which also
+proves the 53 existing `ONCHAIN_VERIFIABLE` rows, `entityBinding UNVERIFIED` with
+null artifact id, did not come from it.)
+
+**The blocker is chain coverage.** `onchain-transport.ts` returns `null` —
+`v1: Solana only` — and every intent is gated on `chain === "solana" && network
+=== "mainnet"`. `SUPPORTED_CHAINS` admits ethereum and six other EVM chains **for
+identity only**, so a confirmed Ethereum project degrades silently to
+documentary-only. Not a defect; a capability boundary.
+
+Repository memory holds three projects: `pump_fun` (26 jobs, 401 evidence),
+`hyperliquid` and `uniswap` — the latter two with **0 jobs, 0 evidence, 0 routes,
+no confirmed identity, and no documentary knowledge of any kind**. Both are
+non-Solana, so neither can test the on-chain path.
+
+**The fork: add an EVM read transport, or choose Solana projects until Pattern v1
+is mature.** No Solana TVC candidate exists in repository memory, so option two
+needs the owner to name one.
