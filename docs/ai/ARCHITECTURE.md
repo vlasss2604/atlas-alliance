@@ -283,6 +283,40 @@ per-attempt observation channel, which is folded into the terminal reason — th
 zero-document failure path included, since that is the path a failed render
 ends on and owner tooling that executes an item directly writes no attempt row.
 
+## Confirming a source route
+
+A domain becomes CONFIRMED for a project only through an ACTIVE `SOURCE_ROUTE`
+row, and that transition is a human act performed by a controlled script
+(D-021/D-055) — never a model, never an admin UI, never hand-written SQL.
+`promote-memory.ts` is that script for `research_memory`;
+`confirm-source-route.ts` is it for `project_memory_items`, with the operation
+itself in `memory/source-route-confirmation.ts`.
+
+**It assigns no `routeClass`, and has no parameter that could.** Confirming that
+a host belongs to a project and deciding that a page carries documentation
+authority are different judgements, and the second should follow reading the
+page. So the result is always officiality CONFIRMED with `routeClass` null,
+which opens **non-evidentiary inspection and nothing else** — evidentiary
+acquisition and both renderer-as-Evidence entry points require a non-null class
+and keep refusing. Classification stays a separate later act, which is the order
+`/pump-token` actually went through.
+
+Two refusals exist because of how the resolver *combines* rows, and both prevent
+a confirmation from silently damaging what already works:
+
+- `matchedPathPrefix` is reported only when **exactly one** path-scoped row
+  matched a url, so a new prefix that co-matches an existing ACTIVE one turns
+  that field null for the overlapping urls — disabling rendering and inspection
+  for a route that worked yesterday. Overlapping prefixes are refused.
+- `routeClass` resolves from **every** matching ACTIVE row, so an ACTIVE
+  domain-wide row carrying a class would hand it to the new url too. A
+  confirmation that would inherit a class is refused rather than quietly
+  granting authority.
+
+Nothing is ever auto-superseded: supersession is a separate owner action. The
+prefix rule and the shared-platform list are the authority module's own,
+exported rather than copied, so no second notion of authority exists.
+
 ## Research Memory
 
 Direction, not a finished system: retrieval before fresh research, freshness

@@ -4,86 +4,70 @@
 
 ## NONE — awaiting owner direction
 
-The owner approved confirming `fees.pump.fun` for non-evidentiary inspection.
-**The route was NOT created: no supported owner route-management path exists**,
-and the instruction in that case was to stop and report rather than improvise a
-database write. Nothing was written, fetched or changed except this document set.
+The owner route-confirmation tool is built and tested. **No route was created for
+`fees.pump.fun`** — the capability only, as instructed.
 
-### Why there is no supported path — verified, not assumed
+### What exists now
 
-- **Nothing in `src/` or `scripts/` ever inserts a `project_memory_items` row.**
-  Zero occurrences of `insert(projectMemoryItems)` outside tests.
-- `promoteProjectMemoryItem` **exists** in `src/server/memory/lifecycle.ts` and
-  correctly walks OBSERVED → CANDIDATE → ACTIVE inside a transaction, honouring
-  the `0007_memory_lifecycle_guard` constraint — but it has **no caller
-  anywhere**. No script wires it.
-- `scripts/promote-memory.ts` is not it: it calls `promoteToActive`, which
-  operates on `research_memory`, a different table. It can neither create nor
-  promote a SOURCE_ROUTE.
-- **Four separate tests actively ban route management from every existing owner
-  entrypoint** — `owner-acquisition-boundary`, `owner-docs-inspection-mode`,
-  `owner-inspection-mode` and `onchain-derive-entrypoint-boundary` each assert
-  the entrypoint source contains none of `promoteProjectMemoryItem`,
-  `projectMemoryItems`, `memory/lifecycle`, or `routeClass: "`.
-- `docs/PROJECT_IDENTITY_CONFIRMATION.md` documents the record shape and that
-  confirmation means `lifecycle_state = 'ACTIVE'` — and names no tool.
+`scripts/confirm-source-route.ts`, a thin controlled entrypoint, with the
+operation in `src/server/memory/source-route-confirmation.ts`.
 
-So the capability is deliberately absent from every acquisition entrypoint, and
-was never given a home of its own. This is a real gap, not an oversight to route
-around.
+```
+npx tsx scripts/confirm-source-route.ts \
+  --project=<slug> --domain=<host> --prefix=</path> --actor=<name>
+```
 
-### Everything else the owner asked to verify — all confirmed
+It reuses `promoteProjectMemoryItem` for OBSERVED → CANDIDATE → ACTIVE and
+inserts only the OBSERVED state the database guard permits — no transition is
+re-implemented. Then it prints the route as resolved by the **real**
+source-authority resolver, and fails loudly if `routeClass` came back non-null.
 
-Current state: **0** SOURCE_ROUTE rows name `fees.pump.fun`, so **no conflicting
-ACTIVE route** exists. Both candidate URLs resolve `CLAIMED / null / null`.
+**It assigns no route class and has no parameter that could.** A `--route-class`
+flag (or any spelling of it) is refused loudly rather than ignored, because
+silently dropping it would let an operator believe they had classified
+something. Confirming a host and classifying a page are different judgements,
+and the second should follow reading the page.
 
-The intended end state was evaluated against the **real gate functions**, using
-the route object that `{domain: "fees.pump.fun", pathPrefix: "/"}`, ACTIVE and
-unclassified, would produce:
+### Two hazards found while building it, both now refused
 
-| gate | result |
-|---|---|
-| inspection eligibility (root url) | **eligible**, host `fees.pump.fun`, prefix `/` |
-| render-as-Evidence (upgrade path) | refused — `NOT_OFFICIAL_DOCS` |
-| render-on-refusal | refused — `NOT_OFFICIAL_DOCS` |
-| `alpha-acquire-url` scope gate | **refuses** — routeClass is null |
-| inspection of any sub-path | refused — `NO_PATH_PREFIX` |
+Neither was in the brief; both fall out of how `resolveSourceRoute` **combines**
+ACTIVE rows, and both would have silently damaged working routes.
 
-Exactly the bounded grant intended: the root page becomes readable
-non-evidentiarily, nothing becomes Evidence, and the confirmation reaches no
-sub-path. `matchesPathPrefix` treats `/` as the root and nothing beneath it, in
-both the authority and renderer implementations.
+- **`OVERLAPPING_ACTIVE_PREFIX`** — `matchedPathPrefix` is reported only when
+  *exactly one* path-scoped row matched a url. Confirming a prefix that
+  co-matches an existing ACTIVE one turns that field null for the overlapping
+  urls, disabling rendering and inspection for a route that worked yesterday.
+- **`WOULD_INHERIT_ROUTE_CLASS`** — `routeClass` resolves from *every* matching
+  ACTIVE row, so an ACTIVE domain-wide row carrying a class hands it to the new
+  url too. A confirmation promising "unclassified" would quietly grant
+  documentation authority.
 
-### The smallest safe way to create it
+Both are mutation-checked: removing either guard fails tests.
 
-A new owner script, `scripts/confirm-source-route.ts` — the missing sibling of
-`promote-memory.ts`, following the principle that file already states (D-021 /
-D-055): a transition to ACTIVE happens **only by a human, through a controlled,
-auditable script** — not an admin UI, not a model, not hand-written SQL.
+The refusals are not so broad as to block legitimate use — two non-overlapping
+prefixes on one domain still coexist, which is what `pump.fun` has in production
+today.
 
-It should:
+### Next step, awaiting approval
 
-- take `--project`, `--domain`, `--path-prefix`, `--actor`, and an **explicit**
-  `--route-class` that **defaults to null**, so classification can never be a
-  side effect of confirming a domain;
-- refuse when an ACTIVE row already exists for the same project + domain, rather
-  than creating a silent duplicate;
-- insert as `OBSERVED` and then call the existing `promoteProjectMemoryItem`,
-  reusing the supported lifecycle instead of copying it, so the database guard
-  stays the authority;
-- print `resolveSourceRoute` for the target url afterwards, so the outcome is
-  verified rather than assumed;
-- write nothing else — no Evidence, no fetch, no model, no S5–S7 — with its own
-  boundary test mirroring the four that already exist.
+Creating the real route:
 
-**One design question for the owner**, because it is a judgement rather than a
-detail: whether this script may set `routeClass` at all. The existing tests show
-a clear stance that *acquisition* entrypoints must never assign one. A dedicated
-confirmation script is the natural home for it, but keeping classification a
-separate second act is also defensible — and is what actually happened with
-`/pump-token`, which was inspected first and classified afterwards.
+```
+npx tsx scripts/confirm-source-route.ts \
+  --project=pump_fun --domain=fees.pump.fun --prefix=/ --actor=owner
+```
 
-Say which, and whether to build it, and it is a small self-contained task.
+Verified offline in advance: no SOURCE_ROUTE row names `fees.pump.fun`, so no
+duplicate, no overlap and no class to inherit — the command should succeed and
+yield CONFIRMED / null / `/`.
+
+**One thing to weigh before running it.** A `/` prefix confirms the root path
+and nothing beneath it, so if `fees.pump.fun/` redirects or client-side-routes
+to a sub-path, the later inspection render ends `FINAL_URL_OUTSIDE_ROUTE` —
+exactly as `pump.fun/pump-token` did. The honest response then is to confirm a
+route at that specific sub-path, not to widen the prefix.
+
+Say the word and it runs; it is a single local database write, no network.
 
 ### Standing boundaries
 

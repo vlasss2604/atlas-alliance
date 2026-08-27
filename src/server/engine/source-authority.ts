@@ -186,7 +186,10 @@ const SHARED_MULTI_TENANT_PLATFORM_BASE_DOMAINS = new Set([
 // True only for an EXACT shared-platform base domain (github.com), never
 // for a subdomain of it (project.gitbook.io stays eligible for routeClass
 // — it is a specific host, not the whole shared platform).
-function isBareSharedPlatformBase(host: string): boolean {
+// EXPORTED so the owner confirmation tool refuses these from the SAME
+// code-owned list, rather than growing its own opinion about which hosts
+// are shared platforms.
+export function isBareSharedPlatformBase(host: string): boolean {
   return SHARED_MULTI_TENANT_PLATFORM_BASE_DOMAINS.has(host);
 }
 
@@ -359,15 +362,22 @@ interface SourceRouteContent {
 // matchesPlatformDomain's dot-boundary check: "/doc" must not match
 // "/documentation". "/docs" matches "/docs" and "/docs/x", never
 // "/docsomething".
-function matchesPathPrefix(pathname: string, prefix: string): boolean {
-  const normalize = (p: string) => {
-    const withLeadingSlash = p.startsWith("/") ? p : `/${p}`;
-    return withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")
-      ? withLeadingSlash.slice(0, -1)
-      : withLeadingSlash;
-  };
-  const normalizedPrefix = normalize(prefix);
-  const normalizedPath = normalize(pathname);
+// EXPORTED so a route being CONFIRMED is normalized by the same rule that
+// will later match it. A second copy of this would be a second notion of
+// authority, which is the one thing this module must not have.
+export function normalizePathPrefix(p: string): string {
+  const withLeadingSlash = p.startsWith("/") ? p : `/${p}`;
+  return withLeadingSlash.length > 1 && withLeadingSlash.endsWith("/")
+    ? withLeadingSlash.slice(0, -1)
+    : withLeadingSlash;
+}
+
+// EXPORTED for the same reason: the owner confirmation tool has to know
+// whether a proposed prefix would co-match an existing ACTIVE row's, and
+// it must ask THIS rule rather than approximate it.
+export function matchesPathPrefix(pathname: string, prefix: string): boolean {
+  const normalizedPrefix = normalizePathPrefix(prefix);
+  const normalizedPath = normalizePathPrefix(pathname);
   return normalizedPath === normalizedPrefix || normalizedPath.startsWith(`${normalizedPrefix}/`);
 }
 

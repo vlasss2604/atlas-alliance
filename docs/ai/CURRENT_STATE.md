@@ -333,10 +333,21 @@ Abbreviated PUMP position:
   url; both renderer entry points refused `NOT_OFFICIAL_DOCS`; the evidentiary
   scope gate refused on a null routeClass; and any sub-path refused
   `NO_PATH_PREFIX`. The grant would be exactly as bounded as intended.
-- **Proposed smallest fix: `scripts/confirm-source-route.ts`**, the missing
-  sibling of `promote-memory.ts`, reusing `promoteProjectMemoryItem` and
-  defaulting `routeClass` to null. Not built — awaiting the owner's decision on
-  whether it may set a class at all. See `CURRENT_TASK.md`.
+- **That gap is now closed: `scripts/confirm-source-route.ts` exists**, with the
+  operation in `memory/source-route-confirmation.ts`. It reuses
+  `promoteProjectMemoryItem` for the transitions and inserts only the OBSERVED
+  state the database guard permits. **It assigns no `routeClass` and has no
+  parameter that could** — a class flag is refused loudly rather than ignored.
+  Result: CONFIRMED + null, which opens non-evidentiary inspection and nothing
+  else. See `ARCHITECTURE.md`, "Confirming a source route".
+- **Building it surfaced two silent-breakage hazards, now refused.** A prefix
+  overlapping an existing ACTIVE one would null that route's
+  `matchedPathPrefix` (reported only when exactly one path-scoped row matches),
+  disabling rendering and inspection for a route that worked. And an ACTIVE
+  domain-wide row carrying a class would be inherited, so a confirmation
+  promising "unclassified" would quietly grant authority. Both mutation-checked.
+- **No route was created for `fees.pump.fun`.** The capability is built and
+  tested only; using it against the real database awaits owner approval.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
