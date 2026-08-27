@@ -1,6 +1,10 @@
 import type { ExtractedFact } from "./providers/types";
 import type { OnchainArtifact } from "./providers/onchain-types";
 import {
+  deriveDecodedExchange,
+  EXCHANGE_DOES_NOT_PROVE,
+} from "./onchain-exchange-decoding";
+import {
   deriveReciprocalAssetFlows,
   RECIPROCAL_FLOW_DOES_NOT_PROVE,
 } from "./onchain-transaction-flow";
@@ -436,6 +440,37 @@ export function synthesizeOnchainFacts(
             // is inert in reconciliation, so this can never push a component
             // toward SUPPORTED by resembling a purchase. Unchanged: this
             // fact was never anything else.
+            { relationship: "CONTEXT" },
+          ),
+        );
+      }
+
+      // A DECODED EXCHANGE, WHEN THE INSTRUCTION ITSELF SAYS SO.
+      //
+      // The reciprocal facts above stay exactly as they are: they describe
+      // movement and are offered as CONTEXT because movement is not a
+      // mechanism. This one is different in what it reads — the venue
+      // instruction's own method name, and an event the program emitted
+      // stating both assets and both amounts — and identical in what it
+      // may conclude. An exchange is an economic fact about two parties;
+      // it is still not evidence that any published mechanism was being
+      // carried out, so it remains CONTEXT and establishes no component.
+      const exchange = deriveDecodedExchange(r, artifact.provenance.projectAnchor);
+      if (exchange !== null) {
+        facts.push(
+          fact(
+            target,
+            `Transaction ${exchange.signature} (slot ${exchange.slot}) deterministically executes an asset ` +
+              `exchange within outer instruction ${exchange.invocationIndex}: address ${exchange.participant} ` +
+              `paid ${exchange.paid.amountRaw} raw units of mint ${exchange.paid.mint} from token account ` +
+              `${exchange.paid.fromAccount} into token account ${exchange.paid.toAccount}, owned by ` +
+              `${exchange.counterparty}, and received ${exchange.received.amountRaw} raw units of mint ` +
+              `${exchange.received.mint} from token account ${exchange.received.fromAccount}, owned by ` +
+              `${exchange.counterparty}, into token account ${exchange.received.toAccount}. The venue ` +
+              `instruction's own method is ${exchange.basis.venueMethod}, and an event emitted by program ` +
+              `${exchange.basis.eventProgramId} in the same invocation states both assets and both amounts.`,
+            JSON.stringify({ signature: r.signature, slot: r.slot, exchange }),
+            EXCHANGE_DOES_NOT_PROVE,
             { relationship: "CONTEXT" },
           ),
         );

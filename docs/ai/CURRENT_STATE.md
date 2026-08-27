@@ -134,12 +134,19 @@ Abbreviated PUMP position:
   outer instruction 5 is a `JUP6LkbZ…` instruction — so the opposing legs are
   CPIs of one invocation, not merely two movements in one transaction. That rung
   was previously not establishable.
-- **Swap/acquisition semantics remain out of reach.** Neither program is
-  identified from any local evidence and no decoder exists, so the blobs are
-  retained unread. Co-occurrence inside one invocation is a stronger structure
-  than co-occurrence inside one transaction, and it is still not an exchange, a
-  purchase or an acquisition. Derivation output is byte-identical to before the
-  re-read: DIRECT + CONTEXT, zero burns.
+- **The exchange is decoded.** The venue instruction's own method reproduces
+  `sha256("global:swap_v2")[0..8]` exactly, and an event emitted in the same
+  invocation states both mints and both amounts — each corroborated against a
+  transfer the transaction independently records. So: within outer instruction 5,
+  the documented address paid `382202589` raw wSOL and received `7723746661`
+  raw units of the confirmed mint from the same counterparty. Account roles were
+  never read from array position; the ordering contract is not available locally.
+- **It is still CONTEXT and establishes no component.** An exchange is an economic
+  fact about two parties, not evidence that a published mechanism ran. Buyback,
+  revenue funding, market-wide purchase and policy remain separate bridges, none
+  of them crossed. The reciprocal movement facts are unchanged beside it.
+- The aggregator's OUTER instruction variant matched none of nineteen tested
+  method names and is recorded UNSUPPORTED. Nothing depends on it.
 
 ## Done
 

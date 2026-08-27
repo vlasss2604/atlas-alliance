@@ -130,7 +130,7 @@ export const RECIPROCAL_FLOW_DOES_NOT_PROVE =
   "it does NOT establish that the amount which arrived is the amount that went on, nor what the remainder " +
   "was for. Two unrelated transfers batched into one transaction produce exactly this picture.";
 
-interface ResolvedOwner {
+export interface ResolvedOwner {
   owner: string;
   source: OwnerSource;
   attestedBy: string[];
@@ -195,7 +195,7 @@ function attestedOwnership(
 // which reading to believe about the very thing being established, and there
 // is no basis for that choice. Attestation therefore only ever FILLS a gap —
 // it can never overrule, and it can never quietly correct.
-function resolveOwnership(result: TransactionDetailResult): Map<string, ResolvedOwner> {
+export function resolveOwnership(result: TransactionDetailResult): Map<string, ResolvedOwner> {
   const fromBalances = balanceOwnership(result);
   const attested = attestedOwnership(result);
   const out = new Map<string, ResolvedOwner>();

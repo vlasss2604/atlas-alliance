@@ -66,12 +66,22 @@ its own position and the ordinal of the outer instruction it was invoked from.
 That is what makes "inside one invocation" distinguishable from "in one
 transaction".
 
-Preservation is not interpretation. Nothing reads a raw instruction, no program
-is identified anywhere, and no swap, route or exchange is representable in the
-model. Keeping the material is what makes a later, separately-decided decoding
-possible; it is not that decision. Malformed material is dropped whole rather
-than stored in part, and an over-long blob is dropped rather than truncated —
-something that looks decodable and is not is worse than nothing.
+Malformed material is dropped whole rather than stored in part, and an over-long
+blob is dropped rather than truncated — something that looks decodable and is
+not is worse than nothing.
+
+One narrow decoder reads that material: `onchain-exchange-decoding.ts`. Its
+constants are DERIVED at module load, never pasted — an Anchor method name is a
+hypothesis checked against `sha256("global:<name>")[0..8]`, so it either
+reproduces the observed bytes exactly or is wrong. Program-id match is exact,
+payload length is exact, and every step fails closed with no fallback.
+
+**It never reads an account role from array position.** A third-party ordering
+contract is not available, and assuming one fails silently and wrongly. Roles
+come from the mints and amounts the instruction and its event state, each
+corroborated against a transfer the transaction independently records; direction
+comes from those transfers. A decoded exchange is still offered as CONTEXT: it is
+an economic fact about two parties, not evidence that any mechanism ran.
 
 The raw response itself is still kept only as a hash, so an artifact stored
 before this capability cannot be enriched retrospectively; only a fresh read can

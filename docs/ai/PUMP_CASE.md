@@ -305,7 +305,7 @@ Never "the same tokens". The claim is account-level quantity continuity, and it
 carries the coverage ceiling recorded above: *nothing further was listed* is not
 *nothing else happened*.
 
-### Why it cannot be called a swap, from what is stored
+### The exchange, decoded
 
 The transaction invokes seven programs. Five are chain infrastructure ATLAS
 decodes: Compute Budget, the Associated Token program, the System program, SPL
@@ -365,8 +365,58 @@ come out byte-identical to the earlier payload, still DIRECT + CONTEXT, still
 zero burns. Seeing more did not change what anything means.
 
 The ladder now: same transaction — yes. Same counterparty ownership — yes.
-**Same program invocation — yes**, from the captured parent linkage. Decoded
-swap instruction — **no**. Deterministic economic exchange — **no**.
+Same program invocation — yes. **Decoded swap instruction — yes.**
+**Asset exchange — yes.** Buyback, revenue funding, published mechanism,
+market-wide purchase — still no, and those are different questions.
+
+### How it was decoded without a vendored contract
+
+An Anchor program dispatches on `sha256("global:<method>")[0..8]`. A method
+name is therefore a HYPOTHESIS that either reproduces the observed eight bytes
+exactly or is wrong, and that check runs locally on the real blob. The venue
+instruction's eight bytes reproduce `global:swap_v2` exactly.
+
+That result does not rest on the owner-supplied program identities, and barely
+uses them: a program answering to that discriminator is answering to that method
+name whoever it is. The outer aggregator instruction, by contrast, matched none
+of nineteen tested method names and is recorded as **UNSUPPORTED** — nothing
+depends on it.
+
+The aggregator's inner instruction is an Anchor event CPI (marker derived from
+`anchor:event`, matched exactly). Its event NAME is not established and is
+never asserted — only its discriminator bytes, `982f4eebc0606e6a`. Its 132-byte
+payload tiles exactly, and every field the tiling produces is corroborated
+against something the transaction states independently:
+
+| offset | content | corroboration |
+|---|---|---|
+| 20 | `So1111…112` | base58-matches the wSOL mint |
+| 52 | `382202589` | equals the wSOL transfer out of A's wrapper |
+| 60 | `pumpCmXq…` | base58-matches the confirmed project mint |
+| 92 | `7723746661` | equals the project-token transfer into A's account |
+| 100 | `CAMMCzo5…` | the venue program |
+
+**Account roles were never read from array position.** The ordering contract of
+a third-party program is not available locally, and assuming one is exactly the
+remembered layout that fails silently. Roles come from mints and amounts instead,
+corroborated against the transaction's own transfers; direction comes from those
+transfers, never from a flag byte. Reversing the venue instruction's whole
+account list changes the result not at all — pinned by test.
+
+### What the exchange is, exactly
+
+> The transaction deterministically executes an asset exchange in which the
+> documented address's SOL/wSOL side is used and confirmed PUMP is received.
+
+Concretely: within outer instruction 5, `99mRw3…` paid `382202589` raw wSOL
+from its transient wrapper into an account owned by `45ssPkUQ…`, and received
+`7723746661` raw units of the confirmed mint from an account owned by that same
+party. Note the consideration is `382202589`, not the `382585174` lamports
+A wrapped — the remainder went elsewhere and is not part of the exchange.
+
+The fact is **CONTEXT**, exactly like the movement facts. An exchange is an
+economic fact about two parties; it is not evidence that a published mechanism
+was being carried out, so it establishes no component.
 
 Decoding would require re-retrieving the transaction and a human-authored program
 registry — a label whose own provenance would then need answering. And even a
