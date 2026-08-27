@@ -27,21 +27,17 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   for any future artifact-reuse path. Pinned by
   `tests/onchain-persisted-burn-evidence.test.ts`.
 
-### Owner tooling gaps — BLOCKING for the next case
+### Owner tooling gaps — one still BLOCKING for the next case
 
-Both are the same shape as the `SOURCE_ROUTE` gap already closed: a decision the
+The same shape as the `SOURCE_ROUTE` gap already closed: a decision the
 architecture requires a human to make, with no controlled auditable tool to make
-it. Neither is a defect in research behaviour; both stop project #2 before it
-starts.
+it. Not a defect in research behaviour; it stops project #2 before it starts.
 
-- **`PROJECT_IDENTITY` confirmation has no supported path** — *BLOCKING.*
-  Nothing in `src/` or `scripts/` inserts one. `onchain-account-check.ts` and
-  `onchain-derive-token-accounts.ts` read it and refuse without it, and S4 skips
-  structured on-chain acquisition unless the project has a confirmed identity.
-  Smallest fix: one owner script mirroring `confirm-source-route.ts` — insert as
-  OBSERVED, reuse `promoteProjectMemoryItem`, validate chain and address shape at
-  the edge, refuse a duplicate ACTIVE identity, print what `resolveProjectIdentity`
-  then returns.
+- ~~**`PROJECT_IDENTITY` confirmation has no supported path.**~~ **CLOSED
+  2026-08-28** by `scripts/confirm-project-identity.ts`, with the operation in
+  `memory/project-identity-confirmation.ts`. Generic, discovers nothing, reuses
+  the domain module's own validation, and refuses a second ACTIVE identity
+  outright because the resolver would silently ignore it.
 - **Route classification has no supported path** — *BLOCKING.*
   `confirm-source-route.ts` deliberately assigns no `routeClass`; the separate
   later act that assigns `OFFICIAL_DOCS` was never built. Without it the

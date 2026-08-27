@@ -322,6 +322,37 @@ per-attempt observation channel, which is folded into the terminal reason — th
 zero-document failure path included, since that is the path a failed render
 ends on and owner tooling that executes an item directly writes no attempt row.
 
+## Confirming a project's identity
+
+Which entity a project **is** — D-133 — is an ACTIVE `PROJECT_IDENTITY` row, and
+that transition is a human act performed by a controlled script, never a model
+and never hand-written SQL. `confirm-project-identity.ts` is that script, with
+the operation in `memory/project-identity-confirmation.ts`.
+
+It **discovers nothing**: no chain query, no web query, no document, no model is
+in its import graph. A well-formed address is not a confirmed one — confirmation
+*is* the human decision, and the tool only records that it was made. Validation
+reuses the domain module's own `SUPPORTED_CHAINS`, `addressShapeMatchesChain` and
+strict content schema rather than restating them, so an `0x…` address filed under
+`solana` — the cross-chain contamination D-133 exists to prevent — is refused at
+entry.
+
+**The stored contract is `{ chain, tokenAddress?, ticker? }` and nothing else.**
+There is no `network` field: mainnet is implied by construction, since every
+explorer in the code-owned chain map is a mainnet host and test networks are
+rejected again at classification time. A `--network` option is refused loudly
+rather than dropped silently. `tokenAddress` is genuinely optional — a project
+may be confirmed on a chain before its token is, and without an address there is
+simply no explorer locator.
+
+**A second ACTIVE identity is refused outright, identical or not.**
+`resolveConfirmedIdentity` returns the *earliest* structurally-valid ACTIVE row,
+so a second one would not replace anything and would not conflict loudly — it
+would be silently ignored while the older record kept deciding what the project
+is. An owner who "confirmed" a correction would get no error and no effect, which
+is worse than a refusal. Superseding is a separate deliberate act with its own
+consequences, and this tool does not perform it.
+
 ## Confirming a source route
 
 A domain becomes CONFIRMED for a project only through an ACTIVE `SOURCE_ROUTE`
