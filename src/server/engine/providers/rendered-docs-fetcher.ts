@@ -165,6 +165,12 @@ export const RENDERED_DOCS_FAILURE_REASONS = [
   // checked. Fail closed: unverifiable is not the same as fine, and it is
   // a different statement from the server having refused us.
   "NO_NAVIGATION_RESPONSE",
+  // The navigation THREW — it never completed, so there was never a
+  // response to have a status. Its own stage, because everything before it
+  // (the browser started, the route passed pre-flight) worked and
+  // everything after it (status, final url, text) never happened.
+  // Carries a NavigationDiagnostic saying which kind.
+  "NAVIGATION_FAILED",
   // The browser itself could not be started: the module is absent, the
   // binary is missing, or the launch was refused. Distinct from every
   // page-level failure because the site is not implicated at all.
@@ -216,9 +222,67 @@ export const CHILD_REPORTABLE_RENDER_REASONS: ReadonlySet<string> = new Set<stri
   "TOO_LARGE",
   "HTTP_ERROR",
   "NO_NAVIGATION_RESPONSE",
+  "NAVIGATION_FAILED",
   "BROWSER_LAUNCH_FAILED",
   "RENDER_FAILED",
 ] satisfies RenderedDocsFailureReason[]);
+
+// WHY A NAVIGATION NEVER COMPLETED, as a closed code-owned set.
+//
+// `page.goto` throwing collapsed three materially different situations
+// into one word, and they call for opposite next actions: wait longer,
+// confirm a different host, or do nothing at all. A live window that comes
+// back unable to say which buys one bit of information at full price.
+//
+// EVERY VALUE HERE RESTS ON A LOCAL SIGNAL WE ACTUALLY HOLD. Nothing is
+// inferred from the shape of a generic failure, and nothing is parsed out
+// of an exception message.
+export const NAVIGATION_DIAGNOSTICS = [
+  // Playwright's own typed timeout. `errors.TimeoutError` sets
+  // `name === "TimeoutError"`, verified against the installed package —
+  // an exact comparison against a code-owned constant, not a message
+  // search.
+  "NAVIGATION_TIMEOUT",
+  // OUR OWN containment aborted the main-frame navigation. Recorded by the
+  // route handler at the moment it calls abort(), never inferred: the
+  // request must have been a navigation request belonging to the page's
+  // main frame. A cross-host redirect is the case this exists for, and it
+  // is a statement about what THIS code did, not a guess about the site.
+  "BLOCKED_BY_ROUTE_POLICY",
+  // The navigation failed some other way — a reset, a TLS failure, an
+  // empty response. Chromium's `net::ERR_*` code lives only inside the
+  // exception message, and messages are provider-influenced text, so it is
+  // deliberately NOT parsed. By elimination this value still separates the
+  // transport case from the two above.
+  "UNCLASSIFIED_NAVIGATION_ERROR",
+] as const;
+
+export type NavigationDiagnostic = (typeof NAVIGATION_DIAGNOSTICS)[number];
+
+const NAVIGATION_DIAGNOSTIC_SET: ReadonlySet<string> = new Set<string>(NAVIGATION_DIAGNOSTICS);
+
+export function isNavigationDiagnostic(v: unknown): v is NavigationDiagnostic {
+  return typeof v === "string" && NAVIGATION_DIAGNOSTIC_SET.has(v);
+}
+
+// The name Playwright gives its typed timeout. Kept as a named constant so
+// the comparison is against something this repository owns and a test can
+// assert it still matches the installed package.
+export const PLAYWRIGHT_TIMEOUT_ERROR_NAME = "TimeoutError";
+
+// The one place a navigation failure is classified. `blockedMainFrameNav`
+// is OUR OWN observation, passed in by the caller that made it — the
+// classifier never guesses at containment from the exception.
+export function classifyNavigationFailure(
+  e: unknown,
+  blockedMainFrameNav: boolean,
+): NavigationDiagnostic {
+  // Our own action outranks the browser's report of it: when containment
+  // aborted the navigation, the exception is merely the consequence.
+  if (blockedMainFrameNav) return "BLOCKED_BY_ROUTE_POLICY";
+  if (e instanceof Error && e.name === PLAYWRIGHT_TIMEOUT_ERROR_NAME) return "NAVIGATION_TIMEOUT";
+  return "UNCLASSIFIED_NAVIGATION_ERROR";
+}
 
 // WHY A BROWSER DID NOT START, as a closed code-owned set.
 //
@@ -303,11 +367,19 @@ export class RenderedDocsError extends Error {
   // a header or a page, whatever the server sent.
   readonly httpStatus: number | null;
 
+  // Present only for NAVIGATION_FAILED, and only ever a member of the
+  // closed set above. Kept as its OWN field rather than widening
+  // `diagnostic`: launch causes and navigation causes are separate
+  // vocabularies, and merging them would let a value from one be reported
+  // for a stage in the other.
+  readonly navigationDiagnostic: NavigationDiagnostic | null;
+
   constructor(
     public readonly reason: RenderedDocsFailureReason,
     public readonly rendererName = "unknown",
     diagnostic: BrowserLaunchDiagnostic | null = null,
     httpStatus: number | null = null,
+    navigationDiagnostic: NavigationDiagnostic | null = null,
   ) {
     super(`rendered docs retrieval failed (${reason}) via ${rendererName}`);
     this.name = "RenderedDocsError";
@@ -315,6 +387,9 @@ export class RenderedDocsError extends Error {
     // the boundary, so it validates at its own edge.
     this.diagnostic = isBrowserLaunchDiagnostic(diagnostic) ? diagnostic : null;
     this.httpStatus = isHttpStatusCode(httpStatus) ? httpStatus : null;
+    this.navigationDiagnostic = isNavigationDiagnostic(navigationDiagnostic)
+      ? navigationDiagnostic
+      : null;
   }
 }
 

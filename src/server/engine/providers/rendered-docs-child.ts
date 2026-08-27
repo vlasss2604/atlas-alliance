@@ -57,7 +57,7 @@ export type ChildRenderResponse =
   // present only for HTTP_ERROR and comes from Playwright's navigation
   // Response. Both are typed loosely because this is the wire: the parent
   // re-checks them rather than believing the type.
-  | { ok: false; reason: string; detail?: string; httpStatus?: number };
+  | { ok: false; reason: string; detail?: string; httpStatus?: number; navigationDetail?: string };
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -133,6 +133,7 @@ export async function runChild(): Promise<void> {
       response = { ok: false, reason: e.reason };
       if (e.diagnostic !== null) response.detail = e.diagnostic;
       if (e.httpStatus !== null) response.httpStatus = e.httpStatus;
+      if (e.navigationDiagnostic !== null) response.navigationDetail = e.navigationDiagnostic;
     } else {
       response = { ok: false, reason: "RENDER_FAILED" };
     }

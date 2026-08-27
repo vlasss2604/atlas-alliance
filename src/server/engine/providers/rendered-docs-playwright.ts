@@ -22,6 +22,7 @@ import {
   DEFAULT_RENDER_LIMITS,
   RenderedDocsError,
   classifyBrowserLaunchFailure,
+  classifyNavigationFailure,
   type ConfirmedDocsRoute,
   type RenderedDocsFetcher,
   type RenderedDocument,
@@ -55,7 +56,17 @@ interface ContextLike {
   route(pattern: string, handler: (route: RouteLike) => Promise<void> | void): Promise<void>;
 }
 interface RouteLike {
-  request(): { url(): string; resourceType(): string };
+  // `isNavigationRequest` and `frame` are OPTIONAL on purpose. They are
+  // what lets containment prove it aborted the main-frame navigation, and
+  // a driver that does not expose them simply cannot prove it — so the
+  // classification falls back to the generic one rather than being
+  // asserted. Absence of proof is not proof.
+  request(): {
+    url(): string;
+    resourceType(): string;
+    isNavigationRequest?: () => boolean;
+    frame?: () => unknown;
+  };
   abort(reason?: string): Promise<void>;
   continue(): Promise<void>;
 }
@@ -66,6 +77,7 @@ interface PageLike {
   innerText(selector: string): Promise<string>;
   on(event: string, handler: (...args: unknown[]) => void): void;
   close(): Promise<void>;
+  mainFrame?: () => unknown;
 }
 
 export interface PlaywrightRenderDeps {
@@ -148,6 +160,13 @@ export function createPlaywrightRenderedDocsFetcher(
       const bodyReads: Promise<void>[] = [];
       let totalBytes = 0;
       let navigations = 0;
+      // Set by the route handler when IT aborts the page's own top-level
+      // navigation. The single local fact that lets a failed navigation be
+      // attributed to containment rather than guessed at.
+      let blockedMainFrameNavigation = false;
+      // A holder, because the route handler closes over it before the page
+      // exists.
+      const pageHolder: { page: PageLike | null } = { page: null };
 
       // Starting the browser is its own stage. A missing playwright
       // module, an absent Chromium binary or a refused launch says
@@ -185,9 +204,25 @@ export function createPlaywrightRenderedDocsFetcher(
         // connection pinning: a browser resolves and connects on its own,
         // so containment has to happen here or not at all.
         await context.route("**/*", async (r) => {
-          const requestUrl = r.request().url();
+          const request = r.request();
+          const requestUrl = request.url();
           if (subresourceAllowed(requestUrl, route.confirmedHost) === "BLOCK") {
             blockedRequestCount += 1;
+            // RECORDED AT THE MOMENT OF THE DECISION, never inferred
+            // afterwards from a generic failure. The navigation is only
+            // claimed as blocked-by-policy when this code can see that the
+            // request it aborted was a navigation belonging to the page's
+            // OWN main frame — an iframe navigating elsewhere is blocked
+            // too, and does not make page.goto throw.
+            //
+            // The url itself is deliberately not kept: which host we
+            // refused is exactly the kind of detail that must not travel.
+            const isNav = request.isNavigationRequest?.() ?? false;
+            const sameFrame =
+              request.frame !== undefined &&
+              pageHolder.page?.mainFrame !== undefined &&
+              request.frame() === pageHolder.page.mainFrame();
+            if (isNav && sameFrame) blockedMainFrameNavigation = true;
             await r.abort("blockedbyclient");
             return;
           }
@@ -195,6 +230,9 @@ export function createPlaywrightRenderedDocsFetcher(
         });
 
         const page = await context.newPage();
+        // The handler above is registered on the CONTEXT, before a page
+        // exists, but only ever runs once one does.
+        pageHolder.page = page;
         // A popup or new target is refused rather than followed.
         page.on("popup", (...args: unknown[]) => {
           blockedRequestCount += 1;
@@ -269,10 +307,29 @@ export function createPlaywrightRenderedDocsFetcher(
         // receives the refusal page, renders it, and reports success.
         // Discarding this was how a server's "access denied" HTML could
         // reach extraction dressed as the document we asked for.
-        const response = await page.goto(url, {
-          timeout: limits.navigationTimeoutMs,
-          waitUntil: "networkidle",
-        });
+        //
+        // THE NAVIGATION IS ITS OWN STAGE. A throw here means it never
+        // completed, so there was never a response to have a status — and
+        // it collapsed into the generic RENDER_FAILED beside failures that
+        // happen nowhere near the network. The wait condition, the timeout
+        // and the single-attempt rule are all unchanged; only the
+        // reporting is.
+        let response: { status(): number } | null;
+        try {
+          response = await page.goto(url, {
+            timeout: limits.navigationTimeoutMs,
+            waitUntil: "networkidle",
+          });
+        } catch (e) {
+          if (e instanceof RenderedDocsError) throw e;
+          throw new RenderedDocsError(
+            "NAVIGATION_FAILED",
+            name,
+            null,
+            null,
+            classifyNavigationFailure(e, blockedMainFrameNavigation),
+          );
+        }
 
         if (Date.now() - startedAt > limits.totalWallClockMs) {
           throw new RenderedDocsError("TIMEOUT", name);

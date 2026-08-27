@@ -4,64 +4,63 @@
 
 ## NONE — awaiting owner direction
 
-The `fees.pump.fun` root inspection ran once, non-evidentiarily, and failed with
-`RENDER_FAILED`. Analysed offline; no retry, no network call, nothing persisted.
+Pre-response render failures are now classified. Written up in `ARCHITECTURE.md`,
+"Rendering: two ways in, one set of gates". Observability only — no navigation
+behaviour changed.
 
-### What the failure tells us
+### What changed
 
-`RENDER_FAILED` is the *unclassified* render-stage reason, so the finding is
-what it rules out. Each of these is a distinct reason the code would have
-returned instead:
+A navigation that never completed is its own stage, **`NAVIGATION_FAILED`**,
+carrying its own closed diagnostic:
 
-- **the browser launched** — not `BROWSER_LAUNCH_FAILED`;
-- the proxy, child process and result envelope were all fine;
-- the pre-flight passed, so the host resolved and was not private or reserved;
-- **not `FINAL_URL_OUTSIDE_ROUTE`** — the `pump.fun/pump-token` same-host move
-  off the prefix did **not** recur;
-- **not `HTTP_ERROR`, not `NO_NAVIGATION_RESPONSE`** — no status was ever
-  obtained, so no navigation completed with a response;
-- not the post-navigation wall clock, not the byte cap.
-
-The throw is at or around `page.goto`: after launch, before any response.
-
-**Three causes remain, and this capture cannot separate them.**
-
-| cause | next action if true |
+| diagnostic | signal it rests on |
 |---|---|
-| navigation timeout — `networkidle` never settling, ordinary for a polling dashboard | relax the wait condition or the budget |
-| our own containment aborting a **cross-host** redirect, or the proxy denying a cross-host CONNECT | confirm the other host, a separate owner decision |
-| transport error — reset, TLS failure, empty response | nothing; retry another day |
+| `NAVIGATION_TIMEOUT` | Playwright's typed `TimeoutError`, matched on a name pinned as a constant |
+| `BLOCKED_BY_ROUTE_POLICY` | **our own route handler** recorded aborting the main-frame navigation |
+| `UNCLASSIFIED_NAVIGATION_ERROR` | everything else, honestly |
 
-### The recommended next step, and it is offline
+Previously all three fell into the generic `RENDER_FAILED`, beside failures
+happening nowhere near the network — and the three call for opposite next
+actions: wait longer, confirm a different host, or nothing at all.
 
-**Close the third observability gap before spending another window here.**
+`RENDER_FAILED` keeps its meaning and is now genuinely elsewhere: context
+creation, text extraction, anything outside the navigation itself.
 
-The renderer's own `TIMEOUT` is raised only by the post-`goto` wall-clock check,
-so a `goto` that timed out is indistinguishable from a blocked redirect and from
-a dead connection — all three collapse into `RENDER_FAILED`. This is the same
-shape as the two gaps already closed (the launch stage, then the HTTP status),
-and the same lesson: a window spent on a failure that cannot explain itself buys
-one bit of information at full price.
+### What it deliberately does not do
 
-That work is entirely offline and needs no authorization.
+**It never infers containment from a generic failure.** The abort is recorded at
+the moment the route handler makes the decision, and only when the request was a
+navigation belonging to the page's own main frame. A driver that cannot prove
+that claims nothing — absence of proof is not proof, and a test pins it.
 
-A smaller, separate option if the owner prefers: `fees.pump.fun/api/buybacks`
-would need **its own** confirmed route at prefix `/api` — the `/` grant does not
-reach it. JSON settles instantly, so it would sidestep a `networkidle` cause
-specifically. But per the standing analysis it is unlikely to *assign a role*,
-and an endpoint named `buybacks` is not a statement.
+**It does not parse `net::ERR_*`.** Chromium's transport codes live only inside
+the exception message, which is provider-influenced text. There is no typed path
+to them, so that case stays unclassified — which still separates it from the
+other two by elimination.
 
-### What is NOT concluded
+**A contract test pins the timeout name** against the installed Playwright, so a
+future rename fails there rather than silently degrading every timeout to
+unclassified during a live window.
 
-- **The page was not read**, so nothing about its content is known. The
-  address's absence from it is **not** established: failure to read a source is
-  never evidence that the information is absent.
-- **No classification.** `fees.pump.fun` stays CONFIRMED and unclassified.
-  Classifying a page nobody has read is exactly the inversion the inspection
-  path exists to prevent.
-- **The actor → acquisition bridge is unchanged and still unresolved.** The
-  standard is unchanged too: an explicit first-party assignment of the
-  acquisition role to `99mRw3…`.
+### Also
+
+The inspection script printed only the stage, which is how a window came back
+saying `RENDER_FAILED` and nothing else. It now prints the sub-reason beside it —
+closed-set values only, no message, url, host or stack.
+
+### Reported separately, as instructed — not fixed
+
+**`waitUntil: "networkidle"` is a poor fit for a live dashboard.** A page that
+polls or streams may never reach two seconds of network silence, so the
+navigation can time out while the document is perfectly readable. That is a
+plausible reading of the `fees.pump.fun` failure, and the next window will now
+say so outright if it is one.
+
+Changing it is a navigation-behaviour decision — `domcontentloaded` or `load`
+trades settled-DOM completeness for reachability — and it was explicitly out of
+scope here. **Get one classified observation first**: if the diagnostic comes
+back `NAVIGATION_TIMEOUT`, the case for changing it is evidence rather than a
+guess.
 
 ### Standing boundaries
 

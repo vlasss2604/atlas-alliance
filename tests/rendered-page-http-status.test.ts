@@ -260,9 +260,11 @@ describe("5. the status comes from the Response and from nowhere else", () => {
       gotoError: new Error(`net::ERR_FAILED 403 Forbidden at ${SECRET_URL} authorization: ${SECRET}`),
     });
     // A thrown navigation is not a refusal: no Response existed, so no
-    // status is claimed. Nothing is scraped out of the message.
-    expect(e.reason).toBe("RENDER_FAILED");
+    // status is claimed. Nothing is scraped out of the message — the "403"
+    // sitting in that error text reaches nothing.
+    expect(e.reason).toBe("NAVIGATION_FAILED");
     expect(e.httpStatus).toBeNull();
+    expect(e.navigationDiagnostic).toBe("UNCLASSIFIED_NAVIGATION_ERROR");
   });
 
   it("a missing Response fails closed rather than passing unverified", async () => {

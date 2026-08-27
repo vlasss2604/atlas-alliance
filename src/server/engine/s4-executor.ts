@@ -51,6 +51,7 @@ import {
 import { evaluateRefusalRenderEligibility, evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
   isBrowserLaunchDiagnostic,
+  isNavigationDiagnostic,
   isRenderedDocsFailureReason,
   RenderedDocsError,
   renderedDocsAvailable,
@@ -385,6 +386,9 @@ function renderFailureObservation(label: string, e: unknown): string {
   // with. Same shape the static path already uses, and the same trusted
   // source: a Response's own status, never anything parsed out of a page.
   if (isHttpStatusCode(e.httpStatus)) return `${staged}:${e.httpStatus}`;
+  // Or, when the navigation itself never completed, WHICH kind of
+  // pre-response failure it was. Same closed-set gate as the others.
+  if (isNavigationDiagnostic(e.navigationDiagnostic)) return `${staged}:${e.navigationDiagnostic}`;
   return staged;
 }
 

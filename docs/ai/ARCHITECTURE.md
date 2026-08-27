@@ -211,6 +211,26 @@ it is never stored, forwarded or re-thrown. Candidates that could not be induced
 on this platform were left out rather than guessed at, and unrecognised text maps
 to `UNKNOWN_BROWSER_LAUNCH_FAILURE` rather than being echoed.
 
+**A navigation that never completed is its own stage**, `NAVIGATION_FAILED`,
+carrying its own closed diagnostic: `NAVIGATION_TIMEOUT`,
+`BLOCKED_BY_ROUTE_POLICY`, or `UNCLASSIFIED_NAVIGATION_ERROR`. It used to fall
+into the generic `RENDER_FAILED` beside failures happening nowhere near the
+network, and the three causes inside it call for opposite next actions — wait
+longer, confirm a different host, or nothing at all.
+
+Each value rests on a signal held locally. The timeout is Playwright's own typed
+error, matched against a name this repository pins as a constant and re-checks by
+contract test against the installed package. **The containment case is recorded
+by our own route handler at the moment it aborts** — the request must have been
+a navigation belonging to the page's own main frame — and is never inferred
+afterwards from the shape of a generic failure; a driver that cannot prove it
+claims nothing. Chromium's `net::ERR_*` codes live only inside the exception
+message, so they are deliberately not parsed and that case stays unclassified —
+which still separates it from the other two by elimination.
+
+`RENDER_FAILED` keeps its meaning: genuinely unclassified, and now genuinely
+elsewhere — context creation, text extraction, anything outside the navigation.
+
 **The renderer can be tested without a live window.**
 `runIsolatedRendererSelfTest()`, and `scripts/renderer-selftest.ts` for the
 owner, answers "can this machine start the locked-down browser?" in a few

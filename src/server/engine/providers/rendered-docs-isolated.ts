@@ -8,6 +8,7 @@ import {
   CHILD_REPORTABLE_RENDER_REASONS,
   DEFAULT_RENDER_LIMITS,
   isBrowserLaunchDiagnostic,
+  isNavigationDiagnostic,
   isRenderedDocsFailureReason,
   RenderedDocsError,
   type BrowserLaunchDiagnostic,
@@ -166,11 +167,13 @@ function parseChildDocument(stdout: string): RenderedDocument {
       // never passed along.
       const detail = (parsed as { detail?: unknown }).detail;
       const status = (parsed as { httpStatus?: unknown }).httpStatus;
+      const navDetail = (parsed as { navigationDetail?: unknown }).navigationDetail;
       throw new RenderedDocsError(
         reported,
         "isolated",
         isBrowserLaunchDiagnostic(detail) ? detail : null,
         isHttpStatusCode(status) ? status : null,
+        isNavigationDiagnostic(navDetail) ? navDetail : null,
       );
     }
     throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");

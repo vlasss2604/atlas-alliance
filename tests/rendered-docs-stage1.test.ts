@@ -418,9 +418,15 @@ describe("adapter behaviour (fake driver, no browser launched)", () => {
     });
     const err = (await fetcher.render(URL_IN, ROUTE).catch((e) => e)) as RenderedDocsError;
     expect(err).toBeInstanceOf(RenderedDocsError);
-    expect(err.reason).toBe("RENDER_FAILED");
+    // A navigation that THREW is now its own stage rather than the generic
+    // one — the fail-closed guarantee this test exists for is unchanged,
+    // and the reason is simply more precise about where it happened.
+    expect(err.reason).toBe("NAVIGATION_FAILED");
+    // Which is all that travels: a member of a closed code-owned set.
+    expect(err.navigationDiagnostic).toBe("UNCLASSIFIED_NAVIGATION_ERROR");
     expect(err.message).not.toContain("secret-token-XYZ");
     expect(err.message).not.toContain(HOST);
+    expect(err.navigationDiagnostic).not.toContain("secret-token-XYZ");
   });
 
   it("context and browser are torn down after every render, success or failure", async () => {

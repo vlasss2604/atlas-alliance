@@ -110,8 +110,16 @@ async function main(): Promise<void> {
 }
 
 main().catch((e) => {
-  console.error(
-    "INSPECTION FAILED: " + (e instanceof RenderedDocsError ? e.reason : String(e?.message ?? e)),
-  );
+  if (!(e instanceof RenderedDocsError)) {
+    console.error("INSPECTION FAILED: " + String(e?.message ?? e));
+    process.exit(1);
+  }
+  // The reason names the STAGE; the typed sub-reason beside it names which
+  // kind. Printing only the stage is how a window came back saying
+  // RENDER_FAILED and nothing else. Every value below is a member of a
+  // closed code-owned set — no message, no url, no host, no stack.
+  const detail =
+    e.diagnostic ?? e.navigationDiagnostic ?? (e.httpStatus === null ? null : String(e.httpStatus));
+  console.error("INSPECTION FAILED: " + e.reason + (detail === null ? "" : ":" + detail));
   process.exit(1);
 });

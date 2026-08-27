@@ -377,11 +377,20 @@ Abbreviated PUMP position:
   timeout (`networkidle` never settling), our own containment aborting a
   cross-host redirect, or a transport error. Their next actions differ
   completely.
-- **A third observability gap, same shape as the two already closed.** The
-  renderer's `TIMEOUT` is raised only by the post-`goto` wall-clock check, so a
-  `goto` that timed out is indistinguishable from a blocked redirect and from a
-  dead connection. Named, not fixed — and it should be fixed **before** another
-  window is spent here.
+- **That third gap is now closed.** A navigation that never completed is its own
+  stage, `NAVIGATION_FAILED`, with a closed diagnostic — `NAVIGATION_TIMEOUT`,
+  `BLOCKED_BY_ROUTE_POLICY`, `UNCLASSIFIED_NAVIGATION_ERROR`. The timeout is
+  Playwright's typed error matched on a pinned name, re-checked by contract test
+  against the installed package. The containment case is **recorded by our own
+  route handler when it aborts the main-frame navigation**, never inferred, and
+  a driver that cannot prove it claims nothing. `net::ERR_*` codes live only in
+  the message and are deliberately not parsed. See `ARCHITECTURE.md`.
+- **The inspection script now prints the sub-reason too.** It printed only the
+  stage, which is how a window came back saying `RENDER_FAILED` and nothing
+  else. Only closed-set values are shown.
+- **Navigation behaviour is unchanged.** `waitUntil`, the goto timeout, the
+  one-attempt rule, route scope, allowed hosts and resource policy were all left
+  exactly as they were — this was observability only.
 - **`fees.pump.fun` stays unread and unclassified.** Nothing about its content
   is known, and the address's absence from it is **not** established — failure
   to read a source is not evidence of absence.
