@@ -365,6 +365,26 @@ Abbreviated PUMP position:
   refused it as `PREFIX_HAS_WHITESPACE` and wrote nothing, which is the
   validation working — but the command silently means something else in that
   shell.
+- **The root inspection ran once and failed `RENDER_FAILED`.** Non-evidentiary,
+  nothing persisted; Evidence still 401, `sources` still 62 with zero naming the
+  host, route row untouched. No content of any kind was returned.
+- **What that excludes is the finding.** The browser launched; the child, proxy
+  and envelope were all fine; the pre-flight passed; and crucially it is **not**
+  `FINAL_URL_OUTSIDE_ROUTE`, so the `pump.fun/pump-token` same-host move did not
+  recur — and **not** `HTTP_ERROR`, so no status was ever obtained. The throw is
+  at `page.goto`, after launch and before any response.
+- **Three causes remain and the capture cannot separate them**: a navigation
+  timeout (`networkidle` never settling), our own containment aborting a
+  cross-host redirect, or a transport error. Their next actions differ
+  completely.
+- **A third observability gap, same shape as the two already closed.** The
+  renderer's `TIMEOUT` is raised only by the post-`goto` wall-clock check, so a
+  `goto` that timed out is indistinguishable from a blocked redirect and from a
+  dead connection. Named, not fixed — and it should be fixed **before** another
+  window is spent here.
+- **`fees.pump.fun` stays unread and unclassified.** Nothing about its content
+  is known, and the address's absence from it is **not** established — failure
+  to read a source is not evidence of absence.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /

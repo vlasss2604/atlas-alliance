@@ -869,11 +869,53 @@ a separate owner decision.
 Nothing was superseded. Both existing `pump.fun` routes still resolve
 `OFFICIAL_DOCS` at `/docs` and `/pump-token`, unchanged.
 
-**Inspection has not been run.** The page is still unread, so nothing about what
-`fees.pump.fun` says is known — and confirming a route says nothing about
-content. The evidence standard is unchanged: what would close the bridge is an
-explicit first-party assignment of the acquisition role to `99mRw3…`, not the
-address appearing in data.
+### The root inspection ran once and failed: `RENDER_FAILED`
+
+Owner-executed 2026-08-27 with MantaRay off, exactly once, non-evidentiary. Full
+output: officiality CONFIRMED, routeClass null, matchedPrefix `/`, then
+`INSPECTION FAILED: RENDER_FAILED`. **No page content, no links, no identifiers,
+no text.** Nothing was persisted — Evidence still 401 rows with nothing newer
+than 2026-08-24, `sources` still 62 with zero naming `fees.pump.fun`, and the
+route row untouched.
+
+`RENDER_FAILED` is the *unclassified* render-stage reason, so its value is
+entirely in what it excludes. Every one of these is a distinct reason the code
+would have returned instead:
+
+- not `BROWSER_LAUNCH_FAILED` — **the browser launched**;
+- not `CHILD_SPAWN_FAILED` / `CHILD_EXIT_NONZERO` / `CHILD_OUTPUT_MALFORMED` /
+  `EGRESS_PROXY_UNAVAILABLE` — the proxy came up, the child ran and returned a
+  well-formed envelope;
+- not `NAVIGATION_BLOCKED` / `HOST_NOT_ALLOWED` — the pre-flight passed, so the
+  host resolved and was not a private or reserved address;
+- not `FINAL_URL_OUTSIDE_ROUTE` — **the `pump.fun/pump-token` failure mode did
+  not recur.** A same-host move off the prefix produces that reason; this was
+  something else;
+- not `HTTP_ERROR` and not `NO_NAVIGATION_RESPONSE` — **no status was ever
+  obtained**, so the server never completed a navigation with a response;
+- not `TIMEOUT` / `TOO_LARGE` — neither the post-navigation wall clock nor the
+  byte cap.
+
+So the throw is at or around `page.goto` itself, after launch and before any
+response existed.
+
+**Three causes remain, and the capture cannot separate them.** A navigation
+timeout — `waitUntil: "networkidle"` never settling within 15s, entirely
+ordinary for a live dashboard that polls; our own containment aborting a
+**cross-host** top-level redirect (`abort("blockedbyclient")`) or the egress
+proxy denying a cross-host CONNECT; or a genuine transport error such as a reset
+or a TLS failure. Their next actions differ completely: wait longer, confirm a
+different host, or nothing.
+
+**This is a real observability gap, of exactly the shape already closed twice.**
+The renderer's own `TIMEOUT` is raised only by the post-`goto` wall-clock check,
+so a `goto` that timed out is indistinguishable from a blocked redirect and from
+a dead connection. Named here; not fixed in that task.
+
+**Nothing about the page's content is known, and absence is not established.**
+The address may or may not appear on it; failure to read a source is not
+evidence that the information is absent. Route confirmation grants the
+opportunity to read, and says nothing about what is there.
 
 ### Second attempt: the page refuses the fetcher
 
