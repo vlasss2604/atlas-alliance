@@ -289,6 +289,28 @@ Abbreviated PUMP position:
 - **"Buyback" stays impermissible for `99mRw3…`.** Unresolved, not disproven:
   deciding it needs material ATLAS has never acquired, and the one known
   first-party host refuses both transports.
+- **The two-wallet cardinality join was examined and refused.** A first-party
+  Pump.fun thread says two "buyback & burn wallets" carry out the buybacks; the
+  docs list two "Burn addresses". Two and two does not entail the same two — the
+  thread itself names a separate class of intermediary wallets, so an
+  architecture of buyback wallets feeding distinct burn addresses fits both
+  documents equally. Shared mechanism context does not establish identity either;
+  that is locator co-occurrence in a better disguise.
+- **Chain behaviour cannot resolve documentary identity.** Not circular — the
+  observation is independent — but affirming the consequent, and a category
+  error: a role is an institutional fact, and as a documentary label is never a
+  chain fact, chain behaviour is never a role assignment. It does legitimately
+  rule out a passive reading of `99mRw3…`, which acquires and burns under its
+  own authority. Plausibility, not identity.
+- **Acquiring that thread would change nothing.** `twitter.com` is not
+  `pump.fun`, and SOCIAL establishes nothing however official the account
+  (D-074). Its value is as a pointer to **`fees.pump.fun`**, now the
+  highest-value target in the case. DefiLlama's adapter corroborates as
+  DATA_PROVIDER only.
+- **No architectural defect.** Identity binding is already refused by
+  construction in two places: documentary locators require the complete
+  identifier to appear literally in the document, and S6 slot identity is
+  structural only, with no classifier ever reaching identity (D-101).
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /

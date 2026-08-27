@@ -707,6 +707,87 @@ Two first-party candidates were seen and produced nothing:
 `https://pump.fun/coin/GT9GhUj2…` (0 Evidence). Named as leads for a future
 authorized window; neither has ever been read.
 
+### The two-wallet cardinality join, examined and REFUSED
+
+An owner-supplied first-party lead (a Pump.fun X thread, 2026) states that 50% of
+net revenue automatically purchases PUMP on the open market and immediately burns
+it; that funds move through **intermediary wallets**; that those consolidate into
+"**1 of 2 buyback & burn wallets**"; that "the buyback & burn wallets carry out
+ongoing buyback & burns"; and that `fees.pump.fun` tracks them.
+
+Held OFFICIAL_DOCS separately lists exactly **two** "Burn addresses". The
+tempting composition is: two there, two here, therefore the same two.
+
+**Cardinality does not establish identity.** |X| = 2 and |Y| = 2 does not entail
+X = Y, and nothing here supplies the missing premise. The alternative
+architecture fits both documents exactly as well: intermediary wallets →
+buyback wallets (which purchase) → burn addresses (which receive and destroy).
+The thread itself proves the design has **more than one wallet class** by naming
+intermediaries, so "two of something" and "two of something else" is precisely
+the shape that should not be collapsed. Counts also drift: two-at-one-date and
+two-at-another need not be the same two.
+
+**Shared mechanism context does not establish it either.** Both documents
+describe one mechanism, and that is exactly the setting in which a wrong identity
+join is most tempting and least detectable. Consistency is not entailment. This
+is the same failure already rejected in this case as locator co-occurrence,
+wearing a more respectable disguise.
+
+**An explicit address-level statement is still required** — a first-party text
+naming the address (or an identifier resolving to it) AND assigning it the
+acquisition role.
+
+**The chain behaviour does not close it, and the reason is worth stating
+precisely.** It is not circular: the observation was obtained independently, not
+derived from the documents. The defect is different and fatal in two ways.
+
+- **Affirming the consequent.** "A buyback wallet would buy then burn; this
+  address buys then burns; therefore it is a buyback wallet." The behaviour is
+  not exclusive to the role — an arbitrageur, a market maker or an unrelated
+  party produces the same trace.
+- **Category error.** A role is an institutional fact. CORE_RULES already fixes
+  the forward direction — a documentary role label is never a chain fact about
+  an account — and the converse holds identically: **chain behaviour is never a
+  role assignment.** Only an authoritative source can assign a role, so chain
+  data is categorically the wrong instrument for resolving documentary identity.
+
+The genuine circularity is the adjacent move, and it should be named so it is not
+made later: using the documents to decide the chain activity *is* the buyback,
+then citing "the chain shows the buyback" as confirmation that the address is the
+buyback wallet.
+
+**What the chain observation does legitimately contribute.** It rules out a
+passive, receive-only reading of the published address: `99mRw3…` acquires under
+its **own** authority and destroys the exact quantity from its **own** token
+account. Under the thread's description the buyback & burn wallets both buy and
+burn — an ACTOR, not an incinerator — and the observed signature matches that
+specific description rather than a generic pattern. That is a material
+strengthening of plausibility. It is not identity.
+
+**Acquiring the thread would not change the verdict.** `twitter.com` is not
+`pump.fun`; an official domain is not OFFICIAL_DOCS authority automatically, and
+SOCIAL establishes nothing however official the account (D-074). Its value is as
+a **pointer**, not as evidence.
+
+### The architecture already expresses this cleanly — no defect
+
+Checked rather than assumed, and the refusal is structural in two independent
+places.
+
+- **Documentary locators are the identity mechanism**, and a locator is admitted
+  only when the complete identifier appears **literally** in the document
+  (`documentary-locator.ts`). Evidence from a text that never states an address
+  therefore carries no locator and has nothing to join with. A truncated display
+  form is refused rather than repaired — which is why even the "Burn addresses"
+  fragment does not itself carry the identifier.
+- **S6 slot identity is structural only** — extraction unit key, or content hash
+  plus fragment hash. No classification and no semantic attribute ever
+  participates in identity (D-101, verified by mutation tests), so no lexical or
+  numeric coincidence can merge two actors into one.
+
+Neither had to be taught this case. **Decision C does not apply: the distinction
+is expressible and is already enforced by construction.**
+
 ### Verdict: actor → acquisition is UNRESOLVED, not disproven
 
 No authoritative bridge exists in anything ATLAS holds, established
@@ -718,6 +799,29 @@ the static fetcher and an off-route move for the browser, across four windows.
 **The word "buyback" therefore remains impermissible for this address.**
 Concluding it from "the documents call it the burn address" plus "it bought"
 is affirming the consequent, and nothing in this round changes that.
+
+### Leads on record — pointers, not evidence
+
+Neither has been acquired. Both are recorded so a future authorized window has a
+target instead of a search.
+
+- **`fees.pump.fun`** — named by Pump.fun's own thread as where ongoing buybacks
+  and burns are tracked. A `pump.fun` subdomain, so it could carry OFFICIAL_DOCS
+  authority if its route were confirmed. **This is the highest-value target in
+  the case**: an address-level, first-party assignment of the acquisition role
+  would plausibly live here and nowhere else.
+- **DefiLlama's Pump adapter** (third-party, DATA_PROVIDER → CLAIMED, corroboration
+  only) references `fees.pump.fun/api/buybacks` as the buyback data source,
+  defines the two burn wallets as `99mRw3…` and `9jHrTC…`, and treats burns from
+  them as the PUMP buyback metric. It cannot establish the bridge — a third party
+  asserting the identity join is still the join being asserted rather than shown.
+
+**A caution for whoever reads that endpoint.** An endpoint *named* `buybacks` is
+not a statement. If `/api/buybacks` merely returns records that contain those
+addresses, that is locator co-occurrence again — the same error with a fresher
+source. The payload must actually assign the role: a field naming the wallet as
+the buyback wallet, or documented semantics saying these are the wallets that
+purchase. Read it against that standard, not against the URL.
 
 ### Second attempt: the page refuses the fetcher
 

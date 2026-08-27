@@ -4,60 +4,60 @@
 
 ## NONE — awaiting owner direction
 
-The actor → acquisition bridge was searched exhaustively **offline**. Result:
-**B — no authoritative bridge found. Unresolved, not disproven.**
+The two-statement mechanism-binding question was answered offline.
+**Decision: B — materially strengthens the case, still requires an explicit
+address-level statement.** No code changed; no defect found.
 
-### What was searched, and how
+### The join, and why it is refused
 
-Not by recalling the earlier sweep but by repeating it with a stronger method:
-all **115 text-bearing columns** in the database, enumerated from
-`information_schema`, scanned for `99mRw3EzdJZWEUjgp1nrU4WeHsukUBjbh7gYE7pm4F3c`.
+Two official statements were offered: a first-party thread saying **two**
+"buyback & burn wallets" carry out the buybacks, and held OFFICIAL_DOCS listing
+exactly **two** "Burn addresses".
 
-The address appears in eight columns. Three are locator provenance (the recovered
-href), one is a model-written summary that says *"sent to burn addresses"*, and
-four are on-chain artifacts. **`evidence.fragment` is not among them.**
+**Cardinality does not establish identity.** |X| = 2 and |Y| = 2 does not entail
+X = Y. The thread itself names a separate class of **intermediary wallets**, so
+the design demonstrably has more than one wallet class — and an architecture of
+buyback wallets feeding distinct burn addresses fits both documents exactly as
+well. Counts also drift between dates.
 
-The only fragment naming the address carries it **truncated** —
-`99mRw3…pm4F3c` under the heading "Burn addresses" — because that is how the page
-displays it. ATLAS holds the full value only because link recovery read the href.
+**Shared mechanism context does not establish it either.** Both texts describe
+one mechanism, which is precisely the setting where a wrong identity join is most
+tempting and least detectable. This is locator co-occurrence in a better
+disguise.
 
-**Decisive test: no single text contains both any form of the address and any of
-`buyback`, `buy back`, `purchase`, `acquir…`, `treasury`, `buying`, `executes`.**
-Not one row, in fragments or summaries.
+**Chain behaviour cannot decide it.** Not circular — the observation is
+independent — but affirming the consequent, and a category error: a role is an
+institutional fact, and just as a documentary label is never a chain fact, chain
+behaviour is never a role assignment. It does legitimately rule out a passive,
+receive-only reading of `99mRw3…`, which acquires and burns under its own
+authority. That is plausibility, not identity.
 
-### Why the standard was not met
+The circularity to avoid later: using the documents to decide the chain activity
+*is* the buyback, then citing the chain as confirmation of the role.
 
-The acquisition vocabulary is abundant — `buyback` 19 rows, `purchase` 33,
-`buying` 13 — and with one exception all of it is `SOCIAL / CLAIMED` or
-`DATA_PROVIDER / CLAIMED`, which establishes nothing under D-074.
+### Nothing to fix
 
-The whole first-party corpus is four fragments from one URL. The nearest text,
-"a verifiable record of each daily purchase and burn, settled on Solana", is an
-existence claim about records and binds no address to purchasing.
+Checked rather than assumed. The join is refused by construction in two
+independent places: documentary locators admit an identifier only when it appears
+literally in the document, and S6 slot identity is structural only, with no
+classifier ever reaching identity (D-101, mutation-verified). Decision C does not
+apply.
 
-### What was NOT done, and needs a decision
+### The actionable outcome
 
-**No external search was performed.** Live HTTP requires explicit per-task
-authorization under `CLAUDE.md`, bounded and prepared in advance; this task did
-not open one, and MantaRay is on. So the honest scope of the finding is: no
-bridge exists in anything ATLAS holds. Whether one exists in material never
-acquired is open.
+**Acquiring the thread would not change the verdict** — `twitter.com` is not
+`pump.fun`, and SOCIAL establishes nothing however official the account (D-074).
+Its value is as a pointer.
 
-Three facts shape that decision:
+**`fees.pump.fun` is now the highest-value target in the case.** Named by
+Pump.fun's own thread as where buybacks and burns are tracked, and a `pump.fun`
+subdomain, so it could carry OFFICIAL_DOCS authority if its route were confirmed.
+An address-level assignment of the acquisition role would plausibly live here and
+nowhere else. Reaching it needs an authorized live window.
 
-1. **`OFFICIAL_REPORT` and `GOVERNANCE` have zero rows** — those tiers were never
-   acquired by any run. Absence of acquisition, not evidence of absence.
-2. **Two first-party candidates were seen and never read**:
-   `https://pump.fun/docs/fees` and `https://pump.fun/coin/GT9GhUj2…`, both with
-   0 Evidence. Concrete targets for an authorized window.
-3. **The known first-party host currently refuses both transports** — `403` to
-   the static fetcher, an off-route move for the browser — across four windows.
-   An authorized window aimed at `pump.fun` itself would most likely hit the
-   same wall.
-
-A further caution: material found by browsing directly is a **lead, not
-Evidence**. It establishes nothing until acquired through the pipeline, where
-source authority and entity binding are computed rather than asserted.
+**Read it against the right standard.** An endpoint named `buybacks` is not a
+statement. Records that merely contain the addresses are locator co-occurrence
+again — the same error with a fresher source. The payload must assign the role.
 
 ### Standing boundaries
 
