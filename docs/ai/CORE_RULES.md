@@ -47,6 +47,12 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **System utility ≠ economic value capture.**
 - A documentary role label ("burn address", "treasury") is a claim about the
   account, never a chain fact about it.
+- **Fungible units have no identity.** There is no link between the units
+  acquired and the units later destroyed or moved — not a missing one, an
+  impossible one. The strongest bridge available is account-level continuity
+  (the account that received is the account that was drawn from) plus quantity
+  accounting over a known interval. That is a weaker claim than "those units",
+  and the difference must be stated, not smoothed over.
 
 ## Establishment
 
@@ -82,6 +88,19 @@ Brakes are as much a capability as skills. Do not:
 
 **Stop when the proof plan no longer justifies another branch.** Over-research is
 a defect, not diligence.
+
+## Sampling honestly
+
+Enumerating a **pre-declared, already-justified, bounded set completely** is not a
+search: the outcome does not depend on which member you happened to look at, and
+the negative result is a finding. Reading one more because the last one
+disappointed is a search for a desired answer, however deterministic the rule
+selecting it looks. Declare the whole set first and read all of it, or read none
+of it — and do not stop early just because the hoped-for thing turned up.
+
+Then report the sample as a sample. A bounded window is not the population, and
+**absence in a bounded sample is not evidence of absence.** The finding is "not
+found in the observed window", never "does not occur".
 
 ## Generic over specific
 

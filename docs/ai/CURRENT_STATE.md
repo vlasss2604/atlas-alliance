@@ -118,10 +118,24 @@ Abbreviated PUMP position:
 
 ## Next research direction
 
-Acquisition-side context exists. The next step is to determine the **smallest
-bounded, deterministic strategy for burn-side evidence** — before executing any
-of it. Then a genuine PUMP `Burn`/`BurnChecked`, then the acquisition-to-burn
-bridge, then final mechanism reconciliation.
+The burn-side strategy is **designed and recorded** — `PUMP_CASE.md` §"Burn-side
+strategy", with its rejected options and its stop conditions. Nothing in it has
+been executed.
+
+Two findings from designing it are worth carrying:
+
+- Automatic promotion **cannot** reach a burn from the current locator. A
+  signature window yields exactly one transaction and a transaction is terminal;
+  the one it yielded contains no burn. That is the brake working.
+- It does not need a new capability anyway. Every signature of the persisted
+  window already carries durable provenance, and the owner-authorized
+  transaction-detail script re-validates any of them — which is what that
+  persistence was built for.
+
+Order: Step 0 (offline, no authorization) → Step 1 exhaustive read of the
+persisted window → Step 2 the second documented burn address → then, at best, an
+account-level acquisition-to-burn bridge. There is no token-identity bridge to be
+had; SPL units are fungible.
 
 Not by paging signature history backward to a date, not by inspecting arbitrary
 transactions, not by counterparty-chasing. See `CURRENT_TASK.md`.

@@ -125,6 +125,155 @@ specific PUMP `Burn`/`BurnChecked` for the claimed mechanism · the
 acquisition → burn bridge · official cumulative burn totals · Aug 23 record → exact
 transactions · circulating-supply reduction attributable to the claimed flow.
 
+## Burn-side strategy (designed, not executed)
+
+The acquisition side is established. The missing thing is a genuine PUMP
+`Burn`/`BurnChecked`. This section records the strategy, the reasoning, and the
+options that were rejected — so none of it is re-litigated.
+
+### What the engine can and cannot reach on its own
+
+The automatic chain for `EXECUTION_EVIDENCE` is
+`ACCOUNT_INFO` → `TOKEN_ACCOUNTS_BY_OWNER` → `SIGNATURES_FOR_ADDRESS` →
+`TRANSACTION_DETAIL`, and it ends there: a transaction is `TERMINAL_OBSERVATION`,
+refused before the depth ceiling so the trace names the true reason. A signature
+window promotes **exactly one** transaction, chosen by "newest successful, ties by
+signature string" — a rule that cannot be steered by a memo or by content.
+
+So the only transaction the engine will ever read from this locator is whichever
+one happened to be newest at observation time. It was read; it contains zero
+burns. **Automatic promotion cannot reach a burn from here.** That is the brake
+working, not a defect — `onchain-subject-promotion.ts` says in as many words that
+"keep looking until you find a burn" is written nowhere.
+
+### The seam that does not need a new capability
+
+`onchain_observed_signatures` already holds every signature of the persisted
+window with durable provenance, and `scripts/onchain-transaction-detail.ts`
+accepts any signature that `resolveObservedSignature` can re-validate — it
+re-checks the originating artifact, its intent, and the parent subject's own
+provenance on every call. That is precisely why the window was persisted.
+
+So the window can be read **exhaustively** through the owner-authorized script
+path, with the engine's one-transaction brake untouched and no pagination added.
+
+### The discipline that makes this evidence rather than fishing
+
+Reading a second transaction because the first disappointed is a search for a
+desired answer. Reading **all** of a pre-declared, already-justified, bounded set
+is not: the outcome no longer depends on which one you looked at, and the negative
+result is recorded as a finding.
+
+The rule: **declare the complete set in advance and read all of it, or read none
+of it.** Never "read one more and see".
+
+### Step 0 — offline, zero live calls, do this first
+
+Read-only queries against the local database. No existing script covers this
+(`alpha-inspect.ts` is research-job-scoped), so it needs either a small read-only
+inspection script or a direct query.
+
+1. Artifact `df2ed321-…` (`TRANSACTION_DETAIL`, slot `441977087`): confirm the
+   post-balance recorded for `9Wtcf…`.
+2. The `TOKEN_ACCOUNTS_BY_OWNER` artifact: its own `slot`, and the balance it
+   recorded for `9Wtcf…`.
+3. The 25 rows of `onchain_observed_signatures` under artifact `2e332079-…`:
+   `slot`, `block_time`, `err` for each.
+
+**Why it matters.** If the zero-balance observation is at a slot *strictly later*
+than `441977087`, then within a known slot interval that account's confirmed-mint
+balance went from a known quantity to zero. That establishes a **decrease of a
+known size in a known interval** — by transfer out, burn, or close, in some
+combination. It is not a burn, and must never be written as one. But it turns
+"zero balance proves nothing" into a bounded, recorded fact, and it is what makes
+Step 1 justified rather than speculative. If the balance observation is *earlier*,
+Step 0 yields nothing and Step 1 rests on a weaker footing — say so plainly.
+
+Step 0 also fixes the exact size of Step 1: 25 signatures, minus the one already
+read, minus any with `err = true` (a failed transaction executed nothing). Do not
+assume that count — read it.
+
+### Step 1 — exhaustive read of the persisted window (needs authorization)
+
+- **Subject set:** every signature persisted under artifact `2e332079-…` that has
+  `err = false` and has not already been read. Declared complete before the first
+  call.
+- **Intent:** `TRANSACTION_DETAIL`, one per signature, via
+  `scripts/onchain-transaction-detail.ts`, which refuses any signature lacking
+  persisted provenance.
+- **Bound:** that exact count, zero retries, one MantaRay-off window, complete
+  output captured the first time. Order `slot DESC, signature ASC` for
+  replayability — the order is irrelevant because all of them are read.
+- **Stop condition:** after the last one. Finding a burn early does **not** stop
+  the run; the remaining reads still happen, so the sample stays complete and the
+  result stays interpretable.
+- **New capability required:** none.
+
+### Step 2 — the second documented burn address (needs authorization)
+
+Independent of Step 1's outcome, and not a fallback for it.
+
+`9jHrTCwp…` must arrive as a documentary locator through the normal docs recovery
+path. It is never typed in, never hardcoded, never trusted because it appears in
+this file. Once it is a locator, it is an ordinary subject: `ACCOUNT_INFO` →
+classification → (if ordinary) `TOKEN_ACCOUNTS_BY_OWNER` → (if a confirmed-mint
+token account exists) `SIGNATURES_FOR_ADDRESS` → one `TRANSACTION_DETAIL`.
+Roughly four bounded reads. No new capability.
+
+Worth doing even if it yields no burn: the classification and holdings of the
+*second* address the project publishes as a burn address is itself a finding. A
+large standing balance would be a retained-not-retired shape, which bears directly
+on `DESTINATION`'s "retains, redistributes or retires" clause.
+
+### Rejected, with reasons — do not reopen
+
+- **Paging signature history back to Aug 23.** Prohibited, and hopeless. From the
+  observed density (25 signatures ≈ 1–2 minutes), four days is on the order of
+  10^5 signatures — an order-of-magnitude estimate from the observed window, not a
+  measurement, and decisive either way.
+- **`TOKEN_SUPPLY` on the mint.** One observation has no time dimension. Two give
+  a net change attributable to nothing. Supply is also a definitional concept, not
+  only a chain value.
+- **Following the counterparty `FkaLnX17…`.** Counterparty-chasing, and it is not
+  a documented address.
+- **Re-running the head sample until a burn appears.** The prohibited search
+  wearing a deterministic rule as a disguise. One scheduled re-observation is
+  sampling; repeating it until the answer changes is not.
+- **Decoding program `61DF…`.** Out of scope without explicit authorization.
+
+### What success would and would not establish
+
+A decoded `Burn`/`BurnChecked` of the confirmed mint carries `mechanismState =
+LIVE`, `SUPPORTS`, `DIRECT`, class `ONCHAIN_VERIFIABLE` with confirmed entity
+binding. It satisfies `EXECUTION_EVIDENCE`'s live-state gate — that component
+requires no freshness window — so it can establish step 4.
+
+It would still not establish: that the burned tokens came from a buyback, that the
+SOL was protocol revenue, that the published mechanism is what ran, the cumulative
+burn totals, the Aug 23 attribution, or circulating-supply semantics. The overall
+mechanism claim would remain at best `PARTIALLY_SUPPORTED`.
+
+### The bridge that cannot be built, and why
+
+SPL tokens are **fungible**. There is no on-chain link between the units acquired
+and the units burned, and no amount of research can create one — this is a
+property of the asset, not a gap in the evidence.
+
+The strongest bridge reachable is *account-level continuity*: the account that
+received the acquisition is the account the burn destroyed from, plus quantity
+accounting across a known slot interval. That is materially weaker than "the
+purchased tokens were burned", and ATLAS must say which one it has.
+
+### If nothing is found
+
+Record `INSUFFICIENT_EVIDENCE` for `EXECUTION_EVIDENCE` and name the missing
+bridge. Do not acquire a paging capability to keep looking.
+
+State the sample honestly: a few dozen transactions out of an estimated 10^5 in
+the relevant period is a fraction of a percent. **Absence in a bounded sample is
+not evidence of absence** — the finding is "no burn in the observed window", never
+"no burns occur".
+
 ## Success criterion
 
 PUMP does not need to end `SUPPORTED`. `PARTIALLY_SUPPORTED`,
