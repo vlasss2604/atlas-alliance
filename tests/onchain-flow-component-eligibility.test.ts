@@ -6,6 +6,7 @@ import {
   type EvidenceRow,
 } from "../src/server/engine/component-reconciler";
 import { synthesizeOnchainFacts } from "../src/server/engine/onchain-facts";
+import { componentAllowsRule } from "../src/server/engine/onchain-subject-promotion";
 import { brandOnchainArtifact } from "../src/server/engine/providers/onchain-types";
 import type {
   OnchainArtifact,
@@ -333,29 +334,110 @@ describe("3. a genuine burn retains its execution support", () => {
   });
 });
 
-describe("4/5. components whose contract the transfer genuinely answers", () => {
+// A TRANSFER IS NOT A MECHANISM.
+//
+// The three components below have no live-state gate, so the gate that
+// stops EXECUTION_EVIDENCE cannot help them. What stops them is what their
+// contracts actually ask for. FLOW_PATH traces the hops THE VALUE takes
+// through the protocol; DESTINATION asks where assets end up AFTER THE
+// MECHANISM EXECUTES and whether that destination retains, redistributes or
+// retires them; RECIPIENT asks who ULTIMATELY RECEIVES THE ECONOMIC
+// BENEFIT. A decoded transfer answers none of those. It reports that an
+// amount moved between two accounts whose owners the RPC named.
+//
+// These were previously SUPPORTS, and each one of them established its
+// component alone.
+describe("4/5. a transfer cannot establish a mechanism-level component", () => {
+  const STEP_OF: Record<string, number> = { FLOW_PATH: 2, DESTINATION: 6, RECIPIENT: 6 };
+
   for (const component of ["FLOW_PATH", "DESTINATION", "RECIPIENT"]) {
-    it(`${component}: documents the actual reconciliation outcome`, () => {
-      const step = component === "FLOW_PATH" ? 2 : 6;
-      const { outcome } = reconcileFor(component, reciprocalTx(), step);
-      // Recorded rather than asserted blind: these components declare
-      // requiresLiveMechanismState = false, so a DIRECT + SUPPORTS decoded
-      // movement is exactly what their contract asks for. A transfer of the
-      // project's token into an account IS where value landed (DESTINATION /
-      // RECIPIENT) and IS how it moved (FLOW_PATH).
-      expect(outcome.status).toBe("SUPPORTED");
-      expect(outcome.supportingEvidenceIds).toHaveLength(2); // the two legs
+    it(`${component}: is NOT established by the reciprocal transfer facts`, () => {
+      const { outcome } = reconcileFor(component, reciprocalTx(), STEP_OF[component]);
+      expect(outcome.status).not.toBe("SUPPORTED");
+      expect(outcome.status).not.toBe("PARTIALLY_SUPPORTED");
+      expect(outcome.status).toBe("INSUFFICIENT_EVIDENCE");
+      expect(outcome.supportingEvidenceIds).toHaveLength(0);
     });
 
-    it(`${component}: the paired fact is still inert`, () => {
-      const step = component === "FLOW_PATH" ? 2 : 6;
-      const { facts, outcome } = reconcileFor(component, reciprocalTx(), step);
-      expect(facts[2].relationship).toBe("CONTEXT");
-      expect(outcome.excludedEvidence.some((e) => e.reason === "RELATIONSHIP_NOT_SUPPORTING")).toBe(
-        true,
+    it(`${component}: all three facts are excluded for the same reason`, () => {
+      const { facts, outcome } = reconcileFor(component, reciprocalTx(), STEP_OF[component]);
+      expect(facts).toHaveLength(3);
+      expect(outcome.excludedEvidence).toHaveLength(3);
+      expect(new Set(outcome.excludedEvidence.map((e) => e.reason))).toEqual(
+        new Set(["RELATIONSHIP_NOT_SUPPORTING"]),
       );
+      expect(outcome.reasonCodes).toContain("ALL_EVIDENCE_EXCLUDED");
+    });
+
+    it(`${component}: each leg alone establishes nothing either`, () => {
+      // Not an artefact of the three arriving together: no single leg can
+      // carry the component on its own.
+      const step = STEP_OF[component];
+      const { facts } = reconcileFor(component, reciprocalTx(), step);
+      for (const [i, f] of facts.entries()) {
+        const out = reconcileComponent({
+          jobId: JOB,
+          item: { step, component },
+          requirements: REQUIREMENTS[component],
+          evidence: [asRow(f)],
+          now: NOW,
+          freshnessPolicyDays: FRESHNESS_POLICY,
+        });
+        expect(out.status, `fact ${i}`).toBe("INSUFFICIENT_EVIDENCE");
+        expect(out.supportingEvidenceIds, `fact ${i}`).toHaveLength(0);
+      }
     });
   }
+
+  it("directness is untouched — the READING is still direct", () => {
+    // The correction is on the claim axis only. Downgrading directness
+    // would have said the decoded instruction was an inference, which it
+    // is not, and would have produced PARTIALLY_SUPPORTED — a weaker
+    // version of the same overclaim rather than its absence.
+    const { facts } = reconcileFor("FLOW_PATH", reciprocalTx(), 2);
+    for (const f of facts) expect(f.directness).toBe("DIRECT");
+    for (const f of facts) expect(f.relationship).toBe("CONTEXT");
+  });
+
+  it("4b. a transfer with no mechanism binding at all changes nothing", () => {
+    // Same mint, same project, confirmed entity binding — and two parties
+    // no document has ever named. Entity binding proves the data is about
+    // this project's token; it does not make the movement part of the
+    // claimed mechanism. If the outcome here differed from the case above,
+    // the reconciler would be reading a binding it does not have.
+    const unrelated = reciprocalTx({
+      tokenInstructions: [
+        {
+          programId: TOKEN_2022,
+          type: "transferChecked",
+          mint: ANCHOR,
+          account: C_TOKEN,
+          destination: A_TOKEN,
+          authority: C,
+          amountRaw: "1",
+          decimals: 6,
+          inner: true,
+        },
+      ],
+    });
+    for (const component of ["FLOW_PATH", "DESTINATION", "RECIPIENT"]) {
+      const { outcome } = reconcileFor(component, unrelated, STEP_OF[component]);
+      expect(outcome.status, component).toBe("INSUFFICIENT_EVIDENCE");
+      expect(outcome.supportingEvidenceIds, component).toHaveLength(0);
+    }
+  });
+
+  it("5b. the reciprocal shape survives as recorded context, not as nothing", () => {
+    // The facts are still synthesized, still exact, still traceable. The
+    // capability is not withdrawn — only its authority to establish.
+    const { facts } = reconcileFor("FLOW_PATH", reciprocalTx(), 2);
+    expect(facts).toHaveLength(3);
+    const text = facts.map((f) => f.statement).join(" ");
+    expect(text).toContain("17509.274333"); // formatted, never rounded
+    expect(text).toContain("850140914"); // lamports, raw
+    expect(text).toContain(ANCHOR);
+    expect(facts[2].statement).toContain("The same successful transaction");
+  });
 });
 
 describe("6/7/8. the remaining boundaries hold", () => {
@@ -407,6 +489,25 @@ describe("6/7/8. the remaining boundaries hold", () => {
     for (const f of a) {
       expect(f.supportFragment).toContain("SigAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA");
       expect(f.supportFragment).toContain("441977087");
+    }
+  });
+
+  it("11. the guard is the fact's own label, not the promotion map", () => {
+    // Today only EXECUTION_EVIDENCE may walk a signature to a transaction,
+    // so in production these facts are synthesized for that component and
+    // its live-state gate stops them. That is a routing accident, not a
+    // semantic guarantee: the day FLOW_PATH is granted the same rule, the
+    // overclaim would have gone live with no code change. The label is set
+    // where the fact is authored, so it holds whatever the map later says.
+    expect(componentAllowsRule("EXECUTION_EVIDENCE", "SIGNATURE_TO_TRANSACTION")).toBe(true);
+    for (const component of ["FLOW_PATH", "DESTINATION", "RECIPIENT"]) {
+      expect(componentAllowsRule(component, "SIGNATURE_TO_TRANSACTION"), component).toBe(false);
+    }
+    // And the facts carry the safe label regardless of which component
+    // asked for them.
+    for (const component of ["FLOW_PATH", "DESTINATION", "RECIPIENT", "EXECUTION_EVIDENCE"]) {
+      const facts = synthesizeOnchainFacts(artifactOf(reciprocalTx()), { step: 2, component });
+      expect(facts.map((f) => f.relationship), component).toEqual(["CONTEXT", "CONTEXT", "CONTEXT"]);
     }
   });
 

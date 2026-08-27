@@ -321,10 +321,40 @@ export function synthesizeOnchainFacts(
       // deterministically established.
       //
       // Each derived flow yields THREE facts, kept separate on purpose.
-      // The two legs are direct decoded movements. The pairing is a
-      // structural composition of them, and it is the one that invites an
-      // economic reading — so it is stated as co-occurrence and offered as
-      // CONTEXT, which cannot establish a component on its own.
+      // The two legs are direct decoded movements; the pairing is a
+      // structural composition of them. All three are offered as CONTEXT.
+      //
+      // WHY A TRUE, DIRECT, PROJECT-BOUND MOVEMENT STILL DOES NOT SUPPORT.
+      // The legs were previously SUPPORTS on the reasoning that a decoded
+      // transfer is as direct as chain evidence gets. That is true about
+      // the transfer and says nothing about the COMPONENT. Every Pattern v1
+      // component a transfer can be offered for asks a mechanism-level or
+      // economic question, never a bare routing one: FLOW_PATH traces the
+      // hops THE VALUE takes through the protocol, DESTINATION asks where
+      // assets end up AFTER THE MECHANISM EXECUTES and whether that
+      // destination retains, redistributes or retires them, and RECIPIENT
+      // asks who ULTIMATELY RECEIVES THE ECONOMIC BENEFIT. A transfer
+      // establishes that an amount moved between two accounts whose owners
+      // the RPC reported. It does not establish that the movement belongs
+      // to the claimed mechanism, that either endpoint is the mechanism's
+      // destination rather than an intermediate or unrelated hop, or that a
+      // token-account owner is the party that ends up better off — the
+      // three things those components actually ask for.
+      //
+      // A transaction-level destination is not a mechanism-level
+      // destination, and a token-account owner is not an economic
+      // recipient. Offered as SUPPORTS, one unrelated transfer of the
+      // project's token would flip its component to SUPPORTED on its own,
+      // because S5 reconciles one component from one pool and never waits
+      // for the binding to arrive from anywhere else.
+      //
+      // CONTEXT is the honest label, and the same one an observed balance
+      // and an observed signature window already carry here: real, bounded,
+      // recorded, inert until something else binds it. Not INDIRECT —
+      // directness grades how directly evidence bears on ITS proposition,
+      // and this bears on a different proposition. The bridge from movement
+      // to mechanism is separate admitted evidence, exactly as it is for a
+      // genuine burn.
       for (const flow of deriveReciprocalAssetFlows(r, artifact.provenance.projectAnchor)) {
         const legFragment = (leg: unknown, role: string) =>
           JSON.stringify({ signature: r.signature, slot: r.slot, role, leg });
@@ -338,6 +368,7 @@ export function synthesizeOnchainFacts(
               `${flow.outbound.destinationSyncedNative ? ", and a syncNative instruction on that account was observed in the same transaction" : ""}.`,
             legFragment(flow.outbound, "outbound"),
             ONCHAIN_DOES_NOT_PROVE.NATIVE_TRANSFER,
+            { relationship: "CONTEXT" },
           ),
         );
 
@@ -350,6 +381,7 @@ export function synthesizeOnchainFacts(
               `into token account ${flow.inbound.to}, owned by ${flow.participant}.`,
             legFragment(flow.inbound, "inbound"),
             ONCHAIN_DOES_NOT_PROVE.TOKEN_TRANSFER,
+            { relationship: "CONTEXT" },
           ),
         );
 
@@ -371,7 +403,8 @@ export function synthesizeOnchainFacts(
             RECIPROCAL_FLOW_DOES_NOT_PROVE,
             // Structural co-occurrence, not an established exchange. CONTEXT
             // is inert in reconciliation, so this can never push a component
-            // toward SUPPORTED by resembling a purchase.
+            // toward SUPPORTED by resembling a purchase. Unchanged: this
+            // fact was never anything else.
             { relationship: "CONTEXT" },
           ),
         );

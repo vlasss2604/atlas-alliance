@@ -228,10 +228,14 @@ describe("reciprocal flow — facts, and the words they must not use", () => {
     expect(facts).toHaveLength(3);
   });
 
-  it("the legs are DIRECT decoded movements offered as support", () => {
+  it("the legs are DIRECT decoded movements, offered as context only", () => {
+    // DIRECT is about the READING: these are decoded instructions, not an
+    // inference. CONTEXT is about the CLAIM: a movement is not a mechanism,
+    // so no component may be established from one. The two axes answer
+    // different questions and are set independently.
     for (const f of facts.slice(0, 2)) {
       expect(f.directness).toBe("DIRECT");
-      expect(f.relationship).toBe("SUPPORTS");
+      expect(f.relationship).toBe("CONTEXT");
     }
   });
 
