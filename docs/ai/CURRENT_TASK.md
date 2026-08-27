@@ -4,74 +4,73 @@
 
 ## NONE — awaiting owner direction
 
-The egress proxy's decision log is now surfaced, counts only. Observability
-only — no DNS, SSRF, CONNECT, routing or navigation behaviour changed.
+Fourth `fees.pump.fun` window analysed offline. **Recommendation: stop
+diagnosing this branch.** No retry, no network call, nothing persisted, no code
+changed.
 
-### What changed
+### What the window established
 
-A failed render carries a **counts-only** summary of what the proxy decided,
-beside the browser's own verdict. The two are independent witnesses and neither
-replaces the other:
+`NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`, `1 denied, 1 allowed`, the
+denial being `HOST_NOT_CONFIRMED`.
 
-```
-reason:           NAVIGATION_FAILED
-diagnostic:       UNCLASSIFIED_NAVIGATION_ERROR
-proxyDenials:     1 denied, 0 allowed
-  NOT_HTTPS             0
-  HOST_NOT_CONFIRMED    0
-  BLOCKED_ADDRESS       1
-  DNS_FAILED            0
-  MALFORMED_TARGET      0
-```
+**The stale-DNS hypothesis is refuted.** `BLOCKED_ADDRESS` 0, `DNS_FAILED` 0 —
+proposed as checkable last round, checked, negative. Also not `NOT_HTTPS`, not
+`MALFORMED_TARGET`, and not `BLOCKED_BY_ROUTE_POLICY`, so our Playwright
+containment did not refuse the main-frame navigation.
 
-Every reason key is always present, so "no denial of this kind" and "no summary
-at all" stay different observations. `allowedCount` separates a proxy that
-permitted traffic — failure downstream — from one never consulted at all. And a
-zero-denial line says so outright.
+**"1 allowed" is weaker than it looks.** The proxy records the allow at
+policy-decision time, *before* `netConnect` is attempted; if the upstream connect
+or TLS then fails, the error path destroys both sockets and records nothing. So
+it proves policy said yes — resolution happened, the address was public — and
+proves nothing about the connection succeeding.
 
-Both owner scripts print it: `inspect-official-page.ts` on failure, and
-`renderer-selftest.ts` always.
+**One CONNECT to an unconfirmed host was refused.** The destination is not
+recorded and is not inferred. One thing does follow structurally: it was **not**
+the main-frame navigation, since that case would have surfaced as
+`BLOCKED_BY_ROUTE_POLICY`. So something reached the proxy that `context.route`
+did not intercept — page traffic escaping interception and browser-level traffic
+both fit, and the closed signals do not separate them. **Whether that denial
+caused the failure is unknown and is not claimed.**
 
-### What still cannot be seen, by construction
+### The one remaining blind spot, and why I am not proposing to fix it
 
-A decision record holds a raw `host:port`, and an allow carries the resolved
-address. **None of it travels.** The summary is built by counting, has no field
-that could hold a string, and is **rebuilt key by key** from the closed list at
-the error's edge — so an object arriving with a `target`, a hostname or an
-address yields a summary that structurally cannot contain them. Unrecognised
-reasons are counted as denials but never become keys, because a key taken from
-data is a key that can carry data.
+After an allowed CONNECT, the tunnel's outcome is never recorded — connected,
+errored and zero-bytes-transferred are indistinguishable. A counts-only,
+host-free diagnostic would close it, and it is the last unlit segment.
 
-So a result licenses exactly this much: a count above zero says **we** refused at
-least one request and names the class. All-zero says no containment refusal was
-recorded. Never which host, never which address, and never a redirect
-destination.
+**But it should not be built for this.** Four windows have now gone into
+transport plumbing and produced no evidence. Each fix was correct and each paid
+for itself in information — and the thing being illuminated has drifted from the
+research question to our own network stack. CORE_RULES: *stop when the proof plan
+no longer justifies another branch; over-research is a defect, not diligence.*
 
-### No cause is claimed
+Worth restating plainly: **it was always speculative that this page carries what
+is needed.** The missing bridge is an explicit first-party assignment of the
+acquisition role to `99mRw3…`. Nothing establishes that a fees dashboard's root
+page contains such a sentence, and a dashboard is a poor candidate for one —
+role assignments live in prose, not in a metrics surface.
 
-The `fees.pump.fun` failure is **not** explained by this work. The capability to
-read one now exists; the page has not been re-run and will not be without an
-authorized window.
+### If the owner wants to continue anyway
 
-If it is re-run, the reading key is:
+In increasing cost, and each is a decision rather than a recommendation:
 
-| observation | meaning |
-|---|---|
-| `BLOCKED_ADDRESS` ≥ 1 | our SSRF guard refused a resolved address — **the stale-DNS hypothesis becomes checkable, not proven** |
-| `DNS_FAILED` ≥ 1 | resolution failed for the confirmed host |
-| `HOST_NOT_CONFIRMED` ≥ 1 | a CONNECT elsewhere, refused by the proxy |
-| all zero, `allowedCount` > 0 | the proxy permitted traffic; the failure was downstream of everything we control |
-| all zero, `allowedCount` 0 | the proxy was never consulted — the browser failed before reaching it |
-
-The cheapest version still needs no code and no new window logic: run
-`ipconfig /flushdns` and confirm the host resolves publicly **before** invoking
-the inspection.
+1. **`ipconfig /flushdns` then one more run** — free, and the proxy line would
+   now show whether resolution changed. Given `DNS_FAILED` 0 already, expect
+   little.
+2. **Tunnel-outcome diagnostic** (offline, counts-only, host-free) then one run —
+   would separate "connect/TLS failed" from "connected and the page still
+   failed". Engineering, not research.
+3. **Confirm `fees.pump.fun/api` as its own route** and inspect the JSON
+   endpoint. Different transport shape, settles instantly, no `networkidle`
+   dependency. Still unlikely to *assign a role* — an endpoint named `buybacks`
+   is not a statement, and records containing the address are locator
+   co-occurrence.
 
 ### Unchanged
 
-Actor → acquisition remains unresolved; the page is unread, so the address's
+Actor → acquisition remains **unresolved**. The page is unread, so the address's
 absence from it is **not** established. `fees.pump.fun` stays CONFIRMED and
-unclassified.
+unclassified; both `pump.fun` routes are untouched.
 
 ### Standing boundaries
 

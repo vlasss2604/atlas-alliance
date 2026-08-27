@@ -418,9 +418,30 @@ Abbreviated PUMP position:
   travel: the summary is rebuilt key by key from the closed list and has no
   field that could hold a string. Printed by both owner scripts. See
   `ARCHITECTURE.md`.
-- **No cause has been claimed for the `fees.pump.fun` failure.** The capability
-  now exists to read one; it has not been re-run and will not be without an
-  authorized window.
+- **Fourth window, 2026-08-28: `1 denied, 1 allowed`, the denial being
+  `HOST_NOT_CONFIRMED`.** Result still
+  `NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`; nothing persisted.
+- **The stale-DNS hypothesis is refuted.** `BLOCKED_ADDRESS` 0 and `DNS_FAILED`
+  0 — named as checkable last round, checked, negative. Also not `NOT_HTTPS`,
+  not `MALFORMED_TARGET`, and not `BLOCKED_BY_ROUTE_POLICY`.
+- **"1 allowed" does not mean the connection succeeded.** The proxy records the
+  allow at POLICY-DECISION time, before `netConnect`; if the upstream connect or
+  TLS then fails, the error path destroys both sockets and records nothing. The
+  allow proves only that policy said yes — resolution happened and the address
+  was public.
+- **One CONNECT to an unconfirmed host was refused, destination not recorded and
+  not inferred.** It was **not** the main-frame navigation — that case is
+  covered by the route handler and would have surfaced as
+  `BLOCKED_BY_ROUTE_POLICY` — so something reached the proxy that
+  `context.route` did not intercept. Whether that denial caused the failure is
+  unknown and not claimed.
+- **The last blind spot is the tunnel outcome after an allowed CONNECT** —
+  connected, errored and zero-bytes are indistinguishable because the error path
+  is silent. A counts-only, host-free diagnostic would close it.
+- **And that is where the research value stops.** Four windows have produced
+  transport diagnostics and zero evidence. The page's content is still unknown,
+  and a dashboard root carrying an address-level role assignment was always
+  speculative. CORE_RULES' brake applies.
 - **`fees.pump.fun` stays unread and unclassified.** Nothing about its content
   is known, and the address's absence from it is **not** established — failure
   to read a source is not evidence of absence.

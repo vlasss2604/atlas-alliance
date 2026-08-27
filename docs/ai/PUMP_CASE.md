@@ -975,6 +975,51 @@ producing exactly what was observed. The live procedure's `ipconfig /flushdns`
 step exists for this. Unverified, and the proxy log would confirm or refute it
 immediately.
 
+### Fourth window, with the proxy log: `1 denied, 1 allowed` — `HOST_NOT_CONFIRMED`
+
+Owner-executed once, 2026-08-28, MantaRay off. Result:
+`NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`, with
+`proxyDenials: 1 denied, 1 allowed` and the single denial being
+`HOST_NOT_CONFIRMED`. Nothing persisted; state verified unchanged.
+
+**The stale-DNS hypothesis is refuted.** `BLOCKED_ADDRESS` is **0** and
+`DNS_FAILED` is **0**. Named as checkable last round; the check came back
+negative. Also not `NOT_HTTPS`, not `MALFORMED_TARGET`, and not
+`BLOCKED_BY_ROUTE_POLICY` — so our Playwright containment did not refuse the
+main-frame navigation either.
+
+**A code fact that bounds what "1 allowed" may be read to mean.** The proxy
+pushes `{allowed: true}` at POLICY-DECISION time, before `netConnect` is even
+attempted; if the upstream connect or TLS then fails, `upstream.on("error")`
+destroys both sockets and **records nothing**. So the allow proves the policy
+said yes — DNS resolved and the address was public, both being preconditions of
+allowing — and proves **nothing about the connection succeeding**.
+
+**One CONNECT to a host outside the confirmed set was refused.** The destination
+is deliberately not recorded and is not inferred here. One structural thing does
+follow: it was **not the page's main-frame navigation**, because that case is
+covered by the route handler and would have surfaced as
+`BLOCKED_BY_ROUTE_POLICY`. So something reached the proxy that `context.route`
+did not intercept — page traffic escaping interception and browser-level traffic
+are both consistent, and the closed signals do not separate them.
+
+**Whether that denial caused the failure is unknown**, and is not claimed. It may
+have been incidental to a navigation that failed for its own transport reason.
+
+### The remaining blind spot, precisely located
+
+After the policy allows a CONNECT, **the tunnel's outcome is never recorded** —
+connected, errored, or zero bytes transferred are all indistinguishable, because
+the error path destroys the sockets silently. That is the last unlit segment on
+this path, and a counts-only, host-free diagnostic would light it.
+
+**It is also where the research value stops.** Four windows have now gone into
+transport plumbing and produced no evidence at all. The page's content is still
+unknown, and it was always speculative that a dashboard root carries an
+address-level role assignment — which is what the missing bridge actually needs.
+CORE_RULES' brake applies: stop when the proof plan no longer justifies another
+branch. Diagnosing our own tunnel further is engineering, not research.
+
 ### Second attempt: the page refuses the fetcher
 
 Job `cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, 2026-08-27T15:06:08Z, run with the
