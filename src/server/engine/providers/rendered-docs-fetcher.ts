@@ -1,4 +1,9 @@
 import { isHttpStatusCode } from "./content-fetcher";
+import {
+  EGRESS_DENIAL_REASONS,
+  type EgressDenialReason,
+  type EgressDenialSummary,
+} from "./render-egress-proxy";
 import type { FetchedDocument } from "./types";
 
 // Stage 1 — RenderedDocsFetcher.
@@ -353,6 +358,27 @@ export function classifyBrowserLaunchFailure(e: unknown): BrowserLaunchDiagnosti
   return "UNKNOWN_BROWSER_LAUNCH_FAILURE";
 }
 
+// REBUILT, never adopted. The summary is re-derived key by key from the
+// closed reason list and coerced to non-negative integers, so an object
+// arriving with a `target`, a hostname or any other extra field yields a
+// summary that structurally cannot contain it.
+function sanitizeProxyDenials(v: EgressDenialSummary | null): EgressDenialSummary | null {
+  if (v === null || typeof v !== "object") return null;
+  const src = (v as { denials?: unknown }).denials;
+  const counts = (src ?? {}) as Record<string, unknown>;
+  const int = (n: unknown): number =>
+    typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : 0;
+  const denials = Object.fromEntries(
+    EGRESS_DENIAL_REASONS.map((r) => [r, int(counts[r])]),
+  ) as Record<EgressDenialReason, number>;
+  return {
+    denials,
+    deniedCount: int((v as { deniedCount?: unknown }).deniedCount),
+    allowedCount: int((v as { allowedCount?: unknown }).allowedCount),
+    distinctDenialClasses: EGRESS_DENIAL_REASONS.filter((r) => denials[r] > 0).length,
+  };
+}
+
 // Carries a reason code only. A renderer error must never echo page
 // content or a URL back into logs/trace.
 export class RenderedDocsError extends Error {
@@ -374,12 +400,22 @@ export class RenderedDocsError extends Error {
   // for a stage in the other.
   readonly navigationDiagnostic: NavigationDiagnostic | null;
 
+  // COUNTS FROM THE EGRESS PROXY'S OWN LOG, and only counts. An
+  // INDEPENDENT observation from the ones above, never a replacement:
+  // what the browser reported and what our proxy decided are two
+  // different witnesses, and the whole point is being able to read both.
+  //
+  // Rebuilt through the summarizer rather than trusted, so a caller
+  // cannot attach an object with extra fields.
+  readonly proxyDenials: EgressDenialSummary | null;
+
   constructor(
     public readonly reason: RenderedDocsFailureReason,
     public readonly rendererName = "unknown",
     diagnostic: BrowserLaunchDiagnostic | null = null,
     httpStatus: number | null = null,
     navigationDiagnostic: NavigationDiagnostic | null = null,
+    proxyDenials: EgressDenialSummary | null = null,
   ) {
     super(`rendered docs retrieval failed (${reason}) via ${rendererName}`);
     this.name = "RenderedDocsError";
@@ -390,6 +426,22 @@ export class RenderedDocsError extends Error {
     this.navigationDiagnostic = isNavigationDiagnostic(navigationDiagnostic)
       ? navigationDiagnostic
       : null;
+    this.proxyDenials = sanitizeProxyDenials(proxyDenials);
+  }
+
+  // Attaches the proxy's counts to an already-classified failure. The
+  // proxy is a PARENT-side boundary, so its log exists where the error is
+  // caught rather than where it was raised — and the classification must
+  // not change on the way through. Everything else is copied verbatim.
+  withProxyDenials(summary: EgressDenialSummary | null): RenderedDocsError {
+    return new RenderedDocsError(
+      this.reason,
+      this.rendererName,
+      this.diagnostic,
+      this.httpStatus,
+      this.navigationDiagnostic,
+      summary,
+    );
   }
 }
 

@@ -231,6 +231,25 @@ which still separates it from the other two by elimination.
 `RENDER_FAILED` keeps its meaning: genuinely unclassified, and now genuinely
 elsewhere — context creation, text extraction, anything outside the navigation.
 
+**The egress proxy is a second, independent witness.** It records every decision
+it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
+`BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET` — and a failed render now
+carries a **counts-only** summary of that log beside the browser's own verdict.
+The two never replace each other: what Chromium reported and what our
+containment decided are different observations, and reading both is the point.
+
+Only counts cross. A decision record holds a raw `host:port`, and an allow
+carries the resolved address, so the summary is built by counting and has no
+field that could hold a string; it is re-derived key by key from the closed list
+at the error's edge, so an object arriving with extra fields yields one that
+structurally cannot contain them. Every reason key is always present, so "no
+denial of this kind" and "no summary at all" stay different observations, and an
+`allowedCount` separates a proxy that permitted traffic from one never consulted.
+
+What it licenses is narrow: a denial count above zero says **we** refused at
+least one request and names the class. All-zero says no containment refusal was
+recorded — not which host, not which address, and never a redirect destination.
+
 **The renderer can be tested without a live window.**
 `runIsolatedRendererSelfTest()`, and `scripts/renderer-selftest.ts` for the
 owner, answers "can this machine start the locked-down browser?" in a few

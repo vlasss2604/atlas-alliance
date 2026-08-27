@@ -2,7 +2,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import * as path from "node:path";
 
 import { isHttpStatusCode } from "./content-fetcher";
-import { startEgressProxy, type EgressProxyHandle } from "./render-egress-proxy";
+import {
+  startEgressProxy,
+  summarizeEgressDenials,
+  type EgressDenialSummary,
+  type EgressProxyHandle,
+} from "./render-egress-proxy";
 import { buildRendererEnv } from "./renderer-env";
 import {
   CHILD_REPORTABLE_RENDER_REASONS,
@@ -276,8 +281,26 @@ export function createIsolatedRenderedDocsFetcher(
         if (code !== 0) throw new RenderedDocsError("CHILD_EXIT_NONZERO", "isolated");
         return parseChildDocument(stdout);
       } catch (e) {
-        if (e instanceof RenderedDocsError) throw e;
-        throw new RenderedDocsError("RENDER_FAILED", "isolated");
+        // THE PROXY'S OWN VERDICT, attached here because this is where its
+        // log lives — the proxy is a parent-side boundary, so the browser's
+        // report and our containment's decision are two different
+        // witnesses caught in two different places. Neither replaces the
+        // other; the classification above is untouched and only counts are
+        // added.
+        //
+        // Summarized before anything leaves this scope: `decisions` holds a
+        // raw `host:port` per entry, and that is precisely what this
+        // boundary exists to keep out of a diagnostic.
+        const denials = proxy === null ? null : summarizeEgressDenials(proxy.decisions);
+        if (e instanceof RenderedDocsError) throw e.withProxyDenials(denials);
+        throw new RenderedDocsError(
+          "RENDER_FAILED",
+          "isolated",
+          null,
+          null,
+          null,
+          denials,
+        );
       } finally {
         if (timer) clearTimeout(timer);
         // The boundary is torn down after every render, so no proxy
@@ -313,6 +336,10 @@ export interface RendererSelfTestResult {
   browserVersion: string | null;
   reason: RenderedDocsFailureReason | null;
   diagnostic: BrowserLaunchDiagnostic | null;
+  // The same counts-only summary the render path reports. A self-test
+  // navigates only to about:blank, so a denial here would say something
+  // is wrong with the boundary itself rather than with any site.
+  proxyDenials: EgressDenialSummary | null;
   durationMs: number;
 }
 
@@ -324,6 +351,7 @@ export async function runIsolatedRendererSelfTest(
   const startProxy = deps.startProxy ?? startEgressProxy;
   const parentEnv = deps.parentEnv ?? process.env;
   const startedAt = Date.now();
+  let proxy: EgressProxyHandle | null = null;
   const done = (
     over: Partial<RendererSelfTestResult>,
   ): RendererSelfTestResult => ({
@@ -331,11 +359,12 @@ export async function runIsolatedRendererSelfTest(
     browserVersion: null,
     reason: null,
     diagnostic: null,
+    // Read at report time so it covers whatever the proxy saw, and
+    // summarized here so no raw decision escapes this function.
+    proxyDenials: proxy === null ? null : summarizeEgressDenials(proxy.decisions),
     durationMs: Date.now() - startedAt,
     ...over,
   });
-
-  let proxy: EgressProxyHandle | null = null;
   try {
     // A host that exists only as a label here: the proxy is opened so the
     // launch arguments are identical to production's, and no request is

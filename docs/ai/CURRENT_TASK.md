@@ -4,80 +4,74 @@
 
 ## NONE — awaiting owner direction
 
-The classified re-run returned **`NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`**
-— branch C. Analysed offline; no retry, no network call, nothing persisted.
+The egress proxy's decision log is now surfaced, counts only. Observability
+only — no DNS, SSRF, CONNECT, routing or navigation behaviour changed.
 
-### What the classifier bought
+### What changed
 
-Two hypotheses retired on its first outing, one of them mine:
+A failed render carries a **counts-only** summary of what the proxy decided,
+beside the browser's own verdict. The two are independent witnesses and neither
+replaces the other:
 
-- **Not `NAVIGATION_TIMEOUT`.** Playwright's typed `TimeoutError` did not fire,
-  so the `networkidle`-mismatch reading proposed last round is **refuted for
-  this observation**. It stays a plausible generic concern for polling pages;
-  it is not what happened here, and it should not be "fixed" on the strength of
-  a guess that has now been tested and failed.
-- **Not `BLOCKED_BY_ROUTE_POLICY`.** Our own containment did not abort a
-  main-frame navigation, so no cross-host redirect was refused by us. The proof
-  channel was available — production runs real Playwright, which exposes
-  `isNavigationRequest`, `frame` and `mainFrame` — so this is a finding, not a
-  missing API. Residual: had Chromium classified the request as something other
-  than a main-frame navigation, the abort would not have been recorded.
+```
+reason:           NAVIGATION_FAILED
+diagnostic:       UNCLASSIFIED_NAVIGATION_ERROR
+proxyDenials:     1 denied, 0 allowed
+  NOT_HTTPS             0
+  HOST_NOT_CONFIRMED    0
+  BLOCKED_ADDRESS       1
+  DNS_FAILED            0
+  MALFORMED_TARGET      0
+```
 
-The navigation threw at transport level, and the closed signal says no more.
-`net::ERR_*` codes live only in the exception message and are deliberately not
-parsed.
+Every reason key is always present, so "no denial of this kind" and "no summary
+at all" stay different observations. `allowedCount` separates a proxy that
+permitted traffic — failure downstream — from one never consulted at all. And a
+zero-denial line says so outright.
 
-### The branch is NOT exhausted — and this is the next task
+Both owner scripts print it: `inspect-official-page.ts` on failure, and
+`renderer-selftest.ts` always.
 
-`startEgressProxy` records **every decision it makes**, with a closed,
-code-owned `EgressDenialReason`: `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
-`BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET`. The isolated fetcher opens
-the proxy, holds the handle, and **drops the entire log in its `finally`** —
-nothing in `src/` or `scripts/` reads `.decisions` at all.
+### What still cannot be seen, by construction
 
-Fourth instance of the same defect: information produced and discarded. It
-discriminates exactly what is now unknown:
+A decision record holds a raw `host:port`, and an allow carries the resolved
+address. **None of it travels.** The summary is built by counting, has no field
+that could hold a string, and is **rebuilt key by key** from the closed list at
+the error's edge — so an object arriving with a `target`, a hostname or an
+address yields a summary that structurally cannot contain them. Unrecognised
+reasons are counted as denials but never become keys, because a key taken from
+data is a key that can carry data.
 
-| proxy record | meaning |
+So a result licenses exactly this much: a count above zero says **we** refused at
+least one request and names the class. All-zero says no containment refusal was
+recorded. Never which host, never which address, and never a redirect
+destination.
+
+### No cause is claimed
+
+The `fees.pump.fun` failure is **not** explained by this work. The capability to
+read one now exists; the page has not been re-run and will not be without an
+authorized window.
+
+If it is re-run, the reading key is:
+
+| observation | meaning |
 |---|---|
-| `DNS_FAILED` | resolution failed for the confirmed host |
-| `BLOCKED_ADDRESS` | resolved into a reserved range — the SSRF guard fired |
-| `HOST_NOT_CONFIRMED` | a CONNECT elsewhere, refused by the proxy |
-| `NOT_HTTPS` / `MALFORMED_TARGET` | malformed or downgraded target |
-| **no denial at all** | the proxy allowed it; the failure was downstream |
+| `BLOCKED_ADDRESS` ≥ 1 | our SSRF guard refused a resolved address — **the stale-DNS hypothesis becomes checkable, not proven** |
+| `DNS_FAILED` ≥ 1 | resolution failed for the confirmed host |
+| `HOST_NOT_CONFIRMED` ≥ 1 | a CONNECT elsewhere, refused by the proxy |
+| all zero, `allowedCount` > 0 | the proxy permitted traffic; the failure was downstream of everything we control |
+| all zero, `allowedCount` 0 | the proxy was never consulted — the browser failed before reaching it |
 
-Even the empty case is informative — it separates *we refused it* from *the
-network failed after we allowed it*.
-
-**Safety constraint:** an allow-decision carries `host`, `port` and `address`,
-and every decision carries a raw `target`. None of that may travel. Only the
-closed denial reason and counts are safe. Fully offline-testable: the proxy has
-an injectable `lookup`, so every branch is deterministic without a network.
-
-**A concrete hypothesis it would settle immediately.** MantaRay's fake-IP DNS
-returns `198.18.0.0/15`, which safe-http correctly refuses. A stale cached entry
-surviving the tunnel going down would make the proxy deny with `BLOCKED_ADDRESS`
-while the browser reported only a generic connection failure — precisely what was
-observed. The procedure's `ipconfig /flushdns` step exists for this. Unverified.
-
-### Another live window is not justified yet
-
-Same reasoning that has now paid off three times: a window spent on a failure
-that cannot explain itself buys one bit at full price. Surface the proxy log
-first — it is offline, cheap, and would either name the cause outright or prove
-the failure was genuinely downstream of everything we control.
-
-If the owner would rather spend a window regardless, the honest cheapest version
-is to run `ipconfig /flushdns` and confirm `fees.pump.fun` resolves to a public
-address **before** invoking the inspection — which tests the stale-DNS
-hypothesis without any new code.
+The cheapest version still needs no code and no new window logic: run
+`ipconfig /flushdns` and confirm the host resolves publicly **before** invoking
+the inspection.
 
 ### Unchanged
 
-Actor → acquisition remains unresolved; the page is still unread, so the
-address's absence from it is **not** established. `fees.pump.fun` stays
-CONFIRMED and unclassified — classifying a page nobody has read is the inversion
-inspection exists to prevent.
+Actor → acquisition remains unresolved; the page is unread, so the address's
+absence from it is **not** established. `fees.pump.fun` stays CONFIRMED and
+unclassified.
 
 ### Standing boundaries
 

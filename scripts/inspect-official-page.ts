@@ -121,5 +121,25 @@ main().catch((e) => {
   const detail =
     e.diagnostic ?? e.navigationDiagnostic ?? (e.httpStatus === null ? null : String(e.httpStatus));
   console.error("INSPECTION FAILED: " + e.reason + (detail === null ? "" : ":" + detail));
+
+  // THE PROXY'S OWN VERDICT, printed as an INDEPENDENT observation beside
+  // the browser's. What Chromium reported and what our containment decided
+  // are two different witnesses, and reading both is the whole point.
+  //
+  // Counts only. Never a target, a hostname, a port or a resolved address —
+  // the summary has no field that could hold one. Absent means the proxy
+  // was never opened, which is itself different from opened-and-silent.
+  const p = e.proxyDenials;
+  if (p === null) {
+    console.error("proxyDenials:     (none recorded)");
+  } else {
+    console.error("proxyDenials:     " + p.deniedCount + " denied, " + p.allowedCount + " allowed");
+    for (const [reason, count] of Object.entries(p.denials)) {
+      console.error("  " + reason.padEnd(20) + count);
+    }
+    if (p.deniedCount === 0) {
+      console.error("  -> no proxy denial was recorded; the failure was not a containment refusal.");
+    }
+  }
   process.exit(1);
 });

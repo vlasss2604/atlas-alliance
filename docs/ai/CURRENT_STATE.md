@@ -410,6 +410,17 @@ Abbreviated PUMP position:
   (`198.18.0.0/15`) surviving the tunnel going down would make the proxy deny
   with `BLOCKED_ADDRESS` while the browser reported only a generic connection
   failure — exactly what was observed. Unverified.
+- **That log is now surfaced, counts only.** A failed render carries a summary
+  of the proxy's decisions beside the browser's verdict — an independent
+  witness, never a replacement. Every closed reason key is always present, so
+  zero is explicit; `allowedCount` separates a proxy that permitted traffic from
+  one never consulted. The raw `target`, host, port and resolved address do not
+  travel: the summary is rebuilt key by key from the closed list and has no
+  field that could hold a string. Printed by both owner scripts. See
+  `ARCHITECTURE.md`.
+- **No cause has been claimed for the `fees.pump.fun` failure.** The capability
+  now exists to read one; it has not been re-run and will not be without an
+  authorized window.
 - **`fees.pump.fun` stays unread and unclassified.** Nothing about its content
   is known, and the address's absence from it is **not** established — failure
   to read a source is not evidence of absence.

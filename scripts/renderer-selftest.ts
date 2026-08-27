@@ -31,6 +31,19 @@ async function main(): Promise<void> {
   console.log("browserVersion:   " + (result.browserVersion ?? "(none)"));
   console.log("reason:           " + (result.reason ?? "(none)"));
   console.log("diagnostic:       " + (result.diagnostic ?? "(none)"));
+  // Counts only, from the proxy's own log. A denial during a self-test —
+  // which navigates nowhere but about:blank — would point at the boundary
+  // itself rather than at any site.
+  const p = result.proxyDenials;
+  console.log(
+    "proxyDenials:     " +
+      (p === null ? "(none recorded)" : `${p.deniedCount} denied, ${p.allowedCount} allowed`),
+  );
+  if (p !== null && p.deniedCount > 0) {
+    for (const [reason, count] of Object.entries(p.denials)) {
+      if (count > 0) console.log("  " + reason.padEnd(20) + count);
+    }
+  }
 
   if (result.ok) {
     console.log("\nThe renderer can start on this machine.");

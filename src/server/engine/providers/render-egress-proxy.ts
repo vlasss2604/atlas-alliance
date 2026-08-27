@@ -90,6 +90,65 @@ export interface EgressProxyHandle {
   close(): Promise<void>;
 }
 
+// The closed list, as a runtime array so a summary can enumerate it and a
+// caller can check membership. The type above stays the source of truth;
+// `satisfies` makes the two impossible to drift apart.
+export const EGRESS_DENIAL_REASONS = [
+  "NOT_HTTPS",
+  "HOST_NOT_CONFIRMED",
+  "BLOCKED_ADDRESS",
+  "DNS_FAILED",
+  "MALFORMED_TARGET",
+] as const satisfies readonly EgressDenialReason[];
+
+// WHAT MAY LEAVE THE PROXY'S LOG: counts, and nothing else.
+//
+// A decision record carries a raw `target` — a `host:port` the browser
+// asked for. That is exactly the material this boundary exists to keep
+// out of diagnostics, so the summary is built by COUNTING and the strings
+// are never copied, formatted or returned. There is no field here that
+// could hold one.
+//
+// Every reason key is always present, so "no denial of this kind" and
+// "no summary at all" are different observations rather than the same
+// silence. `allowedCount` distinguishes a proxy that saw traffic and
+// permitted it from one that was never consulted at all — an integer, not
+// target metadata.
+export interface EgressDenialSummary {
+  denials: Record<EgressDenialReason, number>;
+  deniedCount: number;
+  allowedCount: number;
+  // How many distinct denial classes fired. One class repeated is a
+  // different picture from several classes at once.
+  distinctDenialClasses: number;
+}
+
+export function summarizeEgressDenials(
+  decisions: readonly { allowed: boolean; reason?: string }[],
+): EgressDenialSummary {
+  const denials = Object.fromEntries(
+    EGRESS_DENIAL_REASONS.map((r) => [r, 0]),
+  ) as Record<EgressDenialReason, number>;
+  let deniedCount = 0;
+  let allowedCount = 0;
+  for (const d of decisions) {
+    if (d.allowed) {
+      allowedCount += 1;
+      continue;
+    }
+    deniedCount += 1;
+    // Only a member of the closed list is counted. An unrecognised value
+    // is dropped rather than becoming a key — a record whose keys came
+    // from data would be a record that can carry data.
+    const reason = d.reason;
+    if (typeof reason === "string" && reason in denials) {
+      denials[reason as EgressDenialReason] += 1;
+    }
+  }
+  const distinctDenialClasses = EGRESS_DENIAL_REASONS.filter((r) => denials[r] > 0).length;
+  return { denials, deniedCount, allowedCount, distinctDenialClasses };
+}
+
 // Starts the proxy on an ephemeral loopback port. Bound to 127.0.0.1 so
 // nothing outside this machine can use it as an open relay.
 export async function startEgressProxy(policy: EgressPolicy): Promise<EgressProxyHandle> {
