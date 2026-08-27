@@ -4,70 +4,68 @@
 
 ## NONE — awaiting owner direction
 
-The owner route-confirmation tool is built and tested. **No route was created for
-`fees.pump.fun`** — the capability only, as instructed.
+The `fees.pump.fun` route was created, owner-authorized, through the supported
+script. No network call was made and the page has not been read.
 
-### What exists now
+### What was created
 
-`scripts/confirm-source-route.ts`, a thin controlled entrypoint, with the
-operation in `src/server/memory/source-route-confirmation.ts`.
+Memory item `0aec2717-7c3e-4332-82d0-d0cee2f422c0`, `SOURCE_ROUTE`, **ACTIVE**,
+content exactly:
 
-```
-npx tsx scripts/confirm-source-route.ts \
-  --project=<slug> --domain=<host> --prefix=</path> --actor=<name>
-```
-
-It reuses `promoteProjectMemoryItem` for OBSERVED → CANDIDATE → ACTIVE and
-inserts only the OBSERVED state the database guard permits — no transition is
-re-implemented. Then it prints the route as resolved by the **real**
-source-authority resolver, and fails loudly if `routeClass` came back non-null.
-
-**It assigns no route class and has no parameter that could.** A `--route-class`
-flag (or any spelling of it) is refused loudly rather than ignored, because
-silently dropping it would let an operator believe they had classified
-something. Confirming a host and classifying a page are different judgements,
-and the second should follow reading the page.
-
-### Two hazards found while building it, both now refused
-
-Neither was in the brief; both fall out of how `resolveSourceRoute` **combines**
-ACTIVE rows, and both would have silently damaged working routes.
-
-- **`OVERLAPPING_ACTIVE_PREFIX`** — `matchedPathPrefix` is reported only when
-  *exactly one* path-scoped row matched a url. Confirming a prefix that
-  co-matches an existing ACTIVE one turns that field null for the overlapping
-  urls, disabling rendering and inspection for a route that worked yesterday.
-- **`WOULD_INHERIT_ROUTE_CLASS`** — `routeClass` resolves from *every* matching
-  ACTIVE row, so an ACTIVE domain-wide row carrying a class hands it to the new
-  url too. A confirmation promising "unclassified" would quietly grant
-  documentation authority.
-
-Both are mutation-checked: removing either guard fails tests.
-
-The refusals are not so broad as to block legitimate use — two non-overlapping
-prefixes on one domain still coexist, which is what `pump.fun` has in production
-today.
-
-### Next step, awaiting approval
-
-Creating the real route:
-
-```
-npx tsx scripts/confirm-source-route.ts \
-  --project=pump_fun --domain=fees.pump.fun --prefix=/ --actor=owner
+```json
+{"domain": "fees.pump.fun", "pathPrefix": "/"}
 ```
 
-Verified offline in advance: no SOURCE_ROUTE row names `fees.pump.fun`, so no
-duplicate, no overlap and no class to inherit — the command should succeed and
-yield CONFIRMED / null / `/`.
+No `routeClass` key — absent, not null-valued. Created via
+`OBSERVED → CANDIDATE → ACTIVE` through the existing lifecycle function; no SQL
+was written by hand and nothing was superseded.
 
-**One thing to weigh before running it.** A `/` prefix confirms the root path
-and nothing beneath it, so if `fees.pump.fun/` redirects or client-side-routes
-to a sub-path, the later inspection render ends `FINAL_URL_OUTSIDE_ROUTE` —
-exactly as `pump.fun/pump-token` did. The honest response then is to confirm a
-route at that specific sub-path, not to widen the prefix.
+Pre-check before execution found zero existing routes for the host, no
+duplicate, no overlapping prefix and no class to inherit. The resolver reported
+`CLAIMED / null / null` before, and `CONFIRMED / null / "/"` after.
 
-Say the word and it runs; it is a single local database write, no network.
+### Verified after, independently of what the script printed
+
+| check | result |
+|---|---|
+| `resolveSourceRoute("https://fees.pump.fun/")` | `CONFIRMED / null / "/"`, observation null |
+| inspection eligibility | **eligible** — host `fees.pump.fun`, prefix `/` |
+| evidentiary acquisition scope gate | **refuses** — routeClass is null |
+| render-as-Evidence (upgrade) | refused — `NOT_OFFICIAL_DOCS` |
+| render-on-refusal | refused — `NOT_OFFICIAL_DOCS` |
+| `/api/buybacks`, `/dashboard` | `CONFIRMED` host-wide, prefix **null** → `NO_PATH_PREFIX` |
+| existing `pump.fun` routes | unchanged: `OFFICIAL_DOCS` at `/docs` and `/pump-token` |
+
+Exactly the bounded grant intended: the root page became readable
+non-evidentiarily, nothing became able to produce Evidence, and the confirmation
+reached no sub-path.
+
+### Operational note worth keeping
+
+**Run that script from PowerShell, not Git Bash.** MSYS path conversion rewrites
+a bare `--prefix=/` into `C:/Program Files/Git/`. The first attempt hit exactly
+that: the tool refused it as `PREFIX_HAS_WHITESPACE` and wrote nothing, which is
+the validation doing its job — but in that shell the command silently means
+something other than what it says. The real run was made from PowerShell.
+
+### The next step, not taken
+
+Inspection has **not** been run, as instructed:
+
+```
+npx tsx scripts/inspect-official-page.ts https://fees.pump.fun/ pump_fun
+```
+
+That is one live isolated render, navigating nowhere but the confirmed root —
+no model, no Evidence, no budget, no database write. It needs an authorized
+window with MantaRay off, and `renderer-selftest.ts` should be run first in the
+same session.
+
+Two things to expect. If the host redirects or client-side-routes away from the
+root, the render ends `FINAL_URL_OUTSIDE_ROUTE`, and the honest response is to
+confirm that specific sub-path rather than widen the prefix. And whatever the
+page says, the standard is unchanged: an explicit first-party assignment of the
+acquisition role to `99mRw3…`. The address appearing in data is not that.
 
 ### Standing boundaries
 

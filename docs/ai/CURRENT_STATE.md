@@ -346,8 +346,25 @@ Abbreviated PUMP position:
   disabling rendering and inspection for a route that worked. And an ACTIVE
   domain-wide row carrying a class would be inherited, so a confirmation
   promising "unclassified" would quietly grant authority. Both mutation-checked.
-- **No route was created for `fees.pump.fun`.** The capability is built and
-  tested only; using it against the real database awaits owner approval.
+- **`fees.pump.fun` is now CONFIRMED and UNCLASSIFIED.** Owner-authorized,
+  created 2026-08-27 through `confirm-source-route.ts` — memory item
+  `0aec2717-…`, ACTIVE, content exactly `{"domain":"fees.pump.fun",
+  "pathPrefix":"/"}` with no `routeClass` key. Verified independently against
+  the real resolver: `CONFIRMED / null / "/"`.
+  - **Inspection is now eligible** at `https://fees.pump.fun/`.
+  - **Everything evidentiary still refuses**: the acquisition scope gate on a
+    null class, and both renderer-as-Evidence entry points with
+    `NOT_OFFICIAL_DOCS`.
+  - **Sub-paths are outside the grant** — `/api/buybacks` and any other path
+    resolve `CONFIRMED` host-wide but with prefix null, so inspection refuses
+    `NO_PATH_PREFIX`. Reaching the API would need its own confirmed route.
+  - Nothing was superseded; both existing `pump.fun` routes still resolve
+    `OFFICIAL_DOCS` at `/docs` and `/pump-token` unchanged.
+- **Operational note: run that script from PowerShell, not Git Bash.** MSYS path
+  conversion rewrites a bare `--prefix=/` into `C:/Program Files/Git/`. The tool
+  refused it as `PREFIX_HAS_WHITESPACE` and wrote nothing, which is the
+  validation working — but the command silently means something else in that
+  shell.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /

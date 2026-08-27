@@ -852,6 +852,29 @@ client-side route change from `fees.pump.fun/` therefore ends
 stated design that a bare-domain confirmation must not authorize a whole site —
 a fact to plan around, not a defect.
 
+### The route now exists — CONFIRMED, unclassified, root only
+
+Owner-authorized and created 2026-08-27 through the new
+`confirm-source-route.ts`: memory item `0aec2717-…`, ACTIVE, content exactly
+`{"domain": "fees.pump.fun", "pathPrefix": "/"}` with **no `routeClass` key**.
+Verified independently against the real resolver as `CONFIRMED / null / "/"`.
+
+What it grants: **non-evidentiary inspection of the root page, and nothing
+else.** The acquisition scope gate refuses on the null class, both
+renderer-as-Evidence entry points refuse `NOT_OFFICIAL_DOCS`, and every sub-path
+— `/api/buybacks` included — resolves with a null prefix and is refused
+`NO_PATH_PREFIX`. Reaching the API would need its own confirmed route, which is
+a separate owner decision.
+
+Nothing was superseded. Both existing `pump.fun` routes still resolve
+`OFFICIAL_DOCS` at `/docs` and `/pump-token`, unchanged.
+
+**Inspection has not been run.** The page is still unread, so nothing about what
+`fees.pump.fun` says is known — and confirming a route says nothing about
+content. The evidence standard is unchanged: what would close the bridge is an
+explicit first-party assignment of the acquisition role to `99mRw3…`, not the
+address appearing in data.
+
 ### Second attempt: the page refuses the fetcher
 
 Job `cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, 2026-08-27T15:06:08Z, run with the
