@@ -610,6 +610,70 @@ coverage PARTIAL, zero signature-like, zero address-like, zero explorer URLs. Th
 dated record exists and carries no on-chain identifier. **That line of digging is
 closed.**
 
+## The whole official corpus, and what it does not contain
+
+Searched exhaustively and offline: every source, every Evidence fragment and
+summary, every documentary locator, research memory and its provenance, and
+project memory. **No document body is stored anywhere** — `sources` holds url,
+publisher and title only, and no `snapshot_ref` is populated on any of the 401
+Evidence rows. So the documentary corpus ATLAS holds IS the set of fragments.
+
+For Pump.fun that corpus is **four distinct fragments** (10 rows), all from
+`https://pump.fun/pump-token`, all OFFICIAL_DOCS / CONFIRMED, and all filed at
+**step 6 / DESTINATION**:
+
+1. "Half of every dollar Pump.fun earns buys $PUMP on the open market, then burns
+   it forever." (×3)
+2. "Burn addresses / 99mRw3…pm4F3c / 9jHrTC…6KVCXM" (×3)
+3. "As of 28 Apr 2026, 50% of revenue is programmatically locked and allocated to
+   be burned for one year." (×3)
+4. "Every burn, on-chain — A verifiable record of each daily purchase and burn,
+   settled on Solana." (×1)
+
+### No actor → acquisition bridge exists
+
+The actor address appears in **exactly one fragment**: the "Burn addresses"
+heading. Nowhere in the corpus does any text place it near a buying, purchasing,
+acquiring or treasury-execution statement.
+
+A keyword sweep does return the claim sentence when searching for the address —
+but that match comes from the row's `documentary_locator` column, not from its
+text. Checked directly: the claim sentence's fragment does **not** contain the
+address. That is locator co-occurrence, which is exactly the thing that does not
+count.
+
+So the gap named last round is confirmed by exhaustion, not assumed: **the
+documents bind the address to burning and describe the buying, and never join
+the two.**
+
+### A component misassignment worth deciding on (reported, NOT changed)
+
+All 10 OFFICIAL_DOCS rows sit at step 6 / DESTINATION. Only fragment 2 belongs
+there — it names where assets end up.
+
+Fragment 1 is a mechanism SPECIFICATION: a rate (half), a trigger (every dollar
+earned) and the operations. That is verbatim what `MECHANISM_SPEC`'s
+evidenceGoal asks for. Meanwhile `MECHANISM_SPEC` holds **only SOCIAL /
+CLAIMED evidence — 112 rows** — and SOCIAL establishes nothing ever (D-074), so
+the component is INSUFFICIENT_EVIDENCE in all 17 jobs while the best
+specification sentence in the corpus sits filed elsewhere.
+
+The cost is concrete. `MECHANISM_SPEC` admits OFFICIAL_DOCS, requires no live
+state and no freshness window, and is not token-state sensitive. The row's
+officiality is **CONFIRMED** — via the human-approved `SOURCE_ROUTE` for
+`pump.fun/pump-token` — so D-074's PARTIALLY_SUPPORTED cap would not apply.
+Correctly filed, that one sentence would plausibly carry MECHANISM_SPEC to
+SUPPORTED.
+
+Fragment 3 reads as DURABILITY_BASIS ("for one year" is a time limit) or
+MECHANISM_SPEC. Fragment 4 asserts that execution records exist — but
+`EXECUTION_EVIDENCE` admits only ONCHAIN_VERIFIABLE and OFFICIAL_REPORT, so an
+OFFICIAL_DOCS sentence cannot establish it wherever it is filed. That one is
+correctly powerless, not misfiled.
+
+**Nothing was reassigned.** Evidence rows carry the component S4 chose at
+extraction time; moving them is a decision about how extraction targets
+components, not a row edit.
 ## Mechanism binding: what the documents actually bind
 
 Three OFFICIAL_DOCS Evidence rows exist for this case, all officiality

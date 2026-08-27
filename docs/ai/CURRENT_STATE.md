@@ -153,6 +153,15 @@ Abbreviated PUMP position:
   on-chain artifact — the Solana work has never entered Evidence — and S6 carries
   no verdict, proven or confidence field by design (D-103). Revenue funding is a
   third, wholly separate bridge with no evidence at all.
+- **The missing bridge is confirmed by exhaustion.** The entire official corpus is
+  four distinct fragments from one page; no document body is stored anywhere, so
+  fragments ARE the corpus. The actor appears in exactly one of them, the "Burn
+  addresses" heading. Nothing anywhere places it near a buying statement.
+- **Open decision: OFFICIAL_DOCS component assignment.** All 10 official rows sit
+  at step 6 / DESTINATION, including the mechanism-specification sentence, while
+  `MECHANISM_SPEC` holds only SOCIAL evidence and is INSUFFICIENT_EVIDENCE
+  everywhere. Correctly filed that sentence could reach SUPPORTED, since its
+  officiality is CONFIRMED. Reported, not changed — see `PUMP_CASE.md`.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 
