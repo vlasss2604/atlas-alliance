@@ -27,12 +27,109 @@ execution.**
 - Second burn address published on the same page:
   `9jHrTCwpDANHLNQz5cem6XLUBM8KiTWKe766Br6KVCXM`
 
-The second address **must enter through normal deterministic documentary
-provenance**. Do not hardcode it, do not manually trust it.
+Both arrived through normal documentary provenance and are recorded in
+`evidence_documentary_locators` with `literally_present = true` and
+`validation_result = CONFIRMED` — `99mRw3…` at ordinal 0 and `9jHrTCwp…` at
+ordinal 1 of the same evidence rows. Neither was ever hardcoded, and neither may
+be. The second address has additionally been followed one hop (see the inventory
+below); the old note that it "still needs to enter through provenance" is
+resolved.
 
 A documentary "burn address" label proves none of: that a burn occurred, that
 PUMP reached the account, that `Burn`/`BurnChecked` executed, that supply
 decreased, or that the economic role is what the label says.
+
+## Persisted on-chain inventory (verified from the local database)
+
+Everything below was read from `onchain_artifacts`, `onchain_observed_signatures`
+and `onchain_derived_subjects`. Ten artifacts exist in total; all are
+`STANDALONE_STRUCTURED_OBSERVATION` (no research job attached), so these are
+established chain FACTS in the artifact store, **not yet Evidence in a Proof**.
+
+### Balance observations
+
+| slot | artifact | subject | result |
+|---|---|---|---|
+| `441498936` | `6161bae4-…` | owner `99mRw3…` | one PUMP token account `9Wtcf…`, balance **0** |
+| `441835488` | `0bfa3d2d-…` | owner `9jHrTCwp…` | one PUMP token account `HxT8kiUKxJ7jdvWfDeRZQzQia4wyRCNN2iRBjMUzcimN`, balance **0** |
+
+Both derived accounts are recorded in `onchain_derived_subjects` with
+`derivation_method = TOKEN_ACCOUNTS_BY_OWNER`, `binding_status = CONFIRMED`.
+
+### Signature windows — three, all on `9Wtcf…`
+
+| artifact | n | slots | block times | span |
+|---|---|---|---|---|
+| `d0b844a0-…` | 10 | `441595243`–`441595300` | 2026-08-25 08:54:21–08:54:42 | 21 s |
+| `cdddfcc1-…` | 10 | `441840911`–`441840980` | 2026-08-26 09:50:00–09:50:26 | 26 s |
+| `2e332079-…` | 25 | `441976802`–`441977087` | 2026-08-26 23:39:19–23:41:02 | 103 s |
+
+Every window returned exactly its limit, so each is saturated and the density is
+a lower bound: roughly 0.24–0.48 signatures per second. No row anywhere has
+`err = true`.
+
+### Transactions read in full — five artifacts, four distinct signatures
+
+| slot | signature | burns |
+|---|---|---|
+| `441977087` | `zdjrE4w…` | 0 — the reciprocal acquisition |
+| `441840980` | `5R5LhLd…` | **1 — BurnChecked** |
+| `441840975` | `4eMRNdm…` | 0 (read twice; two artifacts, same signature) |
+| `441595300` | `44235e2…` | 0 |
+
+## The established burn
+
+Artifact `8ccbbac0-96d7-4dbf-91c9-ece29d62ec0e`, signature
+`5R5LhLdHyzDJtFgHFG4UdkwNh66iGhf7Y2XVaagMi5XadQB1cbRJP66EqkKyao9FBmYPVB3gyCinb6vy3RwdUPSF`,
+slot `441840980`, block time 2026-08-26T09:50:26Z, succeeded.
+
+- `artifact_hash` `sha256:4a9d2394874829b4a2d9e0aec035832d010fc5d4577cc4fbb2ab99b52c1ff712`
+- `raw_response_hash` `sha256:a3e22c49f42d9af4c1209a01beceee4a481dd9a182bc646566479d7edbff014d`
+- Programs invoked: **Token-2022 only** (`TokenzQdB…`). A single-instruction
+  transaction.
+- Decoded `BurnChecked`, outer instruction: mint = the confirmed PUMP mint,
+  `amountRaw` `7723746661` at 6 decimals = **7723.746661 PUMP**,
+  `sourceAccount` = `9Wtcf…`, `authority` = `99mRw3…` — the documented burn
+  address acting as authority over its own token account.
+- Balances: pre `7723746661` → post `0`. The account's entire balance, destroyed.
+- Provenance: the signature was listed in window `cdddfcc1-…` on parent subject
+  `9Wtcf…`, `binding_status = CONFIRMED`.
+
+**This is a genuine on-chain destruction of the project's confirmed mint.** It is
+the strongest single fact in the case, and it corrects the earlier record, which
+said no PUMP `Burn`/`BurnChecked` had been established.
+
+What it still does not establish: that the burned tokens came from a buyback,
+that the SOL that bought them was protocol revenue, that the published mechanism
+is what ran, the cumulative burn totals, the Aug 23 attribution, or
+circulating-supply semantics. It is also not yet Evidence — no research job owns
+it, so nothing has been reconciled against `EXECUTION_EVIDENCE`.
+
+## The temporal picture, and the hole in it
+
+Ordered by slot, this is everything observed about `9Wtcf…`:
+
+```
+441498936  balance 0                                    (TOKEN_ACCOUNTS_BY_OWNER)
+   ... 342,044 slots unobserved ...
+441840980  balance 7723746661 -> 0   BURN 7723.746661   (BurnChecked)
+   ... 136,107 slots unobserved (~13.8 h) ...
+441977087  balance 0 -> 17509274333  ACQUISITION        (reciprocal flow, 0 burns)
+   ... nothing observed after this slot, anywhere ...
+```
+
+Two things follow, and neither is comfortable.
+
+**The burn precedes the acquisition.** It destroyed a balance that arrived during
+an unobserved interval — not the 17,509.274333 PUMP received later. These are two
+different cycles, and pairing them would be inventing a link.
+
+**Nothing at all is observed after slot `441977087`.** Not one persisted signature
+anywhere has a higher slot. So what became of the 17,509.274333 PUMP is entirely
+unrecorded here.
+
+Every interval between the observed points is unaccounted. The endpoints are
+suggestive — fill, burn to zero, fill again — and suggestive is not established.
 
 ## Established on-chain observations
 
@@ -44,17 +141,20 @@ documented locator is a System-Program-owned account, not an SPL token account.
 **Its PUMP token account** — `TOKEN_ACCOUNTS_BY_OWNER` filtered by the confirmed
 mint returned exactly one account:
 `9WtcfpuiF6dVKroycsi3E1k7vYQP8XmT7RBjcptdcfjX`, owner `99mRw3…`, balance 0 PUMP
-in that bounded observation. **Zero balance proves neither burn nor absence of
-historical tokens.**
+**at slot `441498936`** — roughly 478,000 slots BEFORE the acquisition
+transaction, not after it. **Zero balance proves neither burn nor absence of
+historical tokens**, and this one proves nothing about the acquisition at all: it
+was observed first.
 
 **History is dense.** A bounded `SIGNATURES_FOR_ADDRESS` (limit 25) on that token
 account returned 25/25, one observed window covering roughly 1–2 minutes. Bounded
 head windows are for deterministic sampling, not for reaching a date several days
 back. Do not add paging to get to a date.
 
-## The persisted transaction
+## The acquisition transaction, in detail
 
-Selected from a persisted 25-signature window by the deterministic rule
+One of five persisted transaction artifacts (see the inventory above). Selected
+from a persisted 25-signature window by the deterministic rule
 `ORDER BY slot DESC, signature ASC` — no content-based cherry-picking.
 
 | | |
@@ -120,16 +220,22 @@ closed.**
 ## Not yet proven
 
 The reciprocal transaction is a buyback · the SOL came from protocol revenue ·
-PUMP was purchased on the open market · the received PUMP was later burned · a
-specific PUMP `Burn`/`BurnChecked` for the claimed mechanism · the
-acquisition → burn bridge · official cumulative burn totals · Aug 23 record → exact
-transactions · circulating-supply reduction attributable to the claimed flow.
+PUMP was purchased on the open market · the 17,509.274333 PUMP received at slot
+`441977087` was later burned · the acquisition → burn bridge · that the observed
+burn belongs to the published mechanism · official cumulative burn totals ·
+Aug 23 record → exact transactions · circulating-supply reduction attributable to
+the claimed flow.
 
-## Burn-side strategy (designed, not executed)
+A specific PUMP `BurnChecked` **is** now established as a chain fact — see "The
+established burn" above. It is not yet Evidence, and it is not bridged to any
+acquisition.
 
-The acquisition side is established. The missing thing is a genuine PUMP
-`Burn`/`BurnChecked`. This section records the strategy, the reasoning, and the
-options that were rejected — so none of it is re-litigated.
+## Burn-side strategy — Step 0 executed, Step 1 rejected
+
+Written before Step 0 ran, on the assumption that no PUMP `Burn`/`BurnChecked`
+existed anywhere. Step 0 found one already persisted and refuted the premise of
+Step 1. The reasoning is kept — including the parts that turned out wrong — so it
+is not rebuilt from scratch and not re-litigated.
 
 ### What the engine can and cannot reach on its own
 
@@ -167,70 +273,55 @@ result is recorded as a finding.
 The rule: **declare the complete set in advance and read all of it, or read none
 of it.** Never "read one more and see".
 
-### Step 0 — offline, zero live calls, do this first
+### Step 0 — DONE, offline, and it refuted its own premise
 
-Read-only queries against the local database. No existing script covers this
-(`alpha-inspect.ts` is research-job-scoped), so it needs either a small read-only
-inspection script or a direct query.
+Executed against the local database, read-only, zero network calls. Results are in
+the inventory sections above. Three things came out of it.
 
-1. Artifact `df2ed321-…` (`TRANSACTION_DETAIL`, slot `441977087`): confirm the
-   post-balance recorded for `9Wtcf…`.
-2. The `TOKEN_ACCOUNTS_BY_OWNER` artifact: its own `slot`, and the balance it
-   recorded for `9Wtcf…`.
-3. The 25 rows of `onchain_observed_signatures` under artifact `2e332079-…`:
-   `slot`, `block_time`, `err` for each.
+**The premise was wrong.** Step 0 was designed around the possibility that the
+zero-balance observation came *after* the acquisition, which would have
+established a decrease of a known size in a known interval. It came **before** —
+slot `441498936` against `441977087`, roughly 478,000 slots earlier. No decrease
+is established by that pairing, and the reasoning built on it is withdrawn.
 
-**Why it matters.** If the zero-balance observation is at a slot *strictly later*
-than `441977087`, then within a known slot interval that account's confirmed-mint
-balance went from a known quantity to zero. That establishes a **decrease of a
-known size in a known interval** — by transfer out, burn, or close, in some
-combination. It is not a burn, and must never be written as one. But it turns
-"zero balance proves nothing" into a bounded, recorded fact, and it is what makes
-Step 1 justified rather than speculative. If the balance observation is *earlier*,
-Step 0 yields nothing and Step 1 rests on a weaker footing — say so plainly.
+**A genuine burn was already sitting in the artifact store.** Artifact
+`8ccbbac0-…` at slot `441840980` contains a decoded `BurnChecked` of the confirmed
+mint. Nobody had looked. The lesson is cheap and worth keeping: **read what is
+already persisted before designing a plan to go and get it.**
 
-Step 0 also fixes the exact size of Step 1: 25 signatures, minus the one already
-read, minus any with `err = true` (a failed transaction executed nothing). Do not
-assume that count — read it.
+**Nothing is observed after slot `441977087`.** Not one persisted signature, in any
+of the three windows, has a higher slot.
 
-### Step 1 — exhaustive read of the persisted window (needs authorization)
+### Step 1 — REJECTED for the burn-after-acquisition question. Not executed.
 
-- **Subject set:** every signature persisted under artifact `2e332079-…` that has
-  `err = false` and has not already been read. Declared complete before the first
-  call.
-- **Intent:** `TRANSACTION_DETAIL`, one per signature, via
-  `scripts/onchain-transaction-detail.ts`, which refuses any signature lacking
-  persisted provenance.
-- **Bound:** that exact count, zero retries, one MantaRay-off window, complete
-  output captured the first time. Order `slot DESC, signature ASC` for
-  replayability — the order is irrelevant because all of them are read.
-- **Stop condition:** after the last one. Finding a burn early does **not** stop
-  the run; the remaining reads still happen, so the sample stays complete and the
-  result stays interpretable.
-- **New capability required:** none.
+The 25-signature window `2e332079-…` spans slots `441976802`–`441977087`, and
+`441977087` **is** the acquisition — the newest signature in the window is the
+acquisition itself. The other 24 all lie strictly before it.
 
-### Step 2 — the second documented burn address (needs authorization)
+Whatever became of the 17,509.274333 PUMP received *at* that slot is necessarily
+recorded in transactions at slots **≥ `441977087`**, of which exactly one is held:
+the acquisition, which contains no burn. Reading the remaining 24 exhaustively
+would be looking strictly into the past of the event in question. It cannot
+answer it — not with poor odds, but structurally.
 
-Independent of Step 1's outcome, and not a fallback for it.
+So Step 1 is rejected **for that purpose** and was not run. It would still answer a
+different question (how often burns occur within a 103-second window), and that is
+a different question, to be decided on its own merits and not smuggled in on this
+one's authorization.
 
-`9jHrTCwp…` must arrive as a documentary locator through the normal docs recovery
-path. It is never typed in, never hardcoded, never trusted because it appears in
-this file. Once it is a locator, it is an ordinary subject: `ACCOUNT_INFO` →
-classification → (if ordinary) `TOKEN_ACCOUNTS_BY_OWNER` → (if a confirmed-mint
-token account exists) `SIGNATURES_FOR_ADDRESS` → one `TRANSACTION_DETAIL`.
-Roughly four bounded reads. No new capability.
+### Step 2 — partly done already, and it was never a fallback
 
-Worth doing even if it yields no burn: the classification and holdings of the
-*second* address the project publishes as a burn address is itself a finding. A
-large standing balance would be a retained-not-retired shape, which bears directly
-on `DESTINATION`'s "retains, redistributes or retires" clause.
+`9jHrTCwp…` did arrive through normal documentary provenance, and one hop was
+already taken: artifact `0bfa3d2d-…` at slot `441835488` returned exactly one PUMP
+token account, `HxT8kiUKxJ7jdvWfDeRZQzQia4wyRCNN2iRBjMUzcimN`, balance **0**,
+`binding_status = CONFIRMED`. Its history has never been observed.
 
 ### Rejected, with reasons — do not reopen
 
-- **Paging signature history back to Aug 23.** Prohibited, and hopeless. From the
-  observed density (25 signatures ≈ 1–2 minutes), four days is on the order of
-  10^5 signatures — an order-of-magnitude estimate from the observed window, not a
-  measurement, and decisive either way.
+- **Paging signature history back to Aug 23.** Prohibited, and hopeless. All three
+  saturated windows give 0.24–0.48 signatures per second as a lower bound, so four
+  days is on the order of 10^5 signatures — an order-of-magnitude estimate from
+  the observed windows, not a measurement, and decisive either way.
 - **`TOKEN_SUPPLY` on the mint.** One observation has no time dimension. Two give
   a net change attributable to nothing. Supply is also a definitional concept, not
   only a chain value.
@@ -241,38 +332,52 @@ on `DESTINATION`'s "retains, redistributes or retires" clause.
   sampling; repeating it until the answer changes is not.
 - **Decoding program `61DF…`.** Out of scope without explicit authorization.
 
-### What success would and would not establish
+### What the burn establishes, and what it does not
 
-A decoded `Burn`/`BurnChecked` of the confirmed mint carries `mechanismState =
-LIVE`, `SUPPORTS`, `DIRECT`, class `ONCHAIN_VERIFIABLE` with confirmed entity
-binding. It satisfies `EXECUTION_EVIDENCE`'s live-state gate — that component
-requires no freshness window — so it can establish step 4.
+A decoded `Burn`/`BurnChecked` of the confirmed mint is synthesized with
+`mechanismState = LIVE`, `SUPPORTS`, `DIRECT`, class `ONCHAIN_VERIFIABLE`. With
+confirmed entity binding it satisfies `EXECUTION_EVIDENCE`'s live-state gate —
+that component sets `requiresCurrentState = false`, so no freshness window
+applies — and it can establish step 4.
 
-It would still not establish: that the burned tokens came from a buyback, that the
-SOL was protocol revenue, that the published mechanism is what ran, the cumulative
-burn totals, the Aug 23 attribution, or circulating-supply semantics. The overall
-mechanism claim would remain at best `PARTIALLY_SUPPORTED`.
+The observed burn is not there yet: its artifact is standalone, owned by no
+research job, so no Evidence row exists and nothing has been reconciled. Getting
+it there is a separate, ordinary step, not a discovery.
 
-### The bridge that cannot be built, and why
+Even reconciled, it would not establish: that the burned tokens came from a
+buyback, that the SOL was protocol revenue, that the published mechanism is what
+ran, the cumulative burn totals, the Aug 23 attribution, or circulating-supply
+semantics. The overall mechanism claim stays at best `PARTIALLY_SUPPORTED`.
 
-SPL tokens are **fungible**. There is no on-chain link between the units acquired
-and the units burned, and no amount of research can create one — this is a
-property of the asset, not a gap in the evidence.
+### The bridge, and what it would actually take
 
-The strongest bridge reachable is *account-level continuity*: the account that
-received the acquisition is the account the burn destroyed from, plus quantity
-accounting across a known slot interval. That is materially weaker than "the
-purchased tokens were burned", and ATLAS must say which one it has.
+SPL units are fungible, so "*these* tokens were burned" is not directly provable —
+no chain record links an acquired unit to a destroyed one. That is a property of
+the asset.
 
-### If nothing is found
+It is **not** a reason to declare the bridge impossible. Bounded account-level
+QUANTITY continuity would establish one: the account that received the acquisition
+is the same account the observed burn destroyed from, and if every state-changing
+transaction between two known balance points were deterministically accounted for,
+what entered and what left would reconcile as quantities. The bridge holds on
+completeness of the interval, not on identity of the units.
 
-Record `INSUFFICIENT_EVIDENCE` for `EXECUTION_EVIDENCE` and name the missing
-bridge. Do not acquire a paging capability to keep looking.
+What is missing here is exactly that completeness. Every interval between the
+observed points is unaccounted — 342,044 slots before the burn, 136,107 after it,
+and everything after slot `441977087`. Two suggestive endpoints with a hole
+between them establish nothing about the hole. That is the honest statement of the
+gap, and it names what would close it.
 
-State the sample honestly: a few dozen transactions out of an estimated 10^5 in
-the relevant period is a fraction of a percent. **Absence in a bounded sample is
-not evidence of absence** — the finding is "no burn in the observed window", never
-"no burns occur".
+### Reporting the sample honestly
+
+Four distinct transactions have been read in full, out of an estimated 10^5 in the
+relevant period. One of them contains a burn.
+
+That fraction cuts both ways and neither conclusion is available: it is far too
+small to support "burns happen routinely", and **absence in a bounded sample is
+not evidence of absence** either. The findings are "one burn observed at slot
+`441840980`" and "no burn in the transactions read from the other windows" —
+never a rate, never a policy, never "no burns occur".
 
 ## Success criterion
 

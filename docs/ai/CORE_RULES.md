@@ -47,12 +47,19 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **System utility ≠ economic value capture.**
 - A documentary role label ("burn address", "treasury") is a claim about the
   account, never a chain fact about it.
-- **Fungible units have no identity.** There is no link between the units
-  acquired and the units later destroyed or moved — not a missing one, an
-  impossible one. The strongest bridge available is account-level continuity
-  (the account that received is the account that was drawn from) plus quantity
-  accounting over a known interval. That is a weaker claim than "those units",
-  and the difference must be stated, not smoothed over.
+- **Fungible units have no individual identity.** No chain record links a
+  specific acquired unit to a specific destroyed one, and none can — so
+  "*these* tokens were burned" is never directly provable.
+  **This does not make an acquisition → disposition bridge impossible.** Bounded
+  account-level QUANTITY continuity can establish one: if a balance is known at
+  two points and EVERY state-changing transaction in between is deterministically
+  accounted for, then what entered and what left are reconciled as quantities,
+  and the bridge holds without ever needing unit identity. The condition is
+  completeness of the interval, not identity of the units.
+  What fails is the shortcut: two endpoints with an unobserved gap between them
+  establish nothing about what happened in the gap, however suggestive the
+  endpoints look. Say which one you have — a reconciled interval, or two
+  observations with a hole between them.
 
 ## Establishment
 

@@ -87,14 +87,18 @@ read it only for a PUMP task.
 
 Abbreviated PUMP position:
 
-- Official buyback-and-burn claim and official burn locator exist and were recovered.
-- The locator exists on-chain, is System-Program-owned, and is not itself a token
-  account. It owns exactly one confirmed-PUMP token account in the bounded
-  observation.
-- One real persisted transaction contains an exact, reconciling reciprocal
-  SOL/PUMP flow with a single counterparty owner, and **zero decoded burns**.
-- Nothing about buyback, purchase, swap, revenue funding, causality, burn or
-  supply reduction is proven.
+- Official buyback-and-burn claim and both official burn addresses were recovered
+  through documentary provenance and are CONFIRMED locators.
+- The first locator is System-Program-owned and owns exactly one confirmed-PUMP
+  token account; the second owns exactly one as well. Both were observed at zero.
+- **A genuine `BurnChecked` of the confirmed mint is established as a chain
+  fact**: 7723.746661 PUMP destroyed from the locator's own token account, under
+  the locator's own authority, balance to zero, at slot `441840980`.
+- A separate transaction at slot `441977087` contains an exact reciprocal
+  SOL/PUMP flow and zero burns. It is **later** than the burn, so the two are
+  different cycles.
+- Nothing about buyback, purchase, revenue funding, causality or supply reduction
+  is proven, and no acquisition → burn bridge exists.
 
 ## Done
 
@@ -106,10 +110,15 @@ Abbreviated PUMP position:
 
 ## Open
 
-- The **acquisition → burn bridge** for PUMP is missing. No genuine PUMP
-  `Burn`/`BurnChecked` has been established for the claimed mechanism.
-- The second documented burn address has not entered through normal deterministic
-  provenance, and must not be hardcoded.
+- The **acquisition → burn bridge** for PUMP is missing. A burn exists and an
+  acquisition exists; nothing connects them. Every interval between the observed
+  points is unaccounted, and **nothing at all is observed after slot
+  `441977087`** — no persisted signature anywhere has a higher slot.
+- The established burn is a standalone artifact owned by no research job, so it is
+  a chain fact and not yet Evidence. Nothing has been reconciled against
+  `EXECUTION_EVIDENCE`.
+- The second burn address has one derived token account observed at zero; its
+  history has never been read.
 - The Aug 23 daily record was recovered but carries no signature, address or
   explorer identifier. That line of digging is closed.
 - Cumulative official burn totals are unverified.
@@ -118,24 +127,20 @@ Abbreviated PUMP position:
 
 ## Next research direction
 
-The burn-side strategy is **designed and recorded** — `PUMP_CASE.md` §"Burn-side
-strategy", with its rejected options and its stop conditions. Nothing in it has
-been executed.
+**Awaiting owner direction.** Step 0 ran offline and changed the picture enough
+that no new strategy should be written until the result is reviewed.
 
-Two findings from designing it are worth carrying:
+What it established (`PUMP_CASE.md`, verified inventory):
 
-- Automatic promotion **cannot** reach a burn from the current locator. A
-  signature window yields exactly one transaction and a transaction is terminal;
-  the one it yielded contains no burn. That is the brake working.
-- It does not need a new capability anyway. Every signature of the persisted
-  window already carries durable provenance, and the owner-authorized
-  transaction-detail script re-validates any of them — which is what that
-  persistence was built for.
-
-Order: Step 0 (offline, no authorization) → Step 1 exhaustive read of the
-persisted window → Step 2 the second documented burn address → then, at best, an
-account-level acquisition-to-burn bridge. There is no token-identity bridge to be
-had; SPL units are fungible.
+- A genuine `BurnChecked` was **already persisted** and nobody had looked. The
+  cheapest lesson in the case so far: read what is already stored before planning
+  to go and get it.
+- Step 1 — exhaustively reading the 25-signature window — is **rejected** for the
+  burn-after-acquisition question and was not run. That window ends AT the
+  acquisition; its other 24 signatures all precede it, so it cannot say what
+  happened afterwards. Structurally, not probabilistically.
+- The gap is now precise: forward coverage after slot `441977087`, and complete
+  interval accounting between known balance points.
 
 Not by paging signature history backward to a date, not by inspecting arbitrary
-transactions, not by counterparty-chasing. See `CURRENT_TASK.md`.
+transactions, not by counterparty-chasing.

@@ -36,8 +36,10 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Case-specific, deferred
 
-- **Second PUMP burn address** (`9jHrTCwp…`) still needs to arrive through normal
-  deterministic documentary provenance. Never hardcoded. See `PUMP_CASE.md`.
+- ~~**Second PUMP burn address** needs documentary provenance.~~ **Resolved.**
+  `9jHrTCwp…` is a CONFIRMED documentary locator at ordinal 1, and one hop has
+  been taken from it. See `PUMP_CASE.md`. Its signature history remains
+  unobserved — that is research scope, not backlog.
 
 ### Tooling / environment
 
