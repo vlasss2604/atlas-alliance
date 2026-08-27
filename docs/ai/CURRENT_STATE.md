@@ -100,13 +100,17 @@ Abbreviated PUMP position:
 - **A genuine `BurnChecked` of the confirmed mint is established as a chain
   fact**: 7723.746661 PUMP destroyed from the locator's own token account, under
   the locator's own authority, balance to zero, at slot `441840980`.
-- **That burn's own interval is complete.** The transaction five slots earlier
-  moved exactly the same raw quantity INTO the same account from a balance of
-  zero, the window lists nothing between them, and the quantities reconcile. An
+- **That burn's own interval is closed under the observed index** — deliberately
+  weaker than "complete". The transaction five slots earlier moved exactly the
+  same raw quantity INTO the same account from a balance of zero, the window
+  lists nothing further between them, and the quantities reconcile. An
   account-level inflow → burn continuity statement holds across
-  `441840975`–`441840980` — established from persisted rows, with no further
-  chain read. The inflow is a transfer and nothing more: not a buyback, not a
-  purchase, not revenue-funded, and one cycle is not a policy.
+  `441840975`–`441840980`, from persisted rows with no further chain read.
+  Its ceiling: "nothing further was listed" is not "nothing else happened" —
+  ATLAS holds no contract for what the RPC address-signature index covers, and
+  models address lookup tables nowhere. The inflow is also a transfer and nothing
+  more: not a buyback, not a purchase, not revenue-funded, and one cycle is not a
+  policy.
 - A separate transaction at slot `441977087` contains an exact reciprocal
   SOL/PUMP flow and zero burns. It is **later** than the burn, so the two are
   different cycles.

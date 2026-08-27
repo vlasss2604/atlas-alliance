@@ -4,36 +4,37 @@
 
 ## NONE — awaiting owner direction
 
-The pre-burn window inventory is done, offline, read-only. No RPC call was made,
-no code changed, no test added.
+The signature-coverage contract check is done, offline. No production code
+changed; the correction was to wording that had outrun its evidence.
 
 ### What it found
 
-The window immediately preceding the burn did not need completing. Two of its ten
-signatures already had transaction detail, they are the two newest, and they are
-adjacent: an inflow of `7723746661` raw units into `9Wtcf…` from a zero balance at
-slot `441840975`, then a `BurnChecked` of `7723746661` taking it back to zero at
-`441840980`, with no signature listed between them.
+ATLAS has **no contract** for what the RPC address-signature index covers. There
+is no Solana SDK in the tree, address lookup tables are modelled nowhere
+(`meta.loadedAddresses` and `message.addressTableLookups` are unread), and the
+account-key schema keeps only `pubkey`, discarding the `source` field that would
+say whether an address arrived via a lookup table.
 
-That is a complete interval, so an **account-level inflow → burn continuity
-statement already holds** at zero further cost. Details and its limits are in
-`PUMP_CASE.md`, "The burn's own interval is already complete".
+So "no other transaction touched the account" was a census claim resting on an
+unverified premise. The correct, weaker statement — *nothing further was listed
+for that range by the observed window* — is what the data supports, and it still
+carries the burn cycle's quantity reconciliation.
 
-### The open decision, for the owner
+No production path relied on the stronger reading: windows are treated as
+deterministic sampling, and the signature fact is CONTEXT-only. Details in
+`PUMP_CASE.md`, "Why 'complete' is the wrong word here"; the generic rule is in
+`CORE_RULES.md`, "An index is not a census".
 
-**Eight** signatures in that window still have no transaction detail — the exact
-maximum for a future authorized run. It is **not recommended**: the balance at
-slot `441840975` was already zero, so those eight transactions cannot bear on this
-burn's accounting. They would answer whether the cycle recurs, and ten signatures
-cannot answer that.
+### Flagged, not fixed
 
-Also unauthorized and unstarted: pinning the continuity finding as an offline
-regression test, which would be small and is not yet done.
+The `SIGNATURES_FOR_ADDRESS` fact statement reads "Address X has N on-chain
+transaction(s) in the observed window", which phrases an index reading as a
+count. It establishes nothing (CONTEXT, with its own limits attached), so it was
+left alone under this round's no-production-change rule. Worth a decision.
 
 ### Standing boundaries
 
 - No live calls without separate authorization.
-- No paging, no signatures outside a persisted window, no counterparty-chasing —
-  `48xDcrnn…` and `45ssPkUQ…` are out of scope.
+- No paging, no signatures outside a persisted window, no counterparty-chasing.
 - Do not call the inflow a buyback, purchase, swap or revenue-funded acquisition.
 - Do not connect this cycle to the later acquisition at slot `441977087`.

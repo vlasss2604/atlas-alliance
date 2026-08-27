@@ -96,6 +96,22 @@ Brakes are as much a capability as skills. Do not:
 **Stop when the proof plan no longer justifies another branch.** Over-research is
 a defect, not diligence.
 
+## An index is not a census
+
+A provider's index answers "what did you list for this key", never "what exists".
+A coverage claim inherits the indexing guarantees of whatever answered — so
+before writing that a set is COMPLETE, name the guarantee and check you actually
+hold it. A vendored contract, a conformance test, a documented invariant: one of
+those, or the claim is an assumption wearing a stronger word.
+
+Absent the guarantee, scope the claim to the observation: *nothing further was
+listed for that range* is honest and often enough. *Nothing else happened* is a
+census, and needs the guarantee.
+
+The gap matters most exactly where it is easiest to miss — when the listing looks
+exhaustive because it is contiguous, saturated and internally consistent. None of
+those properties is the guarantee.
+
 ## Sampling honestly
 
 Enumerating a **pre-declared, already-justified, bounded set completely** is not a

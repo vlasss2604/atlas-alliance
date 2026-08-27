@@ -105,7 +105,7 @@ is what ran, the cumulative burn totals, the Aug 23 attribution, or
 circulating-supply semantics. It is also not yet Evidence — no research job owns
 it. What it WOULD reach, and why it cannot get there offline, is below.
 
-## The burn's own interval is already complete
+## The burn's own interval, closed under the observed index
 
 Verified offline from persisted rows only. No RPC call was made and none is
 needed for what follows.
@@ -135,23 +135,62 @@ transfer — an unplanned but welcome consistency check.
 
 ### The continuity statement this supports
 
+Say exactly this, and not more:
+
 > Across the interval bounded by the transaction at slot `441840975` and the
-> transaction at slot `441840980`, token account `9Wtcf…` held zero units of the
-> confirmed mint at both ends, `7723746661` raw units entered it, `7723746661`
-> raw units were destroyed from it by a decoded `BurnChecked`, and no other
-> transaction touched the account in between.
+> transaction at slot `441840980`, token account `9Wtcf…` is observed holding
+> zero units of the confirmed mint at both ends; `7723746661` raw units entered
+> it and `7723746661` raw units were destroyed from it by a decoded
+> `BurnChecked`. **No further transaction involving the account was listed for
+> that slot range by the observed signature window.**
 
-This is **account-level quantity continuity over a complete interval** — the
-condition `CORE_RULES.md` names. It never says "the same tokens"; fungible units
-have no individual identity and none is claimed. It says that everything which
-entered was destroyed, and that nothing else moved.
+It never says "the same tokens" — fungible units have no individual identity and
+none is claimed. It is account-level quantity continuity, and the quantities
+reconcile exactly.
 
-**The load-bearing premise, stated rather than buried:** completeness rests on
-`getSignaturesForAddress` listing every transaction that touched the account in
-that range. A transaction mutating a token account must carry it as a writable
-account, so it is listed. Whether that index covers addresses loaded through
-address-lookup tables in every provider implementation is not something an
-offline inventory can verify, and it is not asserted here.
+**What it is NOT allowed to say is "no other transaction touched the account".**
+That is a census claim, and this is an index reading. The two differ by a premise
+ATLAS does not hold — see below.
+
+### Why "complete" is the wrong word here
+
+The continuity claim would be complete only if the RPC address-signature index
+returns every transaction capable of mutating the account. Checked against the
+code, that premise is **unverified**, and this is not a subtlety an offline
+inventory merely "could not check" — it is absent from the system:
+
+- There is **no Solana SDK dependency** in the repository. The adapter speaks raw
+  JSON-RPC against its own Zod schemas, so no vendored contract states what the
+  index covers.
+- **Address lookup tables are not modelled anywhere.** `meta.loadedAddresses` and
+  `message.addressTableLookups` are not read; the sole mention of versioned
+  transactions in the whole tree is one comment about
+  `maxSupportedTransactionVersion`.
+- The account-key schema parses the `jsonParsed` key object and keeps **only**
+  `pubkey`, discarding `source` — so even where the node says an address arrived
+  via a lookup table, ATLAS drops it. A stored artifact cannot be asked which of
+  its keys were static.
+- Nothing in the codebase claims within-window completeness. The nearest wording
+  is the signature fact's own limit — the list is not "complete beyond the queried
+  window" — which implies within-window completeness by contrast without ever
+  asserting it. No production path relies on it; the promotion module treats a
+  window as deterministic sampling, not a census.
+
+What *is* settled, from the execution model rather than from anything in this
+repository: a transaction cannot read or write an account it does not declare, so
+a mutation implies membership in the transaction's effective account set (static
+keys plus lookup-loaded addresses). The open question is not whether the account
+is in that set — it is whether the **index** covers every way it can get there.
+
+Local evidence bears on a neighbouring question only. Persisted transactions with
+54 and 25 account keys resolve every token-balance index without a single
+unresolved account, which indicates `getTransaction` under `jsonParsed` does
+merge loaded addresses into `accountKeys`. That is a different subsystem from the
+address-signature index and settles nothing about it.
+
+**Safe vocabulary, to be used from here on:** an interval is *closed under the
+observed index* when the window lists nothing further in its range. Call it
+*complete* only once the index guarantee is actually held.
 
 ### What it is not
 
@@ -267,11 +306,13 @@ different cycles, and pairing them would be inventing a link.
 anywhere has a higher slot. So what became of the 17,509.274333 PUMP is entirely
 unrecorded here.
 
-One interval is now fully accounted: slots `441840975`–`441840980`, where the
-inflow and the burn sit adjacent with nothing between them (see above). The
-others — 342,044 slots before the burn, 136,107 after it, and everything past
-`441977087` — remain unaccounted. Those endpoints are suggestive, and suggestive
-is not established.
+One interval is closed under the observed index: slots `441840975`–`441840980`,
+where the inflow and the burn sit adjacent with nothing further listed between
+them (see above — "closed under the observed index" is deliberately weaker than
+"complete", and the difference is a premise ATLAS does not hold). The others —
+342,044 slots before the burn, 136,107 after it, and everything past
+`441977087` — are not covered at all. Those endpoints are suggestive, and
+suggestive is not established.
 
 ## Established on-chain observations
 
@@ -504,10 +545,12 @@ transaction between two known balance points were deterministically accounted fo
 what entered and what left would reconcile as quantities. The bridge holds on
 completeness of the interval, not on identity of the units.
 
-One such interval now exists, and it needed no further chain read: slots
-`441840975`–`441840980` are complete, and inflow and destruction reconcile
-exactly across them. That is a genuine inflow → burn continuity statement at
-account level, bounded to 26 seconds and one cycle.
+One such interval now exists at the strength the index supports, and it needed no
+further chain read: across slots `441840975`–`441840980` inflow and destruction
+reconcile exactly, both ends are observed at zero, and the window lists nothing
+further in that range. That is an inflow → burn continuity statement at account
+level, bounded to 26 seconds and one cycle — and bounded also by the index, since
+"nothing further was listed" is not the same claim as "nothing else happened".
 
 What it is not is the claimed MECHANISM. The inflow is a transfer; nothing
 establishes it as a buyback, a market purchase or revenue-funded, and one cycle
