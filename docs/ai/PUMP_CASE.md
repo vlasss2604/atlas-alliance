@@ -646,6 +646,51 @@ So the gap named last round is confirmed by exhaustion, not assumed: **the
 documents bind the address to burning and describe the buying, and never join
 the two.**
 
+### The supported re-extraction path, prepared and gated offline
+
+The bounded tool for this is `scripts/alpha-acquire-url.ts`: one component, one
+already-known URL, no search provider. It builds the REAL S4 executor with the
+real ContentFetcher, the real EvidenceExtractor and real S5 reconciliation, so it
+cannot make a document admissible that the engine would otherwise refuse. Its
+SearchGateway returns only the URL given and its QueryProposer is a fixture, so
+no candidate the owner did not name can enter the run and no query model is
+called.
+
+Every gate it checks was verified offline before any attempt:
+
+| gate | state |
+|---|---|
+| `internal_alpha_enabled` | true |
+| `ANTHROPIC_API_KEY` | set |
+| `pump_fun` in live allowlist | yes |
+| extractor model | `claude-haiku-4-5` |
+| active topic | `token_value_capture` |
+| scope gate | officiality CONFIRMED, routeClass OFFICIAL_DOCS |
+
+The scope gate deserved checking rather than assuming: five SOURCE_ROUTE rows
+exist for this domain, and one of them carries no routeClass at all. Two are
+ACTIVE, only one applies to `/pump-token`, and a class-less row contributes
+null rather than a competing value — so `SOURCE_ROUTE_CONFLICT` does not fire
+and the gate resolves to OFFICIAL_DOCS. The rest are SUPERSEDED.
+
+**Expected live footprint:** at most two source opens against `pump.fun` (the
+static fetch, plus one isolated render if the render gate opens — the script's
+budget allows no third) and **one** Anthropic call for the extractor.
+
+**Command**, for a window with the tunnel off:
+
+```
+npx tsx scripts/alpha-acquire-url.ts \
+  --url=https://pump.fun/pump-token \
+  --component=MECHANISM_SPEC \
+  --step=3 \
+  --actor=owner \
+  --project=pump_fun
+```
+
+Not yet run: with MantaRay up, both `pump.fun` and `api.anthropic.com`
+resolve into `198.18.0.0/15`, so the fetch and the model call would both be
+SSRF-blocked. That is the protection working, and it is not to be relaxed.
 ### Why the official rows all landed on DESTINATION
 
 Investigated through the trace. **The routing is not the cause, and there is no

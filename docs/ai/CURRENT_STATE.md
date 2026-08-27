@@ -167,6 +167,11 @@ Abbreviated PUMP position:
   The cost: all three PARTIALLY_SUPPORTED DESTINATION results rest on sets where
   only one of three or four rows is really destination evidence. Remedy is
   re-extraction, not row edits. No code changed. See `PUMP_CASE.md`.
+- **The re-extraction is prepared but not run.** `scripts/alpha-acquire-url.ts`
+  is the bounded supported path; every gate it checks passes offline, including
+  the scope gate (CONFIRMED / OFFICIAL_DOCS). It needs a tunnel-off window:
+  `pump.fun` and `api.anthropic.com` both resolve into 198.18.0.0/15 today,
+  so fetch and model call would both be SSRF-blocked. Command in `PUMP_CASE.md`.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

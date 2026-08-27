@@ -4,37 +4,42 @@
 
 ## NONE — awaiting owner direction
 
-The component-assignment investigation is done. **No generic routing defect
-exists, and no code was changed.** Details in `PUMP_CASE.md`, "Why the official
-rows all landed on DESTINATION".
+The MECHANISM_SPEC re-extraction is **prepared and gated, not run**. MantaRay is
+up, so both `pump.fun` and `api.anthropic.com` resolve into `198.18.0.0/15` and
+the fetch and the model call would both be SSRF-blocked. No semantic conclusion
+can be drawn about whether the current pipeline files the statement correctly.
 
-### What the trace showed
+Details and the full pre-flight in `PUMP_CASE.md`, "The supported re-extraction
+path, prepared and gated offline".
 
-One document reaching several components is supported and happened —
-`pump.fun/pump-token` was opened under six of them, and eight sources across the
-corpus produced Evidence under two to four components each. The premise that
-routing is too coarse is disproven.
+### Ready to run, in a tunnel-off window
 
-What actually happened: MECHANISM_SPEC never got a successful extraction of that
-page with current guidance (its one success predates `evidenceGoal`; two later
-attempts died at `FETCH_FAILED / PROVIDER_ERROR`), while DESTINATION over-reported
-inside its own lane, returning four semantically distinct sentences under one
-label.
+```
+npx tsx scripts/alpha-acquire-url.ts \
+  --url=https://pump.fun/pump-token \
+  --component=MECHANISM_SPEC \
+  --step=3 \
+  --actor=owner \
+  --project=pump_fun
+```
 
-S4's wrong-component guard cannot catch that: the extractor is told the component
-and echoes it, so a wrong fact with the right label always passes. That guard has
-never fired in this database.
+Footprint: at most two source opens against `pump.fun` (static fetch, plus one
+isolated render if that gate opens) and **one** Anthropic call. No search query
+is issued and no query model is called.
 
-### Open decisions, for the owner
+Every other gate was verified offline and passes — `internal_alpha_enabled`, the
+API key, the live allowlist, the extractor model, an active topic, and the scope
+gate at CONFIRMED / OFFICIAL_DOCS.
 
-- **Re-extraction.** The supported remedy is a fresh job whose MECHANISM_SPEC work
-  item successfully fetches the page. No rows should be edited by hand.
-- **Prompt exclusions.** Passing sibling components' evidence goals to the
-  extractor as exclusions is generic and Pattern-driven, but its effect cannot be
-  proven offline. Not implemented.
+### After it runs
+
+Verify from persisted data only: source class, officiality, component,
+relationship/directness, exact fragment, documentary provenance, and whether S5
+now reconciles MECHANISM_SPEC differently. Do not re-run DESTINATION to improve
+it, and do not edit the old rows.
 
 ### Standing boundaries
 
-- No live calls without separate authorization.
-- Do not hand-edit Evidence rows to correct a component.
-- Do not call the observed sequence a buyback or revenue-funded.
+- No live calls without a separate authorized window; no retries.
+- Never relax safe-http or SSRF to accommodate the tunnel.
+- This task does not touch the actor → acquisition bridge.
