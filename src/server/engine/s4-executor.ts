@@ -49,6 +49,7 @@ import {
 } from "./documentary-locator-store";
 import { evaluateRefusalRenderEligibility, evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
+  isBrowserLaunchDiagnostic,
   isRenderedDocsFailureReason,
   RenderedDocsError,
   renderedDocsAvailable,
@@ -373,7 +374,13 @@ function safeFetchFailure(e: unknown): { reason: string; httpStatus: number | nu
 function renderFailureObservation(label: string, e: unknown): string {
   if (!(e instanceof RenderedDocsError)) return label;
   if (!isRenderedDocsFailureReason(e.reason)) return label;
-  return `${label}:${e.reason}`;
+  const staged = `${label}:${e.reason}`;
+  // And, when the browser is what failed, WHICH local fault it was —
+  // gated the same way, from its own closed set. A launch error's own
+  // text can carry an absolute path and Chromium's whole command line;
+  // none of it is here, only the classification.
+  if (!isBrowserLaunchDiagnostic(e.diagnostic)) return staged;
+  return `${staged}:${e.diagnostic}`;
 }
 
 function safeFailureReason(label: string, e: unknown): string {

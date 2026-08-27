@@ -214,16 +214,28 @@ Abbreviated PUMP position:
   `DOCS_RENDER_AFTER_REFUSAL_FAILED` and the natural conclusion would have been
   the opposite one — the observability fix earned itself back on first use, for
   the second time in this case.
-- **Why the launch failed is not established, and is the blocker.** Verified:
-  Chromium `chromium-1234` is installed and marked complete, `playwright`
-  1.62.1 matches the revision its own `browsers.json` names, and this same
-  isolated path — scrubbed environment included — rendered this very page
-  successfully earlier in the project, after the `808f3e8` spawn fix. So
-  neither the code path nor the host is new. The cause inside the stage is
-  unavailable by design: the child's stderr is `ignore`, so Playwright's launch
-  diagnostic never crosses the boundary. A scrubbed-env cause was considered and
-  is weakened rather than supported, since that allowlist was in force for the
-  render that worked.
+- **The launch failure does NOT reproduce offline, and the renderer is
+  healthy.** Investigated through the production isolated path — real egress
+  proxy, real scrubbed environment, real argv-only spawn, real child, real
+  launch — and it starts Chromium `151.0.7922.34` in about 2.5–5 seconds, every
+  time, well inside the 20-second parent deadline. Each candidate cause was
+  tested and cleared individually: the scrubbed environment (launches fine),
+  the production proxy launch arguments (fine), the child's `stdio` with stderr
+  ignored (fine), and a bogus `TEMP`/`TMP` (fine — Chromium does not depend on
+  it). **No speculative fix was made**, and no environment variable was added.
+- **The live failure is therefore transient or environmental**, not a defect in
+  this code. It remains unexplained, and the honest reading is that something
+  about that moment — the run was made seconds after the VPN tunnel was taken
+  down — refused the browser process. Do not write it down as understood.
+- **The renderer can now be checked without spending a window.**
+  `npx tsx scripts/renderer-selftest.ts` answers "can this machine start the
+  locked-down browser?" offline in a few seconds, navigating nowhere. **Run it
+  immediately before any future live window.**
+- **And if it does fail again, it will say which local fault it was.**
+  `…:BROWSER_LAUNCH_FAILED:EXECUTABLE_NOT_FOUND`, `:PROCESS_START_FAILED`,
+  `:PROCESS_EXITED_DURING_LAUNCH`, or `:UNKNOWN_BROWSER_LAUNCH_FAILURE`. All
+  three named values were observed by inducing the failure offline, not taken
+  from documentation.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
@@ -263,11 +275,11 @@ Abbreviated PUMP position:
 - The Aug 23 daily record was recovered but carries no signature, address or
   explorer identifier. That line of digging is closed.
 - Cumulative official burn totals are unverified.
-- **The renderer will not launch, and that now blocks the documentary line.**
-  Local, reproducible offline, and no live window is needed to work on it — the
-  next diagnostic step does not touch the network. Until it is fixed, spending
-  another authorized window on `pump.fun` buys nothing: the fetch will be
-  refused with `403` again and the render will fail again at the same stage.
+- **The one-off renderer launch failure is unexplained.** It does not reproduce
+  offline and the renderer is healthy, so it no longer blocks the documentary
+  line — but nothing establishes what caused it. If it recurs, the run will now
+  name the local fault, and `scripts/renderer-selftest.ts` distinguishes a
+  broken machine from a broken window before either is spent.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 

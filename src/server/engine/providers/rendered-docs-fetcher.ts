@@ -207,15 +207,92 @@ export const CHILD_REPORTABLE_RENDER_REASONS: ReadonlySet<string> = new Set<stri
   "RENDER_FAILED",
 ] satisfies RenderedDocsFailureReason[]);
 
+// WHY A BROWSER DID NOT START, as a closed code-owned set.
+//
+// BROWSER_LAUNCH_FAILED says the browser never started, which is already
+// the difference between a local fault and a site that defeated us. It
+// does not say WHICH local fault, and the launch error that would say so
+// cannot be shown: every real one observed while building this carried
+// either an absolute filesystem path or Chromium's ENTIRE command line —
+// roughly two kilobytes of local configuration — inside its message.
+//
+// So the message is read once, matched against fixed code-authored
+// substrings, reduced to one of these, and dropped.
+//
+// EVERY ENTRY BELOW WAS OBSERVED, offline, by inducing the failure and
+// reading what Playwright actually produced. Nothing here is guessed from
+// documentation, and candidates that could not be induced on this platform
+// were deliberately left out rather than added speculatively:
+// a permission-denied spawn, a profile/temp-directory failure (Chromium
+// launches fine with TEMP pointed at a non-existent path), and Linux's
+// missing-shared-library case.
+export const BROWSER_LAUNCH_DIAGNOSTICS = [
+  // Observed: "browserType.launch: Executable doesn't exist at <path>",
+  // by pointing PLAYWRIGHT_BROWSERS_PATH at an empty directory. The
+  // install is absent or is a revision this Playwright does not expect.
+  "EXECUTABLE_NOT_FOUND",
+  // Observed: "browserType.launch: spawn UNKNOWN", by putting a file that
+  // is not an executable where the browser belongs. The OS refused to
+  // start the process at all — also the shape a security product blocking
+  // the binary would take.
+  "PROCESS_START_FAILED",
+  // Observed: "browserType.launch: Target page, context or browser has
+  // been closed" with a "Browser logs:" section, by substituting a real
+  // executable that exits immediately. The process started and died
+  // before it could speak the debugging protocol.
+  "PROCESS_EXITED_DURING_LAUNCH",
+  // Anything else. Never a guess dressed up as a finding.
+  "UNKNOWN_BROWSER_LAUNCH_FAILURE",
+] as const;
+
+export type BrowserLaunchDiagnostic = (typeof BROWSER_LAUNCH_DIAGNOSTICS)[number];
+
+const BROWSER_LAUNCH_DIAGNOSTIC_SET: ReadonlySet<string> = new Set<string>(
+  BROWSER_LAUNCH_DIAGNOSTICS,
+);
+
+export function isBrowserLaunchDiagnostic(v: unknown): v is BrowserLaunchDiagnostic {
+  return typeof v === "string" && BROWSER_LAUNCH_DIAGNOSTIC_SET.has(v);
+}
+
+// The one place a provider-controlled string is read, and nothing but a
+// member of the set above ever comes back out. The input is never stored,
+// never returned, never logged and never re-thrown.
+export function classifyBrowserLaunchFailure(e: unknown): BrowserLaunchDiagnostic {
+  const text = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  if (text.includes("Executable doesn't exist")) return "EXECUTABLE_NOT_FOUND";
+  // Node surfaces every OS-level start refusal as "spawn <ERRNO>", and the
+  // errno set includes digits (E2BIG). Only "spawn UNKNOWN" was observed
+  // here; the family is generalised because the SHAPE is Node's, not
+  // because other errnos were guessed at — every one of them means the
+  // same thing, that the process was never started.
+  if (/\bspawn [A-Z][A-Z0-9]*\b/.test(text)) return "PROCESS_START_FAILED";
+  if (
+    text.includes("Target page, context or browser has been closed") ||
+    text.includes("browser has disconnected")
+  ) {
+    return "PROCESS_EXITED_DURING_LAUNCH";
+  }
+  return "UNKNOWN_BROWSER_LAUNCH_FAILURE";
+}
+
 // Carries a reason code only. A renderer error must never echo page
 // content or a URL back into logs/trace.
 export class RenderedDocsError extends Error {
+  // Present only for BROWSER_LAUNCH_FAILED, and only ever a member of the
+  // closed set above.
+  readonly diagnostic: BrowserLaunchDiagnostic | null;
+
   constructor(
     public readonly reason: RenderedDocsFailureReason,
     public readonly rendererName = "unknown",
+    diagnostic: BrowserLaunchDiagnostic | null = null,
   ) {
     super(`rendered docs retrieval failed (${reason}) via ${rendererName}`);
     this.name = "RenderedDocsError";
+    // Re-checked here rather than trusted from the caller: this class is
+    // the boundary, so it validates at its own edge.
+    this.diagnostic = isBrowserLaunchDiagnostic(diagnostic) ? diagnostic : null;
   }
 }
 

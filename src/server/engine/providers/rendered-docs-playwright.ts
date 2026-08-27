@@ -17,6 +17,7 @@ import {
   BROWSER_LOCKDOWN,
   DEFAULT_RENDER_LIMITS,
   RenderedDocsError,
+  classifyBrowserLaunchFailure,
   type ConfirmedDocsRoute,
   type RenderedDocsFetcher,
   type RenderedDocument,
@@ -85,7 +86,11 @@ export interface PlaywrightRenderDeps {
   recoverRecords?: { needles: readonly string[] };
 }
 
-async function defaultLaunch(proxyPort?: number): Promise<BrowserLike> {
+// EXPORTED so the offline self-test launches through the SAME call, with
+// the same lockdown and the same proxy arguments. A probe that built its
+// own launch would drift from this one and stop proving anything about
+// production.
+export async function launchLockedDownBrowser(proxyPort?: number): Promise<BrowserLike> {
   // Lazy: only reached when rendering is actually enabled and invoked.
   const pw = (await import("playwright")) as unknown as {
     chromium: { launch(opts: unknown): Promise<BrowserLike> };
@@ -109,7 +114,7 @@ export function createPlaywrightRenderedDocsFetcher(
   deps: PlaywrightRenderDeps = {},
 ): RenderedDocsFetcher {
   const limits = deps.limits ?? DEFAULT_RENDER_LIMITS;
-  const launch = deps.launchBrowser ?? (() => defaultLaunch(deps.proxyPort));
+  const launch = deps.launchBrowser ?? (() => launchLockedDownBrowser(deps.proxyPort));
   const hostAllowed = deps.hostAllowed ?? resolvedHostAllowed;
   const name = "playwright-chromium";
   const version = deps.rendererVersion ?? "1";
@@ -150,9 +155,15 @@ export function createPlaywrightRenderedDocsFetcher(
         browser = await launch();
       } catch (e) {
         if (e instanceof RenderedDocsError) throw e;
-        // The cause is deliberately dropped: a launch error's message can
-        // carry an absolute filesystem path.
-        throw new RenderedDocsError("BROWSER_LAUNCH_FAILED", name);
+        // The message is read exactly once, here, and reduced to a member
+        // of a closed code-owned set. It is never stored, forwarded or
+        // re-thrown: a real launch error carries an absolute filesystem
+        // path, and often Chromium's entire command line.
+        throw new RenderedDocsError(
+          "BROWSER_LAUNCH_FAILED",
+          name,
+          classifyBrowserLaunchFailure(e),
+        );
       }
       let context: ContextLike | null = null;
       try {

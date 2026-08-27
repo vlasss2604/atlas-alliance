@@ -591,6 +591,26 @@ describe("6. the reason reaches the owner-visible terminal path", () => {
     expect(reason).toContain("DOCS_RENDER_AFTER_REFUSAL_FAILED:TIMEOUT");
   });
 
+  it("when the browser is what failed, WHICH local fault reaches the owner too", async () => {
+    const reason = await runWithFailingRender(
+      new RenderedDocsError("BROWSER_LAUNCH_FAILED", "isolated", "EXECUTABLE_NOT_FOUND"),
+    );
+    expect(reason).toContain(
+      "DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED:EXECUTABLE_NOT_FOUND",
+    );
+  });
+
+  it("an unrecognised diagnostic is dropped, and the stage still stands alone", async () => {
+    const e = new RenderedDocsError("BROWSER_LAUNCH_FAILED", "isolated");
+    // Forced past the constructor's own check, which is exactly the case
+    // the sanitizer's second gate exists for.
+    Object.defineProperty(e, "diagnostic", { value: `SNEAKY ${SECRET}` });
+    const reason = await runWithFailingRender(e);
+    expect(reason).toContain("DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED");
+    expect(reason).not.toContain("SNEAKY");
+    expect(reason).not.toContain(SECRET);
+  });
+
   it("an unclassified renderer error stays unclassified, and says nothing more", async () => {
     const reason = await runWithFailingRender(new Error(`boom ${SECRET_URL} ${SECRET}`));
     // Not a RenderedDocsError, so no detail is claimed at all — the label

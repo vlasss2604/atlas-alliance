@@ -4,51 +4,68 @@
 
 ## NONE — awaiting owner direction
 
-The third authorized `pump.fun` window was executed by the owner and analysed
-offline. No further live call was made.
+The Chromium launch failure was investigated offline. **It does not reproduce**,
+and no speculative fix was made.
 
-### What the window established
+### What was established
 
-`pump.fun` refuses the static fetcher with **`403`** — a renderable status. The
-scope gate passed, the refusal path opened exactly as designed, and the render
-was attempted once on its own reservation.
+The isolated renderer is **healthy on this machine**. Driven through the
+production path — real egress proxy, real scrubbed environment, real argv-only
+spawn, real child script, real shared launch call — it starts Chromium
+`151.0.7922.34` in about 2.5–5 seconds, repeatably, well inside the 20-second
+parent deadline.
 
-**The render failed because our browser never started**, not because of the
-site: `DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED`, raised before any
-navigation. The hypothesis that the page defeats the renderer has still never
-been tested.
+Every candidate cause was tested and cleared on its own: the scrubbed
+environment, the production proxy launch arguments, the child's `stdio` with
+stderr ignored, and a `TEMP`/`TMP` pointed at a non-existent path. **No
+environment variable was added and nothing was loosened**, because nothing
+needed to be.
 
-Under last week's code the same run would have said only
-`DOCS_RENDER_AFTER_REFUSAL_FAILED`, and the obvious reading would have been the
-opposite, wrong conclusion. Second time in this case that an observability fix
-paid for itself on first use.
+So the live failure was transient or environmental — the run was made seconds
+after the VPN tunnel was taken down — and it stays **unexplained**. It is not
+written down as understood.
 
-Nothing was written: zero Evidence, no `sources` row, `MECHANISM_SPEC` unchanged
-at 112 SOCIAL/CLAIMED rows, S5 `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. The
-extractor was never reached. Details in `PUMP_CASE.md`, "Third attempt".
+### What changed, so this is never opaque again
 
-### The blocker, and why it needs no live window
+**A self-test.** `npx tsx scripts/renderer-selftest.ts` answers "can this
+machine start the locked-down browser?" offline, in seconds, with no
+authorization. It navigates nowhere: the self-test message carries no url, no
+confirmed host and no path prefix, so the child structurally cannot be pointed
+at anything, and the only page opened is `about:blank`.
 
-**The isolated renderer will not launch on this machine right now.** Verified
-offline: Chromium `chromium-1234` is installed and complete, `playwright` 1.62.1
-matches the revision its own `browsers.json` names, and this same isolated path
-rendered this very page successfully earlier in the project. So neither the
-install, the code path nor the host is new.
+**A launch diagnostic.** A browser that fails to start now says which local
+fault it was — `…:BROWSER_LAUNCH_FAILED:EXECUTABLE_NOT_FOUND`,
+`:PROCESS_START_FAILED`, `:PROCESS_EXITED_DURING_LAUNCH`, or
+`:UNKNOWN_BROWSER_LAUNCH_FAILURE`. All three named values were observed by
+inducing the failure offline and reading what Playwright actually emitted; the
+raw message is classified once and dropped, because every real one carried an
+absolute filesystem path and two carried Chromium's whole command line.
 
-Why it fails is **not** established, and cannot be from what was captured: the
-child is spawned with `stdio: [..., "ignore"]`, so Playwright's launch
-diagnostic is discarded at the boundary. A scrubbed-environment cause was
-considered and is weakened rather than supported — that same allowlist was in
-force for the render that worked.
+### The next intended live action, unchanged
 
-This is reproducible **entirely offline**. Diagnosing it needs no authorized
-window and no network: the renderer can be pointed at a local fixture, and
-`BROWSER_LAUNCH_FAILED` can be split into code-owned sub-reasons the same way
-the stage itself was split. Nothing here requires touching `pump.fun`.
+**The `pump.fun` MECHANISM_SPEC re-extraction**, exactly as prepared:
 
-**Do not spend another live window until it is fixed.** The fetch will be
-refused with `403` again and the render will fail at the same stage again; the
-outcome is already known.
+```
+npx tsx scripts/alpha-acquire-url.ts \
+  --url=https://pump.fun/pump-token \
+  --component=MECHANISM_SPEC \
+  --step=3 \
+  --actor=owner \
+  --project=pump_fun
+```
+
+**Run the self-test first, in the same session.** If it fails, do not open the
+window — the outcome is already known.
+
+What the last window established and this one does not change: `pump.fun`
+answers `403`, the scope gate passes, and the refusal path opens the render
+correctly. What is still untested is whether `pump.fun` serves the page to
+Chromium.
+
+One limit to hold while reading the next result: a browser served `403`
+receives a page, not an error. If `pump.fun` refuses Chromium, the run reports a
+*successful* render of the refusal page. Nothing distinguishes that from a real
+document today — known, and not changed here.
 
 ### Standing boundaries
 

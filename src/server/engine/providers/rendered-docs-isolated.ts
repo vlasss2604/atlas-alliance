@@ -6,14 +6,21 @@ import { buildRendererEnv } from "./renderer-env";
 import {
   CHILD_REPORTABLE_RENDER_REASONS,
   DEFAULT_RENDER_LIMITS,
+  isBrowserLaunchDiagnostic,
   isRenderedDocsFailureReason,
   RenderedDocsError,
+  type BrowserLaunchDiagnostic,
   type ConfirmedDocsRoute,
+  type RenderedDocsFailureReason,
   type RenderedDocsFetcher,
   type RenderedDocument,
   type RenderLimits,
 } from "./rendered-docs-fetcher";
-import type { ChildRenderRequest, ChildRenderResponse } from "./rendered-docs-child";
+import type {
+  ChildRenderRequest,
+  ChildRenderResponse,
+  ChildSelfTestRequest,
+} from "./rendered-docs-child";
 
 // Parent-side supervisor: the production RenderedDocsFetcher.
 //
@@ -152,11 +159,21 @@ function parseChildDocument(stdout: string): RenderedDocument {
     // read. A look-alike string is not a reason.
     const reported = (parsed as { reason?: unknown }).reason;
     if (isRenderedDocsFailureReason(reported) && CHILD_REPORTABLE_RENDER_REASONS.has(reported)) {
-      throw new RenderedDocsError(reported, "isolated");
+      // The launch sub-reason travels the same way and is re-checked the
+      // same way: a member of its own closed set, or nothing. An
+      // unrecognised value is dropped, never passed along.
+      const detail = (parsed as { detail?: unknown }).detail;
+      throw new RenderedDocsError(
+        reported,
+        "isolated",
+        isBrowserLaunchDiagnostic(detail) ? detail : null,
+      );
     }
     throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");
   }
-  const doc = parsed.document as Partial<RenderedDocument> | undefined;
+  // A self-test envelope is a valid response, but it is not a document —
+  // and the render path must never be satisfied by one.
+  const doc = (parsed as { document?: unknown }).document as Partial<RenderedDocument> | undefined;
   // Shape check on every field the downstream path reads. A missing one
   // means the result is not a document, not that we should default it.
   if (
@@ -262,4 +279,107 @@ export function createIsolatedRenderedDocsFetcher(
       }
     },
   };
+}
+
+// ---- offline self-test ------------------------------------------------
+//
+// "CAN THIS MACHINE START THE LOCKED-DOWN BROWSER?" — answerable in a few
+// seconds, offline, at any time.
+//
+// It was not answerable before, and the cost of that was an owner-
+// authorized live window that reached the page, was refused with 403,
+// correctly opened the render fallback, and then died at a browser that
+// never started. The window bought one bit of information that this
+// function now gives away for free.
+//
+// PRODUCTION-EQUIVALENT BY CONSTRUCTION, not by resemblance: the same
+// egress proxy, the same scrubbed environment from buildRendererEnv, the
+// same argv-only spawn from buildChildCommand, the same child script, and
+// the same launch call with the same lockdown and proxy arguments.
+//
+// It navigates NOWHERE. The request carries no url, no confirmed host and
+// no path prefix, so the child structurally cannot be pointed at anything;
+// the only page opened is `about:blank`. Safe to run with no
+// authorization, on any network, at any time.
+export interface RendererSelfTestResult {
+  ok: boolean;
+  browserVersion: string | null;
+  reason: RenderedDocsFailureReason | null;
+  diagnostic: BrowserLaunchDiagnostic | null;
+  durationMs: number;
+}
+
+export async function runIsolatedRendererSelfTest(
+  deps: IsolatedRendererDeps = {},
+): Promise<RendererSelfTestResult> {
+  const limits = deps.limits ?? DEFAULT_RENDER_LIMITS;
+  const spawnChild = deps.spawnChild ?? defaultSpawn;
+  const startProxy = deps.startProxy ?? startEgressProxy;
+  const parentEnv = deps.parentEnv ?? process.env;
+  const startedAt = Date.now();
+  const done = (
+    over: Partial<RendererSelfTestResult>,
+  ): RendererSelfTestResult => ({
+    ok: false,
+    browserVersion: null,
+    reason: null,
+    diagnostic: null,
+    durationMs: Date.now() - startedAt,
+    ...over,
+  });
+
+  let proxy: EgressProxyHandle | null = null;
+  try {
+    // A host that exists only as a label here: the proxy is opened so the
+    // launch arguments are identical to production's, and no request is
+    // ever made through it.
+    try {
+      proxy = await startProxy({ confirmedHost: "self-test.invalid" });
+    } catch {
+      return done({ reason: "EGRESS_PROXY_UNAVAILABLE" });
+    }
+
+    const request: ChildSelfTestRequest = { selfTest: true, limits, proxyPort: proxy.port };
+    let out: { stdout: string; code: number | null };
+    try {
+      out = await spawnChild({
+        scriptPath: CHILD_SCRIPT,
+        env: buildRendererEnv({ parentEnv, proxyPort: proxy.port }),
+        // The child accepts either message on stdin; the spawn signature
+        // is shared, so the cast is at the boundary rather than inside it.
+        request: request as unknown as ChildRenderRequest,
+      });
+    } catch {
+      return done({ reason: "CHILD_SPAWN_FAILED" });
+    }
+    if (out.code !== 0) return done({ reason: "CHILD_EXIT_NONZERO" });
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(out.stdout);
+    } catch {
+      return done({ reason: "CHILD_OUTPUT_MALFORMED" });
+    }
+    const env = parsed as { ok?: unknown; selfTest?: unknown; browserVersion?: unknown; reason?: unknown; detail?: unknown };
+    if (env?.ok === true && env.selfTest === true) {
+      return done({
+        ok: true,
+        browserVersion: typeof env.browserVersion === "string" ? env.browserVersion : null,
+      });
+    }
+    // Same two gates as the render path: the closed reason list, and the
+    // subset the child could have witnessed.
+    if (
+      isRenderedDocsFailureReason(env?.reason) &&
+      CHILD_REPORTABLE_RENDER_REASONS.has(env.reason)
+    ) {
+      return done({
+        reason: env.reason,
+        diagnostic: isBrowserLaunchDiagnostic(env.detail) ? env.detail : null,
+      });
+    }
+    return done({ reason: "CHILD_OUTPUT_MALFORMED" });
+  } finally {
+    await proxy?.close().catch(() => {});
+  }
 }

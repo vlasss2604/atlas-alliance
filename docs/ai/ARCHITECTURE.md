@@ -200,6 +200,27 @@ witnessed. A child claiming the proxy failed, or claiming its own non-zero exit,
 is contradicting the parent's own observation — that is malformed output, not a
 reason.
 
+When the browser is what failed, one more level is available:
+`…:BROWSER_LAUNCH_FAILED:EXECUTABLE_NOT_FOUND`. Its set is its own, closed and
+runtime-checked like the others, and **every member was observed** by inducing
+the failure offline and reading what Playwright actually emitted. That mattered:
+each real launch error carried an absolute filesystem path, and two carried
+Chromium's entire command line. The message is read once at the launch seam,
+matched against fixed code-owned substrings, reduced to one value, and dropped —
+it is never stored, forwarded or re-thrown. Candidates that could not be induced
+on this platform were left out rather than guessed at, and unrecognised text maps
+to `UNKNOWN_BROWSER_LAUNCH_FAILURE` rather than being echoed.
+
+**The renderer can be tested without a live window.**
+`runIsolatedRendererSelfTest()`, and `scripts/renderer-selftest.ts` for the
+owner, answers "can this machine start the locked-down browser?" in a few
+seconds, offline. It is production-equivalent by construction rather than by
+resemblance — same egress proxy, same scrubbed environment, same argv-only
+spawn, same child, same shared launch call with the same lockdown and proxy
+arguments — and it navigates nowhere: the self-test message carries no url, no
+confirmed host and no path prefix, so the child structurally cannot be pointed
+at anything, and the only page opened is `about:blank`.
+
 Two limits worth knowing before reading a result. A failed render is still never
 evidence and never fails the attempt, so the stage name is an observation rather
 than a verdict. And the render stage does **not** see a navigation's HTTP status
