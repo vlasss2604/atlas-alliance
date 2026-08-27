@@ -798,6 +798,67 @@ npx tsx scripts/alpha-acquire-url.ts \
 Not yet run: with MantaRay up, both `pump.fun` and `api.anthropic.com`
 resolve into `198.18.0.0/15`, so the fetch and the model call would both be
 SSRF-blocked. That is the protection working, and it is not to be relaxed.
+
+### Third attempt: the refusal is 403, the render fired, and OUR browser failed
+
+Job `0f28d892-8bdc-40fa-b877-033ade617c32`, 2026-08-27T16:39:11Z, owner-executed
+with MantaRay off. Terminal reason, in full:
+
+```
+CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR:403; source-route
+observations: CLASS_REQUIRES_CONFIRMED_ROUTE:GOVERNANCE,
+DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED
+```
+
+Three things are settled by that line, and one of them reverses the standing
+assumption.
+
+**The refusal is `403`** — a renderable status. The scope gate passed
+(CONFIRMED / OFFICIAL_DOCS / `/pump-token`), so the refusal path opened exactly
+as designed and the render was attempted on its own reservation: DB
+`sourceOpensReserved` = 2 (the refused static fetch, then the render), reported
+`spent.sourceOpens` = 1, against a ceiling of 2. No third was possible.
+
+**The renderer did not fail because of `pump.fun`. It never started.**
+`BROWSER_LAUNCH_FAILED` is raised around the browser launch inside the isolated
+child, before any navigation. **The site is not implicated in the render at
+all.** Every earlier note treating "the page defeats the renderer" as the live
+hypothesis is superseded: that hypothesis has not been tested even once.
+
+**Nothing was written.** Zero Evidence for the job, no new `sources` row (newest
+is still 2026-08-24), Evidence table still 401 with nothing newer than
+2026-08-24, `MECHANISM_SPEC` still 112 rows and still SOCIAL / CLAIMED only,
+S5 `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. Six trace events, ending
+`FETCH_FAILED / PROVIDER_ERROR`. The extractor was never reached — no extraction
+event exists and no document was ever handed to a model. The one
+`MODEL_CALL_ATTEMPTED` (6560 micro, provider `owner-supplied-url`) is the
+script's fixture query proposer, which calls no model.
+
+**The observability fix paid for itself on first use, for the second time in
+this case.** Under the previous code this run would have reported a bare
+`DOCS_RENDER_AFTER_REFUSAL_FAILED`, and the natural reading — the one the
+prepared window's own notes warned about — would have been "pump.fun defeated
+the browser too". That conclusion would have been wrong, and it would have
+retired a live option that is in fact still open.
+
+**Why the launch failed is NOT established.** What is verified: Chromium is
+fully installed (`chromium-1234/chrome-win64/chrome.exe`, with
+`INSTALLATION_COMPLETE`), `playwright` 1.62.1 is present, and
+`playwright-core`'s own `browsers.json` names revision 1234 — so the install is
+coherent, not missing or mismatched. Also verified: this same isolated path,
+scrubbed env and all, **previously rendered this very page successfully** — that
+render is what promoted `/pump-token` to OFFICIAL_DOCS, and it post-dates the
+spawn fix in `808f3e8`. So neither the code path nor the host is new.
+
+The cause inside the stage is unavailable by design: the child is spawned with
+`stdio: [..., "ignore"]`, so Playwright's own launch diagnostic is discarded and
+never crosses the boundary. A scrubbed-environment cause was considered and is
+**weakened, not supported** — the allowlist keeps 14 of 85 parent variables and
+drops Windows plumbing a browser may touch (`ProgramFiles`, `ProgramData`,
+`ALLUSERSPROFILE`, `HOMEDRIVE`/`HOMEPATH`, `USERNAME`, `PUBLIC`,
+`CommonProgramFiles`, `DriverData`), but that same allowlist was in force for the
+render that succeeded. Recorded as an open question, not a finding.
+
 ### Why the official rows all landed on DESTINATION
 
 Investigated through the trace. **The routing is not the cause, and there is no
@@ -851,6 +912,16 @@ nothing ever (D-074), so it is INSUFFICIENT_EVIDENCE in all 17 jobs.
 Re-extraction through the normal pipeline — a fresh job whose MECHANISM_SPEC work
 item actually fetches the page. No rows were edited and none should be: where a
 row is filed is an output of extraction, not a field to correct by hand.
+
+**Verified inventory of the claim sentence, 2026-08-27** (read-only, offline).
+"Half of every dollar Pump.fun earns buys $PUMP on the open market, then burns
+it forever." appears in Evidence **three times, all under `DESTINATION` step 6**,
+all `OFFICIAL_DOCS` / `CONFIRMED` / `SUPPORTS` / `DIRECT`, created 2026-08-24,
+with `entityBinding` null and `mechanismState` recorded variously as
+`buyback_and_burn`, `burned forever` and `active`; one carries the documentary
+locator `99mRw3…`. It appears **zero times under `MECHANISM_SPEC`**, whose 112
+rows remain SOCIAL / CLAIMED without exception. Three attempts have now been
+spent trying to change that and the model has still never been shown the page.
 
 One option was considered and **not** taken: passing sibling components' evidence
 goals into the extractor prompt as exclusions. It is generic and Pattern-driven,

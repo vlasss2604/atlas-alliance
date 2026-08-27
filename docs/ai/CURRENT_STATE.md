@@ -198,24 +198,41 @@ Abbreviated PUMP position:
   excluded. Same renderer, same gates, no evasion, zero retry. The failure
   string also carries the status now — `…:HTTP_ERROR:403` — taken from the
   Response, never parsed from a message. See `ARCHITECTURE.md`.
-- **Untested against the live page.** `pump.fun` was not re-run in that task, so
-  whether its refusal is one of the three statuses, and whether a render would
-  then succeed, is unknown. **The run is prepared and gated offline** — command,
-  re-verified gate table, expected footprint and a reading key for every
-  outcome. It is preserved below as the next intended action.
-- **A failed render now names its stage.** Preparation surfaced the gap and it
-  is closed: `DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED` and the
-  rest. The renderer had typed reasons all along and the parent supervisor
-  discarded them. See `ARCHITECTURE.md`, "What a failure may say about itself".
-- **Correction to the previous round's note.** It said the renderer had never
-  been exercised end-to-end against a live host here. That is wrong: an
-  owner-inspection render of `pump.fun/pump-token` succeeded earlier in the
-  project — it is what established that page as the project's own token
-  economics documentation and led to its promotion to OFFICIAL_DOCS, and a
-  live render is also what surfaced the DEP0190 spawn defect fixed in `808f3e8`.
-  So the renderer works on this machine and `pump.fun` has served the page to
-  Chromium before. What remains untested is only that path reached through S4's
-  refusal fallback, on current code.
+- **A failed render now names its stage.** The renderer had typed reasons all
+  along and the parent supervisor discarded them; three further stages had no
+  reason at all. See `ARCHITECTURE.md`, "What a failure may say about itself".
+- **The refusal is `403`, and the render fired.** Third authorized window, job
+  `0f28d892-…`, 2026-08-27, owner-executed. The scope gate passed, the static
+  fetch was refused with a renderable status, and the refusal path opened
+  exactly as designed — its own reservation, `sourceOpensReserved` 2 against a
+  ceiling of 2.
+- **But OUR browser never started.**
+  `DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED`, raised before any
+  navigation. **`pump.fun` is not implicated in the render at all, and the
+  hypothesis that the page defeats the renderer has still never been tested.**
+  Under the previous code this would have read as a bare
+  `DOCS_RENDER_AFTER_REFUSAL_FAILED` and the natural conclusion would have been
+  the opposite one — the observability fix earned itself back on first use, for
+  the second time in this case.
+- **Why the launch failed is not established, and is the blocker.** Verified:
+  Chromium `chromium-1234` is installed and marked complete, `playwright`
+  1.62.1 matches the revision its own `browsers.json` names, and this same
+  isolated path — scrubbed environment included — rendered this very page
+  successfully earlier in the project, after the `808f3e8` spawn fix. So
+  neither the code path nor the host is new. The cause inside the stage is
+  unavailable by design: the child's stderr is `ignore`, so Playwright's launch
+  diagnostic never crosses the boundary. A scrubbed-env cause was considered and
+  is weakened rather than supported, since that allowlist was in force for the
+  render that worked.
+- **Nothing was written by the run.** Zero Evidence, no new `sources` row,
+  Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
+  still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
+  NO_EVIDENCE_FOUND`. The extractor was never reached and no document was ever
+  handed to a model.
+- **The claim sentence is still filed only under `DESTINATION`.** Verified
+  offline: three rows carry it, all step 6, `OFFICIAL_DOCS` / `CONFIRMED` /
+  `SUPPORTS` / `DIRECT`; zero rows under `MECHANISM_SPEC`. Three windows have
+  now been spent and the model has still never seen the page.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 
@@ -246,6 +263,11 @@ Abbreviated PUMP position:
 - The Aug 23 daily record was recovered but carries no signature, address or
   explorer identifier. That line of digging is closed.
 - Cumulative official burn totals are unverified.
+- **The renderer will not launch, and that now blocks the documentary line.**
+  Local, reproducible offline, and no live window is needed to work on it — the
+  next diagnostic step does not touch the network. Until it is fixed, spending
+  another authorized window on `pump.fun` buys nothing: the fetch will be
+  refused with `403` again and the render will fail again at the same stage.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
