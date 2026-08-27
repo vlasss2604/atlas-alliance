@@ -305,6 +305,50 @@ Never "the same tokens". The claim is account-level quantity continuity, and it
 carries the coverage ceiling recorded above: *nothing further was listed* is not
 *nothing else happened*.
 
+### Why it cannot be called a swap, from what is stored
+
+The transaction invokes seven programs. Five are chain infrastructure ATLAS
+decodes: Compute Budget, the Associated Token program, the System program, SPL
+Token and Token-2022. Two are not:
+`JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4` and
+`CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK`.
+
+**Both are UNKNOWN, and that is a finding rather than a gap in effort.** Neither
+id appears anywhere in this repository outside the test that records them as
+opaque, there is no Solana, Jupiter, Raydium or Anchor dependency among the 347
+installed packages, and no IDL, registry or program list exists locally. Nothing
+here can say what either program does, and nothing may pretend to.
+
+**They also contributed zero decoded instructions.** Every decoded instruction in
+the payload belongs to the System program, an SPL Token program or the ATA
+program. What the two unknown programs actually did is not represented at all.
+
+Three things would be needed to decode them, and none survives:
+
+- **Instruction payloads.** `parsedInstructionSchema` keeps only `programId` and
+  `parsed.{type,info}`. An unknown program's instruction arrives with `data` and
+  `accounts` instead, and both are dropped — for every transaction, not just this
+  one.
+- **The raw response.** Only its hash is stored. The bytes are gone.
+- **Parent linkage.** `innerInstructions` groups are flattened with `flatMap`,
+  discarding the group index, so no decoded instruction names the outer
+  instruction it was a CPI of.
+
+That last one matters on its own. Without it ATLAS cannot even establish the
+weaker structural claim that both legs happened inside ONE invocation of the same
+program — only that they happened in the same transaction between the same two
+owners. Retaining the group index would be a small, program-agnostic addition and
+would still not establish a swap; it is not implemented.
+
+So the ladder stops early. Same transaction: yes. Same counterparty ownership:
+yes. Same program invocation: **not establishable**. Decoded swap instruction:
+**no**. Deterministic economic exchange: **no**.
+
+Decoding would require re-retrieving the transaction and a human-authored program
+registry — a label whose own provenance would then need answering. And even a
+fully decoded swap would establish ACQUISITION, never buyback: nothing would bind
+it to protocol revenue or to a published policy.
+
 ### What it still cannot prove
 
 Not a buyback. Not revenue funding — what funded `99mRw3…`'s lamports is outside

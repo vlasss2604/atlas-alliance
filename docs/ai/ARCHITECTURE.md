@@ -58,6 +58,14 @@ Chain reads use **typed intents only** — no arbitrary RPC. Intents:
 `SIGNATURES_FOR_ADDRESS`, `TRANSACTION_DETAIL`, `TOKEN_ACCOUNT_BALANCE`.
 See `providers/onchain-*.ts`.
 
+The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
+Associated Token — and keeps only `programId` plus the node's own `parsed`
+projection. An instruction from any other program survives as its program id in
+`programs[]` and nothing else: its `data` and `accounts` are dropped, inner
+instructions are flattened so no parent linkage remains, and the raw response is
+kept only as a hash. Nothing stored can later be decoded into program semantics,
+and no swap, route or exchange is representable anywhere in the model.
+
 Chain facts **bypass the model entirely**. `src/server/engine/onchain-facts.ts`
 synthesizes statements by code template over validated values, with a literal
 fragment of the artifact's canonical JSON as support, and a hand-authored
