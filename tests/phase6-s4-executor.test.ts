@@ -1279,7 +1279,11 @@ describe("Фаза 6, S4 — SearchGateway: сниппет никогда не �
     // instead of only a generic label. MEDIUM-2 closure (D-116): the raw
     // exception message ("not found in fixture") is no longer included —
     // see safeFailureReason() in s4-executor.ts.
-    expect(result.reason).toBe("CONTENT_FETCHER_FAILED:ContentFetchError");
+    //
+    // It now also carries the typed reason from ContentFetchError's own
+    // closed enum. The class name alone could not distinguish a refusal
+    // from a block from a timeout, which are three different next moves.
+    expect(result.reason).toBe("CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR");
     expect(result.reason).not.toContain("not found in fixture");
   });
 });

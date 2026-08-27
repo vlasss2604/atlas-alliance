@@ -47,18 +47,32 @@ export interface FetchOptions {
   recoverEmbeddedPayloads?: boolean;
 }
 
-export type ContentFetchFailureReason =
-  | "INVALID_URL"
-  | "UNSUPPORTED_PROTOCOL"
-  | "DNS_RESOLUTION_FAILED"
-  | "BLOCKED_ADDRESS"
-  | "TOO_MANY_REDIRECTS"
-  | "REDIRECT_TARGET_BLOCKED"
-  | "TIMEOUT"
-  | "TOO_LARGE"
-  | "UNSUPPORTED_CONTENT_TYPE"
-  | "HTTP_ERROR"
-  | "NETWORK_ERROR";
+// THE CLOSED, CODE-OWNED SET OF FETCH FAILURE REASONS.
+//
+// The ARRAY is the single source of truth and the type is derived from it,
+// so the two cannot drift: adding a reason to the union without adding it
+// here is not expressible. That matters because this list is also the
+// allowlist consumers use to decide what may safely appear in sanitized
+// diagnostics — a reason not in it is not surfaced.
+//
+// Every value is authored here. None is derived from a response, a header,
+// a URL or any other provider-controlled input, which is what makes the
+// whole list safe to show.
+export const CONTENT_FETCH_FAILURE_REASONS = [
+  "INVALID_URL",
+  "UNSUPPORTED_PROTOCOL",
+  "DNS_RESOLUTION_FAILED",
+  "BLOCKED_ADDRESS",
+  "TOO_MANY_REDIRECTS",
+  "REDIRECT_TARGET_BLOCKED",
+  "TIMEOUT",
+  "TOO_LARGE",
+  "UNSUPPORTED_CONTENT_TYPE",
+  "HTTP_ERROR",
+  "NETWORK_ERROR",
+] as const;
+
+export type ContentFetchFailureReason = (typeof CONTENT_FETCH_FAILURE_REASONS)[number];
 
 export class ContentFetchError extends Error {
   constructor(

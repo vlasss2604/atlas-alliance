@@ -151,6 +151,32 @@ Two consequences worth knowing before you reason about outcomes:
 Downstream: `mechanism-assembler.ts` (S6) composes the chain,
 `claim-evaluator.ts` (S7) evaluates claim requirements.
 
+## What a failure may say about itself
+
+A provider exception reaches owner-visible diagnostics through one sanitizer,
+and it may contribute exactly two things: the code-owned label of which provider
+boundary failed, and the exception's CLASS NAME. Never the message — a fetch
+error's message can embed a credential-bearing URL or an Authorization header
+verbatim, which is confirmed reproducible, so there is no redaction step to get
+subtly wrong.
+
+One typed detail is allowed past that line, and only through two independent
+gates that must both hold: the error is an actual `ContentFetchError`
+(`instanceof` against a class this repository owns, never a duck-typed
+`reason` field a look-alike object could carry), **and** its reason is a member
+of the closed, code-authored list that the reason type is itself derived from.
+The second gate is not redundant: a runtime value can violate a compile-time
+union, so the class alone vouches for nothing.
+
+The result is `CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS` — enough
+to tell a refusal from a block from a timeout, which are three different next
+moves. Anything that fails either gate falls back to the class-name-only form
+unchanged.
+
+The trace's `reason_code` stays a closed Postgres enum and keeps recording
+`PROVIDER_ERROR` for fetch failures. Widening it would need a migration for
+detail that already reaches the owner through the terminal reason.
+
 ## Research Memory
 
 Direction, not a finished system: retrieval before fresh research, freshness

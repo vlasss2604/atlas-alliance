@@ -15,7 +15,11 @@ import {
   loadModelCostProfile,
 } from "./model-cost-profile";
 import type { ModelCostProfile, ModelRole } from "./model-cost-profile";
-import { resolveContentFetcher } from "./providers/content-fetcher";
+import {
+  CONTENT_FETCH_FAILURE_REASONS,
+  ContentFetchError,
+  resolveContentFetcher,
+} from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import { resolveEvidenceExtractor } from "./providers/evidence-extractor";
 import type { EvidenceExtractor } from "./providers/evidence-extractor";
@@ -310,9 +314,41 @@ async function findOrCreateSource(
 // name being interpolated here.
 const MAX_FAILURE_CATEGORY_LENGTH = 64;
 
+// THE TYPED DETAIL A FAILURE MAY SAFELY CONTRIBUTE, and nothing else.
+//
+// The class name alone proved too coarse to act on: a real bounded fetch
+// failed and nothing recorded could say whether the site had refused us,
+// the request had been SSRF-blocked, or it had simply timed out. Those
+// call for opposite next moves, and one of them means a live window never
+// actually opened.
+//
+// TWO INDEPENDENT GATES, both required. The error must be an actual
+// ContentFetchError — an instanceof check against a class this repository
+// owns, never a duck-typed `reason` property, because anything can carry
+// a field by that name and a provider-shaped object must not be able to
+// talk its way into diagnostics. And the value must be a member of the
+// closed, code-authored list beside the type itself, because a runtime
+// value can violate a compile-time union and a class alone therefore
+// vouches for nothing.
+//
+// WHAT IS STILL NEVER SURFACED: message, stack, url, headers, response
+// body. A fetch error's message can embed a credential-bearing URL or an
+// Authorization header verbatim — confirmed reproducible — which is why
+// only enumerated values pass, and why the gates are membership tests
+// rather than sanitisation of free text. There is no escaping or
+// redaction here to get subtly wrong.
+const SAFE_FAILURE_DETAILS: ReadonlySet<string> = new Set<string>(CONTENT_FETCH_FAILURE_REASONS);
+
+function safeFailureDetail(e: unknown): string | null {
+  if (!(e instanceof ContentFetchError)) return null;
+  return SAFE_FAILURE_DETAILS.has(e.reason) ? e.reason : null;
+}
+
 function safeFailureReason(label: string, e: unknown): string {
   const category = e instanceof Error ? e.constructor.name : "UnknownError";
-  return `${label}_FAILED:${category.slice(0, MAX_FAILURE_CATEGORY_LENGTH)}`;
+  const detail = safeFailureDetail(e);
+  const base = `${label}_FAILED:${category.slice(0, MAX_FAILURE_CATEGORY_LENGTH)}`;
+  return detail === null ? base : `${base}:${detail}`;
 }
 
 // S10 (D-090 count-then-gate, live-provider-enablement.md §5/§17):

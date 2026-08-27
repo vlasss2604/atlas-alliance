@@ -173,12 +173,15 @@ Abbreviated PUMP position:
   `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. DESTINATION untouched. Whether
   the pipeline would file the sentence correctly is **still unknown** — the model
   never saw the page.
-- **Fetch-failure observability is a proven defect now, not a theoretical one.**
-  `ContentFetchError` carries a typed reason from a closed enum; the trace
-  hardcodes `PROVIDER_ERROR` and `safeFailureReason` keeps only the class name.
-  So a spent live window cannot distinguish "the site refused us" from "the
-  tunnel was still up". Smallest fix identified, not implemented — it touches a
-  security-motivated boundary. See `PUMP_CASE.md` and `BACKLOG.md`.
+- **Fetch-failure observability is fixed.** A terminal reason now reads
+  `CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS` — enough to tell a
+  refusal from a block from a timeout. Two gates guard it: `instanceof` the
+  owned error class, and membership of the closed list the reason type is derived
+  from. Message, stack, url and headers are still never surfaced. The trace enum
+  is untouched, so no migration. See `ARCHITECTURE.md`.
+- **The failed Pump.fun fetch itself is not retroactively explained.** That run's
+  reason was recorded before the fix, so it still reads only
+  `CONTENT_FETCHER_FAILED:ContentFetchError`. A future attempt would say why.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

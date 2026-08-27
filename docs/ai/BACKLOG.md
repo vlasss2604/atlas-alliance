@@ -8,14 +8,6 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
-- **`ContentFetchError.reason` observability — PROVEN, with a measured cost.**
-  The reason a fetch failed is not surfaced: the trace hardcodes
-  `PROVIDER_ERROR` and `safeFailureReason` keeps only the exception class name,
-  so the typed eleven-value enum on `ContentFetchError` never escapes. On
-  2026-08-27 this cost an owner-authorized live window: the fetch failed and
-  nothing recorded can say whether the site refused us, the tunnel was still up,
-  or it timed out. Smallest fix and its security caveat are in `PUMP_CASE.md`.
-  Still not to be worked on unless `CURRENT_TASK.md` says so.
 - **Reserved vs spent source-open accounting** — a discrepancy between what the
   budget reserves and what it records as spent.
 - **Cross-component duplicate chain facts** — the same chain observation can be
