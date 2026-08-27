@@ -4,116 +4,86 @@
 
 ## NONE — awaiting owner direction
 
-The `fees.pump.fun` acquisition was prepared offline. **Decision: B — a
-source-authority prerequisite is missing.** No live call was made, no route was
-created, no code changed.
+The owner approved confirming `fees.pump.fun` for non-evidentiary inspection.
+**The route was NOT created: no supported owner route-management path exists**,
+and the instruction in that case was to stop and report rather than improvise a
+database write. Nothing was written, fetched or changed except this document set.
 
-### Local state: `fees.pump.fun` is entirely unknown to ATLAS
+### Why there is no supported path — verified, not assumed
 
-Verified, not assumed:
+- **Nothing in `src/` or `scripts/` ever inserts a `project_memory_items` row.**
+  Zero occurrences of `insert(projectMemoryItems)` outside tests.
+- `promoteProjectMemoryItem` **exists** in `src/server/memory/lifecycle.ts` and
+  correctly walks OBSERVED → CANDIDATE → ACTIVE inside a transaction, honouring
+  the `0007_memory_lifecycle_guard` constraint — but it has **no caller
+  anywhere**. No script wires it.
+- `scripts/promote-memory.ts` is not it: it calls `promoteToActive`, which
+  operates on `research_memory`, a different table. It can neither create nor
+  promote a SOURCE_ROUTE.
+- **Four separate tests actively ban route management from every existing owner
+  entrypoint** — `owner-acquisition-boundary`, `owner-docs-inspection-mode`,
+  `owner-inspection-mode` and `onchain-derive-entrypoint-boundary` each assert
+  the entrypoint source contains none of `promoteProjectMemoryItem`,
+  `projectMemoryItems`, `memory/lifecycle`, or `routeClass: "`.
+- `docs/PROJECT_IDENTITY_CONFIRMATION.md` documents the record shape and that
+  confirmation means `lifecycle_state = 'ACTIVE'` — and names no tool.
 
-- **0** `sources` rows for any `fees.` host; **0** Evidence rows mentioning it.
-- **0** SOURCE_ROUTE rows naming it. All five pump_fun routes name `pump.fun`.
-- The repository contains no code, fixture or constant referencing it — only
-  this document set.
-- `resolveSourceRoute("https://fees.pump.fun/…")` returns
-  **`officiality=CLAIMED, routeClass=null, matchedPathPrefix=null`.**
+So the capability is deliberately absent from every acquisition entrypoint, and
+was never given a home of its own. This is a real gap, not an oversight to route
+around.
 
-**Routes are host-exact.** `source-authority.ts` compares
-`routeDomain !== host` and skips, so a subdomain inherits nothing from
-`pump.fun` — by design, and correctly: confirming a domain is not confirming
-everything under it.
+### Everything else the owner asked to verify — all confirmed
 
-### What that blocks today
+Current state: **0** SOURCE_ROUTE rows name `fees.pump.fun`, so **no conflicting
+ACTIVE route** exists. Both candidate URLs resolve `CLAIMED / null / null`.
 
-| gate | requires | fees.pump.fun |
-|---|---|---|
-| `alpha-acquire-url.ts` scope gate | CONFIRMED **and** routeClass ≠ null | refuses |
-| render eligibility (both entry points) | CONFIRMED + OFFICIAL_DOCS + prefix | refuses |
-| inspection eligibility | CONFIRMED + prefix + routeClass **=== null** | refuses (officiality is CLAIMED) |
+The intended end state was evaluated against the **real gate functions**, using
+the route object that `{domain: "fees.pump.fun", pathPrefix: "/"}`, ACTIVE and
+unclassified, would produce:
 
-Nothing can be fetched at all, so no command can be given yet. Decision A is
-unavailable.
+| gate | result |
+|---|---|
+| inspection eligibility (root url) | **eligible**, host `fees.pump.fun`, prefix `/` |
+| render-as-Evidence (upgrade path) | refused — `NOT_OFFICIAL_DOCS` |
+| render-on-refusal | refused — `NOT_OFFICIAL_DOCS` |
+| `alpha-acquire-url` scope gate | **refuses** — routeClass is null |
+| inspection of any sub-path | refused — `NO_PATH_PREFIX` |
 
-### The smallest prerequisite
+Exactly the bounded grant intended: the root page becomes readable
+non-evidentiarily, nothing becomes Evidence, and the confirmation reaches no
+sub-path. `matchesPathPrefix` treats `/` as the root and nothing beneath it, in
+both the authority and renderer implementations.
 
-**One ACTIVE SOURCE_ROUTE for `fees.pump.fun`, CONFIRMED and UNCLASSIFIED** — a
-`pathPrefix`, and **no `routeClass`**.
+### The smallest safe way to create it
 
-CONFIRMED comes from an ACTIVE row naming the exact domain, independently of
-`routeClass`, so an unclassified row is enough to open inspection while
-asserting no documentation authority over a page nobody has read. That ordering
-is the architecture's own: inspection exists only for the undecided case, and
-`/pump-token` was promoted this way — inspected first, classified afterwards.
+A new owner script, `scripts/confirm-source-route.ts` — the missing sibling of
+`promote-memory.ts`, following the principle that file already states (D-021 /
+D-055): a transition to ACTIVE happens **only by a human, through a controlled,
+auditable script** — not an admin UI, not a model, not hand-written SQL.
 
-Deliberately **not** created in this task.
+It should:
 
-### Target: the page, not the API
+- take `--project`, `--domain`, `--path-prefix`, `--actor`, and an **explicit**
+  `--route-class` that **defaults to null**, so classification can never be a
+  side effect of confirming a domain;
+- refuse when an ACTIVE row already exists for the same project + domain, rather
+  than creating a silent duplicate;
+- insert as `OBSERVED` and then call the existing `promoteProjectMemoryItem`,
+  reusing the supported lifecycle instead of copying it, so the database guard
+  stays the authority;
+- print `resolveSourceRoute` for the target url afterwards, so the outcome is
+  verified rather than assumed;
+- write nothing else — no Evidence, no fetch, no model, no S5–S7 — with its own
+  boundary test mirroring the four that already exist.
 
-The owner's first preference — an already-known authoritative endpoint — does
-not actually apply. `fees.pump.fun/api/buybacks` is known only from a
-third-party adapter; nothing first-party published that path to ATLAS, so it is
-neither already-known-to-us nor authoritative. Preference 2 governs.
+**One design question for the owner**, because it is a judgement rather than a
+detail: whether this script may set `routeClass` at all. The existing tests show
+a clear stance that *acquisition* entrypoints must never assign one. A dedicated
+confirmation script is the natural home for it, but keeping classification a
+separate second act is also defensible — and is what actually happened with
+`/pump-token`, which was inspected first and classified afterwards.
 
-**Primary target: `https://fees.pump.fun/`.**
-
-Role assignments live in human-readable labels, not in data payloads. The
-question needs something of the form "these wallets execute buybacks", which is
-prose. An endpoint returning records that merely contain the addresses is
-locator co-occurrence — the error already rejected twice in this case, with a
-fresher source. That is a judgement about where labels usually live, not a claim
-about a payload nobody has seen.
-
-**Fallback, a separate later window: `https://fees.pump.fun/api/buybacks`** with
-prefix `/api`. `application/json` is an accepted content type, so it is
-fetchable — but it is likely to fail the evidence standard even when it
-succeeds technically.
-
-### A prefix detail that will bite if missed
-
-`pathWithinPrefix("/x", "/")` is **false**. A route with prefix `/` matches the
-root path and nothing beneath it. So if `fees.pump.fun/` redirects or
-client-side-routes to any sub-path, the render ends `FINAL_URL_OUTSIDE_ROUTE` —
-exactly what `pump.fun/pump-token` did. This is consistent with the stated
-design (a bare-domain confirmation must not authorize the whole site), so it is
-reported as a fact to plan around, **not** as a defect.
-
-If that happens, the honest next step is to confirm a route at the specific
-sub-path, not to widen the prefix.
-
-### The sequence, only step 2 being live
-
-1. **Offline, owner:** create the ACTIVE unclassified SOURCE_ROUTE above.
-2. **Live, one bounded render — the only network step:**
-
-```
-npx tsx scripts/inspect-official-page.ts https://fees.pump.fun/ pump_fun
-```
-
-3. **Offline:** read the output and decide whether it deserves OFFICIAL_DOCS.
-4. **Live, later separate window:** evidentiary acquisition, only if step 3 says
-   the page assigns the role.
-
-**Footprint of step 2:** one isolated render, one navigation, zero retries.
-No model call, no Evidence, no facts, no S5/S6/S7, no research budget, no
-database write — the script imports none of those, and a test asserts it. The
-renderer boundary is the usual one: scrubbed child, deny-by-default egress proxy
-pinned to the confirmed host, cross-origin blocked, bounded time and size.
-
-Run it with MantaRay off, capture the complete output the first time, then
-MantaRay on and analyse offline.
-
-### What counts as success
-
-An explicit first-party semantic binding: text assigning the acquisition role to
-the address — "wallet `99mRw3…` executes buybacks", "buyback wallets:
-`99mRw3…`", or equivalent.
-
-### What does not count
-
-The address under generic data; the address in transaction rows; the path saying
-`/buybacks`; purchase amounts with no actor role; DefiLlama's label; two-and-two
-cardinality; chain behaviour resembling a buyback.
+Say which, and whether to build it, and it is a small self-contained task.
 
 ### Standing boundaries
 

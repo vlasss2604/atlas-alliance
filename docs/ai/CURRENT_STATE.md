@@ -319,8 +319,24 @@ Abbreviated PUMP position:
   inspection gate all refuse.
 - **The smallest opener is one ACTIVE SOURCE_ROUTE for `fees.pump.fun`,
   CONFIRMED and UNCLASSIFIED** — which opens non-evidentiary inspection without
-  asserting documentation authority over an unread page. Not created; that is an
-  owner act. The prepared sequence is in `CURRENT_TASK.md`, with one live step.
+  asserting documentation authority over an unread page.
+- **It could not be created: there is no supported owner route-management
+  path.** Nothing in `src/` or `scripts/` inserts a `project_memory_items` row;
+  `promoteProjectMemoryItem` exists but has no caller; `promote-memory.ts`
+  operates on `research_memory`, a different table; and four boundary tests
+  actively ban `promoteProjectMemoryItem` / `projectMemoryItems` /
+  `memory/lifecycle` / `routeClass: "` from every owner entrypoint. Route
+  confirmation is deliberately absent from acquisition and was never given a
+  home of its own — a real gap.
+- **The intended semantics were verified against the real gates anyway**, using
+  the route object such a row would produce: inspection **eligible** at the root
+  url; both renderer entry points refused `NOT_OFFICIAL_DOCS`; the evidentiary
+  scope gate refused on a null routeClass; and any sub-path refused
+  `NO_PATH_PREFIX`. The grant would be exactly as bounded as intended.
+- **Proposed smallest fix: `scripts/confirm-source-route.ts`**, the missing
+  sibling of `promote-memory.ts`, reusing `promoteProjectMemoryItem` and
+  defaulting `routeClass` to null. Not built — awaiting the owner's decision on
+  whether it may set a class at all. See `CURRENT_TASK.md`.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
