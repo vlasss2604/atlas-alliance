@@ -66,7 +66,13 @@ no seam for a model in that path.
 
 Reciprocal same-transaction asset flow is derived purely in
 `onchain-transaction-flow.ts` and deliberately named nothing: it is co-occurrence,
-not exchange.
+not exchange. Two shapes are recognised — the payer paying the counterparty
+directly, and the payer funding an account it owns which then pays the
+counterparty. Account ownership comes from RPC balance metadata first; an
+account that has none — a wrapper created and closed inside the transaction —
+may instead be resolved from a same-transaction instruction that establishes
+ownership by protocol definition. The two sources must agree or the account
+resolves to nothing, and no amount is ever carried across a routing hop.
 
 ## Bounded promotion
 

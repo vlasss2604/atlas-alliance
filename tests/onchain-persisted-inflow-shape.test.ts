@@ -9,32 +9,29 @@ import type {
   TransactionDetailResult,
 } from "../src/server/engine/providers/onchain-types";
 
-// THE INFLOW THAT PRODUCES NO FACT.
+// THE INFLOW, AND THE ROUTING THAT USED TO HIDE IT.
 //
 // The fixture is the normalized_result of onchain_artifacts row
 // 1c9f3afd-f02f-4c04-a394-2aa78d0537c3, copied verbatim from the local
 // database. It is the transaction five slots before the known burn, and it
-// moved exactly the quantity that was later destroyed INTO the token
-// account that was later burned from.
+// moved exactly the quantity that was later destroyed INTO the token account
+// that was later burned from.
 //
-// It carries a reciprocal shape — the documented address pays out native
-// SOL, a counterparty's account pays in the project's token — but ATLAS
-// derives nothing from it, because the payment is routed through a
+// It carries a reciprocal shape — the documented address pays out native SOL,
+// a counterparty's account pays in the project's token — routed through a
 // TRANSIENT WRAPPED-SOL ACCOUNT the payer creates, funds, spends and closes
-// inside the same transaction. That account never appears in the
-// transaction's token-balance metadata, so its ownership is unresolvable,
-// and the derivation correctly refuses to guess.
+// inside the same transaction. That account appears in no token-balance
+// metadata, because it did not exist before the transaction and did not
+// survive it. Ownership was therefore unresolvable and the derivation returned
+// nothing at all, however much the transaction established.
 //
-// These tests pin BOTH halves: the movements really are there and reconcile
-// exactly, AND today's code yields no fact from them. Neither half is an
-// accusation. The derivation fails closed, which is the designed behaviour;
-// what the tests establish is the exact shape a future extension would have
-// to handle, so nobody has to rediscover it from a database.
+// It is resolvable now, from the same-transaction instructions that name the
+// owner by protocol definition — an attestation READ, never an owner guessed.
 //
 // NOTHING here says buyback, purchase, swap or market. The programs the
-// transaction invokes are recorded as opaque ids on purpose — decoding what
-// a program means is a separate, separately-authorized step, and it is the
-// step that would license those words.
+// transaction invokes are recorded as opaque ids on purpose: decoding what a
+// program means is a separate, separately-authorized step, and it is the step
+// that would license those words.
 
 const ANCHOR = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -64,8 +61,8 @@ const LAMPORTS_IN = "382585174";
 const WSOL_TO_C = "382202589";
 const WSOL_TO_D = "382585";
 
-function storedResult(): TransactionDetailResult {
-  return JSON.parse(
+function storedResult(over: Partial<TransactionDetailResult> = {}): TransactionDetailResult {
+  const base = JSON.parse(
     JSON.stringify({
       kind: "TRANSACTION_DETAIL",
       slot: SLOT,
@@ -110,6 +107,7 @@ function storedResult(): TransactionDetailResult {
       ],
     }),
   ) as TransactionDetailResult;
+  return { ...base, ...over };
 }
 
 function artifact(result: TransactionDetailResult): OnchainArtifact {
@@ -148,6 +146,9 @@ function artifact(result: TransactionDetailResult): OnchainArtifact {
   });
 }
 
+const factsFor = (r: TransactionDetailResult) =>
+  synthesizeOnchainFacts(artifact(r), { step: 2, component: "FLOW_PATH" });
+
 describe("1. the movements are real and reconcile exactly", () => {
   const r = storedResult();
 
@@ -177,15 +178,13 @@ describe("1. the movements are real and reconcile exactly", () => {
     expect(sys.source).toBe(A);
     expect(sys.destination).toBe(A_WSOL_TRANSIENT);
     expect(sys.lamports).toBe(LAMPORTS_IN);
-    // Every lamport delivered leaves again in this same transaction.
     expect(BigInt(WSOL_TO_C) + BigInt(WSOL_TO_D)).toBe(BigInt(LAMPORTS_IN));
-    // And the account is created and closed inside the transaction.
     expect(r.lifecycleInstructions.some((x) => x.type === "createIdempotent" && x.account === A_WSOL_TRANSIENT)).toBe(true);
     expect(r.tokenInstructions.some((x) => x.type === "closeAccount" && x.account === A_WSOL_TRANSIENT)).toBe(true);
   });
 
-  it("the transient account appears in NO balance metadata, so its owner is unresolvable", () => {
-    // This is the whole reason the derivation below finds nothing.
+  it("the transient account appears in NO balance metadata", () => {
+    // Which is why ownership has to come from the attestation, or not at all.
     for (const b of [...r.preTokenBalances, ...r.postTokenBalances]) {
       expect(b.account).not.toBe(A_WSOL_TRANSIENT);
     }
@@ -196,63 +195,244 @@ describe("1. the movements are real and reconcile exactly", () => {
   });
 });
 
-describe("2. what ATLAS derives from it today: nothing", () => {
-  it("no reciprocal flow is derived", () => {
-    // The native leg's destination is the transient account, whose owner
-    // cannot be read from balance metadata — so the leg is dropped before
-    // any pairing is attempted. Failing closed, not failing wrong.
-    expect(deriveReciprocalAssetFlows(storedResult(), ANCHOR)).toHaveLength(0);
+describe("2. the real transaction now produces the reciprocal flow", () => {
+  const flows = deriveReciprocalAssetFlows(storedResult(), ANCHOR);
+
+  it("exactly one flow, between the payer and the counterparty", () => {
+    expect(flows).toHaveLength(1);
+    expect(flows[0].participant).toBe(A);
+    expect(flows[0].counterparty).toBe(C);
+    expect(flows[0].signature).toBe(SIGNATURE);
+    expect(flows[0].slot).toBe(SLOT);
   });
 
-  it("the synthesizer produces no fact at all", () => {
-    // No burn and no derivable flow means this transaction contributes
-    // nothing to Evidence, however much it deterministically established.
-    for (const component of ["EXECUTION_EVIDENCE", "FLOW_PATH", "DESTINATION"]) {
-      const facts = synthesizeOnchainFacts(artifact(storedResult()), { step: 4, component });
-      expect(facts, component).toHaveLength(0);
-    }
+  it("the A -> wrapper -> C routing is preserved exactly", () => {
+    const via = flows[0].outbound.via!;
+    // The native leg states where the lamports actually went: the wrapper.
+    expect(flows[0].outbound.from).toBe(A);
+    expect(flows[0].outbound.to).toBe(A_WSOL_TRANSIENT);
+    expect(flows[0].outbound.amountRaw).toBe(LAMPORTS_IN);
+    expect(flows[0].outbound.toOwner).toBe(A);
+    // And the hop that reached the counterparty is stated separately.
+    expect(via.account).toBe(A_WSOL_TRANSIENT);
+    expect(via.accountOwner).toBe(A);
+    expect(via.onward.to).toBe(C_WSOL);
+    expect(via.onward.toOwner).toBe(C);
+    expect(via.onward.mint).toBe(WSOL);
+    // NO AMOUNT CROSSES THE HOP. What arrived and what went on are different
+    // numbers, and each is reported as itself.
+    expect(via.onward.amountRaw).toBe(WSOL_TO_C);
+    expect(via.onward.amountRaw).not.toBe(flows[0].outbound.amountRaw);
   });
 
-  it("the shape it cannot see is A -> A's own wrapper -> C, not A -> C", () => {
-    // The derivation looks for a native transfer whose destination is a
-    // token account owned by the COUNTERPARTY. Here the destination is
-    // owned by the payer, and the counterparty is reached one hop later by
-    // a token transfer out of that wrapper.
-    const sys = storedResult().lifecycleInstructions.find(
-      (x) => x.programId === SYSTEM && x.type === "transfer",
-    )!;
-    const wsolOut = storedResult().tokenInstructions.find(
-      (x) => x.mint === WSOL && x.destination === C_WSOL,
-    )!;
-    expect(sys.destination).toBe(A_WSOL_TRANSIENT);
-    expect(wsolOut.account).toBe(A_WSOL_TRANSIENT);
-    // The wrapper is owned by the payer, per the lifecycle instruction that
-    // initialized it — not by anything in balance metadata.
-    const init = storedResult().lifecycleInstructions.find((x) => x.type === "initializeAccount3")!;
-    expect(init.account).toBe(A_WSOL_TRANSIENT);
-    expect(init.owner).toBe(A);
+  it("the wrapper's owner comes from the attestation, and the leg says so", () => {
+    const via = flows[0].outbound.via!;
+    expect(via.ownerSource).toBe("LIFECYCLE_ATTESTATION");
+    // BOTH agreeing instructions are named, not just the first.
+    expect(via.attestedBy).toEqual(["createIdempotent", "initializeAccount3"]);
+    expect(via.syncedNative).toBe(true);
+    expect(via.closedInTransaction).toBe(true);
+  });
+
+  it("the inbound leg is the project's token, into the payer's account", () => {
+    expect(flows[0].inbound.mint).toBe(ANCHOR);
+    expect(flows[0].inbound.amountRaw).toBe(PUMP_RAW);
+    expect(flows[0].inbound.from).toBe(C_PUMP);
+    expect(flows[0].inbound.fromOwner).toBe(C);
+    expect(flows[0].inbound.to).toBe(A_PUMP);
+    expect(flows[0].inbound.toOwner).toBe(A);
+  });
+
+  it("the third-party output neither breaks the flow nor pairs with it", () => {
+    // The wrapper also paid D. D sends no project token back, so D never
+    // becomes a counterparty — and its presence does not make the A/C pair
+    // ambiguous either.
+    expect(flows.map((f) => f.counterparty)).toEqual([C]);
+    expect(flows[0].outbound.via!.onward.toOwner).not.toBe(D);
   });
 });
 
-describe("3. the words this transaction does not license", () => {
+describe("3. the facts it now synthesizes", () => {
+  const facts = factsFor(storedResult());
+
+  it("three facts, every one DIRECT and CONTEXT", () => {
+    expect(facts).toHaveLength(3);
+    for (const f of facts) {
+      expect(f.relationship).toBe("CONTEXT");
+      expect(f.directness).toBe("DIRECT");
+      expect(f.mechanismState).toBeNull();
+    }
+  });
+
+  it("the native-leg statement describes the routing without misstating it", () => {
+    const s = facts[0].statement;
+    expect(s).toContain(LAMPORTS_IN);
+    expect(s).toContain(A_WSOL_TRANSIENT);
+    expect(s).toContain("the sending address itself");
+    expect(s).toContain("createIdempotent and initializeAccount3 instructions in the same transaction");
+    expect(s).toContain(WSOL_TO_C);
+    expect(s).toContain(C_WSOL);
+    expect(s).toContain("was closed in the same transaction");
+    // It must never claim the wrapper belongs to the counterparty.
+    expect(s).not.toContain(`${A_WSOL_TRANSIENT}, which the transaction's balance metadata reports as owned by ${C}`);
+  });
+
+  it("the pairing fact stays co-occurrence, and names the intermediate", () => {
+    const s = facts[2].statement;
+    expect(s).toContain("The same successful transaction");
+    expect(s).toContain("into an account it owns itself");
+    expect(s.toLowerCase()).not.toContain("in exchange for");
+  });
+
+  it("no economic verdict appears in any statement", () => {
+    const text = facts.map((f) => f.statement).join(" ").toLowerCase();
+    for (const forbidden of [
+      "buyback", "buy back", "purchase", "bought", "swap", "sold", "sale",
+      "market", "revenue", "burn", "in exchange for",
+    ]) {
+      expect(text, forbidden).not.toContain(forbidden);
+    }
+  });
+
+  it("the limits name the two-amount problem explicitly", () => {
+    expect(facts[0].doesNotProve).toContain(
+      "nothing here establishes that what arrived is what went on",
+    );
+  });
+});
+
+describe("4. fail-closed: conflicting ownership evidence", () => {
+  it("lifecycle attestation disagreeing with balance metadata yields no flow", () => {
+    // The wrapper now DOES appear in balance metadata, naming a different
+    // owner than the instruction that initialized it. Preferring either
+    // reading would be choosing what to believe about the very thing being
+    // established, so the account resolves to nothing and the flow is gone.
+    const r = storedResult();
+    const conflicting = storedResult({
+      preTokenBalances: [
+        ...r.preTokenBalances,
+        { accountIndex: 20, account: A_WSOL_TRANSIENT, mint: WSOL, owner: C, amountRaw: "0", decimals: 9 },
+      ],
+      postTokenBalances: [
+        ...r.postTokenBalances,
+        { accountIndex: 20, account: A_WSOL_TRANSIENT, mint: WSOL, owner: C, amountRaw: "0", decimals: 9 },
+      ],
+    });
+    expect(deriveReciprocalAssetFlows(conflicting, ANCHOR)).toHaveLength(0);
+    expect(factsFor(conflicting)).toHaveLength(0);
+  });
+
+  it("two lifecycle instructions naming different owners yield no flow", () => {
+    const r = storedResult();
+    const ambiguous = storedResult({
+      lifecycleInstructions: r.lifecycleInstructions.map((ix) =>
+        ix.type === "createIdempotent" ? { ...ix, owner: C } : ix,
+      ),
+    });
+    expect(deriveReciprocalAssetFlows(ambiguous, ANCHOR)).toHaveLength(0);
+  });
+
+  it("no ownership evidence at all yields no flow", () => {
+    // Strip the attestations: the wrapper is unknown again, exactly as before
+    // this capability existed. The old behaviour is still the fallback.
+    const r = storedResult();
+    const unattested = storedResult({
+      lifecycleInstructions: r.lifecycleInstructions.map((ix) => ({ ...ix, owner: null })),
+    });
+    expect(deriveReciprocalAssetFlows(unattested, ANCHOR)).toHaveLength(0);
+  });
+
+  it("agreeing balance metadata is used, and reported as the source", () => {
+    // Same owner from both. Balance metadata is in front, so that is what the
+    // leg records — attestation only ever fills a gap.
+    const r = storedResult();
+    const agreeing = storedResult({
+      preTokenBalances: [
+        ...r.preTokenBalances,
+        { accountIndex: 20, account: A_WSOL_TRANSIENT, mint: WSOL, owner: A, amountRaw: "0", decimals: 9 },
+      ],
+      postTokenBalances: [
+        ...r.postTokenBalances,
+        { accountIndex: 20, account: A_WSOL_TRANSIENT, mint: WSOL, owner: A, amountRaw: LAMPORTS_IN, decimals: 9 },
+      ],
+    });
+    const flows = deriveReciprocalAssetFlows(agreeing, ANCHOR);
+    expect(flows).toHaveLength(1);
+    expect(flows[0].outbound.via!.ownerSource).toBe("BALANCE_METADATA");
+    expect(flows[0].outbound.via!.attestedBy).toEqual([]);
+  });
+});
+
+describe("5. fail-closed: transient accounts that reach nobody relevant", () => {
+  it("a wrapper that pays only a third party yields no flow", () => {
+    // Remove the hop to C. D is still paid, and D sends no project token
+    // back — so there is no pair to make.
+    const r = storedResult();
+    const onlyD = storedResult({
+      tokenInstructions: r.tokenInstructions.filter((ix) => ix.destination !== C_WSOL),
+    });
+    expect(deriveReciprocalAssetFlows(onlyD, ANCHOR)).toHaveLength(0);
+  });
+
+  it("a wrapper that pays nobody yields no flow", () => {
+    const r = storedResult();
+    const noHops = storedResult({
+      tokenInstructions: r.tokenInstructions.filter(
+        (ix) => ix.account !== A_WSOL_TRANSIENT || ix.type === "closeAccount",
+      ),
+    });
+    expect(deriveReciprocalAssetFlows(noHops, ANCHOR)).toHaveLength(0);
+  });
+
+  it("two hops to the SAME owner are ambiguous and yield no flow", () => {
+    // Reducing them to one would mean choosing between them.
+    const r = storedResult();
+    const doubled = storedResult({
+      tokenInstructions: [
+        ...r.tokenInstructions,
+        { mint: WSOL, type: "transferChecked", inner: true, account: A_WSOL_TRANSIENT, decimals: 9, amountRaw: "1", authority: A, programId: TOKEN, destination: C_WSOL },
+      ],
+    });
+    expect(deriveReciprocalAssetFlows(doubled, ANCHOR)).toHaveLength(0);
+  });
+
+  it("a foreign-mint inbound leg yields no flow", () => {
+    const r = storedResult();
+    const foreign = storedResult({
+      tokenInstructions: r.tokenInstructions.map((ix) =>
+        ix.mint === ANCHOR ? { ...ix, mint: "MintZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ" } : ix,
+      ),
+    });
+    expect(deriveReciprocalAssetFlows(foreign, ANCHOR)).toHaveLength(0);
+  });
+
+  it("a failed transaction yields no flow", () => {
+    expect(deriveReciprocalAssetFlows(storedResult({ succeeded: false }), ANCHOR)).toHaveLength(0);
+  });
+
+  it("the payer paying only itself is not an onward hop", () => {
+    const r = storedResult();
+    const selfOnly = storedResult({
+      tokenInstructions: r.tokenInstructions.map((ix) =>
+        ix.destination === C_WSOL ? { ...ix, destination: A_PUMP } : ix,
+      ),
+    });
+    expect(deriveReciprocalAssetFlows(selfOnly, ANCHOR)).toHaveLength(0);
+  });
+});
+
+describe("6. the words this transaction still does not license", () => {
   it("the programs stay opaque ids — decoding one is a separate step", () => {
     const r = storedResult();
-    // Recorded, never interpreted. Naming what a program does is exactly
-    // the step that would license "swap" or "market purchase".
     expect(r.programs).toContain("JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4");
     expect(r.programs).toContain("CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK");
   });
 
   it("nothing establishes where the lamports came from", () => {
-    // The System transfer's source is the documented address. What funded
-    // THAT is outside this transaction entirely.
     const sys = storedResult().lifecycleInstructions.find(
       (x) => x.programId === SYSTEM && x.type === "transfer",
     )!;
     expect(sys.source).toBe(A);
-    // There is no inbound native leg to A anywhere in this transaction.
-    expect(
-      storedResult().lifecycleInstructions.filter((x) => x.destination === A),
-    ).toHaveLength(0);
+    expect(storedResult().lifecycleInstructions.filter((x) => x.destination === A)).toHaveLength(0);
   });
 });

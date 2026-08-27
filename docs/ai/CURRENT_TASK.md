@@ -4,36 +4,21 @@
 
 ## NONE — awaiting owner direction
 
-The inflow transaction at slot `441840975` has been inspected offline. No RPC, no
-production change. Findings in `PUMP_CASE.md`, "The inflow transaction, and the
-fact it does not produce", pinned by
-`tests/onchain-persisted-inflow-shape.test.ts`.
+The transient-wrapper blind spot is closed. Details in `PUMP_CASE.md` ("The
+reciprocal shape, and how ATLAS came to see it") and `ARCHITECTURE.md`.
 
-### What it found
+### What changed
 
-The transaction really does carry a reciprocal shape — the documented address
-pays out `382585174` lamports, the counterparty `45ssPkUQ…` pays in `7723746661`
-raw units of the confirmed mint, one successful transaction, both sides
-reconciling exactly.
+`deriveReciprocalAssetFlows` recognises a second shape: the payer funding an
+account it owns, which then pays the counterparty. Ownership for an account with
+no balance metadata comes from same-transaction instructions that establish it by
+protocol definition — read, never inferred — and every agreeing instruction is
+named. Balance metadata still comes first; disagreement between the two sources
+resolves the account to nothing.
 
-**ATLAS derives nothing from it.** The payment routes through a transient
-wrapped-SOL account the payer creates, funds, spends and closes in the same
-transaction; that account is in no balance metadata, so its owner is unresolvable
-and the native leg is dropped before pairing. No burn plus no derivable flow means
-no fact for any component. The case's most informative acquisition-side
-transaction is invisible to the Evidence path.
-
-### The open decision, for the owner
-
-Closing that gap is generic work — wrap-then-pay is the ordinary way to spend SOL
-down a token-program path, so this blind spot is not PUMP's. It would mean
-resolving a transient account's owner from its own `initializeAccount3` /
-`createIdempotent` instruction, and admitting a second pairing shape,
-`A → A's own wrapper → C`.
-
-That relaxes a deliberate rule — ownership comes from the RPC, never from
-inference — so it is a decision, not a patch. **Not implemented.** Nothing should
-be built here without approval.
+Routing stays visible: the native leg records what went into the wrapper, the
+onward hop records what reached the counterparty, and no amount crosses between
+them. Legs and pairing remain DIRECT + CONTEXT.
 
 ### Standing boundaries
 

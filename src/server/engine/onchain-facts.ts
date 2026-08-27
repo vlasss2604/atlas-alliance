@@ -81,11 +81,14 @@ export const ONCHAIN_DOES_NOT_PROVE = {
   // account. The destination's OWNER is the RPC's own metadata; everything
   // about why the lamports moved is not.
   NATIVE_TRANSFER:
-    "This is a transfer of native SOL recorded in one transaction, and the owner the transaction's balance " +
-    "metadata reports for the destination account. It does not establish why the transfer was made, what it " +
-    "paid for, who controls either party, where the lamports came from, or that anything was received in " +
-    "return. A syncNative instruction converts delivered lamports into a wrapped-SOL balance; it says nothing " +
-    "about purpose either.",
+    "This is a transfer of native SOL recorded in one transaction, and the owner reported for the destination " +
+    "account. It does not establish why the transfer was made, what it paid for, who controls either party, " +
+    "where the lamports came from, or that anything was received in return. A syncNative instruction converts " +
+    "delivered lamports into a wrapped-SOL balance; it says nothing about purpose either. Where the sender " +
+    "funded an account it owns and that account paid someone else, the two amounts are stated separately " +
+    "because they are separate movements: nothing here establishes that what arrived is what went on, or what " +
+    "any remainder was for. An account whose owner is named by a same-transaction instruction that establishes " +
+    "ownership is reported on that basis, which says who owns it and nothing more about what it is for.",
   // A token transfer between two accounts whose owners the RPC reported.
   TOKEN_TRANSFER:
     "This is a transfer of the stated mint between two token accounts in one transaction, with the owners the " +
@@ -140,6 +143,15 @@ function fragmentFor(artifact: OnchainArtifact, keys: string[]): string {
   const picked: Record<string, unknown> = {};
   for (const k of keys) if (k in result) picked[k] = result[k];
   return JSON.stringify(picked);
+}
+
+// Names the instructions an ownership reading rests on, in the plural when
+// more than one agreed. Under-reporting agreement would make a stronger basis
+// look like a weaker one.
+function attestationBasis(types: readonly string[]): string {
+  if (types.length === 0) return "by an instruction in the same transaction";
+  if (types.length === 1) return `on the basis of a ${types[0]} instruction in the same transaction`;
+  return `on the basis of ${types.join(" and ")} instructions in the same transaction`;
 }
 
 // Formats a raw integer amount with its decimals WITHOUT floating point —
@@ -359,13 +371,31 @@ export function synthesizeOnchainFacts(
         const legFragment = (leg: unknown, role: string) =>
           JSON.stringify({ signature: r.signature, slot: r.slot, role, leg });
 
+        // TWO SENTENCES FOR TWO SHAPES, because one sentence cannot be true of
+        // both. Direct: the lamports landed in an account the other party owns.
+        // Routed: they landed in an account the SENDER owns, and a further hop
+        // reached the other party — calling that destination the
+        // counterparty's would be false, and carrying the arriving amount
+        // across the hop would be a second falsehood on top of it.
+        const via = flow.outbound.via;
+        const syncedClause = flow.outbound.destinationSyncedNative
+          ? ", and a syncNative instruction on that account was observed in the same transaction"
+          : "";
         facts.push(
           fact(
             target,
-            `Transaction ${flow.signature} (slot ${flow.slot}) transferred ${flow.outbound.amountRaw} lamports ` +
-              `of native SOL from address ${flow.participant} to token account ${flow.outbound.to}, which the ` +
-              `transaction's balance metadata reports as owned by ${flow.counterparty}` +
-              `${flow.outbound.destinationSyncedNative ? ", and a syncNative instruction on that account was observed in the same transaction" : ""}.`,
+            via === undefined
+              ? `Transaction ${flow.signature} (slot ${flow.slot}) transferred ${flow.outbound.amountRaw} lamports ` +
+                  `of native SOL from address ${flow.participant} to token account ${flow.outbound.to}, which the ` +
+                  `transaction's balance metadata reports as owned by ${flow.counterparty}${syncedClause}.`
+              : `Transaction ${flow.signature} (slot ${flow.slot}) transferred ${flow.outbound.amountRaw} lamports ` +
+                  `of native SOL from address ${flow.participant} to token account ${via.account}, reported as owned ` +
+                  `by ${via.accountOwner} — the sending address itself — ` +
+                  `${via.ownerSource === "LIFECYCLE_ATTESTATION" ? attestationBasis(via.attestedBy) : "by the transaction's balance metadata"}` +
+                  `${syncedClause}. That account transferred ` +
+                  `${via.onward.mint === null ? via.onward.amountRaw : `${via.onward.amountRaw} of mint ${via.onward.mint}`} ` +
+                  `into token account ${via.onward.to}, owned by ${flow.counterparty}` +
+                  `${via.closedInTransaction ? ", and was closed in the same transaction" : ""}.`,
             legFragment(flow.outbound, "outbound"),
             ONCHAIN_DOES_NOT_PROVE.NATIVE_TRANSFER,
             { relationship: "CONTEXT" },
@@ -389,9 +419,10 @@ export function synthesizeOnchainFacts(
           fact(
             target,
             `The same successful transaction ${flow.signature} (slot ${flow.slot}) contains both movements: ` +
-              `native SOL from ${flow.participant} toward an account owned by ${flow.counterparty}, and mint ` +
-              `${flow.inbound.mint} from an account owned by ${flow.counterparty} into an account owned by ` +
-              `${flow.participant}.`,
+              `native SOL from ${flow.participant} ` +
+              `${via === undefined ? "toward an account owned by" : "into an account it owns itself, from which a further transfer reached an account owned by"} ` +
+              `${flow.counterparty}, and mint ${flow.inbound.mint} from an account owned by ${flow.counterparty} ` +
+              `into an account owned by ${flow.participant}.`,
             JSON.stringify({
               signature: r.signature,
               slot: r.slot,

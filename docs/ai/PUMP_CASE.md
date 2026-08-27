@@ -265,35 +265,34 @@ third owner; what that is for is not established and is not guessed at here.
 transaction and did not survive it. Its owner is known only from the lifecycle
 instruction that initialized it.
 
-### Yes, there is a reciprocal shape — and ATLAS cannot see it
+### The reciprocal shape, and how ATLAS came to see it
 
-Read by a person: the documented address pays out native SOL and a
-counterparty's account pays in the project's token, in one successful
-transaction, with the same counterparty on both sides.
+The documented address pays out native SOL and a counterparty's account pays in
+the project's token, in one successful transaction, with the same counterparty
+on both sides — routed through a wrapper the payer creates and closes.
 
-Read by `deriveReciprocalAssetFlows`: **nothing**. Verified, not assumed —
-`tests/onchain-persisted-inflow-shape.test.ts` runs the real function and the
-real synthesizer over this exact payload and gets an empty array from both.
+This produced **nothing** until the transient-wrapper capability landed. The
+derivation looked for a native transfer whose destination is a token account
+owned by the **counterparty**; here it is a wrapper owned by the **payer**, and
+the counterparty is one hop further on. The wrapper appears in no balance
+metadata — it did not exist before the transaction and did not survive it — so
+its owner was unresolvable and the leg was dropped before any pairing. No burn
+plus no flow meant no fact for any component.
 
-The derivation looks for a native transfer whose destination is a token account
-owned by the **counterparty**. Here the destination is a wrapper owned by the
-**payer**, and the counterparty is reached one hop later. Two things stop it:
-the wrapper's ownership cannot be read from balance metadata, so the leg is
-dropped before any pairing; and the shape is `A → A's own wrapper → C`, not
-`A → C`.
+It resolves now from the same-transaction instructions that name the owner by
+protocol definition. Both `createIdempotent` and `initializeAccount3` do here,
+and both are reported: agreement is a stronger basis than one attestation, and
+naming only the first would understate it. Balance metadata still comes first,
+and disagreement between the two sources resolves the account to nothing.
 
-**Consequence:** the single most informative acquisition-side transaction in this
-case currently yields **no fact at all** — no burn, no derivable flow, nothing for
-any component. Exactly the failure commit `9bc4aba` was written to fix, in a
-different shape.
+The derived flow keeps the routing visible rather than flattening it. The native
+leg records the lamports going into the wrapper; the onward hop to the
+counterparty is stated separately with its own amount and mint. **No amount is
+carried across the hop** — what arrived and what went on are different numbers,
+and the remainder went somewhere this says nothing about.
 
-**The gap is generic, not PUMP-specific.** Wrapping SOL through a transient
-account is the ordinary way to pay with SOL down a token-program path; any
-project doing it produces this blind spot. Closing it means resolving a
-transient account's owner from its own `initializeAccount3`/`createIdempotent`
-instruction, and admitting a second pairing shape. That relaxes a deliberate
-rule — *ownership comes from the RPC, not from inference* — so it is an owner
-decision, not a patch. Not implemented.
+Legs and pairing stay DIRECT + CONTEXT. Seeing the shape did not make it mean
+anything: nothing here can establish a component on its own.
 
 ### Connection to the burn — quantity and account only
 
