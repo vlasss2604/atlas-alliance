@@ -323,28 +323,50 @@ here can say what either program does, and nothing may pretend to.
 the payload belongs to the System program, an SPL Token program or the ATA
 program. What the two unknown programs actually did is not represented at all.
 
-Three things would be needed to decode them. **Two are now preserved going
-forward; the third is why this artifact still cannot be decoded.**
+Three things would be needed to decode them. **Two are now captured for this
+transaction; the third still is not.**
 
-- **Instruction payloads.** Preserved now. An unparsed instruction's program id,
-  account list and opaque blob are kept in `rawInstructions`.
-- **Parent linkage.** Preserved now. Every instruction records its position and
-  the ordinal of the outer instruction it was invoked from, so "inside one
-  invocation" is distinguishable from "in one transaction".
-- **The raw response.** Still only a hash. **The bytes for THIS artifact are
-  gone**, and preservation is not retrospective: the persisted payload predates
-  the capability and carries neither field. Only a fresh read would.
+One owner-authorized re-read was performed on 2026-08-27 — a single
+`getTransaction`, zero retries — producing artifact
+`bff0290c-2d5e-4b33-a518-5efaece12338`. Its `raw_response_hash` is **identical**
+to the reads a day earlier (`sha256:686ba894…`), so the node returned byte-identical
+content and the two observations agree exactly. The `artifact_hash` differs only
+because the projection now retains more.
 
-So the ladder for this transaction is unchanged, and no re-read is authorized.
-What changed is that the same shape read today would leave enough behind to make
-a later, separately-decided decoding possible — which is a preservation decision,
-not a semantic one. Nothing identifies either program, and nothing here
-establishes a swap.
+- **Instruction payloads — captured.** Five unparsed instructions preserved: two
+  Compute Budget (no accounts, which is legitimate for that program), two
+  `JUP6LkbZ…` (31 accounts / 54-char blob outer, 1 account / 181-char blob inner)
+  and one `CAMMCzo5…` (17 accounts / 56-char blob).
+- **Parent linkage — captured.** See below.
+- **Program identity — still absent.** No registry, no IDL, no dependency. The
+  material now exists to decode; the means to decode it does not, and acquiring
+  it is a separate decision.
 
-So the ladder stops early for this artifact. Same transaction: yes. Same
-counterparty ownership: yes. Same program invocation: **not establishable from
-what is stored** (a fresh read would now carry the linkage). Decoded swap
-instruction: **no**. Deterministic economic exchange: **no**.
+### What the linkage establishes, and what it does not
+
+Every one of the three token movements carries `parentIndex = 5`: the wSOL
+transfer of `382202589`, the project-token transfer of `7723746661`, and the
+wSOL transfer of `382585`. The `CAMMCzo5…` instruction carries it too. Outer
+instruction 5 is a `JUP6LkbZ…` instruction.
+
+So the two opposing legs are **CPIs of one and the same outer instruction**, not
+merely two movements in one transaction. That rung — *same program invocation* —
+was previously recorded as not establishable. It is established now.
+
+**It is still only that rung.** What that invocation was asked to do is not
+represented anywhere: the blob is retained, unread. Co-occurrence inside one
+invocation is a stronger structure than co-occurrence inside one transaction,
+and it is not an exchange, a purchase or an acquisition. A program could batch
+unrelated movements inside one invocation and produce this identical picture.
+Nothing here identifies `JUP6LkbZ…` or `CAMMCzo5…`, and nothing may.
+
+Derivation is unchanged by the re-read: the reciprocal flow and all three facts
+come out byte-identical to the earlier payload, still DIRECT + CONTEXT, still
+zero burns. Seeing more did not change what anything means.
+
+The ladder now: same transaction — yes. Same counterparty ownership — yes.
+**Same program invocation — yes**, from the captured parent linkage. Decoded
+swap instruction — **no**. Deterministic economic exchange — **no**.
 
 Decoding would require re-retrieving the transaction and a human-authored program
 registry — a label whose own provenance would then need answering. And even a

@@ -123,15 +123,23 @@ Abbreviated PUMP position:
   different cycles.
 - Nothing about buyback, purchase, revenue funding, causality or supply reduction
   is proven, and no acquisition → burn bridge exists.
-- **Swap/acquisition semantics are not reachable from the stored inflow
-  artifact.** It invokes two programs ATLAS cannot identify from any local
-  evidence, and they contributed zero decoded instructions. Same transaction and
-  same counterparty ownership are established; same program invocation is not,
-  and swap is not. **Opaque instructions and parent linkage are preserved from
-  now on** — program id, ordered accounts, opaque blob, instruction position and
-  parent ordinal — but preservation is not retrospective and the raw response is
-  still kept only as a hash, so this artifact would need a fresh read. Nothing
-  identifies any program, and preserving material is not decoding it.
+- **The inflow transaction was re-read once, and the opaque material is now
+  captured.** Artifact `bff0290c-…` (2026-08-27, one `getTransaction`, zero
+  retries) carries five preserved unparsed instructions including both
+  unidentified programs, with their accounts, blobs and positions. Its
+  `raw_response_hash` is identical to the earlier reads, so the observations
+  agree byte for byte.
+- **Same program invocation is now established for that transaction.** All three
+  token movements and the `CAMMCzo5…` instruction share `parentIndex = 5`, and
+  outer instruction 5 is a `JUP6LkbZ…` instruction — so the opposing legs are
+  CPIs of one invocation, not merely two movements in one transaction. That rung
+  was previously not establishable.
+- **Swap/acquisition semantics remain out of reach.** Neither program is
+  identified from any local evidence and no decoder exists, so the blobs are
+  retained unread. Co-occurrence inside one invocation is a stronger structure
+  than co-occurrence inside one transaction, and it is still not an exchange, a
+  purchase or an acquisition. Derivation output is byte-identical to before the
+  re-read: DIRECT + CONTEXT, zero burns.
 
 ## Done
 

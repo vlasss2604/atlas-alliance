@@ -4,37 +4,35 @@
 
 ## NONE — awaiting owner direction
 
-Opaque-instruction preservation and inner-instruction parent linkage are
-implemented and accepted. See `ARCHITECTURE.md` for the shape and `PUMP_CASE.md`
-for what it does and does not change about the inflow transaction.
+The one authorized re-read of the inflow transaction is done and analysed
+offline. Capture only; nothing was interpreted. Details in `PUMP_CASE.md`.
 
-### What changed
+### What the capture established
 
-An instruction the node does not parse is now preserved rather than dropped:
-program id, ordered account list and opaque data blob, in `rawInstructions`.
-Every instruction — parsed or not — records its own position and the ordinal of
-the outer instruction it was invoked from, so "inside one invocation" is
-distinguishable from "in one transaction".
+Artifact `bff0290c-2d5e-4b33-a518-5efaece12338`, one `getTransaction`, zero
+retries. Its `raw_response_hash` is identical to the reads a day earlier, so the
+node returned byte-identical content.
 
-Nothing reads this material. No program is identified anywhere, and no swap,
-purchase or exchange semantics exist in the model. Malformed material is dropped
-whole, never stored in part; an over-long blob is dropped rather than truncated.
+Five unparsed instructions preserved with their accounts, blobs and positions —
+including both unidentified programs. And the linkage: all three token movements
+plus the `CAMMCzo5…` instruction carry `parentIndex = 5`, where outer instruction
+5 is a `JUP6LkbZ…` instruction. **Same program invocation is now established**;
+that rung was previously not reachable.
 
-`rawInstructions` is optional, so artifacts stored before this remain valid.
-Absent means "unknown"; `[]` means "read with this capability, none present" —
-the two are deliberately not the same.
+Derivation is unchanged — reciprocal flow and all three facts byte-identical to
+the earlier payload, DIRECT + CONTEXT, zero burns.
 
-### Known limit
+### What is deliberately still open
 
-Preservation is not retrospective. The raw response is still kept only as a hash,
-so an existing artifact cannot be enriched; only a fresh read carries the new
-material. The inflow transaction at slot `441840975` is therefore unchanged, and
-no re-read is authorized.
+Neither program is identified and no decoder exists, so the blobs are retained
+unread. One invocation is a stronger structure than one transaction, and it is
+still not an exchange, a purchase or an acquisition. Decoding would need a
+program registry whose own provenance someone has to answer for — a separate
+decision, not started.
 
 ### Standing boundaries
 
-- No live calls without separate authorization.
-- Do not identify any program or decode an opaque instruction; that is a separate
-  decision, and it is the one that would license "swap" or "market purchase".
-- Do not call the inflow a buyback, purchase or revenue-funded acquisition.
+- No live calls without separate authorization. The single authorization is spent.
+- Do not identify or decode `JUP6LkbZ…` or `CAMMCzo5…`.
+- Do not call the inflow a buyback, purchase or swap.
 - Do not connect this cycle to the later acquisition at slot `441977087`.
