@@ -2,36 +2,34 @@
 
 > Overwrite this file each round. Never append.
 
-## PREPARED, NOT EXECUTED — the pump.fun re-extraction, with the refusal path in place
+## NONE — awaiting owner direction
 
-The owner authorized preparation only. **No live call was made this round.**
-Nothing in the engine changed; this file is the artifact. Executing it needs a
-separate authorized window.
+The renderer observability gap is closed. Written up in `ARCHITECTURE.md`,
+"What a failure may say about itself".
 
-## What the run is for
+### What changed
 
-`pump.fun` refuses ATLAS's static fetcher — established, not assumed, by job
-`cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, which returned
-`CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR`. `HTTP_ERROR` is raised
-only after DNS resolved and the connection succeeded, so a server answered with
-a non-2xx status.
+A failed render now names the stage that failed:
+`DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED`, and the same for every
+other stage. Previously every renderer failure collapsed into one
+indistinguishable observation, so a browser that never started read exactly like
+a site that defeated the browser — opposite diagnoses with opposite next moves.
 
-Since then the failure carries the status number, and a refusal on an
-already-renderer-eligible OFFICIAL_DOCS route opens one isolated render. So this
-run answers **two** questions that no previous window could:
+The renderer had typed reasons the whole time. The child classified its own
+failure and put a reason on the wire; the parent supervisor discarded it one line
+before use. Three further stages had no reason of their own at all — the egress
+proxy, the spawn, and the exit — and now do.
 
-1. Which status is the refusal — is it one of `401`, `403`, `429`?
-2. If it is, does a real browser get the page where the plain client could not?
+Reasons are admitted through two independent gates: the `RenderedDocsError` class
+**and** membership of a closed list that now exists at runtime, plus, for the
+child's envelope, membership of the subset the child could actually have
+witnessed. No message, stack, url, stderr or renderer name crosses. The trace
+enum is untouched, so no migration.
 
-And, only if the page is actually read, the original question underneath both:
-does the current pipeline file the mechanism sentence into `MECHANISM_SPEC`?
+### The next intended action, unchanged and still prepared
 
-**The run cannot fail to inform.** Every outcome, including refusal, now names
-itself.
-
-## The command
-
-Exactly this, with the tunnel off. One line, no variations, zero retries.
+**The pump.fun re-extraction.** Not opened this round, by instruction. Run it
+with the tunnel off, exactly this, zero retries:
 
 ```
 npx tsx scripts/alpha-acquire-url.ts \
@@ -42,96 +40,46 @@ npx tsx scripts/alpha-acquire-url.ts \
   --project=pump_fun
 ```
 
-## Gates — re-verified offline this round, read-only, not carried over
+Gates were re-verified offline last round and nothing since then touched them:
+internal alpha on, key present, `pump_fun` allowlisted, extractor
+`claude-haiku-4-5` with a resolvable cost profile, topic `token_value_capture`,
+and the scope gate resolving CONFIRMED / OFFICIAL_DOCS on prefix `/pump-token`
+with no route conflict. The route half of the refusal gate already passes, so the
+only undetermined input is the status the server answers with.
 
-| gate | state | how |
-|---|---|---|
-| `internal_alpha_enabled` | true | local DB read |
-| `ANTHROPIC_API_KEY` | set | env |
-| `pump_fun` in live allowlist | yes | `INTERNAL_ALPHA_LIVE_PROJECT_SLUGS` |
-| extractor model | `claude-haiku-4-5`, cost profile OK | local DB read |
-| active topic | `token_value_capture` | local DB read |
-| scope-gate officiality | `CONFIRMED` | `resolveSourceRoute` |
-| scope-gate routeClass | `OFFICIAL_DOCS` | `resolveSourceRoute` |
-| matched path prefix | `/pump-token` | `resolveSourceRoute` |
-| route observation | none — no `SOURCE_ROUTE_CONFLICT` | `resolveSourceRoute` |
+**Footprint:** at most two source opens (`maxSourceOpens` is 2 and the injected
+gateway yields exactly one candidate), at most one model call and only if a page
+is read, no search provider, no chain call.
 
-The script fails closed on all of these itself before spending anything, so this
-table is a prediction of its behaviour, not a substitute for it.
-
-**Route half of the refusal gate therefore passes already.** https ✓, officiality
-`CONFIRMED` ✓, routeClass `OFFICIAL_DOCS` ✓, non-empty prefix ✓, and the url path
-`/pump-token` equals the prefix, which `pathWithinPrefix` accepts. The **only**
-undetermined input is the status number.
-
-**Renderer dependency, verified present:** `playwright` and `playwright-core` are
-installed, and the Chromium binaries exist (`chromium-1234`,
-`chromium_headless_shell-1234`). The script installs the isolated fetcher itself
-and sets `RENDERED_DOCS_ENABLED=1`, so `renderedDocsEnabled()` and
-`renderedDocsAvailable()` are both satisfied for this run.
-
-## Expected footprint
-
-- **At most 2 source opens** against `pump.fun` — the static fetch, plus one
-  isolated render if the refusal gate opens. `maxSourceOpens` is 2 and the
-  SearchGateway yields exactly one candidate, so there is no third and no
-  competing candidate to spend the second on.
-- **At most 1 Anthropic call** (the extractor), and only if a document is read.
-- **0 search-provider calls.** Brave is never constructed; the proposer is a
-  fixture.
-- **0 chain calls.** No on-chain retriever is in the script's import graph.
-
-## Reading the result
-
-`spent.sourceOpens` is the tell, because a *failed* static fetch reserves DB
-budget but never increments the reported `spent`. Read the console this way:
+**Reading the result.** `spent.sourceOpens` is the tell — a failed static fetch
+reserves database budget without incrementing the reported spend.
 
 | status | reason | spent.sourceOpens | meaning |
 |---|---|---|---|
-| FAILED | `…:HTTP_ERROR:404` (or 5xx) | 0 | refusal is not renderable; no render attempted — correct behaviour, question closed differently |
-| FAILED | `…:HTTP_ERROR:403` (or 401/429) | 0 | should not happen — would mean a route gate refused after all; investigate the gate, not the site |
-| FAILED | `…:HTTP_ERROR:403` (or 401/429) | 1 | render **was** attempted and failed. See the ambiguity below |
-| FAILED | `…:BLOCKED_ADDRESS` | 0 | the tunnel was still up. The window never opened; not a result |
-| SKIPPED / FAILED with evidence-stage reason | carries `DOCS_RENDERED_AFTER_REFUSAL` | 1 | **the render worked.** The page was read and the pipeline's filing behaviour is finally observable |
+| FAILED | `…:HTTP_ERROR:404` (or 5xx) | 0 | refusal is not renderable; no render attempted |
+| FAILED | `…:HTTP_ERROR:403` (or 401/429) | 1 | render attempted and failed — **the suffix now names the stage** |
+| FAILED | `…:BLOCKED_ADDRESS` | 0 | the tunnel was still up; the window never opened |
+| SKIPPED / FAILED with an evidence-stage reason carrying `DOCS_RENDERED_AFTER_REFUSAL` | | 1 | the render worked; the page was read |
 
-A successful render reaches the extraction stage, whose reasons are wrapped with
-the observation channel — so `DOCS_RENDERED_AFTER_REFUSAL` will be visible in the
-`reason:` line. The zero-document failure path is not wrapped, so on a failed
-render the reason line shows only the static failure string and
-`spent.sourceOpens = 1` is the sole indicator.
+Row 2 was the ambiguous one and is no longer ambiguous:
+`…FAILED:BROWSER_LAUNCH_FAILED` or `…:CHILD_SPAWN_FAILED` or
+`…:EGRESS_PROXY_UNAVAILABLE` means the fault is local and the site is innocent;
+`…:HOST_NOT_ALLOWED` or `…:NAVIGATION_BLOCKED` means our own containment
+refused; `…:TIMEOUT` or `…:TOO_LARGE` implicates the page; a bare
+`DOCS_RENDER_AFTER_REFUSAL_FAILED` with no suffix means the error was not a
+renderer error at all.
 
-## Known ambiguity, to state honestly before the window rather than after
+**One limit to hold in mind while reading it.** A browser served `403` receives a
+page rather than an error, so if `pump.fun` refuses Chromium the run reports a
+*successful* render of the refusal page, not a failure. Nothing currently tells
+that apart from a real document. This is a known gap, not a defect introduced
+here, and no code was changed for it.
 
-**A failed render will not say why it failed.** The catch is bare and records
-only `DOCS_RENDER_AFTER_REFUSAL_FAILED`. So row 3 above cannot distinguish
-"`pump.fun` refused the browser too" from "the isolated renderer's own plumbing
-failed here" — the scrubbed-env child spawn, the egress proxy and a real Chromium
-launch have never been exercised end-to-end against a live host on this machine.
+**Procedure** (from `PUMP_CASE.md`): MantaRay OFF, `ipconfig /flushdns`, verify
+real public IPs, execute once, capture the complete output the first time, zero
+retries, MantaRay ON, analyse offline.
 
-This is the same class of defect as the one just fixed: a failure that cannot say
-which failure it was. It is **named, not fixed** — fixing it is a separate task
-and was not authorized this round. Neither render path records a trace event
-either; that asymmetry is pre-existing and was not introduced by `e9269fb`.
-
-If the owner wants row 3 to be unambiguous, that observability work should land
-**before** the window, not after it.
-
-## Procedure for the window (from `PUMP_CASE.md`)
-
-1. this command, already prepared above — do not edit it;
-2. MantaRay OFF;
-3. `ipconfig /flushdns`;
-4. verify DNS returns real public IPs for `pump.fun` and `api.anthropic.com`;
-5. execute once;
-6. capture the complete console output the first time;
-7. **zero retries**;
-8. MantaRay ON again;
-9. analyse offline.
-
-With MantaRay up both hosts resolve into `198.18.0.0/15` and would be
-SSRF-blocked. That is the protection working and is never to be relaxed.
-
-## Standing boundaries
+### Standing boundaries
 
 - No live calls without a separate authorized window; no retries.
 - Never relax safe-http or SSRF, never whitelist a reserved range, never

@@ -4,7 +4,9 @@ import * as path from "node:path";
 import { startEgressProxy, type EgressProxyHandle } from "./render-egress-proxy";
 import { buildRendererEnv } from "./renderer-env";
 import {
+  CHILD_REPORTABLE_RENDER_REASONS,
   DEFAULT_RENDER_LIMITS,
+  isRenderedDocsFailureReason,
   RenderedDocsError,
   type ConfirmedDocsRoute,
   type RenderedDocsFetcher,
@@ -130,12 +132,30 @@ function parseChildDocument(stdout: string): RenderedDocument {
   try {
     parsed = JSON.parse(stdout) as ChildRenderResponse;
   } catch {
-    throw new RenderedDocsError("RENDER_FAILED", "isolated");
+    throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");
   }
   if (!parsed || typeof parsed !== "object") {
-    throw new RenderedDocsError("RENDER_FAILED", "isolated");
+    throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");
   }
-  if (!parsed.ok) throw new RenderedDocsError("RENDER_FAILED", "isolated");
+  if (!parsed.ok) {
+    // THE CHILD ALREADY KNEW. It classifies its own failure and puts a
+    // reason on the wire; this line used to throw it away and report
+    // RENDER_FAILED for every one of them, which is why a site that
+    // defeated the browser read identically to a browser that never
+    // started.
+    //
+    // The envelope is untrusted input like any other — it arrives as JSON
+    // from a separate process — so the value is admitted only by
+    // membership of the closed, code-owned list, and only of the subset
+    // the child is in a position to have observed. It is never
+    // interpreted, never normalised, and nothing else on the envelope is
+    // read. A look-alike string is not a reason.
+    const reported = (parsed as { reason?: unknown }).reason;
+    if (isRenderedDocsFailureReason(reported) && CHILD_REPORTABLE_RENDER_REASONS.has(reported)) {
+      throw new RenderedDocsError(reported, "isolated");
+    }
+    throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");
+  }
   const doc = parsed.document as Partial<RenderedDocument> | undefined;
   // Shape check on every field the downstream path reads. A missing one
   // means the result is not a document, not that we should default it.
@@ -147,7 +167,11 @@ function parseChildDocument(stdout: string): RenderedDocument {
     typeof doc.contentHash !== "string" ||
     typeof doc.byteLength !== "number"
   ) {
-    throw new RenderedDocsError("RENDER_FAILED", "isolated");
+    // The child claimed success and handed back something that is not a
+    // document. That is the data boundary refusing it, not a render that
+    // failed — the distinction tells a contract mismatch apart from a
+    // page that defeated the browser.
+    throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");
   }
   // fetchedAt crosses the process boundary as a JSON string.
   return { ...(doc as RenderedDocument), fetchedAt: new Date(doc.fetchedAt as unknown as string) };
@@ -173,7 +197,17 @@ export function createIsolatedRenderedDocsFetcher(
       try {
         // The egress boundary is pinned to THIS render's confirmed host.
         // It exists only for the lifetime of the render.
-        proxy = await startProxy({ confirmedHost: route.confirmedHost });
+        //
+        // Its own stage: if this fails no child is ever spawned and no
+        // request ever leaves the machine, so the site is not implicated
+        // in any way. Reporting that as RENDER_FAILED pointed the reader
+        // at the page instead of at a local port.
+        try {
+          proxy = await startProxy({ confirmedHost: route.confirmedHost });
+        } catch (e) {
+          if (e instanceof RenderedDocsError) throw e;
+          throw new RenderedDocsError("EGRESS_PROXY_UNAVAILABLE", "isolated");
+        }
 
         const request: ChildRenderRequest = {
           url,
@@ -187,10 +221,17 @@ export function createIsolatedRenderedDocsFetcher(
 
         // EXACTLY ONE child render request. No loop, no retry — a failed
         // render is a failed render.
+        //
+        // A rejection here is the process never starting — an unresolvable
+        // loader, a missing binary, an OS refusal. Still exactly one call:
+        // the mapping below replaces the error, it does not re-invoke.
         const work = spawnChild({
           scriptPath: CHILD_SCRIPT,
           env: buildRendererEnv({ parentEnv, proxyPort: proxy.port }),
           request,
+        }).catch((e: unknown) => {
+          if (e instanceof RenderedDocsError) throw e;
+          throw new RenderedDocsError("CHILD_SPAWN_FAILED", "isolated");
         });
 
         // The parent owns the hard deadline: a wedged child cannot hang
@@ -204,7 +245,11 @@ export function createIsolatedRenderedDocsFetcher(
 
         const { stdout, code } = await Promise.race([work, timeout]);
         // A crash or non-zero exit is a failure, never a partial result.
-        if (code !== 0) throw new RenderedDocsError("RENDER_FAILED", "isolated");
+        // The child catches its own render failures and still exits 0 with
+        // an envelope, so reaching here means it died BEFORE it could
+        // classify anything — whatever stdout holds is not to be trusted
+        // as a reason.
+        if (code !== 0) throw new RenderedDocsError("CHILD_EXIT_NONZERO", "isolated");
         return parseChildDocument(stdout);
       } catch (e) {
         if (e instanceof RenderedDocsError) throw e;

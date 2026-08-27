@@ -1283,7 +1283,22 @@ describe("Фаза 6, S4 — SearchGateway: сниппет никогда не �
     // It now also carries the typed reason from ContentFetchError's own
     // closed enum. The class name alone could not distinguish a refusal
     // from a block from a timeout, which are three different next moves.
-    expect(result.reason).toBe("CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR");
+    //
+    // The zero-document failure path now folds in the per-attempt
+    // observation channel that every other terminal return here already
+    // used — it was the one exception, and it is the path a failed render
+    // ends on, so a renderer failure was being classified correctly and
+    // then had nowhere to be said. The assertion keeps its original
+    // intent (the typed provider failure survives; no raw exception text
+    // gets in) and states it more strictly than exact equality did: the
+    // reason BEGINS with the sanitized provider failure, and anything
+    // appended is code-owned observation codes and nothing else.
+    const [head, ...rest] = result.reason!.split("; source-route observations: ");
+    expect(head).toBe("CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR");
+    expect(rest.length).toBeLessThanOrEqual(1);
+    // Upper-case identifiers, separated by ", ". No prose, no path, no
+    // url, no quoted provider text could satisfy this shape.
+    if (rest.length === 1) expect(rest[0]).toMatch(/^[A-Z0-9_:]+(, [A-Z0-9_:]+)*$/);
     expect(result.reason).not.toContain("not found in fixture");
   });
 });

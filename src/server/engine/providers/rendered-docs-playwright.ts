@@ -140,7 +140,20 @@ export function createPlaywrightRenderedDocsFetcher(
       let totalBytes = 0;
       let navigations = 0;
 
-      const browser = await launch();
+      // Starting the browser is its own stage. A missing playwright
+      // module, an absent Chromium binary or a refused launch says
+      // nothing whatever about the page — collapsing it into
+      // RENDER_FAILED made a broken local install indistinguishable from
+      // a site that defeated the renderer, which are opposite diagnoses.
+      let browser: BrowserLike;
+      try {
+        browser = await launch();
+      } catch (e) {
+        if (e instanceof RenderedDocsError) throw e;
+        // The cause is deliberately dropped: a launch error's message can
+        // carry an absolute filesystem path.
+        throw new RenderedDocsError("BROWSER_LAUNCH_FAILED", name);
+      }
       let context: ContextLike | null = null;
       try {
         context = await browser.newContext({

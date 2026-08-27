@@ -49,6 +49,8 @@ import {
 } from "./documentary-locator-store";
 import { evaluateRefusalRenderEligibility, evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
+  isRenderedDocsFailureReason,
+  RenderedDocsError,
   renderedDocsAvailable,
   renderedDocsEnabled,
   resolveRenderedDocsFetcher,
@@ -355,6 +357,23 @@ function safeFetchFailure(e: unknown): { reason: string; httpStatus: number | nu
   if (!(e instanceof ContentFetchError)) return null;
   if (!SAFE_FAILURE_DETAILS.has(e.reason)) return null;
   return { reason: e.reason, httpStatus: e.httpStatus };
+}
+
+// A RENDER FAILURE, sanitized by the same two independent gates the fetch
+// path uses, for the same reason: the class alone vouches for nothing
+// because a runtime value can violate a compile-time union, and a closed
+// list alone vouches for nothing because a look-alike object can carry a
+// matching `reason` field.
+//
+// Every renderer failure used to arrive here as one indistinguishable
+// observation, which could not tell a site that defeated the browser from
+// a browser that never started — opposite diagnoses with opposite next
+// moves. The reason is the ONLY thing taken from the error: no message,
+// no stack, no url, no rendererName, no cause.
+function renderFailureObservation(label: string, e: unknown): string {
+  if (!(e instanceof RenderedDocsError)) return label;
+  if (!isRenderedDocsFailureReason(e.reason)) return label;
+  return `${label}:${e.reason}`;
 }
 
 function safeFailureReason(label: string, e: unknown): string {
@@ -1422,10 +1441,13 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 fetchedDocs.push(rendered);
                 observations.add("DOCS_RENDERED_AFTER_REFUSAL");
                 continue;
-              } catch {
+              } catch (e) {
                 // Fail closed and stop. One attempt, no retry — a failed
                 // render is never evidence and never fails the attempt.
-                observations.add("DOCS_RENDER_AFTER_REFUSAL_FAILED");
+                // It does, however, say which stage failed.
+                observations.add(
+                  renderFailureObservation("DOCS_RENDER_AFTER_REFUSAL_FAILED", e),
+                );
               }
             } else {
               observations.add("DOCS_RENDER_SKIPPED_BUDGET");
@@ -1482,10 +1504,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length;
               acquiredDoc = rendered;
               observations.add("DOCS_RENDERED");
-            } catch {
+            } catch (e) {
               // Fail closed: a failed render is never evidence, and never
               // fails the attempt — the static document stands as-is.
-              observations.add("DOCS_RENDER_FAILED");
+              // Same sanitizer as the refusal path: two ways in, one set
+              // of gates, and now one way of saying what went wrong.
+              observations.add(renderFailureObservation("DOCS_RENDER_FAILED", e));
             }
           } else {
             observations.add("DOCS_RENDER_SKIPPED_BUDGET");
@@ -1497,9 +1521,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // A source-open budget denial already threw above, at the point
         // of denial — reaching here with zero documents means every
         // candidate failed for a non-budget reason.
+        // Folded into the SAME observation channel every other terminal
+        // return here already uses. This path was the one exception, and
+        // it is precisely the path a render-after-refusal ends on — so a
+        // renderer failure was classified correctly and then had nowhere
+        // to be said. For a run executed directly (owner tooling writes no
+        // research_attempts row) this string is the only place it appears
+        // at all. Everything appended is code-owned: the sanitized fetch
+        // reason, plus observation codes this function itself authored.
         return {
           status: "FAILED",
-          reason: lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED",
+          reason: withObservations(lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED"),
           spent,
         };
       }

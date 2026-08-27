@@ -9,15 +9,21 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   documentation-only and sits directly on top of it.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite: **1806 passing, 4 skipped, 2 failing**. Both failures are
+- Full suite: **1979 passing, 4 skipped, 2 failing**. Both failures are
   pre-existing and unrelated to research behaviour:
-  - `first-real-run-stage2.test.ts` — a source-regex assertion no longer matching
-    the current shape of `s4-executor.ts`;
+  - `first-real-run-stage2.test.ts` — a source-regex assertion against
+    `s4-executor.ts`. **Now understood: it is a line-ending artifact.** The
+    assertion matches `\n}\n`, and `core.autocrlf=true` checks the file out with
+    CRLF, so the regex finds nothing and the match is null. It passes whenever
+    the working copy happens to hold LF — which an editor rewriting the file can
+    cause — and fails again after any git round-trip restores CRLF. It says
+    nothing about the code either way;
   - `s10-live-provider-enablement.test.ts` — a Windows path bug (`C:\C:\...`)
     while scanning `src/server/services/`.
 
   Do not "fix" these opportunistically. Verify by stashing before blaming any new
-  change on them.
+  change on them — and for the first one, check the file's line endings before
+  believing either result.
 
 ## What works today
 
@@ -194,13 +200,22 @@ Abbreviated PUMP position:
   Response, never parsed from a message. See `ARCHITECTURE.md`.
 - **Untested against the live page.** `pump.fun` was not re-run in that task, so
   whether its refusal is one of the three statuses, and whether a render would
-  then succeed, is unknown. **The run is now prepared and gated offline** in
-  `CURRENT_TASK.md` — command, re-verified gate table, expected footprint and a
-  reading key for every outcome — and awaits an authorized window. Preparation
-  also surfaced one honest limit: a failed render records only
-  `DOCS_RENDER_AFTER_REFUSAL_FAILED`, so it cannot distinguish the site refusing
-  a browser from the renderer's own plumbing failing, which has never been
-  exercised live on this machine. Named, not fixed.
+  then succeed, is unknown. **The run is prepared and gated offline** — command,
+  re-verified gate table, expected footprint and a reading key for every
+  outcome. It is preserved below as the next intended action.
+- **A failed render now names its stage.** Preparation surfaced the gap and it
+  is closed: `DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED` and the
+  rest. The renderer had typed reasons all along and the parent supervisor
+  discarded them. See `ARCHITECTURE.md`, "What a failure may say about itself".
+- **Correction to the previous round's note.** It said the renderer had never
+  been exercised end-to-end against a live host here. That is wrong: an
+  owner-inspection render of `pump.fun/pump-token` succeeded earlier in the
+  project — it is what established that page as the project's own token
+  economics documentation and led to its promotion to OFFICIAL_DOCS, and a
+  live render is also what surfaced the DEP0190 spawn defect fixed in `808f3e8`.
+  So the renderer works on this machine and `pump.fun` has served the page to
+  Chromium before. What remains untested is only that path reached through S4's
+  refusal fallback, on current code.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

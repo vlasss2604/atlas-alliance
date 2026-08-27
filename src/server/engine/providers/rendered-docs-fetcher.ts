@@ -133,14 +133,79 @@ export interface RenderedDocument extends FetchedDocument {
   } | null;
 }
 
-export type RenderedDocsFailureReason =
-  | "NAVIGATION_BLOCKED"
-  | "FINAL_URL_OUTSIDE_ROUTE"
-  | "HOST_NOT_ALLOWED"
-  | "TIMEOUT"
-  | "TOO_LARGE"
-  | "RENDER_FAILED"
-  | "RENDERER_UNAVAILABLE";
+// THE CLOSED, CODE-AUTHORED REASON LIST.
+//
+// Declared as a runtime array and the type DERIVED from it, exactly as
+// CONTENT_FETCH_FAILURE_REASONS is. A bare type union vanishes at compile
+// time, and a sanitizer that must decide whether a runtime value is a
+// member of a closed set needs the set to actually exist at runtime — a
+// value crossing a process boundary can violate a compile-time union.
+//
+// ONE REASON PER STAGE THAT CAN INDEPENDENTLY FAIL, and no more. A render
+// crosses four boundaries before a page becomes a document — network
+// (the egress proxy), process (spawn, then exit), data (the output
+// contract), and the render itself — and each one failing points at a
+// different next action. Anything finer than that is taxonomy for its own
+// sake; anything coarser is the defect this list exists to remove.
+export const RENDERED_DOCS_FAILURE_REASONS = [
+  // --- render stage: the page, the route, the limits -------------------
+  "NAVIGATION_BLOCKED",
+  "FINAL_URL_OUTSIDE_ROUTE",
+  "HOST_NOT_ALLOWED",
+  "TIMEOUT",
+  "TOO_LARGE",
+  // The browser itself could not be started: the module is absent, the
+  // binary is missing, or the launch was refused. Distinct from every
+  // page-level failure because the site is not implicated at all.
+  "BROWSER_LAUNCH_FAILED",
+  // The render stage failed for a reason the renderer does not classify.
+  // Genuinely unknown — never a stand-in for one of the above.
+  "RENDER_FAILED",
+  // --- supervisor stages: reachable only in the parent -----------------
+  // The deny-by-default egress boundary could not be established, so no
+  // child was ever spawned. Local, and the site is not implicated.
+  "EGRESS_PROXY_UNAVAILABLE",
+  // The child process could not be started at all.
+  "CHILD_SPAWN_FAILED",
+  // The child started and died without emitting a usable envelope.
+  "CHILD_EXIT_NONZERO",
+  // The child answered, and the answer did not satisfy the data contract.
+  "CHILD_OUTPUT_MALFORMED",
+  // No renderer is installed in this deployment.
+  "RENDERER_UNAVAILABLE",
+] as const;
+
+export type RenderedDocsFailureReason = (typeof RENDERED_DOCS_FAILURE_REASONS)[number];
+
+const RENDERED_DOCS_FAILURE_REASON_SET: ReadonlySet<string> = new Set<string>(
+  RENDERED_DOCS_FAILURE_REASONS,
+);
+
+// The runtime gate. `unknown` in, and membership of the closed list is the
+// only way out — no duck typing, no prefix match, no normalisation.
+export function isRenderedDocsFailureReason(v: unknown): v is RenderedDocsFailureReason {
+  return typeof v === "string" && RENDERED_DOCS_FAILURE_REASON_SET.has(v);
+}
+
+// WHAT THE CHILD IS ALLOWED TO SAY ABOUT ITSELF.
+//
+// The child renders; it does not supervise. It cannot have observed a
+// proxy that failed before it existed, a spawn that failed to produce it,
+// its own non-zero exit, or its own malformed output — so a child claiming
+// any of those is not reporting, it is contradicting the parent's own
+// observation. Such an envelope is malformed output, not a reason.
+//
+// This is a fidelity gate, not a security one: every value here is
+// code-owned either way. It keeps the stage a reason names honest.
+export const CHILD_REPORTABLE_RENDER_REASONS: ReadonlySet<string> = new Set<string>([
+  "NAVIGATION_BLOCKED",
+  "FINAL_URL_OUTSIDE_ROUTE",
+  "HOST_NOT_ALLOWED",
+  "TIMEOUT",
+  "TOO_LARGE",
+  "BROWSER_LAUNCH_FAILED",
+  "RENDER_FAILED",
+] satisfies RenderedDocsFailureReason[]);
 
 // Carries a reason code only. A renderer error must never echo page
 // content or a URL back into logs/trace.

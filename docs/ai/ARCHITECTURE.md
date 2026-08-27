@@ -179,6 +179,34 @@ by the error's constructor — never parsed back out of a message, which is
 provider-influenced text. A status is a number, so it cannot carry a URL, a
 header or a body no matter what the server sent.
 
+A **render** failure says which stage failed by the same construction:
+`DOCS_RENDER_AFTER_REFUSAL_FAILED:BROWSER_LAUNCH_FAILED`. The reason list is
+declared as a runtime array with the type derived from it, so membership is
+checkable for a value that crossed a process boundary; the two gates are the
+`RenderedDocsError` class and that list. Nothing else on the error is read — no
+message, no stack, no url, no renderer name.
+
+A render crosses four boundaries before a page becomes a document — network
+(the egress proxy), process (spawn, then exit), data (the output contract) — and
+then renders. **One reason per stage that can independently fail**, because each
+points at a different next action: a browser that never started and a site that
+defeated the browser are opposite diagnoses. The child already classified its own
+failure and put a typed reason on the wire; the parent used to discard it and
+report `RENDER_FAILED` for everything.
+
+The child's envelope is untrusted input like any other, so its reason is admitted
+only by membership of the closed list **and** of the subset the child could have
+witnessed. A child claiming the proxy failed, or claiming its own non-zero exit,
+is contradicting the parent's own observation — that is malformed output, not a
+reason.
+
+Two limits worth knowing before reading a result. A failed render is still never
+evidence and never fails the attempt, so the stage name is an observation rather
+than a verdict. And the render stage does **not** see a navigation's HTTP status
+at all: a browser served `403` receives a page, so a site refusing the renderer
+returns a successful render of its refusal page, not a failure. Nothing currently
+distinguishes that from a real document.
+
 ## Rendering: two ways in, one set of gates
 
 The isolated renderer is reachable two ways, and both pass through the same
@@ -210,7 +238,11 @@ the candidate is abandoned.
 
 The trace's `reason_code` stays a closed Postgres enum and keeps recording
 `PROVIDER_ERROR` for fetch failures. Widening it would need a migration for
-detail that already reaches the owner through the terminal reason.
+detail that already reaches the owner through the terminal reason. Neither
+render path records a trace event of its own; both report through the
+per-attempt observation channel, which is folded into the terminal reason — the
+zero-document failure path included, since that is the path a failed render
+ends on and owner tooling that executes an item directly writes no attempt row.
 
 ## Research Memory
 
