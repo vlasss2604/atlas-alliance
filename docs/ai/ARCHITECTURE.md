@@ -173,6 +173,41 @@ to tell a refusal from a block from a timeout, which are three different next
 moves. Anything that fails either gate falls back to the class-name-only form
 unchanged.
 
+An HTTP failure adds its status the same way: `…:HTTP_ERROR:403`. The number is
+taken from the Response's own `status` and re-checked as an integer in 100..599
+by the error's constructor — never parsed back out of a message, which is
+provider-influenced text. A status is a number, so it cannot carry a URL, a
+header or a body no matter what the server sent.
+
+## Rendering: two ways in, one set of gates
+
+The isolated renderer is reachable two ways, and both pass through the same
+route gates in one shared implementation — https, officiality CONFIRMED,
+routeClass OFFICIAL_DOCS, a non-empty path prefix, and a segment-bounded match
+of the url against it.
+
+- **As an upgrade**, when a static fetch SUCCEEDED but returned an SPA shell:
+  substantial HTML, almost no text.
+- **On refusal**, when the static request was declined by `401`, `403` or
+  `429` — refusals a real browser session frequently satisfies. Without this,
+  a site that declines ordinary clients made its own official docs permanently
+  unreadable, and the tool built for that page could never be asked.
+
+The refusal set is deliberately narrow. `404` is an absent page and rendering
+does not invent one; ordinary 5xx means the server is broken and a second,
+costlier request is not a fix; `503` is excluded for that reason rather than
+treated as a refusal. Everything that never reached a server — a blocked
+address, a DNS failure, a timeout, a malformed URL — carries no status at all
+and so cannot open this path even in principle.
+
+Nothing else differs. Same isolated child process, scrubbed environment,
+deny-by-default egress, cross-origin and reserved-IP blocking, one navigation,
+no clicks or forms or logins or downloads, bounded time and body, zero retry.
+The fallback takes its own source-open reservation exactly as the upgrade does,
+so it is one visible attempt against the normal budget and never a hidden extra.
+No user agent is spoofed and no anti-bot evasion is added; if a render fails,
+the candidate is abandoned.
+
 The trace's `reason_code` stays a closed Postgres enum and keeps recording
 `PROVIDER_ERROR` for fetch failures. Widening it would need a migration for
 detail that already reaches the owner through the terminal reason.

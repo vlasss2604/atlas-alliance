@@ -185,12 +185,16 @@ Abbreviated PUMP position:
   answered with a non-2xx status. Not `BLOCKED_ADDRESS`, which also proves the
   tunnel was genuinely off and the window genuinely open. The first run's reason
   predates the fix and stays unknowable.
-- **Next blocker: the renderer is unreachable.** It exists for exactly this case
-  and is enabled for confirmed OFFICIAL_DOCS routes, but the render gate reads
-  the byte and text length of an ALREADY-FETCHED document — so it is an upgrade
-  path for a successful fetch, never a fallback for a refused one. Generic, not a
-  Pump.fun quirk. Adding a render-on-refusal branch is an undecided design
-  question with real cost. See `PUMP_CASE.md`.
+- **Render-on-refusal exists now.** A static request declined by `401`, `403`
+  or `429` on an already renderer-eligible OFFICIAL_DOCS route attempts
+  exactly one isolated render, on its own source-open reservation. `404`,
+  ordinary 5xx (503 included), and every failure that never reached a server are
+  excluded. Same renderer, same gates, no evasion, zero retry. The failure
+  string also carries the status now — `…:HTTP_ERROR:403` — taken from the
+  Response, never parsed from a message. See `ARCHITECTURE.md`.
+- **Untested against the live page.** `pump.fun` was not re-run in that task, so
+  whether its refusal is one of the three statuses, and whether a render would
+  then succeed, is unknown.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

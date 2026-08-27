@@ -70,7 +70,10 @@ export type RenderDenialReason =
   | "NOT_OFFICIAL_DOCS"
   | "NO_PATH_PREFIX"
   | "URL_OUTSIDE_PREFIX"
-  | "NO_STATIC_SHORTFALL";
+  | "NO_STATIC_SHORTFALL"
+  // The static request failed for a reason no browser would change: an
+  // absent page, a broken server, or a failure that never reached one.
+  | "NOT_A_RENDERABLE_REFUSAL";
 
 export type RenderEligibility =
   | { eligible: true; confirmedHost: string; matchedPathPrefix: string }
@@ -124,22 +127,38 @@ export interface RenderEligibilityInput {
 // Every condition the owner required, evaluated in one place so no caller
 // can satisfy a subset. Ordinary search candidates never reach this with a
 // CONFIRMED/OFFICIAL_DOCS route, so they are denied by construction.
-export function evaluateRenderEligibility(input: RenderEligibilityInput): RenderEligibility {
-  if (!input.rendererEnabled) return { eligible: false, reason: "RENDERER_DISABLED" };
-  if (!isHttps(input.url)) return { eligible: false, reason: "NOT_HTTPS" };
-  if (input.route.officiality !== "CONFIRMED") return { eligible: false, reason: "NOT_CONFIRMED" };
-  if (input.route.routeClass !== "OFFICIAL_DOCS") {
+// The route and transport gates, shared verbatim by both ways in. Every
+// condition the owner required lives here, so no caller can satisfy a
+// subset and no second copy can drift away from this one.
+function routeEligibility(
+  url: string,
+  route: ResolvedSourceRoute,
+  rendererEnabled: boolean,
+): RenderEligibility {
+  if (!rendererEnabled) return { eligible: false, reason: "RENDERER_DISABLED" };
+  if (!isHttps(url)) return { eligible: false, reason: "NOT_HTTPS" };
+  if (route.officiality !== "CONFIRMED") return { eligible: false, reason: "NOT_CONFIRMED" };
+  if (route.routeClass !== "OFFICIAL_DOCS") {
     return { eligible: false, reason: "NOT_OFFICIAL_DOCS" };
   }
-  const prefix = input.route.matchedPathPrefix;
+  const prefix = route.matchedPathPrefix;
   if (typeof prefix !== "string" || prefix.length === 0) {
     return { eligible: false, reason: "NO_PATH_PREFIX" };
   }
-  if (!pathWithinPrefix(pathOf(input.url), prefix)) {
+  if (!pathWithinPrefix(pathOf(url), prefix)) {
     return { eligible: false, reason: "URL_OUTSIDE_PREFIX" };
   }
-  const host = hostOf(input.url);
+  const host = hostOf(url);
   if (!host) return { eligible: false, reason: "NOT_HTTPS" };
+  return { eligible: true, confirmedHost: host, matchedPathPrefix: prefix };
+}
+
+// Every condition the owner required, evaluated in one place so no caller
+// can satisfy a subset. Ordinary search candidates never reach this with a
+// CONFIRMED/OFFICIAL_DOCS route, so they are denied by construction.
+export function evaluateRenderEligibility(input: RenderEligibilityInput): RenderEligibility {
+  const route = routeEligibility(input.url, input.route, input.rendererEnabled);
+  if (!route.eligible) return route;
   // Static-first: rendering is the expensive, higher-risk path and only
   // runs when the cheap one demonstrably failed.
   if (
@@ -150,7 +169,49 @@ export function evaluateRenderEligibility(input: RenderEligibilityInput): Render
   ) {
     return { eligible: false, reason: "NO_STATIC_SHORTFALL" };
   }
-  return { eligible: true, confirmedHost: host, matchedPathPrefix: prefix };
+  return route;
+}
+
+// THE STATUSES A BROWSER PLAUSIBLY ANSWERS, and no others.
+//
+// 401, 403 and 429 are the server declining to serve THIS client — a
+// refusal a real browser session frequently satisfies, which is the whole
+// reason the renderer exists. Everything else is excluded on purpose:
+//
+//   404  the page is absent, and rendering does not invent one
+//   5xx  the server is broken; a second, costlier request is not a fix
+//   410  gone is gone
+//
+// 503 is deliberately NOT here. It is an ordinary server-side failure and
+// treating it as a refusal would spend a render on every overloaded host.
+// Nothing in the existing architecture or tests justifies it, and the
+// narrow set is the one that can be defended.
+export const RENDER_ON_REFUSAL_STATUSES: ReadonlySet<number> = new Set([401, 403, 429]);
+
+export interface RefusalRenderEligibilityInput {
+  url: string;
+  route: ResolvedSourceRoute;
+  rendererEnabled: boolean;
+  // The trusted numeric status from the refused response, or null when the
+  // failure was not an HTTP response at all.
+  httpStatus: number | null;
+}
+
+// The second way in: the static request was REFUSED, so there is no
+// document to measure and the shortfall test cannot apply. Everything else
+// is identical — same route gates, same host, same prefix, same renderer.
+//
+// A refusal is not a licence. Only the statuses above open this path, and
+// only for a route already confirmed as this project's official docs; a
+// blocked address, a DNS failure, a timeout or a malformed URL carries no
+// status at all and therefore cannot reach it.
+export function evaluateRefusalRenderEligibility(
+  input: RefusalRenderEligibilityInput,
+): RenderEligibility {
+  if (input.httpStatus === null || !RENDER_ON_REFUSAL_STATUSES.has(input.httpStatus)) {
+    return { eligible: false, reason: "NOT_A_RENDERABLE_REFUSAL" };
+  }
+  return routeEligibility(input.url, input.route, input.rendererEnabled);
 }
 
 // ---- in-flight network policy ----------------------------------------

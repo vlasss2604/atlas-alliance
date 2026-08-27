@@ -74,14 +74,33 @@ export const CONTENT_FETCH_FAILURE_REASONS = [
 
 export type ContentFetchFailureReason = (typeof CONTENT_FETCH_FAILURE_REASONS)[number];
 
+// A status code is safe to keep and safe to show, and it is the one detail
+// that turns "the server refused us" into something actionable: 403 and 429
+// are refusals a browser often satisfies, 404 is an absent page and no
+// amount of rendering invents one.
+//
+// TRUSTED NUMERIC ONLY. It is set from the Response's own `status` — never
+// parsed back out of a message, which is provider-influenced text. The
+// constructor re-checks the range so a caller cannot smuggle anything else
+// through, and anything that is not an integer in 100..599 is dropped to
+// null rather than kept and hoped about.
+function coerceHttpStatus(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isInteger(value)) return null;
+  return value >= 100 && value <= 599 ? value : null;
+}
+
 export class ContentFetchError extends Error {
+  readonly httpStatus: number | null;
+
   constructor(
     public readonly reason: ContentFetchFailureReason,
     message: string,
     public readonly url: string,
+    httpStatus?: number,
   ) {
     super(message);
     this.name = "ContentFetchError";
+    this.httpStatus = coerceHttpStatus(httpStatus);
   }
 }
 
@@ -559,10 +578,12 @@ export function createContentFetcher(
       const raw = await fetchWithRedirects(url, resolved, isAddressBlocked);
 
       if (raw.status < 200 || raw.status >= 300) {
+        // The status travels as a number beside the message, not inside it.
         throw new ContentFetchError(
           "HTTP_ERROR",
           `HTTP ${raw.status} for ${raw.finalUrl}`,
           url,
+          raw.status,
         );
       }
 

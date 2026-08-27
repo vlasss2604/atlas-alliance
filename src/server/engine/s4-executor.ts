@@ -47,7 +47,7 @@ import {
   persistFactLocators,
   validateFactLocators,
 } from "./documentary-locator-store";
-import { evaluateRenderEligibility } from "./rendered-docs-policy";
+import { evaluateRefusalRenderEligibility, evaluateRenderEligibility } from "./rendered-docs-policy";
 import {
   renderedDocsAvailable,
   renderedDocsEnabled,
@@ -341,7 +341,20 @@ const SAFE_FAILURE_DETAILS: ReadonlySet<string> = new Set<string>(CONTENT_FETCH_
 
 function safeFailureDetail(e: unknown): string | null {
   if (!(e instanceof ContentFetchError)) return null;
-  return SAFE_FAILURE_DETAILS.has(e.reason) ? e.reason : null;
+  if (!SAFE_FAILURE_DETAILS.has(e.reason)) return null;
+  // The status is already a trusted integer — the class coerced it out of
+  // the Response and refuses anything else — so appending it adds
+  // actionable detail without widening what may be said.
+  return e.httpStatus === null ? e.reason : `${e.reason}:${e.httpStatus}`;
+}
+
+// The same two gates, returning the typed facts a caller may branch on
+// rather than a string it would have to parse. Nothing here is derived
+// from a message.
+function safeFetchFailure(e: unknown): { reason: string; httpStatus: number | null } | null {
+  if (!(e instanceof ContentFetchError)) return null;
+  if (!SAFE_FAILURE_DETAILS.has(e.reason)) return null;
+  return { reason: e.reason, httpStatus: e.httpStatus };
 }
 
 function safeFailureReason(label: string, e: unknown): string {
@@ -367,11 +380,24 @@ function classifyTraceReasonCode(e: unknown): "MODEL_INPUT_OVERSIZED" | "TOKEN_C
 async function callProvider<T>(
   label: string,
   fn: () => Promise<T>,
-): Promise<{ ok: true; value: T } | { ok: false; reason: string; reasonCode: ReturnType<typeof classifyTraceReasonCode> }> {
+): Promise<
+  | { ok: true; value: T }
+  | {
+      ok: false;
+      reason: string;
+      reasonCode: ReturnType<typeof classifyTraceReasonCode>;
+      fetchFailure: { reason: string; httpStatus: number | null } | null;
+    }
+> {
   try {
     return { ok: true, value: await fn() };
   } catch (e) {
-    return { ok: false, reason: safeFailureReason(label, e), reasonCode: classifyTraceReasonCode(e) };
+    return {
+      ok: false,
+      reason: safeFailureReason(label, e),
+      reasonCode: classifyTraceReasonCode(e),
+      fetchFailure: safeFetchFailure(e),
+    };
   }
 }
 
@@ -1353,6 +1379,58 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         });
         if (!fetchResult.ok) {
           lastFetchFailureReason = fetchResult.reason;
+          // RENDER ON REFUSAL.
+          //
+          // Rendering used to be reachable only as an upgrade to a fetch
+          // that had already succeeded, which left a page that refuses
+          // ordinary clients permanently unreadable — the renderer exists
+          // for exactly that page and could never be asked.
+          //
+          // This is the same renderer, the same route gates, the same
+          // host and prefix, and the same one-navigation isolated child
+          // process. What differs is only that no document exists to
+          // measure, so the static-shortfall test is replaced by a
+          // narrow, code-owned set of refusal statuses. A blocked
+          // address, a DNS failure, a timeout or a malformed URL carries
+          // no status at all and cannot reach here.
+          const refusal = evaluateRefusalRenderEligibility({
+            url,
+            route: preFetchRoute,
+            rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
+            httpStatus: fetchResult.fetchFailure?.httpStatus ?? null,
+          });
+          if (refusal.eligible) {
+            // Its own reservation, exactly like the upgrade path. The
+            // refused static request spent nothing, and no ceiling moves.
+            const refusalReserved = await reserveJobBudget(
+              deps.db,
+              ctx.jobId,
+              "sourceOpens",
+              1,
+              ctx.budget.maxSourceOpens,
+            );
+            if (refusalReserved) {
+              spent.sourceOpens += 1;
+              try {
+                const rendered = await resolveRenderedDocsFetcher().render(url, {
+                  confirmedHost: refusal.confirmedHost,
+                  matchedPathPrefix: refusal.matchedPathPrefix,
+                });
+                // Honest provenance: the static request was refused, so
+                // there was no static text — not a shortfall, an absence.
+                rendered.staticTextLength = 0;
+                fetchedDocs.push(rendered);
+                observations.add("DOCS_RENDERED_AFTER_REFUSAL");
+                continue;
+              } catch {
+                // Fail closed and stop. One attempt, no retry — a failed
+                // render is never evidence and never fails the attempt.
+                observations.add("DOCS_RENDER_AFTER_REFUSAL_FAILED");
+              }
+            } else {
+              observations.add("DOCS_RENDER_SKIPPED_BUDGET");
+            }
+          }
           continue; // typed/unexpected fetch failure — try the next candidate
         }
         // Bounded, safe-to-persist observability: WHICH payload kinds were
