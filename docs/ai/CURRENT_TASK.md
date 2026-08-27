@@ -4,63 +4,80 @@
 
 ## NONE — awaiting owner direction
 
-Pre-response render failures are now classified. Written up in `ARCHITECTURE.md`,
-"Rendering: two ways in, one set of gates". Observability only — no navigation
-behaviour changed.
+The classified re-run returned **`NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`**
+— branch C. Analysed offline; no retry, no network call, nothing persisted.
 
-### What changed
+### What the classifier bought
 
-A navigation that never completed is its own stage, **`NAVIGATION_FAILED`**,
-carrying its own closed diagnostic:
+Two hypotheses retired on its first outing, one of them mine:
 
-| diagnostic | signal it rests on |
+- **Not `NAVIGATION_TIMEOUT`.** Playwright's typed `TimeoutError` did not fire,
+  so the `networkidle`-mismatch reading proposed last round is **refuted for
+  this observation**. It stays a plausible generic concern for polling pages;
+  it is not what happened here, and it should not be "fixed" on the strength of
+  a guess that has now been tested and failed.
+- **Not `BLOCKED_BY_ROUTE_POLICY`.** Our own containment did not abort a
+  main-frame navigation, so no cross-host redirect was refused by us. The proof
+  channel was available — production runs real Playwright, which exposes
+  `isNavigationRequest`, `frame` and `mainFrame` — so this is a finding, not a
+  missing API. Residual: had Chromium classified the request as something other
+  than a main-frame navigation, the abort would not have been recorded.
+
+The navigation threw at transport level, and the closed signal says no more.
+`net::ERR_*` codes live only in the exception message and are deliberately not
+parsed.
+
+### The branch is NOT exhausted — and this is the next task
+
+`startEgressProxy` records **every decision it makes**, with a closed,
+code-owned `EgressDenialReason`: `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
+`BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET`. The isolated fetcher opens
+the proxy, holds the handle, and **drops the entire log in its `finally`** —
+nothing in `src/` or `scripts/` reads `.decisions` at all.
+
+Fourth instance of the same defect: information produced and discarded. It
+discriminates exactly what is now unknown:
+
+| proxy record | meaning |
 |---|---|
-| `NAVIGATION_TIMEOUT` | Playwright's typed `TimeoutError`, matched on a name pinned as a constant |
-| `BLOCKED_BY_ROUTE_POLICY` | **our own route handler** recorded aborting the main-frame navigation |
-| `UNCLASSIFIED_NAVIGATION_ERROR` | everything else, honestly |
+| `DNS_FAILED` | resolution failed for the confirmed host |
+| `BLOCKED_ADDRESS` | resolved into a reserved range — the SSRF guard fired |
+| `HOST_NOT_CONFIRMED` | a CONNECT elsewhere, refused by the proxy |
+| `NOT_HTTPS` / `MALFORMED_TARGET` | malformed or downgraded target |
+| **no denial at all** | the proxy allowed it; the failure was downstream |
 
-Previously all three fell into the generic `RENDER_FAILED`, beside failures
-happening nowhere near the network — and the three call for opposite next
-actions: wait longer, confirm a different host, or nothing at all.
+Even the empty case is informative — it separates *we refused it* from *the
+network failed after we allowed it*.
 
-`RENDER_FAILED` keeps its meaning and is now genuinely elsewhere: context
-creation, text extraction, anything outside the navigation itself.
+**Safety constraint:** an allow-decision carries `host`, `port` and `address`,
+and every decision carries a raw `target`. None of that may travel. Only the
+closed denial reason and counts are safe. Fully offline-testable: the proxy has
+an injectable `lookup`, so every branch is deterministic without a network.
 
-### What it deliberately does not do
+**A concrete hypothesis it would settle immediately.** MantaRay's fake-IP DNS
+returns `198.18.0.0/15`, which safe-http correctly refuses. A stale cached entry
+surviving the tunnel going down would make the proxy deny with `BLOCKED_ADDRESS`
+while the browser reported only a generic connection failure — precisely what was
+observed. The procedure's `ipconfig /flushdns` step exists for this. Unverified.
 
-**It never infers containment from a generic failure.** The abort is recorded at
-the moment the route handler makes the decision, and only when the request was a
-navigation belonging to the page's own main frame. A driver that cannot prove
-that claims nothing — absence of proof is not proof, and a test pins it.
+### Another live window is not justified yet
 
-**It does not parse `net::ERR_*`.** Chromium's transport codes live only inside
-the exception message, which is provider-influenced text. There is no typed path
-to them, so that case stays unclassified — which still separates it from the
-other two by elimination.
+Same reasoning that has now paid off three times: a window spent on a failure
+that cannot explain itself buys one bit at full price. Surface the proxy log
+first — it is offline, cheap, and would either name the cause outright or prove
+the failure was genuinely downstream of everything we control.
 
-**A contract test pins the timeout name** against the installed Playwright, so a
-future rename fails there rather than silently degrading every timeout to
-unclassified during a live window.
+If the owner would rather spend a window regardless, the honest cheapest version
+is to run `ipconfig /flushdns` and confirm `fees.pump.fun` resolves to a public
+address **before** invoking the inspection — which tests the stale-DNS
+hypothesis without any new code.
 
-### Also
+### Unchanged
 
-The inspection script printed only the stage, which is how a window came back
-saying `RENDER_FAILED` and nothing else. It now prints the sub-reason beside it —
-closed-set values only, no message, url, host or stack.
-
-### Reported separately, as instructed — not fixed
-
-**`waitUntil: "networkidle"` is a poor fit for a live dashboard.** A page that
-polls or streams may never reach two seconds of network silence, so the
-navigation can time out while the document is perfectly readable. That is a
-plausible reading of the `fees.pump.fun` failure, and the next window will now
-say so outright if it is one.
-
-Changing it is a navigation-behaviour decision — `domcontentloaded` or `load`
-trades settled-DOM completeness for reachability — and it was explicitly out of
-scope here. **Get one classified observation first**: if the diagnostic comes
-back `NAVIGATION_TIMEOUT`, the case for changing it is evidence rather than a
-guess.
+Actor → acquisition remains unresolved; the page is still unread, so the
+address's absence from it is **not** established. `fees.pump.fun` stays
+CONFIRMED and unclassified — classifying a page nobody has read is the inversion
+inspection exists to prevent.
 
 ### Standing boundaries
 

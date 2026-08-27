@@ -917,6 +917,64 @@ The address may or may not appear on it; failure to read a source is not
 evidence that the information is absent. Route confirmation grants the
 opportunity to read, and says nothing about what is there.
 
+### Re-run with the classifier: `NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`
+
+Owner-executed once more, 2026-08-28, MantaRay off, after the navigation stage
+was split. Full output: CONFIRMED / null / `/`, then
+`INSPECTION FAILED: NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`. Still no
+page content. Nothing persisted — Evidence 401, `sources` 62 with none naming the
+host, the route row ACTIVE and unclassified, both `pump.fun` routes unchanged.
+
+**Two hypotheses are now retired, one of them mine.**
+
+- **Not a timeout.** `NAVIGATION_TIMEOUT` was not returned, so Playwright's typed
+  `TimeoutError` did not fire. The `networkidle`-mismatch reading proposed last
+  round is **refuted for this observation** — it remains a plausible generic
+  concern for polling pages, and it is not what happened here.
+- **Not our containment.** `BLOCKED_BY_ROUTE_POLICY` was not returned, so
+  `context.route` did not abort a main-frame navigation — no cross-host redirect
+  was refused by us. The proof channel was genuinely available: production runs
+  real Playwright, which exposes `isNavigationRequest`, `frame` and `mainFrame`,
+  so this negative is a finding rather than a missing API. The narrow residual:
+  had Chromium classified the request as something other than a main-frame
+  navigation, the abort would not have been recorded.
+
+So the navigation threw at transport level, and the closed signal says no more.
+
+### The branch is NOT exhausted — one typed local signal is still discarded
+
+`startEgressProxy` records **every decision it makes**, and a denial carries a
+closed, code-owned `EgressDenialReason`: `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
+`BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET`. The isolated fetcher opens
+the proxy, holds the handle, and **throws the whole log away in its `finally`** —
+nothing in `src/` or `scripts/` reads `.decisions` at all.
+
+That is the same shape as the three defects already closed: information produced
+and discarded. And it discriminates precisely what is now unknown:
+
+| proxy record | meaning |
+|---|---|
+| `DNS_FAILED` | resolution failed for the confirmed host |
+| `BLOCKED_ADDRESS` | it resolved into a reserved range — the SSRF guard fired |
+| `HOST_NOT_CONFIRMED` | a CONNECT to another host, refused by the proxy |
+| `NOT_HTTPS` / `MALFORMED_TARGET` | a malformed or downgraded target |
+| **no denial at all** | the proxy allowed it and the failure was downstream — a genuine transport error |
+
+Even the empty case is informative: it separates *we refused it* from *the
+network failed after we allowed it*.
+
+**Safety constraint on surfacing it:** an allow-decision carries `host`, `port`
+and `address`, and every decision carries a raw `target`. None of that may
+travel. Only the closed denial reason and counts are safe.
+
+**A concrete, checkable hypothesis this would settle.** MantaRay's fake-IP DNS
+returns addresses in `198.18.0.0/15`, which safe-http correctly refuses. A stale
+cached entry surviving the tunnel going down would make the proxy deny with
+`BLOCKED_ADDRESS` while the browser reported only a generic connection failure —
+producing exactly what was observed. The live procedure's `ipconfig /flushdns`
+step exists for this. Unverified, and the proxy log would confirm or refute it
+immediately.
+
 ### Second attempt: the page refuses the fetcher
 
 Job `cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, 2026-08-27T15:06:08Z, run with the

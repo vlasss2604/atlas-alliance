@@ -391,6 +391,25 @@ Abbreviated PUMP position:
 - **Navigation behaviour is unchanged.** `waitUntil`, the goto timeout, the
   one-attempt rule, route scope, allowed hosts and resource policy were all left
   exactly as they were — this was observability only.
+- **The re-run returned `NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`**
+  (2026-08-28). The classifier earned itself back immediately by **retiring two
+  hypotheses**: not `NAVIGATION_TIMEOUT`, so the `networkidle` mismatch proposed
+  the round before is refuted for this observation; and not
+  `BLOCKED_BY_ROUTE_POLICY`, so our own containment did not abort a main-frame
+  navigation — the proof channel was available, since production Playwright
+  exposes the frame API. The navigation threw at transport level.
+- **The branch is not exhausted: one typed local signal is still discarded.**
+  `startEgressProxy` records every decision with a closed `EgressDenialReason`
+  (`NOT_HTTPS`, `HOST_NOT_CONFIRMED`, `BLOCKED_ADDRESS`, `DNS_FAILED`,
+  `MALFORMED_TARGET`), and **nothing in `src/` or `scripts/` reads
+  `.decisions`** — the isolated fetcher closes the proxy and drops the log. Even
+  an empty log is informative: it separates "we refused it" from "the network
+  failed after we allowed it". Only the closed reason and counts are safe to
+  surface; the raw `target`, `host` and `address` are not.
+- **A checkable hypothesis it would settle:** a stale MantaRay fake-IP DNS entry
+  (`198.18.0.0/15`) surviving the tunnel going down would make the proxy deny
+  with `BLOCKED_ADDRESS` while the browser reported only a generic connection
+  failure — exactly what was observed. Unverified.
 - **`fees.pump.fun` stays unread and unclassified.** Nothing about its content
   is known, and the address's absence from it is **not** established — failure
   to read a source is not evidence of absence.
