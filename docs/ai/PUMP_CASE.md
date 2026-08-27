@@ -859,6 +859,74 @@ drops Windows plumbing a browser may touch (`ProgramFiles`, `ProgramData`,
 `CommonProgramFiles`, `DriverData`), but that same allowlist was in force for the
 render that succeeded. Recorded as an open question, not a finding.
 
+### Fourth attempt: the browser is moved off the page
+
+Job `d4da299a-4e66-4fe2-87fc-88ce29050548`, 2026-08-27T17:58:12Z, owner-executed
+with MantaRay off. Terminal reason, in full:
+
+```
+CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR:403; source-route
+observations: CLASS_REQUIRES_CONFIRMED_ROUTE:GOVERNANCE,
+DOCS_RENDER_AFTER_REFUSAL_FAILED:FINAL_URL_OUTSIDE_ROUTE
+```
+
+**The static refusal is `403` again**, reproducing the third attempt exactly.
+The scope gate passed, the refusal path opened, and the render took its own
+reservation: DB `sourceOpensReserved` 2, reported `spent.sourceOpens` 1.
+
+**The browser launched and navigated this time.** No `BROWSER_LAUNCH_FAILED`.
+Together with the offline self-test, that retires the previous window's launch
+failure as transient — it is not a standing defect and was never about the site.
+
+**And the render ended outside the confirmed route.** This is the first time
+ATLAS has observed what `pump.fun` does with a browser, and the answer is that
+it does not leave it on `/pump-token`.
+
+**The final URL was on `pump.fun`, outside `/pump-token`** — derived from the
+code, not assumed. Every request, the top-level navigation included, passes
+`subresourceAllowed`, which blocks any host other than the confirmed one; a
+cross-host redirect would therefore have been aborted and surfaced as a thrown
+navigation (`RENDER_FAILED`), not as this reason. `navigationAllowed` then checks
+https, host equality and the path prefix, so with the host necessarily matching,
+**the prefix is the only condition left to fail**. Whether the move was an HTTP
+redirect or a client-side navigation after load is not distinguishable from what
+was captured, and neither is claimed.
+
+**The rendered HTTP status is not available, by design.** The route check runs
+before the status check: landing somewhere never confirmed is a containment
+failure, and reporting a status for a page we were not allowed to read would be
+a statement about the wrong document. `FINAL_URL_OUTSIDE_ROUTE` is the complete
+and correct answer here — the browser did not arrive at the page, so no status
+about the page exists to report.
+
+**What makes this sharp: the same URL under the same prefix rendered
+successfully three days earlier.** The owner-inspection render that established
+this page as the project's own token-economics documentation ran against the
+route row `{domain: pump.fun, pathPrefix: /pump-token}` — the inspection gate
+requires a non-empty prefix and refuses an already-classified route, and that
+unclassified `/pump-token` row is the only one that satisfies both. So the
+earlier success was **not** the result of a broader prefix. Same URL, same
+prefix, rendered on 2026-08-24, moved off-route on 2026-08-27.
+
+**Why is not established.** A site change, headless-specific handling and
+intermittent behaviour are all consistent with one observation, and one
+observation does not choose between them. Do not write it down as bot
+mitigation.
+
+**A consequence worth knowing: that page can no longer be inspected.**
+`evaluateInspectionEligibility` refuses an already-classified route
+(`ALREADY_CLASSIFIED`), and `/pump-token` is now `OFFICIAL_DOCS`. Promoting the
+route closed the non-evidentiary tool that discovered it. Reported, not changed.
+
+**Nothing was written.** Zero Evidence for the job, no new `sources` row (newest
+still 2026-08-24), Evidence table still 401 rows with nothing newer than
+2026-08-24, `MECHANISM_SPEC` still 112 rows and SOCIAL / CLAIMED only, S5
+`INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. Six trace events ending
+`FETCH_FAILED / PROVIDER_ERROR`. The extractor was never reached; the single
+`MODEL_CALL_ATTEMPTED` is the script's fixture query proposer, which calls no
+model. Four windows have now been spent and the model has still never seen the
+page.
+
 ### Why the official rows all landed on DESTINATION
 
 Investigated through the trace. **The routing is not the cause, and there is no

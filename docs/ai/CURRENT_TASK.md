@@ -4,57 +4,58 @@
 
 ## NONE — awaiting owner direction
 
-The last correctness gap in the rendered-docs path is closed. Written up in
-`ARCHITECTURE.md`, "Rendering: two ways in, one set of gates".
+The fourth authorized `pump.fun` window was executed by the owner and analysed
+offline. No further live call was made.
 
-### What changed
+### What the window established
 
-**A rendered page must have answered with a success status.** A browser does not
-throw on `403` — it receives the refusal page, renders it, and reports success —
-so the renderer would have handed a server's "access denied" HTML to extraction
-as though it were the page we asked for. `page.goto()` returns the Response that
-says otherwise, and it was being discarded although the adapter's own type
-already declared it.
+`pump.fun` refuses the static fetcher with **`403`** again, reproducing the third
+attempt exactly. The scope gate passed and the refusal path opened correctly.
 
-It is read now. A non-success status fails closed as `HTTP_ERROR` carrying the
-trusted number, surfacing as `…:HTTP_ERROR:403`. The number comes from
-`Response.status()` and from nowhere else — never from markup, a title, a body, a
-header or an error string — so a page claiming `200 OK` in its own text changes
-nothing, and a page that merely discusses `403` is still a document.
+**The browser launched and navigated.** No `BROWSER_LAUNCH_FAILED` — which,
+together with the offline self-test, retires the previous window's launch failure
+as transient rather than a standing defect.
 
-The success rule `200..299` is now **one shared predicate** used by both the
-static fetcher and the renderer. Which statuses yield a document is a property of
-HTTP, not of the transport, and two copies would eventually disagree. `204` sits
-inside that class and renders to an empty document, which cannot become evidence.
+**And the render ended outside the confirmed route.** This is the first time
+ATLAS has observed what `pump.fun` does with a browser: it does not leave it on
+`/pump-token`. The final URL was on `pump.fun` but outside the prefix — derived
+from the code, since a cross-host redirect would have been aborted as a thrown
+navigation instead. Whether the move was an HTTP redirect or a client-side
+navigation is not distinguishable from what was captured.
 
-Redirects are unchanged: Playwright returns the last response, and the route
-check still runs first, because landing outside the confirmed route is a
-containment failure and the more serious statement. A navigation with no Response
-at all is `NO_NAVIGATION_RESPONSE` — unverifiable is not the same as fine.
+Nothing was written: zero Evidence, no `sources` row, `MECHANISM_SPEC` unchanged
+at 112 SOCIAL/CLAIMED rows, S5 `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. The
+extractor was never reached. Details in `PUMP_CASE.md`, "Fourth attempt".
 
-Nothing was relaxed, and the renderer self-test still passes offline.
+### The sharp part
 
-### The next intended live action, unchanged
+**The same URL under the same prefix rendered successfully on 2026-08-24.** The
+inspection gate requires a non-empty prefix and refuses an already-classified
+route, so that render used the `/pump-token` row and not a broader one. The
+earlier success was not an artefact of scope.
 
-**The `pump.fun` MECHANISM_SPEC re-extraction**, exactly as prepared:
+**Why it now moves off-route is not established.** A site change,
+headless-specific handling and intermittent behaviour all fit one observation
+equally well, and one observation does not choose between them.
 
-```
-npx tsx scripts/alpha-acquire-url.ts \
-  --url=https://pump.fun/pump-token \
-  --component=MECHANISM_SPEC \
-  --step=3 \
-  --actor=owner \
-  --project=pump_fun
-```
+### Decisions the owner may want to make
 
-**Run `npx tsx scripts/renderer-selftest.ts` first, in the same session.** If it
-fails, do not open the window.
+Named, not taken. None of these were started.
 
-What is established: `pump.fun` answers `403` to the static fetcher, the scope
-gate passes, and the refusal path opens the render correctly. What is still
-untested is whether `pump.fun` serves the page to Chromium — and that question
-now has an honest answer either way. The risk flagged in the prepared run, that a
-refusal to the browser would come back looking like a successful render, is gone.
+1. **Another window changes nothing on its own.** The static path will be
+   refused with `403` and the render will move off-route again — unless the
+   behaviour is intermittent, which is exactly what is unknown. A second
+   identical run is the cheapest way to test intermittency, and it is the
+   owner's call whether that is worth a window.
+2. **The page can no longer be inspected.** `evaluateInspectionEligibility`
+   refuses an already-classified route, so the non-evidentiary tool that
+   discovered this page is now closed for it. Whether that gate should admit a
+   classified route for re-inspection is a real design question.
+3. **The documentary line may simply be closed for this page.** The corpus
+   already contains the claim sentence under `DESTINATION`, and the missing
+   bridge — the actor bound to the ACQUISITION step — was established by
+   exhaustion, not by a failure to fetch. Re-extraction was always about filing,
+   never about discovering something new.
 
 ### Standing boundaries
 

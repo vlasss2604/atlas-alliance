@@ -249,6 +249,27 @@ Abbreviated PUMP position:
   will now say so precisely, instead of reporting a successful render of the
   refusal page. That failure mode was named as an open risk in the prepared run
   and is closed.
+- **Fourth window run, 2026-08-27, job `d4da299a-…`: the browser is moved off
+  the page.** Static refusal `403` again; the render fired and ended
+  `FINAL_URL_OUTSIDE_ROUTE`. **The browser launched and navigated**, which
+  retires the previous window's launch failure as transient. The final URL was
+  on `pump.fun` but outside `/pump-token` — derived from the code, since a
+  cross-host redirect would have been aborted as a thrown navigation instead.
+  The rendered status is unavailable by design: the route check precedes the
+  status check, because a status for a page we were not allowed to read is a
+  statement about the wrong document.
+- **The same URL under the same prefix rendered successfully on 2026-08-24.**
+  The inspection gate requires a non-empty prefix and refuses a classified
+  route, so that render used the `/pump-token` row — not a broader one. Why it
+  now moves off-route is **not established**: a site change, headless-specific
+  handling and intermittent behaviour all fit one observation equally.
+- **That page can no longer be inspected.** `evaluateInspectionEligibility`
+  refuses an already-classified route, and `/pump-token` is now OFFICIAL_DOCS —
+  promoting it closed the non-evidentiary tool that discovered it. Reported, not
+  changed.
+- **Still nothing written.** Four windows spent; Evidence unchanged at 401 rows,
+  `MECHANISM_SPEC` unchanged at 112 SOCIAL / CLAIMED rows, and the model has
+  still never been shown the page.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /
