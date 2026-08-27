@@ -157,11 +157,16 @@ Abbreviated PUMP position:
   four distinct fragments from one page; no document body is stored anywhere, so
   fragments ARE the corpus. The actor appears in exactly one of them, the "Burn
   addresses" heading. Nothing anywhere places it near a buying statement.
-- **Open decision: OFFICIAL_DOCS component assignment.** All 10 official rows sit
-  at step 6 / DESTINATION, including the mechanism-specification sentence, while
-  `MECHANISM_SPEC` holds only SOCIAL evidence and is INSUFFICIENT_EVIDENCE
-  everywhere. Correctly filed that sentence could reach SUPPORTED, since its
-  officiality is CONFIRMED. Reported, not changed — see `PUMP_CASE.md`.
+- **Component assignment: investigated, no routing defect.** One document reaching
+  several components is supported and happens — that page was opened under six.
+  MECHANISM_SPEC simply never got a successful extraction of it with current
+  guidance (one pre-`evidenceGoal` attempt returned nothing; two later ones died
+  at FETCH_FAILED), while DESTINATION over-reported inside its own lane. S4's
+  wrong-component guard cannot catch that — the extractor is told the component
+  and echoes it — and it has never fired in this database.
+  The cost: all three PARTIALLY_SUPPORTED DESTINATION results rest on sets where
+  only one of three or four rows is really destination evidence. Remedy is
+  re-extraction, not row edits. No code changed. See `PUMP_CASE.md`.
 - The aggregator's OUTER instruction variant matched none of nineteen tested
   method names and is recorded UNSUPPORTED. Nothing depends on it.
 

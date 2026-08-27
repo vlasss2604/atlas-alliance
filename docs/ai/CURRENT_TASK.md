@@ -4,36 +4,37 @@
 
 ## NONE — awaiting owner direction
 
-The corpus was searched exhaustively and offline. **No actor → acquisition bridge
-exists.** Details in `PUMP_CASE.md`, "The whole official corpus, and what it does
-not contain". No code changed.
+The component-assignment investigation is done. **No generic routing defect
+exists, and no code was changed.** Details in `PUMP_CASE.md`, "Why the official
+rows all landed on DESTINATION".
 
-### What the search settled
+### What the trace showed
 
-No document body is stored anywhere — `sources` holds url/publisher/title only
-and no snapshot is populated on any of the 401 Evidence rows. Fragments *are* the
-corpus. For Pump.fun that is four distinct fragments from one page.
+One document reaching several components is supported and happened —
+`pump.fun/pump-token` was opened under six of them, and eight sources across the
+corpus produced Evidence under two to four components each. The premise that
+routing is too coarse is disproven.
 
-The actor appears in exactly one of them: the "Burn addresses" heading. A keyword
-sweep does surface the claim sentence for the address, but only through the
-`documentary_locator` column — the fragment text itself does not contain it,
-checked directly. That is locator co-occurrence, which does not count.
+What actually happened: MECHANISM_SPEC never got a successful extraction of that
+page with current guidance (its one success predates `evidenceGoal`; two later
+attempts died at `FETCH_FAILED / PROVIDER_ERROR`), while DESTINATION over-reported
+inside its own lane, returning four semantically distinct sentences under one
+label.
 
-So the gap is now confirmed by exhaustion rather than assumed.
+S4's wrong-component guard cannot catch that: the extractor is told the component
+and echoes it, so a wrong fact with the right label always passes. That guard has
+never fired in this database.
 
-### Open decision, for the owner
+### Open decisions, for the owner
 
-All 10 OFFICIAL_DOCS rows sit at step 6 / DESTINATION, including the
-mechanism-specification sentence. `MECHANISM_SPEC` meanwhile holds only SOCIAL
-evidence and is INSUFFICIENT_EVIDENCE in all 17 jobs. Correctly filed, that one
-sentence could carry MECHANISM_SPEC to SUPPORTED — its officiality is CONFIRMED,
-so the D-074 cap would not apply.
-
-Reported only; nothing was reassigned. This is a question about how extraction
-targets components, not a row edit.
+- **Re-extraction.** The supported remedy is a fresh job whose MECHANISM_SPEC work
+  item successfully fetches the page. No rows should be edited by hand.
+- **Prompt exclusions.** Passing sibling components' evidence goals to the
+  extractor as exclusions is generic and Pattern-driven, but its effect cannot be
+  proven offline. Not implemented.
 
 ### Standing boundaries
 
 - No live calls without separate authorization.
+- Do not hand-edit Evidence rows to correct a component.
 - Do not call the observed sequence a buyback or revenue-funded.
-- Do not treat one cycle as a pattern.

@@ -646,6 +646,65 @@ So the gap named last round is confirmed by exhaustion, not assumed: **the
 documents bind the address to burning and describe the buying, and never join
 the two.**
 
+### Why the official rows all landed on DESTINATION
+
+Investigated through the trace. **The routing is not the cause, and there is no
+generic routing defect.**
+
+One document reaching several components is supported and does happen:
+`pump.fun/pump-token` was opened under **six** components — DESTINATION,
+DURABILITY_BASIS, FLOW_PATH, GOVERNANCE_BASIS, MECHANISM_SPEC, NET_EFFECT — and
+across the corpus eight sources produced Evidence under two to four distinct
+components. There is no job-scoped lock claiming a URL for whichever component
+reaches it first.
+
+Two separate things went wrong instead:
+
+**1. MECHANISM_SPEC never got a successful extraction of that page with current
+guidance.** Its only successful fetch-and-extract ran 2026-08-24T12:21 UTC —
+before `evidenceGoal` shipped at 14:02 UTC — and returned nothing. Both later
+attempts, on 2026-08-26, died at `FETCH_FAILED / PROVIDER_ERROR` and never
+reached the model. So the sentence's absence from MECHANISM_SPEC is a retrieval
+reliability outcome, not a judgement one.
+
+**2. DESTINATION over-reported inside its own lane.** Its extractions ran
+20:52–21:55 UTC, after evidenceGoal shipped, and returned four semantically
+distinct sentences all labelled DESTINATION — a specification, a durability
+statement, an execution-record claim, and the one genuine destination fact.
+
+### Why the existing guard cannot catch this
+
+S4 discards any fact whose (step, component) differs from the requested one
+(`REJECTED_WRONG_COMPONENT`). That guard has **never fired in this database** —
+zero rows — and by construction it cannot fire here: the extractor is *told* the
+component and echoes it, so a wrong fact carrying the right label always passes.
+The guard prevents cross-component leakage, not mislabelling within the lane.
+
+There is no deterministic fix available. Deciding whether a sentence is really
+destination evidence is a semantic judgement, and the architecture deliberately
+keeps semantic judgement out of the structural layers — S5 is structural, and
+S6's lexical classifiers never decide existence.
+
+### The correctness cost, measured
+
+All three PARTIALLY_SUPPORTED DESTINATION results rest on supporting sets where
+only **one of three or four** rows is actually destination evidence. The
+component's status is partly carried by evidence that belongs elsewhere.
+
+And `MECHANISM_SPEC` holds only SOCIAL / CLAIMED evidence, which establishes
+nothing ever (D-074), so it is INSUFFICIENT_EVIDENCE in all 17 jobs.
+
+### Remedy
+
+Re-extraction through the normal pipeline — a fresh job whose MECHANISM_SPEC work
+item actually fetches the page. No rows were edited and none should be: where a
+row is filed is an output of extraction, not a field to correct by hand.
+
+One option was considered and **not** taken: passing sibling components' evidence
+goals into the extractor prompt as exclusions. It is generic and Pattern-driven,
+but it is a model-behaviour change whose effect cannot be proven offline — a test
+could show the prompt contains the text, never that assignment improves. Owner
+decision, not a silent edit.
 ### A component misassignment worth deciding on (reported, NOT changed)
 
 All 10 OFFICIAL_DOCS rows sit at step 6 / DESTINATION. Only fragment 2 belongs
