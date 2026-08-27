@@ -270,6 +270,25 @@ Abbreviated PUMP position:
 - **Still nothing written.** Four windows spent; Evidence unchanged at 401 rows,
   `MECHANISM_SPEC` unchanged at 112 SOCIAL / CLAIMED rows, and the model has
   still never been shown the page.
+- **Actor → acquisition: re-verified schema-wide, and still UNRESOLVED.** All 115
+  text-bearing columns were enumerated from `information_schema` and scanned. No
+  `evidence.fragment` anywhere contains the address; the one fragment naming it
+  carries it **truncated** under "Burn addresses", and the full value exists only
+  because link recovery read the href. **No single text contains both any form of
+  the address and any of `buyback`, `purchase`, `acquir…`, `treasury`, `buying`
+  or `executes`.** The acquisition vocabulary is abundant but almost entirely
+  SOCIAL/CLAIMED, which establishes nothing.
+- **The whole first-party corpus is four fragments from one URL.** All ten
+  `OFFICIAL_DOCS` rows come from `https://pump.fun/pump-token`. The closest text —
+  "a verifiable record of each daily purchase and burn" — is an existence claim
+  about records and binds no address to purchasing.
+- **`OFFICIAL_REPORT` and `GOVERNANCE` have zero rows.** Those tiers were never
+  acquired, which is absence of acquisition rather than evidence of absence.
+  `pump.fun/docs/fees` and `pump.fun/coin/GT9G…` were seen and never read — named
+  leads, not findings.
+- **"Buyback" stays impermissible for `99mRw3…`.** Unresolved, not disproven:
+  deciding it needs material ATLAS has never acquired, and the one known
+  first-party host refuses both transports.
 - **Nothing was written by the run.** Zero Evidence, no new `sources` row,
   Evidence still 401 rows with nothing newer than 2026-08-24, `MECHANISM_SPEC`
   still 112 rows and SOCIAL / CLAIMED only, S5 `INSUFFICIENT_EVIDENCE /

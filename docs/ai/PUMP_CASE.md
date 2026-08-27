@@ -646,6 +646,79 @@ So the gap named last round is confirmed by exhaustion, not assumed: **the
 documents bind the address to burning and describe the buying, and never join
 the two.**
 
+### Re-verified 2026-08-27, schema-wide, against the acquisition vocabulary
+
+Repeated independently rather than trusted, and by a stronger method: every
+text-bearing column in the database — **115 of them**, enumerated from
+`information_schema` rather than from a list someone remembered — was scanned for
+the actor address. It appears in exactly eight columns, and what they are matters:
+
+- `evidence.documentary_locator` (3) and `evidence_documentary_locators.value`
+  (3) — the recovered href, i.e. locator provenance, not the document's words;
+- `evidence.summary` (1) — a MODEL restatement, and it says *"$PUMP tokens are
+  sent to burn addresses"*: the burn role again;
+- four `onchain_*` columns — chain artifacts, not documentary material.
+
+**`evidence.fragment` is not among them.** No document fragment anywhere contains
+the full address. The only fragment naming it at all carries it **truncated** —
+`99mRw3…pm4F3c`, under the heading "Burn addresses" — which is how the page
+displays it. The full value exists in ATLAS only because link recovery read the
+href; the visible document never spells it out.
+
+**The decisive test returns nothing.** No single text, fragment or summary,
+contains both any form of the address and any of `buyback`, `buy back`,
+`purchase`, `acquir…`, `treasury`, `buying` or `executes`. Not one row.
+
+The acquisition vocabulary is abundant — `buyback` in 19 rows, `purchase` in 33,
+`buying` in 13, `wallet` in 2 — and with a single exception every one of them is
+`SOCIAL / CLAIMED` or `DATA_PROVIDER / CLAIMED`, which establishes nothing
+(D-074). The exception is fragment 3 below, and it names no address.
+
+**The entire first-party corpus is four distinct fragments from one URL**,
+`https://pump.fun/pump-token`, all `OFFICIAL_DOCS / CONFIRMED`, all filed at
+DESTINATION:
+
+1. "Half of every dollar Pump.fun earns buys $PUMP on the open market, then burns
+   it forever."
+2. "Burn addresses / 99mRw3…pm4F3c / 9jHrTC…6KVCXM"
+3. "Every burn, on-chain — A verifiable record of each daily purchase and burn,
+   settled on Solana."
+4. "As of 28 Apr 2026, 50% of revenue is programmatically locked and allocated to
+   be burned for one year."
+
+Fragment 3 is the closest any first-party text comes, and it does not close the
+gap: it asserts that a record of each daily purchase exists, which is an
+existence claim about records. It binds no address to the purchasing role.
+
+### The higher-priority tiers are empty — never acquired, not searched and found wanting
+
+Only four source classes exist in Evidence at all: `SOCIAL / CLAIMED` (308),
+`ONCHAIN_VERIFIABLE / CLAIMED` (53), `DATA_PROVIDER / CLAIMED` (30) and
+`OFFICIAL_DOCS / CONFIRMED` (10).
+
+**`OFFICIAL_REPORT` and `GOVERNANCE` have zero rows.** Priority tiers 2 and 3 of
+the search have never been populated by any run in this database. That is an
+absence of **acquisition**, not evidence of absence — the distinction this
+project already holds elsewhere as "an unread payload can never read as absence",
+and it applies with full force here.
+
+Two first-party candidates were seen and produced nothing:
+`https://pump.fun/docs/fees` (0 Evidence) and
+`https://pump.fun/coin/GT9GhUj2…` (0 Evidence). Named as leads for a future
+authorized window; neither has ever been read.
+
+### Verdict: actor → acquisition is UNRESOLVED, not disproven
+
+No authoritative bridge exists in anything ATLAS holds, established
+exhaustively. Whether one exists in material ATLAS has never acquired is a
+different question and remains open. Reaching it needs a live authorized window,
+and the one known first-party host currently refuses both transports: `403` to
+the static fetcher and an off-route move for the browser, across four windows.
+
+**The word "buyback" therefore remains impermissible for this address.**
+Concluding it from "the documents call it the burn address" plus "it bought"
+is affirming the consequent, and nothing in this round changes that.
+
 ### Second attempt: the page refuses the fetcher
 
 Job `cee22fcb-4238-4827-a1b4-6ce06f8cafa7`, 2026-08-27T15:06:08Z, run with the
