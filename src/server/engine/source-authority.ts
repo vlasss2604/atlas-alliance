@@ -256,7 +256,9 @@ export function classRequiresConfirmedRoute(sourceClass: EvidenceSourceClass): b
 // below). Never inferred from the URL, the page, the model, or the search
 // provider.
 export type RouteClass = "OFFICIAL_DOCS" | "GOVERNANCE" | "OFFICIAL_REPORT";
-const VALID_ROUTE_CLASSES: readonly RouteClass[] = ["OFFICIAL_DOCS", "GOVERNANCE", "OFFICIAL_REPORT"];
+// EXPORTED so the owner classification tool validates against THIS list
+// rather than growing a second opinion about what a route class is.
+export const VALID_ROUTE_CLASSES: readonly RouteClass[] = ["OFFICIAL_DOCS", "GOVERNANCE", "OFFICIAL_REPORT"];
 
 // `sourceType` mirrors the `sources` table's own enum
 // (OFFICIAL_DOCS/GOVERNANCE/ONCHAIN/SECURITY/RESEARCH/NEWS/OTHER) — the
@@ -413,7 +415,9 @@ export interface ResolvedSourceRoute {
   matchedPathPrefix: string | null;
 }
 
-function isValidRouteClass(value: unknown): value is RouteClass {
+// EXPORTED for the same reason: one predicate, used by the resolver that
+// reads a stored class and by the tool that writes one.
+export function isValidRouteClass(value: unknown): value is RouteClass {
   return typeof value === "string" && (VALID_ROUTE_CLASSES as readonly string[]).includes(value);
 }
 

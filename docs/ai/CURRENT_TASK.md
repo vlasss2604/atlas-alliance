@@ -4,69 +4,79 @@
 
 ## NONE — awaiting owner direction
 
-The `PROJECT_IDENTITY` confirmation tool exists and is tested. **No Raydium
-project, identity or route was created** — capability only, as instructed.
+The route classification tool exists and is tested. **No real route was
+classified** — capability only. `fees.pump.fun` is still unclassified, the two
+`pump.fun` routes are untouched, and there is still no Raydium anything.
+
+**Both blockers for project #2 are now closed.**
 
 ### What exists now
 
-`scripts/confirm-project-identity.ts`, a thin entrypoint, with the operation in
-`src/server/memory/project-identity-confirmation.ts`.
+`scripts/classify-source-route.ts`, with the operation in
+`src/server/memory/source-route-classification.ts`.
 
 ```
-npx tsx scripts/confirm-project-identity.ts \
-  --project=<slug> --chain=<chain> [--token=<address>] [--ticker=<TICKER>] --actor=<name>
+npx tsx scripts/classify-source-route.ts --route-id=<uuid> --class=<CLASS> --actor=<name>
 ```
 
-It inserts as OBSERVED — the only state the database guard permits — then walks
-to ACTIVE through the existing `promoteProjectMemoryItem`, and finally prints
-what the **production resolver** returns, failing loudly if an ACTIVE row somehow
-resolves to nothing.
+It acts only on an exact, already-ACTIVE, currently-unclassified route named by
+**id**. It cannot create a host, confirm an unconfirmed one, widen a prefix, or
+read anything — `--domain`, `--prefix` and `--project` are refused outright,
+because naming a host here would be performing the *first* owner act inside the
+second.
 
-### Three things the contract dictated, against the brief
+### The transition, and why it is that one
 
-Discovered by reading the code rather than taking the prompt's shape:
+Established from the repository rather than chosen: **replacement plus
+supersession**, which is the lifecycle graph's own model and the precedent
+already sitting in the database from when `/pump-token` was classified. A new
+ACTIVE record carries the same domain and the same prefix **verbatim** plus the
+class; the original moves to `SUPERSEDED` with `supersededBy` linking to it.
 
-1. **There is no `network` field.** The content schema is
-   `{ chain, tokenAddress?, ticker? }` and it is `.strict()`. Mainnet is implied
-   by construction — every explorer in the code-owned chain map is a mainnet
-   host, and test networks are rejected again at classification time. The
-   proposed `--network` option would have been inventing contract, so it does
-   not exist and is refused loudly if passed.
-2. **`tokenAddress` is optional**, deliberately: a project may be confirmed on a
-   chain before its token is. Without one there is simply no explorer locator.
-3. **A second ACTIVE identity must be refused outright, identical or not.**
-   `resolveConfirmedIdentity` returns the *earliest* structurally-valid ACTIVE
-   row, so a second would not replace anything and would not conflict loudly —
-   it would be **silently ignored** while the older record kept deciding what
-   the project is. An owner "confirming" a correction would get no error and no
-   effect, which is worse than a refusal. Superseding stays a separate act.
+Editing content in place was rejected for a concrete reason: the lifecycle
+trigger fires on `lifecycle_state` **only**, so mutating an ACTIVE row's content
+is an unguarded change to an authoritative human statement, and it destroys the
+history the graph exists to keep.
 
-### What it deliberately cannot do
+**One transaction, because the middle is dangerous.** Between inserting the
+replacement and superseding the original there are two co-matching ACTIVE rows,
+and `resolveSourceRoute` reports `matchedPathPrefix` only when exactly one
+path-scoped row matched — so a reader in that window sees the prefix vanish, and
+a crash there would leave it vanished for good.
 
-Discover, infer, or query. No chain, no web, no document, no model is in its
-import graph, and a test asserts it. Validation reuses the domain module's own
-`SUPPORTED_CHAINS`, `addressShapeMatchesChain` and strict schema rather than
-restating them — so an `0x…` address filed under `solana`, the cross-chain
-contamination D-133 exists to prevent, is refused at entry.
+**Verified, not argued.** After the swap the transaction re-resolves every
+affected url through the real resolver: the target must differ in exactly one
+field, and every other route's url must be byte-identical, or the whole thing
+rolls back. That check caught the deliberate mutation that skips supersession.
 
-### Auditability, stated honestly
+`supersedeProjectMemoryItem` is the primitive this needed — the schema had a
+`supersededBy` column and the graph permitted `ACTIVE → SUPERSEDED`, but no code
+had ever performed it.
 
-`project_memory_items` has **no actor column** — deliberately, unlike
-`research_memory` which carries `promoted_by`. `--actor` is therefore printed for
-the operator's record and explicitly marked as not persisted, rather than
-smuggled into the content JSON. Inventing a field to hold it would be inventing
-provenance. The durable trail is the row's lifecycle state and `created_at`.
+### Classes
 
-### Remaining blocker before Raydium can start
+The resolver's own closed enum — `OFFICIAL_DOCS`, `GOVERNANCE`,
+`OFFICIAL_REPORT` — validated by the resolver's own predicate, both now exported
+rather than copied. All three are supported: they are equally real source
+classes with the same semantics, and restricting to one would only guarantee a
+second task later. Anything else is refused with no fallback.
 
-**Route classification still has no supported path.** `confirm-source-route.ts`
-assigns no `routeClass` by design, and the separate later act that assigns
-`OFFICIAL_DOCS` was never built — so no documentary Evidence can be admitted.
+### Ready for Raydium
 
-Smallest fix: a second script that classifies an **already ACTIVE, unclassified**
-route, refusing to invent one, and respecting the overlap and inheritance hazards
-already documented — adding a classified row is exactly what can null a
-neighbouring route's matched prefix.
+Nothing architectural blocks the case now. The remaining prerequisites are
+ordinary owner acts, in order:
+
+1. add `raydium` to the seed catalog (one line + `npx tsx scripts/seed.ts`);
+2. `confirm-project-identity.ts` — Solana, RAY mint;
+3. `confirm-source-route.ts` — `docs.raydium.io` at a bounded prefix;
+4. **inspect** the page (non-evidentiary), then
+5. `classify-source-route.ts` — only if what the page says earns it.
+
+Step 4 before step 5 is the whole point: classification should follow reading.
+
+The pre-registered success criteria for the case — what will and will not count
+as an address-level role assignment — remain as written when Raydium was
+selected, and were deliberately settled before anything was read.
 
 ### Standing boundaries
 

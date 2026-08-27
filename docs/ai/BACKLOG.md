@@ -27,25 +27,25 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   for any future artifact-reuse path. Pinned by
   `tests/onchain-persisted-burn-evidence.test.ts`.
 
-### Owner tooling gaps — one still BLOCKING for the next case
+### Owner tooling gaps — ALL CLOSED
 
-The same shape as the `SOURCE_ROUTE` gap already closed: a decision the
-architecture requires a human to make, with no controlled auditable tool to make
-it. Not a defect in research behaviour; it stops project #2 before it starts.
+Each was a decision the architecture requires a human to make, with no
+controlled auditable tool to make it. None was a defect in research behaviour;
+together they stopped project #2 before it could start. Kept for context.
 
 - ~~**`PROJECT_IDENTITY` confirmation has no supported path.**~~ **CLOSED
   2026-08-28** by `scripts/confirm-project-identity.ts`, with the operation in
   `memory/project-identity-confirmation.ts`. Generic, discovers nothing, reuses
   the domain module's own validation, and refuses a second ACTIVE identity
   outright because the resolver would silently ignore it.
-- **Route classification has no supported path** — *BLOCKING.*
-  `confirm-source-route.ts` deliberately assigns no `routeClass`; the separate
-  later act that assigns `OFFICIAL_DOCS` was never built. Without it the
-  acquisition scope gate refuses and no documentary Evidence is admissible.
-  Smallest fix: a second owner script that classifies an **already ACTIVE,
-  unclassified** route, refusing to invent one — and it must respect the
-  overlap and inheritance hazards already documented, since adding a classified
-  row is exactly what can null a neighbouring route's matched prefix.
+- ~~**Route classification has no supported path.**~~ **CLOSED 2026-08-28** by
+  `scripts/classify-source-route.ts`, with the operation in
+  `memory/source-route-classification.ts`. Acts on an exact ACTIVE unclassified
+  route by id; replaces rather than edits; supersedes the original in the SAME
+  transaction, because two co-matching ACTIVE rows make the matched prefix
+  vanish; and verifies the swap against the real resolver, rolling back if any
+  other route would move. `supersedeProjectMemoryItem` is the primitive it
+  needed — nothing had ever written `supersededBy`.
 
 ### Chain coverage
 

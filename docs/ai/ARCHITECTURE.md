@@ -371,6 +371,30 @@ acquisition and both renderer-as-Evidence entry points require a non-null class
 and keep refusing. Classification stays a separate later act, which is the order
 `/pump-token` actually went through.
 
+**Classifying a route is the owner's second act**, and `classify-source-route.ts`
+is its tool. It acts only on an exact, already-ACTIVE, currently-unclassified
+route named by id: it cannot create a host, confirm an unconfirmed one, widen a
+prefix, or read anything — `--domain`, `--prefix` and `--project` are refused
+outright, because naming a host here would be doing the first act inside the
+second. The class comes from the resolver's own closed enum
+(`OFFICIAL_DOCS`, `GOVERNANCE`, `OFFICIAL_REPORT`), validated by the resolver's
+own predicate.
+
+**The route is replaced, not edited.** A new ACTIVE record carries the same
+domain and the same prefix verbatim plus the class, and the original moves to
+`SUPERSEDED` with `supersededBy` linking to it — the lifecycle graph's own model,
+and the precedent already in the database from `/pump-token`. Editing content in
+place would be an unguarded mutation of an authoritative row: the lifecycle
+trigger fires on `lifecycle_state` only.
+
+**The whole swap is one transaction**, because the intermediate state is
+dangerous — two co-matching ACTIVE rows make `matchedPathPrefix` vanish, and a
+crash between the two writes would leave it vanished. Afterwards the transition
+is **verified against the real resolver**: the target url must differ in exactly
+one field and every other route's url must be byte-identical, or the transaction
+rolls back. `supersedeProjectMemoryItem` is the primitive that performs the
+`ACTIVE → SUPERSEDED` move; nothing had ever written `supersededBy` before.
+
 Two refusals exist because of how the resolver *combines* rows, and both prevent
 a confirmation from silently damaging what already works:
 

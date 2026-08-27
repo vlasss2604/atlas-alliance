@@ -6,7 +6,7 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite: **2154 passing, 4 skipped, 2 failing**. Both failures are
+- Full suite: **2179 passing, 4 skipped, 2 failing**. Both failures are
   pre-existing and unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
     `s4-executor.ts`. **Now understood: it is a line-ending artifact.** The
@@ -220,15 +220,14 @@ The shape is deliberately different from PUMP — fee → collection → convers
 exercises **buyback ≠ supply reduction**, an invariant CORE_RULES states and
 nothing has ever tested.
 
-**One owner capability is still missing before it can start** — one of the two
-is now closed:
+**Both owner capabilities now exist.** Nothing blocks the case:
 
 1. ~~`PROJECT_IDENTITY` has no supported creation path.~~ **Closed 2026-08-28** —
    `confirm-project-identity.ts`, generic, discovers nothing, refuses a second
    ACTIVE identity outright. See `ARCHITECTURE.md`.
-2. **Route classification has no supported path.** `confirm-source-route.ts`
-   assigns no `routeClass` by design, and the "separate later act" that would
-   assign `OFFICIAL_DOCS` was never built — so no documentary Evidence can be
-   admitted.
+2. ~~Route classification has no supported path.~~ **Closed 2026-08-28** —
+   `classify-source-route.ts` acts on an exact ACTIVE unclassified route by id,
+   replaces rather than edits, supersedes the original atomically, and verifies
+   the swap against the real resolver. See `ARCHITECTURE.md`.
 
 Plan and pre-registered success criteria are in `CURRENT_TASK.md`.

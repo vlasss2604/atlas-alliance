@@ -206,8 +206,14 @@ export async function deprecateMemory(
 
 // Зеркало для project_memory_items — тот же граф, без promoted_by
 // (RESEARCH MEMORY, не FACT MEMORY; см. 0007_memory_lifecycle_guard.sql).
+// Accepts a Transaction as well as a Database — same widening
+// `deprecateMemory` above already has — so a caller that must do several
+// lifecycle moves atomically can. Classification is exactly that: a
+// replacement promoted and the original superseded, which must never be
+// half-done. The inner `transaction` becomes a savepoint when a
+// transaction is passed.
 export async function promoteProjectMemoryItem(
-  db: Database,
+  db: Database | Transaction,
   itemId: string,
 ): Promise<void> {
   await db.transaction(async (tx) => {
@@ -227,4 +233,26 @@ export async function promoteProjectMemoryItem(
       .set({ lifecycleState: "ACTIVE" })
       .where(eq(projectMemoryItems.id, itemId));
   });
+}
+
+// SUPERSESSION for project memory items — the transition the lifecycle
+// graph already permits (ACTIVE -> SUPERSEDED) and the schema already has
+// a column for, with no code anywhere that performed it.
+//
+// It exists because a record is REPLACED rather than edited: an ACTIVE
+// project-memory row is an authoritative statement a human made, and the
+// history of what replaced what is the audit trail. `supersededBy` makes
+// that relationship explicit instead of leaving two rows and a guess.
+//
+// Deliberately narrow: it moves ONE named row aside in favour of ONE named
+// replacement. It finds nothing, matches nothing, and cascades to nothing.
+export async function supersedeProjectMemoryItem(
+  db: Database | Transaction,
+  itemId: string,
+  replacedBy: string,
+): Promise<void> {
+  await db
+    .update(projectMemoryItems)
+    .set({ lifecycleState: "SUPERSEDED", supersededBy: replacedBy })
+    .where(eq(projectMemoryItems.id, itemId));
 }
