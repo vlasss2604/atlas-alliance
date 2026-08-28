@@ -4,61 +4,50 @@
 
 ## NONE — awaiting owner direction
 
-Document acquisition and model extraction are now **separable owner stages**
-(D-128). No live call was made this round; Raydium untouched — still 0
-Evidence, chain gate locked.
+**Stage A succeeded; Stage B has not run in substance.** The Raydium buyback
+document is persisted, sealed and unconsumed. No Evidence exists; the chain
+gate is still locked. Analysis only this round — no live calls, no retry, no
+code changes.
 
-### Why (owner live facts, recorded)
+### Stage A — verified, not just read from the terminal
 
-The count_tokens probe: MantaRay **ON → SUCCESS** (input_tokens 14, 1 attempt);
-MantaRay **OFF → `PERMISSION_DENIED:403`** (1 attempt). The 403's cause is
-deliberately not inferred. Meanwhile the document host fetch succeeds **OFF**.
-The one-process acquisition therefore coupled two capabilities whose working
-network conditions are not currently identical — and a fetched document died
-with the failed extraction.
+Document `711e6745-abc1-44c0-b4a0-4d3eb449b7df` (job `983d8ebb-…`):
+`text/markdown` (**the header value is now persisted for the first time**),
+HTTP 200, 2,940 bytes, `STATIC`, authority snapshot
+`CONFIRMED / OFFICIAL_DOCS / /ray/ray-buybacks.md`, `consumedAt null`. The
+seal was recomputed offline and matches. The stored `text_sha256`
+(`f71a3dd3…`) equals the browser window's rendered-text hash — two
+transports, one identical document. All four role-bound addresses are
+literally present in the stored text (checked in the DB).
 
-### The seam
+Created beyond the document: only the executor's pre-existing url-registry
+`sources` row (`OTHER` / `UNKNOWN`, no content, no authority — not Evidence).
+Zero Evidence, locators, artifacts, attempts, component rows. Trace confirms
+the real `safe-http` fetch and the `document-capture` stub. `findAdmittedLocator`
+0 for all four addresses; `resolveOnchainSubject` `NOT_FOUND`.
 
-- **`acquired_documents`** (migration `0034_acquired_documents`, hand-authored
-  per the 0028+ convention — note: `drizzle-kit generate` is unusable here, its
-  snapshots are stale since 0018 and it regenerates existing objects; the bad
-  generated file was discarded before anything applied).
-- **Stage A** `scripts/acquire-document.ts` — the real S4 executor with a
-  capture stub at the extractor seam: full production fetch/render/containment
-  fidelity, zero duplication. Structurally zero model calls (no
-  `ANTHROPIC_API_KEY` read), zero Evidence, zero locators, zero RPC
-  (`DOCUMENTARY_ONLY` by definition).
-- **Stage B** `scripts/extract-from-document.ts` — replays ONE stored document
-  through the same executor via a replay fetcher that errors on any other url;
-  renderer force-disabled; real extractor → Evidence → locators → S5, the
-  ordinary path only.
+### Stage B — why it did not run
 
-**PERSISTED DOCUMENT ≠ EVIDENCE**; sealed (`text_sha256`), project-scoped,
-consumed at most once, both-ends authority rule, explicit staleness (never
-re-fetch on resume). All in `ARCHITECTURE.md` + D-128; 13 tests including the
-no-network-on-resume mutation boundary.
+The invocation used the **literal placeholder** `<DOCUMENT_ID>`. Postgres
+refused the malformed uuid at the row lookup — before any job creation,
+before any fetch, before any model call. Verified: still exactly three
+Raydium jobs (the two old failures + Stage A), and the document is
+unconsumed. Another owner-authorized Stage B is technically allowed and is
+exactly what the contract anticipates.
 
-### The Raydium two-window future flow (NOT run)
+One hardening item recorded in BACKLOG (not fixed here): a malformed id
+should produce the closed `NOT_FOUND` refusal, not a raw driver error that
+echoes the SQL.
 
-**Window 1 — MantaRay OFF:**
-
-```
-npx tsx scripts/acquire-document.ts --url=https://docs.raydium.io/ray/ray-buybacks.md --component=DESTINATION --step=6 --actor=owner --project=raydium
-```
-
-→ prints `documentId` + hashes; persists the document; nothing else.
-
-**Window 2 — MantaRay ON:**
+### The next owner act — Window 2, MantaRay ON, with the REAL id
 
 ```
-npx tsx scripts/extract-from-document.ts --document-id=<uuid from window 1> --component=DESTINATION --step=6 --actor=owner --project=raydium --mode=documentary-only
+npx tsx scripts/extract-from-document.ts --document-id=711e6745-abc1-44c0-b4a0-4d3eb449b7df --component=DESTINATION --step=6 --actor=owner --project=raydium --mode=documentary-only
 ```
 
-→ no second Raydium fetch (structurally impossible); real extraction; Evidence
-+ locators through the production path; document marked consumed on success.
-
-Only after Stage B success: evaluate `findAdmittedLocator(DdHDoz…VEZaz)` and
-`resolveOnchainSubject` — offline. No RPC in either stage.
+No Raydium fetch is possible in this stage (replay transport only); RPC is
+impossible under documentary-only (D-127). After success, evaluate offline:
+`findAdmittedLocator(DdHDoz…VEZaz)` and `resolveOnchainSubject`.
 
 ### Standing boundaries
 

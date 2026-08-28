@@ -150,6 +150,14 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
+- **`loadAcquiredDocumentForResume` should refuse a malformed document id with
+  the closed `NOT_FOUND`, not a raw driver error.** Observed live: Stage B was
+  invoked with the literal placeholder `<DOCUMENT_ID>`; Postgres rejected the
+  uuid and the script printed the failed SQL plus the operator's own input via
+  the generic catch. No harm done (local SQL, operator's own string, nothing
+  external), but it violates the closed-refusal discipline every other axis of
+  that loader follows. One shape-check before the query, plus a test.
+
 - **`alpha-acquire-url.ts` teardown is not crash-clean on Windows.** When
   `executor.execute()` throws, the process prints the error and then aborts in
   libuv during exit (`!(handle->flags & UV_HANDLE_CLOSING)`, `src\win\async.c`)

@@ -702,6 +702,42 @@ the next such failure will read
 from a closed vocabulary. The run recorded below predates that fix, so its
 cause remains genuinely unknown. As recorded at the time:
 
+### Stage A succeeded (2026-08-28): the buyback document is persisted and sealed
+
+First production run of the D-128 path, MantaRay OFF, job
+`983d8ebb-71ab-41f7-b2e9-54a071722647`. `acquired_documents` row
+`711e6745-abc1-44c0-b4a0-4d3eb449b7df`: project `raydium`,
+url = finalUrl = `https://docs.raydium.io/ray/ray-buybacks.md`, HTTP 200,
+**`content_type = text/markdown` — now PERSISTED, retroactively confirming
+what was previously only inferred from the fetch-fix delta**, 2,940 bytes /
+2,939 chars, `renderMode STATIC`, authority snapshot
+`CONFIRMED / OFFICIAL_DOCS / /ray/ray-buybacks.md`, unconsumed. Seal verified
+offline: recomputed sha256 of the stored text equals `text_sha256`.
+
+**Cross-transport confirmation:** the stored `text_sha256`
+(`sha256:f71a3dd3…`) is byte-identical to the content hash the browser
+inspection window reported for its rendered text — two different transports,
+one identical document, unchanged between windows. All four role-bound
+addresses are literally present in the stored text (verified in the DB, not
+from memory).
+
+Stage A created exactly what D-128 promises **plus one row worth naming
+honestly**: the executor's pre-existing bookkeeping creates a url-registry
+`sources` row after any successful document handling — even with zero facts —
+so `sources` gained one row (`sourceType OTHER`, `health UNKNOWN`, no
+content, no authority). That is production behaviour older than D-128, and the
+row is not Evidence and establishes nothing. Otherwise: 0 Evidence, 0
+locators, 0 artifacts, 0 attempts, no component result, chain gate still
+locked, trace shows the real `safe-http` fetch and the `document-capture`
+stub.
+
+**Stage B has not run in substance.** The owner's invocation passed the
+literal placeholder `<DOCUMENT_ID>` instead of the real uuid; the script died
+at the row lookup on Postgres uuid parsing — before any job, fetch, or model
+call. The document remains unconsumed and resumable; the correct command is in
+`CURRENT_TASK.md`. Hardening noted in BACKLOG: a malformed id currently
+surfaces as a raw driver error instead of the closed `NOT_FOUND` refusal.
+
 **Two owner probe runs (2026-08-28) split the failure cleanly.** With MantaRay
 ON the count_tokens probe returned SUCCESS (input_tokens 14, 1 attempt); with
 MantaRay OFF it returned `PERMISSION_DENIED:403` (1 attempt). Established:
