@@ -2,85 +2,145 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — awaiting owner direction
+## NONE — awaiting owner approval of the next major milestone
 
-Analysis only. No live call this round; the local Postgres was read, never
-mutated.
+Planning round. Offline, no code changed, no live call. The Raydium case
+stays at its resting point and is used below only as a persisted fixture.
 
-### The answer to the question that was asked
+## The bottleneck: the pipeline ends one stage before the product
 
-**Yes.** At finalized slot `442456294`, `DdHDoz94o2WJ…` owned **six** SPL token
-accounts whose mint is the confirmed RAY mint. Raw amounts (6 decimals):
-`39064464475794`, `23497797799450`, `15363003294153`, `6708471002739`,
-`19940152952`, `0`.
+Verified against current code, not notes: the engine runs
+**S4 → S5 → S6 → S7** and stops. `run-job.ts` ends with
+`assembleAndPersistMechanism` then `evaluateAndPersistClaimSupport`, and
+returns.
 
-**No total is stated anywhere** — not in Evidence, not in the docs, not here.
-Six independent positions are not one holding, and summing them would invent a
-figure the chain never reported. The zero-balance account is a position like
-any other; it is **not** evidence that anything left it.
+**Nothing in production ever writes a Proof.** The `proofs` table exists with
+its locked shape (`verdict`, `confidence`, 7-layer `layers` jsonb,
+`researchCutoff`, `visibility PRIVATE`, `verificationStatus`), and
+`memory/verification.ts` reads it — but the only `insert(proofs)` calls in the
+repository are in tests. `evidence.proof_id` is null on every row ever
+written; the `PROOF_BOUND` half of the ownership model has never occurred.
 
-### Footprint, verified
+Three consequences, all product-blocking:
 
-One `getTokenAccountsByOwner` (`finalized`), owner = the documented address,
-mint = the confirmed anchor from identity. 0 retries · 0 pagination · 0
-`ACCOUNT_INFO` · 0 signatures/history · 0 follow-up reads · 0 docs/search/model
-calls. The promoted-intent gate passed on the persisted `ACCOUNT_INFO`
-artifact, exactly as designed.
+1. **There is no Proof.** `GET /api/research-jobs/[id]` returns raw engine
+   projections — claim-support rows, component results, evidence arrays.
+   Internal research complexity leaks straight to the surface, which the
+   product rules forbid ("user-facing answers start simple").
+2. **The learning loop cannot close.** Memory promotion is gated on a
+   **VERIFIED Proof** (D-041/D-055). With no Proof writer there is nothing to
+   verify, so no research outcome can ever become durable memory —
+   `ARI_LEARNING_LOOP` is structurally blocked, not merely unimplemented.
+3. **Nothing is citable.** A Proof is the only object that binds a verdict to
+   the evidence and gaps behind it. Without it, every downstream feature
+   (Proof Map, sharing, history) has no object to render.
 
-### The structural finding worth keeping
+## Selected milestone: **S8 — the Proof Writer**
 
-S5 for this job: **`INSUFFICIENT_EVIDENCE` / `["ALL_EVIDENCE_EXCLUDED"]`**, all
-six rows excluded as `RELATIONSHIP_NOT_SUPPORTING`.
+One job's reconciled state becomes **one persisted, structured Proof**.
 
-That is correct, and it is a rule rather than an accident: production authors
-`TOKEN_ACCOUNTS_BY_OWNER` facts as **`CONTEXT`**, so **a holding observation
-can never establish `DESTINATION` on its own**. Where value *is* is a different
-statement from where value *ends up by mechanism*. Establishing `DESTINATION`
-from chain data would need evidence of the mechanism, which a balance read
-cannot supply. Recorded in `ARCHITECTURE.md`.
+Deliberately chosen over the alternatives: it *completes* an existing pipeline
+rather than adding another adapter, it unblocks the learning loop, and it is
+the last stage between validated subsystems and a coherent Proof Engine.
 
-### What is now true, and what is still not
+### Product outcome
 
-**Settled:** the documented address holds RAY at that slot — the
-documentation's claim is now *consistent with* chain state rather than
-unexamined. Two chain observations of that address are durable Evidence.
+A finished research job produces a Proof row carrying a verdict, a confidence,
+the seven locked layers, and traceable references to the Evidence, component
+results and gaps it rests on — private by default, with `evidence.proof_id`
+bound for the rows it cites.
 
-**Not settled, and not inferable from anything held:** how any balance
-arrived; whether a buyback executed; whether protocol revenue funded it;
-whether Raydium institutionally controls the address (the owner field is RPC
-metadata and names no organisation); whether anything was burned; whether the
-holding is permanent; whether balances accumulated over time; whether any two
-slots describe the same tokens.
+### Domain contract
 
-**The two bridges remain open.** Documentary says bought-back RAY is *held*
-here; chain says RAY *is* here. Neither says the RAY here was bought back, and
-nothing links protocol fees to any of it.
+- **Input:** `researchJobId`. Everything else is read from persisted state —
+  S7 claim support (status, reasonCodes, requirementResults with their
+  evidenceIds/componentResultKeys/blockingGaps), S6 assembly, S5 component
+  results, and the Evidence they cite.
+- **Output:** one `proofs` row + `evidence.proof_id` bound on cited rows.
+- **Verdict:** derived deterministically from S7's `ClaimSupportStatus`, which
+  already shares the vocabulary (`SUPPORTED` / `PARTIALLY_SUPPORTED` /
+  `NOT_SUPPORTED` / `INSUFFICIENT_EVIDENCE`), plus `NOT_APPLICABLE` for a job
+  with no applicable claim. **The verdict is never re-judged and never
+  model-authored** — S7 already decided it.
+- **Confidence:** a documented deterministic function of what S7 and S5
+  recorded (requirement satisfaction, authority ceiling, gaps). Not a model
+  score, not a vibe.
+- **Layers:** the seven locked layers, with **"Что может изменить вывод"
+  mandatory** — populated from real `blockingGaps` / `contextGaps` /
+  exclusion reasons, never invented, and never padded to fill a block.
 
-### Next — the owner's choice
+### Invariants to preserve
 
-1. **Stop and consolidate.** The case has reached a coherent resting point:
-   documentary `SUPPORTED`, chain observations recorded, both bridges honestly
-   open. This is a legitimate outcome under fail-closed discipline.
-2. **One `SIGNATURES_FOR_ADDRESS` window on a derived token account** — the
-   only direction that could speak to *how* a balance arrived. Note three
-   things first: `DESTINATION` does not permit that promotion rule
-   (`EXECUTION_EVIDENCE` and `FLOW_PATH` do), no Evidence-writing sibling
-   exists for that intent, and history is a paging surface — the exact
-   opposite of the bounded reads used so far. Needs its own scoped task.
-3. **Settle owner identity** (BACKLOG) — small, offline.
+- **Fail closed:** a job with no S7 projection produces **no Proof**, not an
+  empty one. `INSUFFICIENT_EVIDENCE` with named gaps is a valid, successful
+  Proof.
+- **D-074 and every reconciliation verdict stand.** S8 projects; it never
+  re-decides, upgrades or downgrades what S5/S6/S7 concluded.
+- **No new research, no model call, no network.** S8 is a pure projection
+  over persisted state, exactly like S6 and S7 — re-runnable, deterministic,
+  spending nothing.
+- **Private by default** (`visibility PRIVATE`, no public URLs in v1);
+  entitlement is enforced server-side and an entitlement change must never
+  destroy an existing Proof.
+- **Idempotent per job**, and re-running must not fork a second conflicting
+  Proof for the same job.
+- Every citation must resolve to a row that actually exists; a claim with no
+  evidence renders empty rather than borrowing another component's rows.
 
-Option 2 is where the research question actually lives, and also where the
-strongest brakes apply. It should not be started as a live window.
+### Reused vs new
+
+**Reused unchanged:** `claim-support-store`, `mechanism-assembly-store`,
+`component-reconciliation-store`, the `proofs`/`evidence` schema, `run-job.ts`
+as the call site (one more projection step after S7), `memory/verification.ts`
+downstream.
+**New:** a proof builder (pure, deterministic, testable without a DB) and a
+proof store (persist + bind `evidence.proof_id`), mirroring the
+`*-store.ts` / pure-module split S5/S6/S7 already use.
+
+### Test plan (offline, existing fixtures)
+
+Unit: verdict mapping for every S7 status; confidence determinism; the
+mandatory-gap layer populated only from real gaps; no-S7 → no Proof.
+Integration: the **existing Raydium jobs** as fixtures — the documentary
+`SUPPORTED` job, the `PARTIALLY_SUPPORTED` chain job, and the
+`ALL_EVIDENCE_EXCLUDED` job — each producing the honest Proof its state
+implies, **without re-running research or altering a single existing row**.
+Boundary: no model, no network, no re-judging, idempotency, private-by-default.
+
+### Acceptance criteria
+
+A completed job yields exactly one Proof whose verdict equals S7's status,
+whose layers are all present with the change-conditions block non-empty
+whenever gaps exist, whose citations resolve, whose cited Evidence rows carry
+`proof_id`, and which re-runs identically. Every pre-existing verdict, S5
+result and Evidence row is unchanged. Full suite green.
+
+### What a user can do afterward that they cannot today
+
+Ask a question, and when the job finishes receive **one persisted structured
+Proof** — verdict, confidence, plain-language explanation, what would change
+the conclusion, and the evidence and gaps behind it — instead of raw engine
+projections. And for the first time a research outcome becomes **verifiable**,
+which is the gate durable Research Memory has always been waiting on.
+
+### Deliberately deferred (backlog, not blockers)
+
+Raydium transaction history · stable owner-user identity · the Windows
+`C:\C:\` test bug · diagnostics · more owner CLIs · another project case ·
+Telegram/UI polish · Proof Map rendering · sharing · Promises/Risks (D-124) ·
+EVM support.
+
+### Recommended next coding task
+
+Implement S8 in one slice: the pure proof builder + its store + wiring after
+S7 in `run-job.ts`, validated against the existing Raydium and PUMP fixtures
+offline. **Not started — awaiting your approval**, since this is the largest
+single block since the acquisition path.
 
 ### Standing boundaries
 
 - No live calls without a separate authorized window; no retries.
-- documentary role ≠ chain behaviour · current balance ≠ historical
-  acquisition · holding ≠ mechanism · transfer ≠ buyback · buyback ≠ burn ·
-  zero balance ≠ burn · zero result ≠ "holds none" · same transaction ≠
-  causality · token-account owner field ≠ institutional actor · chain
-  behaviour cannot assign an institutional role.
-- Never sum independent positions into an aggregate the chain never reported.
-- No arbitrary history paging, no counterparty chasing.
-- Never relax safe-http or SSRF; never whitelist a reserved range.
-- Never loosen `extractionResultSchema` to make model output easier to accept.
+- S8 must never re-judge S5/S6/S7, never call a model, never touch the network.
+- documentary role ≠ chain behaviour · holding ≠ mechanism · balance ≠
+  history · buyback ≠ burn · same transaction ≠ causality.
+- Never relax safe-http or SSRF; never loosen `extractionResultSchema`.

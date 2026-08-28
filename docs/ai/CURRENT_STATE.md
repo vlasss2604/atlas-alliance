@@ -208,6 +208,27 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## The pipeline ends at S7 — no Proof is ever written
+
+Verified against current code 2026-08-29: `run-job.ts` runs S4 → S5 → S6
+(`assembleAndPersistMechanism`) → S7 (`evaluateAndPersistClaimSupport`) and
+returns. **There is no S8.** The `proofs` table exists with its locked shape
+(verdict, confidence, 7-layer `layers`, `researchCutoff`, `visibility
+PRIVATE`, `verificationStatus`) and `memory/verification.ts` reads it, but the
+only `insert(proofs)` calls in the repository are in tests. Consequently
+`evidence.proof_id` is null on every row ever written and the `PROOF_BOUND`
+half of the ownership model has never occurred.
+
+Three product consequences: `GET /api/research-jobs/[id]` returns raw engine
+projections rather than a Proof, so internal complexity leaks to the surface;
+Research Memory promotion is gated on a **VERIFIED Proof** (D-041/D-055), so
+with no Proof writer the learning loop is structurally blocked; and no object
+exists for any downstream feature to render or cite.
+
+This is the current single biggest product bottleneck. The proposed milestone
+(S8, the Proof Writer) is written up in `CURRENT_TASK.md` and is **not
+started**.
+
 ## Open
 
 - **Both PUMP bridges stay unresolved** — see the closure summary above. That is
