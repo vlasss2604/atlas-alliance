@@ -203,8 +203,43 @@ creates its own job, so nothing is overwritten and two slots are never
 collapsed into one state. Within a single job, `extraction_unit_key` makes a
 repeat insert idempotent.
 
+**The same shape now exists for `TOKEN_ACCOUNTS_BY_OWNER`.**
+`scripts/onchain-observe-token-accounts.ts` asks which SPL token accounts for
+the project's confirmed mint one documented address owns — a separate
+entrypoint per intent rather than an `--intent` argument, so each keeps a
+one-sentence guarantee a test can check. The mint is never a CLI argument: it
+travels as `projectAnchor` from the ACTIVE identity. Returned accounts are
+recorded as derived subjects through the existing bounded path so a LATER
+window can read one without a repeat RPC — **nothing is read here, and no
+intent is promoted.**
+
+It enforces one gate the `ACCOUNT_INFO` sibling does not need.
+`TOKEN_ACCOUNTS_BY_OWNER` is promotion-only in production because asking which
+token accounts an address owns is meaningful only once something established
+the address is not itself a token account — a token account cannot answer it.
+The owner path must not be able to ask earlier than the research path would,
+so it requires a **persisted** `ACCOUNT_INFO` artifact for that exact subject
+and anchor whose normalized result says `NOT_TOKEN_PROGRAM_OWNED`. No such
+artifact means: run the `ACCOUNT_INFO` sibling first.
+
+**A zero result writes no Evidence, and that is the design.**
+`synthesizeOnchainFacts` returns nothing for an empty answer — "absence is not
+a fact" — so an address that owns no matching token account produces an
+artifact and no Evidence rather than an invented negative. "Owns no token
+account for this mint at this slot" is not "holds no RAY", is not "the
+document is false", and is not "no buyback occurred". A non-empty answer
+yields **one fact per account** (never a summed total, which the chain never
+reported), each `CONTEXT` rather than support, each pinned to its own slot.
+
 **The two hashes answer different questions**, confirmed by a real pair of
-reads of one unchanged account at slots `442384428` and `442446081`:
+reads of one unchanged account at slots `442384428` and `442446081` —
+and the same content-addressing applies to the `TOKEN_ACCOUNTS_BY_OWNER`
+fragment, which is per-account (`{owner, mint, account}`) and carries no slot,
+so an unchanged balance yields an identical fragment at two slots. **What
+keeps two observations separate is job scoping**: `extractionUnitKey` is
+computed over `jobId + artifactHash + step + component + fragment`, and each
+owner run creates its own job, so a later read never overwrites an earlier one
+and equal balances are never collapsed into "the same tokens":
 `artifactHash = sha256(normalizedText)` covers the normalized observation,
 which carries no slot, so both reads produced the **identical**
 `sha256:ae1b7ae1…` — it identifies the STATE observed. `rawResponseHash =

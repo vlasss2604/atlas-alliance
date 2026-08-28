@@ -4,77 +4,103 @@
 
 ## NONE — awaiting owner direction
 
-Analysis only. No live call was made this round; only the local Postgres was
-read, and nothing was mutated.
+Offline implementation only. **No live call of any kind**; the local Postgres
+was read but never mutated, and no existing Raydium row was touched.
 
-### What the owner window achieved
+### What was built
 
-**The chain-to-Evidence path closed end to end for the first time in this
-repository** (job `9d488cc6-…`, 2026-08-29). One RPC → artifact → synthesized
-fact → Evidence carrying `onchainArtifactId` → reconciliation. That was the
-single most valuable thing PUMP left untested, and it is now answered.
+`scripts/onchain-observe-token-accounts.ts` — the Evidence-writing sibling for
+`TOKEN_ACCOUNTS_BY_OWNER`, alongside the diagnostic `onchain-token-accounts.ts`
+and the standalone-persisting `onchain-derive-token-accounts.ts`. A separate
+entrypoint per intent, deliberately **not** an `--intent` argument on the
+existing tool: one script, one sentence, one test.
 
-The observation itself repeated the earlier characterization at a fresh slot
-(`442446081`, `finalized`): exists, System Program owner, `executable false`,
-`lamports 7823801354`, `NOT_TOKEN_PROGRAM_OWNED`, binding `CONFIRMED`.
-**Nothing new about the account was learned** — what is new is that it is
-durable Evidence instead of terminal output.
+**Never run live.**
 
-Persisted, verified in the DB: artifact `84915cd0-…` (`RESEARCH_JOB` origin,
-source = the `atlas-onchain://…/info` URI, `sourceType ONCHAIN`); Evidence
-`7770000d-…` (step 6 `DESTINATION`, `ONCHAIN_VERIFIABLE` / `CLAIMED`,
-`entityBinding CONFIRMED`, `SUPPORTS` / `DIRECT`, `mechanismState null`,
-`onchainArtifactId` set). Exactly one of each; no duplicate artifact hash
-anywhere. The job reserved **0** on all three budget axes and wrote no trace
-rows.
+```
+SOLANA_MAINNET_RPC_URL=... npx tsx scripts/onchain-observe-token-accounts.ts <OWNER_ADDRESS> <projectSlug> <COMPONENT> <STEP>
+```
 
-**D-074 held visibly:** this job's `DESTINATION` reconciled to
-`PARTIALLY_SUPPORTED` / `["INSUFFICIENT_AUTHORITY"]` — the code emits that
-reason exactly when the best establishing row is `CLAIMED`. The ceiling was
-observed, not asserted.
+The mint is never an argument — it travels as `projectAnchor` from the ACTIVE
+identity, so this cannot be pointed at an arbitrary token.
 
-**The documentary result is untouched:** job `baf42b79-…` still holds
-`SUPPORTED` / `[]`. Reconciliation is job-scoped, so five `DESTINATION`
-results now stand side by side, each honest about its own job's Evidence.
+### The gate this one adds
 
-**The two statements remain separate.** The docs *state* bought-back RAY is
-held at that address; the chain says only that it is a System-Program account.
-Neither confirms the other, and `NOT_TOKEN_PROGRAM_OWNED` still does not mean
-"owns no RAY token account".
+`TOKEN_ACCOUNTS_BY_OWNER` is **promotion-only** in production: asking which
+token accounts an address owns is well-formed only once something established
+the address is *not itself* a token account. The tool enforces that from
+**persisted state** — a stored `ACCOUNT_INFO` artifact for the exact subject
+and anchor whose normalized result says `NOT_TOKEN_PROGRAM_OWNED`. Missing
+that, it refuses and names the sibling to run first. The owner path cannot ask
+earlier than the research path would.
 
-### Next justified bounded intent — unchanged
+For `DdHDoz94o2WJ…` that prerequisite is already satisfied by artifact
+`84915cd0-…`.
 
-**`TOKEN_ACCOUNTS_BY_OWNER`**, owner = `DdHDoz94o2WJ…`, mint = the confirmed
-RAY mint. It is the question the first read made well-formed, and it is the
-only one that can say whether any RAY is held under that address. Not
-executed.
+### Zero-result semantics — the part that matters most
 
-Two entrypoints already perform exactly that one read — one RPC, no retry, no
-cursor:
+`synthesizeOnchainFacts` returns **nothing** for an empty answer ("absence is
+not a fact"), so a zero result persists the artifact and **no Evidence**. That
+is correct and was not worked around. An empty answer is **not** "holds no
+RAY", **not** "the documentation is false", **not** "no buyback occurred", and
+**not** "the address never held RAY". The script prints that limit explicitly
+and cannot author a negative — it writes no fact text at all.
 
-- `scripts/onchain-token-accounts.ts` — diagnostic, persists nothing;
-- `scripts/onchain-derive-token-accounts.ts` — persists the artifact and the
-  derived subjects, but **no Evidence**.
+Non-zero: **one fact per account**, never a summed total the chain never
+reported, each `CONTEXT` (not support), each pinned to its own slot, with
+production's own limits attached ("does not establish how any balance got
+there… never a history and never a purpose").
 
-**A gap worth naming before choosing:** there is no persisting-to-Evidence
-sibling for `TOKEN_ACCOUNTS_BY_OWNER`, the same gap just closed for
-`ACCOUNT_INFO`. `onchain-observe-account.ts` is deliberately single-intent and
-cannot issue it. So a run today yields either a diagnostic print or an
-artifact + derived subjects — not Evidence, and not a component result.
+### Hard live footprint (asserted by test)
 
-**An answer of "owns no RAY token account" would be a genuine finding, not a
-failure** — and it would still not contradict the documentation.
+1 owner subject · 1 mint from identity · 1 `TOKEN_ACCOUNTS_BY_OWNER` intent ·
+**max 1 RPC** · 0 retries · 0 pagination · 0 `ACCOUNT_INFO` · 0 signatures ·
+0 transaction history · 0 promoted follow-ups · 0 other locators · 0 search ·
+0 docs fetch · 0 model calls. Returned accounts are recorded as derived
+subjects through the existing path and **never read in this window**.
+
+### Evidence, reconciliation, D-074
+
+One `persistOnchainArtifactAndFacts` call; the script authors nothing — no
+`.insert(evidence)`, no classification, no fact text. So Evidence is
+`ONCHAIN_VERIFIABLE` / **`CLAIMED`** / `DIRECT` / validated binding /
+`onchainArtifactId` set, from production. Reconciliation runs once, after
+persistence, **scoped to its own job** — job `baf42b79-…`'s documentary
+`SUPPORTED` / `[]` cannot be touched. D-074 holds by construction.
+
+### Idempotency — verified, with an honest nuance
+
+A later run at another slot is a separate observation because **each run
+creates its own job**: `extractionUnitKey` = `jobId + artifactHash + step +
+component + fragment`. The nuance, confirmed rather than assumed: the
+`TOKEN_ACCOUNTS_BY_OWNER` fragment is per-account (`{owner, mint, account}`)
+and carries no slot, and `artifactHash` is content-addressed on the normalized
+result — so an unchanged balance produces an identical fragment *and* hash at
+two slots. Job scoping is what separates them; the statement text carries the
+slot, and nothing claims continuity between two observations.
+
+### Reported, not fixed: owner identity
+
+**Every owner-tooling run creates a NEW `users` row** (answer B to the
+question about the `+1 user` delta). Verified read-only: 15 users, one with 19
+jobs (seeded/alpha), recent owner jobs each with their own.
+`extract-from-document.ts` and both observe-* tools all do
+`db.insert(users).values({})`. Nothing is broken — attribution is correct and
+quota logic is DEMO-only — but "the owner" is not one stable identity.
+Recorded in `BACKLOG.md`; deliberately not changed here, since a stable owner
+identity is an identity decision, not a side effect of an on-chain task.
 
 ### Next — the owner's choice
 
-1. **One `TOKEN_ACCOUNTS_BY_OWNER` window** with
-   `onchain-derive-token-accounts.ts` (persists artifact + derived subjects,
-   so a later read needs no repeat RPC).
-2. **First generalize the persisting tool to that intent offline**, so the
-   answer can become Evidence and reach `DESTINATION` in one window rather
-   than two. Scope decision required: a second single-intent script, or one
-   tool with an intent argument — the latter weakens the one-sentence
-   guarantee each current script keeps, so a sibling is the safer default.
+1. **Run the command below** in an authorized window — the first answer to
+   whether any RAY is held under the documented address.
+   ```
+   SOLANA_MAINNET_RPC_URL=... npx tsx scripts/onchain-observe-token-accounts.ts DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz raydium DESTINATION 6
+   ```
+   Expect one of two honest outcomes: accounts returned → one `CONTEXT` fact
+   per account plus derived subjects; **zero returned → an artifact and no
+   Evidence**, which is a real observation and not a negative finding.
+2. **Settle owner identity first** (BACKLOG) — small, offline.
 3. **Stop and consolidate.**
 
 ### Standing boundaries
@@ -82,8 +108,9 @@ failure** — and it would still not contradict the documentation.
 - No live calls without a separate authorized window; no retries.
 - documentary role ≠ chain behaviour · current balance ≠ historical
   acquisition · transfer ≠ buyback · buyback ≠ burn · zero balance ≠ burn ·
-  same transaction ≠ causality · token-account owner ≠ institutional actor ·
-  chain behaviour cannot assign an institutional role.
+  zero result ≠ "holds none" · same transaction ≠ causality · token-account
+  owner field ≠ institutional actor · chain behaviour cannot assign an
+  institutional role.
 - No arbitrary history paging, no counterparty chasing. Stop after one
   bounded read.
 - Never relax safe-http or SSRF; never whitelist a reserved range.

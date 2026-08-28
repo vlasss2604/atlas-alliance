@@ -150,6 +150,18 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
+- **Every owner-tooling run creates a NEW `users` row.** Confirmed read-only
+  2026-08-29: 15 users exist, one carries 19 jobs (seeded/alpha) and the
+  recent owner-tool jobs each have their own. `extract-from-document.ts`,
+  `onchain-observe-account.ts` and now `onchain-observe-token-accounts.ts` all
+  do `db.insert(users).values({})` per run. Nothing is broken — the job is
+  correctly attributed and quota logic is DEMO-only — but "the owner" is not
+  one stable identity, so per-user history and any future owner-side quota or
+  audit view would be fragmented. Deliberately **not** changed while
+  implementing the token-accounts tool: a stable owner identity is an identity
+  decision (one seeded owner user? a reserved uuid? a marker column?), not a
+  side effect of an on-chain task.
+
 - ~~**`ACCOUNT_INFO` has no persisting sibling, so a characterization read
   cannot become Evidence.**~~ **Resolved 2026-08-28** —
   `scripts/onchain-observe-account.ts`: one admitted subject, one intent, one
