@@ -400,9 +400,11 @@ the render's outcome. Deriving the deadline removed that race; the
 phase-boundary half of the fix was **not** implicated here, because `goto` never
 returns on this page.
 
-**Host-wide, not page-specific — now supported.** **Both** Raydium pages, at two
-unrelated prefixes, return the same closed reason: `waitUntil: "networkidle"`
-never settles within 15s. Neither is a containment refusal, neither carries a
+**Host-wide, not page-specific — LATER REFUTED (see the fifth window below).**
+This was concluded while both pages were being judged by `networkidle`, which
+hid that they behave completely differently. Recorded as written, then
+overturned. **Both** Raydium pages, at two unrelated prefixes, returned the same
+closed reason: `waitUntil: "networkidle"` never settles within 15s. Neither is a containment refusal, neither carries a
 proxy denial of any class, and neither produced an `HTTP_ERROR`. **Nothing
 observed says the site refused ATLAS** — the wait condition is simply not
 reached on this host, which is ordinary for a documentation SPA holding
@@ -442,6 +444,39 @@ ACTIVE route whose own url is absent. The domain confirmation is untouched —
 officiality is a statement about the host — but the prefix points at nothing.
 Superseding or replacing it is an **owner act**, and finding a correct path is
 discovery, which no owner tool may perform.
+
+### Fifth window, 2026-08-28: `/ray/ray-buybacks` under the new contract
+
+`NAVIGATION_FAILED:NAVIGATION_TIMEOUT` again, `0 denied, 1 allowed`, no status.
+The reason is unchanged from its first window — but it now means something much
+stronger, because the milestone changed. The old contract waited for
+`networkidle`; this one waits only for **`domcontentloaded`**, which fires when
+the initial HTML is parsed. **This url does not deliver a parseable document at
+all within 15s.**
+
+**My "host-wide" conclusion is refuted.** In the same period, on the same host,
+with the same proxy and the same budgets, `/raydium/protocol/protocol-fees`
+returned a **404 status promptly**. `docs.raydium.io` is therefore reachable and
+responsive; the stall belongs to this one url, not to the host. The earlier
+reading was an artefact of judging both pages by `networkidle`, which hid that
+they behave completely differently.
+
+**No other host was involved.** The route handler filters by **host**, so a
+cross-host redirect would have surfaced as `BLOCKED_BY_ROUTE_POLICY` or as a
+`HOST_NOT_CONFIRMED` proxy denial. Neither appeared, and every denial class is
+zero. Note the corollary: a **same-host** redirect is *not* filtered by path, so
+a redirect chain within `docs.raydium.io` would pass containment silently and
+would look exactly like this.
+
+**Three readings survive, unseparated by any closed signal**: the server never
+answered for this path; a same-host redirect chain never settled into a parsed
+document; or the connection stalled after CONNECT. The tunnel-outcome blind spot
+named in `BACKLOG.md` is why the last one cannot be excluded — `1 allowed` is
+recorded at policy-decision time, before `netConnect`.
+
+**Status of the Raydium documentary path: both confirmed urls are unreadable**,
+for two different and now clearly distinct reasons — one absent, one
+unresponsive. Five live windows have produced no first-party text.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.

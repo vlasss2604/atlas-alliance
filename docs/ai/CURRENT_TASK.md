@@ -4,77 +4,86 @@
 
 ## NONE — awaiting owner direction
 
-Four inspection windows spent. **No Raydium page has been read.** Both routes
+Five inspection windows spent. **No Raydium page has been read.** Both routes
 remain ACTIVE and unclassified. No source, Evidence, job or artifact.
 
-### The four windows
+### The five windows
 
-| url | reason | status |
-|---|---|---|
-| `/ray/ray-buybacks` | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | none |
-| `/raydium/protocol/protocol-fees` (pre-budget-fix) | `TIMEOUT` | none |
-| `/raydium/protocol/protocol-fees` (post-budget-fix) | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | none |
-| `/raydium/protocol/protocol-fees` (post-readiness-fix) | **`HTTP_ERROR:404`** | **404** |
+| url | contract | reason | status |
+|---|---|---|---|
+| `/ray/ray-buybacks` | networkidle | `NAVIGATION_TIMEOUT` | none |
+| `/raydium/protocol/protocol-fees` | networkidle, pre-budget-fix | `TIMEOUT` | none |
+| `/raydium/protocol/protocol-fees` | networkidle, post-budget-fix | `NAVIGATION_TIMEOUT` | none |
+| `/raydium/protocol/protocol-fees` | **domcontentloaded** | `HTTP_ERROR` | **404** |
+| `/ray/ray-buybacks` | **domcontentloaded** | `NAVIGATION_TIMEOUT` | none |
 
-Every window: `0 denied, 1 allowed`, no containment refusal.
+Every window: `0 denied, 1 allowed`, no containment refusal, no denial of any
+class.
 
-### The renderer worked. The resource does not exist.
+### What the fifth window means
 
-**For the first time in four windows a status was obtained.** `HTTP_ERROR` is
-raised only after a real Response carrying a trusted numeric status, and it is
-raised **before** the readiness wait — so readiness was never evaluated and is
-not implicated in this failure.
+The reason is unchanged from that url's first window, but the **milestone
+changed**, so the statement is much stronger. The old contract waited for
+`networkidle`; this one waits only for **`domcontentloaded`**, which fires when
+the initial HTML is parsed. **This url does not deliver a parseable document at
+all within 15s.**
 
-Under the old contract this page **could not** report a status, because
-`networkidle` never arrived. The 404 was there all along and was invisible. That
-is the readiness change doing exactly its job: it moved the failure from our
-renderer to the page.
+### It refutes a conclusion recorded two rounds ago
 
-**404 is an absent page, not a refusal.** The code-owned refusal set is
-`401/403/429`; `404` is deliberately outside it — "the page is absent, and
-rendering does not invent one". No anti-bot behaviour is indicated, and none
-should be inferred.
+"Host-wide, not page-specific" is **wrong**, and it was mine. In the same period,
+on the same host, with the same proxy and budgets, `/raydium/protocol/protocol-fees`
+returned a 404 **promptly**. `docs.raydium.io` is reachable and responsive. The
+stall belongs to one url, not to the host. The earlier reading was an artefact of
+judging both pages by `networkidle`, which hid that they behave differently.
 
-### What is and is not established
+### What is established, and what is not
 
-**Established.** At that moment,
-`https://docs.raydium.io/raydium/protocol/protocol-fees` returned **404**.
+**Established.** This url did not reach `domcontentloaded` within 15s. No status
+was obtained. No containment refusal and no proxy denial of any class occurred.
+No other host was involved — a cross-host redirect would have surfaced as
+`BLOCKED_BY_ROUTE_POLICY` or `HOST_NOT_CONFIRMED`.
 
-**Not established.** That the page never existed; that Raydium publishes no
-protocol-fee documentation; that some other path would also 404; anything
-whatsoever about `/ray/ray-buybacks`, which has never returned a status and
-whose `NAVIGATION_TIMEOUT` remains unexplained. A 404 on one url is not a
-finding about a project.
+**Not established.** Which of three readings holds: the server never answered for
+this path; a **same-host** redirect chain never settled into a parsed document
+(the route handler filters by host, not path, so such a chain passes containment
+silently and would look exactly like this); or the connection stalled after
+CONNECT. `1 allowed` is recorded at policy-decision time, before `netConnect`, so
+it excludes none of them — the tunnel-outcome blind spot in `BACKLOG.md`.
 
-### Consequence for the route
+**Nothing about the page's content is known** — unknown, not absent. Nothing here
+says Raydium lacks buyback documentation, or that this page never existed.
 
-`d09657e6-96b6-423e-9973-a2578cb71069` is an ACTIVE route whose own url is
-absent. The **domain** confirmation is untouched — officiality is a statement
-about the host — but the prefix points at nothing.
+### Where the case actually stands
 
-Superseding or replacing it is an **owner act**. Finding a correct path is
-**discovery**, which no owner tool performs and which nothing here may guess.
+**Both confirmed urls are unreadable, for two distinct reasons**: one absent
+(404), one unresponsive. Five live windows have produced no first-party text, no
+Evidence, and no documentary locator.
 
-### Nothing about the content is known
+**The chain provenance gate remains locked.** `resolveOnchainSubject` on the
+confirmed RAY mint returns `NOT_FOUND`: an identity does not admit itself.
 
-Fee source, allocation share, executing address, destination, supply effect: all
-**unknown, not absent**. Neither route may be classified.
+Neither `84774bb9-b10a-4519-8a69-7f1c3a6c0b93` nor
+`d09657e6-96b6-423e-9973-a2578cb71069` may be classified.
 
-**The chain provenance gate remains locked.** No documentary locator exists;
-`resolveOnchainSubject` on the confirmed RAY mint returns `NOT_FOUND`, because an
-identity does not admit itself.
+### Recommendation
 
-### Next — the owner's choice
+**Close the case with the bridge named.** CORE_RULES' brake applies: the proof
+plan no longer justifies another branch, and further windows would be diagnosing
+our own transport rather than researching a mechanism — the same trap that
+consumed four PUMP windows. The honest closure is *"ATLAS could not read
+Raydium's first-party documentation at the two confirmed urls: one returned 404,
+the other never delivered a document."* That is a valid `INSUFFICIENT_EVIDENCE`
+outcome with the missing bridge named correctly, and it implies **nothing** about
+whether the buyback mechanism exists.
 
-1. **Re-inspect `/ray/ray-buybacks`.** Cheapest and most informative: it is the
-   one url never to have returned a status, and the readiness fix has not been
-   tried on it. It either reads, 404s, or times out — and all three are useful.
-2. **Supply a corrected protocol-fees path**, then confirm and inspect it. The
-   path must come from the owner; ATLAS may not discover it.
-3. **Stop.** Closing with the bridge named remains legitimate and implies
-   nothing about the mechanism.
+If the owner prefers to continue, the only options that attack something real
+are owner acts, not retries:
 
-A live window is a separate authorization, one navigation, zero retry.
+1. **Supply corrected first-party urls** for both pages, then confirm and inspect.
+   The paths must come from the owner; ATLAS may not discover them.
+2. **Accept the transport blind spot as a work item** — recording the tunnel
+   outcome would separate the three readings. That is engineering, not research,
+   and it belongs in `BACKLOG.md` rather than in a live window.
 
 ### Standing boundaries
 
