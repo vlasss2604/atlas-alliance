@@ -547,9 +547,35 @@ was selected to exercise, and nothing here may be read as a burn.
 `resolveOnchainSubject` still returns `NOT_FOUND`. A locator becomes admissible
 only from an Evidence row whose `sourceClass` is in
 `ADMISSIBLE_LOCATOR_SOURCE_CLASSES` (`OFFICIAL_DOCS`, `GOVERNANCE`,
-`OFFICIAL_REPORT`). The route is unclassified, so this page would still acquire
-as `SOCIAL`, which establishes nothing. **Classification is the gate**, and it is
-an owner act.
+`OFFICIAL_REPORT`).
+
+**Classified 2026-08-28 — `OFFICIAL_DOCS`.** `classify-source-route.ts`, by
+replacement and supersession in one transaction: the unclassified row
+`52084c53-…` moved to `SUPERSEDED` with `supersededBy` pointing at the new
+ACTIVE row `dbe81df6-b197-48c4-938f-b03ea8d37e50`, which carries the same domain
+and the same prefix **verbatim** plus the class. The superseded row was never
+edited — its content is still the unclassified original, which is the history the
+lifecycle graph exists to keep.
+
+`https://docs.raydium.io/ray/ray-buybacks.md` now resolves `CONFIRMED` /
+`OFFICIAL_DOCS` / `/ray/ray-buybacks.md`, and `resolveSourceClass` returns
+**`OFFICIAL_DOCS`** where it returned `SOCIAL` before. Documentary acquisition,
+Stage-0 payload recovery and renderer-as-Evidence are all now eligible for this
+exact prefix. Owner inspection is correspondingly **refused** with
+`ALREADY_CLASSIFIED` — the two gates are mutually exclusive by construction, and
+inspection exists only for the undecided case.
+
+**No scope widened.** Across seven urls exactly two changed: the route itself and
+one path beneath it. `/ray/ray-buybacks` and `/raydium/protocol/protocol-fees`
+resolve **byte-identically** and remain unclassified; `/ray/protocol-fees.md`,
+`/ray/treasury.md` and `/` are untouched. Three ACTIVE routes, never four.
+
+**The chain gate is still locked, and that is the point.** Verified after
+classification: `findAdmittedLocator` returns **0** rows for all four addresses
+and `resolveOnchainSubject` still returns `NOT_FOUND`. Raydium still has **0
+Evidence and 0 jobs**. **A classified route is not Evidence** — it only makes
+acquisition possible. The locators become admissible when the page is acquired
+through the normal pipeline, and not before.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.

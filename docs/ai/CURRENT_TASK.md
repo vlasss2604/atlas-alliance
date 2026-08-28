@@ -4,98 +4,78 @@
 
 ## NONE — awaiting owner direction
 
-**A Raydium page was read for the first time**, on the sixth window. Nothing was
-classified, nothing persisted: Raydium still has 0 Evidence, 0 jobs, 0 sources,
-0 artifacts, and all three routes remain ACTIVE and unclassified.
+The buyback Markdown route is classified `OFFICIAL_DOCS`. **Nothing was
+acquired.** Raydium still has 0 Evidence, 0 jobs, 0 sources, 0 artifacts, and the
+chain gate is still locked.
 
-### The read
+### What was done
 
-`https://docs.raydium.io/ray/ray-buybacks.md` — `finalUrl` identical and in
-route, `htmlBytes 3124`, `renderedLength 2939`, `blockedRequests 0`,
-`durationMs 3158`, `contentHash sha256:f71a3dd3…`.
+```
+npx tsx scripts/classify-source-route.ts \
+  --route-id=52084c53-6e55-40fa-a7d4-66550b0e2771 --class=OFFICIAL_DOCS --actor=owner
+```
 
-**Served as plain text, not HTML.** `anchors: 0, identifiers: 0, hosts: (none)`
-while the text contains a Markdown link — the browser wrapped a raw document
-instead of parsing a DOM. That is why this surface worked where the SPA
-representation never delivered one, and it means **no hrefs exist**: every
-identifier is fully literal or unavailable.
+**Replacement plus supersession, in one transaction** — not an in-place edit:
 
-### INSPECTION ONLY — none of this is Evidence
-
-The document has not been acquired through the pipeline and the route is
-unclassified. Everything below is *what one first-party document was observed to
-say*, not a verified finding about Raydium.
-
-### What it says
-
-- **Source of value:** `12%` of Raydium trading fees are used to buy back RAY.
-- **Mechanism spec:** the share applies to the **trading fee**, not the trade
-  amount. CLMM and CPMM split `84/12/4` LPs/buybacks/treasury; Standard AMM v4
-  splits `88/12` LPs/buybacks. Both sum to 100.
-- **Supply effect: HELD, not burned.** "Bought-back RAY is held by the protocol
-  at a public on-chain address"; the page speaks of "RAY accumulation". `burn` is
-  **absent**, per the term scan. `buyback != supply reduction` — the invariant
-  this case was chosen to exercise.
-
-### Four role-bound addresses, all Solana-shape valid
-
-| address | stated role | binding |
+| row | state | content |
 |---|---|---|
-| `projjosVCPQH49d5em7VYS7fJZzaqKixqKtus7yk416` | CLMM protocol fee collection | table column "Collection address" |
-| `ProCXqRcXJjoUd1RNoo28bSizAA6EEqt9wURZYPDc5u` | CPMM protocol fee collection | same table |
-| `PNLCQcVCD26aC7ZWgRyr5ptfaR7bBrWdTFgRWwu2tvF` | Standard AMM v4 protocol fee collection | same table |
-| `DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` | **where bought-back RAY is held** | "Bought-back RAY is held at:" then the address |
+| `52084c53-6e55-40fa-a7d4-66550b0e2771` | **SUPERSEDED**, `supersededBy` → `dbe81df6-…` | `{ domain, pathPrefix }` — **still unclassified, never edited** |
+| `dbe81df6-b197-48c4-938f-b03ea8d37e50` | **ACTIVE** | `{ domain, pathPrefix, routeClass: "OFFICIAL_DOCS" }` |
 
-**This is the address-level role assignment PUMP never had.** PUMP's bridge
-failed because no single text contained both an address and an acquisition verb.
-Here identifier and role sit in the same statement.
+Domain and prefix carried over verbatim. Three ACTIVE routes throughout, never
+four — the transaction exists precisely because two co-matching ACTIVE rows would
+null `matchedPathPrefix` for the urls they both cover.
 
-### The chain gate is still locked, and the reason is exact
+### Verified through the real resolver
 
-Verified, not assumed: `findAdmittedLocator` returns **0** rows for the holding
-address, and `resolveOnchainSubject` returns `NOT_FOUND`.
+`https://docs.raydium.io/ray/ray-buybacks.md` → `CONFIRMED` / **`OFFICIAL_DOCS`**
+/ `/ray/ray-buybacks.md`, `observation: null`.
 
-A locator is admissible only from an Evidence row whose `sourceClass` is in
-`ADMISSIBLE_LOCATOR_SOURCE_CLASSES` — `OFFICIAL_DOCS`, `GOVERNANCE`,
-`OFFICIAL_REPORT`. The route is unclassified, so this page would still acquire as
-`SOCIAL`, which appears in no component's `establishingClasses`.
+**No scope widened.** Across seven urls exactly two changed: the route and one
+path beneath it. `/ray/ray-buybacks` and `/raydium/protocol/protocol-fees`
+resolve **byte-identically** and remain unclassified. `/ray/protocol-fees.md`,
+`/ray/treasury.md` and `/` are untouched.
 
-**Classification is the gate.** It is an owner act, and it is now the one step
-that unlocks everything downstream.
+### What classification actually opened
 
-### The path this opens, if classified
+| gate | before | now |
+|---|---|---|
+| `resolveSourceClass` | `SOCIAL` | **`OFFICIAL_DOCS`** |
+| `evaluateDocsInspectionEligibility` | refused | **eligible** |
+| `docsPayloadRecoveryEligible` | false | **true** |
+| `evaluateRenderEligibility` | refused | **eligible** |
+| owner inspection | allowed | **refused — `ALREADY_CLASSIFIED`** |
 
-1. `classify-source-route.ts` on `52084c53-6e55-40fa-a7d4-66550b0e2771` →
-   `OFFICIAL_DOCS`.
-2. Acquire the page through the pipeline → Evidence, `sourceClass OFFICIAL_DOCS`,
-   `officiality CONFIRMED`, with the four addresses as documentary locators.
-3. `resolveOnchainSubject` then admits `DdHDoz…VEZaz` as a `DOCUMENTARY_LOCATOR`.
-4. Deterministic Solana read: `ACCOUNT_INFO` first — it is the sole base intent
-   and classifies the subject before anything is asked of it — then
-   `TOKEN_ACCOUNTS_BY_OWNER`, which is exactly what the document's own
-   `spl-token accounts --owner` instruction describes.
-5. Artifact → Evidence with `onchainArtifactId` → **DESTINATION**, whose
-   `establishingClasses` are `["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS"]` and whose
-   goal is literally "whether that destination retains, redistributes or retires
-   them".
+That last row is correct, not a regression: the two gates are mutually exclusive
+by construction. Inspection exists only for the undecided case, so a classified
+page goes through the ordinary evidentiary path instead.
 
-**Expected ceiling: `PARTIALLY_SUPPORTED` for the chain leg.** Every on-chain
-fact is `officiality CLAIMED`, and D-074 caps `CLAIMED` there. The documentary
-leg (`OFFICIAL_DOCS` / `CONFIRMED`) is what can reach `SUPPORTED`.
+### CLASSIFIED ROUTE != EVIDENCE
 
-**Two risks worth naming before spending anything.** `DESTINATION` is
-`tokenStateSensitive: true`, which is the gate that excluded PUMP's DESTINATION
-results as `TOKEN_STATE_UNQUALIFIED`. And no Evidence row in this repository has
-ever carried an `onchainArtifactId` — that path is read and believed correct but
-has never succeeded end to end.
+Verified **after** classification, not assumed: `findAdmittedLocator` returns
+**0** rows for all four addresses, and `resolveOnchainSubject` on
+`DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` still returns **`NOT_FOUND`**.
+
+Classification makes acquisition *possible*. The locators become admissible only
+when the page is acquired through the normal pipeline and Evidence exists with
+`sourceClass OFFICIAL_DOCS`. Nothing about the chain was unlocked by hand, and
+nothing should be.
 
 ### Next — the owner's choice
 
-1. **Classify `52084c53-…` as `OFFICIAL_DOCS`**, after deciding the document
-   earns it. Offline, and it is the single unlocking step.
-2. **Inspect `/ray/treasury.md` or `/ray/protocol-fees.md` first** — each needs
-   its own route confirmation and its own live window.
+1. **Acquire the page through the pipeline.** The one step that turns a
+   classified route into Evidence and makes the four addresses admissible
+   locators. Requires a live window.
+2. **Confirm and inspect `/ray/treasury.md`** — the document points at it for
+   "the complete address map", and it is where a buyback *executor* might be
+   role-bound. Its own route act and its own window.
 3. **Stop.**
+
+**Two risks already named, unchanged.** `DESTINATION` is
+`tokenStateSensitive: true` — the gate that excluded PUMP's DESTINATION results
+as `TOKEN_STATE_UNQUALIFIED`. And **no Evidence row in this repository has ever
+carried an `onchainArtifactId`**: that path is read and believed correct but has
+never succeeded end to end. This case would be its first real test.
 
 ### Standing boundaries
 
