@@ -511,6 +511,29 @@ policy, and only VERIFIED outcomes becoming durable memory.
 evaluation, golden scenarios. See `docs/ARI_LEARNING_LOOP.md` for the intended
 evolution. No LLM weights are ever trained.
 
+## Platform boundary: Telegram is a client, not the platform (ACTIVE)
+
+**ATLAS is the product; Telegram is only the first interface** — an ACTIVE
+constraint on current development (D-125), not a future idea. The full boundary,
+repository mapping, coupling audit and acceptance matrix live in
+`docs/PLATFORM_INDEPENDENT_ARCHITECTURE.md`; only the law lives here:
+
+```
+CLIENT → APPLICATION/SERVICE LAYER → ATLAS DOMAIN/CORE
+```
+
+The reverse edge `ATLAS DOMAIN → TELEGRAM` is forbidden. The Core — engine,
+domain, memory, persistence, entitlements, usage policy — must not need to know
+Telegram exists. Telegram concerns (initData bootstrap, WebApp SDK, deep links,
+payments, presentation) stay at the edge: `src/server/auth/`,
+`app/api/auth/telegram/`, `src/client/platform.ts`. The canonical user is
+`users.id`; a Telegram user id is an attached external identity in
+`user_identities`, never a domain key. Entitlement is computed from
+subscription state, never from a payment event. The design-review rule for
+every feature: **if Telegram disappeared tomorrow, the feature must still
+operate through another client against the same backend.** Audit 2026-08-28:
+zero Core violations found.
+
 ## Future extension boundary: Project Assessment consumes Proof
 
 A future product layer — **EVIDENCE → PROMISES → RISKS** — is recorded in

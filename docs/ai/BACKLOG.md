@@ -73,6 +73,18 @@ together they stopped project #2 before it could start. Kept for context.
   observation as visually neutral. It is neutral in reconciliation; nothing yet
   guarantees it reads that way to a user.
 
+### Future clients and adapters (constraint ACTIVE, implementations NOT scheduled)
+
+The platform-independence constraint (D-125,
+`docs/PLATFORM_INDEPENDENT_ARCHITECTURE.md`) is active now; these
+implementations are not authorized and each needs its own owner decision:
+
+- Web / iOS / Android clients against the same application boundary
+- Payment adapters beyond Telegram Stars (entitlement stays provider-blind);
+  includes de-denominating `price_stars_at_purchase` when a second adapter
+  is actually built
+- Notification delivery adapters (domain event ≠ Telegram message)
+
 ### Future extension — Project Assessment (recorded, NOT scheduled)
 
 The canonical spec is `docs/PROJECT_ASSESSMENT_PRODUCT_SPEC.md` (D-124). Only

@@ -4,58 +4,56 @@
 
 ## NONE — awaiting owner direction
 
-The future **Project Assessment** extension (EVIDENCE → PROMISES → RISKS) is
-recorded — documentation only. **Nothing was implemented**: no tables, engines,
-adapters, UI, migrations or API routes, and no change to Raydium / Proof
-research behaviour. No production code was touched.
+The platform-independence constraint — **ATLAS is the product; Telegram is only
+the first interface** — is recorded as an **ACTIVE** architectural invariant
+(D-125). Documentation and audit only: **no production code changed**, no
+client built, no Raydium/Proof behaviour touched.
 
 ### What was recorded, and where
 
-- **Canonical spec:** `docs/PROJECT_ASSESSMENT_PRODUCT_SPEC.md` — the complete
-  future vision: NO CONCLUSION WITHOUT A TRACE; the dependency law (Assessment
-  consumes Proof, never manages it); the verified mapping onto existing
-  canonical entities; phases A–G; Promise/Risk/Watch boundaries; no investment
-  advice; evidence coverage ≠ project quality; the ≥10-project testing vision.
-- **Decision register:** `docs/DECISIONS.md` **D-124** (LOCKED), same commit —
-  per the register's own rule that an owner decision living only in chat gets
-  re-asked.
-- **ARCHITECTURE.md:** only the dependency invariant / integration boundary.
-- **BACKLOG.md:** only the future phase references, explicitly not scheduled.
-- **CURRENT_STATE.md:** one note — recorded, NOT active.
-- **INDEX.md:** one navigation line, read-only-when-relevant.
+- **Canonical doc:** `docs/PLATFORM_INDEPENDENT_ARCHITECTURE.md` — the
+  dependency law (CLIENT → APPLICATION → CORE; reverse edge forbidden), the
+  verified repository mapping, the Telegram coupling audit, forbidden
+  couplings, the removal test, and the honest 14-point acceptance matrix.
+- **Register:** `docs/DECISIONS.md` **D-125** (LOCKED), same commit.
+- **ARCHITECTURE.md** — the law only. **CURRENT_STATE.md** — one ACTIVE note
+  (explicitly distinguished from the *future* D-124 spec). **BACKLOG.md** —
+  future clients/adapters as unscheduled references. **INDEX.md** — one nav
+  line.
 
-No text is duplicated across those files; each holds only its own slice.
+### The audit result (report only, per instruction)
 
-### Mapping facts verified before writing (not assumed)
+**Zero Core violations.** Telegram exists only at the edge: the auth chain
+(`app/api/auth/telegram/` → `src/server/auth/`), the client
+`PlatformAdapter` (`src/client/platform.ts`, with a `web` fallback already in
+place), and the SDK script tag. `package.json` carries no Telegram SDK. The
+single engine string match is `t.me`/`telegram.me` inside `SOCIAL_DOMAINS` —
+source-classification data about the external web, not coupling.
 
-- `component_reconciliation_status` is exactly `SUPPORTED /
-  PARTIALLY_SUPPORTED / CONTRADICTED / INSUFFICIENT_EVIDENCE`; `NOT_APPLICABLE`
-  deliberately absent (D-092). The spec forbids introducing it into component
-  semantics — and notes honestly that the *Proof-level* Phase-1 `verdict` enum
-  does contain it, untouched.
-- The Phase-B "Research Trace" chain already exists at rest:
-  `research_component_results` carries supporting/contradicting/excluded
-  evidence ids with closed reason codes; S6/S7 are replay-idempotent derived
-  projections; `proof_gaps` exists; `proofs.layers` already mandates a "what
-  could change the conclusion" block.
-- Numeric research budgets are already owned by `product.ts`
-  (`budget_demo` / `budget_core` / `INTERNAL_ALPHA_V1`); the spec added **no
-  new constants**.
+Key mapping facts, verified not assumed: canonical identity is `users.id` with
+`user_identities` as generic provider attachment; every domain FK references
+the internal uuid; entitlement is computed from subscription state and
+**nothing reads `billingProvider`**; `evaluateGates` is one function for
+preview and enforcement; no client/app file imports `src/server/engine`; no
+payment-processing code exists at all; only tests write `proofs` (S8/S9 not
+started — a roadmap fact, not a platform gap).
 
-### Where the active work still stands (unchanged by this task)
+One denomination residue recorded for later, not fixed: `price_stars_at_purchase`
+/ `ari_core_price_stars` bake Stars into the billing record. De-denominate when
+a second billing adapter is actually built.
+
+### Still flagged from earlier (unchanged)
+
+The raydium-allowlist and documentary-only-mode owner decisions from `b5a95aa`
+are still not register rows; D-122's text still names the allowlist as
+`{pump_fun}`. Catch-up registration remains its own owner act.
+
+### Where the active research work stands (unchanged by this task)
 
 Raydium: identity ACTIVE, buyback `.md` route classified `OFFICIAL_DOCS`,
-`raydium` in the alpha allowlist, documentary-only mode available, **0 Evidence,
-0 jobs**, chain gate locked. The prepared first acquisition command is in the
-previous round's record (`git log`) and in CURRENT_STATE.
-
-### One register gap flagged for the owner (not fixed here — scope)
-
-The two owner decisions enacted in commit `b5a95aa` — adding `raydium` to
-`INTERNAL_ALPHA_LIVE_PROJECT_SLUGS` and the documentary-only mode — are not yet
-rows in `docs/DECISIONS.md`. D-122's freeze text still names the allowlist as
-`{pump_fun}`. Per the register's discipline a catch-up registration should be
-its own small owner-authorized act.
+alpha allowlist includes `raydium`, documentary-only mode available, **0
+Evidence, 0 jobs**, chain gate locked. The prepared first acquisition command
+is recorded in CURRENT_STATE and `git log`.
 
 ### Standing boundaries
 

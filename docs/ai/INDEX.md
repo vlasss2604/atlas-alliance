@@ -30,6 +30,10 @@ Those three are the whole normal startup set.
 - `../PROJECT_ASSESSMENT_PRODUCT_SPEC.md` — the recorded FUTURE
   Evidence → Promises → Risks extension (D-124). Read only when a task
   explicitly concerns that extension; it authorizes no current work.
+- `../PLATFORM_INDEPENDENT_ARCHITECTURE.md` — the ACTIVE platform-independence
+  constraint (D-125): Telegram is a client, not the platform. Read when a task
+  touches auth, clients, billing, notifications, or adds anything a client
+  would call.
 - `../implementation/` — phase plans, freezes, audits. Historical; read only when
   a task names one.
 - `../handoff/` — the original bootstrap package that created this repository.

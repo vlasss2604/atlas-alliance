@@ -104,6 +104,15 @@ Consequence to keep in mind: S5 reconciles one component from one pool and never
 waits for a binding to arrive from elsewhere, so a fact's relationship must be
 correct where the fact is authored — not left to a downstream gate.
 
+## Active architectural constraint: platform independence
+
+**ATLAS is the product; Telegram is only the first interface** (D-125) — an
+**ACTIVE** constraint on all current development, unlike the future extension
+below. Core must never depend on Telegram; the boundary, mapping, audit and
+acceptance matrix are in `docs/PLATFORM_INDEPENDENT_ARCHITECTURE.md`. Audit
+2026-08-28: zero Core violations; Telegram exists only at the auth/client edge
+and as identity-attachment data. No new client platform is authorized.
+
 ## Recorded future extension (not active)
 
 A future product layer — **EVIDENCE → PROMISES → RISKS** (Project Assessment) —
