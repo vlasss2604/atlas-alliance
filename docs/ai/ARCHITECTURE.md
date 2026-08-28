@@ -173,6 +173,39 @@ Two consequences worth knowing before you reason about outcomes:
   rather than merely disallowed. Evidence is written only by
   `persistOnchainArtifactAndFacts`, which requires a job.
 
+**An owner may turn ONE bounded chain read into Evidence.**
+`scripts/onchain-observe-account.ts` is the persisting sibling of the
+diagnostic `onchain-account-check.ts`: one admitted subject, one
+`ACCOUNT_INFO` intent, one RPC, no retry, no promotion, no second locator, no
+search, no documentary fetch, no model call, and no S4 loop — asserted by
+test, not promised in prose. It reuses the production path end to end
+(`resolveOnchainSubject` → `retrieve` → `validateOnchainBinding` →
+`persistOnchainArtifactAndFacts` → `reconcileAndPersistComponent`) and
+authors nothing: every Evidence property is decided by production synthesis
+and persistence, so `ONCHAIN_VERIFIABLE` / `CLAIMED` / `DIRECT` / binding
+cannot be influenced from the command line. D-074 is therefore intact by
+construction.
+
+**Why this one creates a job while `onchain-derive-token-accounts.ts` refuses
+to.** The derive script writes no Evidence, so a job there would exist purely
+to satisfy a foreign key and would assert a research operation that did not
+happen — which is why the standalone artifact origin exists. Here the job IS
+the operation, and it says so: its `originalQuestion` and `normalizedTask`
+describe one bounded on-chain observation and claim no document fetch, no
+search and no model call, with those budget axes set to zero and
+`skipEnqueue` keeping the worker out of it. The same owner-attributed pattern
+`extract-from-document.ts` already uses. Honest job provenance is the price
+of Evidence, and it is paid explicitly rather than avoided.
+
+Re-running it later re-reads at a NEW slot and writes a NEW artifact:
+`uq_onchain_artifacts_job_artifact` is per (job, artifactHash) and each run
+creates its own job, so nothing is overwritten and two slots are never
+collapsed into one state. Within a single job, `extraction_unit_key` makes a
+repeat insert idempotent. Reconciliation is scoped to its own job, so an
+observation never rewrites an earlier job's component result — the
+documentary `SUPPORTED` that Raydium's `DESTINATION` already carries is
+untouched by a later chain read.
+
 Downstream: `mechanism-assembler.ts` (S6) composes the chain,
 `claim-evaluator.ts` (S7) evaluates claim requirements.
 

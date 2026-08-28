@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2309 passing, 4 skipped, 1 failing**
-  (2314 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2327 passing, 4 skipped, 1 failing**
+  (2332 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -222,9 +222,10 @@ unknown, so the address's absence from it is **not** established.
   once.** `DdHDoz94o2WJ…` was characterized 2026-08-28 as a System-Program
   account (not a RAY token account) — see the first on-chain read below.
   Nothing has been read for the other three, no RAY balance has been observed
-  anywhere, and **no Raydium on-chain fact has entered Evidence** (the
-  `ACCOUNT_INFO` persisting sibling does not exist). What Raydium's published
-  claims mean on-chain remains unverified.
+  anywhere, and **no Raydium on-chain fact has entered Evidence** — the
+  `ACCOUNT_INFO` persisting sibling now exists
+  (`scripts/onchain-observe-account.ts`) but has never been run live. What
+  Raydium's published claims mean on-chain remains unverified.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
@@ -813,11 +814,14 @@ derives independently (`NOT_TOKEN_PROGRAM_OWNED` → `ACCOUNT_TO_TOKEN_ACCOUNTS`
 permitted for `DESTINATION`). An answer of "owns no RAY token account" would
 be a genuine finding, not a failure.
 
-**The persistence gap is confirmed unchanged:** `ACCOUNT_INFO` has no
-persisting sibling (enumerated across every on-chain script), and
-`persistOnchainArtifactAndFacts` requires a `jobId` because
-`evidence.research_job_id` is NOT NULL — so on-chain Evidence exists only
-inside a research job. **No Raydium on-chain fact has entered Evidence.**
+**The persistence gap was confirmed at the time of this read:** `ACCOUNT_INFO`
+had no persisting sibling, and `persistOnchainArtifactAndFacts` requires a
+`jobId` because `evidence.research_job_id` is NOT NULL — so on-chain Evidence
+exists only inside a research job. *(The gap was closed the same day —
+`scripts/onchain-observe-account.ts`, offline, never yet run live; see
+`ARCHITECTURE.md`. **This read's result was NOT imported into it**: a
+persisting run performs its own fresh bounded read.)* **No Raydium on-chain
+fact has entered Evidence.**
 
 ### THIRD Stage B window (2026-08-28, job `baf42b79-…`): EXTRACTION SUCCEEDED — Raydium has documentary Evidence, and the chain gate is OPEN
 

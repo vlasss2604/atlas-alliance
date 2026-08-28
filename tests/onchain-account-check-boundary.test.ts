@@ -165,6 +165,9 @@ const GATED_ENTRYPOINTS = [
   "onchain-account-check.ts",
   "onchain-signature-discovery.ts",
   "onchain-token-accounts.ts",
+  // The persisting ACCOUNT_INFO sibling. It writes Evidence, so it is the
+  // one that most needs its header to match the gate it actually enforces.
+  "onchain-observe-account.ts",
 ] as const;
 
 // Comment prose wraps across lines, so a phrase is matched with the
