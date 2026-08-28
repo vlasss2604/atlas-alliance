@@ -150,6 +150,16 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
+- **Generation-side extractor failures lose their class.** A failed
+  `messages.create` (or a `max_tokens` truncation, or a JSON/schema failure)
+  all collapse to `EVIDENCE_EXTRACTOR_UNAVAILABLE` + trace `PROVIDER_ERROR`;
+  the wrapped detail is (correctly) never printed, so a 4xx refusal and an
+  output truncation are indistinguishable at rest. Extend the e7c422c closed
+  diagnostic to this path: classify the raw API error with the existing
+  classifier, add closed values for `MAX_TOKENS_TRUNCATED` /
+  `OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID`, surface via
+  `safeFailureDetail`. Observed live 2026-08-28 (job `b3457f0b-…`).
+
 - **`loadAcquiredDocumentForResume` should refuse a malformed document id with
   the closed `NOT_FOUND`, not a raw driver error.** Observed live: Stage B was
   invoked with the literal placeholder `<DOCUMENT_ID>`; Postgres rejected the

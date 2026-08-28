@@ -731,7 +731,31 @@ locators, 0 artifacts, 0 attempts, no component result, chain gate still
 locked, trace shows the real `safe-http` fetch and the `document-capture`
 stub.
 
-**Stage B has not run in substance.** The owner's invocation passed the
+**Stage B ran (2026-08-28, MantaRay ON, job `b3457f0b-…`) and D-128 did its
+job end to end** — cross-process resume, live seal verification, authority
+re-confirmed `CONFIRMED / OFFICIAL_DOCS` at both ends, the replay transport
+(`acquired-document-replay`) served the stored document with **zero external
+fetch**, the documentary-only chain guarantee held, and when extraction failed
+the document was **not consumed and remains resumable** — the Raydium fetch was
+neither lost nor repeated, which is precisely what the seam was built for.
+
+**The extraction itself failed — for the first time on the GENERATION side.**
+The real `anthropic` extractor was invoked for the first time in any Raydium
+job; `count_tokens` passed (a count failure is fatal-classified and would have
+crashed — it did not), consistent with the MantaRay-ON probe. One attempt, no
+transient-retry row, `EXTRACT_FAILED / PROVIDER_ERROR`, outcome
+`FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE`, S5 for this job
+`INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. Usage columns are all **null**,
+which narrows the cause to exactly two closed candidates — `messages.create`
+threw a non-transient 4xx, **or** the response truncated at
+`stop_reason = "max_tokens"` (thrown before usage capture) — and excludes
+JSON/schema failures, which record usage first. **Which of the two is not
+recoverable from anything persisted**: the wrapped detail string is correctly
+never surfaced, and the local path collapses to a constant. The same
+observability shape fixed for count_tokens (e7c422c) is missing on the
+generation path. No cause beyond those two candidates is inferred.
+
+**Previously — Stage B had not run in substance.** The owner's invocation passed the
 literal placeholder `<DOCUMENT_ID>` instead of the real uuid; the script died
 at the row lookup on Postgres uuid parsing — before any job, fetch, or model
 call. The document remains unconsumed and resumable; the correct command is in
