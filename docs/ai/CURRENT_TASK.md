@@ -4,106 +4,118 @@
 
 ## NONE — awaiting owner direction
 
-Offline preparation only. **Nothing was executed, nothing was changed** apart
-from this file. The first Raydium on-chain read is **READY**, in a
-characterization-only form; the step after it is **BLOCKED** by a structural
-property worth understanding before authorizing anything.
+The first Raydium on-chain read was executed by the owner (one window,
+MantaRay OFF, 2026-08-28T16:53:13Z) and **succeeded**. Analysis only this
+round; nothing was executed here, nothing persisted, no code changed.
 
-### The prepared read (one subject, one intent, one RPC)
+### What the read established
 
-```
-SOLANA_MAINNET_RPC_URL=... npx tsx scripts/onchain-account-check.ts DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz raydium
-```
+`DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` **exists** on Solana mainnet
+at slot **442384428** (`finalized`) and is owned by program
+**`11111111111111111111111111111111`** — the System Program. It is
+`executable: false` and holds `lamports: 7823801354`.
 
-`scripts/onchain-account-check.ts` — the real supported entrypoint, read and
-verified this round. Exactly one `ACCOUNT_INFO` intent → one
-`getAccountInfo(jsonParsed, finalized)` → **one HTTPS POST**. The transport
-performs **zero retries** by construction. No pagination, no signatures, no
-transaction history, no counterparty discovery, no search, no model call, no
-documentary fetch. The address is checked against `resolveOnchainSubject`
-**before** the retriever is constructed, and the DB pool is closed **before**
-the RPC runs — so the call happens with no open handle to ATLAS data.
+**Classification: C — NON-TOKEN ACCOUNT.** `tokenAccountRelation` =
+`NOT_TOKEN_PROGRAM_OWNED`, which the classifier returns only when the owning
+program is not an SPL Token program — an *established* negative, not an
+unresolved one. `tokenAccount` is therefore `null`: no mint, no token-account
+owner, no token amount, no decimals were obtained, and none may be assumed.
 
-**It writes nothing.** That is deliberate in the script, and it is also the
-reason the chain does not continue — see the blocker.
+**The address is not a RAY token account.** A System-Program account cannot
+hold SPL tokens directly; SPL balances live in separate token accounts that
+such an address may *own*.
 
-### What it can establish
+### What it does not establish
 
-Whether the account exists; which program owns it; and — only if the node
-parses it as an SPL token account — whether its mint is RAY, plus the parsed
-owner and balance at the observed slot. That is the technical prerequisite
-that decides whether a later `TOKEN_ACCOUNTS_BY_OWNER` read is even
-meaningful.
+Nothing about buybacks, burns, revenue, control, or role. The synthesized
+`doesNotProve` says it exactly: program ownership does not establish who
+controls the account, what role it plays, "or whether it is a treasury, a
+vault, a burn address or an ordinary holder — those are economic labels, not
+chain facts." The documentary role (Raydium's docs *state* bought-back RAY is
+held here) remains a documentary claim and **has not become a chain fact**.
+The lamport figure is a native SOL position at one slot — not a RAY balance,
+not a history, not an acquisition.
 
-### What it cannot establish, and must never be read as
+### The smallest justified next read
 
-That a buyback happened, that revenue funded anything, that RAY was burned or
-permanently removed, that the balance has any history, or that the address
-holds any institutional role. **Documentary role ≠ chain fact; chain fact ≠
-economic causality.** A balance is a position at a moment, never a history and
-never a purpose.
+**`TOKEN_ACCOUNTS_BY_OWNER`** on the same address, for the confirmed RAY mint
+— technically justified, and the production promotion rule reaches the same
+conclusion independently: `NOT_TOKEN_PROGRAM_OWNED` → `ACCOUNT_TO_TOKEN_ACCOUNTS`,
+permitted for `DESTINATION`, commented "Established as NOT a token account, so
+asking which token accounts it owns is a well-formed question. An answer of
+none is itself a finding."
 
-### The blocker for artifact → Evidence
+Two owner scripts already perform exactly this one read, both bounded to one
+RPC with no retry, no cursor and no second intent:
 
-`persistOnchainArtifactAndFacts` requires a `jobId` — `evidence.research_job_id`
-is NOT NULL — so **on-chain Evidence can only be created inside a research
-job**. Every owner on-chain script is either diagnostic-only or persists an
-artifact plus derived subjects, never Evidence. `ACCOUNT_INFO` has **no
-persisting sibling at all** (the pairs exist for `TOKEN_ACCOUNTS_BY_OWNER`,
-`SIGNATURES_FOR_ADDRESS` and `TRANSACTION_DETAIL`).
+- `scripts/onchain-token-accounts.ts` — diagnostic, persists nothing;
+- `scripts/onchain-derive-token-accounts.ts` — persists the artifact and the
+  derived subjects (still **no Evidence**).
 
-The only path that writes on-chain Evidence today is the S4 executor, and it
-would **not** be one bounded read: for DESTINATION it selects `ACCOUNT_INFO`
-for the first `MAX_ONCHAIN_INTENTS_PER_ATTEMPT = 2` non-anchor subjects — and
-raydium now has **four** admitted locators — plus up to
-`MAX_PROMOTED_INTENTS_PER_ATTEMPT = 3` promoted intents, alongside search,
-documentary fetch and model calls. Up to five RPC reads across two addresses,
-not one.
+Neither is authorized here. **An answer of "owns no RAY token account" would
+be a real finding, not a failure** — and it would not contradict the
+documentation, which may describe an arrangement this single read cannot see.
 
-**Do not widen a script to close this gap in the same window as a live read.**
-Closing it is its own offline task, and its shape is an owner decision.
+### The persistence gap — re-confirmed from current code
 
-### Also worth knowing before any on-chain DESTINATION Evidence
+`ACCOUNT_INFO` still has **no persisting sibling**. Verified by enumerating
+every on-chain script: `onchain-account-check.ts` calls
+`persistOnchainArtifact` **zero** times, while the pairs exist for
+`TOKEN_ACCOUNTS_BY_OWNER`, `SIGNATURES_FOR_ADDRESS` and `TRANSACTION_DETAIL`.
+Confirmed in the DB after the window: **0 raydium on-chain artifacts**, 0
+artifacts created since the window opened, 4 raydium Evidence rows all with
+`onchain_artifact_id` null, latest `DESTINATION` S5 still `SUPPORTED` /
+`[]` from 16:04Z. **The read changed nothing.**
 
-`DESTINATION` is `tokenStateSensitive: true` with `requiredTokenState: null`
-(pattern.ts). The gate downgrades to `TOKEN_STATE_UNQUALIFIED` whenever a
-token-state qualifier — `locked`, `staked`, `vested`, `wrapped`, `escrowed`,
-`vote-escrowed` — appears in the establishing rows' text. Raydium's current
-`SUPPORTED` result carries empty reason codes because none appears. An
-`ACCOUNT_INFO` fact's synthesized text contains no such word either, so it
-would not itself trigger the downgrade. The gate is a text-detection
-downgrade, not a chain-fact requirement — **do not weaken it**.
+Structural reason it cannot be closed by a script alone:
+`persistOnchainArtifactAndFacts` requires a `jobId` because
+`evidence.research_job_id` is NOT NULL — on-chain Evidence exists only inside
+a research job.
 
-### Expected shape if that Evidence were ever created
+### Smallest persisting tool shape (design only — NOT implemented)
 
-Artifact `ACCOUNT_INFO` (canonical URI, raw + artifact hashes, slot,
-finality). Facts: one existence/owner-program fact, plus one token-relation
-fact if parsed. Evidence would carry `sourceClass ONCHAIN_VERIFIABLE`,
-`entityBinding CONFIRMED`, `directness DIRECT`, `mechanismState null`,
-`onchainArtifactId` set — and **`officiality CLAIMED`**. **D-074 is
-unchanged**: on-chain Evidence is CLAIMED by design and therefore cannot
-independently exceed `PARTIALLY_SUPPORTED`. A foreign-mint token account
-would be authored as `CONTEXT`, never support.
+`scripts/onchain-observe-account.ts`, mirroring
+`onchain-derive-token-accounts.ts`: owner-supplied exact subject + project
+slug → confirmed identity supplies the anchor → `resolveOnchainSubject` gate
+**before** the retriever → **exactly one** `ACCOUNT_INFO` →
+`validateOnchainBinding` → `persistOnchainArtifactAndFacts` (artifact +
+`synthesizeOnchainFacts` → Evidence with `onchainArtifactId`) → reconcile
+`DESTINATION`. Structurally incapable of: search, documentary fetch, model
+call, enumerating other admitted locators, promoting any intent, a second RPC,
+or a retry — asserted by test, not promised in a comment.
+
+The one open design question is **job provenance**: Evidence requires a job,
+so the tool must either create a minimal owner-attributed job or take an
+existing job id. That is an owner decision, not a default.
+
+Expected result if built and run: `sourceClass ONCHAIN_VERIFIABLE`,
+`officiality CLAIMED` (D-074 — cannot independently exceed
+`PARTIALLY_SUPPORTED`), `entityBinding CONFIRMED`, `directness DIRECT`,
+`mechanismState null`, one existence/owner-program fact.
 
 ### Next — the owner's choice
 
-1. **Run the prepared characterization read** (command above), in an ordinary
-   PowerShell window under the established manual live-window procedure. One
-   RPC, nothing persisted. Then stop and report.
-2. **First close the artifact→Evidence gap offline** — an `ACCOUNT_INFO`
-   persisting sibling scoped to one subject, mirroring
-   `onchain-derive-token-accounts.ts`. Needs an owner decision about job
-   provenance, since Evidence requires a job.
+1. **One `TOKEN_ACCOUNTS_BY_OWNER` window** on `DdHDoz94o2WJ…` using
+   `onchain-token-accounts.ts` (diagnostic) or
+   `onchain-derive-token-accounts.ts` (persists artifact + derived subjects).
+   One RPC, no retry. Then stop.
+2. **First build the `ACCOUNT_INFO` persisting sibling** offline, so this
+   read — and the next — can become Evidence rather than terminal output.
 3. **Stop.**
+
+Doing 2 before 1 means the existing `ACCOUNT_INFO` observation would have to
+be re-read live to be persisted; doing 1 first spends a window on a question
+whose answer cannot yet enter Evidence either. Both orders are defensible;
+neither is urgent.
 
 ### Standing boundaries
 
 - No live calls without a separate authorized window; no retries.
-- token-account owner ≠ wallet · transfer ≠ burn · transfer ≠ buyback · same
-  transaction ≠ causality · zero balance ≠ burn or history · current balance ≠
-  historical acquisition · documentary label ≠ chain behaviour · chain
-  behaviour cannot assign an institutional role.
-- No arbitrary history paging, no counterparty chasing. **Stop after the one
-  bounded read.**
+- documentary role ≠ chain behaviour · current balance ≠ historical
+  acquisition · transfer ≠ buyback · buyback ≠ burn · zero balance ≠ burn ·
+  same transaction ≠ causality · token-account owner ≠ institutional actor ·
+  chain behaviour cannot assign an institutional role.
+- No arbitrary history paging, no counterparty chasing. Stop after one
+  bounded read.
 - Never relax safe-http or SSRF; never whitelist a reserved range.
 - Never loosen `extractionResultSchema` to make model output easier to accept.

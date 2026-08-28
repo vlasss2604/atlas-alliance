@@ -150,6 +150,18 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
+- **`ACCOUNT_INFO` has no persisting sibling, so a characterization read
+  cannot become Evidence.** `onchain-account-check.ts` is diagnostic-only
+  (0 `persistOnchainArtifact` calls), while `TOKEN_ACCOUNTS_BY_OWNER`,
+  `SIGNATURES_FOR_ADDRESS` and `TRANSACTION_DETAIL` each have a persisting
+  pair. Observed live 2026-08-28: the first Raydium on-chain read produced a
+  clean deterministic result that exists only in terminal output. Shape (one
+  subject, one RPC, no retry, no promotion, no search/docs/model, asserted by
+  test) is written in `CURRENT_TASK.md`. **Open design question:** Evidence
+  requires a job (`evidence.research_job_id` is NOT NULL), so the tool must
+  either create a minimal owner-attributed job or accept an existing job id —
+  an owner decision, not a default.
+
 - ~~**Generation-side extractor failures lose their class.**~~ **Resolved
   2026-08-28**, exactly in the shape written here: the raw API error is
   classified by the existing shared classifier, the three closed output values

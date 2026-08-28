@@ -218,10 +218,13 @@ unknown, so the address's absence from it is **not** established.
 - Cumulative official burn totals are unverified.
 - Nothing at all is observed after slot `441977087`; no persisted signature
   anywhere has a higher slot.
-- **Raydium's four documentary locators are admissible but unread.** The chain
-  gate opened 2026-08-28 (third Stage B window); nothing on-chain has been
-  observed for any of them, and the acquired document is now consumed. What
-  Raydium's published claims mean on-chain is entirely unverified.
+- **Raydium's four documentary locators are admissible; one has now been read
+  once.** `DdHDoz94o2WJ…` was characterized 2026-08-28 as a System-Program
+  account (not a RAY token account) — see the first on-chain read below.
+  Nothing has been read for the other three, no RAY balance has been observed
+  anywhere, and **no Raydium on-chain fact has entered Evidence** (the
+  `ACCOUNT_INFO` persisting sibling does not exist). What Raydium's published
+  claims mean on-chain remains unverified.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
@@ -771,6 +774,50 @@ which one is not recoverable from anything persisted. The observability gap
 itself was **CLOSED the same day** (see "A generation failure names its
 cause" in `ARCHITECTURE.md`); this run predates the fix and the new
 vocabulary is never applied retroactively.
+
+### FIRST RAYDIUM ON-CHAIN READ (2026-08-28, owner window): the holding address is a SYSTEM-PROGRAM account, not a RAY token account
+
+One owner-authorized window, MantaRay OFF, `onchain-account-check.ts` on
+`DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` with project `raydium`. **One
+RPC, zero retries, nothing persisted** — verified afterwards in the DB: 0
+raydium on-chain artifacts, 0 artifacts created since the window, all four
+Evidence rows still `onchain_artifact_id` null, `DESTINATION` S5 unchanged at
+`SUPPORTED` / `[]`.
+
+**Established, deterministically, at slot `442384428` (`finalized`):** the
+account **exists**; `ownerProgram` = `11111111111111111111111111111111` (the
+System Program); `executable: false`; `lamports: 7823801354`;
+`tokenAccountRelation` = **`NOT_TOKEN_PROGRAM_OWNED`** — an established
+negative, returned only when the owning program is not an SPL Token program,
+never an unresolved one. `tokenAccount` is `null`, so **no mint, no
+token-account owner, no token amount and no decimals were obtained**.
+`binding: CONFIRMED`. `rawHash sha256:5e2086a6…`, `artifactHash
+sha256:ae1b7ae1…`.
+
+**The documented holding address is therefore NOT itself a RAY token
+account.** A System-Program account cannot hold SPL tokens directly; SPL
+balances live in separate token accounts such an address may own. That is a
+technical prerequisite, and it is the whole of what this read settled.
+
+**It establishes nothing economic.** Not that a buyback occurred, not that
+RAY was burned or removed, not who controls the account, not that anything
+was ever sent there. The 7.82 SOL of lamports is a native position at one
+slot — not a RAY balance, not a history. The documentary claim that
+bought-back RAY is held here **remains documentary**; this read neither
+confirms nor contradicts it, and **documentary role has not become a chain
+fact**.
+
+**The justified next read is `TOKEN_ACCOUNTS_BY_OWNER`** for the confirmed RAY
+mint on this same address — which is also what the production promotion rule
+derives independently (`NOT_TOKEN_PROGRAM_OWNED` → `ACCOUNT_TO_TOKEN_ACCOUNTS`,
+permitted for `DESTINATION`). An answer of "owns no RAY token account" would
+be a genuine finding, not a failure.
+
+**The persistence gap is confirmed unchanged:** `ACCOUNT_INFO` has no
+persisting sibling (enumerated across every on-chain script), and
+`persistOnchainArtifactAndFacts` requires a `jobId` because
+`evidence.research_job_id` is NOT NULL — so on-chain Evidence exists only
+inside a research job. **No Raydium on-chain fact has entered Evidence.**
 
 ### THIRD Stage B window (2026-08-28, job `baf42b79-…`): EXTRACTION SUCCEEDED — Raydium has documentary Evidence, and the chain gate is OPEN
 
