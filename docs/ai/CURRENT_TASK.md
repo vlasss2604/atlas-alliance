@@ -4,62 +4,69 @@
 
 ## NONE — awaiting owner direction
 
-Raydium now has a catalog row and a confirmed identity. It still has **no route,
-no source, no Evidence, no job and no artifact**, and nothing has been read.
+Raydium has a catalog row, a confirmed identity and one **unclassified** route.
+**Nothing has been read.** No source, no Evidence, no job, no artifact.
 
 ### What was done
 
-One owner-authorized identity act, through the only supported path:
+One owner-authorized route act, through the only supported path:
 
 ```
-npx tsx scripts/confirm-project-identity.ts --project=raydium --chain=solana \
-  --token=4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R --ticker=RAY --actor=owner
+npx tsx scripts/confirm-source-route.ts --project=raydium \
+  --domain=docs.raydium.io --prefix=/ray/ray-buybacks --actor=owner
 ```
 
-Row `c90833b3-bd93-413b-b430-b9e5e8b3cb28`, kind `PROJECT_IDENTITY`, ACTIVE via
-`OBSERVED -> CANDIDATE -> ACTIVE` on the existing `promoteProjectMemoryItem`. No
-SQL, no direct ACTIVE write, no re-implemented transition.
+Row `84774bb9-b10a-4519-8a69-7f1c3a6c0b93`, kind `SOURCE_ROUTE`, ACTIVE via
+`OBSERVED -> CANDIDATE -> ACTIVE` on the existing `promoteProjectMemoryItem`.
+No SQL, no direct ACTIVE write, no classification.
 
-Stored content has exactly three keys — `chain`, `tokenAddress`, `ticker`. There
-is **no `network` field**; the schema is `.strict()` and the script refuses
-`--network` loudly rather than dropping it. Mainnet is implied by construction.
+Content is exactly `{ domain, pathPrefix }`. `routeClass` is **absent rather than
+null** — the tool has no parameter for it, refuses `--class` and its variants
+loudly, and the documented shape treats absent and null identically.
 
-The chain and mint were **owner-supplied**. Nothing discovered or verified them:
-the shape validator only rejects an obviously cross-chain address, and a
-well-formed address is not a confirmed one. Confirmation *is* the human ACTIVE
-row, and that is all this recorded.
+On Windows, note: Git Bash's MSYS path conversion rewrites a `/...` argument into
+a Windows path. The first invocation therefore arrived as
+`C:/Program Files/Git/ray/ray-buybacks` and was **refused** with
+`PREFIX_HAS_WHITESPACE` before any write — the validator ran first, so nothing
+was inserted. Prefix such a command with `MSYS_NO_PATHCONV=1`, or run it from
+PowerShell.
 
-`projects.ticker` for `raydium` stays **null**, untouched. Catalog ticker and
-canonical identity are separate concerns — the domain module treats identity
-`ticker` as informational and never uses it for matching.
+### Verified offline, through the real resolver and the real gates
 
-### Verified offline, through the real production resolver
+`resolveSourceRoute("https://docs.raydium.io/ray/ray-buybacks")` →
+`officiality CONFIRMED`, `routeClass null`, `matchedPathPrefix
+"/ray/ray-buybacks"`.
 
-`resolveConfirmedIdentity(raydium)` returns
-`{ chain: "solana", tokenAddress: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
-ticker: "RAY" }` — exact match on all three. Exactly one ACTIVE
-`PROJECT_IDENTITY` row exists; it is the project's only `project_memory_items`
-row of any kind or state. `pump_fun`'s identity is untouched.
+- inspection (`evaluateInspectionEligibility`) → **allowed**
+- `evaluateDocsInspectionEligibility` → refused, `NOT_OFFICIAL_DOCS`
+- `evaluateRenderEligibility` → refused, `NOT_OFFICIAL_DOCS`
+- `docsPayloadRecoveryEligible` → false
+- `resolveSourceClass(url, OTHER, null)` → `SOCIAL`, which is in no component's
+  `establishingClasses`. With a class it would be `OFFICIAL_DOCS` — that is the
+  whole difference classification makes, and it has not been made.
 
-On-chain preflight, exercised against the real gate functions with **no retriever
-constructed**, so transport was structurally unreachable: the identity gate
-**passes**, the `chain === "solana"` gate **passes**, `projectAnchor` would be the
-confirmed mint — and it stops at the subject-provenance gate with `NOT_FOUND`.
-Correct: there is no admitted documentary locator and no derived subject, so
-nothing is eligible to be read. Identity was the first gate, not the last.
+Segment-bounded matching holds: `/ray/ray-buybacks/history` is inside the prefix,
+`/ray/ray-buybacks-extra` is not. `raydium.io` is a different host and stays
+`CLAIMED`. `pump_fun`'s six route rows are untouched.
 
-### Next, and still ordinary owner acts
+**One consequence to carry forward.** Officiality is decided by **domain match
+alone**, so `/ray/treasury`, `/raydium/protocol/protocol-fees` and `/` on
+`docs.raydium.io` moved `CLAIMED -> CONFIRMED` as a side effect of this single
+confirmation. They gained no capability — `matchedPathPrefix` is null for them,
+inspection denies `NO_PATH_PREFIX`, sourceClass stays `SOCIAL` — but "neighbouring
+routes are untouched" is true of capability, not of officiality. Confirming a
+second prefix on this host is also constrained: an overlapping ACTIVE prefix is
+refused outright, because two co-matching rows null `matchedPathPrefix` and would
+silently disable inspection for urls both cover.
 
-1. `confirm-source-route.ts` — `docs.raydium.io` at a bounded prefix.
-2. **inspect** the page (non-evidentiary) — needs an authorized live window.
-3. `classify-source-route.ts` — only if what the page says earns it.
+### Next
 
-Step 2 before step 3 remains the point: classification follows reading.
+1. **Inspect** `https://docs.raydium.io/ray/ray-buybacks` — non-evidentiary,
+   needs an authorized live window. `scripts/inspect-official-page.ts`.
+2. `classify-source-route.ts` — **only if what the page says earns it**, and only
+   for the class the page actually supports.
 
-Note the ordering that the preflight just made concrete: on-chain reading cannot
-start from the mint alone. A subject becomes eligible only through a documentary
-locator or a previously derived subject, so the documentary path is not optional
-groundwork — it is what unlocks the chain path.
+Step 1 before step 2 is the point: classification follows reading.
 
 The pre-registered success criteria for the case — what will and will not count
 as an address-level role assignment — remain as written when Raydium was

@@ -202,10 +202,10 @@ documentary-only. Not a defect; a capability boundary.
 
 Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
 `hyperliquid`, `uniswap` and `raydium` — the latter three with **0 jobs,
-0 evidence, 0 routes and no documentary knowledge of any kind**. `hyperliquid`
-and `uniswap` additionally have **no confirmed identity**, and both are
-non-Solana, so neither can test the on-chain path. `raydium` now has one — see
-below.
+0 evidence and no documentary knowledge of any kind**. `hyperliquid` and
+`uniswap` additionally have **no confirmed identity and no route**, and both are
+non-Solana, so neither can test the on-chain path. `raydium` now has an identity
+and one unclassified route — see below.
 
 **The fork: add an EVM read transport, or choose Solana projects until Pattern v1
 is mature.** No Solana TVC candidate exists in repository memory, so option two
@@ -215,10 +215,11 @@ needs the owner to name one.
 Solana, so the transport wall does not apply. Recorded as the **selected next
 case and an owner-supplied lead only** — nothing about its mechanism, fee split
 or published addresses is a finding, and none of it becomes one until acquired
-through the pipeline. Local state is a clean slate apart from the catalog row and
-the confirmed identity recorded below: no route, source, job, Evidence or
-artifact; the only `raydium` mentions anywhere are 11 SOCIAL Evidence rows
-belonging to `pump_fun` that name it as a venue.
+through the pipeline. Local state is a clean slate apart from the catalog row, the
+confirmed identity and the one unclassified route recorded below: no source, job,
+Evidence or artifact, and **nothing has been read**; the only `raydium` mentions
+anywhere are 11 SOCIAL Evidence rows belonging to `pump_fun` that name it as a
+venue.
 
 The shape is deliberately different from PUMP — fee → collection → conversion →
 **accumulation at a protocol-controlled destination, with no burn** — so it
@@ -258,6 +259,32 @@ retriever: the on-chain preflight now **passes** the identity gate and the
 provenance gate with `NOT_FOUND`. That is correct: `raydium` has no admitted
 documentary locator and no derived subject, so nothing is eligible to be read
 yet. Identity was never the last gate — it was the first.
+
+**Route confirmed 2026-08-28, unclassified** — `confirm-source-route.ts`, row
+`84774bb9-b10a-4519-8a69-7f1c3a6c0b93`, ACTIVE via `OBSERVED -> CANDIDATE ->
+ACTIVE`. Content is exactly `{ domain: "docs.raydium.io", pathPrefix:
+"/ray/ray-buybacks" }` — two keys, `routeClass` **absent rather than null**,
+because the tool has no parameter for it and the documented shape treats absent
+and null identically. `https://docs.raydium.io/ray/ray-buybacks` resolves to
+`CONFIRMED` / `routeClass null` / `matchedPathPrefix "/ray/ray-buybacks"`.
+
+That opens **non-evidentiary inspection and nothing else**, verified against the
+real gates: `evaluateInspectionEligibility` allows it, while
+`evaluateDocsInspectionEligibility`, `evaluateRenderEligibility` and
+`docsPayloadRecoveryEligible` all refuse with `NOT_OFFICIAL_DOCS`. Acquired as
+Evidence today the page would classify `SOCIAL` — `resolveSourceClass` only
+promotes an unrecognized host when a routeClass exists — and `SOCIAL` appears in
+no component's `establishingClasses`, so it would establish nothing.
+
+**Worth knowing before confirming a second route on that host: officiality is
+domain-wide, matchedPathPrefix is not.** The resolver decides officiality by
+domain match alone, so `/ray/treasury`, `/raydium/protocol/protocol-fees` and
+`/` on `docs.raydium.io` all moved `CLAIMED -> CONFIRMED` as a side effect of
+this one confirmation. They gained **no capability**: their `matchedPathPrefix`
+is null, so inspection denies them `NO_PATH_PREFIX`, and their sourceClass stays
+`SOCIAL`. Prefix matching is segment-bounded — `/ray/ray-buybacks/history` is
+inside, `/ray/ray-buybacks-extra` is not — and `raydium.io` (a different host)
+stays `CLAIMED`.
 
 **Both owner capabilities now exist.** Nothing blocks the case:
 
