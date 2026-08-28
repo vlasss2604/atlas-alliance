@@ -700,7 +700,14 @@ same day** (see "count_tokens failure names its cause" in `ARCHITECTURE.md`):
 the next such failure will read
 `capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — …:<CLASS>[:<status>]`
 from a closed vocabulary. The run recorded below predates that fix, so its
-cause remains genuinely unknown. As recorded at the time: `safeFailureDetail` extracts a status only for `ContentFetchError`;
+cause remains genuinely unknown. As recorded at the time:
+
+**A provider-only probe now exists** — `scripts/anthropic-count-tokens-probe.ts`
+(owner-run, MantaRay ON): one countTokens capability check using the production
+client construction, config model id, retry composition and closed diagnostic;
+at most 2 provider requests, zero generation, zero DB writes, no research
+surface in its import graph (pinned by a boundary test). It separates
+"the capability works at all" from "the acquisition process works". `safeFailureDetail` extracts a status only for `ContentFetchError`;
 for this error class it returns null, so the reason is the bare
 `EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError`. `CapabilityFatalError`'s
 message carries only the capability name, the computed reason travels as an
