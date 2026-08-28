@@ -332,6 +332,53 @@ timeout never fired; here the timeout is exactly what fired, so it is live again
 Separating them needs the tunnel-outcome diagnostic already named in
 `BACKLOG.md` — and CORE_RULES' brake applies: that is engineering, not research.
 
+**Second window, 2026-08-28: `/raydium/protocol/protocol-fees` — a different
+failure at a different stage.** `INSPECTION FAILED: TIMEOUT`, again
+`0 denied, 1 allowed`, no navigation diagnostic, no HTTP status, no finalUrl,
+no content. **Two pages inspected, two windows spent, nothing read.**
+
+**`TIMEOUT` is not `NAVIGATION_TIMEOUT`.** The buyback page threw inside
+`page.goto`, so navigation never completed and no response ever existed.
+`TIMEOUT` is raised by the renderer's own wall-clock check, and the two places
+it can be raised are both **after** a navigation attempt:
+
+1. child-side, `rendered-docs-playwright.ts` — the check sits *after* the
+   `goto` try/catch, so reaching it means **`goto` returned without throwing**;
+2. parent-side, `rendered-docs-isolated.ts` — the supervisor's hard deadline at
+   `totalWallClockMs + 5_000` = 20s, for a child that never produced an envelope.
+
+Both surface identically: reason `TIMEOUT`, provider `"isolated"` either way
+(`TIMEOUT` is in `CHILD_REPORTABLE_RENDER_REASONS`, so the child's own is
+re-thrown by the parent unchanged), no diagnostic, no status. **The printed output
+cannot separate them** — the same shape of observability gap already closed three
+times on this path.
+
+Reading 1 is the more economical one and is **not** established: the previous
+window proves the child reports a `goto` timeout promptly and the parent
+receives it well inside 20s, so a second `goto` timeout would have printed
+`NAVIGATION_TIMEOUT` again. It did not. That is an inference from a
+single differing observation, not a closed signal.
+
+**A generic capability limit, found while reading the code and not specific to
+Raydium.** `startedAt` is stamped at line 153, *before* `launch()` at line 178,
+and `navigationTimeoutMs` and `totalWallClockMs` are **both 15_000**. So browser
+launch is deducted from the same budget the navigation is measured against, and a
+navigation that legitimately takes 14s and **succeeds** is discarded by the
+post-check whenever launch cost more than a second. The renderer can therefore
+throw away a completed navigation. Belongs in `BACKLOG.md`; not changed here.
+
+**Host-wide or page-specific: cannot be distinguished.** Two observations, two
+different stages, neither repeated. What both share is more informative than what
+differs: no containment refusal, no proxy denial of any class, no `HTTP_ERROR`,
+no `BLOCKED_BY_ROUTE_POLICY`. **Nothing observed says the site refused ATLAS.**
+The leading hypothesis is that the 15s budget is too tight for this host under
+this renderer — plausible, unproven, and a matter of engineering rather than
+research.
+
+**Nothing about either page's content is known.** Fee source, allocation share,
+executing address, destination and supply effect are all **unknown, not absent**.
+Both routes stay ACTIVE and **unclassified**.
+
 **Both owner capabilities now exist.** Nothing blocks the case:
 
 1. ~~`PROJECT_IDENTITY` has no supported creation path.~~ **Closed 2026-08-28** —

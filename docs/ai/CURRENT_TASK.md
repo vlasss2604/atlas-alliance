@@ -5,107 +5,89 @@
 ## NONE — awaiting owner direction
 
 Raydium has a catalog row, a confirmed identity and **two unclassified routes**.
-One inspection window was spent on the first and **the page was never read**. The
-second has not been inspected at all. No source, no Evidence, no job, no artifact.
+**Two inspection windows have been spent and neither page was read.** No source,
+no Evidence, no job, no artifact.
 
-### The second route, confirmed 2026-08-28
+### The two windows
 
-```
-MSYS_NO_PATHCONV=1 npx tsx scripts/confirm-source-route.ts --project=raydium   --domain=docs.raydium.io --prefix=/raydium/protocol/protocol-fees --actor=owner
-```
+| url | reason | proxy |
+|---|---|---|
+| `/ray/ray-buybacks` | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | 0 denied, 1 allowed |
+| `/raydium/protocol/protocol-fees` | `TIMEOUT` | 0 denied, 1 allowed |
 
-Row `d09657e6-96b6-423e-9973-a2578cb71069`, ACTIVE via `OBSERVED -> CANDIDATE ->
-ACTIVE`, content exactly `{ domain, pathPrefix }`, `routeClass` absent. No SQL,
-no classification.
+No HTTP status, no `finalUrl`, no bytes, no text in either.
 
-`https://docs.raydium.io/raydium/protocol/protocol-fees` → `CONFIRMED` /
-`routeClass null` / `matchedPathPrefix "/raydium/protocol/protocol-fees"`.
-Inspection **allowed**; docs-inspection, render-as-Evidence and payload recovery
-all refuse `NOT_OFFICIAL_DOCS`; `resolveSourceClass` still `SOCIAL`.
+### The difference is real, and it is a stage difference
 
-**The buyback route is byte-identical before and after** — snapshotted through the
-resolver before the write and re-compared after. Across nine urls, exactly two
-changed: the new prefix and `/raydium/protocol/protocol-fees/detail` under it.
-The two prefixes are disjoint, which is the only reason the second was accepted:
-`/raydium/…` is a string-prefix neighbour of `/ray/…` but not a segment prefix,
-and matching is segment-bounded. `-extra` variants of both stay outside, and a
-parent path is not covered by its child's prefix.
+`NAVIGATION_TIMEOUT` is thrown **inside** `page.goto`: navigation never
+completed, no response ever existed. `TIMEOUT` is the wall-clock check, and both
+places it can be raised sit **after** a navigation attempt:
 
-### The window
+1. **child-side** (`rendered-docs-playwright.ts`) — the check is after the `goto`
+   try/catch, so reaching it means **`goto` returned without throwing**;
+2. **parent-side** (`rendered-docs-isolated.ts`) — the supervisor's hard deadline
+   at `totalWallClockMs + 5_000` = 20s, for a child that produced no envelope.
 
-Owner-executed once, 2026-08-28, MantaRay off, zero retry:
+`TIMEOUT` is in `CHILD_REPORTABLE_RENDER_REASONS`, so the child's own is
+re-thrown by the parent with provider `"isolated"` — **identical output to the
+parent's own**. Reason `TIMEOUT`, no diagnostic, no status, either way. The
+printed output **cannot separate them**.
 
-```
-npx tsx scripts/inspect-official-page.ts https://docs.raydium.io/ray/ray-buybacks raydium
-```
+Reading 1 is the more economical one, and it is **an inference, not a finding**:
+the previous window proves the child reports a `goto` timeout promptly and the
+parent receives it well inside 20s, so a second `goto` timeout would have printed
+`NAVIGATION_TIMEOUT` again. It printed something else. One differing observation
+is not reproducibility.
 
-Gate passed (`CONFIRMED` / `null` / `/ray/ray-buybacks`), then:
+### A generic limit worth fixing later — BACKLOG, not now
 
-```
-INSPECTION FAILED: NAVIGATION_FAILED:NAVIGATION_TIMEOUT
-proxyDenials:     0 denied, 1 allowed   (every denial class 0)
-```
+`startedAt` is stamped **before** `launch()`, and `navigationTimeoutMs` and
+`totalWallClockMs` are **both 15_000**. Browser launch is therefore deducted from
+the same budget the navigation is measured against, so a navigation that takes
+14s and **succeeds** is discarded by the post-check whenever launch cost more
+than a second. The renderer can throw away a completed navigation. Generic, not
+Raydium-specific. Do not "fix" it inside a research task.
 
-No `finalUrl`, no status, no bytes, no term scan, no links, no rendered text.
+### Host-wide or page-specific: cannot be distinguished
 
-### What is and is not established
+Two observations, two stages, neither repeated. What they share matters more than
+what differs: **no containment refusal, no proxy denial of any class, no
+`HTTP_ERROR`, no `BLOCKED_BY_ROUTE_POLICY`**. Nothing observed says the site
+refused ATLAS. Leading hypothesis — the 15s budget is too tight for this host
+under this renderer — plausible, unproven, and engineering rather than research.
 
-**Established.** Not `BLOCKED_BY_ROUTE_POLICY` — our containment did not abort
-the main-frame navigation. Not `UNCLASSIFIED_NAVIGATION_ERROR` — Playwright's
-typed `TimeoutError` fired, the **first time that diagnostic has appeared in this
-repository**; all four `fees.pump.fun` windows returned the unclassified value.
-`DNS_FAILED` and `BLOCKED_ADDRESS` both zero, so the stale-fake-IP hypothesis is
-refuted here as it was there.
+### Nothing about either page is known
 
-**Not established.** `1 allowed` is recorded at policy-decision time, **before
-`netConnect`**; the failure path destroys both sockets silently. It proves DNS
-resolved and the address was public — nothing about the connection succeeding.
-Two readings survive, unseparated by any local signal:
+Fee source, allocation share, executing address, destination, supply effect: all
+**unknown, not absent**. Failure to read a source is not evidence about its
+contents. Both routes stay ACTIVE and **unclassified**; neither
+`84774bb9-b10a-4519-8a69-7f1c3a6c0b93` nor
+`d09657e6-96b6-423e-9973-a2578cb71069` may be classified on this evidence.
 
-1. the server never answered through the tunnel;
-2. the page answered but `waitUntil: "networkidle"` never settled within the 15s
-   budget — ordinary for a documentation SPA.
-
-Reading 2 was **refuted for `pump.fun`** (the timeout never fired there); here the
-timeout is precisely what fired, so it is live again for this host. Separating
-them needs the tunnel-outcome diagnostic already named in `BACKLOG.md`. Do not
-spend research on it: CORE_RULES' brake applies, and four PUMP windows already
-went into transport plumbing and produced no evidence.
-
-**Absence is not established.** Whether the page states a fee share, an executing
-address, a destination or a burn is **unknown**. Failure to read a source is not
-evidence that anything is missing from it.
-
-### Consequences
-
-- The route stays ACTIVE and **unclassified**. Classification follows reading,
-  and no reading occurred. `classify-source-route.ts` must not be run on
-  `84774bb9-b10a-4519-8a69-7f1c3a6c0b93` on this evidence.
-- **No documentary locator exists**, so no on-chain subject can be named. Verified
-  again: `resolveOnchainSubject` on the confirmed RAY mint returns `NOT_FOUND`.
-  The mint is an identity, not a locator — it does not admit itself.
-- Nothing persisted. Verified by timestamp, not only by count: newest `sources`
-  row 2026-08-24, newest Evidence 2026-08-24, newest job 2026-08-27, newest
-  on-chain artifact 2026-08-27 — all older than the route confirmation.
+No documentary locator exists, so no on-chain subject can be named.
+`resolveOnchainSubject` on the confirmed RAY mint returns `NOT_FOUND`: an
+identity does not admit itself.
 
 ### Next — the owner's choice, not a queue
 
-1. **Inspect `/raydium/protocol/protocol-fees`.** Now eligible, never attempted.
-   A different url on the same host, so it also tests whether the buyback
-   timeout was about that page or about the host.
-2. **Retry `/ray/ray-buybacks`.** Would settle whether its timeout is
-   reproducible; nothing else would.
-3. **Neither.** Stopping with the bridge named is a legitimate outcome.
+1. **Raise the render budget first, then re-inspect.** The one change that
+   addresses the leading hypothesis, and it is a code task with a regression
+   test, not a live window. Separating `totalWallClockMs` from
+   `navigationTimeoutMs` — or starting the wall clock after launch — is the
+   generic correction.
+2. **Re-inspect one url unchanged**, to test reproducibility of either signal.
+   Cheapest, and it settles nothing about content if it fails again.
+3. **Stop.** Two windows, no content. Closing the case with the bridge named —
+   "Raydium's own documentation could not be read" — is a legitimate outcome and
+   implies nothing negative about the mechanism.
 
-Each is a separate authorized live window, one navigation, zero retry. Nothing
-here should be run without one.
+Each live option is a separate authorized window, one navigation, zero retry.
 
-**When a page is finally read, the standard has not moved:** classification
-requires the page to be first-party documentation of the mechanism, and a usable
-documentary locator requires an explicit **role assignment** to an address —
-"fees collected at X", "executed by X", "accumulated at X". An address
-occurrence, a heading, a bare table row, or matching cardinality do not count.
-That was pre-registered before anything was read, and PUMP closed on exactly it.
+**The standard when a page is finally read has not moved:** classification needs
+first-party documentation of the mechanism, and a usable locator needs an
+explicit **role assignment** to an address. An address occurrence, a heading, a
+bare table row, or matching cardinality do not count. Pre-registered before
+anything was read; PUMP closed on exactly it.
 
 ### Standing boundaries
 
