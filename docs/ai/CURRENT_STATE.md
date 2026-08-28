@@ -629,6 +629,50 @@ its old "no chain call" claim was removed in `b5a95aa`.
 executing address, destination and supply effect are all **unknown, not absent**.
 Both routes stay ACTIVE and **unclassified**.
 
+### First production acquisition attempt (2026-08-28) — FAILED at the fetcher
+
+Owner-run once, `--mode=documentary-only`, job
+`451770c3-2e64-4e27-9d3e-cf8263b876d2`. Terminal outcome:
+`CONTENT_FETCHER_FAILED:ContentFetchError:UNSUPPORTED_CONTENT_TYPE`.
+
+**No Evidence was created** — 0 Evidence, 0 sources, 0 locators, 0 on-chain
+artifacts. `findAdmittedLocator` is still **0** for all four addresses and
+`resolveOnchainSubject` still returns `NOT_FOUND`. **The chain provenance gate
+remains locked**, and nothing about the buyback mechanism is established. The
+only rows this run created are the job itself, six trace events, and one S5
+component result: step 6 `DESTINATION` = `INSUFFICIENT_EVIDENCE` /
+`NO_EVIDENCE_FOUND` — the correct fail-closed outcome.
+
+**The cause is a transport-contract mismatch, not the page.** The static
+`ContentFetcher` admits exactly `text/html`, `text/plain`,
+`application/json`, `application/xml`. `text/plain` **is** on that list, so the
+server answered with something outside it — most plausibly `text/markdown`,
+though the exact header is **not recorded**: `safeFailureReason` deliberately
+strips provider messages, so only the reason code survives. The same document
+was read end-to-end in the browser inspection window, so the page is readable —
+**ATLAS's static path simply cannot ingest this representation.**
+
+**The render fallback correctly did not fire.** `evaluateRefusalRenderEligibility`
+is scoped to the code-owned refusal statuses `{401, 403, 429}`; an
+`UNSUPPORTED_CONTENT_TYPE` error carries **no** HTTP status (the constructor is
+called without one), so the gate returns `NOT_A_RENDERABLE_REFUSAL`. The
+renderer exists for pages that refuse ordinary clients, not for content-type
+mismatches. Widening it would be the wrong fix.
+
+**D-127 held.** `chain work: DISABLED by owner instruction — branch not
+entered`, observation `ONCHAIN_DISABLED_DOCUMENTARY_ONLY`, zero on-chain
+artifacts created. No RPC, and the mode — not the empty locator table — is what
+guaranteed it.
+
+**One reporting nuance worth keeping.** The trace carries one
+`MODEL_CALL_ATTEMPTED` row (`QUERY_PROPOSE`, 6,560 micro-USD) and `spent`
+reports `authorizedModelCostMicro: 6560`. That is the **reserved authorization
+ceiling** around the proposer role, not spend: this entrypoint injects a fixture
+proposer that calls no model. The searched query
+(`site:solscan.io <RAY mint>`) came from deterministic explorer targeting, and
+the injected single-URL search gateway returned only the owner-named url — no
+Brave call, and no solscan candidate could enter. The extractor never ran.
+
 **The budget defect named above was found and fixed 2026-08-28** — generically,
 with an offline regression test that reproduces it deterministically. Whether it
 **caused** this `TIMEOUT` is **not established**: it is a plausible explanation
