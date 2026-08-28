@@ -64,6 +64,13 @@ export class ModelInputOversizedError extends Error {
 // have nothing in common. Every value below rests on a signal the SDK
 // actually provides (its own error class, its own trusted status
 // integer); nothing is parsed out of a message.
+//
+// SHARED, not count-specific: the list and classifyTokenCountFailure
+// below were born on the count_tokens path (e7c422c) and keep their
+// historical names, but they are THE one classification of a raw
+// Anthropic API failure in this repository — the generation path
+// (evidence-extractor-anthropic.ts) classifies its messages.create
+// failures with this exact function, never a second, drifting copy.
 export const TOKEN_COUNT_DIAGNOSTICS = [
   // 401 — the credential was rejected.
   "AUTHENTICATION_FAILED",

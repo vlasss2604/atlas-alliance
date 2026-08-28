@@ -5,9 +5,10 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 ## Repository
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
-- `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2281 passing, 4 skipped, 1 failing**
-  (2286 total). Only the second item below failed on that run; the first passed
+- Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
+  `npm run lint` are clean.
+- Full suite, last verified 2026-08-28: **2301 passing, 4 skipped, 1 failing**
+  (2306 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -752,8 +753,16 @@ threw a non-transient 4xx, **or** the response truncated at
 JSON/schema failures, which record usage first. **Which of the two is not
 recoverable from anything persisted**: the wrapped detail string is correctly
 never surfaced, and the local path collapses to a constant. The same
-observability shape fixed for count_tokens (e7c422c) is missing on the
-generation path. No cause beyond those two candidates is inferred.
+observability shape fixed for count_tokens (e7c422c) was missing on the
+generation path — **a gap CLOSED the same day** (see "A generation failure
+names its cause" in `ARCHITECTURE.md`): the next such failure will carry a
+closed class — the shared provider vocabulary, or `MAX_TOKENS_TRUNCATED` /
+`OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID` from the generation path's own
+branches — in the terminal reason (`EXTRACT_FAILED:<class>` for a
+single-attempt failure, the `CapabilityFatalError` message for an exhausted
+retry). The run recorded here predates that fix, so its cause remains
+genuinely unknown: no cause beyond those two candidates is inferred, and the
+new vocabulary is never applied retroactively.
 
 **Previously — Stage B had not run in substance.** The owner's invocation passed the
 literal placeholder `<DOCUMENT_ID>` instead of the real uuid; the script died

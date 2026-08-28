@@ -22,7 +22,7 @@ import {
   resolveContentFetcher,
 } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
-import { resolveEvidenceExtractor } from "./providers/evidence-extractor";
+import { EvidenceExtractorUnavailableError, isExtractorOutputDiagnostic, resolveEvidenceExtractor } from "./providers/evidence-extractor";
 import type { EvidenceExtractor } from "./providers/evidence-extractor";
 import { resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
@@ -365,6 +365,22 @@ function safeFailureDetail(e: unknown): string | null {
     const status = typeof e.httpStatus === "number" && Number.isInteger(e.httpStatus) ? e.httpStatus : null;
     return status === null ? e.diagnostic : `${e.diagnostic}:${status}`;
   }
+  // Generation-side failures carry the SAME closed discipline (BACKLOG:
+  // "Generation-side extractor failures lose their class"): the class
+  // vouches for the field existing, membership vouches for the value.
+  // The admissible vocabulary is the union of the two closed lists — the
+  // shared provider-failure classes (classified once, at the throw site,
+  // by token-gate.ts's classifier) and the extractor's own output classes
+  // (MAX_TOKENS_TRUNCATED / OUTPUT_NOT_JSON / OUTPUT_SCHEMA_INVALID).
+  // A null diagnostic (resolve-time configuration failures) and a forged
+  // out-of-vocabulary value both return null rather than crossing.
+  if (e instanceof EvidenceExtractorUnavailableError) {
+    const d = e.diagnostic;
+    if (d === null) return null;
+    if (!isTokenCountDiagnostic(d) && !isExtractorOutputDiagnostic(d)) return null;
+    const status = typeof e.httpStatus === "number" && Number.isInteger(e.httpStatus) ? e.httpStatus : null;
+    return status === null ? d : `${d}:${status}`;
+  }
   if (!(e instanceof ContentFetchError)) return null;
   if (!SAFE_FAILURE_DETAILS.has(e.reason)) return null;
   // The status is already a trusted integer — the class coerced it out of
@@ -525,6 +541,13 @@ interface RetryOutcome<T> {
   reason?: string;
   reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE" | "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED";
   capability?: string;
+  // The closed, membership-gated detail (safeFailureDetail product) of a
+  // "local" failure, when one exists — null/absent otherwise. Lets the
+  // caller SAY the classified WHY (e.g. in the observation channel)
+  // without ever holding the raw exception; "fatal" outcomes don't need
+  // it because their `reason` already embeds the same detail into the
+  // CapabilityFatalError message.
+  detail?: string | null;
   attempts: number;
 }
 
@@ -632,7 +655,7 @@ async function reserveAndCallWithRetry<T>(params: {
         return { kind: "fatal", reason: safeFailureReason(params.label, e), capability: `${params.capability}_COUNT_TOKENS`, attempts };
       }
       if (!isTransientError(e)) {
-        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", attempts };
+        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", detail: safeFailureDetail(e), attempts };
       }
       if (attempt === 2) {
         // Transient on the retry too — the capability itself is down.
@@ -1697,6 +1720,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // where every failure is MODEL_INPUT_OVERSIZED must resolve to
           // SKIPPED below, not FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE.
           if (extractOutcome.reasonCode !== "MODEL_INPUT_OVERSIZED") nonOversizedExtractionFailures += 1;
+          // Generation-side closed diagnostic (BACKLOG: "Generation-side
+          // extractor failures lose their class"): when the failure
+          // carries a closed, membership-gated detail, say it in the
+          // observation channel — the same channel DOCS_RENDER_FAILED
+          // already uses. Without this, every non-transient generation
+          // failure collapses to the bare EVIDENCE_EXTRACTOR_UNAVAILABLE
+          // terminal line while the classified WHY is dropped. A failure
+          // with no closed detail adds nothing — never a guessed class.
+          if (extractOutcome.detail) observations.add(`EXTRACT_FAILED:${extractOutcome.detail}`);
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,

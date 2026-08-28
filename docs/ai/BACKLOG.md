@@ -150,15 +150,24 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
-- **Generation-side extractor failures lose their class.** A failed
-  `messages.create` (or a `max_tokens` truncation, or a JSON/schema failure)
-  all collapse to `EVIDENCE_EXTRACTOR_UNAVAILABLE` + trace `PROVIDER_ERROR`;
-  the wrapped detail is (correctly) never printed, so a 4xx refusal and an
-  output truncation are indistinguishable at rest. Extend the e7c422c closed
-  diagnostic to this path: classify the raw API error with the existing
-  classifier, add closed values for `MAX_TOKENS_TRUNCATED` /
-  `OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID`, surface via
-  `safeFailureDetail`. Observed live 2026-08-28 (job `b3457f0b-…`).
+- ~~**Generation-side extractor failures lose their class.**~~ **Resolved
+  2026-08-28**, exactly in the shape written here: the raw API error is
+  classified by the existing shared classifier, the three closed output values
+  exist (`EXTRACTOR_OUTPUT_DIAGNOSTICS`, each emitted only from its own
+  branch), and the diagnostic crosses via `safeFailureDetail` — into the
+  `CapabilityFatalError` message on the fatal path and into the terminal
+  FAILED reason (`EXTRACT_FAILED:<diagnostic>`) on the local path. Pinned by
+  `tests/generation-diagnostic.test.ts`; contract in `ARCHITECTURE.md` ("A
+  generation failure names its cause").
+
+- **QueryProposer generation failures still lose their class.** The proposer's
+  `messages.create` catch (query-proposer-anthropic.ts) has the exact shape
+  the extractor path had before the fix above — raw message wrapped, no closed
+  diagnostic, `max_tokens`/JSON/schema collapse to the bare class name. The
+  same mechanism now exists and would transplant directly (shared classifier +
+  own output list + `safeFailureDetail` branch). Not urgent: no proposer
+  failure has ever been observed live, and the current entrypoints inject a
+  fixture proposer.
 
 - **`loadAcquiredDocumentForResume` should refuse a malformed document id with
   the closed `NOT_FOUND`, not a raw driver error.** Observed live: Stage B was

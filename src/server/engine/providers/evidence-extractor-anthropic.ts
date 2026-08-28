@@ -5,7 +5,7 @@ import { z } from "zod";
 import { EvidenceExtractorUnavailableError } from "./evidence-extractor";
 import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extractor";
 import { isTransientAnthropicApiError } from "./retry";
-import { countThenGate } from "./token-gate";
+import { classifyTokenCountFailure, countThenGate } from "./token-gate";
 import type { ModelUsage } from "./types";
 
 // Phase 6, S4 — live EvidenceExtractor over the Anthropic Messages API.
@@ -200,18 +200,31 @@ async function doExtract(
       max_tokens: maxOutputTokens,
     });
   } catch (e) {
-    const status = e instanceof Anthropic.APIError ? e.status : undefined;
-    const detail =
-      e instanceof Anthropic.APIError
-        ? `api ${status ?? "?"} ${e.name}: ${String(e.message).slice(0, 200)}`
-        : `api call failed: ${e instanceof Error ? e.message : String(e)}`;
-    // S10 final pre-smoke closure (MEDIUM-1, D-120): shared with
-    // token-gate.ts's raw count_tokens retry — one classifier, never a
-    // second, independently-drifting copy of this rule.
-    throw new EvidenceExtractorUnavailableError(detail, isTransientAnthropicApiError(e));
+    // Generation-side closed diagnostic (same fix count_tokens received
+    // in e7c422c): the raw SDK exception is reduced to the closed
+    // provider-failure vocabulary HERE, at the throw site — the only
+    // place still holding it — by THE one shared classifier
+    // (token-gate.ts), never a second, independently-drifting copy of
+    // the status→class rule. The message is COMPOSED from closed values
+    // only; the raw provider message is provider-influenced text and is
+    // never interpolated into anything an operator may read. Transience
+    // (MEDIUM-1, D-120) is likewise shared with token-gate.ts's raw
+    // count_tokens retry.
+    const { diagnostic, httpStatus } = classifyTokenCountFailure(e);
+    throw new EvidenceExtractorUnavailableError(
+      `generation failed: ${diagnostic}${httpStatus === null ? "" : `:${httpStatus}`}`,
+      isTransientAnthropicApiError(e),
+      diagnostic,
+      httpStatus,
+    );
   }
   if (message.stop_reason === "max_tokens") {
-    throw new EvidenceExtractorUnavailableError("model output truncated (max_tokens)");
+    // Emitted ONLY from the actual stop_reason check — never inferred
+    // from null usage columns or any other absence. Deliberately thrown
+    // BEFORE the onUsage capture below: an output truncated at the
+    // ceiling records no usage, which is the existing accounting
+    // contract, unchanged.
+    throw new EvidenceExtractorUnavailableError("model output truncated (max_tokens)", false, "MAX_TOKENS_TRUNCATED");
   }
   // S10 acceptance closure (MEDIUM-2, D-119): INTERNAL_ALPHA_V1 does not
   // use prompt caching — if the provider response reports a billable
@@ -224,11 +237,18 @@ async function doExtract(
   try {
     raw = JSON.parse(text);
   } catch {
-    throw new EvidenceExtractorUnavailableError("model output is not valid JSON");
+    // Emitted ONLY from the actual JSON.parse failure. Usage was already
+    // captured above — a parse failure is a statement about the output's
+    // shape, not about the call having happened.
+    throw new EvidenceExtractorUnavailableError("model output is not valid JSON", false, "OUTPUT_NOT_JSON");
   }
   const parsed = extractionResultSchema.safeParse(raw);
   if (!parsed.success) {
-    throw new EvidenceExtractorUnavailableError(`model output failed schema validation: ${parsed.error.message}`);
+    // Emitted ONLY from the actual schema-validation failure. The zod
+    // error message is DERIVED FROM MODEL OUTPUT (paths, received
+    // values) — untrusted text — and is deliberately not interpolated:
+    // the closed diagnostic is the entire safe statement.
+    throw new EvidenceExtractorUnavailableError("model output failed schema validation", false, "OUTPUT_SCHEMA_INVALID");
   }
   return parsed.data.facts.map((f) => ({
     ...f,
@@ -238,4 +258,13 @@ async function doExtract(
 
 export function __resetAnthropicEvidenceExtractorClient(): void {
   _client = null;
+}
+
+// Offline test seam for the generation-diagnostic suite ONLY: makes
+// client() return a stub so the REAL doExtract path (count → generate →
+// stop_reason → parse → validate) runs with zero network and zero
+// credential. Production never calls this; the same __-prefix convention
+// as __setEvidenceExtractor / __resetAnthropicEvidenceExtractorClient.
+export function __setAnthropicEvidenceExtractorClient(c: Anthropic | null): void {
+  _client = c;
 }

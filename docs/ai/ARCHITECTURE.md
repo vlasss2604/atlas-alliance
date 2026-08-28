@@ -333,6 +333,40 @@ instead of only naming the capability. Raw provider messages, keys, bodies and
 stacks still never cross; the internal count_tokens retry (at most one, only
 for 429/5xx/no-status) is unchanged.
 
+**A generation failure names its cause from the same closed discipline.** The
+extractor's `messages.create` path used to collapse every failure — a 4xx
+refusal, an output truncated at the ceiling, unparseable output — into
+`EVIDENCE_EXTRACTOR_UNAVAILABLE` + trace `PROVIDER_ERROR`, with the classified
+detail correctly never printed. Now `EvidenceExtractorUnavailableError` carries
+a closed diagnostic decided at the throw site: a provider failure is classified
+by **the same one classifier** count_tokens uses (`classifyTokenCountFailure`,
+token-gate.ts — one status→class rule, never a second drifting copy), and the
+generation path adds exactly three output-side values of its own
+(`EXTRACTOR_OUTPUT_DIAGNOSTICS`, evidence-extractor.ts), each emitted only from
+the branch that deterministically identifies it and never inferred from an
+absence: `MAX_TOKENS_TRUNCATED` only from `stop_reason === "max_tokens"`,
+`OUTPUT_NOT_JSON` only from the JSON-parse failure, `OUTPUT_SCHEMA_INVALID`
+only from schema validation. Resolve-time configuration failures carry a null
+diagnostic and claim nothing.
+
+The boundary admits the union of the two closed lists with the same two-gate
+rule (class identity + runtime membership; forged values and forged non-integer
+statuses return null). How it surfaces depends on the failure's own retry
+class, both unchanged: a transient failure that survives the one executor
+retry throws `CapabilityFatalError` whose message now reads
+`capability unavailable: EVIDENCE_EXTRACTOR — …:RATE_LIMITED:429`; a
+non-transient failure stays a local single-attempt event and the terminal
+FAILED reason now carries `EXTRACT_FAILED:<diagnostic>` through the existing
+observation channel (the same channel `DOCS_RENDER_FAILED` uses). The trace
+vocabulary is deliberately unwidened — same decision as the count_tokens fix.
+Usage accounting is also deliberately unchanged, and is itself diagnostic:
+provider failures and `MAX_TOKENS_TRUNCATED` record no usage (the truncation
+throw sits before usage capture), while `OUTPUT_NOT_JSON` /
+`OUTPUT_SCHEMA_INVALID` record usage first — which is exactly the split that
+let null usage columns exclude the JSON/schema classes for job `b3457f0b-…`.
+The zod validation message — text derived from model output — is no longer
+interpolated into the error; the closed diagnostic is the entire statement.
+
 **The egress proxy is a second, independent witness.** It records every decision
 it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
 `BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET` — and a failed render now
