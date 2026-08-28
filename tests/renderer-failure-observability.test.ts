@@ -236,6 +236,7 @@ describe("2. the supervisor names the stage that actually failed", () => {
         browserLaunchTimeoutMs: 50,
         navigationTimeoutMs: 50,
         totalWallClockMs: 50,
+        documentReadinessPollMs: 10,
         maxRenderedTextLength: 1000,
         maxTotalResponseBytes: 1000,
         maxNavigations: 1,

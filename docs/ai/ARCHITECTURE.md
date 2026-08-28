@@ -258,6 +258,39 @@ single point, immediately after navigation. Text extraction that follows it is
 bounded only by the parent's deadline, so a child wedged in extraction is caught
 by the supervisor rather than by its own budget.
 
+**`networkidle` is no longer proof of readiness; the document is.** It was the
+navigation's `waitUntil`, which made an absence of network traffic the sole
+proxy for "this page is ready to read" — and there was no post-render quality
+check anywhere to catch what that let through or kept out. A documentation SPA
+that holds a poll, a socket or an analytics beacon open never reaches it, so a
+page whose document was perfectly usable failed as `NAVIGATION_TIMEOUT`.
+
+The navigation now waits for `domcontentloaded` — a real milestone, so a
+response exists and status and final-url checks are unchanged — and readiness is
+then decided by **re-sampling the rendered document until it stops looking like
+an unfilled shell**. The predicate is `renderedDocumentUsable()`, which is
+`staticShortfallDetected()` inverted and nothing more: one code-owned notion of
+"usable document" rather than two that can drift. It adds no opinion about empty
+bodies, because that is already decided elsewhere and on purpose — a `204` is
+inside the success class, yields an empty document, and fails closed downstream
+where extraction has nothing to quote.
+
+The wait is bounded by the **existing document budget**, not a new or longer one,
+and the poll interval only decides how often the question is asked: the wait ends
+the instant the predicate passes. One navigation, no retry, no fixed sleep
+standing in for readiness.
+
+**Two failures that used to be one.** `NAVIGATION_TIMEOUT` now means the page
+never reached `domcontentloaded`. `DOCUMENT_NOT_READY` means the opposite
+statement: the navigation succeeded — real response, permitted status, url still
+inside the route — and what the page served never stopped looking like a shell.
+Conflating them would send an operator to investigate the network when the honest
+finding is about the document.
+
+Containment is checked **twice**: before the settle window and again after it. An
+SPA can change its own url client-side while it hydrates, and a document read at
+the wrong url is invalid however good it looks.
+
 **The egress proxy is a second, independent witness.** It records every decision
 it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
 `BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET` — and a failed render now

@@ -61,6 +61,41 @@ export function staticShortfallDetected(
   );
 }
 
+// DOCUMENT READINESS — may this rendered document be read yet?
+//
+// Deliberately the SAME rule as the shell trigger above, inverted, rather
+// than a second notion of "usable document" that could drift away from it.
+// staticShortfallDetected already encodes what an SPA shell looks like —
+// substantial as a document, nearly empty as text — and a page that still
+// looks like that has not finished becoming one.
+//
+// It deliberately adds NOTHING to that rule. An empty body is not refused
+// here, because emptiness is already decided elsewhere and on purpose: a
+// 204 is inside the success class, yields an empty document, and fails
+// closed downstream where extraction has nothing to quote. Re-deciding it
+// here would be a second opinion overriding a pinned one.
+//
+// What this DOES catch is the case that rule was written for — substantial
+// HTML carrying almost no text — which is exactly an SPA that has not
+// finished becoming a document.
+//
+// Nothing here inspects site structure. No selector, no hostname, no
+// keyword — only two numbers the renderer already computes.
+export interface RenderedDocumentSample {
+  htmlBytes: number;
+  textLength: number;
+}
+
+export function renderedDocumentUsable(
+  sample: RenderedDocumentSample,
+  thresholds: StaticShortfallThresholds = DEFAULT_SHORTFALL_THRESHOLDS,
+): boolean {
+  return !staticShortfallDetected(
+    { staticHtmlBytes: sample.htmlBytes, staticTextLength: sample.textLength },
+    thresholds,
+  );
+}
+
 // ---- eligibility ------------------------------------------------------
 
 export type RenderDenialReason =

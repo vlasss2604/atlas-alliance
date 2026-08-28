@@ -4,74 +4,71 @@
 
 ## NONE — awaiting owner direction
 
-Three inspection windows spent, **no Raydium page has ever been read**. Both
-routes remain ACTIVE and unclassified. No source, Evidence, job or artifact.
+`networkidle` is no longer required as proof of readiness. Nothing Raydium was
+run, nothing was classified, no Evidence exists.
 
-### The three windows
+### What was wrong
 
-| url | reason | proxy |
-|---|---|---|
-| `/ray/ray-buybacks` | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | 0 denied, 1 allowed |
-| `/raydium/protocol/protocol-fees` (pre-fix) | `TIMEOUT` | 0 denied, 1 allowed |
-| `/raydium/protocol/protocol-fees` (post-fix) | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | 0 denied, 1 allowed |
+`waitUntil: "networkidle"` was the navigation's success condition, which made an
+**absence of network traffic** the sole proxy for "this document is ready". And
+there was **no post-render quality check anywhere** — `staticShortfallDetected()`
+existed only as the *eligibility trigger* on the static fetch, deciding whether
+to render at all. So the renderer had exactly one readiness signal, and it was
+the wrong one: a docs SPA holding a poll, socket or beacon open never reaches it,
+and a page whose document was perfectly usable failed as `NAVIGATION_TIMEOUT`.
 
-### What the fix did, and did not, do
+### What changed
 
-**It did not make the page readable.** It changed the *diagnosis*.
+- The navigation waits for **`domcontentloaded`** — still a real milestone, so a
+  response exists and the status and final-url checks are unchanged.
+- Readiness is then decided by **re-sampling the rendered document** until it
+  stops looking like an unfilled shell, bounded by the **existing** document
+  budget. `documentReadinessPollMs` (250) only sets how often the question is
+  asked; the wait ends the instant the predicate passes.
+- `renderedDocumentUsable()` is `staticShortfallDetected()` **inverted and
+  nothing more** — one code-owned notion of "usable document" instead of two.
+- **`DOCUMENT_NOT_READY`**, a new closed reason: the navigation succeeded and the
+  page never stopped looking like a shell. The opposite statement to
+  `NAVIGATION_TIMEOUT`, which now means the page never reached the milestone.
+- Containment is checked **twice** — before and after the settle window. An SPA
+  can change its own url client-side while hydrating.
 
-**It explained the earlier `TIMEOUT` and refuted my own leading reading.** The
-child's post-navigation wall-clock check sits after the `goto` try/catch, so it
-is **structurally unreachable when `goto` throws**. This window shows `goto`
-throwing on this page — therefore the pre-fix `TIMEOUT` cannot have been the
-child's check, and was the **parent's** deadline. The arithmetic agrees: to
-report `NAVIGATION_TIMEOUT` the child must outlive spawn + launch + `goto`'s own
-15s, while the old parent deadline was a flat 20s, leaving under 5s for spawn and
-launch — against a self-test that alone measured 7,095 ms cold. The parent was
-killing the child mid-navigation and reporting its own impatience as the render's
-outcome.
+One navigation, no retry, no fixed sleep standing in for readiness, no selector,
+hostname or keyword. A source scan asserts the render path names no project,
+host or framework.
 
-So the **parent-deadline half** of the fix is what changed this observation. The
-**phase-boundary half was not implicated here**, because `goto` never returns on
-this page. Both remain correct — the phase defect was reproduced deterministically
-offline and is independently proven — but only one of them was operating here.
+### A correction worth keeping
 
-### The real finding
+I first added "zero rendered text is never usable" on top of the shell rule. A
+pinned existing test caught it: a `204` is deliberately inside the success class,
+yields an empty document, and fails closed downstream where extraction has
+nothing to quote. Re-deciding that in the renderer would have been a second
+opinion overriding a decision the system already makes on purpose. The predicate
+is now pure reuse, and the tests record why.
 
-**Host-wide, and now supported rather than guessed.** Both Raydium pages, at two
-unrelated prefixes, fail with the same closed reason: `waitUntil: "networkidle"`
-does not settle within 15s. No containment refusal, no proxy denial of any class,
-no `HTTP_ERROR` in any window. **Nothing observed says the site refused ATLAS.**
-The wait condition is simply never reached on this host — ordinary for a
-documentation SPA that holds persistent connections.
+### What did NOT change
 
-### The next generic question, and why it is not a one-liner
+DNS/SSRF, confirmed host, path containment, HTTP status handling (including the
+204 decision), final-url containment, byte caps, proxy policy, retry count, the
+phase budgets from `fbcceeb`, the parent supervisor's derived deadline, source
+authority, evidence semantics.
 
-`waitUntil: "networkidle"` is the candidate. It must not be swapped casually:
-`load` or `domcontentloaded` return sooner but risk capturing an **unsettled SPA
-shell**, which is precisely the failure Stage 1 exists to detect and prevent —
-the measured shell in the test suite is 1,477,635 bytes of HTML carrying 134
-characters of text. Any change has to preserve that guarantee, so the shape is
-likely "settle-or-fall-back with a shell check", not a different constant.
+### About Raydium
 
-That is a scoped code task with offline regression tests, not a live window.
+**Unknown whether this makes either page readable.** Neither has been
+re-inspected; the change is verified only against offline fixtures. It removes
+the reason those three windows actually reported. It predicts nothing about what
+the host will do next.
 
-### Nothing about either page is known
-
-Fee source, allocation share, executing address, destination, supply effect: all
-**unknown, not absent**. Neither `84774bb9-b10a-4519-8a69-7f1c3a6c0b93` nor
-`d09657e6-96b6-423e-9973-a2578cb71069` may be classified.
-
-**The chain gate remains locked.** No documentary locator exists, so no on-chain
-subject can be named. `resolveOnchainSubject` on the confirmed RAY mint returns
-`NOT_FOUND`: an identity does not admit itself.
+Both routes remain ACTIVE and unclassified. The chain gate remains locked: no
+documentary locator exists, and `resolveOnchainSubject` on the confirmed RAY mint
+returns `NOT_FOUND` — an identity does not admit itself.
 
 ### Next — the owner's choice
 
-1. **Address `networkidle` generically**, then re-inspect. The only option that
-   attacks the reason actually observed three times.
-2. **Stop.** Three windows, no content. Closing with the bridge named —
-   "Raydium's own documentation could not be read by this renderer" — remains
-   legitimate and implies nothing about the mechanism.
+1. **A new live window** on either Raydium url. The only way to learn whether the
+   host is now readable.
+2. **Stop.** Closing with the bridge named remains legitimate.
 
 A live window is a separate authorization, one navigation, zero retry.
 

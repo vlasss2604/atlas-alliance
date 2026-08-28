@@ -6,8 +6,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2195 passing, 4 skipped, 1 failing**
-  (2200 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2213 passing, 4 skipped, 1 failing**
+  (2218 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -49,6 +49,15 @@ failure; no mint is inferred from binary.
 **Bounded promotion.** Discovery-only components stop at the token accounts an
 address owns. Only `EXECUTION_EVIDENCE` may currently walk a signature window
 into a transaction. No unbounded paging exists, and none should be added casually.
+
+**Document readiness.** `networkidle` is no longer the navigation's success
+condition. The navigation waits for `domcontentloaded`, then the rendered
+document is re-sampled — inside the existing document budget — until it stops
+looking like an unfilled shell, using `staticShortfallDetected()` inverted so
+there is one notion of "usable document" rather than two. A page that never
+becomes readable fails as `DOCUMENT_NOT_READY`, a different statement from
+`NAVIGATION_TIMEOUT`. Containment is re-checked after the settle window. Detail
+in `ARCHITECTURE.md`.
 
 **Renderer phase budgets.** Browser startup and document work are two phases with
 two budgets: `browserLaunchTimeoutMs` enforced by the driver at `launch()`, and
@@ -399,10 +408,15 @@ observed says the site refused ATLAS** — the wait condition is simply not
 reached on this host, which is ordinary for a documentation SPA holding
 persistent connections.
 
-That makes `networkidle` the next generic question, and it is **not** a one-line
-swap: `load` or `domcontentloaded` would return sooner but risk capturing an
-unsettled SPA shell, which is the exact failure Stage 1 exists to prevent. Any
-change there must keep the shell-detection guarantee.
+**That wait condition was removed generically 2026-08-28** — see "Document
+readiness" above. It was not a one-line swap: returning at `domcontentloaded`
+alone would have accepted the unsettled shell Stage 1 exists to reject, so the
+shell rule became the acceptance test instead of a mere trigger.
+
+Whether it makes either Raydium page readable is **unknown**. Neither has been
+re-inspected, and the change is verified only against offline fixtures. It
+removes the reason those three windows actually reported; it predicts nothing
+about what the host will do next.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.

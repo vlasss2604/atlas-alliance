@@ -10,6 +10,7 @@ import {
   isHttpSuccessStatus,
   normalizeHtmlToText,
 } from "./content-fetcher";
+import { renderedDocumentUsable } from "../rendered-docs-policy";
 import { proxyChromiumArgs } from "./renderer-env";
 import { extractDocumentLinks, renderLinkAppendix } from "./document-links";
 import {
@@ -351,7 +352,20 @@ export function createPlaywrightRenderedDocsFetcher(
         try {
           response = await page.goto(url, {
             timeout: limits.navigationTimeoutMs,
-            waitUntil: "networkidle",
+            // THE NAVIGATION MILESTONE, not the readiness test.
+            //
+            // This was "networkidle", which made an absence of network
+            // traffic the sole proxy for "the document is ready" — and a
+            // documentation SPA that holds a poll, a socket or an
+            // analytics beacon open never reaches it, so a page whose
+            // document was perfectly usable failed as NAVIGATION_TIMEOUT.
+            // Readiness is now decided from the document itself, below.
+            //
+            // domcontentloaded is still a real milestone: a response
+            // exists, so status and final url remain checkable exactly as
+            // before, and a navigation that never gets this far is still
+            // a navigation failure.
+            waitUntil: "domcontentloaded",
           });
         } catch (e) {
           if (e instanceof RenderedDocsError) throw e;
@@ -408,15 +422,57 @@ export function createPlaywrightRenderedDocsFetcher(
           throw new RenderedDocsError("HTTP_ERROR", name, null, status);
         }
 
-        const html = await page.content();
-        // Prefer the rendered body text; fall back to normalizing the
-        // settled DOM's HTML if innerText is unavailable.
-        let renderedText: string;
-        try {
-          renderedText = (await page.innerText("body")).trim();
-        } catch {
-          renderedText = normalizeHtmlToText(html);
+        // BOUNDED DOCUMENT READINESS.
+        //
+        // The page is re-sampled until it demonstrably holds a document,
+        // or until the DOCUMENT PHASE budget runs out — the same budget
+        // that already bounded everything after launch, not a new one and
+        // not a longer one. No second navigation, no retry, no fixed sleep
+        // standing in for readiness: the wait ends the instant the
+        // predicate passes, and the poll interval only decides how often
+        // the question is asked.
+        //
+        // The predicate is the existing shell rule, inverted, so there is
+        // one code-owned notion of "usable document" rather than two that
+        // can drift.
+        const readinessDeadline = documentPhaseStartedAt + limits.totalWallClockMs;
+        let html = "";
+        let renderedText = "";
+        let documentReady = false;
+        for (;;) {
+          html = await page.content();
+          // Prefer the rendered body text; fall back to normalizing the
+          // settled DOM's HTML if innerText is unavailable.
+          try {
+            renderedText = (await page.innerText("body")).trim();
+          } catch {
+            renderedText = normalizeHtmlToText(html);
+          }
+          if (
+            renderedDocumentUsable({
+              htmlBytes: Buffer.byteLength(html),
+              textLength: renderedText.length,
+            })
+          ) {
+            documentReady = true;
+            break;
+          }
+          // Fail closed rather than sample past the budget.
+          if (Date.now() + limits.documentReadinessPollMs >= readinessDeadline) break;
+          await new Promise((r) => setTimeout(r, limits.documentReadinessPollMs));
         }
+        if (!documentReady) {
+          throw new RenderedDocsError("DOCUMENT_NOT_READY", name);
+        }
+
+        // CONTAINMENT, RE-CHECKED AFTER THE SETTLE WINDOW. The first check
+        // ran before the document was allowed to keep working; an SPA can
+        // change its own url client-side while it hydrates, and a document
+        // read at the wrong url is invalid however good it looks.
+        if (!navigationAllowed(page.url(), route.confirmedHost, route.matchedPathPrefix)) {
+          throw new RenderedDocsError("FINAL_URL_OUTSIDE_ROUTE", name);
+        }
+
         if (renderedText.length > limits.maxRenderedTextLength) {
           renderedText = renderedText.slice(0, limits.maxRenderedTextLength);
         }

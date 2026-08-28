@@ -176,6 +176,14 @@ export const RENDERED_DOCS_FAILURE_REASONS = [
   // everything after it (status, final url, text) never happened.
   // Carries a NavigationDiagnostic saying which kind.
   "NAVIGATION_FAILED",
+  // The navigation SUCCEEDED — a real response, a permitted status, a url
+  // still inside the route — and the document never became readable
+  // before the document budget ran out. Its own stage because it makes the
+  // opposite statement to NAVIGATION_FAILED: the page answered, and what
+  // it served never stopped looking like an unfilled shell. Conflating the
+  // two would tell an operator to investigate the network when the honest
+  // finding is about the document.
+  "DOCUMENT_NOT_READY",
   // The browser itself could not be started: the module is absent, the
   // binary is missing, or the launch was refused. Distinct from every
   // page-level failure because the site is not implicated at all.
@@ -228,6 +236,7 @@ export const CHILD_REPORTABLE_RENDER_REASONS: ReadonlySet<string> = new Set<stri
   "HTTP_ERROR",
   "NO_NAVIGATION_RESPONSE",
   "NAVIGATION_FAILED",
+  "DOCUMENT_NOT_READY",
   "BROWSER_LAUNCH_FAILED",
   "RENDER_FAILED",
 ] satisfies RenderedDocsFailureReason[]);
@@ -464,8 +473,14 @@ export interface RenderLimits {
   browserLaunchTimeoutMs: number;
   navigationTimeoutMs: number;
   // The DOCUMENT phase: measured from the moment the browser is up, never
-  // from before it. Bounds context creation and the navigation.
+  // from before it. Bounds context creation, the navigation, AND the
+  // bounded wait for the document to become readable.
   totalWallClockMs: number;
+  // How often the rendered document is re-sampled while waiting for it to
+  // become usable. A sampling interval, never a sleep that stands in for
+  // readiness: the wait ends the moment the document passes the predicate,
+  // and the document budget above is what ends it if it never does.
+  documentReadinessPollMs: number;
   maxRenderedTextLength: number;
   maxTotalResponseBytes: number;
   maxNavigations: number;
@@ -485,6 +500,7 @@ export const DEFAULT_RENDER_LIMITS: RenderLimits = {
   browserLaunchTimeoutMs: 20_000,
   navigationTimeoutMs: 15_000,
   totalWallClockMs: 15_000,
+  documentReadinessPollMs: 250,
   maxRenderedTextLength: 400_000,
   maxTotalResponseBytes: 8_000_000,
   // Exactly one. Not a budget to spend — a structural bound.
