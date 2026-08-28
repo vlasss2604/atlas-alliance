@@ -51,6 +51,31 @@ overclaims get in.
   behind a deny-by-default egress proxy: `rendered-docs-*.ts`,
   `render-egress-proxy.ts`, `renderer-env.ts`.
 
+## Document representations the static fetcher accepts
+
+A **closed allowlist of MIME essences**, never a family wildcard:
+`text/html`, `text/markdown`, `text/plain`, `application/json`,
+`application/xml`. `text/*` would admit every future subtype sight-unseen,
+so each entry is a representation the fetcher knows it treats as inert
+documentary text. A boundary test fails if the check ever becomes a prefix
+match.
+
+Only `text/html` is parsed — `normalizeHtmlToText`, plus the opt-in Stage 0
+embedded-payload recovery. **Everything else, Markdown included, is trimmed
+text and nothing more**: never rendered, never followed, no embedded HTML
+executed, no link resolved, no directive honoured.
+
+The gate sits **last**, after SSRF/DNS/redirect validation (which happens
+before any network activity), after the streaming byte cap, and after the HTTP
+status check — so admitting a MIME type cannot loosen any of them, and each is
+pinned by test.
+
+**MIME is representation, never authority.** A `text/markdown` response
+establishes only what shape the bytes are in — not officiality, source class,
+project identity, or truth. Content type is read from the response header and
+**never inferred from a file extension**; authority stays route- and
+source-based.
+
 ## Deterministic on-chain facts
 
 Chain reads use **typed intents only** — no arbitrary RPC. Intents:

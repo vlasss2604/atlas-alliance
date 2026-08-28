@@ -4,72 +4,74 @@
 
 ## NONE — awaiting owner direction
 
-The first production acquisition **failed at the static content fetcher**. No
-Evidence exists, the chain gate is still locked, and nothing about Raydium's
-mechanism is established. Analysis only this round — no retry, no network.
+`text/markdown` is admitted as a document representation. **Raydium was not
+re-run** — no HTTP, RPC, browser or model call this round.
 
-### The failure, exactly
+### The fix
 
-Job `451770c3-2e64-4e27-9d3e-cf8263b876d2`, `--mode=documentary-only`:
+Two lines: `"text/markdown"` added to the `ContentType` union
+(`providers/types.ts`) and to `ALLOWED_CONTENT_TYPES`
+(`providers/content-fetcher.ts`). Nothing else in production changed.
+
+It is genuinely that small because the fetcher already branches only on
+`text/html` (HTML normalization + opt-in Stage 0 payload recovery) and treats
+**everything else** as `rawText.trim()`. Markdown therefore travels the exact
+`text/plain` path — trimmed text, never parsed, rendered or followed; no
+embedded HTML executed, no link resolved, no directive honoured.
+
+### Why it is safe, verified structurally
+
+The MIME gate sits **last**: SSRF/DNS/redirect validation happens *before any
+network activity*, the byte cap is enforced *during streaming*, and the HTTP
+status check precedes the content-type check. Admitting a MIME essence cannot
+loosen any of them — and each is pinned by a test in the new file, not merely
+argued.
+
+The allowlist stays a **closed list of essences, never a family**. The
+load-bearing test probes an unknown `text/x-made-up-subtype`; it **fails** if
+the check ever becomes a `text/*` prefix match. Verified by actually mutating
+the code to a wildcard: exactly that one test failed, then the mutation was
+reverted.
+
+**MIME is representation, never authority.** Content type is read from the
+response header and never inferred from a file extension; officiality, source
+class, project identity and truth are unchanged and untouched.
+
+### Observability — deliberately NOT changed
+
+I assessed adding a closed diagnostic carrying the rejected MIME essence.
+**Declined for now.** The essence is arguably safe to expose (it is a short,
+server-declared token, and the codebase already persists `content_type` in
+network observations), but the criteria were not met: this failure has occurred
+once, and the one page it blocked is now expected to pass. Adding a diagnostic
+channel on a single occurrence is speculation, and `safeFailureReason`'s
+message-stripping discipline (D-116 MEDIUM-2) is deliberate. Revisit if an
+`UNSUPPORTED_CONTENT_TYPE` failure recurs on a page that matters — at that
+point it would materially prevent a blind live retry, which is the bar.
+
+### Raydium preflight — offline, conditional
+
+**Not run, and no claim is made about the live server's header** — the failed
+run recorded only the reason code, never the value. What can be said: *if* the
+response essence is `text/markdown`, the same command now passes the
+content-type gate, and the route/authority gates it already passed are
+unchanged:
 
 ```
-CONTENT_FETCHER_FAILED:ContentFetchError:UNSUPPORTED_CONTENT_TYPE
+npx tsx scripts/alpha-acquire-url.ts \
+  --url=https://docs.raydium.io/ray/ray-buybacks.md \
+  --component=DESTINATION --step=6 --actor=owner --project=raydium \
+  --mode=documentary-only
 ```
 
-The static `ContentFetcher` admits exactly `text/html`, `text/plain`,
-`application/json`, `application/xml`. **`text/plain` is on that list**, so the
-server answered with something outside it — most plausibly `text/markdown`,
-but the exact header is **not recorded**: `safeFailureReason` strips provider
-messages by design, so only the reason code survives.
+If the server sends some *other* unsupported essence, this run will fail the
+same way — and that is the correct outcome, not a reason to widen further.
 
-**The page is readable** — the browser inspection window read it end to end.
-What failed is ATLAS's static transport contract meeting this representation.
+### State unchanged
 
-The render fallback correctly did **not** fire:
-`evaluateRefusalRenderEligibility` is scoped to `{401, 403, 429}`, and an
-`UNSUPPORTED_CONTENT_TYPE` error carries no HTTP status, so it returns
-`NOT_A_RENDERABLE_REFUSAL`. The renderer is for pages that refuse ordinary
-clients, not for content-type mismatches.
-
-### What the run did and did not create
-
-Created: the job row, six trace events, and one S5 component result — step 6
-`DESTINATION` = `INSUFFICIENT_EVIDENCE` / `NO_EVIDENCE_FOUND`, the correct
-fail-closed outcome. Not created: **0** sources, **0** Evidence, **0**
-locators, **0** on-chain artifacts. `findAdmittedLocator` still 0 for all four
-addresses; `resolveOnchainSubject` still `NOT_FOUND`.
-
-Two artifacts of the direct-execute entrypoint, not defects: the job row stays
-`QUEUED` (no worker claimed it) and `research_attempts` is 0 (the script
-executes the item directly and says so). The `sourceOpens` reserved-1 /
-spent-0 mismatch is the pre-existing BACKLOG accounting item.
-
-### D-127 held
-
-`chain work: DISABLED by owner instruction — branch not entered`, observation
-`ONCHAIN_DISABLED_DOCUMENTARY_ONLY`, zero artifacts. The mode — not the empty
-locator table — is what guaranteed it.
-
-### The options, and what each costs
-
-The blocker is generic, not Raydium-specific: **ATLAS cannot ingest a
-first-party document served as Markdown.** Raydium's own `llms.txt` index
-advertises `.md` canonical urls, so this will recur on `/ray/treasury.md` and
-`/ray/protocol-fees.md` too.
-
-1. **Widen the content-type allowlist** to admit a Markdown type. Smallest
-   generic correction, offline, with a regression test. It touches an SSRF-
-   adjacent safety list, so it needs its own scoped owner task and careful
-   reasoning about what else the widening admits — it must not become "accept
-   anything".
-2. **Confirm and acquire the browser-facing `/ray/ray-buybacks` route
-   instead** — but that url is the SPA representation that never delivered a
-   parseable document in three windows. Unattractive.
-3. **Stop**, with the bridge named: the document exists and is readable by
-   inspection, but is not ingestible by the production path.
-
-Option 1 is the honest fix. It is a code change and is **not** authorized by
-this analysis task.
+Raydium: 0 Evidence, 0 sources, 0 locators; `findAdmittedLocator` 0;
+`resolveOnchainSubject` `NOT_FOUND`; chain gate locked. Routes, classification,
+documentary-only mode and D-127 untouched.
 
 ### Standing boundaries
 

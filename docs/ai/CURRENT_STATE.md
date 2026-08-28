@@ -6,8 +6,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2229 passing, 4 skipped, 1 failing**
-  (2234 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2246 passing, 4 skipped, 1 failing**
+  (2251 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -25,6 +25,15 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   believing either result.
 
 ## What works today
+
+**Markdown is a readable document representation.** The static fetcher's closed
+MIME allowlist now admits `text/markdown` alongside `text/html`,
+`text/plain`, `application/json`, `application/xml`. Markdown takes the
+`text/plain` path — trimmed text, never parsed, rendered or followed. The gate
+sits last, after SSRF, the byte cap and the status check, so nothing else
+loosened; a mutation test fails if the allowlist ever becomes a `text/*`
+wildcard. MIME establishes representation only, never authority. Detail in
+`ARCHITECTURE.md`.
 
 **Document recovery.** Embedded structured payloads (`__NEXT_DATA__`, JSON-LD,
 RSC flight frames, `application/json`), then isolated Playwright rendering for

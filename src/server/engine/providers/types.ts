@@ -77,6 +77,13 @@ export interface SourceCandidate {
 
 export type ContentType =
   | "text/html"
+  // RFC 7763. Documentary text, handled on exactly the text/plain path:
+  // the bytes are trimmed and kept as-is. Markdown is never parsed,
+  // rendered, or followed — no embedded HTML is executed, no link is
+  // resolved, no directive is honoured. A first-party document served as
+  // Markdown was previously unreadable by the static path even though the
+  // representation is strictly simpler than the HTML we already accept.
+  | "text/markdown"
   | "text/plain"
   | "application/json"
   | "application/xml";

@@ -127,8 +127,18 @@ const DEFAULT_MAX_BYTES = 2_000_000; // 2 MB — bounded content handling (§16)
 const DEFAULT_TIMEOUT_MS = 15_000;
 const DEFAULT_MAX_REDIRECTS = 5;
 
+// A CLOSED allowlist of MIME ESSENCES, never a family wildcard. `text/*`
+// would admit every future text subtype sight-unseen, including ones with
+// their own execution or reference semantics; each entry here is a
+// representation this fetcher knows it treats as inert documentary text.
+//
+// ADMITTING A TYPE ESTABLISHES REPRESENTATION ONLY. It says nothing about
+// officiality, source class, project identity or truth — a random
+// text/markdown url still faces every source-authority, route-containment
+// and project gate unchanged.
 const ALLOWED_CONTENT_TYPES: readonly ContentType[] = [
   "text/html",
+  "text/markdown",
   "text/plain",
   "application/json",
   "application/xml",
