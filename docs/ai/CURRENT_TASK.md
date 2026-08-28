@@ -4,71 +4,75 @@
 
 ## NONE — awaiting owner direction
 
-`networkidle` is no longer required as proof of readiness. Nothing Raydium was
-run, nothing was classified, no Evidence exists.
+Four inspection windows spent. **No Raydium page has been read.** Both routes
+remain ACTIVE and unclassified. No source, Evidence, job or artifact.
 
-### What was wrong
+### The four windows
 
-`waitUntil: "networkidle"` was the navigation's success condition, which made an
-**absence of network traffic** the sole proxy for "this document is ready". And
-there was **no post-render quality check anywhere** — `staticShortfallDetected()`
-existed only as the *eligibility trigger* on the static fetch, deciding whether
-to render at all. So the renderer had exactly one readiness signal, and it was
-the wrong one: a docs SPA holding a poll, socket or beacon open never reaches it,
-and a page whose document was perfectly usable failed as `NAVIGATION_TIMEOUT`.
+| url | reason | status |
+|---|---|---|
+| `/ray/ray-buybacks` | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | none |
+| `/raydium/protocol/protocol-fees` (pre-budget-fix) | `TIMEOUT` | none |
+| `/raydium/protocol/protocol-fees` (post-budget-fix) | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | none |
+| `/raydium/protocol/protocol-fees` (post-readiness-fix) | **`HTTP_ERROR:404`** | **404** |
 
-### What changed
+Every window: `0 denied, 1 allowed`, no containment refusal.
 
-- The navigation waits for **`domcontentloaded`** — still a real milestone, so a
-  response exists and the status and final-url checks are unchanged.
-- Readiness is then decided by **re-sampling the rendered document** until it
-  stops looking like an unfilled shell, bounded by the **existing** document
-  budget. `documentReadinessPollMs` (250) only sets how often the question is
-  asked; the wait ends the instant the predicate passes.
-- `renderedDocumentUsable()` is `staticShortfallDetected()` **inverted and
-  nothing more** — one code-owned notion of "usable document" instead of two.
-- **`DOCUMENT_NOT_READY`**, a new closed reason: the navigation succeeded and the
-  page never stopped looking like a shell. The opposite statement to
-  `NAVIGATION_TIMEOUT`, which now means the page never reached the milestone.
-- Containment is checked **twice** — before and after the settle window. An SPA
-  can change its own url client-side while hydrating.
+### The renderer worked. The resource does not exist.
 
-One navigation, no retry, no fixed sleep standing in for readiness, no selector,
-hostname or keyword. A source scan asserts the render path names no project,
-host or framework.
+**For the first time in four windows a status was obtained.** `HTTP_ERROR` is
+raised only after a real Response carrying a trusted numeric status, and it is
+raised **before** the readiness wait — so readiness was never evaluated and is
+not implicated in this failure.
 
-### A correction worth keeping
+Under the old contract this page **could not** report a status, because
+`networkidle` never arrived. The 404 was there all along and was invisible. That
+is the readiness change doing exactly its job: it moved the failure from our
+renderer to the page.
 
-I first added "zero rendered text is never usable" on top of the shell rule. A
-pinned existing test caught it: a `204` is deliberately inside the success class,
-yields an empty document, and fails closed downstream where extraction has
-nothing to quote. Re-deciding that in the renderer would have been a second
-opinion overriding a decision the system already makes on purpose. The predicate
-is now pure reuse, and the tests record why.
+**404 is an absent page, not a refusal.** The code-owned refusal set is
+`401/403/429`; `404` is deliberately outside it — "the page is absent, and
+rendering does not invent one". No anti-bot behaviour is indicated, and none
+should be inferred.
 
-### What did NOT change
+### What is and is not established
 
-DNS/SSRF, confirmed host, path containment, HTTP status handling (including the
-204 decision), final-url containment, byte caps, proxy policy, retry count, the
-phase budgets from `fbcceeb`, the parent supervisor's derived deadline, source
-authority, evidence semantics.
+**Established.** At that moment,
+`https://docs.raydium.io/raydium/protocol/protocol-fees` returned **404**.
 
-### About Raydium
+**Not established.** That the page never existed; that Raydium publishes no
+protocol-fee documentation; that some other path would also 404; anything
+whatsoever about `/ray/ray-buybacks`, which has never returned a status and
+whose `NAVIGATION_TIMEOUT` remains unexplained. A 404 on one url is not a
+finding about a project.
 
-**Unknown whether this makes either page readable.** Neither has been
-re-inspected; the change is verified only against offline fixtures. It removes
-the reason those three windows actually reported. It predicts nothing about what
-the host will do next.
+### Consequence for the route
 
-Both routes remain ACTIVE and unclassified. The chain gate remains locked: no
-documentary locator exists, and `resolveOnchainSubject` on the confirmed RAY mint
-returns `NOT_FOUND` — an identity does not admit itself.
+`d09657e6-96b6-423e-9973-a2578cb71069` is an ACTIVE route whose own url is
+absent. The **domain** confirmation is untouched — officiality is a statement
+about the host — but the prefix points at nothing.
+
+Superseding or replacing it is an **owner act**. Finding a correct path is
+**discovery**, which no owner tool performs and which nothing here may guess.
+
+### Nothing about the content is known
+
+Fee source, allocation share, executing address, destination, supply effect: all
+**unknown, not absent**. Neither route may be classified.
+
+**The chain provenance gate remains locked.** No documentary locator exists;
+`resolveOnchainSubject` on the confirmed RAY mint returns `NOT_FOUND`, because an
+identity does not admit itself.
 
 ### Next — the owner's choice
 
-1. **A new live window** on either Raydium url. The only way to learn whether the
-   host is now readable.
-2. **Stop.** Closing with the bridge named remains legitimate.
+1. **Re-inspect `/ray/ray-buybacks`.** Cheapest and most informative: it is the
+   one url never to have returned a status, and the readiness fix has not been
+   tried on it. It either reads, 404s, or times out — and all three are useful.
+2. **Supply a corrected protocol-fees path**, then confirm and inspect it. The
+   path must come from the owner; ATLAS may not discover it.
+3. **Stop.** Closing with the bridge named remains legitimate and implies
+   nothing about the mechanism.
 
 A live window is a separate authorization, one navigation, zero retry.
 

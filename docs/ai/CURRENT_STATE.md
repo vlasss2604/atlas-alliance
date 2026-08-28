@@ -413,10 +413,35 @@ readiness" above. It was not a one-line swap: returning at `domcontentloaded`
 alone would have accepted the unsettled shell Stage 1 exists to reject, so the
 shell rule became the acceptance test instead of a mere trigger.
 
-Whether it makes either Raydium page readable is **unknown**. Neither has been
-re-inspected, and the change is verified only against offline fixtures. It
-removes the reason those three windows actually reported; it predicts nothing
-about what the host will do next.
+**Fourth window, 2026-08-28, after the readiness fix: `HTTP_ERROR:404`.** Again
+`0 denied, 1 allowed`. The page was still not read — but for the **first time in
+four windows a status was obtained at all**, which is the thing every previous
+window failed to reach.
+
+**The renderer worked; the resource does not exist.** `HTTP_ERROR` is raised
+only after a real Response with a trusted numeric status, and it is raised
+*before* the readiness wait — so readiness was never evaluated and is not
+implicated. Under the old contract this page could never report a status,
+because `networkidle` never arrived; the 404 was there all along and was
+invisible.
+
+**404 is an absent page, not a refusal of ATLAS.** The code-owned refusal set is
+`401/403/429`; `404` is deliberately outside it — "the page is absent, and
+rendering does not invent one". So no anti-bot behaviour is indicated, and none
+should be inferred.
+
+**What this establishes, and what it does not.** Established: at that moment,
+`https://docs.raydium.io/raydium/protocol/protocol-fees` returned **404**. Not
+established: that the page never existed, that Raydium publishes no protocol-fee
+documentation, that some other path would also 404, or anything at all about
+`/ray/ray-buybacks` — which has never returned a status and whose three
+`NAVIGATION_TIMEOUT`s remain unexplained.
+
+**Consequence for the route.** `d09657e6-96b6-423e-9973-a2578cb71069` is an
+ACTIVE route whose own url is absent. The domain confirmation is untouched —
+officiality is a statement about the host — but the prefix points at nothing.
+Superseding or replacing it is an **owner act**, and finding a correct path is
+discovery, which no owner tool may perform.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
