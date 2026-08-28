@@ -359,13 +359,19 @@ non-transient failure stays a local single-attempt event and the terminal
 FAILED reason now carries `EXTRACT_FAILED:<diagnostic>` through the existing
 observation channel (the same channel `DOCS_RENDER_FAILED` uses). The trace
 vocabulary is deliberately unwidened — same decision as the count_tokens fix.
-Usage accounting is also deliberately unchanged, and is itself diagnostic:
-provider failures and `MAX_TOKENS_TRUNCATED` record no usage (the truncation
-throw sits before usage capture), while `OUTPUT_NOT_JSON` /
-`OUTPUT_SCHEMA_INVALID` record usage first — which is exactly the split that
-let null usage columns exclude the JSON/schema classes for job `b3457f0b-…`.
-The zod validation message — text derived from model output — is no longer
-interpolated into the error; the closed diagnostic is the entire statement.
+Usage accounting is also deliberately unchanged: provider failures and
+`MAX_TOKENS_TRUNCATED` throw before the in-memory usage capture, while
+`OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID` capture usage first — but that
+capture is **in-memory only** (`onUsage`); the persisted usage columns are
+written solely on the success-path `MODEL_CALL_ATTEMPTED` row, so **every**
+failure class leaves them null and null usage columns distinguish nothing
+between failure classes at rest. (An earlier reading that null usage columns
+excluded the JSON/schema classes for job `b3457f0b-…` was refuted by the
+first post-fix window: a known `OUTPUT_SCHEMA_INVALID` failure left the
+identical all-null trace shape.) The zod validation message — text derived
+from model output — is no longer interpolated into the error; the closed
+diagnostic is the entire statement, and which schema field failed is
+deliberately not recoverable today.
 
 **The egress proxy is a second, independent witness.** It records every decision
 it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,

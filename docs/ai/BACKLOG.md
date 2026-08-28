@@ -160,6 +160,31 @@ restart the PUMP investigation, and none is a correctness defect.
   `tests/generation-diagnostic.test.ts`; contract in `ARCHITECTURE.md` ("A
   generation failure names its cause").
 
+- **`OUTPUT_SCHEMA_INVALID` should name the failing schema field, from a
+  closed set.** Observed live 2026-08-28 (job `eb00256a-…`): the first
+  post-fix Stage B window named the class but nothing can say WHICH field
+  failed — the zod message is model-derived and correctly never crosses.
+  The failing field PATHS, however, are schema-owned (code-authored names in
+  `extractionResultSchema`) and zod's issue codes are a closed vocabulary,
+  so a membership-gated `OUTPUT_SCHEMA_INVALID:<field>` (or `:<issue-code>`)
+  would be safe under the existing two-gate discipline and would name the
+  exact mismatch on the next failure. Also worth recording alongside: the
+  request already uses provider-side structured output built from the same
+  zod schema, yet the local `safeParse` still failed — the two enforcement
+  layers do not coincide, and knowing the field would say where.
+
+- **The closed generation diagnostic is not persisted at rest for
+  owner-tooling runs.** For job `eb00256a-…` the class survives only in the
+  pasted terminal line: the `EXTRACT_FAILED` trace row stays
+  `PROVIDER_ERROR` (trace enum deliberately unwidened, twice), owner tooling
+  writes no `research_attempts` row, and the job row records no termination.
+  Fine when the operator keeps the output; nothing at rest can answer "what
+  class failed?" later. Options if wanted: widen the trace reason-code enum
+  by migration, or add a membership-gated safe-detail column to trace
+  events. Related fact, confirmed 2026-08-28: persisted usage columns are
+  written ONLY on the success-path `MODEL_CALL_ATTEMPTED` row, so null
+  usage columns distinguish nothing between failure classes.
+
 - **QueryProposer generation failures still lose their class.** The proposer's
   `messages.create` catch (query-proposer-anthropic.ts) has the exact shape
   the extractor path had before the fix above — raw message wrapped, no closed

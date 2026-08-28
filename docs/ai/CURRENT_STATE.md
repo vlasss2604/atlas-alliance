@@ -747,22 +747,66 @@ crashed — it did not), consistent with the MantaRay-ON probe. One attempt, no
 transient-retry row, `EXTRACT_FAILED / PROVIDER_ERROR`, outcome
 `FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE`, S5 for this job
 `INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND`. Usage columns are all **null**,
-which narrows the cause to exactly two closed candidates — `messages.create`
-threw a non-transient 4xx, **or** the response truncated at
-`stop_reason = "max_tokens"` (thrown before usage capture) — and excludes
-JSON/schema failures, which record usage first. **Which of the two is not
-recoverable from anything persisted**: the wrapped detail string is correctly
-never surfaced, and the local path collapses to a constant. The same
-observability shape fixed for count_tokens (e7c422c) was missing on the
-generation path — **a gap CLOSED the same day** (see "A generation failure
-names its cause" in `ARCHITECTURE.md`): the next such failure will carry a
-closed class — the shared provider vocabulary, or `MAX_TOKENS_TRUNCATED` /
-`OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID` from the generation path's own
-branches — in the terminal reason (`EXTRACT_FAILED:<class>` for a
-single-attempt failure, the `CapabilityFatalError` message for an exhausted
-retry). The run recorded here predates that fix, so its cause remains
-genuinely unknown: no cause beyond those two candidates is inferred, and the
-new vocabulary is never applied retroactively.
+which was read at the time as narrowing the cause to exactly two closed
+candidates — a non-transient 4xx or a `max_tokens` truncation — by excluding
+JSON/schema failures, "which record usage first". **That narrowing was
+REFUTED by the first post-fix window (below).** The capture-ordering premise
+is real but in-memory only (`onUsage`); the persisted usage columns are
+written solely on the success-path `MODEL_CALL_ATTEMPTED` row
+(s4-executor.ts), so every failure class leaves them null, and the post-fix
+window — a **known** `OUTPUT_SCHEMA_INVALID` failure — left a trace shape
+byte-identical in structure to this job's. Corrected statement: this job's
+cause is one of the four non-transient classes — non-transient 4xx,
+`MAX_TOKENS_TRUNCATED`, `OUTPUT_NOT_JSON`, `OUTPUT_SCHEMA_INVALID` — and
+which one is not recoverable from anything persisted. The observability gap
+itself was **CLOSED the same day** (see "A generation failure names its
+cause" in `ARCHITECTURE.md`); this run predates the fix and the new
+vocabulary is never applied retroactively.
+
+### Second Stage B window (2026-08-28, post-fix, job `eb00256a-…`): the terminal line named the cause — `OUTPUT_SCHEMA_INVALID`
+
+One owner-authorized run of the same command, MantaRay ON, on HEAD `95bd370`
+(the diagnostic fix). Terminal outcome:
+`FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE; source-route observations:
+ONCHAIN_DISABLED_DOCUMENTARY_ONLY, EXTRACT_FAILED:OUTPUT_SCHEMA_INVALID`.
+
+**What the closed diagnostic establishes, by construction of its branch:**
+count_tokens passed; `messages.create` returned a response (no provider
+class fired); `stop_reason` was not `max_tokens` (that branch precedes);
+`JSON.parse` succeeded; the parsed JSON **failed the extraction schema**.
+The model produced complete, syntactically valid JSON that does not match
+`extractionResultSchema`. Exactly one attempt (non-transient, no retry row —
+trace verified: one `EXTRACT_ATTEMPTED`, one `EXTRACT_FAILED /
+PROVIDER_ERROR`, eight rows total, same shape as `b3457f0b-…`). **Which
+schema field failed is deliberately not recoverable** — the zod message is
+model-derived text and never crosses; the closed class is the entire safe
+statement today.
+
+**Noted, not inferred further:** the request carries provider-side
+structured output (`output_config` built from the same zod schema), and the
+output still failed the local `safeParse` — the two enforcement layers do
+not coincide on this schema. Which constraint diverged is unknown.
+
+**Everything else held, verified in the DB after the run:** 0 Evidence for
+raydium (all five jobs), 0 documentary locators, 0 locator rejections, 0
+on-chain artifacts for both Stage B jobs (D-127: `branch not entered`),
+exactly one `sources` row for `docs.raydium.io` (Stage A's bookkeeping row —
+neither Stage B run added one), S5 for this job persisted as its own
+`INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND` row, and the acquired document
+is **unconsumed and resumable** (`consumed_at` null; the
+`DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` role binding is literally
+present in the stored text at char 1935). The chain gate is unchanged, run
+against the real functions: `findAdmittedLocator` = 0 and
+`resolveOnchainSubject` = `NOT_FOUND` for all four role-bound addresses.
+
+**Two honest caveats.** Real generation tokens were spent on this run
+(generation completed; usage was captured in-memory) but the actual figures
+are persisted nowhere — only the 55,680 micro-USD reservation ceiling is on
+record, and no spend number should be quoted. And the closed diagnostic
+itself survives **only in the terminal line** for an owner-tooling run: the
+trace row stays `PROVIDER_ERROR` (no enum migration, by design), no
+`research_attempts` row exists, and the job row records no termination —
+the pasted output is the record. Both are BACKLOG candidates, not defects.
 
 **Previously — Stage B had not run in substance.** The owner's invocation passed the
 literal placeholder `<DOCUMENT_ID>` instead of the real uuid; the script died

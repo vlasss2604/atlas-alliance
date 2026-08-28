@@ -4,41 +4,44 @@
 
 ## NONE — awaiting owner direction
 
-The generation-side diagnostic gap is **closed** (option 1 of the previous
-round's fork, executed offline exactly in the BACKLOG shape). The next
-EvidenceExtractor generation failure will name its cause from a closed
-vocabulary instead of collapsing to a constant:
+The second Stage B window ran post-fix (job `eb00256a-…`, HEAD `95bd370`) and
+**the terminal line named the cause**: `EXTRACT_FAILED:OUTPUT_SCHEMA_INVALID`.
+The model returned complete, valid JSON that failed the extraction schema —
+not a credential problem, not a rate limit, not a `max_tokens` truncation,
+not unparseable output. One attempt, no retry, no Evidence, chain gate still
+locked (`findAdmittedLocator` 0 / `resolveOnchainSubject` `NOT_FOUND` for all
+four role-bound addresses, run against the real functions), D-127 held, and
+the document is **still unconsumed and resumable**.
 
-- provider/API failures are classified by **the same one classifier**
-  count_tokens already uses (`classifyTokenCountFailure`, token-gate.ts) —
-  `AUTHENTICATION_FAILED:401`, `PERMISSION_DENIED:403`, `NOT_FOUND:404`,
-  `INVALID_REQUEST:400/422`, `RATE_LIMITED:429`, `PROVIDER_SERVER_ERROR:5xx`,
-  `NETWORK_NO_RESPONSE`, `UNCLASSIFIED_PROVIDER_ERROR`;
-- three output-side classes exist, each emitted only from the branch that
-  deterministically identifies it: `MAX_TOKENS_TRUNCATED` (only from
-  `stop_reason === "max_tokens"`), `OUTPUT_NOT_JSON` (only from the JSON-parse
-  failure), `OUTPUT_SCHEMA_INVALID` (only from schema validation);
-- surfaces: a single-attempt (non-transient) failure ends
-  `FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE; … EXTRACT_FAILED:<class>` on the
-  terminal line; a retry-exhausted transient failure ends
-  `capability unavailable: EVIDENCE_EXTRACTOR — …:<class>[:<status>]`.
-  Both membership-gated; forged values cannot cross (mutation-tested).
+**A prior narrowing was refuted this round.** The first Stage B failure
+(job `b3457f0b-…`) was narrowed to two candidates on the premise that
+JSON/schema failures persist usage; in fact usage persists only on the
+success-path trace row, so every failure class leaves null usage columns.
+`b3457f0b`'s cause is one of the four non-transient classes and remains
+unknown; `eb00256a` proves nothing about it retroactively — though failing
+at the same stage, on the same document and model, makes the same class a
+plausible (unproven) reading. Recorded in `CURRENT_STATE.md` and corrected
+in `ARCHITECTURE.md`.
 
-Retry counts, the 1,536 output ceiling, count_tokens diagnostics, usage
-accounting, Evidence validation and D-127/D-128 semantics are all unchanged
-and asserted unchanged. Contract in `ARCHITECTURE.md` ("A generation failure
-names its cause"); regression suite `tests/generation-diagnostic.test.ts`.
-
-**For the already-failed Stage B run (job `b3457f0b-…`) the
-cause stays genuinely unknown** — the vocabulary is never applied
-retroactively; the two-candidate narrowing (non-transient 4xx or max_tokens
-truncation) stands as recorded in `CURRENT_STATE.md`.
+**What is deliberately not knowable today:** WHICH schema field failed. The
+zod message is model-derived text and never crosses. The failing field paths
+are code-owned, so a membership-gated `OUTPUT_SCHEMA_INVALID:<field>` would
+be safe — the exact shape is written in `BACKLOG.md`.
 
 ### Next — the owner's choice
 
-One Stage B window, when authorized, will now name the cause on its terminal
-line. The document is verified (2026-08-28, offline): present, seal recomputed
-and matching, **unconsumed, resumable**.
+1. **Close the schema-field diagnostic gap first** (BACKLOG: closed
+   field/issue-code detail on `OUTPUT_SCHEMA_INVALID`). Offline, small,
+   generic, same two-gate discipline. Then one Stage B window names the
+   exact mismatched field.
+2. **Re-run Stage B as-is.** Model output varies between runs; it may pass.
+   If it fails the same way, the line will say the class again but not the
+   field.
+3. **Stop.**
+
+Real generation tokens were spent on `eb00256a` (generation completed; only
+the 55,680 micro-USD reservation ceiling is on record — actual usage is not
+persisted on failure paths, so no spend figure should be quoted).
 
 ### The standing Stage B command (document still resumable)
 
@@ -46,13 +49,12 @@ and matching, **unconsumed, resumable**.
 npx tsx scripts/extract-from-document.ts --document-id=711e6745-abc1-44c0-b4a0-4d3eb449b7df --component=DESTINATION --step=6 --actor=owner --project=raydium --mode=documentary-only
 ```
 
-If the next window reports `MAX_TOKENS_TRUNCATED`, the follow-up is an owner
-decision about the extractor output ceiling (D-122 territory); if a 4xx class,
-it is credential/permission territory.
-
 ### Standing boundaries
 
 - No live calls without a separate authorized window; no retries.
 - Never relax safe-http or SSRF, never whitelist a reserved range, never
   special-case a domain, never add anti-bot evasion or spoof a user agent.
 - Nothing owner-supplied is Evidence until acquired through the pipeline.
+- Keep the pasted terminal output of job `eb00256a-…` — for an owner-tooling
+  run it is the only record of the closed diagnostic (BACKLOG notes the
+  persist-at-rest option).
