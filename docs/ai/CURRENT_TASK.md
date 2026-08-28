@@ -4,48 +4,62 @@
 
 ## NONE — awaiting owner direction
 
-The `raydium` catalog entry exists. Nothing else about Raydium exists.
+Raydium now has a catalog row and a confirmed identity. It still has **no route,
+no source, no Evidence, no job and no artifact**, and nothing has been read.
 
 ### What was done
 
-One owner-authorized setup action: `raydium` / "Raydium" added to the project
-catalog in `src/server/db/seed.ts` using the existing entry shape, applied with
-the existing idempotent path (`npx tsx scripts/seed.ts`). No manual SQL.
+One owner-authorized identity act, through the only supported path:
 
-Project id `9cc80fd6-04ae-45e8-be6c-7ed8b9f663c7`, `status = ACTIVE_CORE`,
-`ticker = null`. Catalog count 3 -> 4; the other three rows are byte-identical.
+```
+npx tsx scripts/confirm-project-identity.ts --project=raydium --chain=solana \
+  --token=4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R --ticker=RAY --actor=owner
+```
 
-`ticker` was left null on purpose. The catalog row is a name, not an identity
-claim: which token this project *is* belongs to `PROJECT_IDENTITY` (chain +
-mint), which does not exist for Raydium. Nothing was inferred — the owner
-supplied a slug and a name, and only those were written.
+Row `c90833b3-bd93-413b-b430-b9e5e8b3cb28`, kind `PROJECT_IDENTITY`, ACTIVE via
+`OBSERVED -> CANDIDATE -> ACTIVE` on the existing `promoteProjectMemoryItem`. No
+SQL, no direct ACTIVE write, no re-implemented transition.
 
-`demo_project_slugs` was not touched, so Raydium is in **scope** and **not**
-available to DEMO. That divergence is now asserted rather than assumed: the
-projects API test previously passed only because the catalog and the DEMO config
-happened to list the same three slugs.
+Stored content has exactly three keys — `chain`, `tokenAddress`, `ticker`. There
+is **no `network` field**; the schema is `.strict()` and the script refuses
+`--network` loudly rather than dropping it. Mainnet is implied by construction.
 
-### Verified offline after seeding
+The chain and mint were **owner-supplied**. Nothing discovered or verified them:
+the shape validator only rejects an obviously cross-chain address, and a
+well-formed address is not a confirmed one. Confirmation *is* the human ACTIVE
+row, and that is all this recorded.
 
-Exactly one `raydium` row; project count 4; the three prior projects unchanged;
-`pump_fun` still 26 jobs / 401 Evidence / 7 memory items. For `raydium`: zero
-`PROJECT_IDENTITY`, zero `SOURCE_ROUTE`, zero project-memory rows of any kind,
-zero jobs, zero Evidence, zero reachable sources. The global `sources` table is
-unchanged at 62 rows — `sources` has no project column, so "zero sources for
-Raydium" means zero reachable through its (nonexistent) Evidence.
+`projects.ticker` for `raydium` stays **null**, untouched. Catalog ticker and
+canonical identity are separate concerns — the domain module treats identity
+`ticker` as informational and never uses it for matching.
 
-Idempotence was not re-proved by a second run: `tests/phase1.test.ts` case 1
-already establishes it, and now pins the catalog at 4.
+### Verified offline, through the real production resolver
+
+`resolveConfirmedIdentity(raydium)` returns
+`{ chain: "solana", tokenAddress: "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R",
+ticker: "RAY" }` — exact match on all three. Exactly one ACTIVE
+`PROJECT_IDENTITY` row exists; it is the project's only `project_memory_items`
+row of any kind or state. `pump_fun`'s identity is untouched.
+
+On-chain preflight, exercised against the real gate functions with **no retriever
+constructed**, so transport was structurally unreachable: the identity gate
+**passes**, the `chain === "solana"` gate **passes**, `projectAnchor` would be the
+confirmed mint — and it stops at the subject-provenance gate with `NOT_FOUND`.
+Correct: there is no admitted documentary locator and no derived subject, so
+nothing is eligible to be read. Identity was the first gate, not the last.
 
 ### Next, and still ordinary owner acts
 
-1. `confirm-project-identity.ts` — Solana, RAY mint. **The mint address must come
-   from the owner.** It is the entity binding; nothing may infer it.
-2. `confirm-source-route.ts` — `docs.raydium.io` at a bounded prefix.
-3. **inspect** the page (non-evidentiary) — needs an authorized live window.
-4. `classify-source-route.ts` — only if what the page says earns it.
+1. `confirm-source-route.ts` — `docs.raydium.io` at a bounded prefix.
+2. **inspect** the page (non-evidentiary) — needs an authorized live window.
+3. `classify-source-route.ts` — only if what the page says earns it.
 
-Step 3 before step 4 remains the point: classification follows reading.
+Step 2 before step 3 remains the point: classification follows reading.
+
+Note the ordering that the preflight just made concrete: on-chain reading cannot
+start from the mint alone. A subject becomes eligible only through a documentary
+locator or a previously derived subject, so the documentary path is not optional
+groundwork — it is what unlocks the chain path.
 
 The pre-registered success criteria for the case — what will and will not count
 as an address-level role assignment — remain as written when Raydium was

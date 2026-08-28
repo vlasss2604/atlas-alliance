@@ -202,9 +202,10 @@ documentary-only. Not a defect; a capability boundary.
 
 Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
 `hyperliquid`, `uniswap` and `raydium` — the latter three with **0 jobs,
-0 evidence, 0 routes, no confirmed identity, and no documentary knowledge of any
-kind**. `hyperliquid` and `uniswap` are non-Solana, so neither can test the
-on-chain path.
+0 evidence, 0 routes and no documentary knowledge of any kind**. `hyperliquid`
+and `uniswap` additionally have **no confirmed identity**, and both are
+non-Solana, so neither can test the on-chain path. `raydium` now has one — see
+below.
 
 **The fork: add an EVM read transport, or choose Solana projects until Pattern v1
 is mature.** No Solana TVC candidate exists in repository memory, so option two
@@ -214,10 +215,10 @@ needs the owner to name one.
 Solana, so the transport wall does not apply. Recorded as the **selected next
 case and an owner-supplied lead only** — nothing about its mechanism, fee split
 or published addresses is a finding, and none of it becomes one until acquired
-through the pipeline. Local state is a clean slate apart from the catalog row
-recorded below: no identity, route, source, job or artifact; the only `raydium`
-mentions anywhere are 11 SOCIAL Evidence rows belonging to `pump_fun` that name
-it as a venue.
+through the pipeline. Local state is a clean slate apart from the catalog row and
+the confirmed identity recorded below: no route, source, job, Evidence or
+artifact; the only `raydium` mentions anywhere are 11 SOCIAL Evidence rows
+belonging to `pump_fun` that name it as a venue.
 
 The shape is deliberately different from PUMP — fee → collection → conversion →
 **accumulation at a protocol-controlled destination, with no burn** — so it
@@ -233,6 +234,30 @@ null so the catalog asserts no token identity, which is `PROJECT_IDENTITY`'s job
 `demo_project_slugs` was **not** touched, so `raydium` is in scope and not
 available to DEMO (Scope != Entitlement), and the projects API now proves that
 divergence rather than assuming catalog and DEMO config coincide.
+
+**Identity confirmed 2026-08-28**, by owner decision through
+`confirm-project-identity.ts` — the only supported path. One
+`PROJECT_IDENTITY` row, `c90833b3-bd93-413b-b430-b9e5e8b3cb28`, ACTIVE via
+`OBSERVED -> CANDIDATE -> ACTIVE` on the existing lifecycle function. Content is
+exactly `{ chain: "solana", tokenAddress:
+"4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R", ticker: "RAY" }` — three keys,
+no `network` field, because the schema is `.strict()` and has none. The chain
+and the mint were **supplied by the owner**; nothing discovered or inferred them,
+and a well-formed address is not a confirmed one — confirmation *is* the human
+ACTIVE row.
+
+The catalog's `projects.ticker` for `raydium` deliberately stays **null**.
+Catalog ticker and canonical identity are separate concerns, and the domain
+module says so itself: identity `ticker` is informational and never used for
+matching, while the catalog column is the display authority.
+
+Consequence, verified offline against the real gates without constructing a
+retriever: the on-chain preflight now **passes** the identity gate and the
+`chain === "solana"` gate, with `projectAnchor` =
+`4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R`, and stops at the subject
+provenance gate with `NOT_FOUND`. That is correct: `raydium` has no admitted
+documentary locator and no derived subject, so nothing is eligible to be read
+yet. Identity was never the last gate — it was the first.
 
 **Both owner capabilities now exist.** Nothing blocks the case:
 
