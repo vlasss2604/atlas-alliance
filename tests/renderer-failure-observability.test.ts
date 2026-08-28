@@ -233,6 +233,7 @@ describe("2. the supervisor names the stage that actually failed", () => {
       startProxy: fakeProxy() as never,
       parentEnv: PARENT_ENV,
       limits: {
+        browserLaunchTimeoutMs: 50,
         navigationTimeoutMs: 50,
         totalWallClockMs: 50,
         maxRenderedTextLength: 1000,

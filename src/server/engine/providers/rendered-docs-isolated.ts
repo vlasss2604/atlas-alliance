@@ -12,6 +12,7 @@ import { buildRendererEnv } from "./renderer-env";
 import {
   CHILD_REPORTABLE_RENDER_REASONS,
   DEFAULT_RENDER_LIMITS,
+  isolatedChildDeadlineMs,
   isBrowserLaunchDiagnostic,
   isNavigationDiagnostic,
   isRenderedDocsFailureReason,
@@ -265,10 +266,17 @@ export function createIsolatedRenderedDocsFetcher(
 
         // The parent owns the hard deadline: a wedged child cannot hang
         // the job even if its own internal timeout fails.
+        //
+        // DERIVED, never chosen: the sum of every budget the child may
+        // lawfully spend — startup AND document — plus the isolation
+        // allowance. It previously counted the document budget alone, so
+        // it was already shorter than a healthy child's worst case; once
+        // startup became a separate budget, ignoring it would have let the
+        // parent kill a child that had done nothing wrong.
         const timeout = new Promise<never>((_, reject) => {
           timer = setTimeout(
             () => reject(new RenderedDocsError("TIMEOUT", "isolated")),
-            limits.totalWallClockMs + 5_000,
+            isolatedChildDeadlineMs(limits),
           );
         });
 

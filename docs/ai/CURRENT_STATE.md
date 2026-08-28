@@ -6,8 +6,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2179 passing, 4 skipped, 1 failing**
-  (2184 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2195 passing, 4 skipped, 1 failing**
+  (2200 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -49,6 +49,15 @@ failure; no mint is inferred from binary.
 **Bounded promotion.** Discovery-only components stop at the token accounts an
 address owns. Only `EXECUTION_EVIDENCE` may currently walk a signature window
 into a transaction. No unbounded paging exists, and none should be added casually.
+
+**Renderer phase budgets.** Browser startup and document work are two phases with
+two budgets: `browserLaunchTimeoutMs` enforced by the driver at `launch()`, and
+`totalWallClockMs` measured from the moment the browser is up. Previously the
+document budget ran from before launch, so startup spent the navigation's
+allowance and a **completed** navigation could be discarded as `TIMEOUT`. The
+parent supervisor's deadline is now derived from both phases plus a fixed
+isolation allowance rather than from the document budget alone. Detail in
+`ARCHITECTURE.md`.
 
 **Deterministic fact synthesis.** Chain facts bypass the model completely:
 code-templated statements, literal artifact fragments, hand-authored
@@ -378,6 +387,14 @@ research.
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
 Both routes stay ACTIVE and **unclassified**.
+
+**The budget defect named above was found and fixed 2026-08-28** — generically,
+with an offline regression test that reproduces it deterministically. Whether it
+**caused** this `TIMEOUT` is **not established**: it is a plausible explanation
+and nothing more, because the page has not been re-inspected since. The two
+readings named above — server never answered, or `networkidle` never settled —
+both remain open, and the fix does not decide between them. Confirming it needs a
+new owner-authorized live window.
 
 **Both owner capabilities now exist.** Nothing blocks the case:
 

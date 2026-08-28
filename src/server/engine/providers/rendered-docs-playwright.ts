@@ -106,20 +106,40 @@ export interface PlaywrightRenderDeps {
 // the same lockdown and the same proxy arguments. A probe that built its
 // own launch would drift from this one and stop proving anything about
 // production.
-export async function launchLockedDownBrowser(proxyPort?: number): Promise<BrowserLike> {
-  // Lazy: only reached when rendering is actually enabled and invoked.
-  const pw = (await import("playwright")) as unknown as {
-    chromium: { launch(opts: unknown): Promise<BrowserLike> };
-  };
-  return pw.chromium.launch({
+// The launch call's options, as DATA — same discipline as
+// BROWSER_LOCKDOWN. Kept a pure function so a test can assert that the
+// startup budget actually reaches the driver, which is not observable
+// through a launch that has already happened.
+export function chromiumLaunchOptions(
+  proxyPort: number | undefined,
+  limits: RenderLimits,
+): { headless: boolean; timeout: number; args: string[] } {
+  return {
     headless: BROWSER_LOCKDOWN.headless,
+    // The STARTUP phase's bound, enforced by the driver — the same
+    // arrangement as navigationTimeoutMs, which page.goto enforces. Before
+    // this, launch was called with no timeout and inherited Playwright's
+    // undeclared default, so the startup phase had no bound this
+    // repository owned.
+    timeout: limits.browserLaunchTimeoutMs,
     args: [
       ...BROWSER_LOCKDOWN.chromiumArgs,
       // Forces ALL traffic through the boundary, with no bypass — the
       // empty-loopback bypass list is the load-bearing part.
       ...(proxyPort ? proxyChromiumArgs(proxyPort) : []),
     ],
-  });
+  };
+}
+
+export async function launchLockedDownBrowser(
+  proxyPort?: number,
+  limits: RenderLimits = DEFAULT_RENDER_LIMITS,
+): Promise<BrowserLike> {
+  // Lazy: only reached when rendering is actually enabled and invoked.
+  const pw = (await import("playwright")) as unknown as {
+    chromium: { launch(opts: unknown): Promise<BrowserLike> };
+  };
+  return pw.chromium.launch(chromiumLaunchOptions(proxyPort, limits));
 }
 
 function sha256(value: string): string {
@@ -130,7 +150,7 @@ export function createPlaywrightRenderedDocsFetcher(
   deps: PlaywrightRenderDeps = {},
 ): RenderedDocsFetcher {
   const limits = deps.limits ?? DEFAULT_RENDER_LIMITS;
-  const launch = deps.launchBrowser ?? (() => launchLockedDownBrowser(deps.proxyPort));
+  const launch = deps.launchBrowser ?? (() => launchLockedDownBrowser(deps.proxyPort, limits));
   const hostAllowed = deps.hostAllowed ?? resolvedHostAllowed;
   const name = "playwright-chromium";
   const version = deps.rendererVersion ?? "1";
@@ -150,7 +170,16 @@ export function createPlaywrightRenderedDocsFetcher(
         throw new RenderedDocsError("HOST_NOT_ALLOWED", name);
       }
 
+      // WHOLE-RENDER wall time, launch included. Reported to the operator
+      // as renderDurationMs and used for nothing else — it is a
+      // measurement, not a budget.
       const startedAt = Date.now();
+      // THE DOCUMENT PHASE's clock. Assigned below, the moment the browser
+      // is up, because startup is a separate phase with its own budget.
+      // Measuring the document budget from before launch is what let
+      // startup spend the navigation's allowance and discard a completed
+      // navigation as TIMEOUT.
+      let documentPhaseStartedAt = startedAt;
       let blockedRequestCount = 0;
       // Present only when the caller asked to observe. Absent by
       // default, so an ordinary evidentiary render records nothing.
@@ -188,6 +217,10 @@ export function createPlaywrightRenderedDocsFetcher(
           classifyBrowserLaunchFailure(e),
         );
       }
+      // THE PHASE BOUNDARY. Startup is over and was bounded by its own
+      // budget; everything measured against totalWallClockMs from here on
+      // is document work.
+      documentPhaseStartedAt = Date.now();
       let context: ContextLike | null = null;
       try {
         context = await browser.newContext({
@@ -331,7 +364,7 @@ export function createPlaywrightRenderedDocsFetcher(
           );
         }
 
-        if (Date.now() - startedAt > limits.totalWallClockMs) {
+        if (Date.now() - documentPhaseStartedAt > limits.totalWallClockMs) {
           throw new RenderedDocsError("TIMEOUT", name);
         }
         if (totalBytes > limits.maxTotalResponseBytes) {

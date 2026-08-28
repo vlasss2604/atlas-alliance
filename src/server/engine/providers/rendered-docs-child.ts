@@ -74,7 +74,7 @@ async function runSelfTest(request: ChildSelfTestRequest): Promise<ChildRenderRe
   // and a render failure name the identical cause.
   let browser: Awaited<ReturnType<typeof launchLockedDownBrowser>>;
   try {
-    browser = await launchLockedDownBrowser(request.proxyPort);
+    browser = await launchLockedDownBrowser(request.proxyPort, request.limits);
   } catch (e) {
     throw new RenderedDocsError("BROWSER_LAUNCH_FAILED", "selftest", classifyBrowserLaunchFailure(e));
   }

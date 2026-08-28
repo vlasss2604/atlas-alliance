@@ -211,7 +211,7 @@ describe("process supervision — fail closed", () => {
       spawnChild: spawnImpl,
       startProxy: fakeProxy() as never,
       parentEnv: PARENT_ENV,
-      limits: { ...DEFAULT_RENDER_LIMITS, totalWallClockMs: 200 },
+      limits: { ...DEFAULT_RENDER_LIMITS, browserLaunchTimeoutMs: 200, totalWallClockMs: 200 },
     });
   }
 
@@ -321,7 +321,8 @@ describe("process supervision — fail closed", () => {
     );
     const started = Date.now();
     await expect(f.render(URL_IN, ROUTE)).rejects.toMatchObject({ reason: "TIMEOUT" });
-    // Parent deadline is the child's wall clock + 5s grace.
+    // Parent deadline is BOTH child phase budgets — startup and document —
+    // plus the isolation allowance. Shrinking only one no longer shortens it.
     expect(Date.now() - started).toBeLessThan(15_000);
   }, 20_000);
 

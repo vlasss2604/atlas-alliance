@@ -456,7 +456,15 @@ export interface RenderedDocsFetcher {
 
 // ---- hard resource limits (code-owned) --------------------------------
 export interface RenderLimits {
+  // BROWSER STARTUP is its own phase with its own budget, separate from
+  // the document work that follows it. Before this existed, launch was
+  // measured against totalWallClockMs, so starting the browser spent the
+  // navigation's allowance and a COMPLETED navigation could be discarded
+  // as TIMEOUT. The two phases now have two budgets.
+  browserLaunchTimeoutMs: number;
   navigationTimeoutMs: number;
+  // The DOCUMENT phase: measured from the moment the browser is up, never
+  // from before it. Bounds context creation and the navigation.
   totalWallClockMs: number;
   maxRenderedTextLength: number;
   maxTotalResponseBytes: number;
@@ -464,6 +472,17 @@ export interface RenderLimits {
 }
 
 export const DEFAULT_RENDER_LIMITS: RenderLimits = {
+  // A bound where the code previously had none of its own: launch was
+  // called with no timeout at all, deferring to Playwright's undeclared
+  // 30s default. This is TIGHTER than that default, so it constrains
+  // rather than relaxes — it is not a grace period.
+  //
+  // Sized from a measurement, not a guess: `scripts/renderer-selftest.ts`
+  // — launch, context, about:blank, close — took 7,095 ms on the
+  // development machine. A startup bound near that would fail healthy
+  // cold starts on a loaded host, so this is roughly 2.8x the observed
+  // probe and still well under the driver's own default.
+  browserLaunchTimeoutMs: 20_000,
   navigationTimeoutMs: 15_000,
   totalWallClockMs: 15_000,
   maxRenderedTextLength: 400_000,
@@ -471,6 +490,23 @@ export const DEFAULT_RENDER_LIMITS: RenderLimits = {
   // Exactly one. Not a budget to spend — a structural bound.
   maxNavigations: 1,
 };
+
+// What the PARENT allows on top of the child's own two phase budgets:
+// process spawn, module load, and the JSON envelope's round trip. It
+// covers supervision overhead only — never a phase of the render, and
+// never a margin for a phase that overran its own budget.
+export const ISOLATION_ENVELOPE_ALLOWANCE_MS = 5_000;
+
+// THE PARENT'S DEADLINE, derived rather than chosen.
+//
+// The supervisor must not kill a child that is still legitimately inside
+// its permitted phases, so its deadline is the sum of every budget the
+// child may lawfully spend plus the isolation allowance above. Expressed
+// as a function so the relationship is asserted by a test instead of
+// living as an arithmetic literal that drifts when a phase budget changes.
+export function isolatedChildDeadlineMs(limits: RenderLimits): number {
+  return limits.browserLaunchTimeoutMs + limits.totalWallClockMs + ISOLATION_ENVELOPE_ALLOWANCE_MS;
+}
 
 // ---- browser lockdown, expressed as inspectable DATA ------------------
 //

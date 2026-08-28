@@ -4,90 +4,74 @@
 
 ## NONE — awaiting owner direction
 
-Raydium has a catalog row, a confirmed identity and **two unclassified routes**.
-**Two inspection windows have been spent and neither page was read.** No source,
-no Evidence, no job, no artifact.
+The renderer's phase-budget defect is fixed generically. **Raydium was not
+re-run**, nothing was classified, and no Evidence exists.
 
-### The two windows
+### What was wrong
 
-| url | reason | proxy |
-|---|---|---|
-| `/ray/ray-buybacks` | `NAVIGATION_FAILED:NAVIGATION_TIMEOUT` | 0 denied, 1 allowed |
-| `/raydium/protocol/protocol-fees` | `TIMEOUT` | 0 denied, 1 allowed |
+`totalWallClockMs` was checked once, immediately after navigation, against a
+clock stamped **before** `launch()`. With `navigationTimeoutMs` and
+`totalWallClockMs` both `15_000`, browser startup was subtracted from the budget
+the navigation was judged against — so a navigation that completed well inside
+its own timeout could still be discarded as `TIMEOUT`. The renderer could throw
+away a completed navigation.
 
-No HTTP status, no `finalUrl`, no bytes, no text in either.
+Startup was also the one phase with **no bound this repository owned**:
+`launch()` was called with no `timeout`, inheriting Playwright's undeclared 30s
+default.
 
-### The difference is real, and it is a stage difference
+### What changed
 
-`NAVIGATION_TIMEOUT` is thrown **inside** `page.goto`: navigation never
-completed, no response ever existed. `TIMEOUT` is the wall-clock check, and both
-places it can be raised sit **after** a navigation attempt:
+- `browserLaunchTimeoutMs` (new, `20_000`) bounds startup, enforced by the driver
+  at `launch()` — the same arrangement `navigationTimeoutMs` already had at
+  `page.goto`. Sized from measurement: `renderer-selftest.ts` took 7,095 ms cold
+  and 2,831 ms warm on this machine.
+- `totalWallClockMs` (unchanged at `15_000`) now measures the **document phase**,
+  from the moment the browser is up.
+- `isolatedChildDeadlineMs(limits)` — the parent's deadline, **derived** as
+  startup + document + a fixed `ISOLATION_ENVELOPE_ALLOWANCE_MS` (`5_000`,
+  unchanged), replacing `totalWallClockMs + 5_000`. The old formula was already
+  shorter than a healthy child's worst case; once startup became its own budget,
+  ignoring it would have let the parent kill a blameless child.
+- `chromiumLaunchOptions()` — launch options as inspectable data, so a test can
+  assert the startup budget actually reaches the driver.
 
-1. **child-side** (`rendered-docs-playwright.ts`) — the check is after the `goto`
-   try/catch, so reaching it means **`goto` returned without throwing**;
-2. **parent-side** (`rendered-docs-isolated.ts`) — the supervisor's hard deadline
-   at `totalWallClockMs + 5_000` = 20s, for a child that produced no envelope.
+`renderDurationMs` still reports whole-render wall time including launch: it is a
+measurement, not a budget.
 
-`TIMEOUT` is in `CHILD_REPORTABLE_RENDER_REASONS`, so the child's own is
-re-thrown by the parent with provider `"isolated"` — **identical output to the
-parent's own**. Reason `TIMEOUT`, no diagnostic, no status, either way. The
-printed output **cannot separate them**.
+### What did NOT change
 
-Reading 1 is the more economical one, and it is **an inference, not a finding**:
-the previous window proves the child reports a `goto` timeout promptly and the
-parent receives it well inside 20s, so a second `goto` timeout would have printed
-`NAVIGATION_TIMEOUT` again. It printed something else. One differing observation
-is not reproducibility.
+`waitUntil: "networkidle"`, `navigationTimeoutMs`, retry count (still exactly one
+navigation), allowed hosts, route containment, SSRF rules, proxy policy, HTTP
+status handling, source authority, evidence semantics. Failure stages keep their
+meanings: `NAVIGATION_TIMEOUT` still means `page.goto` hit its own typed timeout;
+`TIMEOUT` now means the document phase overran, measured correctly.
 
-### A generic limit worth fixing later — BACKLOG, not now
+### Known residuals, not hidden
 
-`startedAt` is stamped **before** `launch()`, and `navigationTimeoutMs` and
-`totalWallClockMs` are **both 15_000**. Browser launch is therefore deducted from
-the same budget the navigation is measured against, so a navigation that takes
-14s and **succeeds** is discarded by the post-check whenever launch cost more
-than a second. The renderer can throw away a completed navigation. Generic, not
-Raydium-specific. Do not "fix" it inside a research task.
+- Child `TIMEOUT` and parent-supervisor `TIMEOUT` still collapse to one
+  owner-visible reason. Left as-is deliberately: both mean "the child exceeded a
+  wall clock", the operator's next action is the same, and a new closed
+  diagnostic would be added on speculation rather than on a need that has arisen.
+- The document budget is checked at a single point, after navigation. Extraction
+  that follows is bounded only by the parent's deadline, so a child wedged in
+  extraction is caught by the supervisor rather than by its own budget.
 
-### Host-wide or page-specific: cannot be distinguished
+### About the Raydium TIMEOUT
 
-Two observations, two stages, neither repeated. What they share matters more than
-what differs: **no containment refusal, no proxy denial of any class, no
-`HTTP_ERROR`, no `BLOCKED_BY_ROUTE_POLICY`**. Nothing observed says the site
-refused ATLAS. Leading hypothesis — the 15s budget is too tight for this host
-under this renderer — plausible, unproven, and engineering rather than research.
+**Not confirmed as the cause.** It is a plausible explanation and nothing more —
+the page has not been re-inspected. The two readings from that window (the server
+never answered, or `networkidle` never settled) both remain open, and this fix
+does not decide between them.
 
-### Nothing about either page is known
+### Next — the owner's choice
 
-Fee source, allocation share, executing address, destination, supply effect: all
-**unknown, not absent**. Failure to read a source is not evidence about its
-contents. Both routes stay ACTIVE and **unclassified**; neither
-`84774bb9-b10a-4519-8a69-7f1c3a6c0b93` nor
-`d09657e6-96b6-423e-9973-a2578cb71069` may be classified on this evidence.
-
-No documentary locator exists, so no on-chain subject can be named.
-`resolveOnchainSubject` on the confirmed RAY mint returns `NOT_FOUND`: an
-identity does not admit itself.
-
-### Next — the owner's choice, not a queue
-
-1. **Raise the render budget first, then re-inspect.** The one change that
-   addresses the leading hypothesis, and it is a code task with a regression
-   test, not a live window. Separating `totalWallClockMs` from
-   `navigationTimeoutMs` — or starting the wall clock after launch — is the
-   generic correction.
-2. **Re-inspect one url unchanged**, to test reproducibility of either signal.
-   Cheapest, and it settles nothing about content if it fails again.
-3. **Stop.** Two windows, no content. Closing the case with the bridge named —
-   "Raydium's own documentation could not be read" — is a legitimate outcome and
-   implies nothing negative about the mechanism.
+1. **A new live window on either Raydium url**, now that startup no longer spends
+   the document budget. That, and only that, would confirm or refute the
+   explanation.
+2. **Stop.** Closing the case with the bridge named remains legitimate.
 
 Each live option is a separate authorized window, one navigation, zero retry.
-
-**The standard when a page is finally read has not moved:** classification needs
-first-party documentation of the mechanism, and a usable locator needs an
-explicit **role assignment** to an address. An address occurrence, a heading, a
-bare table row, or matching cardinality do not count. Pre-registered before
-anything was read; PUMP closed on exactly it.
 
 ### Standing boundaries
 

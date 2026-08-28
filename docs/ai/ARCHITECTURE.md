@@ -231,6 +231,33 @@ which still separates it from the other two by elimination.
 `RENDER_FAILED` keeps its meaning: genuinely unclassified, and now genuinely
 elsewhere — context creation, text extraction, anything outside the navigation.
 
+**A render has two phases, and each has its own budget.** Browser STARTUP is
+bounded by `browserLaunchTimeoutMs` and enforced by the driver at `launch()`, the
+same arrangement `navigationTimeoutMs` already had at `page.goto`. DOCUMENT work
+— context creation and the navigation — is bounded by `totalWallClockMs`,
+measured from the moment the browser is up.
+
+The boundary is the point. `totalWallClockMs` used to be measured from before
+launch, so starting the browser spent the navigation's allowance: with both
+budgets at 15s, a navigation that completed well inside its own timeout was
+still discarded as `TIMEOUT` whenever startup had consumed the difference. That
+is not a hypothetical — startup was measured at 7,095 ms cold and 2,831 ms warm
+on one machine by `renderer-selftest.ts`, and it is exactly the variance a
+shared budget converts into a false failure. `renderDurationMs` still reports
+whole-render wall time, launch included: it is a measurement, not a budget.
+
+**The parent's deadline is derived, not chosen** — `isolatedChildDeadlineMs()` is
+the sum of both child phase budgets plus a fixed isolation allowance for spawn
+and the envelope round trip. A supervisor whose deadline is shorter than what a
+healthy child may lawfully spend is a race, and a large round number hides it
+rather than fixing it; expressing it as a function lets a test assert the
+relationship instead of an arithmetic literal that drifts when a phase changes.
+
+One residual, stated rather than implied: the document budget is checked at a
+single point, immediately after navigation. Text extraction that follows it is
+bounded only by the parent's deadline, so a child wedged in extraction is caught
+by the supervisor rather than by its own budget.
+
 **The egress proxy is a second, independent witness.** It records every decision
 it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
 `BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET` — and a failed render now
