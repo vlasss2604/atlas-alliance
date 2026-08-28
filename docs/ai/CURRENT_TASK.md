@@ -4,86 +4,79 @@
 
 ## NONE — awaiting owner direction
 
-Five inspection windows spent. **No Raydium page has been read.** Both routes
-remain ACTIVE and unclassified. No source, Evidence, job or artifact.
+Raydium now has **three** ACTIVE routes, all unclassified. Nothing has been read;
+five live windows have produced no first-party text. No source, Evidence, job or
+artifact.
 
-### The five windows
+### What was done
 
-| url | contract | reason | status |
-|---|---|---|---|
-| `/ray/ray-buybacks` | networkidle | `NAVIGATION_TIMEOUT` | none |
-| `/raydium/protocol/protocol-fees` | networkidle, pre-budget-fix | `TIMEOUT` | none |
-| `/raydium/protocol/protocol-fees` | networkidle, post-budget-fix | `NAVIGATION_TIMEOUT` | none |
-| `/raydium/protocol/protocol-fees` | **domcontentloaded** | `HTTP_ERROR` | **404** |
-| `/ray/ray-buybacks` | **domcontentloaded** | `NAVIGATION_TIMEOUT` | none |
+One owner-authorized route act:
 
-Every window: `0 denied, 1 allowed`, no containment refusal, no denial of any
-class.
+```
+MSYS_NO_PATHCONV=1 npx tsx scripts/confirm-source-route.ts --project=raydium \
+  --domain=docs.raydium.io --prefix=/ray/ray-buybacks.md --actor=owner
+```
 
-### What the fifth window means
+Row `52084c53-6e55-40fa-a7d4-66550b0e2771`, ACTIVE via `OBSERVED -> CANDIDATE ->
+ACTIVE`, content exactly `{ domain, pathPrefix }`, `routeClass` absent. No SQL,
+no classification.
 
-The reason is unchanged from that url's first window, but the **milestone
-changed**, so the statement is much stronger. The old contract waited for
-`networkidle`; this one waits only for **`domcontentloaded`**, which fires when
-the initial HTML is parsed. **This url does not deliver a parseable document at
-all within 15s.**
+`https://docs.raydium.io/ray/ray-buybacks.md` → `CONFIRMED` / `routeClass null` /
+`matchedPathPrefix "/ray/ray-buybacks.md"`. Inspection **allowed**;
+docs-inspection, render-as-Evidence and payload recovery all refuse
+`NOT_OFFICIAL_DOCS`; `resolveSourceClass` still `SOCIAL`.
 
-### It refutes a conclusion recorded two rounds ago
+### Where the lead came from, and what it is worth
 
-"Host-wide, not page-specific" is **wrong**, and it was mine. In the same period,
-on the same host, with the same proxy and budgets, `/raydium/protocol/protocol-fees`
-returned a 404 **promptly**. `docs.raydium.io` is reachable and responsive. The
-stall belongs to one url, not to the host. The earlier reading was an artefact of
-judging both pages by `networkidle`, which hid that they behave differently.
+The owner independently read `https://docs.raydium.io/llms.txt`, the site's
+current first-party documentation index, and reports that it advertises canonical
+Markdown urls including `/ray/ray-buybacks.md`, `/ray/protocol-fees.md` and
+`/ray/treasury.md`.
 
-### What is established, and what is not
+**That index is an owner-supplied lead and nothing more.** Its content is not
+Evidence, was not acquired through the pipeline, and no mechanism claim follows
+from it. It offers a plausible account of the earlier `404` — the browser-facing
+paths this project confirmed are apparently not the paths the site now advertises
+— but that account is not established either.
 
-**Established.** This url did not reach `domcontentloaded` within 15s. No status
-was obtained. No containment refusal and no proxy denial of any class occurred.
-No other host was involved — a cross-host redirect would have surfaced as
-`BLOCKED_BY_ROUTE_POLICY` or `HOST_NOT_CONFIRMED`.
+**Whether a Markdown surface reads where the SPA did not is unknown.** It has not
+been inspected, and nothing should be assumed. The renderer still runs a browser
+against it, and a `.md` url may be served as a download, as `text/plain`, or as
+another SPA route; each behaves differently and none has been observed.
 
-**Not established.** Which of three readings holds: the server never answered for
-this path; a **same-host** redirect chain never settled into a parsed document
-(the route handler filters by host, not path, so such a chain passes containment
-silently and would look exactly like this); or the connection stalled after
-CONNECT. `1 allowed` is recorded at policy-decision time, before `netConnect`, so
-it excludes none of them — the tunnel-outcome blind spot in `BACKLOG.md`.
+### Disjointness, proved rather than eyeballed
 
-**Nothing about the page's content is known** — unknown, not absent. Nothing here
-says Raydium lacks buyback documentation, or that this page never existed.
+`.md` does not begin a new path segment, so `/ray/ray-buybacks.md` is **not**
+under `/ray/ray-buybacks`. Verified with the real `matchesPathPrefix` in both
+directions against every ACTIVE row — the same segment-bounded rule that kept
+`/raydium/...` and `/ray/...` apart. Confirming it changed exactly two urls: the
+route itself and `/ray/ray-buybacks.md/extra` beneath it.
+`/ray/ray-buybacks.markdown` correctly stayed outside.
 
-### Where the case actually stands
+Both existing routes resolve **byte-identically** before and after.
+`/ray/protocol-fees.md` and `/ray/treasury.md` remain unconfirmed: one route per
+owner act.
 
-**Both confirmed urls are unreadable, for two distinct reasons**: one absent
-(404), one unresponsive. Five live windows have produced no first-party text, no
-Evidence, and no documentary locator.
+### Still true
 
-**The chain provenance gate remains locked.** `resolveOnchainSubject` on the
-confirmed RAY mint returns `NOT_FOUND`: an identity does not admit itself.
+Nothing about any Raydium page's content is known — unknown, not absent. None of
+the three routes may be classified. **The chain provenance gate remains locked**:
+no documentary locator exists, and `resolveOnchainSubject` on the confirmed RAY
+mint returns `NOT_FOUND`, because an identity does not admit itself.
 
-Neither `84774bb9-b10a-4519-8a69-7f1c3a6c0b93` nor
-`d09657e6-96b6-423e-9973-a2578cb71069` may be classified.
+### Next — the owner's choice
 
-### Recommendation
+1. **Inspect `https://docs.raydium.io/ray/ray-buybacks.md`.** Now eligible, never
+   attempted. It tests a genuinely different surface, not a retry.
+2. **Stop.** Closing with the bridge named remains legitimate.
 
-**Close the case with the bridge named.** CORE_RULES' brake applies: the proof
-plan no longer justifies another branch, and further windows would be diagnosing
-our own transport rather than researching a mechanism — the same trap that
-consumed four PUMP windows. The honest closure is *"ATLAS could not read
-Raydium's first-party documentation at the two confirmed urls: one returned 404,
-the other never delivered a document."* That is a valid `INSUFFICIENT_EVIDENCE`
-outcome with the missing bridge named correctly, and it implies **nothing** about
-whether the buyback mechanism exists.
+A live window is a separate authorization, one navigation, zero retry.
 
-If the owner prefers to continue, the only options that attack something real
-are owner acts, not retries:
-
-1. **Supply corrected first-party urls** for both pages, then confirm and inspect.
-   The paths must come from the owner; ATLAS may not discover them.
-2. **Accept the transport blind spot as a work item** — recording the tunnel
-   outcome would separate the three readings. That is engineering, not research,
-   and it belongs in `BACKLOG.md` rather than in a live window.
+**The standard when a page is finally read has not moved:** classification needs
+first-party documentation of the mechanism, and a usable locator needs an
+identifier **plus** an explicit role assignment. An address occurrence, a
+heading, a bare table row, or matching cardinality do not count. Buyback is not
+burn.
 
 ### Standing boundaries
 

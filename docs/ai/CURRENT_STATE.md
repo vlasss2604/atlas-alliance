@@ -474,9 +474,32 @@ document; or the connection stalled after CONNECT. The tunnel-outcome blind spot
 named in `BACKLOG.md` is why the last one cannot be excluded — `1 allowed` is
 recorded at policy-decision time, before `netConnect`.
 
-**Status of the Raydium documentary path: both confirmed urls are unreadable**,
-for two different and now clearly distinct reasons — one absent, one
-unresponsive. Five live windows have produced no first-party text.
+**Status of the Raydium documentary path: both browser-facing urls are
+unreadable**, for two different and clearly distinct reasons — one absent, one
+unresponsive. Five live windows produced no first-party text.
+
+### A third route, from Raydium's own current index (2026-08-28)
+
+The owner independently read `https://docs.raydium.io/llms.txt` — the site's
+current first-party documentation index — and reports that it advertises
+canonical **Markdown** urls, among them `/ray/ray-buybacks.md`,
+`/ray/protocol-fees.md` and `/ray/treasury.md`.
+
+**That index is an owner-supplied lead and nothing more.** Its content is not
+Evidence, has not been acquired through the pipeline, and no mechanism claim
+follows from it. It explains the earlier `404`, without proving anything: the
+browser-facing paths this project confirmed are apparently not the paths the site
+now advertises.
+
+`/ray/ray-buybacks.md` is confirmed as a third ACTIVE route,
+`52084c53-6e55-40fa-a7d4-66550b0e2771`, unclassified, disjoint from both
+others — `.md` does not begin a new path segment, so it is **not** under
+`/ray/ray-buybacks`, verified with the real predicate in both directions rather
+than inferred from the strings. The other two Markdown urls are **not** confirmed:
+one route per owner act.
+
+**Whether a Markdown surface reads where the SPA did not is unknown** and must
+not be assumed. It has not been inspected.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
