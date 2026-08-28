@@ -6,9 +6,12 @@ import { projects, researchTraceEvents, topics, users } from "../src/server/db/s
 import { CapabilityFatalError } from "../src/server/engine/capability-fatal-error";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import {
+  classifyExtractionSchemaFailure,
   EvidenceExtractorUnavailableError,
   EXTRACTOR_OUTPUT_DIAGNOSTICS,
+  EXTRACTOR_SCHEMA_FIELDS,
   isExtractorOutputDiagnostic,
+  isExtractorSchemaField,
 } from "../src/server/engine/providers/evidence-extractor";
 import {
   __resetAnthropicEvidenceExtractorClient,
@@ -197,8 +200,12 @@ describe("generation: output-side closed diagnostics come only from their own br
     expect(err.transient).toBe(false);
     expect(err.message).toBe("model output is not valid JSON");
     expect(err.message).not.toContain(OUT_SECRET);
-    // JSON-parse failures record usage BEFORE throwing — which is exactly
-    // why null usage columns excluded this class for job b3457f0b.
+    // JSON-parse failures capture usage BEFORE throwing. NOTE: that
+    // capture is in-memory (onUsage) only — the PERSISTED usage columns
+    // are written solely on the success-path MODEL_CALL_ATTEMPTED row,
+    // so null usage columns at rest distinguish nothing between failure
+    // classes (an earlier reading that they excluded this class for job
+    // b3457f0b was refuted live).
     expect(onUsage).toHaveBeenCalledTimes(1);
   });
 
@@ -212,6 +219,207 @@ describe("generation: output-side closed diagnostics come only from their own br
     expect(err.message).not.toContain(OUT_SECRET);
     expect(err.message).not.toContain("Expected");
     expect(onUsage).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---- WHICH schema field failed (field-level refinement) ---------------
+
+// One valid fact, so a test can invalidate exactly ONE field and know the
+// first issue is the one it planted.
+function validFact(overrides: Record<string, unknown> = {}) {
+  return {
+    step: 6,
+    component: "DESTINATION",
+    statement: "fees accrue to the treasury",
+    supportFragment: "fee text mentioning the treasury",
+    mechanismState: null,
+    directness: "DIRECT",
+    publishedAt: null,
+    doesNotProve: "does not prove execution",
+    relationship: "SUPPORTS",
+    onchainLocator: null,
+    onchainLocators: null,
+    ...overrides,
+  };
+}
+
+describe("OUTPUT_SCHEMA_INVALID names WHICH code-owned field failed (items 1-4)", () => {
+  it("1. every fact field maps to its own closed code, through the real schema and the real extractor", async () => {
+    for (const [field, expected] of [
+      ["step", "FACTS_STEP"],
+      ["component", "FACTS_COMPONENT"],
+      ["statement", "FACTS_STATEMENT"],
+      ["supportFragment", "FACTS_SUPPORT_FRAGMENT"],
+      ["mechanismState", "FACTS_MECHANISM_STATE"],
+      ["directness", "FACTS_DIRECTNESS"],
+      ["publishedAt", "FACTS_PUBLISHED_AT"],
+      ["doesNotProve", "FACTS_DOES_NOT_PROVE"],
+      ["relationship", "FACTS_RELATIONSHIP"],
+      ["onchainLocator", "FACTS_ONCHAIN_LOCATOR"],
+      ["onchainLocators", "FACTS_ONCHAIN_LOCATORS"],
+    ] as const) {
+      // A number is invalid for every one of these fields (string,
+      // nullable string, enum, array) except `step`, which gets a string.
+      const bad = field === "step" ? `nine ${OUT_SECRET}` : 12345;
+      const body = JSON.stringify({ facts: [validFact({ [field]: bad })] });
+      const { err } = await extractFailure(async () => modelResponse(body));
+      expect(err.diagnostic, field).toBe("OUTPUT_SCHEMA_INVALID");
+      expect(err.schemaField, field).toBe(expected);
+      expect(safeFailureReason("EVIDENCE_EXTRACTOR", err), field).toBe(
+        `EVIDENCE_EXTRACTOR_FAILED:EvidenceExtractorUnavailableError:OUTPUT_SCHEMA_INVALID:${expected}`,
+      );
+      __resetAnthropicEvidenceExtractorClient();
+    }
+  });
+
+  it("2. structural failures map to their own codes: ROOT, FACTS (missing / not-array / element / cap), nested index", async () => {
+    for (const [body, expected] of [
+      [JSON.stringify("just a string"), "ROOT"],
+      [JSON.stringify({}), "FACTS"],
+      [JSON.stringify({ facts: "not-an-array" }), "FACTS"],
+      [JSON.stringify({ facts: ["not-an-object"] }), "FACTS"],
+      [JSON.stringify({ facts: Array.from({ length: 21 }, () => validFact()) }), "FACTS"],
+      // A nested array index inside a fact field: the index is dropped,
+      // the FIELD is what is named.
+      [JSON.stringify({ facts: [validFact({ onchainLocators: ["ok", 7] })] }), "FACTS_ONCHAIN_LOCATORS"],
+      // The index of WHICH fact also never appears — fact 2's bad field
+      // reports the same code as fact 0's would.
+      [JSON.stringify({ facts: [validFact(), validFact(), validFact({ directness: "SIDEWAYS" })] }), "FACTS_DIRECTNESS"],
+    ] as const) {
+      const { err } = await extractFailure(async () => modelResponse(body));
+      expect(err.schemaField, expected).toBe(expected);
+      __resetAnthropicEvidenceExtractorClient();
+    }
+  });
+
+  it("3. an unrecognised path collapses to UNKNOWN_SCHEMA_FIELD — a renamed schema field fails SAFE", () => {
+    // Direct unit-level proof against the classifier: paths the map does
+    // not know, prototype-chain bait, and malformed issue arrays.
+    for (const path of [
+      ["renamedField"],
+      ["facts", 0, "fieldThatNoLongerExists"],
+      ["facts", 0, "constructor"],
+      ["facts", 0, "__proto__"],
+      ["facts", 0, "toString"],
+      ["facts", 0, "step", "deeper"],
+      [SECRET],
+      ["facts", 0, SECRET],
+    ]) {
+      expect(classifyExtractionSchemaFailure([{ path }]), JSON.stringify(path)).toBe("UNKNOWN_SCHEMA_FIELD");
+    }
+    // No issues at all, or a malformed issues array, is never a guess.
+    expect(classifyExtractionSchemaFailure([])).toBe("UNKNOWN_SCHEMA_FIELD");
+    expect(classifyExtractionSchemaFailure(undefined)).toBe("UNKNOWN_SCHEMA_FIELD");
+    expect(classifyExtractionSchemaFailure([{ path: "not-an-array" } as never])).toBe("UNKNOWN_SCHEMA_FIELD");
+    // An all-numeric path (no string segments) is the root statement.
+    expect(classifyExtractionSchemaFailure([{ path: [0] }])).toBe("ROOT");
+  });
+
+  it("4. MULTI-ISSUE RULE: the FIRST issue in stable schema order decides, exactly one code, no arrays", async () => {
+    // An object missing every fact field produces 11 issues; zod reports
+    // them in schema-declaration order, so `step` is first — and the
+    // contract emits that one code alone.
+    const { err } = await extractFailure(async () => modelResponse(JSON.stringify({ facts: [{}] })));
+    expect(err.schemaField).toBe("FACTS_STEP");
+    const detail = safeFailureReason("EVIDENCE_EXTRACTOR", err);
+    expect(detail).toBe(
+      "EVIDENCE_EXTRACTOR_FAILED:EvidenceExtractorUnavailableError:OUTPUT_SCHEMA_INVALID:FACTS_STEP",
+    );
+    // Exactly one field code — no second code, no comma, no list.
+    expect(detail.split(":")).toHaveLength(4);
+    for (const other of ["FACTS_COMPONENT", "FACTS_RELATIONSHIP", "FACTS_DIRECTNESS"]) {
+      expect(detail).not.toContain(other);
+    }
+    // Determinism: the same input yields the same code every time.
+    __resetAnthropicEvidenceExtractorClient();
+    const again = await extractFailure(async () => modelResponse(JSON.stringify({ facts: [{}] })));
+    expect(again.err.schemaField).toBe("FACTS_STEP");
+    // And the direct classifier agrees on ordering when two fields are
+    // invalid: the earlier-declared field wins.
+    expect(
+      classifyExtractionSchemaFailure([
+        { path: ["facts", 0, "directness"] },
+        { path: ["facts", 0, "relationship"] },
+      ]),
+    ).toBe("FACTS_DIRECTNESS");
+  });
+
+  it("5-9. the field vocabulary is closed, and no raw path, message, value or model text can cross", async () => {
+    for (const f of EXTRACTOR_SCHEMA_FIELDS) expect(isExtractorSchemaField(f)).toBe(true);
+    for (const bad of ["", "facts", "facts.0.step", "FACTS_STEP ", "facts_step", SECRET, "UNKNOWN"]) {
+      expect(isExtractorSchemaField(bad), bad).toBe(false);
+    }
+    // A real failure whose invalid VALUE is a planted secret: the value,
+    // the raw path, the zod wording and the model JSON all stay out.
+    const body = JSON.stringify({ facts: [validFact({ component: `${OUT_SECRET}-as-a-number`, step: 99 })] });
+    const { err } = await extractFailure(async () => modelResponse(body));
+    const surfaces = [
+      err.message,
+      safeFailureReason("EVIDENCE_EXTRACTOR", err),
+      new CapabilityFatalError("EVIDENCE_EXTRACTOR", safeFailureReason("EVIDENCE_EXTRACTOR", err)).message,
+    ];
+    for (const s of surfaces) {
+      expect(s).not.toContain(OUT_SECRET);
+      expect(s).not.toContain(DOC_SECRET);
+      expect(s).not.toContain(SECRET);
+      expect(s).not.toContain("facts[");
+      expect(s).not.toContain("Expected");
+      expect(s).not.toContain("received");
+      expect(s).not.toContain("at ");
+    }
+  });
+
+  it("9. MUTATION CHECK: a forged schema field cannot cross; the class still crosses alone", () => {
+    const forged = new EvidenceExtractorUnavailableError(
+      "x",
+      false,
+      "OUTPUT_SCHEMA_INVALID",
+      null,
+      `facts[0].step INJECTED ${SECRET}` as never,
+    );
+    const reason = safeFailureReason("EVIDENCE_EXTRACTOR", forged);
+    expect(reason).toBe("EVIDENCE_EXTRACTOR_FAILED:EvidenceExtractorUnavailableError:OUTPUT_SCHEMA_INVALID");
+    expect(reason).not.toContain("INJECTED");
+    expect(reason).not.toContain(SECRET);
+  });
+
+  it("10. a schema field asserted alongside ANY other diagnostic is dropped as a contradiction", () => {
+    // Compatibility both ways: OUTPUT_SCHEMA_INVALID with no field still
+    // crosses as the bare class (the shape every pre-existing caller
+    // produces), and a field smuggled onto an unrelated class is refused.
+    const noField = new EvidenceExtractorUnavailableError("x", false, "OUTPUT_SCHEMA_INVALID");
+    expect(safeFailureReason("EVIDENCE_EXTRACTOR", noField)).toBe(
+      "EVIDENCE_EXTRACTOR_FAILED:EvidenceExtractorUnavailableError:OUTPUT_SCHEMA_INVALID",
+    );
+    for (const other of ["MAX_TOKENS_TRUNCATED", "OUTPUT_NOT_JSON", "RATE_LIMITED"] as const) {
+      const smuggled = new EvidenceExtractorUnavailableError("x", false, other, 429, "FACTS_STEP");
+      const reason = safeFailureReason("EVIDENCE_EXTRACTOR", smuggled);
+      expect(reason, other).not.toContain("FACTS_STEP");
+    }
+  });
+
+  it("15. the extraction schema itself is unchanged: a fully valid fact still parses and still returns", async () => {
+    const calls: StubCalls = { count: 0, create: 0 };
+    __setAnthropicEvidenceExtractorClient(
+      stubClient(async () => modelResponse(JSON.stringify({ facts: [validFact()] })), calls),
+    );
+    const extractor = createAnthropicEvidenceExtractor("claude-haiku-4-5", 1536, 4000);
+    const facts = await extractor.extract(INPUT);
+    expect(facts).toHaveLength(1);
+    expect(facts[0].component).toBe("DESTINATION");
+    // And the schema is still STRICT about the things it was strict about:
+    // each of these remains a rejection, not a coerced pass.
+    for (const bad of [
+      validFact({ step: 9 }), // above max(8)
+      validFact({ step: 1.5 }), // non-integer
+      validFact({ statement: "" }), // min(1)
+      validFact({ directness: "MAYBE" }), // outside the enum
+      validFact({ onchainLocators: Array.from({ length: 11 }, () => "x") }), // max(10)
+    ]) {
+      __resetAnthropicEvidenceExtractorClient();
+      const { err } = await extractFailure(async () => modelResponse(JSON.stringify({ facts: [bad] })));
+      expect(err.diagnostic).toBe("OUTPUT_SCHEMA_INVALID");
+    }
   });
 });
 

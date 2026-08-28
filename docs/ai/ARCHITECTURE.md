@@ -370,8 +370,31 @@ excluded the JSON/schema classes for job `b3457f0b-…` was refuted by the
 first post-fix window: a known `OUTPUT_SCHEMA_INVALID` failure left the
 identical all-null trace shape.) The zod validation message — text derived
 from model output — is no longer interpolated into the error; the closed
-diagnostic is the entire statement, and which schema field failed is
-deliberately not recoverable today.
+diagnostic is the entire statement.
+
+**`OUTPUT_SCHEMA_INVALID` also names WHICH code-owned field failed.** The
+zod message stays out — it quotes received values, which are model text —
+but the field PATHS are code-owned names authored in the schema itself, so
+they are safe to say by construction. `EXTRACTOR_SCHEMA_FIELDS`
+(evidence-extractor.ts) is that closed list: `ROOT`, `FACTS`, one code per
+fact field (`FACTS_STEP`, `FACTS_DIRECTNESS`, `FACTS_ONCHAIN_LOCATORS`, …),
+and `UNKNOWN_SCHEMA_FIELD`. `classifyExtractionSchemaFailure` is the one
+reduction, and it never passes a path segment through: every mapping is a
+lookup in a closed `Map` (a Map, not an object, so `__proto__` and
+`constructor` miss cleanly), so an arbitrary path structurally cannot become
+operator output, and a RENAMED schema field degrades to
+`UNKNOWN_SCHEMA_FIELD` rather than leaking its new name.
+
+The multi-issue rule is the smallest deterministic one: **the first issue
+only**. zod reports in schema-declaration order, so for a given (schema,
+output) pair the first issue is stable — one code, never a list, never a cap
+to reason about. Array indices are dropped: `facts[3].step` and
+`facts[0].step` are the same statement about the same field, and WHICH fact
+was malformed is not a schema fact. The operator line reads
+`EXTRACT_FAILED:OUTPUT_SCHEMA_INVALID:FACTS_STEP`. The field is admitted by a
+third gate on top of the usual two — it crosses only alongside
+`OUTPUT_SCHEMA_INVALID` itself, since a field asserted next to any other
+class is a contradiction and is dropped rather than reconciled.
 
 **The egress proxy is a second, independent witness.** It records every decision
 it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,

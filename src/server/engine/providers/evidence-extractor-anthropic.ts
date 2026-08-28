@@ -2,7 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
-import { EvidenceExtractorUnavailableError } from "./evidence-extractor";
+import { classifyExtractionSchemaFailure, EvidenceExtractorUnavailableError } from "./evidence-extractor";
 import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extractor";
 import { isTransientAnthropicApiError } from "./retry";
 import { classifyTokenCountFailure, countThenGate } from "./token-gate";
@@ -245,10 +245,19 @@ async function doExtract(
   const parsed = extractionResultSchema.safeParse(raw);
   if (!parsed.success) {
     // Emitted ONLY from the actual schema-validation failure. The zod
-    // error message is DERIVED FROM MODEL OUTPUT (paths, received
-    // values) — untrusted text — and is deliberately not interpolated:
-    // the closed diagnostic is the entire safe statement.
-    throw new EvidenceExtractorUnavailableError("model output failed schema validation", false, "OUTPUT_SCHEMA_INVALID");
+    // error message is DERIVED FROM MODEL OUTPUT (received values) —
+    // untrusted text — and is deliberately not interpolated. What IS
+    // said, beyond the closed class: WHICH code-owned schema field the
+    // first issue sits on, reduced by classifyExtractionSchemaFailure
+    // (evidence-extractor.ts) to its own closed vocabulary — never a
+    // raw path, never a value.
+    throw new EvidenceExtractorUnavailableError(
+      "model output failed schema validation",
+      false,
+      "OUTPUT_SCHEMA_INVALID",
+      null,
+      classifyExtractionSchemaFailure(parsed.error.issues),
+    );
   }
   return parsed.data.facts.map((f) => ({
     ...f,

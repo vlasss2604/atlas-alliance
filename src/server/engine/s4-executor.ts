@@ -22,7 +22,12 @@ import {
   resolveContentFetcher,
 } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
-import { EvidenceExtractorUnavailableError, isExtractorOutputDiagnostic, resolveEvidenceExtractor } from "./providers/evidence-extractor";
+import {
+  EvidenceExtractorUnavailableError,
+  isExtractorOutputDiagnostic,
+  isExtractorSchemaField,
+  resolveEvidenceExtractor,
+} from "./providers/evidence-extractor";
 import type { EvidenceExtractor } from "./providers/evidence-extractor";
 import { resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
@@ -378,6 +383,14 @@ function safeFailureDetail(e: unknown): string | null {
     const d = e.diagnostic;
     if (d === null) return null;
     if (!isTokenCountDiagnostic(d) && !isExtractorOutputDiagnostic(d)) return null;
+    // WHICH code-owned schema field failed — admitted only for the one
+    // diagnostic it can describe, and only from the closed field list.
+    // A field asserted alongside any other class is a contradiction, so
+    // it is dropped rather than reconciled; a forged or renamed value
+    // fails the membership gate and the class still crosses alone.
+    if (d === "OUTPUT_SCHEMA_INVALID") {
+      return isExtractorSchemaField(e.schemaField) ? `${d}:${e.schemaField}` : d;
+    }
     const status = typeof e.httpStatus === "number" && Number.isInteger(e.httpStatus) ? e.httpStatus : null;
     return status === null ? d : `${d}:${status}`;
   }

@@ -160,18 +160,22 @@ restart the PUMP investigation, and none is a correctness defect.
   `tests/generation-diagnostic.test.ts`; contract in `ARCHITECTURE.md` ("A
   generation failure names its cause").
 
-- **`OUTPUT_SCHEMA_INVALID` should name the failing schema field, from a
-  closed set.** Observed live 2026-08-28 (job `eb00256a-…`): the first
-  post-fix Stage B window named the class but nothing can say WHICH field
-  failed — the zod message is model-derived and correctly never crosses.
-  The failing field PATHS, however, are schema-owned (code-authored names in
-  `extractionResultSchema`) and zod's issue codes are a closed vocabulary,
-  so a membership-gated `OUTPUT_SCHEMA_INVALID:<field>` (or `:<issue-code>`)
-  would be safe under the existing two-gate discipline and would name the
-  exact mismatch on the next failure. Also worth recording alongside: the
-  request already uses provider-side structured output built from the same
-  zod schema, yet the local `safeParse` still failed — the two enforcement
-  layers do not coincide, and knowing the field would say where.
+- ~~**`OUTPUT_SCHEMA_INVALID` should name the failing schema field.**~~
+  **Resolved 2026-08-28**: `EXTRACTOR_SCHEMA_FIELDS` +
+  `classifyExtractionSchemaFailure` (evidence-extractor.ts) — first issue in
+  stable schema order, array indices dropped, closed-`Map` lookup so no path
+  segment can pass through, admitted by a third gate requiring the diagnostic
+  to be the schema one. Contract in `ARCHITECTURE.md`; pinned by
+  `tests/generation-diagnostic.test.ts`.
+
+- **Provider-side structured output and the local zod check did not coincide
+  on this schema.** The request carries `output_config` built from the same
+  `extractionResultSchema`, yet job `eb00256a-…` returned JSON that failed
+  the local `safeParse` (while `baf42b79-…`, same document and model minutes
+  later, passed). Worth understanding — it may be a schema construct the
+  provider's structured-output layer does not enforce identically, or plain
+  output variance. The field-level diagnostic above will name the field on
+  the next occurrence. Do **not** "fix" it by loosening validation.
 
 - **The closed generation diagnostic is not persisted at rest for
   owner-tooling runs.** For job `eb00256a-…` the class survives only in the

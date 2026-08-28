@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2301 passing, 4 skipped, 1 failing**
-  (2306 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2309 passing, 4 skipped, 1 failing**
+  (2314 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -218,6 +218,10 @@ unknown, so the address's absence from it is **not** established.
 - Cumulative official burn totals are unverified.
 - Nothing at all is observed after slot `441977087`; no persisted signature
   anywhere has a higher slot.
+- **Raydium's four documentary locators are admissible but unread.** The chain
+  gate opened 2026-08-28 (third Stage B window); nothing on-chain has been
+  observed for any of them, and the acquired document is now consumed. What
+  Raydium's published claims mean on-chain is entirely unverified.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
@@ -569,12 +573,13 @@ the protocol at a public on-chain address" and speaks of "RAY accumulation".
 impression. This is exactly the `buyback != supply reduction` invariant Raydium
 was selected to exercise, and nothing here may be read as a burn.
 
-**The chain gate is still locked, and the reason is precise.** Verified:
+**The chain gate is still locked, and the reason is precise.** *(True at
+inspection time; SUPERSEDED — see "THIRD Stage B window" above.)* Verified:
 `findAdmittedLocator` returns **0** rows for the holding address and
 `resolveOnchainSubject` still returns `NOT_FOUND`. A locator becomes admissible
 only from an Evidence row whose `sourceClass` is in
 `ADMISSIBLE_LOCATOR_SOURCE_CLASSES` (`OFFICIAL_DOCS`, `GOVERNANCE`,
-`OFFICIAL_REPORT`).
+`OFFICIAL_REPORT`) — the condition the third window finally satisfied.
 
 **Classified 2026-08-28 — `OFFICIAL_DOCS`.** `classify-source-route.ts`, by
 replacement and supersession in one transaction: the unclassified row
@@ -597,12 +602,15 @@ one path beneath it. `/ray/ray-buybacks` and `/raydium/protocol/protocol-fees`
 resolve **byte-identically** and remain unclassified; `/ray/protocol-fees.md`,
 `/ray/treasury.md` and `/` are untouched. Three ACTIVE routes, never four.
 
-**The chain gate is still locked, and that is the point.** Verified after
+**The chain gate is still locked, and that is the point.** *(True as
+written; SUPERSEDED — the third Stage B window later acquired the page and
+opened the gate. See "THIRD Stage B window" above.)* Verified after
 classification: `findAdmittedLocator` returns **0** rows for all four addresses
 and `resolveOnchainSubject` still returns `NOT_FOUND`. Raydium still has **0
 Evidence and 0 jobs**. **A classified route is not Evidence** — it only makes
 acquisition possible. The locators become admissible when the page is acquired
-through the normal pipeline, and not before.
+through the normal pipeline, and not before — which is exactly what
+eventually happened.
 
 **Acquisition is no longer blocked.** `raydium` was added to
 `INTERNAL_ALPHA_LIVE_PROJECT_SLUGS` 2026-08-28, which is now exactly
@@ -648,7 +656,8 @@ Owner-run once, `--mode=documentary-only`, job
 **No Evidence was created** — 0 Evidence, 0 sources, 0 locators, 0 on-chain
 artifacts. `findAdmittedLocator` is still **0** for all four addresses and
 `resolveOnchainSubject` still returns `NOT_FOUND`. **The chain provenance gate
-remains locked**, and nothing about the buyback mechanism is established. The
+remains locked**, and nothing about the buyback mechanism is established.
+*(State of this run only; SUPERSEDED by the third Stage B window above.)* The
 only rows this run created are the job itself, six trace events, and one S5
 component result: step 6 `DESTINATION` = `INSUFFICIENT_EVIDENCE` /
 `NO_EVIDENCE_FOUND` — the correct fail-closed outcome.
@@ -762,6 +771,61 @@ which one is not recoverable from anything persisted. The observability gap
 itself was **CLOSED the same day** (see "A generation failure names its
 cause" in `ARCHITECTURE.md`); this run predates the fix and the new
 vocabulary is never applied retroactively.
+
+### THIRD Stage B window (2026-08-28, job `baf42b79-…`): EXTRACTION SUCCEEDED — Raydium has documentary Evidence, and the chain gate is OPEN
+
+**This run was executed by the owner outside the analysis rounds below; the
+account here is read from persisted state, not from having run it.** It
+supersedes every "raydium has 0 Evidence / the chain gate is locked"
+statement elsewhere in this file. Created 2026-08-28T16:04:01Z — nine
+minutes after the failing `eb00256a-…` — with the same command and the same
+sealed document. **Model output varies between runs; this one satisfied the
+schema.**
+
+**What was created (verified in the DB).** Twelve trace rows: one
+`EXTRACT_ATTEMPTED`, one `MODEL_CALL_ATTEMPTED` carrying **real usage —
+input 2,627, output 1,078, actual cost 8,017 micro-USD** (the first
+persisted real extraction usage anywhere in this project), then four
+`EXTRACT_OK`. **Four Evidence rows**, all step 6 / `DESTINATION`, all
+`OFFICIAL_DOCS` / `CONFIRMED`, all `onchain_artifact_id` **null**, all
+pointing at the single Stage A `sources` row (no new source was created),
+`retrievedUrl` = `https://docs.raydium.io/ray/ray-buybacks.md`:
+
+| relationship | locator | statement (model-extracted) |
+|---|---|---|
+| **SUPPORTS** / DIRECT | `DdHDoz94o2WJ…` | bought-back RAY **is held at** that address |
+| CONTEXT / DIRECT | `projjosVCPQH…` | CLMM protocol-side fee collection |
+| CONTEXT / DIRECT | `ProCXqRcXJjo…` | CPMM protocol-side fee collection |
+| CONTEXT / DIRECT | `PNLCQcVCD26a…` | Standard AMM v4 protocol-side fee collection |
+
+Four documentary locators were created, ordinal 0, shape `ADDRESS_LIKE`.
+**S5 for this job is `SUPPORTED`** with an empty reason-code list — the first
+component ever to reach `SUPPORTED` for `raydium`, and the first time the
+address-level role assignment PUMP never had has carried through to a
+component result.
+
+**THE CHAIN GATE IS NOW OPEN — verified against the real functions, offline,
+with no RPC.** For all four addresses `findAdmittedLocator` returns **1** row
+(`OFFICIAL_DOCS` / `CONFIRMED`) and `resolveOnchainSubject` returns
+**`ELIGIBLE` / `DOCUMENTARY_LOCATOR`**, where both returned 0 / `NOT_FOUND`
+before. Nothing has been read on-chain: **0 on-chain artifacts** for this job
+(D-127 held — documentary-only, branch not entered). What changed is
+eligibility, not knowledge.
+
+**The document was CONSUMED** at 2026-08-28T16:04:08Z by this job
+(`consumed_by_job_id = baf42b79-…`), exactly as D-128 specifies once Evidence
+is persisted — further resumes are refused. The seal still verifies. The
+"unconsumed and resumable" statements in the two windows below were true when
+written and are now superseded.
+
+**What this does NOT establish.** `entity_binding` is **null** on all four
+rows. The statements are model-extracted from one first-party document —
+Evidence, not proof — and each is a claim about what Raydium publishes, not
+an observation of on-chain behaviour: no buyback, no fee flow and no holding
+has been verified on-chain, and none may be inferred. **Supply effect stays
+HELD, never burned** — the invariant Raydium was selected to exercise. The
+three collection addresses are `CONTEXT`, which establishes nothing on its
+own.
 
 ### Second Stage B window (2026-08-28, post-fix, job `eb00256a-…`): the terminal line named the cause — `OUTPUT_SCHEMA_INVALID`
 

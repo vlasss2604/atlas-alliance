@@ -73,6 +73,95 @@ export function isExtractorOutputDiagnostic(v: unknown): v is ExtractorOutputDia
 // dependency.
 export type EvidenceExtractorDiagnostic = TokenCountDiagnostic | ExtractorOutputDiagnostic;
 
+// WHICH schema field failed, for OUTPUT_SCHEMA_INVALID — the smallest
+// closed refinement that distinguishes schema mismatches. A live window
+// (job eb00256a-…) named the class and nothing could say the field: the
+// zod message is model-derived text and correctly never crosses, but the
+// FIELD PATHS are code-owned, finite names authored in
+// extractedFactSchema (evidence-extractor-anthropic.ts) — safe to say by
+// construction. Values are never exposed; only which code-owned field
+// rejected them.
+//
+// The list mirrors the schema's own shape: ROOT (the output is not the
+// result object at all), FACTS (the facts array itself — missing, not an
+// array, an element that is not an object, or over the length cap), one
+// code per fact field, and UNKNOWN_SCHEMA_FIELD for any path this map
+// does not recognise — a renamed schema field fails SAFE to "unknown",
+// never to a guessed or pass-through name.
+export const EXTRACTOR_SCHEMA_FIELDS = [
+  "ROOT",
+  "FACTS",
+  "FACTS_STEP",
+  "FACTS_COMPONENT",
+  "FACTS_STATEMENT",
+  "FACTS_SUPPORT_FRAGMENT",
+  "FACTS_MECHANISM_STATE",
+  "FACTS_DIRECTNESS",
+  "FACTS_PUBLISHED_AT",
+  "FACTS_DOES_NOT_PROVE",
+  "FACTS_RELATIONSHIP",
+  "FACTS_ONCHAIN_LOCATOR",
+  "FACTS_ONCHAIN_LOCATORS",
+  "UNKNOWN_SCHEMA_FIELD",
+] as const;
+
+export type ExtractorSchemaField = (typeof EXTRACTOR_SCHEMA_FIELDS)[number];
+
+const EXTRACTOR_SCHEMA_FIELD_SET: ReadonlySet<string> = new Set<string>(EXTRACTOR_SCHEMA_FIELDS);
+
+// Same two-gate discipline as every other closed vocabulary here.
+export function isExtractorSchemaField(v: unknown): v is ExtractorSchemaField {
+  return typeof v === "string" && EXTRACTOR_SCHEMA_FIELD_SET.has(v);
+}
+
+// Schema field name -> closed code. A Map, deliberately not a plain
+// object: an attacker-influenced path segment like "constructor" or
+// "__proto__" must miss cleanly, never resolve through the prototype
+// chain.
+const FACT_FIELD_CODES: ReadonlyMap<string, ExtractorSchemaField> = new Map([
+  ["step", "FACTS_STEP"],
+  ["component", "FACTS_COMPONENT"],
+  ["statement", "FACTS_STATEMENT"],
+  ["supportFragment", "FACTS_SUPPORT_FRAGMENT"],
+  ["mechanismState", "FACTS_MECHANISM_STATE"],
+  ["directness", "FACTS_DIRECTNESS"],
+  ["publishedAt", "FACTS_PUBLISHED_AT"],
+  ["doesNotProve", "FACTS_DOES_NOT_PROVE"],
+  ["relationship", "FACTS_RELATIONSHIP"],
+  ["onchainLocator", "FACTS_ONCHAIN_LOCATOR"],
+  ["onchainLocators", "FACTS_ONCHAIN_LOCATORS"],
+]);
+
+// The ONE reduction of a zod validation failure to the closed field
+// vocabulary. Contract, chosen as the smallest deterministic one:
+//
+//   - FIRST issue only. zod validates in schema-shape order, so for a
+//     given (schema, output) pair the first issue is stable — verified
+//     empirically: an object missing every fact field reports "step"
+//     first, every run. One code, no arrays, no caps to reason about.
+//   - Numeric array indices are dropped (facts[3].step and facts[0].step
+//     are the same statement about the same schema field); non-string
+//     segments of any other kind are ignored the same way.
+//   - Every mapping is a Map lookup against the closed table — no path
+//     segment is ever concatenated, joined, or passed through into the
+//     result, so an arbitrary path structurally cannot become output.
+//
+// Accepts a structural { path } shape rather than importing zod: the
+// seam stays dependency-free, and a forged issues array degrades to a
+// closed value like everything else.
+export function classifyExtractionSchemaFailure(
+  issues: ReadonlyArray<{ path: ReadonlyArray<unknown> }> | undefined,
+): ExtractorSchemaField {
+  const first = issues?.[0];
+  if (!first || !Array.isArray(first.path)) return "UNKNOWN_SCHEMA_FIELD";
+  const segments = first.path.filter((s): s is string => typeof s === "string");
+  if (segments.length === 0) return "ROOT";
+  if (segments[0] !== "facts") return "UNKNOWN_SCHEMA_FIELD";
+  if (segments.length === 1) return "FACTS";
+  if (segments.length === 2) return FACT_FIELD_CODES.get(segments[1]) ?? "UNKNOWN_SCHEMA_FIELD";
+  return "UNKNOWN_SCHEMA_FIELD";
+}
+
 export class EvidenceExtractorUnavailableError extends Error {
   constructor(
     message: string,
@@ -87,6 +176,12 @@ export class EvidenceExtractorUnavailableError extends Error {
     // generation diagnostic"), never a guessed class.
     public readonly diagnostic: EvidenceExtractorDiagnostic | null = null,
     public readonly httpStatus: number | null = null,
+    // WHICH schema field failed — meaningful only alongside
+    // diagnostic === "OUTPUT_SCHEMA_INVALID", set only by that branch's
+    // classifyExtractionSchemaFailure product. Null everywhere else
+    // (default keeps every existing constructor call valid), and the
+    // boundary refuses it unless the diagnostic really is the schema one.
+    public readonly schemaField: ExtractorSchemaField | null = null,
   ) {
     super(message);
     this.name = "EvidenceExtractorUnavailableError";
