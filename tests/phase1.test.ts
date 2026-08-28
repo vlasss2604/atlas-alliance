@@ -95,7 +95,7 @@ describe("Phase 1 DoD", () => {
     expect((await ctx.db.select().from(topics)).length).toBe(before.topics);
     expect((await ctx.db.select().from(projects)).length).toBe(before.projects);
     expect((await ctx.db.select().from(productConfig)).length).toBe(before.config);
-    expect(before.projects).toBe(3);
+    expect(before.projects).toBe(4);
   });
 
   it("2. duplicate (provider, provider_user_id) identity is rejected", async () => {

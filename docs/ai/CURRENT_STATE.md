@@ -6,8 +6,10 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite: **2179 passing, 4 skipped, 2 failing**. Both failures are
-  pre-existing and unrelated to research behaviour:
+- Full suite, last verified 2026-08-28: **2179 passing, 4 skipped, 1 failing**
+  (2184 total). Only the second item below failed on that run; the first passed
+  because the working copy happened to hold LF. Both are pre-existing and
+  unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
     `s4-executor.ts`. **Now understood: it is a line-ending artifact.** The
     assertion matches `\n}\n`, and `core.autocrlf=true` checks the file out with
@@ -198,10 +200,11 @@ null artifact id, did not come from it.)
 identity only**, so a confirmed Ethereum project degrades silently to
 documentary-only. Not a defect; a capability boundary.
 
-Repository memory holds three projects: `pump_fun` (26 jobs, 401 evidence),
-`hyperliquid` and `uniswap` — the latter two with **0 jobs, 0 evidence, 0 routes,
-no confirmed identity, and no documentary knowledge of any kind**. Both are
-non-Solana, so neither can test the on-chain path.
+Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
+`hyperliquid`, `uniswap` and `raydium` — the latter three with **0 jobs,
+0 evidence, 0 routes, no confirmed identity, and no documentary knowledge of any
+kind**. `hyperliquid` and `uniswap` are non-Solana, so neither can test the
+on-chain path.
 
 **The fork: add an EVM read transport, or choose Solana projects until Pattern v1
 is mature.** No Solana TVC candidate exists in repository memory, so option two
@@ -211,14 +214,25 @@ needs the owner to name one.
 Solana, so the transport wall does not apply. Recorded as the **selected next
 case and an owner-supplied lead only** — nothing about its mechanism, fee split
 or published addresses is a finding, and none of it becomes one until acquired
-through the pipeline. Local state is a clean slate: no project, identity, route,
-source, job or artifact; the only `raydium` mentions anywhere are 11 SOCIAL
-Evidence rows belonging to `pump_fun` that name it as a venue.
+through the pipeline. Local state is a clean slate apart from the catalog row
+recorded below: no identity, route, source, job or artifact; the only `raydium`
+mentions anywhere are 11 SOCIAL Evidence rows belonging to `pump_fun` that name
+it as a venue.
 
 The shape is deliberately different from PUMP — fee → collection → conversion →
 **accumulation at a protocol-controlled destination, with no burn** — so it
 exercises **buyback ≠ supply reduction**, an invariant CORE_RULES states and
 nothing has ever tested.
+
+**Catalog entry created 2026-08-28** — `raydium` / "Raydium", `ACTIVE_CORE`,
+`ticker = null`, project id `9cc80fd6-04ae-45e8-be6c-7ed8b9f663c7`, via the
+existing idempotent seed path. That is a catalog row and nothing else: **zero**
+`PROJECT_IDENTITY` rows, zero `SOURCE_ROUTE` rows, zero sources, zero Evidence,
+zero jobs. No chain and no mint were inferred — the ticker was deliberately left
+null so the catalog asserts no token identity, which is `PROJECT_IDENTITY`'s job.
+`demo_project_slugs` was **not** touched, so `raydium` is in scope and not
+available to DEMO (Scope != Entitlement), and the projects API now proves that
+divergence rather than assuming catalog and DEMO config coincide.
 
 **Both owner capabilities now exist.** Nothing blocks the case:
 

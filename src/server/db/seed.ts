@@ -5,7 +5,7 @@ import { productConfig, projects, researchPatterns, topics } from "./schema";
 import { DEFAULT_PRODUCT_CONFIG } from "../config/product";
 import { PATTERN_V1_CONTENT } from "../domain/pattern";
 
-// Идемпотентный сид (phase-1-plan §8): тема, product config, 3 DEMO-проекта,
+// Идемпотентный сид (phase-1-plan §8): тема, product config, каталог проектов,
 // Pattern v1 (Фаза 5). Никаких фейковых Proof/Evidence/Memory —
 // verified-знание сид создавать не может.
 export async function seed(db: Database): Promise<void> {
@@ -26,13 +26,19 @@ export async function seed(db: Database): Promise<void> {
       .onConflictDoNothing({ target: productConfig.key });
   }
 
-  const demoProjects = [
+  // Каталог (scope), а не DEMO-доступность: она в product_config
+  // (demo_project_slugs). Новая запись попадает в scope и НЕ становится
+  // доступна DEMO — Scope != Entitlement.
+  const catalogProjects = [
     { slug: "pump_fun", name: "Pump.fun", ticker: "PUMP" },
     { slug: "hyperliquid", name: "Hyperliquid", ticker: "HYPE" },
     { slug: "uniswap", name: "Uniswap", ticker: "UNI" },
+    // Тикер владельцем при заведении не задан: каталожная запись не
+    // утверждает идентичность токена — её место PROJECT_IDENTITY.
+    { slug: "raydium", name: "Raydium", ticker: null },
   ] as const;
 
-  for (const p of demoProjects) {
+  for (const p of catalogProjects) {
     await db
       .insert(projects)
       .values({ ...p, status: "ACTIVE_CORE", publishedAt: sql`now()` })

@@ -337,8 +337,17 @@ describe("Phase 2 DoD", () => {
     const body = (await (await projectsGET(apiRequest("/api/projects", "GET", client))).json()) as {
       projects: { slug: string; researchable: boolean }[];
     };
-    expect(body.projects.length).toBe(3);
-    expect(body.projects.every((p) => p.researchable)).toBe(true); // все 3 в demo config
+    expect(body.projects.length).toBe(4);
+    // Scope != Entitlement: каталог шире demo config. raydium в scope, но
+    // не в demo_project_slugs — значит researchable=false, и researchable
+    // определяется именно конфигом, а не фактом присутствия в каталоге.
+    expect(
+      body.projects
+        .filter((p) => p.researchable)
+        .map((p) => p.slug)
+        .sort(),
+    ).toEqual(["hyperliquid", "pump_fun", "uniswap"]);
+    expect(body.projects.find((p) => p.slug === "raydium")?.researchable).toBe(false);
 
     // Смена config меняет ответ без деплоя
     await ctx.db

@@ -4,75 +4,48 @@
 
 ## NONE — awaiting owner direction
 
-The route classification tool exists and is tested. **No real route was
-classified** — capability only. `fees.pump.fun` is still unclassified, the two
-`pump.fun` routes are untouched, and there is still no Raydium anything.
+The `raydium` catalog entry exists. Nothing else about Raydium exists.
 
-**Both blockers for project #2 are now closed.**
+### What was done
 
-### What exists now
+One owner-authorized setup action: `raydium` / "Raydium" added to the project
+catalog in `src/server/db/seed.ts` using the existing entry shape, applied with
+the existing idempotent path (`npx tsx scripts/seed.ts`). No manual SQL.
 
-`scripts/classify-source-route.ts`, with the operation in
-`src/server/memory/source-route-classification.ts`.
+Project id `9cc80fd6-04ae-45e8-be6c-7ed8b9f663c7`, `status = ACTIVE_CORE`,
+`ticker = null`. Catalog count 3 -> 4; the other three rows are byte-identical.
 
-```
-npx tsx scripts/classify-source-route.ts --route-id=<uuid> --class=<CLASS> --actor=<name>
-```
+`ticker` was left null on purpose. The catalog row is a name, not an identity
+claim: which token this project *is* belongs to `PROJECT_IDENTITY` (chain +
+mint), which does not exist for Raydium. Nothing was inferred — the owner
+supplied a slug and a name, and only those were written.
 
-It acts only on an exact, already-ACTIVE, currently-unclassified route named by
-**id**. It cannot create a host, confirm an unconfirmed one, widen a prefix, or
-read anything — `--domain`, `--prefix` and `--project` are refused outright,
-because naming a host here would be performing the *first* owner act inside the
-second.
+`demo_project_slugs` was not touched, so Raydium is in **scope** and **not**
+available to DEMO. That divergence is now asserted rather than assumed: the
+projects API test previously passed only because the catalog and the DEMO config
+happened to list the same three slugs.
 
-### The transition, and why it is that one
+### Verified offline after seeding
 
-Established from the repository rather than chosen: **replacement plus
-supersession**, which is the lifecycle graph's own model and the precedent
-already sitting in the database from when `/pump-token` was classified. A new
-ACTIVE record carries the same domain and the same prefix **verbatim** plus the
-class; the original moves to `SUPERSEDED` with `supersededBy` linking to it.
+Exactly one `raydium` row; project count 4; the three prior projects unchanged;
+`pump_fun` still 26 jobs / 401 Evidence / 7 memory items. For `raydium`: zero
+`PROJECT_IDENTITY`, zero `SOURCE_ROUTE`, zero project-memory rows of any kind,
+zero jobs, zero Evidence, zero reachable sources. The global `sources` table is
+unchanged at 62 rows — `sources` has no project column, so "zero sources for
+Raydium" means zero reachable through its (nonexistent) Evidence.
 
-Editing content in place was rejected for a concrete reason: the lifecycle
-trigger fires on `lifecycle_state` **only**, so mutating an ACTIVE row's content
-is an unguarded change to an authoritative human statement, and it destroys the
-history the graph exists to keep.
+Idempotence was not re-proved by a second run: `tests/phase1.test.ts` case 1
+already establishes it, and now pins the catalog at 4.
 
-**One transaction, because the middle is dangerous.** Between inserting the
-replacement and superseding the original there are two co-matching ACTIVE rows,
-and `resolveSourceRoute` reports `matchedPathPrefix` only when exactly one
-path-scoped row matched — so a reader in that window sees the prefix vanish, and
-a crash there would leave it vanished for good.
+### Next, and still ordinary owner acts
 
-**Verified, not argued.** After the swap the transaction re-resolves every
-affected url through the real resolver: the target must differ in exactly one
-field, and every other route's url must be byte-identical, or the whole thing
-rolls back. That check caught the deliberate mutation that skips supersession.
+1. `confirm-project-identity.ts` — Solana, RAY mint. **The mint address must come
+   from the owner.** It is the entity binding; nothing may infer it.
+2. `confirm-source-route.ts` — `docs.raydium.io` at a bounded prefix.
+3. **inspect** the page (non-evidentiary) — needs an authorized live window.
+4. `classify-source-route.ts` — only if what the page says earns it.
 
-`supersedeProjectMemoryItem` is the primitive this needed — the schema had a
-`supersededBy` column and the graph permitted `ACTIVE → SUPERSEDED`, but no code
-had ever performed it.
-
-### Classes
-
-The resolver's own closed enum — `OFFICIAL_DOCS`, `GOVERNANCE`,
-`OFFICIAL_REPORT` — validated by the resolver's own predicate, both now exported
-rather than copied. All three are supported: they are equally real source
-classes with the same semantics, and restricting to one would only guarantee a
-second task later. Anything else is refused with no fallback.
-
-### Ready for Raydium
-
-Nothing architectural blocks the case now. The remaining prerequisites are
-ordinary owner acts, in order:
-
-1. add `raydium` to the seed catalog (one line + `npx tsx scripts/seed.ts`);
-2. `confirm-project-identity.ts` — Solana, RAY mint;
-3. `confirm-source-route.ts` — `docs.raydium.io` at a bounded prefix;
-4. **inspect** the page (non-evidentiary), then
-5. `classify-source-route.ts` — only if what the page says earns it.
-
-Step 4 before step 5 is the whole point: classification should follow reading.
+Step 3 before step 4 remains the point: classification follows reading.
 
 The pre-registered success criteria for the case — what will and will not count
 as an address-level role assignment — remain as written when Raydium was
