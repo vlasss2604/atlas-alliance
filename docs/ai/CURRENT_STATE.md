@@ -673,6 +673,56 @@ entered`, observation `ONCHAIN_DISABLED_DOCUMENTARY_ONLY`, zero on-chain
 artifacts created. No RPC, and the mode — not the empty locator table — is what
 guaranteed it.
 
+### Second production attempt (2026-08-28) — the transport cleared, the extractor did not
+
+Owner-run once, same command, job `4b437b14-1cf8-4637-8539-e0e1e4835e62`.
+Terminal outcome: `CapabilityFatalError: capability unavailable:
+EVIDENCE_EXTRACTOR_COUNT_TOKENS`.
+
+**The Markdown fix worked — proved by a controlled before/after.** The same url
+traced `FETCH_ATTEMPTED -> FETCH_FAILED` in run 1 and
+`FETCH_ATTEMPTED -> **FETCH_OK**` in run 2, with the only intervening change
+being the two lines admitting `text/markdown`. So the server's essence is
+`text/markdown` on the strength of that controlled delta — **the header value
+itself is still not persisted anywhere**, and `FETCH_OK` records no content
+type, so this remains inference from the change, not a stored observation.
+
+**The new blocker is the model provider, not the document.** The run reached
+`EXTRACT_ATTEMPTED` (reservation 55,680 micro-USD) and then a single
+`MODEL_CALL_ATTEMPTED / EXTRACT / FAILED / PROVIDER_ERROR`. A
+`TokenCountUnavailableError` from `countThenGate` is classified **immediately
+fatal** — count_tokens has already spent its own internal
+`retryOnceIfTransient` inside `token-gate.ts` before throwing, so the executor
+does not retry it. Exactly one extraction attempt was made.
+
+**Why it failed is not recoverable from anything persisted, and that is a real
+gap.** `safeFailureDetail` extracts a status only for `ContentFetchError`;
+for this error class it returns null, so the reason is the bare
+`EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError`. `CapabilityFatalError`'s
+message carries only the capability name, the computed reason travels as an
+unprinted `cause`, and the trace row's reason code is the generic
+`PROVIDER_ERROR`. **Nothing distinguishes a bad credential (401), an
+unrecognised model id (404), an exhausted rate limit (429) and a provider
+outage (5xx)** — and those call for completely different next actions. The model
+id sent is `claude-haiku-4-5` (config default; its cost profile resolves).
+
+**Nothing was persisted beyond the job and eight trace rows.** No Source (source
+creation happens at Evidence-persist time, which was never reached), no
+Evidence, no locators, no artifacts, and **no component result** — the exception
+propagated out of `executor.execute()` before the script's S5 call, so unlike
+run 1 this job has no reconciliation row. The chain gate is unchanged:
+`findAdmittedLocator` 0 for all four addresses, `resolveOnchainSubject`
+`NOT_FOUND`.
+
+**D-127 held again**: `chain work: DISABLED by owner instruction — branch not
+entered`, zero on-chain artifacts, and no retriever resolved.
+
+**One process-level observation, not a research finding.** After the fatal
+error the process aborted during teardown with a libuv assertion
+(`!(handle->flags & UV_HANDLE_CLOSING)`, `srcwinasync.c`). All trace writes
+had already committed, so no data was lost, but the cleanup path is not
+crash-clean on Windows when `execute()` throws.
+
 **One reporting nuance worth keeping.** The trace carries one
 `MODEL_CALL_ATTEMPTED` row (`QUERY_PROPOSE`, 6,560 micro-USD) and `spent`
 reports `authorizedModelCostMicro: 6560`. That is the **reserved authorization
