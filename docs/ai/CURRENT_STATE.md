@@ -362,11 +362,8 @@ re-thrown by the parent unchanged), no diagnostic, no status. **The printed outp
 cannot separate them** — the same shape of observability gap already closed three
 times on this path.
 
-Reading 1 is the more economical one and is **not** established: the previous
-window proves the child reports a `goto` timeout promptly and the parent
-receives it well inside 20s, so a second `goto` timeout would have printed
-`NAVIGATION_TIMEOUT` again. It did not. That is an inference from a
-single differing observation, not a closed signal.
+**Reading 1 was later REFUTED for this page** by the post-fix window below, which
+showed `goto` throwing on it. The pre-fix `TIMEOUT` was the parent-side one.
 
 **A generic capability limit, found while reading the code and not specific to
 Raydium.** `startedAt` is stamped at line 153, *before* `launch()` at line 178,
@@ -376,13 +373,36 @@ navigation that legitimately takes 14s and **succeeds** is discarded by the
 post-check whenever launch cost more than a second. The renderer can therefore
 throw away a completed navigation. Belongs in `BACKLOG.md`; not changed here.
 
-**Host-wide or page-specific: cannot be distinguished.** Two observations, two
-different stages, neither repeated. What both share is more informative than what
-differs: no containment refusal, no proxy denial of any class, no `HTTP_ERROR`,
-no `BLOCKED_BY_ROUTE_POLICY`. **Nothing observed says the site refused ATLAS.**
-The leading hypothesis is that the 15s budget is too tight for this host under
-this renderer — plausible, unproven, and a matter of engineering rather than
-research.
+**Third window, 2026-08-28, after the phase-budget fix: the same page returned
+`NAVIGATION_FAILED:NAVIGATION_TIMEOUT`**, again `0 denied, 1 allowed`, again no
+status, no `finalUrl`, no content. **The fix changed the diagnosis, not the
+result.**
+
+**It did explain the earlier `TIMEOUT`, and it retired a hypothesis of mine.**
+The child's post-navigation wall-clock check sits *after* the `goto` try/catch,
+so it is **structurally unreachable** when `goto` throws. This window shows
+`goto` throwing on this page — so the pre-fix `TIMEOUT` cannot have come from
+the child's check, and must have been the **parent's** deadline. The arithmetic
+agrees: to report `NAVIGATION_TIMEOUT` the child must survive spawn + launch +
+`goto`'s own 15s, while the old parent deadline was a flat 20s — leaving under
+5s for spawn and launch, when the self-test alone measured 7,095 ms cold. The
+parent was killing the child mid-navigation and reporting its own impatience as
+the render's outcome. Deriving the deadline removed that race; the
+phase-boundary half of the fix was **not** implicated here, because `goto` never
+returns on this page.
+
+**Host-wide, not page-specific — now supported.** **Both** Raydium pages, at two
+unrelated prefixes, return the same closed reason: `waitUntil: "networkidle"`
+never settles within 15s. Neither is a containment refusal, neither carries a
+proxy denial of any class, and neither produced an `HTTP_ERROR`. **Nothing
+observed says the site refused ATLAS** — the wait condition is simply not
+reached on this host, which is ordinary for a documentation SPA holding
+persistent connections.
+
+That makes `networkidle` the next generic question, and it is **not** a one-line
+swap: `load` or `domcontentloaded` would return sooner but risk capturing an
+unsettled SPA shell, which is the exact failure Stage 1 exists to prevent. Any
+change there must keep the shell-detection guarantee.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
