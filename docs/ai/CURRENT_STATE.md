@@ -577,6 +577,27 @@ Evidence and 0 jobs**. **A classified route is not Evidence** — it only makes
 acquisition possible. The locators become admissible when the page is acquired
 through the normal pipeline, and not before.
 
+**Acquisition is blocked by a code-owned safety allowlist, not by authority.**
+`alpha-acquire-url.ts` refuses any project outside
+`INTERNAL_ALPHA_LIVE_PROJECT_SLUGS`, which is the hard-coded set `{ pump_fun }`.
+Three of its four prerequisites already pass for `raydium` —
+`internal_alpha_enabled` true, `ANTHROPIC_API_KEY` set, and a model cost profile
+resolving for `claude-haiku-4-5` — and the route gate itself passes. **Only the
+allowlist refuses.** Widening it is an owner decision about which projects may
+spend money and make live calls; it is deliberate, and `gates-owner-alpha.test.ts`
+pins it.
+
+**A caveat that will matter on the SECOND acquisition, not the first.** The S4
+executor has a structured on-chain branch driven by `admittedLocatorsForJob`,
+which is scoped by **project** — not by job — and admits a locator only when it
+is `literallyPresent`, `validationResult CONFIRMED`, on Evidence that is
+`officiality CONFIRMED` with a `sourceClass` in the admissible set, from a source
+that is not `BROKEN`, capped at 8. Raydium has none today, so a first run cannot
+reach RPC **by state**. Once documentary Evidence carries those locators, a later
+run of the same script **would** enter that branch and issue real RPC. The
+script's "no chain call" note is about its own import graph, not about the
+executor it builds.
+
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
 Both routes stay ACTIVE and **unclassified**.
