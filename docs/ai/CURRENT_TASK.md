@@ -4,79 +4,98 @@
 
 ## NONE — awaiting owner direction
 
-Raydium now has **three** ACTIVE routes, all unclassified. Nothing has been read;
-five live windows have produced no first-party text. No source, Evidence, job or
-artifact.
+**A Raydium page was read for the first time**, on the sixth window. Nothing was
+classified, nothing persisted: Raydium still has 0 Evidence, 0 jobs, 0 sources,
+0 artifacts, and all three routes remain ACTIVE and unclassified.
 
-### What was done
+### The read
 
-One owner-authorized route act:
+`https://docs.raydium.io/ray/ray-buybacks.md` — `finalUrl` identical and in
+route, `htmlBytes 3124`, `renderedLength 2939`, `blockedRequests 0`,
+`durationMs 3158`, `contentHash sha256:f71a3dd3…`.
 
-```
-MSYS_NO_PATHCONV=1 npx tsx scripts/confirm-source-route.ts --project=raydium \
-  --domain=docs.raydium.io --prefix=/ray/ray-buybacks.md --actor=owner
-```
+**Served as plain text, not HTML.** `anchors: 0, identifiers: 0, hosts: (none)`
+while the text contains a Markdown link — the browser wrapped a raw document
+instead of parsing a DOM. That is why this surface worked where the SPA
+representation never delivered one, and it means **no hrefs exist**: every
+identifier is fully literal or unavailable.
 
-Row `52084c53-6e55-40fa-a7d4-66550b0e2771`, ACTIVE via `OBSERVED -> CANDIDATE ->
-ACTIVE`, content exactly `{ domain, pathPrefix }`, `routeClass` absent. No SQL,
-no classification.
+### INSPECTION ONLY — none of this is Evidence
 
-`https://docs.raydium.io/ray/ray-buybacks.md` → `CONFIRMED` / `routeClass null` /
-`matchedPathPrefix "/ray/ray-buybacks.md"`. Inspection **allowed**;
-docs-inspection, render-as-Evidence and payload recovery all refuse
-`NOT_OFFICIAL_DOCS`; `resolveSourceClass` still `SOCIAL`.
+The document has not been acquired through the pipeline and the route is
+unclassified. Everything below is *what one first-party document was observed to
+say*, not a verified finding about Raydium.
 
-### Where the lead came from, and what it is worth
+### What it says
 
-The owner independently read `https://docs.raydium.io/llms.txt`, the site's
-current first-party documentation index, and reports that it advertises canonical
-Markdown urls including `/ray/ray-buybacks.md`, `/ray/protocol-fees.md` and
-`/ray/treasury.md`.
+- **Source of value:** `12%` of Raydium trading fees are used to buy back RAY.
+- **Mechanism spec:** the share applies to the **trading fee**, not the trade
+  amount. CLMM and CPMM split `84/12/4` LPs/buybacks/treasury; Standard AMM v4
+  splits `88/12` LPs/buybacks. Both sum to 100.
+- **Supply effect: HELD, not burned.** "Bought-back RAY is held by the protocol
+  at a public on-chain address"; the page speaks of "RAY accumulation". `burn` is
+  **absent**, per the term scan. `buyback != supply reduction` — the invariant
+  this case was chosen to exercise.
 
-**That index is an owner-supplied lead and nothing more.** Its content is not
-Evidence, was not acquired through the pipeline, and no mechanism claim follows
-from it. It offers a plausible account of the earlier `404` — the browser-facing
-paths this project confirmed are apparently not the paths the site now advertises
-— but that account is not established either.
+### Four role-bound addresses, all Solana-shape valid
 
-**Whether a Markdown surface reads where the SPA did not is unknown.** It has not
-been inspected, and nothing should be assumed. The renderer still runs a browser
-against it, and a `.md` url may be served as a download, as `text/plain`, or as
-another SPA route; each behaves differently and none has been observed.
+| address | stated role | binding |
+|---|---|---|
+| `projjosVCPQH49d5em7VYS7fJZzaqKixqKtus7yk416` | CLMM protocol fee collection | table column "Collection address" |
+| `ProCXqRcXJjoUd1RNoo28bSizAA6EEqt9wURZYPDc5u` | CPMM protocol fee collection | same table |
+| `PNLCQcVCD26aC7ZWgRyr5ptfaR7bBrWdTFgRWwu2tvF` | Standard AMM v4 protocol fee collection | same table |
+| `DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` | **where bought-back RAY is held** | "Bought-back RAY is held at:" then the address |
 
-### Disjointness, proved rather than eyeballed
+**This is the address-level role assignment PUMP never had.** PUMP's bridge
+failed because no single text contained both an address and an acquisition verb.
+Here identifier and role sit in the same statement.
 
-`.md` does not begin a new path segment, so `/ray/ray-buybacks.md` is **not**
-under `/ray/ray-buybacks`. Verified with the real `matchesPathPrefix` in both
-directions against every ACTIVE row — the same segment-bounded rule that kept
-`/raydium/...` and `/ray/...` apart. Confirming it changed exactly two urls: the
-route itself and `/ray/ray-buybacks.md/extra` beneath it.
-`/ray/ray-buybacks.markdown` correctly stayed outside.
+### The chain gate is still locked, and the reason is exact
 
-Both existing routes resolve **byte-identically** before and after.
-`/ray/protocol-fees.md` and `/ray/treasury.md` remain unconfirmed: one route per
-owner act.
+Verified, not assumed: `findAdmittedLocator` returns **0** rows for the holding
+address, and `resolveOnchainSubject` returns `NOT_FOUND`.
 
-### Still true
+A locator is admissible only from an Evidence row whose `sourceClass` is in
+`ADMISSIBLE_LOCATOR_SOURCE_CLASSES` — `OFFICIAL_DOCS`, `GOVERNANCE`,
+`OFFICIAL_REPORT`. The route is unclassified, so this page would still acquire as
+`SOCIAL`, which appears in no component's `establishingClasses`.
 
-Nothing about any Raydium page's content is known — unknown, not absent. None of
-the three routes may be classified. **The chain provenance gate remains locked**:
-no documentary locator exists, and `resolveOnchainSubject` on the confirmed RAY
-mint returns `NOT_FOUND`, because an identity does not admit itself.
+**Classification is the gate.** It is an owner act, and it is now the one step
+that unlocks everything downstream.
+
+### The path this opens, if classified
+
+1. `classify-source-route.ts` on `52084c53-6e55-40fa-a7d4-66550b0e2771` →
+   `OFFICIAL_DOCS`.
+2. Acquire the page through the pipeline → Evidence, `sourceClass OFFICIAL_DOCS`,
+   `officiality CONFIRMED`, with the four addresses as documentary locators.
+3. `resolveOnchainSubject` then admits `DdHDoz…VEZaz` as a `DOCUMENTARY_LOCATOR`.
+4. Deterministic Solana read: `ACCOUNT_INFO` first — it is the sole base intent
+   and classifies the subject before anything is asked of it — then
+   `TOKEN_ACCOUNTS_BY_OWNER`, which is exactly what the document's own
+   `spl-token accounts --owner` instruction describes.
+5. Artifact → Evidence with `onchainArtifactId` → **DESTINATION**, whose
+   `establishingClasses` are `["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS"]` and whose
+   goal is literally "whether that destination retains, redistributes or retires
+   them".
+
+**Expected ceiling: `PARTIALLY_SUPPORTED` for the chain leg.** Every on-chain
+fact is `officiality CLAIMED`, and D-074 caps `CLAIMED` there. The documentary
+leg (`OFFICIAL_DOCS` / `CONFIRMED`) is what can reach `SUPPORTED`.
+
+**Two risks worth naming before spending anything.** `DESTINATION` is
+`tokenStateSensitive: true`, which is the gate that excluded PUMP's DESTINATION
+results as `TOKEN_STATE_UNQUALIFIED`. And no Evidence row in this repository has
+ever carried an `onchainArtifactId` — that path is read and believed correct but
+has never succeeded end to end.
 
 ### Next — the owner's choice
 
-1. **Inspect `https://docs.raydium.io/ray/ray-buybacks.md`.** Now eligible, never
-   attempted. It tests a genuinely different surface, not a retry.
-2. **Stop.** Closing with the bridge named remains legitimate.
-
-A live window is a separate authorization, one navigation, zero retry.
-
-**The standard when a page is finally read has not moved:** classification needs
-first-party documentation of the mechanism, and a usable locator needs an
-identifier **plus** an explicit role assignment. An address occurrence, a
-heading, a bare table row, or matching cardinality do not count. Buyback is not
-burn.
+1. **Classify `52084c53-…` as `OFFICIAL_DOCS`**, after deciding the document
+   earns it. Offline, and it is the single unlocking step.
+2. **Inspect `/ray/treasury.md` or `/ray/protocol-fees.md` first** — each needs
+   its own route confirmation and its own live window.
+3. **Stop.**
 
 ### Standing boundaries
 

@@ -498,8 +498,58 @@ others — `.md` does not begin a new path segment, so it is **not** under
 than inferred from the strings. The other two Markdown urls are **not** confirmed:
 one route per owner act.
 
-**Whether a Markdown surface reads where the SPA did not is unknown** and must
-not be assumed. It has not been inspected.
+**Sixth window, 2026-08-28: the Markdown surface READ.** First readable page in
+six windows. `finalUrl` identical to the request and inside the route,
+`htmlBytes 3124`, `renderedLength 2939`, `blockedRequests 0`, `durationMs 3158`,
+`contentHash sha256:f71a3dd3…`. A success status by construction — `HTTP_ERROR`
+fires on anything outside the success class.
+
+**It was served as plain text, not HTML.** `anchors: 0, identifiers: 0, hosts:
+(none)` while the text itself contains a Markdown link — so the browser wrapped a
+raw document rather than parsing a DOM. That is why the `.md` surface worked
+where the SPA representation never delivered one. Consequence for locators:
+there are **no hrefs at all**, so every identifier is either fully literal in the
+text or unavailable — no truncated-plus-href recovery exists on this surface, and
+none is needed.
+
+**INSPECTION ONLY — none of the following is Evidence.** The document has not
+been acquired through the pipeline, the route is still unclassified, and nothing
+below is a verified finding about Raydium. It is what one first-party document
+was observed to say.
+
+**What the document states.** `12%` of Raydium trading fees buy back RAY, applied
+to the trading fee rather than the trade amount. Splits: CLMM and CPMM
+`84/12/4` LPs/buybacks/treasury, Standard AMM v4 `88/12` LPs/buybacks. Four
+addresses appear, each **structurally valid for Solana** and each carrying an
+explicit role in the same statement or table that names it:
+
+| address | stated role |
+|---|---|
+| `projjosVCPQH49d5em7VYS7fJZzaqKixqKtus7yk416` | CLMM protocol fee collection |
+| `ProCXqRcXJjoUd1RNoo28bSizAA6EEqt9wURZYPDc5u` | CPMM protocol fee collection |
+| `PNLCQcVCD26aC7ZWgRyr5ptfaR7bBrWdTFgRWwu2tvF` | Standard AMM v4 protocol fee collection |
+| `DdHDoz94o2WJmD9myRobHCwtx1bESpHTd4SSPe6VEZaz` | **where bought-back RAY is held** |
+
+**This is the address-level role assignment PUMP never had.** The PUMP bridge
+failed because no single text contained both an address and any acquisition verb.
+Here "Bought-back RAY is held at:" is immediately followed by the address, and the
+collection table's own column is "Collection address" under a sentence stating
+that protocol-side fees are collected by those addresses.
+
+**Supply effect: HELD, not burned.** The document says bought-back RAY "is held by
+the protocol at a public on-chain address" and speaks of "RAY accumulation".
+`burn` is **absent** from the page — confirmed by the term scan, not by reading
+impression. This is exactly the `buyback != supply reduction` invariant Raydium
+was selected to exercise, and nothing here may be read as a burn.
+
+**The chain gate is still locked, and the reason is precise.** Verified:
+`findAdmittedLocator` returns **0** rows for the holding address and
+`resolveOnchainSubject` still returns `NOT_FOUND`. A locator becomes admissible
+only from an Evidence row whose `sourceClass` is in
+`ADMISSIBLE_LOCATOR_SOURCE_CLASSES` (`OFFICIAL_DOCS`, `GOVERNANCE`,
+`OFFICIAL_REPORT`). The route is unclassified, so this page would still acquire
+as `SOCIAL`, which establishes nothing. **Classification is the gate**, and it is
+an owner act.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
