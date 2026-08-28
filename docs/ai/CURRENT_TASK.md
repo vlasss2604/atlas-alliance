@@ -4,9 +4,32 @@
 
 ## NONE — awaiting owner direction
 
-Raydium has a catalog row, a confirmed identity and one **unclassified** route.
-One inspection window was spent and **the page was never read**. No source, no
-Evidence, no job, no artifact.
+Raydium has a catalog row, a confirmed identity and **two unclassified routes**.
+One inspection window was spent on the first and **the page was never read**. The
+second has not been inspected at all. No source, no Evidence, no job, no artifact.
+
+### The second route, confirmed 2026-08-28
+
+```
+MSYS_NO_PATHCONV=1 npx tsx scripts/confirm-source-route.ts --project=raydium   --domain=docs.raydium.io --prefix=/raydium/protocol/protocol-fees --actor=owner
+```
+
+Row `d09657e6-96b6-423e-9973-a2578cb71069`, ACTIVE via `OBSERVED -> CANDIDATE ->
+ACTIVE`, content exactly `{ domain, pathPrefix }`, `routeClass` absent. No SQL,
+no classification.
+
+`https://docs.raydium.io/raydium/protocol/protocol-fees` → `CONFIRMED` /
+`routeClass null` / `matchedPathPrefix "/raydium/protocol/protocol-fees"`.
+Inspection **allowed**; docs-inspection, render-as-Evidence and payload recovery
+all refuse `NOT_OFFICIAL_DOCS`; `resolveSourceClass` still `SOCIAL`.
+
+**The buyback route is byte-identical before and after** — snapshotted through the
+resolver before the write and re-compared after. Across nine urls, exactly two
+changed: the new prefix and `/raydium/protocol/protocol-fees/detail` under it.
+The two prefixes are disjoint, which is the only reason the second was accepted:
+`/raydium/…` is a string-prefix neighbour of `/ray/…` but not a segment prefix,
+and matching is segment-bounded. `-extra` variants of both stay outside, and a
+parent path is not covered by its child's prefix.
 
 ### The window
 
@@ -67,15 +90,22 @@ evidence that anything is missing from it.
 
 ### Next — the owner's choice, not a queue
 
-1. **Another inspection window on the same url.** Cheapest, and the one thing
-   that would settle whether the timeout is reproducible.
-2. **A different first-party url** inside a newly confirmed prefix. Note the
-   host is already CONFIRMED domain-wide, so this needs only a route act — and
-   an overlapping prefix would be refused.
-3. **Neither.** A page that cannot be read after two windows is a legitimate
-   stopping point, and the case can be closed with the bridge named.
+1. **Inspect `/raydium/protocol/protocol-fees`.** Now eligible, never attempted.
+   A different url on the same host, so it also tests whether the buyback
+   timeout was about that page or about the host.
+2. **Retry `/ray/ray-buybacks`.** Would settle whether its timeout is
+   reproducible; nothing else would.
+3. **Neither.** Stopping with the bridge named is a legitimate outcome.
 
-No live call without a separate authorized window.
+Each is a separate authorized live window, one navigation, zero retry. Nothing
+here should be run without one.
+
+**When a page is finally read, the standard has not moved:** classification
+requires the page to be first-party documentation of the mechanism, and a usable
+documentary locator requires an explicit **role assignment** to an address —
+"fees collected at X", "executed by X", "accumulated at X". An address
+occurrence, a heading, a bare table row, or matching cardinality do not count.
+That was pre-registered before anything was read, and PUMP closed on exactly it.
 
 ### Standing boundaries
 

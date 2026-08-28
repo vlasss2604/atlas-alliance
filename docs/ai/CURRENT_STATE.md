@@ -205,7 +205,7 @@ Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
 0 evidence and no documentary knowledge of any kind**. `hyperliquid` and
 `uniswap` additionally have **no confirmed identity and no route**, and both are
 non-Solana, so neither can test the on-chain path. `raydium` now has an identity
-and one unclassified route — see below.
+and two unclassified routes — see below.
 
 **The fork: add an EVM read transport, or choose Solana projects until Pattern v1
 is mature.** No Solana TVC candidate exists in repository memory, so option two
@@ -216,7 +216,7 @@ Solana, so the transport wall does not apply. Recorded as the **selected next
 case and an owner-supplied lead only** — nothing about its mechanism, fee split
 or published addresses is a finding, and none of it becomes one until acquired
 through the pipeline. Local state is a clean slate apart from the catalog row, the
-confirmed identity and the one unclassified route recorded below: no source, job,
+confirmed identity and the two unclassified routes recorded below: no source, job,
 Evidence or artifact, and **nothing has been read**; the only `raydium` mentions
 anywhere are 11 SOCIAL Evidence rows belonging to `pump_fun` that name it as a
 venue.
@@ -260,13 +260,25 @@ provenance gate with `NOT_FOUND`. That is correct: `raydium` has no admitted
 documentary locator and no derived subject, so nothing is eligible to be read
 yet. Identity was never the last gate — it was the first.
 
-**Route confirmed 2026-08-28, unclassified** — `confirm-source-route.ts`, row
-`84774bb9-b10a-4519-8a69-7f1c3a6c0b93`, ACTIVE via `OBSERVED -> CANDIDATE ->
-ACTIVE`. Content is exactly `{ domain: "docs.raydium.io", pathPrefix:
-"/ray/ray-buybacks" }` — two keys, `routeClass` **absent rather than null**,
-because the tool has no parameter for it and the documented shape treats absent
-and null identically. `https://docs.raydium.io/ray/ray-buybacks` resolves to
-`CONFIRMED` / `routeClass null` / `matchedPathPrefix "/ray/ray-buybacks"`.
+**Two routes confirmed 2026-08-28, both unclassified** — `confirm-source-route.ts`,
+each ACTIVE via `OBSERVED -> CANDIDATE -> ACTIVE`, each content exactly
+`{ domain, pathPrefix }` with `routeClass` **absent rather than null**, because
+the tool has no parameter for it and the documented shape treats absent and null
+identically.
+
+| row | prefix | resolves |
+|---|---|---|
+| `84774bb9-b10a-4519-8a69-7f1c3a6c0b93` | `/ray/ray-buybacks` | `CONFIRMED` / null / that prefix |
+| `d09657e6-96b6-423e-9973-a2578cb71069` | `/raydium/protocol/protocol-fees` | `CONFIRMED` / null / that prefix |
+
+The two are **disjoint**, which is the only reason the second could be added:
+`OVERLAPPING_ACTIVE_PREFIX` refuses co-matching prefixes because two matching
+path-scoped rows null `matchedPathPrefix` and would silently disable inspection
+for urls both cover. Note the trap they avoid — `/raydium/…` is a string prefix
+neighbour of `/ray/…` but not a **segment** prefix of it, and matching is
+segment-bounded. Confirming the second changed the resolution of exactly two urls,
+both inside the new prefix; `/ray/ray-buybacks` resolved byte-identically before
+and after.
 
 That opens **non-evidentiary inspection and nothing else**, verified against the
 real gates: `evaluateInspectionEligibility` allows it, while
@@ -278,13 +290,15 @@ no component's `establishingClasses`, so it would establish nothing.
 
 **Worth knowing before confirming a second route on that host: officiality is
 domain-wide, matchedPathPrefix is not.** The resolver decides officiality by
-domain match alone, so `/ray/treasury`, `/raydium/protocol/protocol-fees` and
-`/` on `docs.raydium.io` all moved `CLAIMED -> CONFIRMED` as a side effect of
-this one confirmation. They gained **no capability**: their `matchedPathPrefix`
-is null, so inspection denies them `NO_PATH_PREFIX`, and their sourceClass stays
-`SOCIAL`. Prefix matching is segment-bounded — `/ray/ray-buybacks/history` is
-inside, `/ray/ray-buybacks-extra` is not — and `raydium.io` (a different host)
-stays `CLAIMED`.
+domain match alone, so the whole of `docs.raydium.io` became `CONFIRMED` on the
+first confirmation. Urls outside both prefixes — `/ray/treasury`,
+`/raydium/protocol`, `/` — carry that officiality and **no capability**: their
+`matchedPathPrefix` is null, so inspection denies them `NO_PATH_PREFIX`, and
+their sourceClass stays `SOCIAL`. Prefix matching is segment-bounded, verified
+both ways: `/ray/ray-buybacks/history` and `/raydium/protocol/protocol-fees/detail`
+are inside their prefixes, while `/ray/ray-buybacks-extra` and
+`/raydium/protocol/protocol-fees-extra` are not. A parent path is not covered by
+its child's prefix either. `raydium.io` (a different host) stays `CLAIMED`.
 
 **Inspected 2026-08-28 — the page was never read.** One owner window, MantaRay
 off, zero retry:
