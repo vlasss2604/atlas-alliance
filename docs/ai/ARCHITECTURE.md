@@ -511,6 +511,23 @@ policy, and only VERIFIED outcomes becoming durable memory.
 evaluation, golden scenarios. See `docs/ARI_LEARNING_LOOP.md` for the intended
 evolution. No LLM weights are ever trained.
 
+## Future extension boundary: Project Assessment consumes Proof
+
+A future product layer — **EVIDENCE → PROMISES → RISKS** — is recorded in
+`docs/PROJECT_ASSESSMENT_PRODUCT_SPEC.md` (D-124). It is **not active** and
+authorizes no implementation. The one structural law that binds any future work
+on it belongs here:
+
+**Assessment consumes Proof; Assessment never manages Proof.** The dependency
+`Project Assessment → Proof Engine` is forbidden: no assessment code may
+control, override, rewrite, re-run or replace Proof logic, and no assessment
+concept may duplicate a canonical entity (`projects`, `sources`, `evidence`,
+`proofs`) that already exists. An assessment that needs research requests an
+ordinary Proof through the ordinary front door and consumes the persisted
+results. Component reconciliation states stay exactly the four of D-092 —
+`NOT_APPLICABLE` stays out. Everything else about the extension lives in the
+spec, not here.
+
 ## Public v1 research areas
 
 1. **Token Value Capture** — the only mature domain; current focus.

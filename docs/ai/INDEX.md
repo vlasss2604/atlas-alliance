@@ -27,6 +27,9 @@ Those three are the whole normal startup set.
 
 - `../DECISIONS.md` — the D-### register. Consult when a comment or plan cites a
   decision number you need to honour.
+- `../PROJECT_ASSESSMENT_PRODUCT_SPEC.md` — the recorded FUTURE
+  Evidence → Promises → Risks extension (D-124). Read only when a task
+  explicitly concerns that extension; it authorizes no current work.
 - `../implementation/` — phase plans, freezes, audits. Historical; read only when
   a task names one.
 - `../handoff/` — the original bootstrap package that created this repository.

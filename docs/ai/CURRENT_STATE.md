@@ -104,6 +104,14 @@ Consequence to keep in mind: S5 reconciles one component from one pool and never
 waits for a binding to arrive from elsewhere, so a fact's relationship must be
 correct where the fact is authored — not left to a downstream gate.
 
+## Recorded future extension (not active)
+
+A future product layer — **EVIDENCE → PROMISES → RISKS** (Project Assessment) —
+is recorded in `docs/PROJECT_ASSESSMENT_PRODUCT_SPEC.md` and registered as
+D-124. **Nothing of it is implemented, scheduled or active**; the dependency
+boundary lives in `ARCHITECTURE.md`, the phase references in `BACKLOG.md`. The
+Proof Core roadmap is unchanged.
+
 ## Token Value Capture — stage
 
 TVC is the only supported domain and is not yet mature. Target: roughly 10 diverse

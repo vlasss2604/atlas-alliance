@@ -73,6 +73,21 @@ together they stopped project #2 before it could start. Kept for context.
   observation as visually neutral. It is neutral in reconciliation; nothing yet
   guarantees it reads that way to a user.
 
+### Future extension — Project Assessment (recorded, NOT scheduled)
+
+The canonical spec is `docs/PROJECT_ASSESSMENT_PRODUCT_SPEC.md` (D-124). Only
+the phase names are referenced here; none is authorized work, and none may start
+without its own scoped owner task:
+
+- **PHASE B — Research Trace** (first mandatory post-core layer; exposure of the
+  already-persisted component → evidence chain)
+- **PHASE C — Project Memory / Proof association** (no second Project entity)
+- **PHASE D — Promise v0**
+- **PHASE E — Project Assessment v0** (Evidence Summary / Gaps, Promise Summary,
+  Risk Signals, Watch Items)
+- **PHASE F — Risk v0** (deterministic rule set; no autonomous risk engine)
+- **PHASE G — External source adapters** (candidates only, never truth)
+
 ### From the PUMP case closure (2026-08-28)
 
 Every item here is **NON_BLOCKING or DEFERRED**. None of them may silently
