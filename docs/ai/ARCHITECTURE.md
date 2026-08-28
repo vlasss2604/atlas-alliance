@@ -201,7 +201,17 @@ Re-running it later re-reads at a NEW slot and writes a NEW artifact:
 `uq_onchain_artifacts_job_artifact` is per (job, artifactHash) and each run
 creates its own job, so nothing is overwritten and two slots are never
 collapsed into one state. Within a single job, `extraction_unit_key` makes a
-repeat insert idempotent. Reconciliation is scoped to its own job, so an
+repeat insert idempotent.
+
+**The two hashes answer different questions**, confirmed by a real pair of
+reads of one unchanged account at slots `442384428` and `442446081`:
+`artifactHash = sha256(normalizedText)` covers the normalized observation,
+which carries no slot, so both reads produced the **identical**
+`sha256:ae1b7ae1…` — it identifies the STATE observed. `rawResponseHash =
+sha256(rawText)` covers the raw response, whose context carries the slot, so
+the two differ. The artifact row's own `slot` column is what separates the
+moments. Useful consequence: an unchanged account is visibly unchanged by
+hash, while the row still records when each observation happened. Reconciliation is scoped to its own job, so an
 observation never rewrites an earlier job's component result — the
 documentary `SUPPORTED` that Raydium's `DESTINATION` already carries is
 untouched by a later chain read.

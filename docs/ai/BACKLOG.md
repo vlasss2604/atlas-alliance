@@ -160,7 +160,10 @@ restart the PUMP investigation, and none is a correctness defect.
   claimed, and those budget axes are zero), which is why creating a job here
   is truthful while `onchain-derive-token-accounts.ts` still correctly refuses
   to. Contract in `ARCHITECTURE.md`; pinned by
-  `tests/onchain-observe-account-boundary.test.ts`. **Never run live yet.**
+  `tests/onchain-observe-account-boundary.test.ts`. **Proven live 2026-08-29**
+  (job `9d488cc6-…`): one RPC, one artifact, one Evidence row, and the D-074
+  ceiling observed rather than asserted — `PARTIALLY_SUPPORTED` /
+  `INSUFFICIENT_AUTHORITY`.
 
 - ~~**Generation-side extractor failures lose their class.**~~ **Resolved
   2026-08-28**, exactly in the shape written here: the raw API error is

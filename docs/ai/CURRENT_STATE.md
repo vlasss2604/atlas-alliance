@@ -222,10 +222,10 @@ unknown, so the address's absence from it is **not** established.
   once.** `DdHDoz94o2WJ…` was characterized 2026-08-28 as a System-Program
   account (not a RAY token account) — see the first on-chain read below.
   Nothing has been read for the other three, no RAY balance has been observed
-  anywhere, and **no Raydium on-chain fact has entered Evidence** — the
-  `ACCOUNT_INFO` persisting sibling now exists
-  (`scripts/onchain-observe-account.ts`) but has never been run live. What
-  Raydium's published claims mean on-chain remains unverified.
+  anywhere. **One Raydium chain fact is now Evidence** (job `9d488cc6-…`,
+  2026-08-29) — that the address exists and is System-Program-owned, nothing
+  more. What Raydium's published claims mean on-chain remains unverified: no
+  RAY balance, flow, buyback or burn has been observed.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
@@ -237,8 +237,11 @@ finding a project. Selection ran 2026-08-28; the reasoning is in
 
 The single most valuable thing PUMP left untested: **whether any project can
 carry an on-chain fact all the way into Evidence and out through a component.**
-Every deterministic chain fact in this repository still lives in a standalone
-artifact, and no Evidence row references one.
+**ANSWERED 2026-08-29 — yes.** Job `9d488cc6-…` carried a Raydium
+`ACCOUNT_INFO` observation into Evidence with `onchainArtifactId` set and out
+through `DESTINATION` reconciliation (`PARTIALLY_SUPPORTED` /
+`INSUFFICIENT_AUTHORITY`, the D-074 ceiling). See "FIRST PERSISTED ON-CHAIN
+EVIDENCE" below. The paragraph as written before that run:
 
 **That path is not the blocker.** Verified by reading it: `onchain-acquisition.ts`
 stores the artifact and inserts Evidence with `onchainArtifactId` set,
@@ -776,6 +779,57 @@ itself was **CLOSED the same day** (see "A generation failure names its
 cause" in `ARCHITECTURE.md`); this run predates the fix and the new
 vocabulary is never applied retroactively.
 
+### FIRST PERSISTED ON-CHAIN EVIDENCE IN THE REPOSITORY (2026-08-29, job `9d488cc6-…`)
+
+One owner window ran `onchain-observe-account.ts` on `DdHDoz94o2WJ…`
+(`raydium DESTINATION 6`). **The chain-to-Evidence path closed end to end for
+the first time**: one RPC → artifact → synthesized fact → Evidence carrying
+`onchainArtifactId` → reconciliation. Before this, every deterministic chain
+fact in this repository lived in a standalone artifact and no Evidence row
+referenced one — the single most valuable thing PUMP left untested.
+
+**The observation repeated the earlier characterization at a fresh slot**
+(`442446081`, `finalized`): exists, `ownerProgram`
+`11111111111111111111111111111111`, `executable false`, `lamports
+7823801354`, `NOT_TOKEN_PROGRAM_OWNED`, `tokenAccount null`, binding
+`CONFIRMED`. Nothing new about the account was learned; what is new is that it
+is now durable Evidence rather than terminal output.
+
+**Persisted:** artifact `84915cd0-…` (`RESEARCH_JOB` origin, source
+`28cfd151-…` = the `atlas-onchain://…/info` URI, `sourceType ONCHAIN`,
+`getAccountInfo`, `rawHash sha256:fb61e136…`, `artifactHash
+sha256:ae1b7ae1…`); Evidence `7770000d-…` — step 6 `DESTINATION`,
+**`ONCHAIN_VERIFIABLE` / `CLAIMED`**, `entityBinding CONFIRMED`, `SUPPORTS` /
+`DIRECT`, `mechanismState null`, `publishedAt null`, `onchainArtifactId` set.
+Exactly **one** artifact and **one** Evidence row; no duplicate artifact hash
+exists anywhere in the table.
+
+**The job is truthful and minimal:** `original_question` = "observe on-chain
+account … for component DESTINATION", task = "perform one bounded
+ACCOUNT_INFO read of one admitted on-chain subject", and all three reserved
+budget axes are **0** — no search, no source open, no model spend was
+authorized, and none happened. It writes **no trace rows** (0 for this job),
+consistent with the rest of the owner tooling.
+
+**D-074 held, visibly.** Reconciliation for this job alone returned
+**`PARTIALLY_SUPPORTED` / `["INSUFFICIENT_AUTHORITY"]`** — the reason code
+emitted precisely when the best establishing row's officiality is `CLAIMED`.
+A canonical chain read cannot independently exceed the ceiling, and here that
+is not a doc claim but an observed result.
+
+**The documentary result was not touched.** Job `baf42b79-…` still carries
+`SUPPORTED` / `[]` with its four `OFFICIAL_DOCS` / `CONFIRMED` rows;
+reconciliation is job-scoped, so the five `DESTINATION` results now stand side
+by side (three `INSUFFICIENT_EVIDENCE`, one `SUPPORTED`, one
+`PARTIALLY_SUPPORTED`), each honest about the Evidence its own job held.
+
+**The two statements remain separate, and this is the point of the case.**
+The documentation *states* bought-back RAY is held at that address; the chain
+says only that the address is a System-Program account. **Neither confirms the
+other.** No buyback, no burn, no balance, no history and no institutional role
+is established, and `NOT_TOKEN_PROGRAM_OWNED` still does not mean "owns no RAY
+token account".
+
 ### FIRST RAYDIUM ON-CHAIN READ (2026-08-28, owner window): the holding address is a SYSTEM-PROGRAM account, not a RAY token account
 
 One owner-authorized window, MantaRay OFF, `onchain-account-check.ts` on
@@ -819,9 +873,10 @@ had no persisting sibling, and `persistOnchainArtifactAndFacts` requires a
 `jobId` because `evidence.research_job_id` is NOT NULL — so on-chain Evidence
 exists only inside a research job. *(The gap was closed the same day —
 `scripts/onchain-observe-account.ts`, offline, never yet run live; see
-`ARCHITECTURE.md`. **This read's result was NOT imported into it**: a
-persisting run performs its own fresh bounded read.)* **No Raydium on-chain
-fact has entered Evidence.**
+`ARCHITECTURE.md`. **This read's result was NOT imported into it** — the
+later persisting run performed its own fresh read at slot `442446081`.)* **At
+the time of this read, no Raydium on-chain fact had entered Evidence**; one
+has since — see "FIRST PERSISTED ON-CHAIN EVIDENCE" above.
 
 ### THIRD Stage B window (2026-08-28, job `baf42b79-…`): EXTRACTION SUCCEEDED — Raydium has documentary Evidence, and the chain gate is OPEN
 
