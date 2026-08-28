@@ -231,6 +231,17 @@ document is false", and is not "no buyback occurred". A non-empty answer
 yields **one fact per account** (never a summed total, which the chain never
 reported), each `CONTEXT` rather than support, each pinned to its own slot.
 
+**Consequence, observed live 2026-08-29 (job `ce359a54-…`): a holding
+observation cannot establish `DESTINATION` by itself.** Six RAY token accounts
+were found and persisted, and S5 returned `INSUFFICIENT_EVIDENCE` /
+`ALL_EVIDENCE_EXCLUDED` with every row excluded as
+`RELATIONSHIP_NOT_SUPPORTING` — because `CONTEXT` is neutral by construction.
+This is the intended shape, not a defect: where value *is* is a different
+statement from where value *ends up by mechanism*, and the reconciler enforces
+that difference rather than leaving it to the reader. Establishing
+`DESTINATION` from chain data would require evidence of the mechanism, which a
+balance read cannot supply.
+
 **The two hashes answer different questions**, confirmed by a real pair of
 reads of one unchanged account at slots `442384428` and `442446081` —
 and the same content-addressing applies to the `TOKEN_ACCOUNTS_BY_OWNER`

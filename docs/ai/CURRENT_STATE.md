@@ -222,10 +222,11 @@ unknown, so the address's absence from it is **not** established.
   once.** `DdHDoz94o2WJ…` was characterized 2026-08-28 as a System-Program
   account (not a RAY token account) — see the first on-chain read below.
   Nothing has been read for the other three, no RAY balance has been observed
-  anywhere. **One Raydium chain fact is now Evidence** (job `9d488cc6-…`,
-  2026-08-29) — that the address exists and is System-Program-owned, nothing
-  more. What Raydium's published claims mean on-chain remains unverified: no
-  RAY balance, flow, buyback or burn has been observed.
+  anywhere for the other three. For `DdHDoz94o2WJ…` two chain observations are
+  now Evidence (2026-08-29): it exists and is System-Program-owned, and it
+  owns six RAY token accounts at slot `442456294`. **No flow, buyback or burn
+  has been observed** — nothing says how any balance arrived, and the
+  holding facts are `CONTEXT`, establishing no component on their own.
 - Non-blocking engineering items are in `BACKLOG.md`. Do not work on them unless
   `CURRENT_TASK.md` says so.
 
@@ -778,6 +779,55 @@ which one is not recoverable from anything persisted. The observability gap
 itself was **CLOSED the same day** (see "A generation failure names its
 cause" in `ARCHITECTURE.md`); this run predates the fix and the new
 vocabulary is never applied retroactively.
+
+### THE DOCUMENTED ADDRESS DOES OWN RAY TOKEN ACCOUNTS (2026-08-29, job `ce359a54-…`)
+
+One owner window ran `onchain-observe-token-accounts.ts` on
+`DdHDoz94o2WJ…` (`raydium DESTINATION 6`). One RPC
+(`getTokenAccountsByOwner`, `finalized`), zero retries, no pagination, no
+follow-up read.
+
+**Established at slot `442456294`:** the address owns **six** SPL token
+accounts whose mint is the confirmed RAY mint. Each is an independent
+position, and production authored **one fact per account** — never a total,
+because the chain reported none:
+
+| token account | raw amount (6 decimals) |
+|---|---|
+| `E5BMFn1mzTGuFWzNHZ7cybWfzetmqhFKS7SM91N5WePU` | 39064464475794 |
+| `BEVT2yGq2rvvPCnMipktFWxJaouidExC7scW9GHhMuzi` | 23497797799450 |
+| `FpDWkidnRD6pWzYZAnDWEU3kC1hXSmQSqhd9w4nMCn1` | 15363003294153 |
+| `BnTSNB2VqsUGiauSfwfyQBdFwPYnteb1M69Y1VXziP5u` | 6708471002739 |
+| `G7rxL8ySm5qPbtTus9FhAn2nEAZn8DDsUEeHGXgWTP1x` | 19940152952 |
+| `GX4HMQz73cHETFMMW4SsCG5dYnWG8DYZYLhMMzV6ZfuC` | 0 |
+
+**No aggregate is stated anywhere** — not in Evidence, not here. Summing six
+independent positions would invent a figure the chain never reported, and the
+one zero-balance account is a position like any other, not evidence that
+anything left it.
+
+**Persisted:** artifact `6b3dc314-…` (`TOKEN_ACCOUNTS_BY_OWNER`, slot
+`442456294`, `finalized`, `rawHash sha256:b2ff4751…`, `artifactHash
+sha256:636b7d2e…`, binding `CONFIRMED`), six Evidence rows — all step 6
+`DESTINATION`, `ONCHAIN_VERIFIABLE` / `CLAIMED`, `entityBinding CONFIRMED`,
+**`CONTEXT` / `DIRECT`**, `onchainArtifactId` set — and six derived subjects
+(`TOKEN_ACCOUNT`, parent = the queried address). The derived subjects were
+**recorded only**: nothing was read from them, no intent was promoted, and no
+second RPC occurred.
+
+**S5 for this job: `INSUFFICIENT_EVIDENCE` / `["ALL_EVIDENCE_EXCLUDED"]`**,
+with all six excluded as `RELATIONSHIP_NOT_SUPPORTING`. That is correct and
+worth stating as a rule: **a holding observation is authored `CONTEXT`, so it
+can never establish `DESTINATION` on its own.** Where value *is* is not the
+same statement as where value *ends up by mechanism*, and the reconciler
+enforces the difference rather than trusting the reader.
+
+**What this does and does not settle.** It settles that the documented address
+holds RAY at that slot — the documentation's claim is now *consistent with*
+chain state instead of unexamined. It settles nothing about **how** any
+balance arrived: no buyback, no fee flow, no revenue, no burn, no permanence,
+no accumulation over time, and no institutional control. The owner field is
+RPC metadata and names no organisation. A balance is a position at a moment.
 
 ### FIRST PERSISTED ON-CHAIN EVIDENCE IN THE REPOSITORY (2026-08-29, job `9d488cc6-…`)
 
