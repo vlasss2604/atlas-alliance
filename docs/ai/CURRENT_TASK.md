@@ -5,72 +5,77 @@
 ## NONE — awaiting owner direction
 
 Raydium has a catalog row, a confirmed identity and one **unclassified** route.
-**Nothing has been read.** No source, no Evidence, no job, no artifact.
+One inspection window was spent and **the page was never read**. No source, no
+Evidence, no job, no artifact.
 
-### What was done
+### The window
 
-One owner-authorized route act, through the only supported path:
+Owner-executed once, 2026-08-28, MantaRay off, zero retry:
 
 ```
-npx tsx scripts/confirm-source-route.ts --project=raydium \
-  --domain=docs.raydium.io --prefix=/ray/ray-buybacks --actor=owner
+npx tsx scripts/inspect-official-page.ts https://docs.raydium.io/ray/ray-buybacks raydium
 ```
 
-Row `84774bb9-b10a-4519-8a69-7f1c3a6c0b93`, kind `SOURCE_ROUTE`, ACTIVE via
-`OBSERVED -> CANDIDATE -> ACTIVE` on the existing `promoteProjectMemoryItem`.
-No SQL, no direct ACTIVE write, no classification.
+Gate passed (`CONFIRMED` / `null` / `/ray/ray-buybacks`), then:
 
-Content is exactly `{ domain, pathPrefix }`. `routeClass` is **absent rather than
-null** — the tool has no parameter for it, refuses `--class` and its variants
-loudly, and the documented shape treats absent and null identically.
+```
+INSPECTION FAILED: NAVIGATION_FAILED:NAVIGATION_TIMEOUT
+proxyDenials:     0 denied, 1 allowed   (every denial class 0)
+```
 
-On Windows, note: Git Bash's MSYS path conversion rewrites a `/...` argument into
-a Windows path. The first invocation therefore arrived as
-`C:/Program Files/Git/ray/ray-buybacks` and was **refused** with
-`PREFIX_HAS_WHITESPACE` before any write — the validator ran first, so nothing
-was inserted. Prefix such a command with `MSYS_NO_PATHCONV=1`, or run it from
-PowerShell.
+No `finalUrl`, no status, no bytes, no term scan, no links, no rendered text.
 
-### Verified offline, through the real resolver and the real gates
+### What is and is not established
 
-`resolveSourceRoute("https://docs.raydium.io/ray/ray-buybacks")` →
-`officiality CONFIRMED`, `routeClass null`, `matchedPathPrefix
-"/ray/ray-buybacks"`.
+**Established.** Not `BLOCKED_BY_ROUTE_POLICY` — our containment did not abort
+the main-frame navigation. Not `UNCLASSIFIED_NAVIGATION_ERROR` — Playwright's
+typed `TimeoutError` fired, the **first time that diagnostic has appeared in this
+repository**; all four `fees.pump.fun` windows returned the unclassified value.
+`DNS_FAILED` and `BLOCKED_ADDRESS` both zero, so the stale-fake-IP hypothesis is
+refuted here as it was there.
 
-- inspection (`evaluateInspectionEligibility`) → **allowed**
-- `evaluateDocsInspectionEligibility` → refused, `NOT_OFFICIAL_DOCS`
-- `evaluateRenderEligibility` → refused, `NOT_OFFICIAL_DOCS`
-- `docsPayloadRecoveryEligible` → false
-- `resolveSourceClass(url, OTHER, null)` → `SOCIAL`, which is in no component's
-  `establishingClasses`. With a class it would be `OFFICIAL_DOCS` — that is the
-  whole difference classification makes, and it has not been made.
+**Not established.** `1 allowed` is recorded at policy-decision time, **before
+`netConnect`**; the failure path destroys both sockets silently. It proves DNS
+resolved and the address was public — nothing about the connection succeeding.
+Two readings survive, unseparated by any local signal:
 
-Segment-bounded matching holds: `/ray/ray-buybacks/history` is inside the prefix,
-`/ray/ray-buybacks-extra` is not. `raydium.io` is a different host and stays
-`CLAIMED`. `pump_fun`'s six route rows are untouched.
+1. the server never answered through the tunnel;
+2. the page answered but `waitUntil: "networkidle"` never settled within the 15s
+   budget — ordinary for a documentation SPA.
 
-**One consequence to carry forward.** Officiality is decided by **domain match
-alone**, so `/ray/treasury`, `/raydium/protocol/protocol-fees` and `/` on
-`docs.raydium.io` moved `CLAIMED -> CONFIRMED` as a side effect of this single
-confirmation. They gained no capability — `matchedPathPrefix` is null for them,
-inspection denies `NO_PATH_PREFIX`, sourceClass stays `SOCIAL` — but "neighbouring
-routes are untouched" is true of capability, not of officiality. Confirming a
-second prefix on this host is also constrained: an overlapping ACTIVE prefix is
-refused outright, because two co-matching rows null `matchedPathPrefix` and would
-silently disable inspection for urls both cover.
+Reading 2 was **refuted for `pump.fun`** (the timeout never fired there); here the
+timeout is precisely what fired, so it is live again for this host. Separating
+them needs the tunnel-outcome diagnostic already named in `BACKLOG.md`. Do not
+spend research on it: CORE_RULES' brake applies, and four PUMP windows already
+went into transport plumbing and produced no evidence.
 
-### Next
+**Absence is not established.** Whether the page states a fee share, an executing
+address, a destination or a burn is **unknown**. Failure to read a source is not
+evidence that anything is missing from it.
 
-1. **Inspect** `https://docs.raydium.io/ray/ray-buybacks` — non-evidentiary,
-   needs an authorized live window. `scripts/inspect-official-page.ts`.
-2. `classify-source-route.ts` — **only if what the page says earns it**, and only
-   for the class the page actually supports.
+### Consequences
 
-Step 1 before step 2 is the point: classification follows reading.
+- The route stays ACTIVE and **unclassified**. Classification follows reading,
+  and no reading occurred. `classify-source-route.ts` must not be run on
+  `84774bb9-b10a-4519-8a69-7f1c3a6c0b93` on this evidence.
+- **No documentary locator exists**, so no on-chain subject can be named. Verified
+  again: `resolveOnchainSubject` on the confirmed RAY mint returns `NOT_FOUND`.
+  The mint is an identity, not a locator — it does not admit itself.
+- Nothing persisted. Verified by timestamp, not only by count: newest `sources`
+  row 2026-08-24, newest Evidence 2026-08-24, newest job 2026-08-27, newest
+  on-chain artifact 2026-08-27 — all older than the route confirmation.
 
-The pre-registered success criteria for the case — what will and will not count
-as an address-level role assignment — remain as written when Raydium was
-selected, and were deliberately settled before anything was read.
+### Next — the owner's choice, not a queue
+
+1. **Another inspection window on the same url.** Cheapest, and the one thing
+   that would settle whether the timeout is reproducible.
+2. **A different first-party url** inside a newly confirmed prefix. Note the
+   host is already CONFIRMED domain-wide, so this needs only a route act — and
+   an overlapping prefix would be refused.
+3. **Neither.** A page that cannot be read after two windows is a legitimate
+   stopping point, and the case can be closed with the bridge named.
+
+No live call without a separate authorized window.
 
 ### Standing boundaries
 

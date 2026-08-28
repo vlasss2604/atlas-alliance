@@ -286,6 +286,38 @@ is null, so inspection denies them `NO_PATH_PREFIX`, and their sourceClass stays
 inside, `/ray/ray-buybacks-extra` is not — and `raydium.io` (a different host)
 stays `CLAIMED`.
 
+**Inspected 2026-08-28 — the page was never read.** One owner window, MantaRay
+off, zero retry:
+`INSPECTION FAILED: NAVIGATION_FAILED:NAVIGATION_TIMEOUT`, with
+`proxyDenials: 0 denied, 1 allowed` and every denial class at zero. No
+`finalUrl`, no status, no bytes, no term scan, no links, no text — the script
+prints those only after a successful render and printed none.
+
+**Nothing about the page's content is known, and absence is not established.**
+Whether Raydium documents a fee share, an executing address or a destination is
+**unknown**, not absent. The route therefore stays ACTIVE and **unclassified**:
+classification follows reading, and no reading occurred.
+
+**What the closed signals do establish.** Not `BLOCKED_BY_ROUTE_POLICY`, so our
+containment did not abort the main-frame navigation. Not
+`UNCLASSIFIED_NAVIGATION_ERROR`, so this was Playwright's typed `TimeoutError`
+rather than a reset or TLS failure — **the first time that diagnostic has fired
+anywhere in this repository**; all four `fees.pump.fun` windows returned
+`UNCLASSIFIED_NAVIGATION_ERROR`. And with `DNS_FAILED` and `BLOCKED_ADDRESS`
+both zero, the stale-fake-IP hypothesis is refuted here too.
+
+**What they do not establish, and why.** `1 allowed` is recorded at
+policy-decision time, **before `netConnect` is attempted**; if the upstream
+connect or TLS then fails, the error path destroys both sockets and records
+nothing. So it proves DNS resolved and the address was public, and proves nothing
+about the connection succeeding. Two readings survive and the local signals
+cannot separate them: the server never answered, or the page answered and
+`waitUntil: "networkidle"` never settled inside the 15s budget — ordinary for a
+documentation SPA. That second reading was refuted for `pump.fun`, where the
+timeout never fired; here the timeout is exactly what fired, so it is live again.
+Separating them needs the tunnel-outcome diagnostic already named in
+`BACKLOG.md` — and CORE_RULES' brake applies: that is engineering, not research.
+
 **Both owner capabilities now exist.** Nothing blocks the case:
 
 1. ~~`PROJECT_IDENTITY` has no supported creation path.~~ **Closed 2026-08-28** —
