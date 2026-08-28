@@ -419,6 +419,40 @@ in silence would run with chain work enabled while the operator believed it off.
 appears in live-execution control: the engine branches on capability and
 authority, never on identity.
 
+## Two-stage acquisition: the document seam
+
+Document acquisition and model extraction are separable owner stages, because
+their working network conditions were proven non-identical in live windows.
+
+**Stage A** (`scripts/acquire-document.ts`) runs the REAL S4 executor — same
+route scope gate, same SSRF-safe fetch, same static-first render fallback,
+same containment — with a capture stub at the extractor seam: the document the
+production path produced is recorded into `acquired_documents` and zero facts
+exist. Structurally zero: model calls (the seam holds a local stub; no
+Anthropic credential is read), Evidence, locators, RPC (chain runs
+DOCUMENTARY_ONLY by definition).
+
+**Stage B** (`scripts/extract-from-document.ts`) replays ONE stored document
+through the same executor via a replay ContentFetcher that serves exactly that
+document for exactly its url and errors on anything else; the renderer is
+force-disabled. The real extractor, fact validation, Source/Evidence
+persistence, locator validator and S5 reconciliation run unchanged — Evidence
+and admitted locators can exist only through that path.
+
+**PERSISTED DOCUMENT ≠ EVIDENCE.** An `acquired_documents` row establishes
+nothing and is read by nothing in S5/S6/S7. It is sealed by `text_sha256`
+(tamper → refuse), project-scoped (mismatch → refuse), consumed at most once
+(Evidence created → consumed; a failed extraction leaves it resumable), and
+size-bounded at rest.
+
+**Authority is checked at both ends.** Stage A requires CONFIRMED + non-null
+routeClass and snapshots it; Stage B requires the snapshot valid AND the route
+to still resolve that way NOW — so neither a later classification nor a
+revocation slips through. Evidence authority itself is still computed by the
+production path at extraction time. **Staleness is explicit:** Stage B
+evaluates exactly the captured content and never re-fetches; a fresh look is a
+new acquisition.
+
 ## Rendering: two ways in, one set of gates
 
 The isolated renderer is reachable two ways, and both pass through the same

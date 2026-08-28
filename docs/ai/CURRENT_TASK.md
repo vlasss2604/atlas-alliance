@@ -4,78 +4,61 @@
 
 ## NONE — awaiting owner direction
 
-A provider-only count_tokens probe is prepared. **No live call was made this
-round**, no production behavior changed (`src/` untouched), Raydium untouched.
+Document acquisition and model extraction are now **separable owner stages**
+(D-128). No live call was made this round; Raydium untouched — still 0
+Evidence, chain gate locked.
 
-### The probe
+### Why (owner live facts, recorded)
 
-`scripts/anthropic-count-tokens-probe.ts` — the model-provider sibling of
-`renderer-selftest.ts`. It answers exactly one question: *can the currently
-configured Anthropic client execute the same countTokens capability the
-EvidenceExtractor uses?* — outside any research process.
+The count_tokens probe: MantaRay **ON → SUCCESS** (input_tokens 14, 1 attempt);
+MantaRay **OFF → `PERMISSION_DENIED:403`** (1 attempt). The 403's cause is
+deliberately not inferred. Meanwhile the document host fetch succeeds **OFF**.
+The one-process acquisition therefore coupled two capabilities whose working
+network conditions are not currently identical — and a fetched document died
+with the failed extraction.
 
-Production fidelity, verified from code not memory:
+### The seam
 
-- client constructed exactly as the extractor does:
-  `new Anthropic({ apiKey, maxRetries: 0 })`
-- model id read from product config (`evidence_extractor_model` — currently
-  `claude-haiku-4-5`), never a literal in the probe (pinned by test)
-- ceiling from the same `loadModelCostProfile("EVIDENCE_EXTRACTOR", …)`
-- the SAME retry composition `countThenGate` uses
-  (`retryOnceIfTransient` + `isTransientAnthropicApiError`), so a transient
-  failure retries exactly once, like production
-- failure output is ONLY the closed diagnostic from `token-gate.ts`
-  (`classifyTokenCountFailure`), plus the trusted status integer
+- **`acquired_documents`** (migration `0034_acquired_documents`, hand-authored
+  per the 0028+ convention — note: `drizzle-kit generate` is unusable here, its
+  snapshots are stale since 0018 and it regenerates existing objects; the bad
+  generated file was discarded before anything applied).
+- **Stage A** `scripts/acquire-document.ts` — the real S4 executor with a
+  capture stub at the extractor seam: full production fetch/render/containment
+  fidelity, zero duplication. Structurally zero model calls (no
+  `ANTHROPIC_API_KEY` read), zero Evidence, zero locators, zero RPC
+  (`DOCUMENTARY_ONLY` by definition).
+- **Stage B** `scripts/extract-from-document.ts` — replays ONE stored document
+  through the same executor via a replay fetcher that errors on any other url;
+  renderer force-disabled; real extractor → Evidence → locators → S5, the
+  ordinary path only.
 
-`countThenGate` itself returns void, so the probe composes the same exported
-primitives to be able to REPORT the count — noted in the script header as a
-follow-the-gate obligation. `output_config` is omitted: the probe tests the
-capability (endpoint, credential, model id, reachability), not the extractor's
-exact schema shape, and says so.
+**PERSISTED DOCUMENT ≠ EVIDENCE**; sealed (`text_sha256`), project-scoped,
+consumed at most once, both-ends authority rule, explicit staleness (never
+re-fetch on resume). All in `ARCHITECTURE.md` + D-128; 13 tests including the
+no-network-on-resume mutation boundary.
 
-### The command (owner-run, MantaRay ON)
+### The Raydium two-window future flow (NOT run)
+
+**Window 1 — MantaRay OFF:**
 
 ```
-npx tsx scripts/anthropic-count-tokens-probe.ts
+npx tsx scripts/acquire-document.ts --url=https://docs.raydium.io/ray/ray-buybacks.md --component=DESTINATION --step=6 --actor=owner --project=raydium
 ```
 
-### Maximum live footprint — stated before the run
+→ prints `documentId` + hashes; persists the document; nothing else.
 
-| axis | max |
-|---|---|
-| Anthropic countTokens requests | **2** (1 + 1 retry, ONLY if the first failure is transient: 429/5xx/no-response) |
-| generation requests | **0** |
-| non-Anthropic HTTP | **0** |
-| DB writes | **0** (one config read; pool closed before the live call) |
-| source opens / search / RPC | **0 / 0 / 0** |
+**Window 2 — MantaRay ON:**
 
-### Interpreting the result
+```
+npx tsx scripts/extract-from-document.ts --document-id=<uuid from window 1> --component=DESTINATION --step=6 --actor=owner --project=raydium --mode=documentary-only
+```
 
-**SUCCESS** establishes: the credential authenticates for count_tokens; the
-configured model id is accepted; Anthropic answered through that network
-configuration. NOT established: the cause of the earlier acquisition failure,
-or that acquisition/generation will succeed.
+→ no second Raydium fetch (structurally impossible); real extraction; Evidence
++ locators through the production path; document marked consumed on success.
 
-**FAILURE** prints one closed class: `AUTHENTICATION_FAILED` → credential;
-`PERMISSION_DENIED` → access refused; `NOT_FOUND` → configured model id;
-`RATE_LIMITED` → usage ceiling; `PROVIDER_SERVER_ERROR` → provider-side;
-`NETWORK_NO_RESPONSE` → no provider response observed (no VPN/DNS/geography
-inference); `UNCLASSIFIED_PROVIDER_ERROR` → closed unknown. No retry is
-prescribed by any of these.
-
-### Boundary, pinned by test
-
-`tests/anthropic-count-tokens-probe.test.ts` — static scan: no
-`messages.create`, no research/documentary/on-chain module, no project names,
-no DB mutation, production primitives used rather than copied, and no path
-that prints the caught exception or the API key.
-
-### Next — the owner's choice
-
-1. **Run the probe** (MantaRay ON). One bounded window; the outcome directly
-   informs whether the third acquisition attempt is worth a window and in
-   which network configuration.
-2. **Stop.**
+Only after Stage B success: evaluate `findAdmittedLocator(DdHDoz…VEZaz)` and
+`resolveOnchainSubject` — offline. No RPC in either stage.
 
 ### Standing boundaries
 

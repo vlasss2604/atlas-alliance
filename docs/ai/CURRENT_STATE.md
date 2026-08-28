@@ -6,8 +6,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2264 passing, 4 skipped, 1 failing**
-  (2269 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2281 passing, 4 skipped, 1 failing**
+  (2286 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -701,6 +701,18 @@ the next such failure will read
 `capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — …:<CLASS>[:<status>]`
 from a closed vocabulary. The run recorded below predates that fix, so its
 cause remains genuinely unknown. As recorded at the time:
+
+**Two owner probe runs (2026-08-28) split the failure cleanly.** With MantaRay
+ON the count_tokens probe returned SUCCESS (input_tokens 14, 1 attempt); with
+MantaRay OFF it returned `PERMISSION_DENIED:403` (1 attempt). Established:
+Anthropic is reachable OFF and returned an explicit 403 there, while the same
+credential/model succeeds ON. The CAUSE of the 403 is deliberately not
+inferred. Since the document host needs OFF and the provider currently needs
+ON, acquisition and extraction are now separable stages — see "Two-stage
+acquisition" in `ARCHITECTURE.md` (D-128): `acquire-document.ts` persists the
+validated document (no model, no Evidence, no RPC), `extract-from-document.ts`
+resumes extraction from storage (no external fetch). PERSISTED DOCUMENT ≠
+EVIDENCE.
 
 **A provider-only probe now exists** — `scripts/anthropic-count-tokens-probe.ts`
 (owner-run, MantaRay ON): one countTokens capability check using the production
