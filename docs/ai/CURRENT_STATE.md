@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-29: **2347 passing, 4 skipped, 1 failing**
-  (2352 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-29: **2368 passing, 4 skipped, 1 failing**
+  (2373 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -225,9 +225,21 @@ Research Memory promotion is gated on a **VERIFIED Proof** (D-041/D-055), so
 with no Proof writer the learning loop is structurally blocked; and no object
 exists for any downstream feature to render or cite.
 
-This is the current single biggest product bottleneck. The proposed milestone
-(S8, the Proof Writer) is written up in `CURRENT_TASK.md` and is **not
-started**.
+This is the current single biggest product bottleneck.
+
+**S8 is now half-built and deliberately stopped.** The pure builder exists —
+`proof-builder.ts`, no IO, no model, deterministic — producing the verdict
+(copied from S7, never recomputed), the seven locked layers (5 empty per
+D-083, 6 assembled only from recorded gaps), resolved citations and a closed
+refusal when S7 is absent. 21 offline tests pin it.
+
+**It cannot be persisted, and that is a contract gap, not an oversight.**
+`proofs.confidence` is `smallint NOT NULL CHECK BETWEEN 0 AND 100`, and while
+D-081/D-110/§11.4 lock that the number is deterministic, code-owned and never
+model-authored, **no decision fixes the mapping to 0..100**. Inventing one
+would invent exactly what the register says must be fixed deliberately, so
+the store and the `run-job.ts` wiring are not written. The four questions a
+decision must answer are in `CURRENT_TASK.md`.
 
 ## Open
 

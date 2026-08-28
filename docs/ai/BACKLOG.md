@@ -69,6 +69,18 @@ together they stopped project #2 before it could start. Kept for context.
 
 ### Product surface
 
+- **BLOCKING (S8): the confidence contract is undecided.** `proofs.confidence`
+  is `smallint NOT NULL CHECK BETWEEN 0 AND 100`, and D-081 / D-110 /
+  `phase-6-plan.md` §11.4 lock only that the number is deterministic,
+  code-owned, computed in Proof Core from named inputs (component states,
+  source classes, freshness, constraints) and never model-authored — the
+  mapping to 0..100 is explicitly left to code and has never been fixed. Until
+  it is, **no Proof can be persisted** and S8 stops at the pure builder. The
+  four questions a decision must settle (ordinal vs cardinal; which inputs and
+  in what precedence; whether the D-074 authority ceiling caps the number; what
+  `INSUFFICIENT_EVIDENCE` scores) are written out in `CURRENT_TASK.md`. Needs a
+  new `D-###`, not an implementation guess.
+
 - **Foreign-mint CONTEXT rendering** — Proof/UI must present a foreign-mint
   observation as visually neutral. It is neutral in reconciliation; nothing yet
   guarantees it reads that way to a user.

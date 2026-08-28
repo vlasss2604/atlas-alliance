@@ -2,145 +2,126 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — awaiting owner approval of the next major milestone
+## BLOCKED — S8 needs one owner decision: the confidence contract
 
-Planning round. Offline, no code changed, no live call. The Raydium case
-stays at its resting point and is used below only as a persisted fixture.
+Offline implementation. No live call, no model call, no DB mutation, and no
+existing verdict or row altered. **S8 is deliberately incomplete**, on your
+instruction to stop at the confidence gap rather than invent a formula.
 
-## The bottleneck: the pipeline ends one stage before the product
+### What is done
 
-Verified against current code, not notes: the engine runs
-**S4 → S5 → S6 → S7** and stops. `run-job.ts` ends with
-`assembleAndPersistMechanism` then `evaluateAndPersistClaimSupport`, and
-returns.
+`src/server/engine/proof-builder.ts` — the pure S8 builder. No IO, no model,
+no clock, no randomness: same input, same draft. It produces the verdict, the
+seven locked layers, resolved citations and the recorded gaps, and refuses
+outright when S7 is absent.
 
-**Nothing in production ever writes a Proof.** The `proofs` table exists with
-its locked shape (`verdict`, `confidence`, 7-layer `layers` jsonb,
-`researchCutoff`, `visibility PRIVATE`, `verificationStatus`), and
-`memory/verification.ts` reads it — but the only `insert(proofs)` calls in the
-repository are in tests. `evidence.proof_id` is null on every row ever
-written; the `PROOF_BOUND` half of the ownership model has never occurred.
+Pinned by `tests/proof-builder.test.ts` (21 tests, offline).
 
-Three consequences, all product-blocking:
+### What is BLOCKED, and exactly why
 
-1. **There is no Proof.** `GET /api/research-jobs/[id]` returns raw engine
-   projections — claim-support rows, component results, evidence arrays.
-   Internal research complexity leaks straight to the surface, which the
-   product rules forbid ("user-facing answers start simple").
-2. **The learning loop cannot close.** Memory promotion is gated on a
-   **VERIFIED Proof** (D-041/D-055). With no Proof writer there is nothing to
-   verify, so no research outcome can ever become durable memory —
-   `ARI_LEARNING_LOOP` is structurally blocked, not merely unimplemented.
-3. **Nothing is citable.** A Proof is the only object that binds a verdict to
-   the evidence and gaps behind it. Without it, every downstream feature
-   (Proof Map, sharing, history) has no object to render.
+`proofs.confidence` is `smallint NOT NULL` with `CHECK BETWEEN 0 AND 100`.
+**No Proof can be persisted without a number**, so the store and the
+`run-job.ts` wiring are not written. This is the whole of the blockage.
 
-## Selected milestone: **S8 — the Proof Writer**
+The register locks the *principle* but not the *value*:
 
-One job's reconciled state becomes **one persisted, structured Proof**.
+- **D-081** — confidence is deterministic, a code function of component
+  states, source classes and constraints; the model never names it. LOCKED.
+- **D-110** — no numeric confidence in S7; the number the Proof schema
+  requires is computed later in Proof Core as a deterministic pure function
+  of `ClaimSupportResult` and the structured state above it. LOCKED.
+- **phase-6-plan.md §11.4** — names the input families (component states,
+  source classes, freshness, presence of constraints) and says only
+  "формула фиксируется в коде".
 
-Deliberately chosen over the alternatives: it *completes* an existing pipeline
-rather than adding another adapter, it unblocks the learning loop, and it is
-the last stage between validated subsystems and a coherent Proof Engine.
+So the inputs are named and the discipline is fixed; the mapping to 0..100 is
+not. Choosing it is a product judgement about what a number shown to a user
+means, not an implementation detail — which is why it stopped here.
 
-### Product outcome
+**What a decision needs to answer** (each is a real fork, not a detail):
 
-A finished research job produces a Proof row carrying a verdict, a confidence,
-the seven locked layers, and traceable references to the Evidence, component
-results and gaps it rests on — private by default, with `evidence.proof_id`
-bound for the rows it cites.
+1. **Is it ordinal or cardinal?** A coarse band (e.g. a handful of discrete
+   values) says "structurally stronger/weaker". A fine score reads as a
+   probability, which ATLAS cannot compute and must not imply.
+2. **Which recorded inputs, and in what precedence?** Available today:
+   S7 claim status; requirement satisfaction counts; the authority ceiling
+   actually hit (`INSUFFICIENT_AUTHORITY`, i.e. D-074's `CLAIMED` cap);
+   component statuses; recorded gap count; excluded-evidence count;
+   freshness (`requiresFreshEvidence` / temporal basis).
+3. **Does an authority ceiling cap confidence?** A `CLAIMED`-only chain
+   result cannot exceed `PARTIALLY_SUPPORTED` — should the number carry the
+   same ceiling, or is it independent of verdict?
+4. **What does `INSUFFICIENT_EVIDENCE` score?** Zero, or the confidence that
+   the *insufficiency itself* is correctly established? These are opposite
+   readings and the layers render differently.
 
-### Domain contract
+I recommend **ordinal bands** with an authority ceiling, registered as a new
+`D-###`. But it is your call, and the code will implement whatever you fix
+exactly, with a test per band.
 
-- **Input:** `researchJobId`. Everything else is read from persisted state —
-  S7 claim support (status, reasonCodes, requirementResults with their
-  evidenceIds/componentResultKeys/blockingGaps), S6 assembly, S5 component
-  results, and the Evidence they cite.
-- **Output:** one `proofs` row + `evidence.proof_id` bound on cited rows.
-- **Verdict:** derived deterministically from S7's `ClaimSupportStatus`, which
-  already shares the vocabulary (`SUPPORTED` / `PARTIALLY_SUPPORTED` /
-  `NOT_SUPPORTED` / `INSUFFICIENT_EVIDENCE`), plus `NOT_APPLICABLE` for a job
-  with no applicable claim. **The verdict is never re-judged and never
-  model-authored** — S7 already decided it.
-- **Confidence:** a documented deterministic function of what S7 and S5
-  recorded (requirement satisfaction, authority ceiling, gaps). Not a model
-  score, not a vibe.
-- **Layers:** the seven locked layers, with **"Что может изменить вывод"
-  mandatory** — populated from real `blockingGaps` / `contextGaps` /
-  exclusion reasons, never invented, and never padded to fill a block.
+Meanwhile the draft is honest about the hole rather than hiding it: layer 1
+reads `Confidence: not yet contracted (see D-081 / D-110); this draft carries
+no number.`, and a test asserts no numeric confidence appears anywhere in the
+draft.
 
-### Invariants to preserve
+### What the builder does, and what it refuses to do
 
-- **Fail closed:** a job with no S7 projection produces **no Proof**, not an
-  empty one. `INSUFFICIENT_EVIDENCE` with named gaps is a valid, successful
-  Proof.
-- **D-074 and every reconciliation verdict stand.** S8 projects; it never
-  re-decides, upgrades or downgrades what S5/S6/S7 concluded.
-- **No new research, no model call, no network.** S8 is a pure projection
-  over persisted state, exactly like S6 and S7 — re-runnable, deterministic,
-  spending nothing.
-- **Private by default** (`visibility PRIVATE`, no public URLs in v1);
-  entitlement is enforced server-side and an entitlement change must never
-  destroy an existing Proof.
-- **Idempotent per job**, and re-running must not fork a second conflicting
-  Proof for the same job.
-- Every citation must resolve to a row that actually exists; a claim with no
-  evidence renders empty rather than borrowing another component's rows.
+**Verdict is copied from S7, never recomputed.** All four
+`ClaimSupportStatus` values map to their namesakes. Pinned: ten satisfied
+citations under an `INSUFFICIENT_EVIDENCE` claim still yield
+`INSUFFICIENT_EVIDENCE` — there is no majority vote and no upgrade path.
+**`NOT_APPLICABLE` is never emitted**: the schema enum has it, S7 cannot
+produce it, so S8 inventing it would be a judgement no stage made.
 
-### Reused vs new
+**Citations resolve or vanish.** An id survives only if the requirement cites
+it, the component treated it as *supporting*, and it exists as an Evidence row
+for the job. So an excluded row can never be cited as support, evidence from a
+component the claim never referenced never appears, and a dangling id is
+structurally impossible. SOURCE ≠ EVIDENCE ≠ FACT ≠ PROOF CLAIM holds: no
+source row and no on-chain artifact can become a citation.
 
-**Reused unchanged:** `claim-support-store`, `mechanism-assembly-store`,
-`component-reconciliation-store`, the `proofs`/`evidence` schema, `run-job.ts`
-as the call site (one more projection step after S7), `memory/verification.ts`
-downstream.
-**New:** a proof builder (pure, deterministic, testable without a DB) and a
-proof store (persist + bind `evidence.proof_id`), mirroring the
-`*-store.ts` / pure-module split S5/S6/S7 already use.
+**Layer 5 is empty (D-083)** and never padded. **Layer 6 — "what could change
+this conclusion" — is assembled only from recorded state**: requirement
+blocking gaps, claim context gaps, non-SUPPORTED component reason codes, and
+excluded-evidence reasons. It is empty only when genuinely nothing is
+unresolved; there is no filler path.
 
-### Test plan (offline, existing fixtures)
+**No S7 ⇒ no Proof**, returning the closed refusal `NO_CLAIM_SUPPORT` — never
+an empty or `UNKNOWN` placeholder.
 
-Unit: verdict mapping for every S7 status; confidence determinism; the
-mandatory-gap layer populated only from real gaps; no-S7 → no Proof.
-Integration: the **existing Raydium jobs** as fixtures — the documentary
-`SUPPORTED` job, the `PARTIALLY_SUPPORTED` chain job, and the
-`ALL_EVIDENCE_EXCLUDED` job — each producing the honest Proof its state
-implies, **without re-running research or altering a single existing row**.
-Boundary: no model, no network, no re-judging, idempotency, private-by-default.
+**Insufficient evidence is a valid Proof.** The all-excluded case yields
+`INSUFFICIENT_EVIDENCE`, cites **nothing**, and names both
+`ALL_EVIDENCE_EXCLUDED` and `RELATIONSHIP_NOT_SUPPORTING` in layer 6. Absence
+never becomes support.
 
-### Acceptance criteria
+### Still to build once confidence is fixed
 
-A completed job yields exactly one Proof whose verdict equals S7's status,
-whose layers are all present with the change-conditions block non-empty
-whenever gaps exist, whose citations resolve, whose cited Evidence rows carry
-`proof_id`, and which re-runs identically. Every pre-existing verdict, S5
-result and Evidence row is unchanged. Full suite green.
+1. `proof-store.ts` — persist exactly one Proof per job (the DB already
+   enforces this with `uq_proofs_research_job`), `visibility PRIVATE`,
+   `verificationStatus DRAFT`, and bind `evidence.proof_id` on cited rows in
+   **one transaction** so a half-bound Proof cannot exist. Composite FK
+   `evidence_proof_same_job_fk` already prevents binding across jobs.
+2. Idempotency on re-run: the unique index makes a second insert fail rather
+   than fork. Open sub-question for the same decision: may S8 *update* an
+   existing Proof when S5/S6/S7 changed, and must it refuse to touch one
+   whose `verificationStatus` is `REVIEWED`/`VERIFIED` (which memory
+   promotion depends on, D-041/D-055)? My recommendation: never rewrite a
+   non-DRAFT Proof.
+3. Wire after S7 in `run-job.ts`, as the same kind of re-runnable derived
+   projection S6 and S7 already are.
 
-### What a user can do afterward that they cannot today
+### Note on this round's prompt
 
-Ask a question, and when the job finishes receive **one persisted structured
-Proof** — verdict, confidence, plain-language explanation, what would change
-the conclusion, and the evidence and gaps behind it — instead of raw engine
-projections. And for the first time a research outcome becomes **verifiable**,
-which is the gate durable Research Memory has always been waiting on.
-
-### Deliberately deferred (backlog, not blockers)
-
-Raydium transaction history · stable owner-user identity · the Windows
-`C:\C:\` test bug · diagnostics · more owner CLIs · another project case ·
-Telegram/UI polish · Proof Map rendering · sharing · Promises/Risks (D-124) ·
-EVM support.
-
-### Recommended next coding task
-
-Implement S8 in one slice: the pure proof builder + its store + wiring after
-S7 in `run-job.ts`, validated against the existing Raydium and PUMP fixtures
-offline. **Not started — awaiting your approval**, since this is the largest
-single block since the acquisition path.
+Your instructions ended mid-STEP 11 (`S7 completed → build Proof →`). I
+proceeded from the milestone plan in the previous round plus steps 1–10. If
+the truncated text specified anything about the store, wiring or acceptance
+that differs from the above, say so and I will follow it instead.
 
 ### Standing boundaries
 
-- No live calls without a separate authorized window; no retries.
-- S8 must never re-judge S5/S6/S7, never call a model, never touch the network.
-- documentary role ≠ chain behaviour · holding ≠ mechanism · balance ≠
-  history · buyback ≠ burn · same transaction ≠ causality.
-- Never relax safe-http or SSRF; never loosen `extractionResultSchema`.
+- S8 never re-judges S5/S6/S7, never calls a model, never touches the network.
+- Fail closed: no S7 ⇒ no Proof. `INSUFFICIENT_EVIDENCE` with named gaps is a
+  valid, successful outcome.
+- Private by default; no public Proof URLs in v1.
+- Never invent a confidence formula the register says must be fixed
+  deliberately.
