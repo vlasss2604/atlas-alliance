@@ -150,6 +150,14 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
+- **`alpha-acquire-url.ts` teardown is not crash-clean on Windows.** When
+  `executor.execute()` throws, the process prints the error and then aborts in
+  libuv during exit (`!(handle->flags & UV_HANDLE_CLOSING)`, `src\win\async.c`)
+  — likely an open handle (pg-boss/pool) torn down while closing. Verified
+  harmless to data on both observed occurrences: every trace write had already
+  committed, and the terminal error message prints before the abort. Annoying,
+  not corrupting.
+
 - **Console encoding** — an em dash renders as `тАФ` in some owner-script output on
   this Windows console.
 - **Two pre-existing test failures** — a stale source-regex assertion in

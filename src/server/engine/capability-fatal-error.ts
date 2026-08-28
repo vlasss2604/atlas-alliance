@@ -21,7 +21,17 @@ export class CapabilityFatalError extends Error {
     public readonly capability: string,
     public readonly cause?: unknown,
   ) {
-    super(`capability unavailable: ${capability}`);
+    // A STRING cause is included in the message; any other cause stays an
+    // unprinted field. Every string handed to this constructor is a
+    // safeFailureReason() product — label, class name, and a closed
+    // membership-gated detail — so surfacing it exposes nothing free-form.
+    // Without this, a terminal owner run died saying only which capability
+    // failed, while the classified WHY sat in an unprinted field.
+    super(
+      typeof cause === "string" && cause.length > 0
+        ? `capability unavailable: ${capability} — ${cause}`
+        : `capability unavailable: ${capability}`,
+    );
     this.name = "CapabilityFatalError";
   }
 }

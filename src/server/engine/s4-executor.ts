@@ -29,7 +29,7 @@ import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isTransientError } from "./providers/retry";
-import { ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
+import { isTokenCountDiagnostic, ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
 import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import {
@@ -355,6 +355,16 @@ const MAX_FAILURE_CATEGORY_LENGTH = 64;
 const SAFE_FAILURE_DETAILS: ReadonlySet<string> = new Set<string>(CONTENT_FETCH_FAILURE_REASONS);
 
 function safeFailureDetail(e: unknown): string | null {
+  // count_tokens failures carry a CLOSED diagnostic classified at the
+  // throw site. Same two-gate discipline as the fetch branch below: the
+  // class vouches for the field existing, membership vouches for the
+  // value — a forged look-alike carrying arbitrary text returns null
+  // rather than crossing the boundary.
+  if (e instanceof TokenCountUnavailableError) {
+    if (!isTokenCountDiagnostic(e.diagnostic)) return null;
+    const status = typeof e.httpStatus === "number" && Number.isInteger(e.httpStatus) ? e.httpStatus : null;
+    return status === null ? e.diagnostic : `${e.diagnostic}:${status}`;
+  }
   if (!(e instanceof ContentFetchError)) return null;
   if (!SAFE_FAILURE_DETAILS.has(e.reason)) return null;
   // The status is already a trusted integer — the class coerced it out of
@@ -402,7 +412,9 @@ function renderFailureObservation(label: string, e: unknown): string {
   return staged;
 }
 
-function safeFailureReason(label: string, e: unknown): string {
+// EXPORTED so the boundary tests ask THIS rule rather than a copy — the
+// same reason validateDomain and matchesPathPrefix are exported.
+export function safeFailureReason(label: string, e: unknown): string {
   const category = e instanceof Error ? e.constructor.name : "UnknownError";
   const detail = safeFailureDetail(e);
   const base = `${label}_FAILED:${category.slice(0, MAX_FAILURE_CATEGORY_LENGTH)}`;

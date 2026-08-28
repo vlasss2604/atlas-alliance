@@ -6,8 +6,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2246 passing, 4 skipped, 1 failing**
-  (2251 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2264 passing, 4 skipped, 1 failing**
+  (2269 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -695,8 +695,12 @@ fatal** — count_tokens has already spent its own internal
 `retryOnceIfTransient` inside `token-gate.ts` before throwing, so the executor
 does not retry it. Exactly one extraction attempt was made.
 
-**Why it failed is not recoverable from anything persisted, and that is a real
-gap.** `safeFailureDetail` extracts a status only for `ContentFetchError`;
+**Why it failed was not recoverable from anything persisted — a gap CLOSED the
+same day** (see "count_tokens failure names its cause" in `ARCHITECTURE.md`):
+the next such failure will read
+`capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — …:<CLASS>[:<status>]`
+from a closed vocabulary. The run recorded below predates that fix, so its
+cause remains genuinely unknown. As recorded at the time: `safeFailureDetail` extracts a status only for `ContentFetchError`;
 for this error class it returns null, so the reason is the bare
 `EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError`. `CapabilityFatalError`'s
 message carries only the capability name, the computed reason travels as an

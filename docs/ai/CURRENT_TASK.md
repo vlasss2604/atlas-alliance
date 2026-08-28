@@ -4,77 +4,65 @@
 
 ## NONE — awaiting owner direction
 
-The second production acquisition **cleared the transport and failed at the
-model provider**. No Evidence exists, the chain gate is still locked. Analysis
-only — no retry, no network.
+The count_tokens diagnostic gap is closed. **No live call was made** — every
+client in every test is a stub, Raydium was not re-run, and nothing about
+routes, Evidence, D-127 or token limits changed.
 
-### Real progress: the document was fetched
+### What changed
 
-Job `4b437b14-1cf8-4637-8539-e0e1e4835e62`. The same url that traced
-`FETCH_FAILED` in run 1 traced **`FETCH_OK`** in run 2, with the only
-intervening change being the two lines admitting `text/markdown`. That
-controlled before/after is the evidence the fix worked — and it is the strongest
-available statement, because **the header value is still not persisted**:
-`FETCH_OK` records no content type, and no Source row was created.
+- **`TOKEN_COUNT_DIAGNOSTICS`** (token-gate.ts) — a closed, code-owned set:
+  `AUTHENTICATION_FAILED` (401) · `PERMISSION_DENIED` (403) · `NOT_FOUND`
+  (404 — the endpoint is SDK-fixed, so in practice the model id) ·
+  `INVALID_REQUEST` (400/422) · `RATE_LIMITED` (429) · `PROVIDER_SERVER_ERROR`
+  (5xx) · `NETWORK_NO_RESPONSE` (the SDK's own no-response class or a
+  status-less APIError; claims nothing about DNS/VPN/routing) ·
+  `UNCLASSIFIED_PROVIDER_ERROR`.
+- Classified **once, at the throw site**, from the SDK's class identity and
+  trusted status integer — never from a message. `TokenCountUnavailableError`
+  now carries `diagnostic` + `httpStatus` (appended constructor params; every
+  existing construction stays valid).
+- The boundary (`safeFailureDetail`) admits it through the **same two-gate
+  discipline as fetch details**: class + runtime membership check. A forged
+  out-of-vocabulary value returns null — mutation-tested.
+- `CapabilityFatalError` now surfaces a **string** cause in its message (all
+  string causes are safeFailureReason products), so the next terminal failure
+  reads e.g.
+  `capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError:RATE_LIMITED:429`.
 
-### The new blocker
+### What a future single failure now tells the operator
 
-```
-CapabilityFatalError: capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS
-```
+- `AUTHENTICATION_FAILED:401` → credential problem
+- `NOT_FOUND:404` → configured model id problem
+- `RATE_LIMITED:429` → usage/rate ceiling
+- `PROVIDER_SERVER_ERROR:5xx` → provider-side failure
+- `NETWORK_NO_RESPONSE` → the provider was never heard from; the network path
+  (including the MantaRay-off window arrangement) is where to look
 
-`countThenGate` raised `TokenCountUnavailableError`, which
-`reserveAndCallWithRetry` classifies as **immediately fatal** — count_tokens
-already spent its own internal `retryOnceIfTransient` inside `token-gate.ts`
-before throwing. Exactly one extraction attempt; the executor did not retry.
+No retry is prescribed by any of these; the mode of the next window stays an
+owner decision. The previous run's cause remains **genuinely unknown** — it
+predates this fix and nothing recorded it.
 
-### The diagnostic gap this exposes — recommended next task
+### Deliberately unchanged
 
-**Why the count failed cannot be recovered from anything persisted.**
-`safeFailureDetail` extracts a status only for `ContentFetchError` and returns
-null here; `CapabilityFatalError`'s message carries only the capability name;
-the computed reason travels as an unprinted `cause`; the trace reason code is
-the generic `PROVIDER_ERROR`.
+Retry semantics (at most one internal count_tokens retry, only for
+429/5xx/no-status; 401/403/404 stay non-retryable and single-attempt —
+asserted), token limits, documentary-only mode, D-127, fetch and renderer
+failure semantics (asserted unchanged), the trace vocabulary (no enum
+migration; the diagnostic travels in the error surfaces).
 
-So a bad credential (401), an unrecognised model id (404), an exhausted rate
-limit (429) and a provider outage (5xx) are **indistinguishable** — and each
-calls for a different action: fix a secret, fix the model id, wait, or wait
-longer. The model id sent is `claude-haiku-4-5` (config default; its cost
-profile resolves fine).
+### Windows teardown residual — assessed, not fixed
 
-This now meets the bar I declined to meet last round for the MIME case: it
-**materially prevents a blind live retry**. An HTTP status integer from
-`Anthropic.APIError` is the same class of safe, closed, non-sensitive value the
-codebase already persists for `ContentFetchError` — no message, no body, no
-provider text. Recommended as its own scoped offline task with a regression
-test; **not done here**, since this round is analysis only.
+The libuv abort happens **after** the terminal message prints and after all
+trace writes commit, on both observed occurrences — so it neither destroys the
+new diagnostic nor loses data. Recorded in `BACKLOG.md` under
+Tooling/environment.
 
-### What this run persisted
+### Next — the owner's choice
 
-The job row and eight trace events. **No Source** (creation happens at
-Evidence-persist time, never reached), no Evidence, no locators, no artifacts,
-and — unlike run 1 — **no component result**, because the exception propagated
-out of `execute()` before the script's S5 call. `findAdmittedLocator` 0 for all
-four addresses; `resolveOnchainSubject` `NOT_FOUND`.
-
-**D-127 held again**: branch not entered, no retriever, zero artifacts.
-
-### Also observed, not a research finding
-
-After the fatal error the process aborted during teardown with a libuv
-assertion (`!(handle->flags & UV_HANDLE_CLOSING)`, `src\win\async.c`). All
-trace writes had already committed — no data loss — but the cleanup path is not
-crash-clean on Windows when `execute()` throws. Worth a BACKLOG line, not a
-research window.
-
-### The options
-
-1. **Add the closed provider-status diagnostic**, then one live window. The
-   only option that stops the next attempt from being blind.
-2. **Investigate the credential/model id offline** — check `ANTHROPIC_API_KEY`
-   validity and whether `claude-haiku-4-5` is an id the API accepts. Cheaper,
-   but it cannot confirm which cause was actually hit.
-3. **Stop.**
+1. **A third live window** with the same prepared command. If it fails again,
+   the terminal line now names the class; if it succeeds, the DESTINATION
+   evidence path finally runs end to end.
+2. **Stop.**
 
 ### Standing boundaries
 

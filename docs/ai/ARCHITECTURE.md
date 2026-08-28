@@ -316,6 +316,23 @@ Containment is checked **twice**: before the settle window and again after it. A
 SPA can change its own url client-side while it hydrates, and a document read at
 the wrong url is invalid however good it looks.
 
+**A model-provider count_tokens failure names its cause from a closed set.**
+`TOKEN_COUNT_DIAGNOSTICS` (token-gate.ts): `AUTHENTICATION_FAILED` (401),
+`PERMISSION_DENIED` (403), `NOT_FOUND` (404 — the endpoint is SDK-fixed, so in
+practice the model id), `INVALID_REQUEST` (400/422), `RATE_LIMITED` (429),
+`PROVIDER_SERVER_ERROR` (5xx), `NETWORK_NO_RESPONSE` (the SDK's own
+no-response class, or an APIError with no status — deliberately claiming
+nothing about DNS/VPN/routing), `UNCLASSIFIED_PROVIDER_ERROR`. Classified once,
+at the throw site, from the SDK's class identity and trusted status integer —
+never from a message. It crosses the boundary through the same two-gate
+discipline as fetch details (class + membership check; a forged value returns
+null), and a string cause now surfaces inside `CapabilityFatalError`'s
+message, so a terminal owner run says
+`capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — …:RATE_LIMITED:429`
+instead of only naming the capability. Raw provider messages, keys, bodies and
+stacks still never cross; the internal count_tokens retry (at most one, only
+for 429/5xx/no-status) is unchanged.
+
 **The egress proxy is a second, independent witness.** It records every decision
 it makes with a closed denial vocabulary — `NOT_HTTPS`, `HOST_NOT_CONFIRMED`,
 `BLOCKED_ADDRESS`, `DNS_FAILED`, `MALFORMED_TARGET` — and a failed render now
