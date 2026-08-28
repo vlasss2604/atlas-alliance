@@ -56,4 +56,8 @@ export function createLiveS4WorkExecutor(deps: LiveExecutorDeps): WorkExecutor {
 export const INTERNAL_ALPHA_LIVE_PROJECT_SLUGS = new Set<string>([
   // §18 — the owner-approved first live target.
   "pump_fun",
+  // Owner-approved 2026-08-28, the second live target. Membership here is
+  // the ONLY place a project slug appears in live-execution control: the
+  // engine itself branches on capability and authority, never on identity.
+  "raydium",
 ]);

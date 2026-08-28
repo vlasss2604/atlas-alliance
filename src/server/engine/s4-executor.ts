@@ -166,6 +166,16 @@ export interface S4ExecutorDeps {
   // safety. Never set outside tests.
   queryProposerCostProfile?: ModelCostProfile;
   evidenceExtractorCostProfile?: ModelCostProfile;
+  // DOCUMENTARY-ONLY MODE. Absent or "ENABLED" is the ordinary behaviour
+  // and the default, so nothing that does not set it changes.
+  //
+  // "DOCUMENTARY_ONLY" is an OWNER INSTRUCTION, not a capability probe: the
+  // structured on-chain branch is not entered at all, so no retriever is
+  // resolved and no RPC can be issued regardless of what the database
+  // holds. It is deliberately NOT satisfied by injecting a no-op retriever
+  // — that would skip the calls while still entering the branch, which is
+  // a state-dependent guarantee rather than a structural one.
+  chainAcquisition?: "ENABLED" | "DOCUMENTARY_ONLY";
 }
 
 function hashUrl(url: string): string {
@@ -851,47 +861,56 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // never a string a model proposed, never an address from anywhere
       // else. The document's authority stays on the document; a locator
       // only says where to look.
-      const admittedLocators = await admittedLocatorsForJob(deps.db, ctx.jobId);
-      const onchainOutcome = await runStructuredOnchainAcquisition({
-        db: deps.db,
-        jobId: ctx.jobId,
-        attemptId,
-        item,
-        plan,
-        locators: admittedLocators.map((l) => ({
-          address: l.value,
-          origin: "ADMITTED_EVIDENCE_SOURCE" as const,
-        })),
-        maxSourceOpens: ctx.budget.maxSourceOpens,
-        recordTrace: async (event) =>
-          recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: event.operationType,
-            providerKind: "FETCH",
-            patternStep: item.step,
-            component: item.component,
-            targetRef: event.targetRef,
-            status: event.status,
-            reasonCode: event.reasonCode ?? "NONE",
-            budgetAxis: "sourceOpens",
-            budgetAmount: 1,
-          }),
-      });
-      spent.sourceOpens += onchainOutcome.sourceOpensSpent;
-      for (const code of onchainOutcome.observations) observations.add(code);
-      if (onchainOutcome.evidenceIds.length > 0) {
-        // Establishing on-chain evidence was obtained deterministically.
-        // Returning here conserves the search/model budget for components
-        // that got nothing — which is exactly the starvation the audit
-        // found. Meaning-of-the-mechanism questions belong to OTHER
-        // components (MECHANISM_SPEC / GOVERNANCE_BASIS), each with its
-        // own attempt and its own doc-oriented targeting.
-        return {
-          status: "SUCCEEDED",
-          reason: withObservations("ONCHAIN_EVIDENCE_ESTABLISHED"),
-          spent,
-        };
+      // THE DOCUMENTARY-ONLY GUARD. Placed around the WHOLE branch rather
+      // than inside it: the locator read, the intent selection, the
+      // retriever resolution and every call are skipped together, so "no
+      // RPC" holds because the code cannot reach one — not because the
+      // database happens to hold no admitted locators today.
+      if (deps.chainAcquisition === "DOCUMENTARY_ONLY") {
+        observations.add("ONCHAIN_DISABLED_DOCUMENTARY_ONLY");
+      } else {
+        const admittedLocators = await admittedLocatorsForJob(deps.db, ctx.jobId);
+        const onchainOutcome = await runStructuredOnchainAcquisition({
+          db: deps.db,
+          jobId: ctx.jobId,
+          attemptId,
+          item,
+          plan,
+          locators: admittedLocators.map((l) => ({
+            address: l.value,
+            origin: "ADMITTED_EVIDENCE_SOURCE" as const,
+          })),
+          maxSourceOpens: ctx.budget.maxSourceOpens,
+          recordTrace: async (event) =>
+            recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: event.operationType,
+              providerKind: "FETCH",
+              patternStep: item.step,
+              component: item.component,
+              targetRef: event.targetRef,
+              status: event.status,
+              reasonCode: event.reasonCode ?? "NONE",
+              budgetAxis: "sourceOpens",
+              budgetAmount: 1,
+            }),
+        });
+        spent.sourceOpens += onchainOutcome.sourceOpensSpent;
+        for (const code of onchainOutcome.observations) observations.add(code);
+        if (onchainOutcome.evidenceIds.length > 0) {
+          // Establishing on-chain evidence was obtained deterministically.
+          // Returning here conserves the search/model budget for components
+          // that got nothing — which is exactly the starvation the audit
+          // found. Meaning-of-the-mechanism questions belong to OTHER
+          // components (MECHANISM_SPEC / GOVERNANCE_BASIS), each with its
+          // own attempt and its own doc-oriented targeting.
+          return {
+            status: "SUCCEEDED",
+            reason: withObservations("ONCHAIN_EVIDENCE_ESTABLISHED"),
+            spent,
+          };
+        }
       }
 
       // D-130: how many search units this component may spend, so that a

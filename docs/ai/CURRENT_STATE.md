@@ -6,8 +6,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - `npm run typecheck` and `npm run lint` are clean.
-- Full suite, last verified 2026-08-28: **2213 passing, 4 skipped, 1 failing**
-  (2218 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-28: **2229 passing, 4 skipped, 1 failing**
+  (2234 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -577,7 +577,14 @@ Evidence and 0 jobs**. **A classified route is not Evidence** — it only makes
 acquisition possible. The locators become admissible when the page is acquired
 through the normal pipeline, and not before.
 
-**Acquisition is blocked by a code-owned safety allowlist, not by authority.**
+**Acquisition is no longer blocked.** `raydium` was added to
+`INTERNAL_ALPHA_LIVE_PROJECT_SLUGS` 2026-08-28, which is now exactly
+`{ pump_fun, raydium }` — a closed enumerated set, verified by test. All four
+prerequisites pass. A new `--mode=documentary-only` makes chain work refused **by
+instruction rather than by state**; see `ARCHITECTURE.md`. The paragraph below
+records the position that held before that change.
+
+**Previously — acquisition was blocked by a code-owned safety allowlist, not by authority.**
 `alpha-acquire-url.ts` refuses any project outside
 `INTERNAL_ALPHA_LIVE_PROJECT_SLUGS`, which is the hard-coded set `{ pump_fun }`.
 Three of its four prerequisites already pass for `raydium` —

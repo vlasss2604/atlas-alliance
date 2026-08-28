@@ -30,10 +30,29 @@
 // merely believes is relevant is not enough: without a confirmed route
 // the ordinary discovery path is the correct one, and this script refuses.
 //
-// NO CHAIN CALL. No on-chain retriever is in this file's import graph, so
-// a run cannot reach an RPC endpoint whatever the page contains.
+// CHAIN WORK IS CONDITIONAL, and this is the corrected statement of it.
+// An earlier version of this comment said "NO CHAIN CALL", reasoning from
+// this file's import graph. That was wrong about what matters: the S4
+// executor this script BUILDS contains a structured on-chain branch, driven
+// by documentary locators already admitted for the PROJECT — not merely by
+// this job. So:
 //
-// Run: npx tsx scripts/alpha-acquire-url.ts --url=<https url> --component=<NAME> --step=<n> --actor=<name> [--project=<slug>]
+//   WITHOUT --mode=documentary-only
+//     S4 may perform chain work when its own prerequisites permit it: the
+//     component admits ONCHAIN_VERIFIABLE, the project has a confirmed
+//     identity, admitted locators exist, and a retriever is configured. A
+//     first run on a project with no admitted locators happens not to reach
+//     one — but that is a property of the DATABASE, not of the code.
+//
+//   WITH --mode=documentary-only
+//     The branch is not entered at all. No locators are read, no retriever
+//     is resolved, and no RPC can be issued regardless of what the database
+//     holds. Documentary fetch, render and extraction are unaffected.
+//
+// Nothing else is claimed. In particular this says nothing about what the
+// documentary path may fetch, which is governed by the route gate below.
+//
+// Run: npx tsx scripts/alpha-acquire-url.ts --url=<https url> --component=<NAME> --step=<n> --actor=<name> [--project=<slug>] [--mode=documentary-only]
 import { loadEnvConfig } from "@next/env";
 
 loadEnvConfig(process.cwd());
@@ -63,24 +82,63 @@ import { resolveSourceRoute } from "../src/server/engine/source-authority";
 import { createBoss } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 
-function parseArgs(argv: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
+// Hyphens are accepted because every other owner script accepts them, and
+// because a flag this parser cannot match would otherwise be dropped in
+// SILENCE — which for a safety flag is the worst possible failure. Unknown
+// keys are refused below rather than ignored, for the same reason.
+export const KNOWN_ARGS = new Set(["url", "component", "step", "actor", "project", "mode"]);
+
+export function parseArgs(argv: string[]): { args: Record<string, string>; unknown: string[] } {
+  const args: Record<string, string> = {};
+  const unknown: string[] = [];
   for (const arg of argv) {
-    const m = /^--([a-zA-Z0-9_]+)=(.*)$/.exec(arg);
-    if (m) out[m[1]] = m[2];
+    const m = /^--([a-zA-Z0-9_-]+)=(.*)$/.exec(arg);
+    if (m && KNOWN_ARGS.has(m[1])) args[m[1]] = m[2];
+    else unknown.push(arg);
   }
-  return out;
+  return { args, unknown };
+}
+
+// The closed set of run modes. Absent means the ordinary behaviour.
+const RUN_MODES = ["default", "documentary-only"] as const;
+type RunMode = (typeof RUN_MODES)[number];
+
+export function parseRunMode(raw: string | undefined): RunMode | null {
+  if (raw === undefined) return "default";
+  return (RUN_MODES as readonly string[]).includes(raw) ? (raw as RunMode) : null;
 }
 
 function usage(): never {
   console.error(
-    "usage: npx tsx scripts/alpha-acquire-url.ts --url=<https url> --component=<NAME> --step=<n> --actor=<name> [--project=<slug>]",
+    "usage: npx tsx scripts/alpha-acquire-url.ts --url=<https url> --component=<NAME> --step=<n> --actor=<name> [--project=<slug>] [--mode=<mode>]",
   );
+  console.error("");
+  console.error("modes: " + RUN_MODES.join(", ") + "   (default when omitted: default)");
+  console.error("");
+  console.error("  default            S4 may perform chain work when its own prerequisites");
+  console.error("                     permit it — admitted locators for the project, a");
+  console.error("                     confirmed identity, and a configured retriever.");
+  console.error("  documentary-only   the structured on-chain branch is not entered at all:");
+  console.error("                     no locator read, no retriever, no RPC, whatever the");
+  console.error("                     database holds. Fetch/render/extraction unaffected.");
   process.exit(1);
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2));
+  const { args, unknown } = parseArgs(process.argv.slice(2));
+  // Refused, never ignored. A misspelt safety flag that is silently dropped
+  // would run with chain work ENABLED while the operator believed it off.
+  if (unknown.length > 0) {
+    console.error("[acquire] refusing: unrecognised argument(s): " + unknown.join(" "));
+    console.error("  known: " + [...KNOWN_ARGS].map((k) => "--" + k + "=").join(" "));
+    process.exit(1);
+  }
+  const mode = parseRunMode(args.mode);
+  if (mode === null) {
+    console.error("[acquire] refusing: --mode=" + String(args.mode) + " is not a run mode.");
+    console.error("  modes: " + RUN_MODES.join(", "));
+    process.exit(1);
+  }
   const url = args.url;
   const component = args.component;
   const step = Number(args.step);
@@ -175,6 +233,13 @@ async function main(): Promise<void> {
     );
     console.log("jobId:            " + job.id);
     console.log("actor:            " + actor);
+    console.log("mode:             " + mode);
+    console.log(
+      "chain work:       " +
+        (mode === "documentary-only"
+          ? "DISABLED by owner instruction — branch not entered"
+          : "permitted if S4's own prerequisites are met"),
+    );
 
     // The renderer is not wired into the engine by default — a deployment
     // that never installs it simply keeps whatever the static path found.
@@ -224,6 +289,9 @@ async function main(): Promise<void> {
       project: { id: project.id, name: project.name, slug: project.slug, ticker: project.ticker },
       searchGateway: singleUrlSearch,
       queryProposer: noModelProposer,
+      // The owner's instruction, passed through to the one seam that can
+      // keep it structurally: the executor skips the whole on-chain branch.
+      chainAcquisition: mode === "documentary-only" ? "DOCUMENTARY_ONLY" : "ENABLED",
       // contentFetcher and evidenceExtractor deliberately absent — the
       // executor's own preflight resolves the REAL ones.
     });
@@ -346,7 +414,13 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((e) => {
-  console.error("ACQUISITION FAILED: " + String(e?.stack ?? e?.message ?? e));
-  process.exit(1);
-});
+// Only runs when executed as a process, never on import — the same guard
+// rendered-docs-child.ts uses. Without it the argument and mode contracts
+// below could not be tested at all, because importing the module would
+// run an acquisition.
+if (process.argv[1] && process.argv[1].endsWith("alpha-acquire-url.ts")) {
+  main().catch((e) => {
+    console.error("ACQUISITION FAILED: " + String(e?.stack ?? e?.message ?? e));
+    process.exit(1);
+  });
+}

@@ -345,6 +345,38 @@ valid code, is `NO_NAVIGATION_RESPONSE` — unverifiable is not the same as fine
 One limit remains: a failed render is still never evidence and never fails the
 attempt, so the stage name is an observation rather than a verdict.
 
+## Documentary-only mode: chain work refused by instruction, not by state
+
+The exact-URL owner acquisition entrypoint builds the **real** S4 executor, and
+that executor contains a structured on-chain branch driven by documentary
+locators already admitted **for the project** — not merely for the job. So a run
+on a project with no admitted locators performs no RPC, but that is a property of
+the **database**, not of the code. The entrypoint's comment once claimed "NO
+CHAIN CALL" by reading its own import graph; that claim was wrong about what
+matters, and is corrected.
+
+`--mode=documentary-only` makes the guarantee structural. The guard wraps the
+**whole** branch — the locator read, the intent selection, the retriever
+resolution and every call are skipped together — so no RPC can be issued whatever
+the database holds. It is deliberately **not** implemented by injecting a no-op
+retriever: that would skip the calls while still entering the branch, which is
+the same state-dependent guarantee in a different costume.
+
+The default is unchanged, so nothing that does not ask for the mode behaves
+differently. Its boundary test proves both halves against one fixture — the
+retriever **is** reached in the ordinary mode and is **not** reached in
+documentary-only mode — because a zero on its own would not distinguish the guard
+from an absent retriever.
+
+Unknown arguments are **refused rather than ignored**, and the parser accepts
+hyphens like every other owner script. A misspelt safety flag that a parser drops
+in silence would run with chain work enabled while the operator believed it off.
+
+**Which projects may execute live is a closed enumerated allowlist**,
+`INTERNAL_ALPHA_LIVE_PROJECT_SLUGS`. Membership is the only place a project slug
+appears in live-execution control: the engine branches on capability and
+authority, never on identity.
+
 ## Rendering: two ways in, one set of gates
 
 The isolated renderer is reachable two ways, and both pass through the same
