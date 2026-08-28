@@ -4,56 +4,46 @@
 
 ## NONE — awaiting owner direction
 
-The platform-independence constraint — **ATLAS is the product; Telegram is only
-the first interface** — is recorded as an **ACTIVE** architectural invariant
-(D-125). Documentation and audit only: **no production code changed**, no
-client built, no Raydium/Proof behaviour touched.
+The Decision Register is caught up to `b5a95aa`. **D-126** (live allowlist
+extended to `{pump_fun, raydium}`) and **D-127** (documentary-only acquisition
+mode) are registered LOCKED. Register-and-docs only: **no production code
+changed**, no live calls, no Raydium research.
 
-### What was recorded, and where
+### What was done
 
-- **Canonical doc:** `docs/PLATFORM_INDEPENDENT_ARCHITECTURE.md` — the
-  dependency law (CLIENT → APPLICATION → CORE; reverse edge forbidden), the
-  verified repository mapping, the Telegram coupling audit, forbidden
-  couplings, the removal test, and the honest 14-point acceptance matrix.
-- **Register:** `docs/DECISIONS.md` **D-125** (LOCKED), same commit.
-- **ARCHITECTURE.md** — the law only. **CURRENT_STATE.md** — one ACTIVE note
-  (explicitly distinguished from the *future* D-124 spec). **BACKLOG.md** —
-  future clients/adapters as unscheduled references. **INDEX.md** — one nav
-  line.
+- **Verified against current code first, not assumed** — all eight facts hold:
+  `b5a95aa` is an ancestor of HEAD; the allowlist is exactly
+  `{pump_fun, raydium}` (`live-executor.ts:56`); `documentary-only` maps to
+  `DOCUMENTARY_ONLY` and the omitted flag to `ENABLED`
+  (`alpha-acquire-url.ts:294`); the guard wraps the complete on-chain branch
+  (`s4-executor.ts:869` — locator read is inside the `else`); the retriever is
+  unreachable in the mode (boundary test asserts exactly 0 spy calls); unknown
+  arguments and invalid mode values fail closed.
+- **D-126** uses the register's native amendment convention: a new later row
+  that names D-122, does not reopen it, and satisfies D-122's own requirement
+  that any change to its data boundary be a new explicit owner decision. D-122's
+  historical text is untouched.
+- **D-127** records the structural no-RPC contract, the corrected operator
+  wording (chain work is CONDITIONAL without the flag — never "NO CHAIN CALL"
+  generally), and the fail-closed CLI behaviour.
 
-### The audit result (report only, per instruction)
+### Current-state doc corrections (historical records preserved)
 
-**Zero Core violations.** Telegram exists only at the edge: the auth chain
-(`app/api/auth/telegram/` → `src/server/auth/`), the client
-`PlatformAdapter` (`src/client/platform.ts`, with a `web` fallback already in
-place), and the SDK script tag. `package.json` carries no Telegram SDK. The
-single engine string match is `t.me`/`telegram.me` inside `SOCIAL_DOMAINS` —
-source-classification data about the external web, not coupling.
+Two stale present-tense sentences in `CURRENT_STATE.md`'s RPC-caveat paragraph
+were corrected: a later *default-mode* run would enter the chain branch, and the
+script's old "no chain call" claim was removed in `b5a95aa`. The explicitly
+marked "Previously" paragraph (allowlist `{pump_fun}`) stays as a historical
+record; `docs/implementation/` freeze documents stay untouched as historical.
+D-124, D-125, both canonical spec documents, and Raydium research conclusions
+are untouched.
 
-Key mapping facts, verified not assumed: canonical identity is `users.id` with
-`user_identities` as generic provider attachment; every domain FK references
-the internal uuid; entitlement is computed from subscription state and
-**nothing reads `billingProvider`**; `evaluateGates` is one function for
-preview and enforcement; no client/app file imports `src/server/engine`; no
-payment-processing code exists at all; only tests write `proofs` (S8/S9 not
-started — a roadmap fact, not a platform gap).
+### Where the active research work stands (unchanged)
 
-One denomination residue recorded for later, not fixed: `price_stars_at_purchase`
-/ `ari_core_price_stars` bake Stars into the billing record. De-denominate when
-a second billing adapter is actually built.
-
-### Still flagged from earlier (unchanged)
-
-The raydium-allowlist and documentary-only-mode owner decisions from `b5a95aa`
-are still not register rows; D-122's text still names the allowlist as
-`{pump_fun}`. Catch-up registration remains its own owner act.
-
-### Where the active research work stands (unchanged by this task)
-
-Raydium: identity ACTIVE, buyback `.md` route classified `OFFICIAL_DOCS`,
-alpha allowlist includes `raydium`, documentary-only mode available, **0
-Evidence, 0 jobs**, chain gate locked. The prepared first acquisition command
-is recorded in CURRENT_STATE and `git log`.
+Raydium: identity ACTIVE, buyback `.md` route classified `OFFICIAL_DOCS`, alpha
+allowlist includes `raydium`, documentary-only mode available, **0 Evidence,
+0 jobs**, chain gate locked. The prepared first acquisition command is recorded
+in CURRENT_STATE and `git log`; running it needs an owner-authorized live
+window.
 
 ### Standing boundaries
 

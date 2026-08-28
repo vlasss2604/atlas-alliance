@@ -596,7 +596,8 @@ through the normal pipeline, and not before.
 
 **Acquisition is no longer blocked.** `raydium` was added to
 `INTERNAL_ALPHA_LIVE_PROJECT_SLUGS` 2026-08-28, which is now exactly
-`{ pump_fun, raydium }` — a closed enumerated set, verified by test. All four
+`{ pump_fun, raydium }` — a closed enumerated set, verified by test, registered
+post-factum as **D-126** (allowlist) and **D-127** (documentary-only mode). All four
 prerequisites pass. A new `--mode=documentary-only` makes chain work refused **by
 instruction rather than by state**; see `ARCHITECTURE.md`. The paragraph below
 records the position that held before that change.
@@ -618,9 +619,11 @@ is `literallyPresent`, `validationResult CONFIRMED`, on Evidence that is
 `officiality CONFIRMED` with a `sourceClass` in the admissible set, from a source
 that is not `BROKEN`, capped at 8. Raydium has none today, so a first run cannot
 reach RPC **by state**. Once documentary Evidence carries those locators, a later
-run of the same script **would** enter that branch and issue real RPC. The
-script's "no chain call" note is about its own import graph, not about the
-executor it builds.
+run of the same script in its **default mode** would enter that branch and
+issue real RPC — which is exactly why `--mode=documentary-only` exists
+(D-127): in that mode the branch is not entered at all, whatever the database
+holds. The script's operator contract now states chain work as conditional;
+its old "no chain call" claim was removed in `b5a95aa`.
 
 **Nothing about either page's content is known.** Fee source, allocation share,
 executing address, destination and supply effect are all **unknown, not absent**.
