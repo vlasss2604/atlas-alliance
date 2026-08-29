@@ -232,36 +232,45 @@ mattered.
 
 ## Previously — the pipeline ended at S7 and no Proof was ever written
 
-As verified before the fix: `run-job.ts` ran S4 → S5 → S6
-(`assembleAndPersistMechanism`) → S7 (`evaluateAndPersistClaimSupport`) and
-returned. **There was no S8.** The `proofs` table exists with its locked shape
-(verdict, confidence, 7-layer `layers`, `researchCutoff`, `visibility
-PRIVATE`, `verificationStatus`) and `memory/verification.ts` reads it, but the
-only `insert(proofs)` calls in the repository are in tests. Consequently
-`evidence.proof_id` is null on every row ever written and the `PROOF_BOUND`
-half of the ownership model has never occurred.
+> **HISTORICAL.** Everything in this section describes the state BEFORE S8
+> was built, and none of it is current. For the current state see "S8 exists:
+> the pipeline now ends in a Proof" above.
 
-Three product consequences: `GET /api/research-jobs/[id]` returns raw engine
-projections rather than a Proof, so internal complexity leaks to the surface;
-Research Memory promotion is gated on a **VERIFIED Proof** (D-041/D-055), so
-with no Proof writer the learning loop is structurally blocked; and no object
-exists for any downstream feature to render or cite.
+As verified at the time: `run-job.ts` ran S4 → S5 → S6
+(`assembleAndPersistMechanism`) → S7 (`evaluateAndPersistClaimSupport`) and
+returned. **There was no S8.** The `proofs` table already existed with its
+locked shape (verdict, confidence, 7-layer `layers`, `researchCutoff`,
+`visibility PRIVATE`, `verificationStatus`) and `memory/verification.ts` read
+it, but the only `insert(proofs)` calls in the repository were in tests.
+Consequently `evidence.proof_id` was null on every row ever written and the
+`PROOF_BOUND` half of the ownership model had never occurred.
+
+Three product consequences held then: `GET /api/research-jobs/[id]` returned
+raw engine projections rather than a Proof, so internal complexity leaked to
+the surface; Research Memory promotion is gated on a **VERIFIED Proof**
+(D-041/D-055), so with no Proof writer the learning loop was structurally
+blocked; and no object existed for any downstream feature to render or cite.
+
+Of those three, the API projection is the one that **still stands today** — it
+is an open BACKLOG item, not a consequence S8 removed. The other two are
+closed.
 
 That was the single biggest product bottleneck, and it is now closed.
 
-**S8 is now half-built and deliberately stopped.** The pure builder exists —
-`proof-builder.ts`, no IO, no model, deterministic — producing the verdict
-(copied from S7, never recomputed), the seven locked layers (5 empty per
-D-083, 6 assembled only from recorded gaps), resolved citations and a closed
-refusal when S7 is absent. 21 offline tests pin it.
+**The intermediate step, for the record — RESOLVED, describes no current
+state.** S8 landed in two rounds rather than one. In the first (commit
+`f3a1a87`), the pure builder was written and then deliberately stopped short
+of persistence: `proofs.confidence` is `smallint NOT NULL CHECK BETWEEN 0 AND
+100`, and while D-081/D-110/§11.4 already locked that the number must be
+deterministic, code-owned and never model-authored, **no decision then fixed
+the mapping to 0..100**. Inventing one would have invented exactly what the
+register says must be fixed deliberately, so the store and the `run-job.ts`
+wiring were left unwritten and the gap was put to the owner instead.
 
-**It cannot be persisted, and that is a contract gap, not an oversight.**
-`proofs.confidence` is `smallint NOT NULL CHECK BETWEEN 0 AND 100`, and while
-D-081/D-110/§11.4 lock that the number is deterministic, code-owned and never
-model-authored, **no decision fixes the mapping to 0..100**. Inventing one
-would invent exactly what the register says must be fixed deliberately, so
-the store and the `run-job.ts` wiring are not written. The four questions a
-decision must answer are in `CURRENT_TASK.md`.
+That gap was closed by **D-135** (commit `847fe63`), which ratified confidence
+as a closed ordinal band. The builder, the store and the wiring all exist now —
+see "S8 exists: the pipeline now ends in a Proof" above for the current state.
+Nothing in this paragraph describes the system as it stands.
 
 ## Open
 
