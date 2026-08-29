@@ -210,6 +210,54 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## THE FIRST REAL PERSISTED PROOF (2026-08-29, job `6bc1a1ca-…`)
+
+A real D-128 two-window run produced the project's **first persisted Proof**:
+`b192ab99-…`, from document `a0513491-…` (now consumed). Verified read-only:
+`PRIVATE` / `DRAFT`, verdict `INSUFFICIENT_EVIDENCE`, confidence **60 =
+STRONG**, all seven layers with layer 5 empty, `researchCutoff` null. **S9
+projects it with no special handling** and a different user's read returns
+null. The resumed path yields the ordinary canonical Proof.
+
+Research state behind it: 1 Evidence row (`OFFICIAL_DOCS` / `CONFIRMED` /
+`SUPPORTS`, step 6 `DESTINATION`), S5 `SUPPORTED`, S6 one flow with
+`MISSING_COMPONENT` gaps at `SOURCE_OF_VALUE` and `FLOW_PATH`, S7
+`INSUFFICIENT_EVIDENCE` / `["INTENT_NOT_CLASSIFIED"]`, **0 bound Evidence**.
+
+**Why the claim was not evaluated, established from the DB rather than the
+reason-code name:** S7's persisted `intent` is the string **`"UNKNOWN"`**.
+`loadIntentAndTaskType` reads `interpretations WHERE research_job_id = job`,
+and **this job has 0 interpretation rows** — the resumed path creates its job
+directly and never creates or links one, while the product path passes an
+`interpretationId` and links it. `UNKNOWN` is in `UNCLASSIFIED_INTENTS`, so
+`evaluateClaimSupport` short-circuits with empty `requirementResults` before
+any CORE lookup. The machinery is fine: 19 of 45 interpretations in the DB are
+linked, carrying real classified intents.
+
+**`runMemoryPlanningStage` is not a substitute** — planning decides which
+components to research; interpretation decides what the user asked. S7 reads
+only the latter.
+
+**S5 SUPPORTED did not make S7 SUPPORTED** because D-103 fixes that boundary:
+S5/S6 say what is structurally established, S7 whether it suffices for the
+user's claim. With no claim there is nothing to be sufficient for. **0 bound
+Evidence is correct**: S8 cites only through `requirementResults[].provenance`,
+which was empty, so binding the DESTINATION row would assert support for a
+claim never evaluated.
+
+**Observed, not fixed:** layer 6 ("what could change this conclusion") is empty
+on this Proof, because S8 sources it from requirement blocking gaps, claim
+context gaps and non-`SUPPORTED` component reason codes — none of which this
+job had — and does not read S6's flow gaps. An `INSUFFICIENT_EVIDENCE` Proof
+with an empty change-block reads as less honest than the engine is.
+
+**The fix, not yet implemented:** Stage B must consume a real, already
+classified interpretation and link it to the job it creates, exactly as the
+product path does. Classification cannot be done inline — the interpreter is a
+model call — so it must be created earlier via `POST /api/interpretations`.
+Detail in `CURRENT_TASK.md`. Note: all 8 unlinked classified interpretations
+are `pump_fun`; **none exists for raydium**.
+
 ## The two required network states are mutually exclusive (2026-08-29)
 
 **Two** owner windows, MantaRay **ON**, Stage A against
