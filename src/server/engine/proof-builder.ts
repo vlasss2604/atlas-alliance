@@ -5,6 +5,12 @@ import type {
   MechanismGapRef,
 } from "./claim-evaluator";
 import type { ComponentReconciliationStatus } from "./component-reconciler";
+import {
+  computeProofConfidence,
+  type ConfidenceBand,
+  type ConfidenceBindingReason,
+  type ConfidenceScore,
+} from "./proof-confidence";
 
 // Phase 6, S8 — the Proof builder.
 //
@@ -22,15 +28,12 @@ import type { ComponentReconciliationStatus } from "./component-reconciler";
 // рендерить confidence и не вправе самостоятельно изменять суждение
 // истины S7").
 //
-// WHAT THIS MODULE DELIBERATELY DOES NOT PRODUCE: the numeric
-// `proofs.confidence`. D-081 and D-110 lock that the number is a
-// deterministic code-owned function and never a model output, and
-// phase-6-plan.md §11.4 names its inputs (component states, source
-// classes, freshness, constraints) — but no decision fixes the actual
-// mapping to 0..100. Inventing one here would be inventing the very
-// thing the register says must be fixed deliberately, so the draft
-// carries NO confidence and cannot be persisted until the contract is
-// decided. See CURRENT_TASK.md, "the confidence contract gap".
+// CONFIDENCE is computed by proof-confidence.ts under D-135 — a closed
+// ordinal band (LOW 20 / LIMITED 40 / STRONG 60 / VERY_STRONG 80), never
+// a probability and never a percentage. It is kept in its own module
+// because it is the one part of S8 with its own ratified contract, and it
+// must stay separately testable. D-081/D-110 hold: deterministic, code
+// owned, never model-authored.
 
 export const PROOF_LAYERS_VERSION = 1;
 
@@ -104,6 +107,11 @@ export interface ProofDraft {
   researchJobId: string;
   // Copied from S7. Never recomputed.
   verdict: ProofVerdict;
+  // D-135. `score` is the database/API ENCODING of `band`; the band is
+  // the semantic value. Never rendered as a percentage.
+  confidenceBand: ConfidenceBand;
+  confidenceScore: ConfidenceScore;
+  confidenceBindingReasons: ConfidenceBindingReason[];
   layers: {
     version: number;
     layers: ProofLayer[];
@@ -128,7 +136,13 @@ export type ProofVerdict =
   | "INSUFFICIENT_EVIDENCE"
   | "NOT_APPLICABLE";
 
-const VERDICT_FROM_CLAIM_STATUS: Record<ClaimSupportStatus, ProofVerdict> = {
+// The verdicts S8 can actually emit. NOT_APPLICABLE is excluded at the
+// TYPE level, so the compiler — not a convention — guarantees S8 never
+// invents it, and confidence's ceiling table stays exhaustive over
+// exactly the reachable set.
+export type ProofVerdictFromClaim = Exclude<ProofVerdict, "NOT_APPLICABLE">;
+
+const VERDICT_FROM_CLAIM_STATUS: Record<ClaimSupportStatus, ProofVerdictFromClaim> = {
   SUPPORTED: "SUPPORTED",
   PARTIALLY_SUPPORTED: "PARTIALLY_SUPPORTED",
   NOT_SUPPORTED: "NOT_SUPPORTED",
@@ -253,11 +267,27 @@ export function buildProof(input: ProofBuilderInput): ProofBuildOutcome {
     (r) => r.optionality === "REQUIRED" && r.status !== "SATISFIED",
   );
 
+  // D-135. Computed from persisted closed state only, over EVERY
+  // component result of the job (see ConfidenceInput's doc comment for
+  // why all of them and not just the cited ones).
+  const confidence = computeProofConfidence({
+    verdict,
+    hasRequiredBlockingGap: cs.requirementResults.some(
+      (r) => r.optionality === "REQUIRED" && r.blockingGaps.length > 0,
+    ),
+    hasClaimContextGap: cs.contextGaps.length > 0,
+    componentResults: input.componentResults.map((r) => ({ status: r.status, reasonCodes: r.reasonCodes })),
+  });
+
   const layer1: string[] = [`Verdict: ${verdict}.`];
-  // Layer 1 names confidence as unresolved rather than silently omitting
-  // it: the locked layer includes it, and pretending otherwise would hide
-  // the open contract instead of surfacing it.
-  layer1.push("Confidence: not yet contracted (see D-081 / D-110); this draft carries no number.");
+  // The band is the statement; the score is named as its encoding, never
+  // as a percentage, so a reader cannot mistake it for a probability.
+  layer1.push(
+    `Confidence: ${confidence.band} (band encoding ${confidence.score}; ` +
+      `a structural indicator for this verdict, not a probability).`,
+  );
+  // WHY it landed there — only the caps that actually bound it.
+  layer1.push(`Confidence bounded by: ${confidence.bindingReasons.join(", ")}.`);
 
   const layer2: string[] = [`For the question "${cs.intent}", the evidence gathered is: ${verdict}.`];
 
@@ -327,6 +357,9 @@ export function buildProof(input: ProofBuilderInput): ProofBuildOutcome {
     proof: {
       researchJobId: input.researchJobId,
       verdict,
+      confidenceBand: confidence.band,
+      confidenceScore: confidence.score,
+      confidenceBindingReasons: confidence.bindingReasons,
       layers: { version: PROOF_LAYERS_VERSION, layers },
       citedEvidenceIds: sortedUnique(citedIds),
       citations,

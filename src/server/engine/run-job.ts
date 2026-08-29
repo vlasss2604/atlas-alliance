@@ -12,6 +12,7 @@ import { loadActivePatternVersion, MissingActivePatternError } from "./active-pa
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
+import { buildAndPersistProof } from "./proof-store";
 
 // Phase 6, S4 — the actual production wiring point: given a jobId, load
 // its frozen entitlement/budget, its persisted Research Boundary
@@ -155,6 +156,11 @@ export async function runS4ResearchJob(
       if (reconciled.length > 0) {
         await assembleAndPersistMechanism(db, jobId, now);
         await evaluateAndPersistClaimSupport(db, jobId, now);
+        // S8 belongs on this path for the same reason S6/S7 do: a job
+        // that did real, already-paid-for research before running out of
+        // budget has a projectable result, and its Proof will honestly
+        // carry whatever gaps the exhausted budget left behind.
+        await buildAndPersistProof(db, jobId);
       }
     }
     throw e;
@@ -183,6 +189,16 @@ export async function runS4ResearchJob(
   // returns null (no-op) when no S6 projection exists yet for this job —
   // S7 never runs ahead of S6, and this is not a failure, just "not yet".
   await evaluateAndPersistClaimSupport(db, jobId, now);
+
+  // Phase 6, S8 — the Proof. The same derived-projection discipline as S6
+  // and S7 above: it reads only what S5/S6/S7 already persisted, makes no
+  // model, network, RPC or search call, and re-running it is deterministic
+  // and free. It refuses (writes nothing) when there is no S7 result, when
+  // the job has no project, or when a human has already REVIEWED/VERIFIED
+  // the existing Proof — every one of those is a legitimate outcome, not a
+  // failure, so the refusal is returned rather than thrown and the job
+  // result is unchanged by it.
+  await buildAndPersistProof(db, jobId);
 
   return result;
 }

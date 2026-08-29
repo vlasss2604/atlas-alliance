@@ -246,12 +246,16 @@ describe("layers: the locked shape, and the mandatory block", () => {
     expect(out.proof!.gaps.map((g) => g.component)).toEqual(["SOURCE_OF_VALUE"]);
   });
 
-  it("layer 1 states the verdict and names confidence as UNRESOLVED rather than hiding it", () => {
+  it("layer 1 states the verdict, the band, its encoding and what bound it — never a percentage", () => {
     const out = buildProof(input());
     const l1 = layerOf(out, 1).lines.join(" ");
     expect(l1).toContain("Verdict: SUPPORTED");
-    expect(l1.toLowerCase()).toContain("confidence");
-    expect(l1).toContain("not yet contracted");
+    expect(l1).toContain("Confidence: VERY_STRONG");
+    expect(l1).toContain("band encoding 80");
+    expect(l1).toContain("not a probability");
+    expect(l1).toContain("Confidence bounded by: VERDICT_CEILING");
+    // 15. the score is never formatted as a percentage, anywhere.
+    expect(JSON.stringify(out.proof)).not.toContain("%");
   });
 });
 
@@ -262,12 +266,20 @@ describe("the builder is a projection: pure, deterministic, and silent about wha
     expect(JSON.stringify(a)).toBe(JSON.stringify(b));
   });
 
-  it("emits NO confidence value — the contract gap is not papered over", () => {
-    const out = buildProof(input());
-    // Nothing anywhere in the draft is a numeric confidence score.
-    expect(out.proof).not.toHaveProperty("confidence");
-    const serialized = JSON.stringify(out.proof);
-    expect(serialized).not.toMatch(/"confidence"\s*:\s*\d/);
+  it("16. confidence never changes the verdict — the two are computed independently", () => {
+    // The weakest possible confidence still leaves a SUPPORTED verdict
+    // SUPPORTED, and the strongest leaves INSUFFICIENT_EVIDENCE alone.
+    const weak = buildProof(
+      input({ componentResults: [componentRow({ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"] })] }),
+    );
+    expect(weak.proof!.verdict).toBe("SUPPORTED");
+    expect(weak.proof!.confidenceScore).toBe(20);
+
+    const strong = buildProof(
+      input({ claimSupport: { ...input().claimSupport!, status: "INSUFFICIENT_EVIDENCE" } }),
+    );
+    expect(strong.proof!.verdict).toBe("INSUFFICIENT_EVIDENCE");
+    expect(strong.proof!.confidenceScore).toBe(60);
   });
 
   it("carries no free text: layer content is templated from recorded values only", () => {
@@ -308,6 +320,117 @@ describe("the builder is a projection: pure, deterministic, and silent about wha
 // all-excluded one). Nothing is fetched and no verdict is re-decided —
 // the point is that each already-recorded state yields the honest Proof
 // it implies.
+describe("D-135 acceptance: the five ratified fixture cases", () => {
+  it("A. clean documentary SUPPORTED -> 80 / VERY_STRONG", () => {
+    const out = buildProof(
+      input({
+        componentResults: [componentRow({ status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["doc-1"] })],
+        claimSupport: {
+          ...input().claimSupport!,
+          status: "SUPPORTED",
+          requirementResults: [req({ provenance: { flowIds: [], componentResultKeys: [{ step: 6, component: "DESTINATION" }], evidenceIds: ["doc-1"] } })],
+        },
+        existingEvidenceIds: ["doc-1"],
+      }),
+    );
+    expect(out.proof!.verdict).toBe("SUPPORTED");
+    expect(out.proof!.confidenceScore).toBe(80);
+    expect(out.proof!.confidenceBand).toBe("VERY_STRONG");
+  });
+
+  it("B. authority-limited PARTIALLY_SUPPORTED (ONCHAIN_VERIFIABLE / CLAIMED) -> 60 / STRONG", () => {
+    const out = buildProof(
+      input({
+        claimSupport: { ...input().claimSupport!, status: "PARTIALLY_SUPPORTED", requirementResults: [req({ status: "PARTIAL" })] },
+        componentResults: [
+          componentRow({ status: "PARTIALLY_SUPPORTED", reasonCodes: ["INSUFFICIENT_AUTHORITY"], supportingEvidenceIds: ["chain-1"] }),
+        ],
+        existingEvidenceIds: ["chain-1"],
+      }),
+    );
+    expect(out.proof!.verdict).toBe("PARTIALLY_SUPPORTED");
+    expect(out.proof!.confidenceScore).toBe(60);
+    expect(out.proof!.confidenceBand).toBe("STRONG");
+    expect(out.proof!.confidenceBindingReasons).toContain("INSUFFICIENT_AUTHORITY");
+  });
+
+  it("C. ALL_EVIDENCE_EXCLUDED with a required blocking gap -> 40 / LIMITED", () => {
+    const excluded = ["x1", "x2", "x3", "x4", "x5", "x6"];
+    const out = buildProof(
+      input({
+        claimSupport: {
+          ...input().claimSupport!,
+          status: "INSUFFICIENT_EVIDENCE",
+          requirementResults: [
+            req({
+              status: "UNSATISFIED",
+              blockingGaps: [{ flowId: null, kind: "MISSING_COMPONENT", component: "DESTINATION", afterStep: 6 }],
+              provenance: { flowIds: [], componentResultKeys: [{ step: 6, component: "DESTINATION" }], evidenceIds: excluded },
+            }),
+          ],
+        },
+        componentResults: [
+          componentRow({
+            status: "INSUFFICIENT_EVIDENCE",
+            reasonCodes: ["ALL_EVIDENCE_EXCLUDED"],
+            supportingEvidenceIds: [],
+            excludedEvidence: excluded.map((id) => ({ evidenceId: id, reason: "RELATIONSHIP_NOT_SUPPORTING" })),
+          }),
+        ],
+        existingEvidenceIds: excluded,
+      }),
+    );
+    expect(out.proof!.verdict).toBe("INSUFFICIENT_EVIDENCE");
+    expect(out.proof!.confidenceScore).toBe(40);
+    expect(out.proof!.confidenceBand).toBe("LIMITED");
+    expect(out.proof!.confidenceBindingReasons).toContain("REQUIRED_BLOCKING_GAP");
+    expect(out.proof!.citedEvidenceIds).toEqual([]);
+  });
+
+  it("D. NO_EVIDENCE_FOUND -> 20 / LOW", () => {
+    const out = buildProof(
+      input({
+        claimSupport: { ...input().claimSupport!, status: "INSUFFICIENT_EVIDENCE", requirementResults: [req({ status: "UNSATISFIED" })] },
+        componentResults: [
+          componentRow({ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"], supportingEvidenceIds: [] }),
+        ],
+        existingEvidenceIds: [],
+      }),
+    );
+    expect(out.proof!.verdict).toBe("INSUFFICIENT_EVIDENCE");
+    expect(out.proof!.confidenceScore).toBe(20);
+    expect(out.proof!.confidenceBand).toBe("LOW");
+  });
+
+  it("E. strong NOT_SUPPORTED from positive contradiction, confirmed authority, no limiting gaps -> 80 / VERY_STRONG", () => {
+    const out = buildProof(
+      input({
+        claimSupport: {
+          ...input().claimSupport!,
+          status: "NOT_SUPPORTED",
+          reasonCodes: ["DESTINATION_MISMATCH"],
+          requirementResults: [
+            req({
+              status: "CONTRADICTED",
+              reasonCodes: ["DESTINATION_MISMATCH"],
+              provenance: { flowIds: [], componentResultKeys: [{ step: 6, component: "DESTINATION" }], evidenceIds: ["doc-1"] },
+            }),
+          ],
+        },
+        componentResults: [
+          componentRow({ status: "CONTRADICTED", reasonCodes: [], supportingEvidenceIds: ["doc-1"] }),
+        ],
+        existingEvidenceIds: ["doc-1"],
+      }),
+    );
+    expect(out.proof!.verdict).toBe("NOT_SUPPORTED");
+    expect(out.proof!.confidenceScore).toBe(80);
+    expect(out.proof!.confidenceBand).toBe("VERY_STRONG");
+    // The contradiction IS the finding, so it does not cap its own verdict.
+    expect(out.proof!.confidenceBindingReasons).toEqual(["VERDICT_CEILING"]);
+  });
+});
+
 describe("existing persisted states produce the Proof they imply", () => {
   it("a documentary SUPPORTED component under a SUPPORTED claim yields SUPPORTED with citations and no gaps", () => {
     const out = buildProof(

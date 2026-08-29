@@ -263,7 +263,54 @@ documentary `SUPPORTED` that Raydium's `DESTINATION` already carries is
 untouched by a later chain read.
 
 Downstream: `mechanism-assembler.ts` (S6) composes the chain,
-`claim-evaluator.ts` (S7) evaluates claim requirements.
+`claim-evaluator.ts` (S7) evaluates claim requirements, and **`S8` writes the
+Proof**.
+
+**S8 — the Proof Writer — is a projection, not a reasoning engine.**
+`proof-builder.ts` is pure (no IO, no model, no clock, no randomness) and
+`proof-store.ts` persists what it produces; both are wired after S7 in
+`run-job.ts` as the same kind of re-runnable derived projection S6 and S7
+already are. The verdict is **copied** from S7's `ClaimSupportStatus` — there
+is no second verdict algorithm, no majority vote over Evidence and no
+confidence-based override, so a Proof can never be more certain than the claim
+support beneath it. `NOT_APPLICABLE` exists in the column but is excluded at
+the *type* level, because S7 cannot produce it and S8 must not invent it.
+
+**Citations resolve or they do not appear.** An id is cited only if the
+requirement names it, the component treated it as *supporting*, and it exists
+as an Evidence row for the job — so an excluded row can never be cited as
+support, another component's evidence cannot leak in, and a dangling reference
+is unrepresentable. Only cited rows get `evidence.proof_id`, which is what
+finally makes the `PROOF_BOUND` half of D-088's ownership model reachable.
+The Proof row and every binding are written in **one transaction**, so a
+half-bound Proof cannot exist.
+
+**Layers follow D-083 exactly**: seven canonical layers, layer 5 deliberately
+empty, and layer 6 — "what could change this conclusion" — assembled only from
+recorded blocking gaps, context gaps, non-`SUPPORTED` component reason codes
+and exclusion reasons. There is no filler path; it is empty only when nothing
+is unresolved.
+
+**Confidence is a closed ordinal band (D-135)**, computed by
+`proof-confidence.ts`: `LOW 20 / LIMITED 40 / STRONG 60 / VERY_STRONG 80`,
+never a probability and never rendered as a percentage. The verdict sets a
+ceiling and each recorded signal imposes a cap; the result is the minimum, and
+no arithmetic is performed. Its cap table is `Record<ResultReasonCode, …>`, so
+a new reason code without a decided cap is a **compile error**, and an
+unrecognised code reaching runtime **fails closed to LOW** rather than
+inflating. Deliberately non-monotonic in verdict positivity — a reasoned
+`INSUFFICIENT_EVIDENCE` can outrank a blocked `PARTIALLY_SUPPORTED` — because
+otherwise the field would merely re-encode the verdict.
+
+**Fail closed, three ways:** no S7 projection → `NO_CLAIM_SUPPORT` and no
+Proof (never an empty or `UNKNOWN` placeholder); a job with no project →
+`NO_PROJECT` (`proofs.project_id` is NOT NULL while the job's is nullable);
+and a Proof a human already `REVIEWED`/`VERIFIED` → `PROOF_NOT_DRAFT`, never
+silently rewritten, because that status gates memory promotion (D-041/D-055).
+Only a `DRAFT` may be replaced, which is what makes a re-run stable rather
+than duplicating — the DB's `uq_proofs_research_job` guarantees the rest.
+`research_cutoff` stays NULL: its semantics are not locked, and the column
+allows honesty.
 
 ## What a failure may say about itself
 

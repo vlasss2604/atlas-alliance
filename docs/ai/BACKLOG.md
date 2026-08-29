@@ -69,17 +69,19 @@ together they stopped project #2 before it could start. Kept for context.
 
 ### Product surface
 
-- **BLOCKING (S8): the confidence contract is undecided.** `proofs.confidence`
-  is `smallint NOT NULL CHECK BETWEEN 0 AND 100`, and D-081 / D-110 /
-  `phase-6-plan.md` §11.4 lock only that the number is deterministic,
-  code-owned, computed in Proof Core from named inputs (component states,
-  source classes, freshness, constraints) and never model-authored — the
-  mapping to 0..100 is explicitly left to code and has never been fixed. Until
-  it is, **no Proof can be persisted** and S8 stops at the pure builder. The
-  four questions a decision must settle (ordinal vs cardinal; which inputs and
-  in what precedence; whether the D-074 authority ceiling caps the number; what
-  `INSUFFICIENT_EVIDENCE` scores) are written out in `CURRENT_TASK.md`. Needs a
-  new `D-###`, not an implementation guess.
+- ~~**BLOCKING (S8): the confidence contract is undecided.**~~ **Ratified and
+  implemented 2026-08-29 as D-135** — a closed ordinal band (LOW 20 / LIMITED
+  40 / STRONG 60 / VERY_STRONG 80), never a probability, computed by
+  `proof-confidence.ts` as verdict-ceiling then minimum of recorded caps. The
+  cap table is exhaustive over `ResultReasonCode` at compile time and fails
+  closed to LOW at runtime.
+
+- **The job-detail API still returns engine projections, not the Proof.**
+  `GET /api/research-jobs/[id]` predates S8 and renders claim-support rows,
+  component results and evidence arrays. Now that a Proof exists, this surface
+  should return it (band + verdict + layers + citations) so internal research
+  complexity stops leaking to the client. Deliberately out of scope for the S8
+  milestone, which was engine-side only.
 
 - **Foreign-mint CONTEXT rendering** — Proof/UI must present a foreign-mint
   observation as visually neutral. It is neutral in reconciliation; nothing yet

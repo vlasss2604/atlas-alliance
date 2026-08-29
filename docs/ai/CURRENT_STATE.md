@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-29: **2368 passing, 4 skipped, 1 failing**
-  (2373 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-29: **2405 passing, 4 skipped, 1 failing**
+  (2410 total). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -208,11 +208,33 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
-## The pipeline ends at S7 — no Proof is ever written
+## S8 exists: the pipeline now ends in a Proof
 
-Verified against current code 2026-08-29: `run-job.ts` runs S4 → S5 → S6
+**Closed 2026-08-29.** `run-job.ts` runs S4 → S5 → S6 → S7 → **S8**, and a
+finished job persists one Proof: verdict copied from S7, confidence as a
+closed ordinal band (D-135), the seven locked layers, resolved citations, and
+`evidence.proof_id` bound on cited rows — which makes D-088's `PROOF_BOUND`
+ownership branch reachable for the first time. Contract in `ARCHITECTURE.md`;
+58 offline tests across `proof-builder`, `proof-confidence` and `proof-store`.
+
+**What this unblocks.** Research Memory promotion is gated on a VERIFIED Proof
+(D-041/D-055); until now nothing produced a Proof to verify, so the learning
+loop was structurally blocked rather than merely unbuilt. There is now an
+object for a human to review.
+
+**Not yet done, and deliberately out of scope:** no production job has run S8
+end to end (the pipeline stays behind `research_enabled=false`), and the
+job-detail API still returns engine projections rather than the Proof — wiring
+that surface is its own task.
+
+The section below records the state that held before this, and why it
+mattered.
+
+## Previously — the pipeline ended at S7 and no Proof was ever written
+
+As verified before the fix: `run-job.ts` ran S4 → S5 → S6
 (`assembleAndPersistMechanism`) → S7 (`evaluateAndPersistClaimSupport`) and
-returns. **There is no S8.** The `proofs` table exists with its locked shape
+returned. **There was no S8.** The `proofs` table exists with its locked shape
 (verdict, confidence, 7-layer `layers`, `researchCutoff`, `visibility
 PRIVATE`, `verificationStatus`) and `memory/verification.ts` reads it, but the
 only `insert(proofs)` calls in the repository are in tests. Consequently
@@ -225,7 +247,7 @@ Research Memory promotion is gated on a **VERIFIED Proof** (D-041/D-055), so
 with no Proof writer the learning loop is structurally blocked; and no object
 exists for any downstream feature to render or cite.
 
-This is the current single biggest product bottleneck.
+That was the single biggest product bottleneck, and it is now closed.
 
 **S8 is now half-built and deliberately stopped.** The pure builder exists —
 `proof-builder.ts`, no IO, no model, deterministic — producing the verdict

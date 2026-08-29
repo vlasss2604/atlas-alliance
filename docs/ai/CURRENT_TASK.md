@@ -2,126 +2,94 @@
 
 > Overwrite this file each round. Never append.
 
-## BLOCKED — S8 needs one owner decision: the confidence contract
+## NONE — S8 is complete
 
-Offline implementation. No live call, no model call, no DB mutation, and no
-existing verdict or row altered. **S8 is deliberately incomplete**, on your
-instruction to stop at the confidence gap rather than invent a formula.
+Offline implementation. No live call, no model call, and no existing verdict,
+Evidence row, component result or claim-support row altered.
 
-### What is done
+**The pipeline now ends in a Proof.** `run-job.ts` runs S4 → S5 → S6 → S7 →
+**S8**, and a finished job persists one Proof with `evidence.proof_id` bound on
+the rows it cites — which makes D-088's `PROOF_BOUND` ownership branch
+reachable for the first time in the project's history.
 
-`src/server/engine/proof-builder.ts` — the pure S8 builder. No IO, no model,
-no clock, no randomness: same input, same draft. It produces the verdict, the
-seven locked layers, resolved citations and the recorded gaps, and refuses
-outright when S7 is absent.
+### D-135 ratified and implemented
 
-Pinned by `tests/proof-builder.test.ts` (21 tests, offline).
+Recorded in `docs/DECISIONS.md` as LOCKED. Confidence is a **closed ordinal
+band** — `LOW 20 / LIMITED 40 / STRONG 60 / VERY_STRONG 80` — expressing
+structural confidence in the verdict, never a probability, never a percentage.
+`proof-confidence.ts` computes it: the verdict sets a ceiling, each recorded
+signal imposes a cap, and the result is the **minimum**. No arithmetic, no
+weighting, no citation counting, no source popularity, no model judgement.
 
-### What is BLOCKED, and exactly why
+`0` and `100` are unreachable by construction and asserted so across every
+input combination. The cap table is `Record<ResultReasonCode, …>`, so adding a
+reason code without deciding its cap is a **compile error**, and an
+unrecognised code reaching runtime **fails closed to LOW** rather than
+inflating. Deliberately non-monotonic in verdict positivity — a reasoned
+`INSUFFICIENT_EVIDENCE` (60) outranks a blocked `PARTIALLY_SUPPORTED` (40) —
+because otherwise the field would merely re-encode the verdict.
 
-`proofs.confidence` is `smallint NOT NULL` with `CHECK BETWEEN 0 AND 100`.
-**No Proof can be persisted without a number**, so the store and the
-`run-job.ts` wiring are not written. This is the whole of the blockage.
+All five ratified acceptance cases pass: clean documentary **80**,
+authority-limited chain **60**, all-excluded-with-blocking-gap **40**,
+bare-absence **20**, strong contradiction **80**.
 
-The register locks the *principle* but not the *value*:
+### What S8 refuses to do
 
-- **D-081** — confidence is deterministic, a code function of component
-  states, source classes and constraints; the model never names it. LOCKED.
-- **D-110** — no numeric confidence in S7; the number the Proof schema
-  requires is computed later in Proof Core as a deterministic pure function
-  of `ClaimSupportResult` and the structured state above it. LOCKED.
-- **phase-6-plan.md §11.4** — names the input families (component states,
-  source classes, freshness, presence of constraints) and says only
-  "формула фиксируется в коде".
+Verdict is **copied** from S7 and never recomputed — ten satisfied citations
+under an `INSUFFICIENT_EVIDENCE` claim still yield `INSUFFICIENT_EVIDENCE`.
+`NOT_APPLICABLE` is excluded at the *type* level, so the compiler guarantees
+S8 cannot invent a verdict S7 never made. Confidence never overrides S7:
+the weakest confidence leaves a `SUPPORTED` verdict `SUPPORTED`.
 
-So the inputs are named and the discipline is fixed; the mapping to 0..100 is
-not. Choosing it is a product judgement about what a number shown to a user
-means, not an implementation detail — which is why it stopped here.
+Citations resolve or vanish — an id is bound only if the requirement names it,
+the component treated it as *supporting*, and it exists as an Evidence row for
+the job. Excluded rows are never bound merely for belonging to the job.
 
-**What a decision needs to answer** (each is a real fork, not a detail):
+Fail closed three ways: **no S7 → `NO_CLAIM_SUPPORT`, no Proof** (never an
+empty or `UNKNOWN` placeholder); no project → `NO_PROJECT` (`proofs.project_id`
+is NOT NULL while the job's is nullable); already `REVIEWED`/`VERIFIED` →
+`PROOF_NOT_DRAFT`, never silently rewritten, because that status gates memory
+promotion (D-041/D-055). Only a `DRAFT` is replaced, which makes a re-run
+stable rather than duplicating.
 
-1. **Is it ordinal or cardinal?** A coarse band (e.g. a handful of discrete
-   values) says "structurally stronger/weaker". A fine score reads as a
-   probability, which ATLAS cannot compute and must not imply.
-2. **Which recorded inputs, and in what precedence?** Available today:
-   S7 claim status; requirement satisfaction counts; the authority ceiling
-   actually hit (`INSUFFICIENT_AUTHORITY`, i.e. D-074's `CLAIMED` cap);
-   component statuses; recorded gap count; excluded-evidence count;
-   freshness (`requiresFreshEvidence` / temporal basis).
-3. **Does an authority ceiling cap confidence?** A `CLAIMED`-only chain
-   result cannot exceed `PARTIALLY_SUPPORTED` — should the number carry the
-   same ceiling, or is it independent of verdict?
-4. **What does `INSUFFICIENT_EVIDENCE` score?** Zero, or the confidence that
-   the *insufficiency itself* is correctly established? These are opposite
-   readings and the layers render differently.
+D-083 is untouched: seven layers, **layer 5 empty**, layer 6 assembled only
+from recorded gaps and exclusion reasons. `research_cutoff` stays NULL —
+its semantics are not locked, and I did not invent a second one.
 
-I recommend **ordinal bands** with an authority ceiling, registered as a new
-`D-###`. But it is your call, and the code will implement whatever you fix
-exactly, with a test per band.
+### What this unblocks
 
-Meanwhile the draft is honest about the hole rather than hiding it: layer 1
-reads `Confidence: not yet contracted (see D-081 / D-110); this draft carries
-no number.`, and a test asserts no numeric confidence appears anywhere in the
-draft.
+Research Memory promotion is gated on a **VERIFIED Proof**. Until now nothing
+produced a Proof to verify, so the learning loop was structurally blocked
+rather than merely unbuilt. There is now an object for a human to review.
 
-### What the builder does, and what it refuses to do
+### Honest limits — what is NOT done
 
-**Verdict is copied from S7, never recomputed.** All four
-`ClaimSupportStatus` values map to their namesakes. Pinned: ten satisfied
-citations under an `INSUFFICIENT_EVIDENCE` claim still yield
-`INSUFFICIENT_EVIDENCE` — there is no majority vote and no upgrade path.
-**`NOT_APPLICABLE` is never emitted**: the schema enum has it, S7 cannot
-produce it, so S8 inventing it would be a judgement no stage made.
+1. **No production job has run S8 end to end.** The pipeline stays behind
+   `research_enabled=false`; every test drives the store directly or through
+   fixtures. The first real Proof does not exist yet.
+2. **The job-detail API still returns engine projections, not the Proof.**
+   `GET /api/research-jobs/[id]` predates S8. Now that a Proof exists, that
+   surface should return it — recorded in `BACKLOG.md`, deliberately out of
+   scope for an engine-side milestone.
+3. **Layer prose is templated, not editorial.** D-083 defers the copy system;
+   the lines are mechanical by design and trace to persisted fields.
 
-**Citations resolve or vanish.** An id survives only if the requirement cites
-it, the component treated it as *supporting*, and it exists as an Evidence row
-for the job. So an excluded row can never be cited as support, evidence from a
-component the claim never referenced never appears, and a dangling id is
-structurally impossible. SOURCE ≠ EVIDENCE ≠ FACT ≠ PROOF CLAIM holds: no
-source row and no on-chain artifact can become a citation.
+### Next — the owner's choice
 
-**Layer 5 is empty (D-083)** and never padded. **Layer 6 — "what could change
-this conclusion" — is assembled only from recorded state**: requirement
-blocking gaps, claim context gaps, non-SUPPORTED component reason codes, and
-excluded-evidence reasons. It is empty only when genuinely nothing is
-unresolved; there is no filler path.
-
-**No S7 ⇒ no Proof**, returning the closed refusal `NO_CLAIM_SUPPORT` — never
-an empty or `UNKNOWN` placeholder.
-
-**Insufficient evidence is a valid Proof.** The all-excluded case yields
-`INSUFFICIENT_EVIDENCE`, cites **nothing**, and names both
-`ALL_EVIDENCE_EXCLUDED` and `RELATIONSHIP_NOT_SUPPORTING` in layer 6. Absence
-never becomes support.
-
-### Still to build once confidence is fixed
-
-1. `proof-store.ts` — persist exactly one Proof per job (the DB already
-   enforces this with `uq_proofs_research_job`), `visibility PRIVATE`,
-   `verificationStatus DRAFT`, and bind `evidence.proof_id` on cited rows in
-   **one transaction** so a half-bound Proof cannot exist. Composite FK
-   `evidence_proof_same_job_fk` already prevents binding across jobs.
-2. Idempotency on re-run: the unique index makes a second insert fail rather
-   than fork. Open sub-question for the same decision: may S8 *update* an
-   existing Proof when S5/S6/S7 changed, and must it refuse to touch one
-   whose `verificationStatus` is `REVIEWED`/`VERIFIED` (which memory
-   promotion depends on, D-041/D-055)? My recommendation: never rewrite a
-   non-DRAFT Proof.
-3. Wire after S7 in `run-job.ts`, as the same kind of re-runnable derived
-   projection S6 and S7 already are.
-
-### Note on this round's prompt
-
-Your instructions ended mid-STEP 11 (`S7 completed → build Proof →`). I
-proceeded from the milestone plan in the previous round plus steps 1–10. If
-the truncated text specified anything about the store, wiring or acceptance
-that differs from the above, say so and I will follow it instead.
+1. **Surface the Proof through the API** — the smallest step that makes S8
+   visible to a user, and the last thing between the engine and the product
+   experience.
+2. **Run one job end to end** behind the alpha gate to produce the first real
+   Proof, then review and VERIFY it — which would exercise the memory
+   promotion path for the first time.
+3. **Stop and consolidate.**
 
 ### Standing boundaries
 
 - S8 never re-judges S5/S6/S7, never calls a model, never touches the network.
+- Confidence is never a probability and its score is never rendered as a
+  percentage; the band is the semantic value.
+- Never rewrite a non-DRAFT Proof.
 - Fail closed: no S7 ⇒ no Proof. `INSUFFICIENT_EVIDENCE` with named gaps is a
   valid, successful outcome.
 - Private by default; no public Proof URLs in v1.
-- Never invent a confidence formula the register says must be fixed
-  deliberately.
