@@ -212,9 +212,12 @@ unknown, so the address's absence from it is **not** established.
 
 ## The two required network states are mutually exclusive (2026-08-29)
 
-One owner window, MantaRay **ON**, Stage A against
-`https://docs.raydium.io/ray/ray-buybacks.md`:
-`CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS`.
+**Two** owner windows, MantaRay **ON**, Stage A against
+`https://docs.raydium.io/ray/ray-buybacks.md` (jobs `19e86520-…` 11:20:36Z and
+`a52247a3-…` 11:26:59Z): both
+`CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS`, byte-identical
+outcome and identical trace shape. **Reproducible, so not a transient DNS
+glitch.**
 
 **That is our own SSRF guard, not a refusal by Raydium.** `resolveAndValidate`
 (`content-fetcher.ts`) resolved the hostname to an address inside a blocked
