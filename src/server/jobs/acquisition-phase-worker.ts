@@ -19,9 +19,10 @@ import {
 import type { ComponentWorkItem } from "../engine/contract-view";
 import { loadJobContractView } from "../engine/job-contract-view";
 import type { ContentFetcher } from "../engine/providers/content-fetcher";
+import type { ModelCostProfile } from "../engine/model-cost-profile";
 import type { QueryProposer } from "../engine/providers/query-proposer";
 import type { SearchGateway } from "../engine/providers/search-gateway";
-import type { ComponentTarget } from "../engine/providers/types";
+import type { ComponentTarget, ModelUsage } from "../engine/providers/types";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
 import { enqueueAcquisitionPhaseInTx, initializeAcquisitionPhaseInTx } from "./queue";
@@ -95,6 +96,12 @@ export type PhaseHandlerResult =
 export interface SearchPhaseProviders {
   queryProposer: QueryProposer;
   searchGateway: SearchGateway;
+  // D-140 — the proposer is a real model call and must be charged. The
+  // caller that RESOLVED the provider is the only one that can wire its
+  // usage callback and knows which cost profile it was resolved under, so
+  // both travel with the provider rather than being guessed here.
+  queryProposerCostProfile?: ModelCostProfile;
+  readProposerUsage?: () => ModelUsage | null | undefined;
 }
 
 export interface PhaseWorkerContext {
@@ -198,9 +205,21 @@ function targetFor(project: ProjectRow) {
   });
 }
 
-function budgetOf(job: JobRow): { maxSearchQueries: number; maxSourceOpens: number } {
-  const b = job.budgetAtStart as { maxSearchQueries: number; maxSourceOpens: number };
-  return { maxSearchQueries: b.maxSearchQueries, maxSourceOpens: b.maxSourceOpens };
+function budgetOf(job: JobRow): {
+  maxSearchQueries: number;
+  maxSourceOpens: number;
+  maxModelCostMicro: number;
+} {
+  const b = job.budgetAtStart as {
+    maxSearchQueries: number;
+    maxSourceOpens: number;
+    maxModelCostMicro: number;
+  };
+  return {
+    maxSearchQueries: b.maxSearchQueries,
+    maxSourceOpens: b.maxSourceOpens,
+    maxModelCostMicro: b.maxModelCostMicro,
+  };
 }
 
 // PHASE 1 — SEARCHING. Role: SEARCH_EXTRACT.
@@ -251,6 +270,12 @@ export async function handleSearchingPhase(
     maxSearchQueries: budgetOf(job).maxSearchQueries,
     maxResultsPerQuery: opts?.maxResultsPerQuery ?? 5,
     maxQueriesPerComponent: opts?.maxQueriesPerComponent ?? 2,
+    // D-140 — one model envelope, shared with extraction; and the
+    // project whose Pattern says which components the intent requires.
+    maxModelCostMicro: budgetOf(job).maxModelCostMicro,
+    projectId: project.id,
+    queryProposerCostProfile: providers.queryProposerCostProfile,
+    readProposerUsage: providers.readProposerUsage,
   });
 
   const advanced = await advancePhaseAndEnqueue(ctx.db, ctx.boss, jobId, "SEARCHING", "FETCHING");

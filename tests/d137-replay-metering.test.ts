@@ -1,4 +1,5 @@
 import { eq, sql } from "drizzle-orm";
+import { INTERNAL_ALPHA_V1 } from "../src/server/config/product";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -249,6 +250,11 @@ async function runLivePhases(jobId: string, project: { id: string; name: string;
     maxSearchQueries: budget.maxSearchQueries,
     maxResultsPerQuery: 5,
     maxQueriesPerComponent: 2,
+    // D-140: the phase now charges the proposer to the job model
+    // envelope and asks the Pattern which components the intent needs.
+    maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+    projectId: project.id,
+    queryProposerCostProfile: COST,
   });
   await runFetchPhase({
     db: ctx.db,

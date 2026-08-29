@@ -2,78 +2,68 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-139: the legacy stale sweep no longer kills phased jobs
+## NONE — D-140: fair SEARCHING and a proposer that pays for itself
 
-Offline round. No live HTTP, no RPC, no model call, no worker started, no
-retry, no dev state mutated.
+Offline round. No live HTTP, no RPC, no real model call, no worker started,
+no live Proof.
 
-### The incident, proven from the persisted record
+### The defect
 
-Job `01589b84-c85d-416d-8845-0fc7435eb43f`:
+The first real phased run had 10 components in the frozen work queue and 12
+search units. `runSearchPhase` walked Pattern order taking 2 each, so the
+first six consumed everything and DESTINATION, RECIPIENT, NET_EFFECT and
+DURABILITY_BASIS searched nothing. That is D-130's defect in a module D-130
+never reached. Separately, 20 real Anthropic proposer calls reserved 0 model
+budget, and 8 of them generated queries no component could ever search.
+
+### The fix — D-130's allocator, unchanged
+
+`runSearchPhase` now reads the live reserved counter, the components pending
+after this one, and `plan.intentRequired` from `loadAcquisitionPlan`, then
+asks `componentSearchAllowance`. No second allocation algorithm exists in the
+phase (asserted by reading its source).
+
+Measured on the same real 10/12 shape:
 
 ```
-21:15:00.461  QUEUED -> RUNNING            "worker picked up"
-21:15:38.293  phase advanced to FETCHING, research-fetch message enqueued
-              [operator switches the machine's network — ~28.5 minutes]
-21:44:05.596  RUNNING -> FAILED            "stale RUNNING sweep"
-21:44:05.703  research-fetch dequeued -> JOB_NOT_RUNNABLE -> completed
+SOURCE_OF_VALUE 1   FLOW_PATH 1   MECHANISM_SPEC 1   GOVERNANCE_BASIS 1
+EXECUTION_EVIDENCE 1   CURRENT_STATE 1   DESTINATION 1   RECIPIENT 1
+NET_EFFECT 2   DURABILITY_BASIS 2          total 12, starved 0
 ```
 
-`sweepStaleRunningJobs` runs at `startWorker` before any queue
-subscription. It saw `now() - started_at = 1745s > maxWallClockSec(900) ×
-1.5 = 1350s` and failed the job 107 ms before its own fetch message was
-picked up. `error_code` and `termination_reason` were null because the
-sweep is the only terminal path that writes neither.
+NET_EFFECT gets the full cap because the job's intent requires it — D-130's
+priority rule doing exactly what it was written for. The last component is
+uncapped by design, so the reservation layer stays the only authority on
+exhaustion.
 
-The handoff was perfect: `loadFetchTargets` replayed read-only returns **48
-valid https targets**, zero lossy, zero unparseable, zero dead. Network: not
-involved. Budget: not involved (`sourceOpens` 0/24 untouched).
+### Truthful metering
 
-### The fix
+A real proposer call reserves on the job's own `modelCostMicro` axis via
+`reserveJobBudget`, at `calculateMaxAuthorizedCostMicro` of the role's
+profile (production catalogue by `query_proposer_model`; injectable in
+tests). One envelope, no new ceiling, no raised limit. The worker resolves
+the proposer exactly as `s4-executor`'s preflight does, so the
+`MODEL_CALL_ATTEMPTED` row carries real tokens and real cost.
 
-One predicate in `sweepStaleRunningJobs`:
+A component with zero allowance makes **no proposer call** and writes **no**
+`QUERY_PROPOSED` rows — only a `MODEL_CALL_SKIPPED` with the existing
+`SEARCH_QUERY_BUDGET_EXHAUSTED` code. The proposer is also asked for exactly
+`allowance` queries, never more than the component can search.
 
-```sql
-AND acquisition_phase IS NULL
-```
+D-137 holds on both sides: charged once in SEARCHING, free on replay in
+EXTRACTING — pinned by a test that runs both over one job.
 
-A phased job is RUNNING for its whole journey but PARKED between capability
-phases, and parked time is not execution time. The formula was never wrong
-for what it was written for; it was asked a question it cannot answer. The
-exclusion reads the persisted phase column and nothing else — no worker role,
-no capability, nothing about the network. The legacy timeout formula is
-unchanged (1.4× survives, 1.6× does not).
+### Unchanged
 
-### Observability
-
-No canonical `termination_reason` exists for "swept", and none was invented.
-`BUDGET_EXHAUSTED` implies the `BUDGET_LIMIT_REACHED` state and one of the
-three reserved axes; `SYSTEM_OR_PROVIDER_FAILURE` asserts a technical failure
-that did not happen. **Owner decision needed** if a swept job should carry a
-machine-readable reason.
-
-Instead, `alpha-inspect` now prints the state-transition journal in its
-TERMINATION section, where the explanation was already persisted as the note
-"stale RUNNING sweep". No schema, no enum, no write. The same change also
-covers the `JOB_NOT_RUNNABLE` visibility gap: the trace vocabulary is
-operation-level only (query/search/fetch/extract), so no event there could
-honestly describe "the job was not runnable" — the journal does.
-
-### Deliberately not fixed here, recorded for their own rounds
-
-- `runSearchPhase` ignores D-130 fair-share: 6 of 10 components consumed all
-  12 search units; DESTINATION, RECIPIENT and NET_EFFECT — what this question
-  is about — got zero candidates.
-- Phase-1 proposer model spend is unmetered: 20 real Anthropic calls,
-  `model_cost_micro_reserved = 0`. The mirror image of D-137.
-- A phased-job liveness policy, if one is wanted.
+`maxSearchQueries` 12, `maxSourceOpens` 24, `maxModelCostMicro` 2,000,000;
+`budget-fairness.ts` itself; controller, attempts, recovery; D-136 queues;
+D-137 replay contract; D-138 admission; D-139 sweep; S5–S9.
 
 ### Standing boundaries
 
-- The legacy sweep judges single-process jobs only; phased liveness is a
-  separate, undecided contract.
-- Phased research is opt-in and owner-only.
-- Every live phase asks the same gate, before constructing any provider.
+- Coverage is bounded, not universal: fewer units than components still means
+  honest partial coverage, never a pretence that everyone got a share.
+- The phase owns no allocator and no budget of its own.
 - The budget default is expensive; a provider that says nothing pays.
 - Capability is declared, never discovered.
 - Phases are never component attempts; the controller runs once.

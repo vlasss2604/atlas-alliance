@@ -338,12 +338,26 @@ happen). Instead `alpha-inspect` now prints the state-transition journal,
 where the explanation was already persisted as the note "stale RUNNING
 sweep" — the line that identified this incident in the first place.
 
-**Separately found in the same post-mortem, recorded and NOT fixed here:**
-`runSearchPhase` does not use D-130 fair-share, so the first 6 of 10
-components consumed all 12 search units and DESTINATION, RECIPIENT and
-NET_EFFECT — the components this question is actually about — got zero
-candidates; and phase-1 proposer model spend is unmetered (20 real Anthropic
-calls, `model_cost_micro_reserved = 0`), the mirror image of D-137.
+**Both of that post-mortem's other findings are now closed by D-140.**
+
+`runSearchPhase` asks D-130's own `componentSearchAllowance` — the same
+allocator, unchanged, with no second algorithm anywhere in the phase. On the
+same real 10-component / 12-unit shape the distribution is now: one unit to
+each of the first eight components, **two to NET_EFFECT** (intent-required,
+so D-130 grants it the full cap) and two to the last component (fair-share
+deliberately does not apply to the last one, so the reservation layer stays
+the only authority on exhaustion). Total exactly 12, zero starved — where the
+incident starved four, including the component the question was about.
+
+The proposer now pays for itself. A real QueryProposer call in SEARCHING
+reserves on the job's own `modelCostMicro` axis, through the job's own
+`reserveJobBudget`, at the canonical `calculateMaxAuthorizedCostMicro` of the
+role's profile. One envelope, no new ceiling. A component whose allowance is
+zero makes **no proposer call at all** and gets a `MODEL_CALL_SKIPPED` row
+with the existing `SEARCH_QUERY_BUDGET_EXHAUSTED` code — the incident wrote
+eight `QUERY_PROPOSED` rows for generations no component could ever use.
+D-137 holds on both sides: the live call is charged once in SEARCHING, and
+the replay proposer in EXTRACTING is still free.
 
 **D-138 connected the product to the phased engine.** Until this round the
 engine existed but nothing could reach it: the owner-alpha Start Proof still

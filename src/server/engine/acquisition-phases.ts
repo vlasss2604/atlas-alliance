@@ -3,13 +3,24 @@ import { eq } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { acquiredDocuments } from "../db/schema";
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
+import { loadAcquisitionPlan } from "./acquisition-plan";
+import { componentSearchAllowance } from "./budget-fairness";
+import {
+  calculateActualCostMicro,
+  calculateMaxAuthorizedCostMicro,
+  loadModelCostProfile,
+} from "./model-cost-profile";
+import type { ModelCostProfile } from "./model-cost-profile";
+import { loadProductConfig } from "../config/product";
+import { researchJobs } from "../db/schema";
 import { persistAcquiredDocument, replayContentFetcher } from "./acquired-documents";
 import type { ComponentWorkItem } from "./contract-view";
 import { reserveJobBudget } from "./budget-reservation";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import type { QueryProposer } from "./providers/query-proposer";
 import type { SearchGateway } from "./providers/search-gateway";
-import type { ComponentTarget, FetchedDocument } from "./providers/types";
+import { isReplayProvider } from "./providers/types";
+import type { ComponentTarget, FetchedDocument, ModelUsage } from "./providers/types";
 import { resolveSourceRoute } from "./source-authority";
 import { canonicalTargetRef, recordTraceEvent } from "./trace-store";
 
@@ -43,6 +54,17 @@ import { canonicalTargetRef, recordTraceEvent } from "./trace-store";
 // what is a deployment fact, asserted by a boundary test.
 
 export interface SearchPhaseResult {
+  // D-140 — components that received a fair-share allowance of zero, so
+  // no proposer call was made and no query was generated for them. This
+  // is bounded coverage, not a failure: the axis is genuinely spent.
+  budgetRefusedComponents: string[];
+  // Components whose proposer call could not be authorized against the
+  // job's model budget. Also no call, also no queries.
+  modelRefusedComponents: string[];
+  // Real proposer calls made in this pass, and what they were authorized
+  // to cost. One reservation per real call, never a flat estimate.
+  proposerCalls: number;
+  proposerReservedMicro: number;
   // Canonical queries for which a real search call was made in this pass.
   executedQueries: string[];
   // Distinct candidate urls discovered in this pass (already lossy-safe,
@@ -84,9 +106,31 @@ export async function runSearchPhase(input: {
   searchGateway: SearchGateway;
   maxSearchQueries: number;
   maxResultsPerQuery: number;
+  // The per-component upper bound. D-140 makes this a CAP, not a quota:
+  // the fair share decides how much of it a component may actually use.
   maxQueriesPerComponent: number;
+  // D-140 — the job's own model ceiling. The proposer is a real model
+  // call and is charged to the SAME envelope every other model call uses.
+  // There is no phase budget.
+  maxModelCostMicro: number;
+  // The project whose Pattern data decides which components this job's
+  // intent requires. Null degrades to "nothing required", never to a
+  // guess (loadAcquisitionPlan's own contract).
+  projectId: string | null;
+  // Test/operational seam, same discipline as S4ExecutorDeps: when absent
+  // the production catalogue is used via the model named in product
+  // config. Never used to widen anything.
+  queryProposerCostProfile?: ModelCostProfile;
+  // Supplied by a caller that resolved the proposer with a usage
+  // callback, so the audit row can carry real token counts. Absent for a
+  // fixture proposer, exactly as in the executor.
+  readProposerUsage?: () => ModelUsage | null | undefined;
 }): Promise<SearchPhaseResult> {
   const out: SearchPhaseResult = {
+    budgetRefusedComponents: [],
+    modelRefusedComponents: [],
+    proposerCalls: 0,
+    proposerReservedMicro: 0,
     executedQueries: [],
     candidateUrls: [],
     dedupedQueries: [],
@@ -94,13 +138,124 @@ export async function runSearchPhase(input: {
   };
   const seenCandidates = new Set<string>();
 
-  for (const item of input.items) {
+  // The cost profile for this job's proposer role — the production
+  // catalogue by default, resolved exactly as s4-executor resolves it.
+  const proposerProfile =
+    input.queryProposerCostProfile ??
+    loadModelCostProfile("QUERY_PROPOSER", (await loadProductConfig(input.db)).query_proposer_model);
+  const proposerCostMicro = calculateMaxAuthorizedCostMicro(proposerProfile);
+
+  for (const [index, item] of input.items.entries()) {
     const target = input.target(item);
+
+    // D-140 — FAIR SHARE BEFORE GENERATION.
+    //
+    // The bug this closes: the phase walked the work queue in Pattern
+    // order taking maxQueriesPerComponent each until the axis was gone.
+    // On the first real run that gave the first 6 of 10 components 2
+    // searches each and the last 4 — including the components the
+    // question was actually about — zero. That is precisely the defect
+    // D-130 was written to prevent for the single-process executor, so
+    // the answer is its allocator, unchanged, not a second one.
+    //
+    // Everything the allocator needs is read the same way the executor
+    // reads it: the live reserved counter (never a stale snapshot), the
+    // components still pending AFTER this one, and whether the job's
+    // intent requires this component per the Pattern's own data.
+    const plan = await loadAcquisitionPlan(input.db, input.jobId, item.component, input.projectId);
+    const othersPending = input.items.slice(index + 1);
+    const allowance = componentSearchAllowance({
+      maxSearchQueries: input.maxSearchQueries,
+      alreadyReserved: await currentSearchQueriesReserved(input.db, input.jobId),
+      workQueueSize: input.items.length,
+      remainingComponents: input.items.length - index,
+      isIntentRequired: plan.intentRequired.has(item.component),
+      hardCapPerAttempt: input.maxQueriesPerComponent,
+      intentRequiredPending: othersPending.filter((c) => plan.intentRequired.has(c.component)).length,
+    });
+
+    if (allowance <= 0) {
+      // The axis is genuinely spent. Do NOT call the proposer: a live
+      // model call producing queries that can never be searched is money
+      // spent on nothing, and the QUERY_PROPOSED rows it would write
+      // would claim a generation the job could not use. Bounded coverage
+      // is the honest outcome (D-130), not universal coverage.
+      out.budgetRefusedComponents.push(item.component);
+      await recordTraceEvent(input.db, {
+        researchJobId: input.jobId,
+        operationType: "MODEL_CALL_SKIPPED",
+        providerKind: "QUERY_PROPOSE",
+        patternStep: item.step,
+        component: item.component,
+        status: "SKIPPED",
+        reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
+        budgetAxis: "searchQueries",
+        budgetAmount: 0,
+      });
+      continue;
+    }
+
+    // D-140 — a real proposer call is real external model consumption and
+    // is charged to the job's ONE model envelope, before the call, the
+    // same way s4-executor charges its own. D-137 keeps the other half of
+    // this true: the REPLAY proposer in EXTRACTING declares itself and is
+    // charged nothing, so a phased job pays for this generation exactly
+    // once.
+    const metered = !isReplayProvider(input.queryProposer);
+    if (metered) {
+      const reserved = await reserveJobBudget(
+        input.db,
+        input.jobId,
+        "modelCostMicro",
+        proposerCostMicro,
+        input.maxModelCostMicro,
+      );
+      if (!reserved) {
+        out.modelRefusedComponents.push(item.component);
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "MODEL_CALL_SKIPPED",
+          providerKind: "QUERY_PROPOSE",
+          patternStep: item.step,
+          component: item.component,
+          status: "SKIPPED",
+          reasonCode: "MODEL_COST_BUDGET_EXHAUSTED",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: proposerCostMicro,
+        });
+        continue;
+      }
+      out.proposerCalls += 1;
+      out.proposerReservedMicro += proposerCostMicro;
+    }
+
     const proposed = await input.queryProposer.proposeQueries({
       target,
       hint: item.component,
-      maxQueries: input.maxQueriesPerComponent,
+      // Never generate more than this component may actually search.
+      maxQueries: allowance,
     });
+
+    // The audit row for the real call: what it was authorized to cost and,
+    // when the caller wired a usage callback, what it actually used.
+    const usage = input.readProposerUsage?.() ?? null;
+    await recordTraceEvent(input.db, {
+      researchJobId: input.jobId,
+      operationType: "MODEL_CALL_ATTEMPTED",
+      providerKind: "QUERY_PROPOSE",
+      providerName: input.queryProposer.name,
+      patternStep: item.step,
+      component: item.component,
+      status: "OK",
+      reasonCode: usage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
+      budgetAxis: "modelCostMicro",
+      budgetAmount: metered ? proposerCostMicro : 0,
+      actualInputTokens: usage?.inputTokens ?? null,
+      actualOutputTokens: usage?.outputTokens ?? null,
+      actualCostMicro:
+        usage && !usage.unsupportedBillingUsage ? calculateActualCostMicro(proposerProfile, usage) : null,
+    });
+
     for (const q of proposed) {
       await recordTraceEvent(input.db, {
         researchJobId: input.jobId,
@@ -195,6 +350,20 @@ export async function runSearchPhase(input: {
     }
   }
   return out;
+}
+
+// The live reserved counter for the search axis. Same read the executor
+// makes before its own allowance calculation — a stale snapshot would let
+// two components believe the same units are still free.
+async function currentSearchQueriesReserved(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ reserved: researchJobs.searchQueriesReserved })
+    .from(researchJobs)
+    .where(eq(researchJobs.id, jobId));
+  return row?.reserved ?? 0;
 }
 
 // The candidate handoff, read back through the ledger's own typed reader.

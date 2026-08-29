@@ -2,10 +2,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { projects, researchJobs, topics, users } from "../src/server/db/schema";
-import {
-  advancePhaseAndEnqueue,
-  beginAcquisitionPhases,
-} from "../src/server/jobs/acquisition-phase-worker";
+import { advancePhaseAndEnqueue } from "../src/server/jobs/acquisition-phase-worker";
 import { claimResearchJob, createResearchJob } from "../src/server/jobs/research-jobs";
 import { sweepStaleRunningJobs } from "../src/server/jobs/worker";
 import type { AcquisitionPhase } from "../src/server/jobs/worker-capabilities";

@@ -259,6 +259,11 @@ describe("PHASE 1 — SEARCHING persists a handoff and nothing else (items 2-5)"
       maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
       maxResultsPerQuery: 5,
       maxQueriesPerComponent: 2,
+      // D-140: the phase now charges the proposer to the job model
+      // envelope and asks the Pattern which components the intent needs.
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
     });
 
     expect(searchCalls.n).toBe(1);
@@ -288,6 +293,11 @@ describe("PHASE 1 — SEARCHING persists a handoff and nothing else (items 2-5)"
       maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
       maxResultsPerQuery: 5,
       maxQueriesPerComponent: 2,
+      // D-140: the phase now charges the proposer to the job model
+      // envelope and asks the Pattern which components the intent needs.
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
     };
     await runSearchPhase(args);
     const second = await runSearchPhase(args);
@@ -371,6 +381,11 @@ describe("PHASE 2 — FETCHING seals, and nothing else (items 6, 9, 12, 13)", ()
       maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
       maxResultsPerQuery: 5,
       maxQueriesPerComponent: 2,
+      // D-140: the phase now charges the proposer to the job model
+      // envelope and asks the Pattern which components the intent needs.
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
     });
 
     const calls = { n: 0, urls: [] as string[] };
@@ -518,6 +533,11 @@ describe("PHASE 3 — EXTRACTING through the NORMAL controller (items 1, 14-23)"
       maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
       maxResultsPerQuery: 5,
       maxQueriesPerComponent: 2,
+      // D-140: the phase now charges the proposer to the job model
+      // envelope and asks the Pattern which components the intent needs.
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
     });
     // --- phase 2 ---
     const fetchCalls = { n: 0, urls: [] as string[] };
@@ -618,6 +638,11 @@ describe("PHASE 3 — EXTRACTING through the NORMAL controller (items 1, 14-23)"
       maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
       maxResultsPerQuery: 5,
       maxQueriesPerComponent: 2,
+      // D-140: the phase now charges the proposer to the job model
+      // envelope and asks the Pattern which components the intent needs.
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
     });
     await runFetchPhase({
       db: ctx.db,
@@ -674,6 +699,11 @@ describe("failure and replay safety (items 24, 15)", () => {
       maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
       maxResultsPerQuery: 5,
       maxQueriesPerComponent: 2,
+      // D-140: the phase now charges the proposer to the job model
+      // envelope and asks the Pattern which components the intent needs.
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
     });
     const fetched = await runFetchPhase({
       db: ctx.db,

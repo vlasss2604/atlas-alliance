@@ -4,6 +4,8 @@ import { eq, sql } from "drizzle-orm";
 import { deleteStaleRateLimits } from "../auth/rate-limit";
 import { deleteExpiredSessions } from "../auth/session";
 import { loadProductConfig } from "../config/product";
+import { loadModelCostProfile } from "../engine/model-cost-profile";
+import type { ModelUsage } from "../engine/providers/types";
 import { createDatabase, type Database } from "../db/client";
 import { projects, researchJobs } from "../db/schema";
 import { BudgetExhaustedError } from "../engine/budget-exhausted-error";
@@ -344,6 +346,7 @@ export async function dispatchResearchQueueMessage(
   if (!job || job.acquisitionPhase === null) {
     return { kind: "LEGACY", result: await handleResearchJobTask(ctx.db, jobId) };
   }
+  const config = await loadProductConfig(ctx.db);
   // D-138 — the SAME live gate EXTRACTING uses, asked BEFORE a provider
   // is even constructed. Eligibility is re-checked here and not inherited
   // from admission: configuration or the actor's role may have changed
@@ -352,9 +355,25 @@ export async function dispatchResearchQueueMessage(
   const gate = await assertPhaseLiveAdmitted(ctx, job, "SEARCHING");
   if (!gate.ok) return { kind: "PHASED", result: gate.result };
 
+  // D-140 — resolved exactly as s4-executor's preflight resolves it: the
+  // approved cost profile supplies the call's token bounds, and a usage
+  // callback captures what the call really consumed so the audit row is
+  // not a guess. The profile also travels with the provider, because the
+  // phase must reserve against the SAME profile the call was made under.
+  const proposerProfile = loadModelCostProfile("QUERY_PROPOSER", config.query_proposer_model);
+  let proposerUsage: ModelUsage | null = null;
   const result = await handleSearchingPhase(ctx, jobId, {
-    queryProposer: await resolveQueryProposer(),
+    queryProposer: await resolveQueryProposer(
+      config.query_proposer_model,
+      proposerProfile.maxOutputTokens,
+      proposerProfile.maxInputTokens,
+      (u) => {
+        proposerUsage = u;
+      },
+    ),
     searchGateway: resolveSearchGateway(),
+    queryProposerCostProfile: proposerProfile,
+    readProposerUsage: () => proposerUsage,
   });
   await finishPhasedJobOnRefusal(ctx, jobId, result);
   return { kind: "PHASED", result };
