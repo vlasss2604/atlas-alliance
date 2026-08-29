@@ -2,72 +2,79 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-138 phased product admission and one uniform live gate: implemented and proven offline
+## NONE — D-139: the legacy stale sweep no longer kills phased jobs
 
-Offline round. No live HTTP, no RPC, no browser, no model call, no worker
-started, no dev config changed.
+Offline round. No live HTTP, no RPC, no model call, no worker started, no
+retry, no dev state mutated.
 
-### What was built
+### The incident, proven from the persisted record
 
-**`phased_research_enabled`** — a backend-only product flag, default false,
-affecting ONLY the owner/internal-alpha admission path. `research_enabled`
-and `internal_alpha_enabled` keep their own meanings; entitlement is
-untouched; the public path is not widened. No client field, no API surface.
+Job `01589b84-c85d-416d-8845-0fc7435eb43f`:
 
-**Atomic phased admission.** `initializeAcquisitionPhaseInTx` (queue.ts)
-writes the phase and its SEARCHING message together, in the caller's
-transaction, and `createResearchJob(..., { phased: true })` runs it inside
-the same transaction that inserts the job. `beginAcquisitionPhases` now just
-opens a transaction around the same primitive — one implementation, two entry
-points. `phased` + `skipEnqueue` together is refused as a programming error.
+```
+21:15:00.461  QUEUED -> RUNNING            "worker picked up"
+21:15:38.293  phase advanced to FETCHING, research-fetch message enqueued
+              [operator switches the machine's network — ~28.5 minutes]
+21:44:05.596  RUNNING -> FAILED            "stale RUNNING sweep"
+21:44:05.703  research-fetch dequeued -> JOB_NOT_RUNNABLE -> completed
+```
 
-**One live gate.** `evaluateOwnerAlphaLive` (non-throwing) and
-`assertOwnerAlphaLive` (throwing) in `owner-alpha-routing.ts`, with the closed
-refusal set `NOT_OWNER_MANUAL_ALPHA | ACTOR_NOT_ADMIN | PROJECT_NOT_ALLOWLISTED
-| INTERNAL_ALPHA_DISABLED` and the same two error classes as before. Asked by
-the single-process executor, SEARCHING, FETCHING and EXTRACTING — and by the
-admission path before it creates any phased work.
+`sweepStaleRunningJobs` runs at `startWorker` before any queue
+subscription. It saw `now() - started_at = 1745s > maxWallClockSec(900) ×
+1.5 = 1350s` and failed the job 107 ms before its own fetch message was
+picked up. `error_code` and `termination_reason` were null because the
+sweep is the only terminal path that writes neither.
 
-**Gate timing.** At admission AND again at each phase, because configuration
-and roles change after enqueue. SEARCHING and FETCHING ask before a provider
-is constructed, so a refusal costs zero model calls, zero searches, zero
-source opens, zero attempts and zero budget. FETCHING never infers
-eligibility from SEARCHING having succeeded.
+The handoff was perfect: `loadFetchTargets` replayed read-only returns **48
+valid https targets**, zero lossy, zero unparseable, zero dead. Network: not
+involved. Budget: not involved (`sourceOpens` 0/24 untouched).
 
-### What was proven
+### The fix
 
-`tests/d138-phased-admission.test.ts` — 18 tests. Legacy admission is
-unchanged (phase NULL, one legacy message, gate not consulted); phased
-admission creates one job, phase SEARCHING, one SEARCHING message, zero legacy
-messages, linked interpretation, zero attempts; a failed enqueue rolls the job
-back rather than stranding it; the one-active-job invariant and idempotency
-still hold; every refusal reason is produced by the one shared helper; a gate
-that closes after enqueue refuses at SEARCHING and at FETCHING with zero
-provider calls; EXTRACTING refuses through the same helper; and the client
-contract carries no phase vocabulary.
+One predicate in `sweepStaleRunningJobs`:
 
-### Learned from a failing test, not from reasoning
+```sql
+AND acquisition_phase IS NULL
+```
 
-The state machine has no `QUEUED → FAILED` edge. A phase that refuses before
-claiming must claim first, exactly as the single-process path does — otherwise
-the terminal write is rejected by the trigger and the message is retried
-forever.
+A phased job is RUNNING for its whole journey but PARKED between capability
+phases, and parked time is not execution time. The formula was never wrong
+for what it was written for; it was asked a question it cannot answer. The
+exclusion reads the persisted phase column and nothing else — no worker role,
+no capability, nothing about the network. The legacy timeout formula is
+unchanged (1.4× survives, 1.6× does not).
 
-### Ready for the first real Mini App phased run
+### Observability
 
-Yes, on the code side. Remaining operator steps, unchanged from the runbook
-and deliberately NOT done here: set `phased_research_enabled = true` in dev
-`product_config`, cancel the stale QUEUED owner job that holds the
-one-active-job slot, then run the sequential worker runbook. `research_enabled`
-stays false; `internal_alpha_enabled` is already true in dev.
+No canonical `termination_reason` exists for "swept", and none was invented.
+`BUDGET_EXHAUSTED` implies the `BUDGET_LIMIT_REACHED` state and one of the
+three reserved axes; `SYSTEM_OR_PROVIDER_FAILURE` asserts a technical failure
+that did not happen. **Owner decision needed** if a swept job should carry a
+machine-readable reason.
+
+Instead, `alpha-inspect` now prints the state-transition journal in its
+TERMINATION section, where the explanation was already persisted as the note
+"stale RUNNING sweep". No schema, no enum, no write. The same change also
+covers the `JOB_NOT_RUNNABLE` visibility gap: the trace vocabulary is
+operation-level only (query/search/fetch/extract), so no event there could
+honestly describe "the job was not runnable" — the journal does.
+
+### Deliberately not fixed here, recorded for their own rounds
+
+- `runSearchPhase` ignores D-130 fair-share: 6 of 10 components consumed all
+  12 search units; DESTINATION, RECIPIENT and NET_EFFECT — what this question
+  is about — got zero candidates.
+- Phase-1 proposer model spend is unmetered: 20 real Anthropic calls,
+  `model_cost_micro_reserved = 0`. The mirror image of D-137.
+- A phased-job liveness policy, if one is wanted.
 
 ### Standing boundaries
 
-- Phased research is opt-in and owner-only; the flag never widens the public path.
-- A phased job never carries a legacy entry message.
+- The legacy sweep judges single-process jobs only; phased liveness is a
+  separate, undecided contract.
+- Phased research is opt-in and owner-only.
 - Every live phase asks the same gate, before constructing any provider.
 - The budget default is expensive; a provider that says nothing pays.
-- No network product in domain logic; capability is declared, never discovered.
+- Capability is declared, never discovered.
 - Phases are never component attempts; the controller runs once.
-- `OWNER_STRICT` sealing keeps its both-ends gate, pinned by test.
 - A lossy trace ref is never fetched.

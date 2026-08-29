@@ -306,6 +306,45 @@ exists once a job crosses processes:
 `controller.ts`, `s4-executor.ts`, S5, S6, S7, S8 and S9: **zero changes**,
 in both slices.
 
+**The first real phased run failed, and not for any reason the phased
+design got wrong (2026-08-30, job `01589b84-…`, D-139).** SEARCHING
+succeeded — 12 real Brave searches, 20 real proposer calls, 60 candidates —
+advanced to FETCHING and enqueued its message. The operator then switched the
+machine's network, which takes minutes. When the FETCH worker started 29
+minutes later, `startWorker` ran `sweepStaleRunningJobs` before subscribing
+to any queue, found the job RUNNING for longer than `maxWallClockSec × 1.5`,
+and failed it. 107 ms later the fetch message was dequeued, saw a terminal
+job and correctly declined it. No fetch was ever attempted.
+
+The handoff itself was perfect: replayed read-only, `loadFetchTargets`
+returns **48 valid https targets**, zero lossy, zero unparseable, zero dead,
+including `docs.raydium.io/ray/protocol-fees`. Network was not involved;
+no budget axis was involved (`sourceOpens` 0/24 untouched).
+
+D-139 narrows the sweep by one predicate — `acquisition_phase IS NULL` —
+returning it to the single-process path it was written for. A phased job is
+RUNNING for its whole journey but PARKED between capability phases, and
+parked time is not execution time. The exclusion reads the persisted phase
+column and nothing else: no worker role, no capability, nothing about the
+network. The legacy formula is untouched.
+
+Two things this round deliberately did NOT do. It did not invent a phased
+liveness policy — if one is needed it belongs on `acquisition_phase_at` with
+capability-worker semantics, as its own decision. And it did not invent a
+`termination_reason` for "swept": no existing value fits (`BUDGET_EXHAUSTED`
+implies the `BUDGET_LIMIT_REACHED` state and one of the three reserved axes;
+`SYSTEM_OR_PROVIDER_FAILURE` asserts a technical failure that did not
+happen). Instead `alpha-inspect` now prints the state-transition journal,
+where the explanation was already persisted as the note "stale RUNNING
+sweep" — the line that identified this incident in the first place.
+
+**Separately found in the same post-mortem, recorded and NOT fixed here:**
+`runSearchPhase` does not use D-130 fair-share, so the first 6 of 10
+components consumed all 12 search units and DESTINATION, RECIPIENT and
+NET_EFFECT — the components this question is actually about — got zero
+candidates; and phase-1 proposer model spend is unmetered (20 real Anthropic
+calls, `model_cost_micro_reserved = 0`), the mirror image of D-137.
+
 **D-138 connected the product to the phased engine.** Until this round the
 engine existed but nothing could reach it: the owner-alpha Start Proof still
 created a single-process job with `acquisition_phase = NULL`. Now a narrow

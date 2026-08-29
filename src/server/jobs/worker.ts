@@ -107,12 +107,38 @@ export async function runMaintenance(db: Database): Promise<void> {
 
 // Зависший RUNNING (дольше бюджета × 1.5) — честный сбой вместо вечного
 // RUNNING: FAILED + освобождение резервации квоты (phase-1-plan §6).
+//
+// D-139 — SINGLE-PROCESS JOBS ONLY.
+//
+// This sweep asks one question: "has this job been executing for longer
+// than its own wall-clock budget could possibly justify?" That question
+// only makes sense while RUNNING means "a worker is executing it right
+// now", which is true for the single-process path and false for a D-136
+// phased job.
+//
+// A phased job is RUNNING for its whole journey, but between phases it is
+// PARKED: its work sits in another queue waiting for a worker with
+// different network capability, and that wait is not execution time. The
+// legacy formula measures from research_jobs.started_at against
+// maxWallClockSec, so it read a normal handoff as a hang and killed a
+// job that had just completed SEARCHING successfully — the real incident
+// this decision closes (job 01589b84-…, swept 29 minutes after start
+// while its FETCHING message was still queued, 107 ms before the fetch
+// worker picked it up).
+//
+// So the predicate is narrowed to the jobs this formula was written for.
+// Phased jobs are excluded by their PERSISTED phase — not by a worker
+// role, a capability or anything about the network. A phased liveness
+// policy, if one is needed, is a separate decision and must be built on
+// acquisition_phase / acquisition_phase_at with capability-worker
+// semantics; it is deliberately NOT invented here.
 export async function sweepStaleRunningJobs(db: Database): Promise<number> {
   const stale = await db
     .select({ id: researchJobs.id, level: researchJobs.entitlementAtStart })
     .from(researchJobs)
     .where(
       sql`${researchJobs.state} = 'RUNNING'
+        AND ${researchJobs.acquisitionPhase} IS NULL
         AND ${researchJobs.startedAt} IS NOT NULL
         AND now() - ${researchJobs.startedAt} >
             make_interval(secs => ((${researchJobs.budgetAtStart} ->> 'maxWallClockSec')::int * 3) / 2)`,

@@ -18,6 +18,7 @@ import {
   researchClaimSupport,
   researchComponentResults,
   researchJobs,
+  researchJobTransitions,
   researchMechanismAssembly,
   researchPlans,
   researchTraceEvents,
@@ -242,6 +243,30 @@ async function main() {
     line("state", job.state);
     line("termination_reason", job.terminationReason);
     line("error_code", job.errorCode);
+    // D-139 — the state-transition journal, which is written by a DB
+    // trigger on every state change and carries the note the transition
+    // was made with. A terminal state whose termination_reason is null
+    // is not necessarily unexplained: the legacy stale-RUNNING sweep, for
+    // one, records its reason ONLY as a journal note, and reading that
+    // note is what identified the real D-136 incident. Printing the
+    // journal here costs one query and turns "FAILED, no reason" into a
+    // readable history — no new column, no new vocabulary.
+    const transitions = await db
+      .select({
+        fromState: researchJobTransitions.fromState,
+        toState: researchJobTransitions.toState,
+        note: researchJobTransitions.note,
+        at: researchJobTransitions.at,
+      })
+      .from(researchJobTransitions)
+      .where(eq(researchJobTransitions.jobId, jobId))
+      .orderBy(researchJobTransitions.at);
+    for (const t of transitions) {
+      line(
+        `${t.at.toISOString()} ${t.fromState} -> ${t.toState}`,
+        t.note ?? "(no note)",
+      );
+    }
 
     section("WARNINGS");
     const warnings: string[] = [];
