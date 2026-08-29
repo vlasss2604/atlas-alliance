@@ -210,6 +210,44 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## The two required network states are mutually exclusive (2026-08-29)
+
+One owner window, MantaRay **ON**, Stage A against
+`https://docs.raydium.io/ray/ray-buybacks.md`:
+`CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS`.
+
+**That is our own SSRF guard, not a refusal by Raydium.** `resolveAndValidate`
+(`content-fetcher.ts`) resolved the hostname to an address inside a blocked
+(private/reserved/loopback) range and refused **before opening any
+connection** — no packet reached the host. Under MantaRay ON that name
+resolves into a blocked range, the split-DNS / blackhole shape a VPN produces
+when it intercepts a hostname.
+
+Both directions are now **established, not inferred**:
+
+| MantaRay | Anthropic | `docs.raydium.io` |
+|---|---|---|
+| ON | SUCCESS | **`BLOCKED_ADDRESS`** |
+| OFF | `PERMISSION_DENIED:403` | HTTP 200, `text/markdown` |
+
+A single-process production job needs both at once, so **no network state
+satisfies it**. This is an environment property, not a code gap: whitelisting
+a reserved range, special-casing the domain or relaxing the SSRF check would
+each remove the protection that correctly stopped the fetch, and none is
+acceptable.
+
+**A second gap found while checking the alternative:** the D-128 two-stage
+path is network-compatible but **stops at S5** —
+`extract-from-document.ts` calls `executor.execute` then
+`reconcileAndPersistComponent`, and never `assembleAndPersistMechanism` (S6),
+`evaluateAndPersistClaimSupport` (S7) or `buildAndPersistProof` (S8). Only
+`run-job.ts` runs that chain. So the two-stage route halts one stage short of
+the three that now exist.
+
+The probe persisted nothing: job `19e86520-…`, 6 trace rows ending
+`FETCH_FAILED`, **no new `acquired_documents` row**, 0 evidence, 0 artifacts,
+0 component results, 0 proofs, 0 model calls, 0 RPC.
+
 ## S9 exists: the Proof is the product boundary
 
 **Closed 2026-08-29.** `GET /api/research-jobs/[id]` now returns a canonical
