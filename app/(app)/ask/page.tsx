@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { api, ApiError, type GateView, type InterpretResult } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
+import { canStartProof, proofBlockReason } from "@/src/client/proof-gate";
 
 // Question-first input (канон atlas-product-ui) + Question Interpreter
 // (Фаза 4). Состояния честные: пока идёт реальный вызов — «разбирает
@@ -104,27 +105,30 @@ export default function AskPage() {
     return fallback;
   }
 
-  // Причина, по которой Proof запустить нельзя. null = можно.
+  // Both answers come from the SAME server verdict (proof-gate.ts), so the
+  // note can never contradict the button. Объяснение и «исследовать
+  // нечего» — не заблокированный Proof, а другой род ответа: кнопки там
+  // быть не должно вовсе (plan §4.6, adversarial review MEDIUM-2).
+  const subject = { interpretation: interp, gates };
+
   const blockedNote = (): string | null => {
-    if (!gates || !interp || interp.status !== "READY") return null;
-    // Объяснение и «исследовать нечего» — не заблокированный Proof,
-    // а другой род ответа: кнопки там быть не должно вовсе
-    // (plan §4.6, adversarial review MEDIUM-2).
-    if (interp.route !== "DEEP_RESEARCH") return null;
-    if (gates.scope === "OUT_OF_SCOPE") return dict.ask.outOfScope;
-    if (gates.entitlement === "CORE_REQUIRED") return dict.ask.coreRequired;
-    if (gates.research === "DEMO_QUOTA_EXHAUSTED") return dict.ask.quotaExhausted;
-    if (gates.research === "ACTIVE_JOB_EXISTS") return dict.ask.activeJob;
-    if (gates.research === "DISABLED") return dict.ask.disabledNote;
-    return null;
+    switch (proofBlockReason(subject)) {
+      case "OUT_OF_SCOPE":
+        return dict.ask.outOfScope;
+      case "CORE_REQUIRED":
+        return dict.ask.coreRequired;
+      case "DEMO_QUOTA_EXHAUSTED":
+        return dict.ask.quotaExhausted;
+      case "ACTIVE_JOB_EXISTS":
+        return dict.ask.activeJob;
+      case "DISABLED":
+        return dict.ask.disabledNote;
+      case null:
+        return null;
+    }
   };
 
-  const canStart =
-    interp?.status === "READY" &&
-    interp.route === "DEEP_RESEARCH" &&
-    gates?.research === "AVAILABLE" &&
-    gates.scope === "SUPPORTED" &&
-    gates.entitlement === "OK";
+  const canStart = canStartProof(subject);
 
   return (
     <main className="enter flex flex-col gap-4">
