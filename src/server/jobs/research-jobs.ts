@@ -8,7 +8,7 @@ import {
   users,
 } from "../db/schema";
 import type { EntitlementSnapshot } from "../../server/domain/types";
-import { enqueueResearchJobInTx } from "./queue";
+import { enqueueResearchJobInTx, initializeAcquisitionPhaseInTx } from "./queue";
 
 export class DemoQuotaExceededError extends Error {
   constructor() {
@@ -60,6 +60,18 @@ export interface CreateResearchJobResult {
 // pick up and race against it for the same job (HIGH-1 closure §3).
 export interface CreateResearchJobOptions {
   skipEnqueue?: boolean;
+  // D-138 — admit this job to the phased (D-136) path instead of the
+  // single-process one. The phase and its SEARCHING message are written
+  // in the SAME transaction as the job row, so the three possible
+  // outcomes are: nothing at all, or a job that is phased AND has work
+  // queued. A job can never end up persisted, active and unrunnable.
+  //
+  // Deliberately mutually exclusive with the legacy enqueue rather than
+  // additive: a phased job that also carried an entry message could be
+  // claimed by the single-process path and would then fetch in whatever
+  // network the worker happens to sit in — exactly what D-136 exists to
+  // prevent. Passing both is a programming error and is refused.
+  phased?: boolean;
 }
 
 function pgConstraint(e: unknown): string | undefined {
@@ -142,7 +154,15 @@ export async function createResearchJob(
         });
       }
 
-      if (!options?.skipEnqueue) {
+      if (options?.phased && options?.skipEnqueue) {
+        throw new Error("createResearchJob: phased and skipEnqueue are mutually exclusive");
+      }
+      if (options?.phased) {
+        // Same transaction as the INSERT above: no commit, no job and no
+        // message; commit, and the job is already phased with its first
+        // phase queued. Never the legacy entry message as well.
+        await initializeAcquisitionPhaseInTx(boss, tx, job.id);
+      } else if (!options?.skipEnqueue) {
         await enqueueResearchJobInTx(boss, tx, job.id);
       }
       return { job, created: true };

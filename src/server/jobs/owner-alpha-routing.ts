@@ -64,23 +64,65 @@ export interface ResolveOwnerAlphaExecutorDeps {
 // executor — callers that want the non-live path call
 // createNonLiveS4WorkExecutor directly, exactly as before this file
 // existed.
-// The three owner-alpha admission checks, in one place so the phased
-// extraction path below cannot drift from the single-process one. Throws
-// on any failure; returns nothing on success.
-async function assertOwnerAlphaAdmitted(deps: ResolveOwnerAlphaExecutorDeps): Promise<void> {
-  if (deps.job.origin !== "OWNER_MANUAL_ALPHA") {
-    throw new OwnerAlphaLiveRefusedError("NOT_OWNER_MANUAL_ALPHA");
-  }
-  const [actor] = await deps.db
+// D-138 — THE ONE OWNER-ALPHA LIVE GATE.
+//
+// Every phase that may touch a real external provider asks THIS function,
+// and there is no second implementation to drift from it: the
+// single-process executor, the SEARCHING phase, the FETCHING phase and
+// the EXTRACTING executor all call it with the same subject shape.
+//
+// The subject is deliberately the smallest set of facts the decision
+// needs, not a job row: the product admission path can ask the same
+// question BEFORE a job exists, and the worker can ask it again at
+// execution time. Both must get the same answer for the same facts.
+export interface OwnerAlphaLiveSubject {
+  // The job's recorded provenance — never the current caller's identity.
+  origin: string;
+  // The user the job belongs to. Their role is re-read here, at decision
+  // time, so a revoked admin's already-queued job stops going live.
+  userId: string;
+  projectSlug: string;
+}
+
+// Non-throwing form, for the admission path and for previews. Returns the
+// refusal reason, or null when live execution is admitted.
+export async function evaluateOwnerAlphaLive(
+  db: Database | Transaction,
+  subject: OwnerAlphaLiveSubject,
+  internalAlphaEnabled: boolean,
+): Promise<OwnerAlphaLiveRefusedError["reason"] | "INTERNAL_ALPHA_DISABLED" | null> {
+  if (subject.origin !== "OWNER_MANUAL_ALPHA") return "NOT_OWNER_MANUAL_ALPHA";
+  const [actor] = await db
     .select({ role: users.role })
     .from(users)
-    .where(eq(users.id, deps.job.userId));
-  if (!actor || actor.role !== "ADMIN") {
-    throw new OwnerAlphaLiveRefusedError("ACTOR_NOT_ADMIN");
+    .where(eq(users.id, subject.userId));
+  if (!actor || actor.role !== "ADMIN") return "ACTOR_NOT_ADMIN";
+  if (!INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has(subject.projectSlug)) {
+    return "PROJECT_NOT_ALLOWLISTED";
   }
-  if (!INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has(deps.project.slug)) {
-    throw new OwnerAlphaLiveRefusedError("PROJECT_NOT_ALLOWLISTED");
-  }
+  // Checked LAST, so the refusal a caller sees for a given set of facts is
+  // exactly the one it saw before D-138.
+  if (!internalAlphaEnabled) return "INTERNAL_ALPHA_DISABLED";
+  return null;
+}
+
+// Throwing form. Keeps the two existing error types exactly as they were:
+// the internal-alpha refusal is still InternalAlphaGateClosedError (the
+// class live-executor.ts owns), everything else is still
+// OwnerAlphaLiveRefusedError with its existing closed reason set.
+export async function assertOwnerAlphaLive(
+  db: Database | Transaction,
+  subject: OwnerAlphaLiveSubject,
+  internalAlphaEnabled: boolean,
+): Promise<void> {
+  const refusal = await evaluateOwnerAlphaLive(db, subject, internalAlphaEnabled);
+  if (refusal === null) return;
+  if (refusal === "INTERNAL_ALPHA_DISABLED") throw new InternalAlphaGateClosedError();
+  throw new OwnerAlphaLiveRefusedError(refusal);
+}
+
+function subjectOf(deps: ResolveOwnerAlphaExecutorDeps): OwnerAlphaLiveSubject {
+  return { origin: deps.job.origin, userId: deps.job.userId, projectSlug: deps.project.slug };
 }
 
 // D-136 — the EXTRACTING phase's executor. Same admission as the
@@ -105,8 +147,7 @@ export async function resolveOwnerAlphaExtractionExecutor(
     };
   },
 ): Promise<WorkExecutor> {
-  await assertOwnerAlphaAdmitted(deps);
-  if (!deps.internalAlphaEnabled) throw new InternalAlphaGateClosedError();
+  await assertOwnerAlphaLive(deps.db, subjectOf(deps), deps.internalAlphaEnabled);
   return createS4WorkExecutor({
     db: deps.db,
     project: deps.project,
@@ -119,7 +160,7 @@ export async function resolveOwnerAlphaExtractionExecutor(
 export async function resolveOwnerAlphaWorkExecutor(
   deps: ResolveOwnerAlphaExecutorDeps,
 ): Promise<WorkExecutor> {
-  await assertOwnerAlphaAdmitted(deps);
+  await assertOwnerAlphaLive(deps.db, subjectOf(deps), deps.internalAlphaEnabled);
   return createLiveS4WorkExecutor({
     db: deps.db,
     project: deps.project,

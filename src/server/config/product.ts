@@ -40,6 +40,17 @@ const productConfigSchema = z.object({
   // query_proposer_model above — an existing DB that only runs
   // migrations (never re-seeds) still fails closed rather than throwing.
   internal_alpha_enabled: z.boolean().default(false),
+  // D-138 — phased research (D-136) as an explicit opt-in, and ONLY for
+  // the owner/internal-alpha admission path. false means the owner-alpha
+  // Start Proof creates exactly the single-process job it has always
+  // created; true means it creates one phased job instead. It is not a
+  // second research gate: research_enabled still decides whether the
+  // public path is open at all, and internal_alpha_enabled still decides
+  // whether live providers may be constructed. .default(false) is the
+  // same defense used by internal_alpha_enabled above — a database that
+  // only ran migrations and was never re-seeded fails closed onto the
+  // existing behaviour instead of throwing.
+  phased_research_enabled: z.boolean().default(false),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -79,6 +90,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   query_proposer_model: "claude-haiku-4-5",
   evidence_extractor_model: "claude-haiku-4-5",
   internal_alpha_enabled: false,
+  phased_research_enabled: false,
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,

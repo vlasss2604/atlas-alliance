@@ -6,7 +6,8 @@ import type { PgBoss } from "pg-boss";
 import { HttpError } from "../auth/guards";
 import type { Database } from "../db/client";
 import { interpretations, projects, researchJobs, topics } from "../db/schema";
-import { INTERNAL_ALPHA_V1 } from "../config/product";
+import { INTERNAL_ALPHA_V1, type ProductConfig } from "../config/product";
+import { evaluateOwnerAlphaLive } from "../jobs/owner-alpha-routing";
 import type { EntitlementSnapshot } from "../domain/types";
 import {
   ActiveJobExistsError,
@@ -56,6 +57,7 @@ export interface StartOwnerAlphaResearchInput {
 export async function startOwnerManualAlphaResearch(
   db: Database,
   boss: PgBoss,
+  config: ProductConfig,
   input: StartOwnerAlphaResearchInput,
 ): Promise<{ job: ResearchJobRow; created: boolean }> {
   const [interp] = await db
@@ -130,19 +132,52 @@ export async function startOwnerManualAlphaResearch(
     budget: INTERNAL_ALPHA_V1,
   };
 
+  // D-138 — which orchestration this job gets is decided HERE, by product
+  // configuration, and never by the client: the Start Proof request body
+  // is unchanged and carries nothing about phases.
+  //
+  // Phased admission additionally requires live eligibility UP FRONT.
+  // The phased path exists to spend real external capabilities across two
+  // networks; admitting a job that the execution-time gate would refuse
+  // would enqueue work nobody may run. The same gate runs again at every
+  // phase (config can change between admission and execution), so this is
+  // an early, honest refusal — not the authority.
+  const phased = config.phased_research_enabled;
+  if (phased) {
+    const refusal = await evaluateOwnerAlphaLive(
+      db,
+      {
+        origin: "OWNER_MANUAL_ALPHA",
+        userId: input.userId,
+        projectSlug: result.project_slug,
+      },
+      config.internal_alpha_enabled,
+    );
+    if (refusal !== null) {
+      throw new HttpError(403, "OWNER_ALPHA_LIVE_NOT_ELIGIBLE");
+    }
+  }
+
   try {
-    const created = await createResearchJob(db, boss, {
-      userId: input.userId,
-      topicId: topic.id,
-      projectId: primary?.id ?? null,
-      originalQuestion: interp.originalQuestion,
-      normalizedTask,
-      normalizedTaskHash,
-      idempotencyKey: input.idempotencyKey,
-      entitlement,
-      demoLifetimeProofLimit: 0,
-      origin: "OWNER_MANUAL_ALPHA",
-    });
+    const created = await createResearchJob(
+      db,
+      boss,
+      {
+        userId: input.userId,
+        topicId: topic.id,
+        projectId: primary?.id ?? null,
+        originalQuestion: interp.originalQuestion,
+        normalizedTask,
+        normalizedTaskHash,
+        idempotencyKey: input.idempotencyKey,
+        entitlement,
+        demoLifetimeProofLimit: 0,
+        origin: "OWNER_MANUAL_ALPHA",
+      },
+      // Not passed at all when phased is off, so the legacy admission is
+      // byte-for-byte the call it has always been.
+      phased ? { phased: true } : undefined,
+    );
 
     if (!created.created) {
       const [linkedElsewhere] = await db

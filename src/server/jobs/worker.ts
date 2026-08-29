@@ -20,6 +20,7 @@ import {
   type PhaseWorkerContext,
 } from "./acquisition-phase-worker";
 import {
+  assertOwnerAlphaLive,
   resolveOwnerAlphaExtractionExecutor,
   resolveOwnerAlphaWorkExecutor,
 } from "./owner-alpha-routing";
@@ -317,10 +318,14 @@ export async function dispatchResearchQueueMessage(
   if (!job || job.acquisitionPhase === null) {
     return { kind: "LEGACY", result: await handleResearchJobTask(ctx.db, jobId) };
   }
-  // Live search providers are resolved here, in the worker, exactly where
-  // the single-process path resolves its own — this module is the one
-  // place that decides a real provider may be constructed, and the
-  // resolvers themselves still fail closed when unconfigured.
+  // D-138 — the SAME live gate EXTRACTING uses, asked BEFORE a provider
+  // is even constructed. Eligibility is re-checked here and not inherited
+  // from admission: configuration or the actor's role may have changed
+  // since this message was enqueued. A refusal therefore costs zero model
+  // calls, zero search calls and zero budget.
+  const gate = await assertPhaseLiveAdmitted(ctx, job, "SEARCHING");
+  if (!gate.ok) return { kind: "PHASED", result: gate.result };
+
   const result = await handleSearchingPhase(ctx, jobId, {
     queryProposer: await resolveQueryProposer(),
     searchGateway: resolveSearchGateway(),
@@ -358,9 +363,76 @@ export async function dispatchFetchQueueMessage(
   ctx: PhaseWorkerContext,
   jobId: string,
 ): Promise<PhaseHandlerResult> {
+  const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job) return { ran: false, refusal: "NOT_FOUND" };
+  // D-138 — the same gate again, and deliberately NOT inferred from the
+  // fact that SEARCHING already succeeded: this is a different process,
+  // possibly a different day, and eligibility is re-decided from current
+  // state. A refusal opens no source.
+  const gate = await assertPhaseLiveAdmitted(ctx, job, "FETCHING");
+  if (!gate.ok) return gate.result;
+
   const result = await handleFetchingPhase(ctx, jobId, resolveContentFetcher());
   await finishPhasedJobOnRefusal(ctx, jobId, result);
   return result;
+}
+
+// The shared execution-time gate for a phase that is about to touch live
+// providers. Refusal is terminal for the job and typed exactly as the
+// single-process path types it (the error class name as errorCode), because
+// a job whose eligibility has gone is not going to become eligible by
+// sitting in a queue.
+async function assertPhaseLiveAdmitted(
+  ctx: PhaseWorkerContext,
+  job: typeof researchJobs.$inferSelect,
+  phase: string,
+): Promise<{ ok: true } | { ok: false; result: PhaseHandlerResult }> {
+  const config = await loadProductConfig(ctx.db);
+  const [project] = job.projectId
+    ? await ctx.db.select().from(projects).where(eq(projects.id, job.projectId))
+    : [];
+  if (!project) {
+    // Same claim-before-terminal rule as the refusal branch below.
+    if (job.state === "QUEUED") await claimResearchJob(ctx.db, job.id);
+    await finishPhasedJob(
+      ctx.db,
+      job.id,
+      { state: "FAILED", terminationReason: "SYSTEM_OR_PROVIDER_FAILURE", errorCode: "PROJECT_NOT_FOUND" },
+      job.entitlementAtStart,
+      "phase " + phase + ": project not resolvable",
+    );
+    return { ok: false, result: { ran: false, refusal: "JOB_NOT_RUNNABLE" } };
+  }
+  try {
+    await assertOwnerAlphaLive(
+      ctx.db,
+      { origin: job.origin, userId: job.userId, projectSlug: project.slug },
+      config.internal_alpha_enabled,
+    );
+    return { ok: true };
+  } catch (e) {
+    // The DB state machine (0001_state_machine.sql) has no QUEUED->FAILED
+    // edge: a job must be picked up before it can fail. The single-process
+    // path satisfies that by claiming first and failing later; a phase
+    // that refuses BEFORE claiming has to do the same, or the terminal
+    // write is rejected by the trigger and the message is retried forever.
+    // Claiming here is also the honest record: this worker did take the
+    // job, and then refused it.
+    if (job.state === "QUEUED") await claimResearchJob(ctx.db, job.id);
+    console.error("[worker] phase " + phase + " refused before any provider call", e);
+    await finishPhasedJob(
+      ctx.db,
+      job.id,
+      {
+        state: "FAILED",
+        terminationReason: "SYSTEM_OR_PROVIDER_FAILURE",
+        errorCode: e instanceof Error ? e.name : "OWNER_ALPHA_LIVE_REFUSED",
+      },
+      job.entitlementAtStart,
+      "phase " + phase + ": live admission refused",
+    );
+    return { ok: false, result: { ran: false, refusal: "JOB_NOT_RUNNABLE" } };
+  }
 }
 
 // The EXTRACTING message. The executor is resolved through the SAME

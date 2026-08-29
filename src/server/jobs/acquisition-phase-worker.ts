@@ -24,7 +24,7 @@ import type { SearchGateway } from "../engine/providers/search-gateway";
 import type { ComponentTarget } from "../engine/providers/types";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
-import { enqueueAcquisitionPhaseInTx } from "./queue";
+import { enqueueAcquisitionPhaseInTx, initializeAcquisitionPhaseInTx } from "./queue";
 import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
 import type { AcquisitionPhase, PhaseCapability } from "./worker-capabilities";
 import { workerServesPhase } from "./worker-capabilities";
@@ -167,21 +167,18 @@ export async function advancePhaseAndEnqueue(
 // Deliberately separate from createResearchJob: an existing caller keeps
 // creating exactly the jobs it created before, and nothing about
 // entitlement, quota or eligibility is touched here.
+// D-138: the product admission path needs this INSIDE the transaction
+// that creates the job, so the two writes live in
+// initializeAcquisitionPhaseInTx (queue.ts) and this wrapper only opens a
+// transaction around it. One implementation, two entry points — a caller
+// that already owns a transaction must never get a second, subtly
+// different version of "start the phases".
 export async function beginAcquisitionPhases(
   db: Database,
   boss: PgBoss,
   jobId: string,
 ): Promise<boolean> {
-  return db.transaction(async (tx) => {
-    const rows = await tx
-      .update(researchJobs)
-      .set({ acquisitionPhase: "SEARCHING", acquisitionPhaseAt: sql`now()` })
-      .where(and(eq(researchJobs.id, jobId), sql`${researchJobs.acquisitionPhase} IS NULL`))
-      .returning({ id: researchJobs.id });
-    if (rows.length === 0) return false;
-    await enqueueAcquisitionPhaseInTx(boss, tx, jobId, "SEARCHING");
-    return true;
-  });
+  return db.transaction((tx) => initializeAcquisitionPhaseInTx(boss, tx, jobId));
 }
 
 async function loadProject(db: Database, job: JobRow): Promise<ProjectRow> {

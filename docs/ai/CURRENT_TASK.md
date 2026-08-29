@@ -2,72 +2,72 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-137 replay-aware budget metering: implemented and proven offline
+## NONE — D-138 phased product admission and one uniform live gate: implemented and proven offline
 
-Offline round. No live HTTP, no RPC, no browser, no model call. Accounting
-only: no engine semantics changed.
+Offline round. No live HTTP, no RPC, no browser, no model call, no worker
+started, no dev config changed.
 
-### The problem, precisely
+### What was built
 
-The job budget is supposed to measure REAL external capability
-consumption. `s4-executor` reserves before every provider call and could
-not tell a replay from a live call, so the D-136 EXTRACTING phase charged
-`searchQueries`, `sourceOpens` and `modelCostMicro` for providers that make
-no external call at all. A phased job could falsely exhaust its budget.
+**`phased_research_enabled`** — a backend-only product flag, default false,
+affecting ONLY the owner/internal-alpha admission path. `research_enabled`
+and `internal_alpha_enabled` keep their own meanings; entitlement is
+untouched; the public path is not widened. No client field, no API surface.
 
-Note the mechanism, since it is not obvious: the ledger already refuses to
-re-search an identical query string, so the leak was not the same query
-twice. It was D-129 targeting — the executor rewrites proposed queries into
-targeted forms, which the ledger has never seen, so a replay gateway was
-asked for them and charged for answering from persisted rows.
+**Atomic phased admission.** `initializeAcquisitionPhaseInTx` (queue.ts)
+writes the phase and its SEARCHING message together, in the caller's
+transaction, and `createResearchJob(..., { phased: true })` runs it inside
+the same transaction that inserts the job. `beginAcquisitionPhases` now just
+opens a transaction around the same primitive — one implementation, two entry
+points. `phased` + `skipEnqueue` together is refused as a programming error.
 
-### The contract
+**One live gate.** `evaluateOwnerAlphaLive` (non-throwing) and
+`assertOwnerAlphaLive` (throwing) in `owner-alpha-routing.ts`, with the closed
+refusal set `NOT_OWNER_MANUAL_ALPHA | ACTOR_NOT_ADMIN | PROJECT_NOT_ALLOWLISTED
+| INTERNAL_ALPHA_DISABLED` and the same two error classes as before. Asked by
+the single-process executor, SEARCHING, FETCHING and EXTRACTING — and by the
+admission path before it creates any phased work.
 
-`PROVIDER_METERING = LIVE | REPLAY`, an optional `metering` field on
-`SearchGateway`, `ContentFetcher` and `QueryProposer` (via `MeteredProvider`),
-and one decision function:
-
-```
-isReplayProvider(p)  ===  p?.metering === "REPLAY"
-```
-
-Default is chargeable. Absence, `undefined`, `"replay"`, `true`, `1` and a
-wrapper that dropped the field all pay. Replay is never inferred from
-`instanceof`, a class or file name, the acquisition phase, the worker role
-or the network — a provider declares what it does.
-
-Declared REPLAY: the three D-136 extraction providers and D-128's
-`replayContentFetcher`. Never declared: the evidence extractor. EXTRACTING
-is real model work and is still charged for it.
+**Gate timing.** At admission AND again at each phase, because configuration
+and roles change after enqueue. SEARCHING and FETCHING ask before a provider
+is constructed, so a refusal costs zero model calls, zero searches, zero
+source opens, zero attempts and zero budget. FETCHING never infers
+eligibility from SEARCHING having succeeded.
 
 ### What was proven
 
-`tests/d137-replay-metering.test.ts` — 14 tests. Live phases reserve exactly
-one unit per real call; extraction over replays adds **zero** to both
-acquisition axes; a second replay adds zero again; per-attempt
-`searchQueriesSpent`/`sourceOpensSpent` are 0 while `modelCostMicroSpent` is
-not; the phased path never costs more than single-process for the same
-work; attempt numbering and the recovery pool are untouched.
+`tests/d138-phased-admission.test.ts` — 18 tests. Legacy admission is
+unchanged (phase NULL, one legacy message, gate not consulted); phased
+admission creates one job, phase SEARCHING, one SEARCHING message, zero legacy
+messages, linked interpretation, zero attempts; a failed enqueue rolls the job
+back rather than stranding it; the one-active-job invariant and idempotency
+still hold; every refusal reason is produced by the one shared helper; a gate
+that closes after enqueue refuses at SEARCHING and at FETCHING with zero
+provider calls; EXTRACTING refuses through the same helper; and the client
+contract carries no phase vocabulary.
 
-The D-136 Slice 2 test that pinned the old behaviour was rewritten to state
-the corrected one — it is the same measurement with the opposite result.
+### Learned from a failing test, not from reasoning
 
-### Ready for the first real D-136 run
+The state machine has no `QUEUED → FAILED` edge. A phase that refuses before
+claiming must claim first, exactly as the single-process path does — otherwise
+the terminal write is rejected by the trigger and the message is retried
+forever.
 
-Yes, on the accounting side. What remains is deployment: two worker
-processes, one with `ATLAS_WORKER_CAPABILITIES=SEARCH_EXTRACT` in the
-model-side network, one with `=FETCH` in the source-side network, and the
-owner's decision to admit a phased job. `research_enabled` and
-`internal_alpha_enabled` remain false.
+### Ready for the first real Mini App phased run
+
+Yes, on the code side. Remaining operator steps, unchanged from the runbook
+and deliberately NOT done here: set `phased_research_enabled = true` in dev
+`product_config`, cancel the stale QUEUED owner job that holds the
+one-active-job slot, then run the sequential worker runbook. `research_enabled`
+stays false; `internal_alpha_enabled` is already true in dev.
 
 ### Standing boundaries
 
-- The budget default is expensive. A new provider that says nothing pays.
-- A wrapper must carry `metering` across deliberately.
-- Never weaken SSRF, whitelist a reserved range, or special-case a domain.
-- No network product in domain logic; capability is declared, never
-  discovered.
+- Phased research is opt-in and owner-only; the flag never widens the public path.
+- A phased job never carries a legacy entry message.
+- Every live phase asks the same gate, before constructing any provider.
+- The budget default is expensive; a provider that says nothing pays.
+- No network product in domain logic; capability is declared, never discovered.
 - Phases are never component attempts; the controller runs once.
 - `OWNER_STRICT` sealing keeps its both-ends gate, pinned by test.
 - A lossy trace ref is never fetched.
-- A phased job must never also carry a single-process entry message.

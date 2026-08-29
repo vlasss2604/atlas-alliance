@@ -306,6 +306,38 @@ exists once a job crosses processes:
 `controller.ts`, `s4-executor.ts`, S5, S6, S7, S8 and S9: **zero changes**,
 in both slices.
 
+**D-138 connected the product to the phased engine.** Until this round the
+engine existed but nothing could reach it: the owner-alpha Start Proof still
+created a single-process job with `acquisition_phase = NULL`. Now a narrow
+backend flag, `phased_research_enabled` (default false), decides — and only
+for the owner/internal-alpha admission path. The client is unchanged and
+sends nothing about phases; the server chooses the orchestration.
+
+The admission is **one transaction**. "Create without enqueue, then begin the
+phases" is not atomic — a failure between them would leave a persistent,
+active job with no work queued at all, holding the user's one-active-job slot
+forever. So the phase write and its SEARCHING message moved into
+`initializeAcquisitionPhaseInTx` and run in the same transaction that inserts
+the job. Two outcomes only: nothing, or a job that is already phased and
+already has exactly one SEARCHING message. A phased job never also carries a
+legacy entry message — passing both is refused as a programming error.
+
+**One live gate, asked four times.** `evaluateOwnerAlphaLive` /
+`assertOwnerAlphaLive` is now the single implementation — job origin, the
+actor's CURRENT admin role, the project allowlist, and the internal-alpha
+flag, with the same two error classes as before. The single-process executor,
+SEARCHING, FETCHING and EXTRACTING all ask it. It runs at admission and again
+at every phase, because configuration and roles change after enqueue; and
+SEARCHING and FETCHING ask it **before constructing a provider**, so a closed
+gate costs zero model calls, zero searches, zero source opens, zero budget and
+zero attempts. FETCHING never infers eligibility from SEARCHING having
+succeeded.
+
+One thing the tests taught rather than confirmed: the DB state machine has no
+`QUEUED → FAILED` edge, so a phase that refuses before claiming has to claim
+first, exactly as the single-process path does — otherwise the terminal write
+is rejected by the trigger and the message is retried forever.
+
 **That round's open finding is now closed by D-137.** The budget measures
 REAL external consumption, so a provider states whether its calls are
 `LIVE` (the default, and what every pre-existing provider says by saying

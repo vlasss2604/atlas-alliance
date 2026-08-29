@@ -1,7 +1,8 @@
-import { sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { PgBoss, fromDrizzle } from "pg-boss";
 
 import type { Transaction } from "../db/client";
+import { researchJobs } from "../db/schema";
 import type { AcquisitionPhase } from "./worker-capabilities";
 
 export const RESEARCH_QUEUE = "research";
@@ -67,4 +68,33 @@ export async function enqueueAcquisitionPhaseInTx(
   phase: AcquisitionPhase,
 ): Promise<void> {
   await boss.send(PHASE_QUEUE[phase], { jobId }, { db: fromDrizzle(tx, sql) });
+}
+
+// D-138 — THE FIRST PHASE, WRITTEN INSIDE THE CALLER'S TRANSACTION.
+//
+// Setting the phase and enqueueing its message are one indivisible act:
+// a job marked SEARCHING with no message would stall forever, and a
+// message for a job with no phase is refused as NOT_PHASED. Both writes
+// therefore go through the caller's transaction, so admission can put
+// them in the SAME transaction that inserts the job — there is no window
+// in which a job exists with neither a legacy nor a phase message.
+//
+// The UPDATE is conditional on the phase still being NULL, which makes it
+// the same atomic-claim shape every other phase transition uses: a job
+// can be initialized exactly once, so it can never carry two SEARCHING
+// messages. Returns false when the job was already phased (or is gone),
+// in which case nothing was enqueued.
+export async function initializeAcquisitionPhaseInTx(
+  boss: PgBoss,
+  tx: Transaction,
+  jobId: string,
+): Promise<boolean> {
+  const rows = await tx
+    .update(researchJobs)
+    .set({ acquisitionPhase: "SEARCHING", acquisitionPhaseAt: sql`now()` })
+    .where(and(eq(researchJobs.id, jobId), sql`${researchJobs.acquisitionPhase} IS NULL`))
+    .returning({ id: researchJobs.id });
+  if (rows.length === 0) return false;
+  await enqueueAcquisitionPhaseInTx(boss, tx, jobId, "SEARCHING");
+  return true;
 }

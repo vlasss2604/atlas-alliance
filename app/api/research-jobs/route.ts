@@ -62,7 +62,7 @@ export async function POST(req: Request): Promise<Response> {
     // which still throws RESEARCH_DISABLED exactly as before this change.
     const { job, created } =
       !config.research_enabled && session.role === "ADMIN"
-        ? await startOwnerManualAlphaResearch(db, await getBoss(), {
+        ? await startOwnerManualAlphaResearch(db, await getBoss(), config, {
             userId: session.userId,
             interpretationId: body.interpretationId,
             idempotencyKey: body.idempotencyKey,
