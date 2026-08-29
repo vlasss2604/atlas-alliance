@@ -2,169 +2,129 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — the product-path unblock is designed, not implemented
+## NONE — Brave probe prepared; no existing entrypoint, so a choice is needed
 
-Offline analysis/design. No live call, no DB mutation, no code changed.
+Offline preparation. Nothing executed, no DB mutation, no code changed.
 
-## 1. The canonical loop, and where it couples
+## 1. The Brave provider contract, read from code
 
-```
-POST /api/interpretations → POST /api/research-jobs → worker
-  → runMemoryPlanningStage → runS4ResearchJob → controller (work queue)
-  → per component: WorkExecutor.execute()
-       ├─ queryProposer  (MODEL)
-       ├─ searchGateway  (BRAVE)
-       ├─ contentFetcher (SOURCE HOST)      ← s4-executor.ts:1468
-       └─ evidenceExtractor (MODEL)         ← s4-executor.ts:1643
-  → S5 → S6 → S7 → S8 → S9
-```
+`search-gateway-brave.ts` — a plain authenticated HTTPS **GET**, no SDK:
 
-**The coupling is tighter than "same job": it is inside ONE `execute()` call
-for ONE component.** Fetch and extract are ~170 lines apart in the same
-function, same process, same instant. No boundary exists between them today.
-
-## 2. The landmine that kills the obvious fix
-
-The obvious design — run each component twice, once to fetch and once to
-extract — **cannot work**, and the reason is precise:
-
-`controller.ts` treats *any* attempt after the first on a component key as a
-**recovery attempt** (`isRecoveryAttempt = maxAttemptByKey.get(key) > 0`),
-charged against `budget.reservedRecoverySteps`, which `INTERNAL_ALPHA_V1`
-sets to **1 for the entire job**. A two-attempt-per-component scheme would
-exhaust the whole recovery pool on the first component and stall.
-
-So the two phases **must not be two attempts of the same work item.** That
-single fact determines the architecture.
-
-## 3. Reusable D-128 engine primitives (A) vs owner-script orchestration (B)
-
-`src/server/engine/acquired-documents.ts` is already a clean 209-line
-**engine capability**, not script logic:
-
-| primitive | what it gives the product path |
+| axis | value |
 |---|---|
-| `persistAcquiredDocument` | seal (`text_sha256`) + authority snapshot |
-| `loadAcquiredDocumentForResume` | seal verify · both-ends authority · project scope · consumption check |
-| `replayContentFetcher` | exact replay, refuses any other url |
-| `markAcquiredDocumentConsumed` | at-most-once |
-| `authorityPermitsAcquisition`, `textSha256` | shared predicates |
+| endpoint | `https://api.search.brave.com/res/v1/web/search` |
+| credential | `BRAVE_SEARCH_API_KEY` → header `X-Subscription-Token` (configured, verified present) |
+| params | `q=<query>`, `count=` clamped to 1..20 |
+| timeout | **10 s**, `AbortController` |
+| retries | **0 in the provider** — "exactly ONE external attempt per call"; retry is owned by `s4-executor`'s `reserveAndCallWithRetry`, which a probe would not use |
+| result-page opens | **none** — returns candidate urls only; a snippet is never Evidence (D-076) |
+| DB writes | **none** |
+| model calls | **none** |
 
-**Owner-script-only (B), to be reused by nobody:** CLI parsing, job creation,
-interpretation binding, the fixture proposer/single-url search gateway, the
-S5→S8 projection calls, and all printing. The product path reuses **A** and
-copies none of **B**.
+Failure classes are already distinguishable: transport error → transient
+`SearchProviderUnavailableError`; `HTTP <status>` (429/5xx transient, others
+not); non-JSON 200 → non-transient. That vocabulary is exactly what a
+reachability probe needs.
 
-## 4. The design — two phases, one job, one controller
+## 2. No existing safe probe — verified, not assumed
 
-**Phase A — `SOURCE_ACQUISITION`** (runs on a source-capable worker):
-job-level, **before** the controller. Derives candidate urls
-**deterministically** — `buildTargetedQueries` plus the project's confirmed
-`SOURCE_ROUTE`s — searches and fetches, and seals each document via
-`persistAcquiredDocument`. Writes **no Evidence, no component attempts, no
-component results, and makes no model call**.
+`resolveSearchGateway` / `createBraveSearchGateway` are referenced **only**
+inside engine modules (`live-executor`, `non-live-executor`, `query-proposer`,
+`s4-executor`, and the gateway files). **No script calls either.** The only
+entrypoints that would reach Brave are `alpha-run --mode=live` and the product
+job path — both of which run a whole research job (search **+** fetch **+**
+model), which is far more than a reachability question and would hit the very
+network conflict we are trying to characterise.
 
-This is not a new capability: S4 already has a model-free targeting path and
-already tolerates skipping the proposer
-(`MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER`).
+So there is no bounded existing tool, and the task's fallback applies: report
+the smallest probe, do not implement it.
 
-**Phase B — `MODEL_EXTRACTION`** (runs on a model-capable worker): **the
-normal controller run, unchanged.** The only difference is that
-`contentFetcher` is a **replay fetcher over this job's sealed documents**
-instead of the network fetcher. Every component therefore gets its **first**
-attempt here — the recovery pool is untouched — and S5/S6/S7/S8/S9 behave
-exactly as they do today.
+## 3. Two options — the choice is yours, and I recommend the first
 
-**Why this is the minimal correct shape:** the controller is not modified, no
-second work queue or stopping rule is introduced, Evidence is created exactly
-once in one job, and the D-128 concept moves *underneath* the product path
-instead of beside it.
+### Option 1 — zero new code (recommended for a one-off)
 
-## 5. Process/queue boundaries, stated without a VPN in them
+The provider is a single GET with one header, so the environment can be tested
+without adding anything to the repository. Read the key from `.env.local`
+rather than typing it, so it never enters shell history:
 
-The handoff is the **existing pg-boss queue**: one additional queue name and a
-phase recorded on the job. Two **worker roles** consume different queues; each
-role is deployed where it has the network access its phase needs.
+**MantaRay ON, exactly once:**
 
-**ATLAS names capabilities, never a provider or a VPN.** The domain knows
-`SOURCE_ACQUISITION` and `MODEL_EXTRACTION`; which process can reach what is a
-deployment fact. "MantaRay" must appear nowhere in the codebase, and no
-process ever changes its own routing.
+```bash
+$k=(Select-String -Path .env.local -Pattern '^BRAVE_SEARCH_API_KEY=(.*)$').Matches[0].Groups[1].Value; try { $r = Invoke-WebRequest -Uri 'https://api.search.brave.com/res/v1/web/search?q=solana%20documentation&count=1' -Headers @{ 'X-Subscription-Token' = $k; 'Accept' = 'application/json' } -TimeoutSec 10; "HTTP $($r.StatusCode)  results=$((($r.Content | ConvertFrom-Json).web.results).Count)" } catch { "FAILED: $($_.Exception.Message)" }
+```
 
-## 6. Failure / resume contract — unchanged
+**MantaRay OFF, exactly once:** the identical command, after switching the VPN
+off. Nothing in it differs.
 
-Sealed documents, exact replay, both-ends authority, at-most-once consumption
-(now per document within one job), no raw-text injection, failed extraction
-leaves its document resumable, no fabricated Proof, no duplicated component
-work (first attempts only), one Proof per job (DB-enforced).
+It reproduces the production request faithfully in the ways that matter for
+reachability — same host, same path, same header, same timeout, `count=1`
+inside the provider's own clamp — while adding no code. It does **not** go
+through `resolveSearchGateway`, so it proves the network and the credential,
+not the repository wiring. For "can this host be reached", that is the whole
+question.
 
-## 7. Product UX afterwards
+### Option 2 — a repo-consistent probe (only if you want it permanent)
 
-Ask question → Start Proof → receive Proof. The user never sees a stage, a
-document id, a replay transport, or any network concept. Phase A/B are
-infrastructure, invisible above the queue.
+`scripts/brave-search-probe.ts`, mirroring `anthropic-count-tokens-probe.ts`:
+one `resolveSearchGateway().search(...)` call, key from env and never printed,
+**no DB handle at all**, no fetcher/renderer/model/RPC in its import graph,
+pinned by a boundary test like the Anthropic probe's. Worth building **only**
+if search reachability becomes something you check repeatedly — for a single
+question it is more surface than the question deserves.
 
-## 8. Risks, named rather than smoothed
+**I have not implemented either.**
 
-1. **Brave's network requirement is unknown** — it has never been exercised
-   live. Phase A assumes search groups with source fetch. If search needs the
-   model network instead, the split line is in the wrong place and the design
-   must move it. **This is the assumption most worth testing first, and it is
-   cheap to test.**
-2. **Deterministic targeting is narrower than model-proposed queries**, so
-   Phase A may acquire fewer or worse documents than a single-process run —
-   a research-quality regression traded for runnability.
-3. **Staleness between phases.** D-128's rule already applies: a resume
-   evaluates exactly what was captured, and a fresh look is a new acquisition.
-4. **Two worker roles are deployment surface.** A mis-provisioned role stalls
-   jobs silently unless the phase is observable.
+## 4. Exact live footprint (both options)
 
-## 9. Recommendation — and the honest ordering
+**1** HTTPS GET to `api.search.brave.com` · **0** retries · **0** result-page
+opens · **0** source fetches · **0** renderer · **0** Anthropic · **0** RPC ·
+**0** DB writes · 10 s timeout · `count=1`.
 
-**Fix the environment first.** One network state that reaches both the docs
-host and Anthropic restores the single-process product path with **zero code
-change**, and everything above becomes unnecessary. It is strictly smaller
-than building a distributed stage machine.
+No Raydium host and no project is involved — the query is deliberately generic.
 
-**Build this only if the environment genuinely cannot provide one state.** It
-does have independent long-term value — offline reprocessing, provider
-outages, rate-limit windows, air-gapped extraction — so it is not wasted work,
-but it should be chosen deliberately, not by default.
+## 5. Signals to capture
 
-## 10. Minimum implementation slice (if chosen)
+- **`HTTP 200` + a result count** → Brave is reachable and the credential
+  works in that state.
+- **`HTTP 401/403`** → reached, credential/permission refused (the Anthropic
+  `OFF` shape).
+- **`HTTP 429`** → reached, rate-limited — reachability is still proven.
+- **A transport failure** (timeout / DNS / connection) → **not reached** in
+  that state. Note the message text; a DNS or blocked-address style failure is
+  the `docs.raydium.io` shape.
 
-Do **not** start with the queue split. Start with the two halves under one
-process, proven offline:
+Record the state (ON/OFF), the status or error, and the result count. Nothing
+else is needed.
 
-1. A **multi-document replay fetcher** — generalise `replayContentFetcher`
-   from one document to a job's sealed set, refusing any url outside it.
-2. A **job-level acquisition pass** reusing `persistAcquiredDocument`, behind
-   an explicit mode, writing no Evidence and making no model call.
-3. An offline test that one job acquires N documents, then runs the **normal
-   controller** with the replay fetcher and reaches S8 with **first attempts
-   only** — proving the recovery pool is untouched.
+## 6. What this decides
 
-Only after that: the job phase column, the second queue name, and the worker
-role split. **Migration:** a phase column on `research_jobs` (or a small
-companion table) plus a queue name — no data migration.
+```
+                 ON        OFF
+Anthropic        success   403
+Raydium docs     blocked   success
+Brave            ?         ?
+```
 
-**Files likely involved:** `acquired-documents.ts` (replay set),
-a new job-level acquisition module, `run-job.ts` / `worker.ts` /
-`jobs/queue.ts` for the phase and queue, `research.ts` schema for the phase.
-`controller.ts`, `s4-executor.ts`, S5/S6/S7/S8/S9 should need **no** change —
-if they do, the design has drifted.
+- **Brave works ON** → it groups with the model, and the designed phase split
+  (source acquisition vs model extraction) is **wrong**: search would belong
+  with extraction, and Phase A would need urls from confirmed routes alone,
+  with no search at all.
+- **Brave works OFF** → it groups with source fetch, and the design as written
+  holds.
+- **Brave works in both** → the split is free to sit where the design puts it.
+- **Brave works in neither** → the product path cannot run at all in this
+  environment, and that is a much larger finding than the phase boundary.
 
-**Fable needed?** No. Correctness-critical engine work: Opus, High,
-single-agent.
+Do not infer any of these from Anthropic's or Raydium's behaviour — that
+inference is exactly what the `BLOCKED_ADDRESS` result already disproved once.
 
-## Deliberately untouched this round
+## 7. DB mutation: **NO** · 8. **READY**
 
-Raydium `destinationKind` near-miss · owner-user fragmentation · layer-6 edge
-case · transaction history · EVM · Promise/Risk · UI · the Windows test bug.
+No blocker. Nothing in the repository needs to change for Option 1.
 
 ### Standing boundaries
 
-- Never weaken SSRF, whitelist a reserved range, or special-case a domain.
-- No VPN toggling inside a process; no VPN brand in domain logic.
-- No second orchestrator, no second work queue, no second Proof pipeline.
-- D-128 stays a bounded capability; the product path reuses it, never copies it.
+- Two windows, one request each, no retries.
+- Never print or type the API key; read it from `.env.local`.
+- No VPN toggling inside a running process.
+- Do not infer one provider's network behaviour from another's.
