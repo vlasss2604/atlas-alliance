@@ -306,15 +306,22 @@ exists once a job crosses processes:
 `controller.ts`, `s4-executor.ts`, S5, S6, S7, S8 and S9: **zero changes**,
 in both slices.
 
-**Open finding, deliberately NOT fixed here.** `s4-executor` reserves
-`searchQueries`/`sourceOpens` before every provider call and cannot tell a
-replay from a live call, so the EXTRACTING phase charges the acquisition
-budget a SECOND time for work the earlier phases already paid for. This is
-a property of the meter, not of the queues — Slice 1 had it too, inside one
-process — and it is now pinned by a measuring test. Fixing it means
-teaching the executor that a replay is not an external call, which is a
-semantic change to a core file and therefore an owner decision, not a
-side effect of this round.
+**That round's open finding is now closed by D-137.** The budget measures
+REAL external consumption, so a provider states whether its calls are
+`LIVE` (the default, and what every pre-existing provider says by saying
+nothing) or `REPLAY`. Only the exact string `"REPLAY"` is free — a typo, a
+truthy value or a wrapper that dropped the field all pay, which is the
+fail-closed direction. Replay is never inferred from a class, a file, the
+job's phase, the worker's role or the network.
+
+The four replay providers declare themselves: the three D-136 extraction
+providers and D-128's single-document `replayContentFetcher`. The evidence
+extractor never does — EXTRACTING is real model work and is still charged
+for it. Measured: the live phases reserve exactly one unit per real call,
+extraction over replays adds **zero** to both acquisition axes, a second
+replay adds zero again, and per-attempt `searchQueriesSpent`/
+`sourceOpensSpent` are 0 while `modelCostMicroSpent` is not. The
+single-process path is unchanged to the unit.
 
 ## The product path is blocked by ONE coupling, and the obvious fix is barred
 

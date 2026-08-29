@@ -213,6 +213,10 @@ export async function loadAcquiredDocumentForResume(
 // if its candidate handling changed.
 export function replayContentFetcher(doc: FetchedDocument): ContentFetcher {
   return {
+    // D-137: this fetcher opens nothing. It serves one already-acquired,
+    // already-accounted document and refuses every other url, so the job
+    // must not be charged a source open for using it.
+    metering: "REPLAY" as const,
     name: "acquired-document-replay",
     async fetch(url: string): Promise<FetchedDocument> {
       if (url !== doc.requestedUrl && url !== doc.finalUrl) {

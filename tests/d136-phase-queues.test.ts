@@ -278,6 +278,11 @@ async function extractionExecutor(
     searchGateway: await prepareExtractionReplaySearch(ctx.db, jobId),
     contentFetcher: {
       name: replay.fetcher.name,
+      // D-137: a wrapper must carry the metering declaration across
+      // deliberately. Dropping it would make this counting wrapper look
+      // like a live fetcher and be charged — which is the fail-closed
+      // direction, and exactly what production wrappers must avoid.
+      metering: replay.fetcher.metering,
       fetch: async (url: string) => {
         counters.replayUrls.push(url);
         return replay.fetcher.fetch(url);
@@ -834,17 +839,13 @@ describe("D-136 §7 — budgets (item 25)", () => {
     expect(afterRedelivery.sourceOpensReserved).toBe(afterFetch.sourceOpensReserved);
   });
 
-  it("the extraction phase re-meters its REPLAYED acquisition — measured, not assumed", async () => {
-    // A finding, recorded as a test rather than as prose: the executor
-    // reserves searchQueries/sourceOpens before every provider call, and
-    // it cannot tell a replay from a live call. So the phased job pays
-    // its acquisition budget TWICE for the same logical work — once in
-    // the phase that really went out to the network, and again in the
-    // extraction phase that only replayed persisted rows.
-    //
-    // This is a property of the METER, not of the queues: Slice 1 had it
-    // too, in a single process. It is asserted here so the number is
-    // visible and any future change to it is deliberate.
+  it("the extraction phase charges NOTHING for its replayed acquisition (D-137)", async () => {
+    // Slice 2 recorded the opposite as a measured finding: the executor
+    // reserved before every provider call and could not tell a replay
+    // from a live one, so a phased job paid its acquisition budget twice.
+    // D-137 settled it — the budget measures REAL external consumption,
+    // and a replay provider declares that it performs none. This test is
+    // the same measurement, now stating the corrected behaviour.
     const project = await makeClassifiedProject();
     const jobId = await makePhasedJob(project.id);
     await beginAcquisitionPhases(ctx.db, ctx.boss, jobId);
@@ -860,15 +861,15 @@ describe("D-136 §7 — budgets (item 25)", () => {
     );
 
     const afterExtraction = await jobRow(jobId);
-    // Strictly greater: the replayed search and the replayed document
-    // open were charged again, to the same job-lifetime axes.
-    expect(afterExtraction.searchQueriesReserved).toBeGreaterThan(beforeExtraction.searchQueriesReserved);
-    expect(afterExtraction.sourceOpensReserved).toBeGreaterThan(beforeExtraction.sourceOpensReserved);
-    // Both axes are nevertheless still inside the job's own frozen
-    // envelope — the ceiling was never exceeded, only approached faster.
-    const budget = beforeExtraction.budgetAtStart as { maxSearchQueries: number; maxSourceOpens: number };
-    expect(afterExtraction.searchQueriesReserved).toBeLessThanOrEqual(budget.maxSearchQueries);
-    expect(afterExtraction.sourceOpensReserved).toBeLessThanOrEqual(budget.maxSourceOpens);
+    // Unchanged on both acquisition axes: the extraction phase searched
+    // nothing and opened nothing, so it owes nothing.
+    expect(afterExtraction.searchQueriesReserved).toBe(beforeExtraction.searchQueriesReserved);
+    expect(afterExtraction.sourceOpensReserved).toBe(beforeExtraction.sourceOpensReserved);
+    // The model axis DID move: extraction is real model work, and D-137
+    // did not make the extraction phase free.
+    expect(afterExtraction.modelCostMicroReserved).toBeGreaterThan(
+      beforeExtraction.modelCostMicroReserved,
+    );
   });
 });
 

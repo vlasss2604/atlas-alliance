@@ -5,6 +5,45 @@
 // nothing else — scope, budget, eligibility and stopping remain the
 // controller's job (D-070).
 
+// D-137 — WHAT A PROVIDER INVOCATION COSTS THE JOB.
+//
+// The research-job budget measures REAL external capability consumption:
+// how many search calls this job actually made, how many sources it
+// actually opened, how much model work it actually authorized. A provider
+// that serves already-persisted results performs none of that — the
+// external call happened earlier and was already charged then. Charging it
+// again would exhaust a job's budget for work nobody did.
+//
+// So a provider may DECLARE how its invocations should be metered:
+//
+//   LIVE   — the invocation performs billable external work (the default)
+//   REPLAY — the invocation serves already-accounted persisted results
+//
+// The default is deliberately the expensive one. The field is optional and
+// absence means LIVE, so every provider that existed before this decision,
+// and every provider written without thinking about metering, is charged
+// exactly as it was. Only an explicit, typed "REPLAY" is free, and the
+// check is an equality test against that one value — anything else,
+// including undefined, a typo or a truthy object, charges. Fail closed
+// financially.
+//
+// Deliberately NOT how replay is detected: instanceof, a class or file
+// name, the job's acquisition phase, the worker's role, or anything about
+// the network. A provider states what it does; nothing infers it.
+export const PROVIDER_METERING = ["LIVE", "REPLAY"] as const;
+export type ProviderMetering = (typeof PROVIDER_METERING)[number];
+
+// Implemented by every provider seam whose calls consume a budget axis.
+export interface MeteredProvider {
+  readonly metering?: ProviderMetering;
+}
+
+// The single decision function. Everything that is not exactly "REPLAY" is
+// billable, including undefined.
+export function isReplayProvider(provider: MeteredProvider | undefined | null): boolean {
+  return provider?.metering === "REPLAY";
+}
+
 // One (step, component) unit of work — the same shape ContractView (S0)
 // produces, kept here so provider modules don't need to import engine
 // internals just for these four fields.

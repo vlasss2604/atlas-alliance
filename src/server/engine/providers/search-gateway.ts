@@ -1,5 +1,5 @@
 import { createBraveSearchGateway } from "./search-gateway-brave";
-import type { ComponentTarget, SourceCandidate } from "./types";
+import type { ComponentTarget, MeteredProvider, SourceCandidate } from "./types";
 
 // Phase 6, S1 — SearchGateway (phase-6-plan.md §4.1, §7.1).
 //
@@ -15,7 +15,7 @@ import type { ComponentTarget, SourceCandidate } from "./types";
 // use the fixture (no fake-in-production fallback, matching the
 // established interpreter/gateway.ts pattern).
 
-export interface SearchGateway {
+export interface SearchGateway extends MeteredProvider {
   readonly name: string;
   search(
     query: string,

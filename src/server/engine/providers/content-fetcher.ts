@@ -4,7 +4,7 @@ import * as http from "node:http";
 import * as https from "node:https";
 import { isIP } from "node:net";
 
-import type { ContentType, FetchedDocument } from "./types";
+import type { ContentType, FetchedDocument, MeteredProvider } from "./types";
 import {
   extractEmbeddedPayloadText,
   mergeDocumentText,
@@ -31,7 +31,7 @@ import {
 //   - content is normalized to plain text and handed back as DATA; this
 //     module never executes, evaluates, or interprets anything it fetches
 
-export interface ContentFetcher {
+export interface ContentFetcher extends MeteredProvider {
   readonly name: string;
   fetch(url: string, opts?: FetchOptions): Promise<FetchedDocument>;
 }

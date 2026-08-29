@@ -371,6 +371,9 @@ export async function prepareExtractionReplayFetcher(
     documentCount: rows.length,
     fetcher: {
       name: "acquired-document-replay",
+      // D-137: every document here was fetched and charged by the FETCH
+      // phase. Replaying it performs no external open.
+      metering: "REPLAY" as const,
       async fetch(url: string): Promise<FetchedDocument> {
         const one = byUrl.get(canonicalTargetRef(url));
         if (!one) {
@@ -395,6 +398,9 @@ export async function prepareExtractionReplaySearch(
   const ledger = await loadAcquisitionLedger(db, jobId);
   return {
     name: "search-replay",
+    // D-137: these candidates were discovered and charged by the SEARCH
+    // phase. Replaying them performs no external search.
+    metering: "REPLAY" as const,
     async search(query, _target, opts) {
       const urls = ledger.candidatesByQuery.get(canonicalTargetRef(query)) ?? [];
       return urls.slice(0, opts.maxResults).map((url) => ({ url, title: null, snippet: null }));
@@ -432,6 +438,9 @@ export async function prepareExtractionReplayProposer(
 
   return {
     name: "query-replay",
+    // D-137: these queries were proposed by a real model call in the
+    // SEARCH phase and charged there. Replaying them makes no model call.
+    metering: "REPLAY" as const,
     async proposeQueries(input) {
       const key = `${input.target.step}:${input.target.component}`;
       return (byKey.get(key) ?? []).slice(0, input.maxQueries);

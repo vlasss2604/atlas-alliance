@@ -6,6 +6,7 @@ import { loadProductConfig } from "../config/product";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
 import { reserveJobBudget } from "./budget-reservation";
+import { isReplayProvider } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
 import {
@@ -612,6 +613,15 @@ async function reserveAndCallWithRetry<T>(params: {
   label: string;
   capability: string;
   fn: () => Promise<T>;
+  // D-137 — whether this invocation consumes the axis at all. Omitted or
+  // true means it does, so every existing call site is unchanged and a
+  // new one has to opt OUT deliberately. When false the provider serves
+  // already-accounted persisted results: no reservation is taken, and
+  // therefore no reservation can be refused. Everything else about this
+  // function — the retry policy, the transient/fatal classification, the
+  // trace callbacks, the returned shape — is identical either way, so a
+  // replay follows exactly the same control flow as a live call.
+  meter?: boolean;
   // Invoked once per real external attempt, immediately after its
   // reservation succeeds and BEFORE fn() is called — lets a caller trace
   // "attempted" per real attempt (including a retry), not just the final
@@ -634,8 +644,11 @@ async function reserveAndCallWithRetry<T>(params: {
     params.budgetAxis === "searchQueries" ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "MODEL_COST_BUDGET_EXHAUSTED";
   let attempts = 0;
   let lastError: unknown = null;
+  const meter = params.meter !== false;
   for (let attempt = 1; attempt <= 2; attempt++) {
-    const reserved = await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget);
+    const reserved = meter
+      ? await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget)
+      : true;
     if (!reserved) {
       // attempt===1: zero real attempts ever made. attempt===2: exactly
       // one real attempt was made (it failed transiently), then the
@@ -1032,6 +1045,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           budgetAmount: 0,
         });
       }
+      // D-137: a replay proposer returns queries this job already proposed
+      // and paid a model call for. Re-charging modelCostMicro here would
+      // bill a second generation that never happens.
+      const queryProposerMetered = !isReplayProvider(queryProposer);
       const queryProposerOutcome = canUseModelQueries
         ? await reserveAndCallWithRetry({
         db: deps.db,
@@ -1041,6 +1058,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         maxBudget: ctx.budget.maxModelCostMicro,
         label: "QUERY_PROPOSER",
         capability: "QUERY_PROPOSER",
+        meter: queryProposerMetered,
         fn: () => queryProposer.proposeQueries({ target, hint, maxQueries: MAX_QUERIES_PER_ATTEMPT }),
         // S10 final pre-smoke closure (§8, D-120): a FAILED attempt-1
         // trace row for a transient failure that is about to be retried —
@@ -1059,14 +1077,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             status: "FAILED",
             reasonCode: classifyTraceReasonCode(firstAttemptError),
             budgetAxis: "modelCostMicro",
-            budgetAmount: queryProposerCostMicro,
+            budgetAmount: queryProposerMetered ? queryProposerCostMicro : 0,
           });
         },
       })
         : // Skipped: no reservation was made and no call happened, so this
           // stands in as a zero-attempt, zero-cost "ok" with no queries.
           ({ kind: "ok" as const, attempts: 0, value: [] as string[] });
-      spent.authorizedModelCostMicro += queryProposerOutcome.attempts * queryProposerCostMicro;
+      spent.authorizedModelCostMicro += queryProposerMetered
+        ? queryProposerOutcome.attempts * queryProposerCostMicro
+        : 0;
 
       if (queryProposerOutcome.kind === "budget_exhausted") {
         // HIGH-1 (S10 final pre-smoke closure, D-120): QueryProposer is
@@ -1112,7 +1132,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           status: "FAILED",
           reasonCode: "PROVIDER_ERROR",
           budgetAxis: "modelCostMicro",
-          budgetAmount: queryProposerCostMicro,
+          budgetAmount: queryProposerMetered ? queryProposerCostMicro : 0,
         });
         throw new CapabilityFatalError(queryProposerOutcome.capability!, queryProposerOutcome.reason);
       }
@@ -1168,7 +1188,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // §8/D-120: this row covers only THIS (successful) attempt's
         // cost — a prior transient attempt-1 failure, if any, already
         // has its own row from onTransientRetry above.
-        budgetAmount: queryProposerCostMicro,
+        budgetAmount: queryProposerMetered ? queryProposerCostMicro : 0,
         actualInputTokens: queryProposerUsage?.inputTokens ?? null,
         actualOutputTokens: queryProposerUsage?.outputTokens ?? null,
         actualCostMicro: queryProposerActualCostMicro,
@@ -1255,6 +1275,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // Derived from persisted trace, so it spans components, attempts and
       // recovery without any new state.
       const ledger = await loadAcquisitionLedger(deps.db, ctx.jobId);
+      const searchMetered = !isReplayProvider(searchGateway);
       for (const entry of planQueries(queries, ledger)) {
         const query = entry.query;
         if (!entry.needsSearch) {
@@ -1268,6 +1289,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           }
           continue;
         }
+        // D-137: a replay gateway serves candidates this job already
+        // discovered and already paid a search call for. The ledger reuse
+        // above covers the identical query string; this covers the same
+        // work reached under a different (targeted) phrasing, where no
+        // external call happens either.
         const searchOutcome = await reserveAndCallWithRetry({
           db: deps.db,
           jobId: ctx.jobId,
@@ -1276,9 +1302,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           maxBudget: ctx.budget.maxSearchQueries,
           label: "SEARCH_GATEWAY",
           capability: "SEARCH_GATEWAY",
+          meter: searchMetered,
           fn: () => searchGateway.search(query, target, { maxResults: MAX_SEARCH_RESULTS_PER_QUERY }),
         });
-        spent.searchQueries += searchOutcome.attempts;
+        spent.searchQueries += searchMetered ? searchOutcome.attempts : 0;
 
         if (searchOutcome.kind === "budget_exhausted") {
           // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): a required reservation
@@ -1301,7 +1328,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             status: "SKIPPED",
             reasonCode: searchOutcome.reasonCode ?? "SEARCH_QUERY_BUDGET_EXHAUSTED",
             budgetAxis: "searchQueries",
-            budgetAmount: searchOutcome.attempts,
+            budgetAmount: searchMetered ? searchOutcome.attempts : 0,
           });
           throw new BudgetExhaustedError("searchQueries", searchOutcome.reason ?? "SEARCH_QUERY_BUDGET_EXHAUSTED");
         }
@@ -1322,7 +1349,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             status: "FAILED",
             reasonCode: "PROVIDER_ERROR",
             budgetAxis: "searchQueries",
-            budgetAmount: searchOutcome.attempts,
+            budgetAmount: searchMetered ? searchOutcome.attempts : 0,
           });
           throw new CapabilityFatalError(searchOutcome.capability!, searchOutcome.reason);
         }
@@ -1338,7 +1365,8 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           status: searchOutcome.kind === "ok" ? "OK" : "FAILED",
           reasonCode: searchOutcome.kind === "ok" ? "NONE" : (searchOutcome.reasonCode ?? "PROVIDER_ERROR"),
           budgetAxis: "searchQueries",
-          budgetAmount: searchOutcome.attempts,
+          // D-137: a replayed search reserved nothing; the row says so.
+          budgetAmount: searchMetered ? searchOutcome.attempts : 0,
         });
         if (searchOutcome.kind !== "ok") {
           lastSearchFailureReason = searchOutcome.reason ?? null;
@@ -1420,9 +1448,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         observations.add("SKIPPED_KNOWN_DEAD_URL");
         return false;
       });
+      // D-137: a replay fetcher serves documents this job (or the owner
+      // path that sealed them) already opened and already paid for. It is
+      // network-impossible by construction, so charging a source open for
+      // it would meter an external action that cannot occur.
+      const fetchMetered = !isReplayProvider(contentFetcher);
       for (const url of orderedCandidates) {
         if (opensAttempted >= openAllowance) break;
-        const reserved = await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens);
+        const reserved = fetchMetered
+          ? await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens)
+          : true;
         if (!reserved) {
           // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
           // dimensional budget axis — throw AT the denial boundary,
@@ -1547,7 +1582,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           observations.add(`DOCS_PAYLOAD_RECOVERED:${recovered.kinds.join("+")}`);
         }
         let acquiredDoc = fetchResult.value;
-        spent.sourceOpens += 1;
+        if (fetchMetered) spent.sourceOpens += 1;
 
         // --- Stage 1: rendered docs -------------------------------------
         // Static-first, always. Rendering runs only when the STATIC

@@ -2,78 +2,71 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-136 Slice 2 implemented and proven offline: phase queues and worker roles
+## NONE — D-137 replay-aware budget metering: implemented and proven offline
 
-Offline round. No live HTTP, no RPC, no browser, no model call.
+Offline round. No live HTTP, no RPC, no browser, no model call. Accounting
+only: no engine semantics changed.
 
-### What was built
+### The problem, precisely
 
-**`src/server/jobs/worker-capabilities.ts`** — the whole of what the domain
-knows about deployment: a closed capability set (`SEARCH_EXTRACT`, `FETCH`),
-the phase → capability map, and an explicit env var
-(`ATLAS_WORKER_CAPABILITIES`). Capability is declared, never discovered: no
-DNS, no address, no reachability probe, and an unconfigured process serves
-no phase at all.
+The job budget is supposed to measure REAL external capability
+consumption. `s4-executor` reserves before every provider call and could
+not tell a replay from a live call, so the D-136 EXTRACTING phase charged
+`searchQueries`, `sourceOpens` and `modelCostMicro` for providers that make
+no external call at all. A phased job could falsely exhaust its budget.
 
-**`src/server/jobs/queue.ts`** — `research` (SEARCHING, and still the
-single-process entry queue), `research-fetch`, `research-extract`; one
-payload type carrying `{ jobId }` and nothing else; and
-`enqueueAcquisitionPhaseInTx`, the transactional send.
+Note the mechanism, since it is not obvious: the ledger already refuses to
+re-search an identical query string, so the leak was not the same query
+twice. It was D-129 targeting — the executor rewrites proposed queries into
+targeted forms, which the ledger has never seen, so a replay gateway was
+asked for them and charged for answering from persisted rows.
 
-**`src/server/jobs/acquisition-phase-worker.ts`** — the three handlers, the
-closed refusal vocabulary (`NOT_FOUND`, `NOT_PHASED`, `PHASE_MISMATCH`,
-`JOB_NOT_RUNNABLE`, `CAPABILITY_NOT_CONFIGURED`), `advancePhaseAndEnqueue`
-(the atomic handoff), `beginAcquisitionPhases` (phased admission),
-`finishPhasedJob` (the same terminal write the single-process path uses) and
-`readAcquisitionPhase` (operator visibility). It contains no research
-logic — every phase body is one call into Slice 1 or into `run-job.ts`.
+### The contract
 
-**Schema** — `research_jobs.acquisition_phase` (+ `acquisition_phase_at`),
-nullable, no default, migration `0035`. NULL means "not a phased job".
+`PROVIDER_METERING = LIVE | REPLAY`, an optional `metering` field on
+`SearchGateway`, `ContentFetcher` and `QueryProposer` (via `MeteredProvider`),
+and one decision function:
 
-**Also touched** — `worker.ts` (dispatch by capability; the legacy path is
-reached whenever the job has no phase, unchanged), `owner-alpha-routing.ts`
-(the EXTRACTING executor, same admission gate, replay acquisition
-providers; `live-executor.ts` itself untouched), `engine/job-contract-view.ts`
-(the work-queue derivation lifted verbatim out of `run-job.ts` so the search
-phase and the controller cannot drift), `alpha-inspect.ts` (phase section),
-`tests/phase1-setup.ts` (creates all three queues).
+```
+isReplayProvider(p)  ===  p?.metering === "REPLAY"
+```
+
+Default is chargeable. Absence, `undefined`, `"replay"`, `true`, `1` and a
+wrapper that dropped the field all pay. Replay is never inferred from
+`instanceof`, a class or file name, the acquisition phase, the worker role
+or the network — a provider declares what it does.
+
+Declared REPLAY: the three D-136 extraction providers and D-128's
+`replayContentFetcher`. Never declared: the evidence extractor. EXTRACTING
+is real model work and is still charged for it.
 
 ### What was proven
 
-`tests/d136-phase-queues.test.ts` — 28 tests, all passing, all offline.
-Including a real end-to-end: two logical roles, three real pg-boss handoffs,
-one admission, one Proof, read back through S9 — with first attempts only.
+`tests/d137-replay-metering.test.ts` — 14 tests. Live phases reserve exactly
+one unit per real call; extraction over replays adds **zero** to both
+acquisition axes; a second replay adds zero again; per-attempt
+`searchQueriesSpent`/`sourceOpensSpent` are 0 while `modelCostMicroSpent` is
+not; the phased path never costs more than single-process for the same
+work; attempt numbering and the recovery pool are untouched.
 
-Backward compatibility was checked against the real dev database, not only
-a fresh test one: 42 jobs, 2 Proofs, 415 Evidence rows and 4 sealed
-documents survived migration `0035` untouched, with all 42 jobs reading
-NULL phase.
+The D-136 Slice 2 test that pinned the old behaviour was rewritten to state
+the corrected one — it is the same measurement with the opposite result.
 
-### Open finding — an owner decision, deliberately not taken here
+### Ready for the first real D-136 run
 
-`s4-executor` reserves `searchQueries`/`sourceOpens` before every provider
-call and cannot tell a replay from a live call, so EXTRACTING charges the
-acquisition budget a **second** time for work the earlier phases already
-paid for. This is a property of the meter, not of the queues (Slice 1 had it
-too, in one process), and it is now pinned by a measuring test. The generic
-correction is to teach the executor that a replay performs no external call
-— a semantic change to a core file, and therefore an owner decision.
-
-Under `INTERNAL_ALPHA_V1` (12 search queries, 24 source opens) this halves
-the effective acquisition ceiling for a phased job. It does not affect
-correctness, only how quickly a job reaches its ceiling.
-
-### Not built (and not needed yet)
-
-Deployment tooling, any UI, and any widening of admission. `research_enabled`
-and `internal_alpha_enabled` remain false.
+Yes, on the accounting side. What remains is deployment: two worker
+processes, one with `ATLAS_WORKER_CAPABILITIES=SEARCH_EXTRACT` in the
+model-side network, one with `=FETCH` in the source-side network, and the
+owner's decision to admit a phased job. `research_enabled` and
+`internal_alpha_enabled` remain false.
 
 ### Standing boundaries
 
+- The budget default is expensive. A new provider that says nothing pays.
+- A wrapper must carry `metering` across deliberately.
 - Never weaken SSRF, whitelist a reserved range, or special-case a domain.
-- No network product in domain logic; no process changes its own routing,
-  and no process infers its own capability.
+- No network product in domain logic; capability is declared, never
+  discovered.
 - Phases are never component attempts; the controller runs once.
 - `OWNER_STRICT` sealing keeps its both-ends gate, pinned by test.
 - A lossy trace ref is never fetched.

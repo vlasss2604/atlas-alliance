@@ -1,4 +1,4 @@
-import type { ComponentTarget, ModelUsage } from "./types";
+import type { ComponentTarget, MeteredProvider, ModelUsage } from "./types";
 
 // Phase 6, S1 — QueryProposer seam (phase-6-plan.md §4.1 table).
 //
@@ -18,7 +18,7 @@ export interface QueryProposalInput {
   maxQueries: number;
 }
 
-export interface QueryProposer {
+export interface QueryProposer extends MeteredProvider {
   readonly name: string;
   proposeQueries(input: QueryProposalInput): Promise<string[]>;
 }
