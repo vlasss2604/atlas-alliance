@@ -210,6 +210,46 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## The network matrix is complete, and the phase design is final (2026-08-29)
+
+The owner ran the prepared Brave probe in both states. The matrix is now
+fully established, and it **refuted the earlier design's split**:
+
+| capability | MantaRay ON | MantaRay OFF |
+|---|---|---|
+| Anthropic | works | 403 |
+| **Brave Search** | **works (200)** | **timeout** |
+| `docs.raydium.io` fetch | `BLOCKED_ADDRESS` | works |
+
+Search groups with the MODEL, not with source fetch. No single environment
+runs search → fetch → extract, so the environment-fix alternative is dead on
+evidence and the phased design is the only architecture that runs the real
+product path here without weakening SSRF.
+
+**Final design (D-136 PROPOSED in `CURRENT_TASK.md`, awaiting ratification):**
+three phases — `SEARCHING` (env A: real proposer + real Brave) → `FETCHING`
+(env B: safe fetch + seal) → `EXTRACTING` (env A: the NORMAL controller with
+replay proposer/search/fetcher and the live extractor, then S5–S9 unchanged) —
+two environments, two worker roles, three queues. Phases are job-level and
+outside the controller, so they create no component attempts and the
+1-per-job recovery pool is untouched; the controller runs once.
+
+Two handoffs, both essentially existing: search→fetch is the trace record
+(`QUERY_PROPOSED`/`CANDIDATE_RETURNED` carry step, component and url;
+`isLossyTargetRef` already defines the reuse rule; the acquisition ledger is
+the precedent) — no new table. Fetch→extract is `acquired_documents` with one
+honest extension: a `PRODUCT_ACQUISITION` admission that seals any
+bounded-transport document and records resolved authority WITHOUT granting
+any (Evidence authority stays extraction-time `resolveSourceClass`), while
+D-128's `OWNER_STRICT` both-ends mode stays untouched and test-pinned.
+
+The whole design is D-128's record-and-replay pattern generalized: each phase
+runs one live capability and replays the persisted outputs of the phases
+before it. `controller.ts`, `s4-executor.ts` and S5–S9 need zero changes.
+First slice is fully offline (replay providers, admission mode, phase passes,
+one first-attempts-only test through the normal controller to S8); queues and
+worker roles come only after it proves out.
+
 ## The product path is blocked by ONE coupling, and the obvious fix is barred
 
 Designed 2026-08-29, **not implemented**.
