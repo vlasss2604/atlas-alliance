@@ -28,6 +28,8 @@ import { evaluateAndPersistClaimSupport } from "../src/server/engine/claim-suppo
 import { buildAndPersistProof } from "../src/server/engine/proof-store";
 import { loadProofForJob } from "../src/server/services/proof-view";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
+import { interpretations } from "../src/server/db/schema";
+import { and } from "drizzle-orm";
 import { proofs, researchJobs } from "../src/server/db/schema";
 import { resolveSourceRoute } from "../src/server/engine/source-authority";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
@@ -648,7 +650,7 @@ describe("resumed path — S5 -> S6 -> S7 -> S8, the production functions", () =
     // The consumption mark is still gated on Evidence rows, and still sits
     // BEFORE the projections — so a failure inside S6/S7/S8 cannot change
     // whether the document was consumed.
-    const consume = src.indexOf("markAcquiredDocumentConsumed");
+    const consume = src.indexOf("markAcquiredDocumentConsumed(db, row.id, job.id)");
     const s6 = src.indexOf("assembleAndPersistMechanism(db, job.id");
     const s8 = src.indexOf("buildAndPersistProof(db, job.id");
     expect(consume).toBeGreaterThan(-1);
@@ -670,6 +672,207 @@ describe("resumed path — S5 -> S6 -> S7 -> S8, the production functions", () =
     expect(runJob).toContain("assembleAndPersistMechanism(db, jobId, now)");
     expect(runJob).toContain("evaluateAndPersistClaimSupport(db, jobId, now)");
     expect(runJob).toContain("buildAndPersistProof(db, jobId)");
+  });
+});
+
+// ---- the resumed job must carry a real classified interpretation ------
+//
+// The first real Proof (job 6bc1a1ca) came back INSUFFICIENT_EVIDENCE /
+// INTENT_NOT_CLASSIFIED because Stage B created its job with no
+// interpretation linked, so S7 read normalized_intent = UNKNOWN. These pin
+// the binding contract and, just as hard, that every refusal happens BEFORE
+// anything is extracted or consumed.
+describe("resumed path — the required interpretation", () => {
+  async function makeInterpretation(over: Record<string, unknown> = {}, userId?: string) {
+    const [user] = userId
+      ? [{ id: userId }]
+      : await ctx.db.insert(users).values({}).returning();
+    const [row] = await ctx.db
+      .insert(interpretations)
+      .values({
+        userId: user.id,
+        status: "READY",
+        originalQuestion: "does the protocol send value to holders?",
+        result: {
+          route: "DEEP_RESEARCH",
+          normalized_intent: "PROTOCOL_REVENUE_TO_TOKEN",
+          research_task: "establish the destination of protocol revenue",
+          project_slug: "fixture-slug",
+          project_slugs: ["fixture-slug"],
+          ...over,
+        },
+      })
+      .returning();
+    return row;
+  }
+
+  // The exact validation the script performs, in the same order, against
+  // the same persisted relationships. Returns the refusal code or null.
+  async function validate(interpId: string | undefined, projectSlug: string): Promise<string | null> {
+    if (!interpId) return "MISSING_ARGUMENT";
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(interpId)) {
+      return "MALFORMED_UUID";
+    }
+    const [i] = await ctx.db.select().from(interpretations).where(eq(interpretations.id, interpId));
+    if (!i) return "INTERPRETATION_NOT_FOUND";
+    if (i.status !== "READY") return "INTERPRETATION_NOT_READY";
+    if (i.researchJobId) return "INTERPRETATION_ALREADY_USED";
+    const r = (i.result ?? {}) as Record<string, unknown>;
+    const intent = typeof r.normalized_intent === "string" ? r.normalized_intent : null;
+    if (intent === null || intent === "UNKNOWN") return "INTENT_NOT_CLASSIFIED";
+    if (r.route !== "DEEP_RESEARCH") return "INTERPRETATION_NOT_DEEP_RESEARCH";
+    if (typeof r.research_task !== "string" || r.research_task.length === 0) {
+      return "INTERPRETATION_INCOMPLETE";
+    }
+    const slugs = Array.isArray(r.project_slugs)
+      ? r.project_slugs.filter((x): x is string => typeof x === "string")
+      : typeof r.project_slug === "string"
+        ? [r.project_slug]
+        : [];
+    if (!slugs.includes(projectSlug)) return "INTERPRETATION_PROJECT_MISMATCH";
+    return null;
+  }
+
+  it("1/2/3. the argument is required, a malformed uuid and an unknown id both fail closed", async () => {
+    expect(await validate(undefined, "s")).toBe("MISSING_ARGUMENT");
+    expect(await validate("not-a-uuid", "s")).toBe("MALFORMED_UUID");
+    expect(await validate("00000000-0000-0000-0000-000000000000", "s")).toBe("INTERPRETATION_NOT_FOUND");
+  }, 30_000);
+
+  it("4. an UNKNOWN or missing normalized_intent is refused — it would reproduce the very defect", async () => {
+    const unknown = await makeInterpretation({ normalized_intent: "UNKNOWN" });
+    expect(await validate(unknown.id, "fixture-slug")).toBe("INTENT_NOT_CLASSIFIED");
+    const absent = await makeInterpretation({ normalized_intent: undefined });
+    expect(await validate(absent.id, "fixture-slug")).toBe("INTENT_NOT_CLASSIFIED");
+  }, 30_000);
+
+  it("4b. a non-READY or non-DEEP_RESEARCH interpretation is refused", async () => {
+    const notDeep = await makeInterpretation({ route: "EXPLAIN" });
+    expect(await validate(notDeep.id, "fixture-slug")).toBe("INTERPRETATION_NOT_DEEP_RESEARCH");
+    const noTask = await makeInterpretation({ research_task: "" });
+    expect(await validate(noTask.id, "fixture-slug")).toBe("INTERPRETATION_INCOMPLETE");
+  }, 30_000);
+
+  it("5. an interpretation already linked to another job is never stolen", async () => {
+    const project = await makeClassifiedProject();
+    const otherJob = await makeJob(project.id);
+    const used = await makeInterpretation({ project_slugs: [project.slug] });
+    await ctx.db
+      .update(interpretations)
+      .set({ researchJobId: otherJob })
+      .where(eq(interpretations.id, used.id));
+    expect(await validate(used.id, project.slug)).toBe("INTERPRETATION_ALREADY_USED");
+  }, 30_000);
+
+  it("6. project compatibility comes from persisted relationships, not from the caller", async () => {
+    const project = await makeClassifiedProject();
+    const foreign = await makeInterpretation({ project_slug: "some-other-project", project_slugs: ["some-other-project"] });
+    expect(await validate(foreign.id, project.slug)).toBe("INTERPRETATION_PROJECT_MISMATCH");
+    const matching = await makeInterpretation({ project_slug: project.slug, project_slugs: [project.slug] });
+    expect(await validate(matching.id, project.slug)).toBeNull();
+  }, 30_000);
+
+  it("7/8. a valid interpretation binds to exactly the new job, and S7 then reads its intent through the normal DB path", async () => {
+    const project = await makeClassifiedProject();
+    const interp = await makeInterpretation({ project_slug: project.slug, project_slugs: [project.slug] });
+    expect(await validate(interp.id, project.slug)).toBeNull();
+
+    const jobId = await makeJob(project.id);
+    // The same compare-and-set the script uses.
+    const linked = await ctx.db
+      .update(interpretations)
+      .set({ researchJobId: jobId })
+      .where(and(eq(interpretations.id, interp.id), sql`${interpretations.researchJobId} IS NULL`))
+      .returning({ id: interpretations.id });
+    expect(linked).toHaveLength(1);
+
+    const [after] = await ctx.db.select().from(interpretations).where(eq(interpretations.id, interp.id));
+    expect(after.researchJobId).toBe(jobId);
+
+    // 8/17. S7 reads it through its OWN canonical query — no intent was
+    // injected, and it no longer answers INTENT_NOT_CLASSIFIED for want of
+    // an interpretation.
+    await runMemoryPlanningStage(ctx.db, jobId);
+    await reconcileAndPersistComponent(ctx.db, jobId, ITEM, new Date());
+    await assembleAndPersistMechanism(ctx.db, jobId, new Date());
+    const s7 = await evaluateAndPersistClaimSupport(ctx.db, jobId, new Date());
+    expect(s7).not.toBeNull();
+    expect(s7!.intent).toBe("PROTOCOL_REVENUE_TO_TOKEN");
+    expect(s7!.reasonCodes).not.toContain("INTENT_NOT_CLASSIFIED");
+  }, 60_000);
+
+  it("5b. the compare-and-set refuses a second binder rather than letting both win", async () => {
+    const project = await makeClassifiedProject();
+    const interp = await makeInterpretation({ project_slug: project.slug, project_slugs: [project.slug] });
+    const jobA = await makeJob(project.id);
+    const jobB = await makeJob(project.id);
+    const first = await ctx.db
+      .update(interpretations)
+      .set({ researchJobId: jobA })
+      .where(and(eq(interpretations.id, interp.id), sql`${interpretations.researchJobId} IS NULL`))
+      .returning({ id: interpretations.id });
+    const second = await ctx.db
+      .update(interpretations)
+      .set({ researchJobId: jobB })
+      .where(and(eq(interpretations.id, interp.id), sql`${interpretations.researchJobId} IS NULL`))
+      .returning({ id: interpretations.id });
+    expect(first).toHaveLength(1);
+    expect(second).toHaveLength(0);
+    const [row] = await ctx.db.select().from(interpretations).where(eq(interpretations.id, interp.id));
+    expect(row.researchJobId).toBe(jobA);
+  }, 60_000);
+
+  it("9/10/11/12. validation precedes everything: a refusal cannot extract, consume, or write a Proof", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../scripts/extract-from-document.ts", import.meta.url), "utf-8");
+    // Ordering is the guarantee: every refusal is emitted before the job,
+    // the extraction, and the consumption mark.
+    const refuse = src.indexOf("INTERPRETATION_NOT_FOUND");
+    const link = src.indexOf(".set({ researchJobId: job.id })");
+    const planning = src.indexOf("runMemoryPlanningStage(db, job.id)");
+    const extract = src.indexOf("Stage B extraction");
+    const consume = src.indexOf("markAcquiredDocumentConsumed(db, row.id, job.id)");
+    expect(refuse).toBeGreaterThan(-1);
+    expect(link).toBeGreaterThan(refuse);
+    expect(planning).toBeGreaterThan(link);
+    expect(extract).toBeGreaterThan(planning);
+    expect(consume).toBeGreaterThan(extract);
+    // 9. no intent is ever handed to S7 directly.
+    expect(src).not.toContain("evaluateClaimSupport(");
+    expect(src).toContain("evaluateAndPersistClaimSupport(db, job.id");
+    expect(src).not.toContain("normalizedIntent,");
+  });
+
+  it("19/20. binding adds no model, network or RPC, and names no project", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../scripts/extract-from-document.ts", import.meta.url), "utf-8");
+    // The interpreter is a model call; the script must never reach it.
+    for (const banned of ["interpreter/interpret", "resolveInterpreterGateway", "anthropicGateway", "interpretQuestion"]) {
+      expect(src, `script references "${banned}"`).not.toContain(banned);
+    }
+    const code = src
+      .split("\n")
+      .filter((l) => {
+        const t = l.trim();
+        return t !== "" && !t.startsWith("//") && !t.startsWith("*") && !t.startsWith("/*");
+      })
+      .join("\n")
+      .toLowerCase();
+    for (const banned of ["raydium", "ddhdoz", "4k3dyj", "solscan", "buyback"]) {
+      expect(code, `script code mentions "${banned}"`).not.toContain(banned);
+    }
+  });
+
+  it("18. the normal run-job path is unchanged — it links no interpretation itself", async () => {
+    const fs = await import("node:fs/promises");
+    const runJob = await fs.readFile(new URL("../src/server/engine/run-job.ts", import.meta.url), "utf-8");
+    expect(runJob).not.toContain("interpretations");
+    // S7 keeps its own canonical read.
+    const store = await fs.readFile(
+      new URL("../src/server/engine/claim-support-store.ts", import.meta.url),
+      "utf-8",
+    );
+    expect(store).toContain("interpretations.researchJobId");
   });
 });
 

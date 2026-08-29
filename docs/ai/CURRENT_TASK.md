@@ -2,144 +2,116 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — first real Proof exists; the cause of INTENT_NOT_CLASSIFIED is identified
+## NONE — Stage B now requires a real classified interpretation
 
-Analysis only. No live call, no DB mutation, no code changed.
+Offline implementation. No live call, no model call, no RPC, no network. No
+change to the engine, S7, S8, S9, D-135, or the normal `run-job.ts` path.
 
-## The first real persisted Proof in the project's history
+## What changed
 
-Job `6bc1a1ca-…`, Proof `b192ab99-…`, from document `a0513491-…` (consumed).
-Verified read-only: `PRIVATE` / `DRAFT`, verdict `INSUFFICIENT_EVIDENCE`,
-confidence **60 = STRONG** (a valid D-135 encoding), all seven layers present
-with layer 5 empty, `researchCutoff` null. **S9 projects it with no special
-handling** — `loadProofForJob` returns the DTO unchanged and a different
-user's read returns `null`, so ownership holds. The resumed path produces the
-ordinary canonical Proof, exactly as intended.
+`extract-from-document.ts` takes a new **required** argument
+`--interpretation-id=<uuid>`, validates it against persisted state, and binds
+it to the job it creates. S7 then finds it through its own canonical query and
+stops answering `INTENT_NOT_CLASSIFIED` for want of one.
 
-## The cause — not guessed from the reason-code name
+Stage B still **classifies nothing**. The interpreter resolves an Anthropic
+gateway, so classification is a model call; the interpretation must be created
+upstream through the normal product entrypoint, and the script never imports
+the interpreter (pinned by test).
 
-**S7's persisted `intent` is literally the string `"UNKNOWN"`.**
+## Validation — all fail closed, all before anything is created
 
-`claim-support-store.ts`'s `loadIntentAndTaskType` reads
-`interpretations WHERE research_job_id = <jobId>`, taking only
-`normalized_intent` and `task_type` — never free text. When no row matches it
-returns `intent: "UNKNOWN"` as a **deliberate, documented non-failure
-default**. `evaluateClaimSupport` then short-circuits: `UNKNOWN` is in
-`UNCLASSIFIED_INTENTS`, so it returns `INSUFFICIENT_EVIDENCE` /
-`["INTENT_NOT_CLASSIFIED"]` with **empty `requirementResults`** before any CORE
-lookup.
+Missing argument · malformed uuid · `INTERPRETATION_NOT_FOUND` ·
+`INTERPRETATION_NOT_READY` (status ≠ `READY`) · `INTERPRETATION_ALREADY_USED`
+(already linked to another job) · `INTENT_NOT_CLASSIFIED` (`normalized_intent`
+absent or `UNKNOWN` — binding one would reproduce the very defect) ·
+`INTERPRETATION_NOT_DEEP_RESEARCH` · `INTERPRETATION_INCOMPLETE` (no
+`research_task`) · `INTERPRETATION_PROJECT_MISMATCH`.
 
-**Verified in the database: this job has 0 interpretation rows.** Across the
-whole DB, 19 of 45 interpretations are linked to a job, and real classified
-values exist (`BURN_OR_SUPPLY_EFFECT`, `PROTOCOL_REVENUE_TO_TOKEN`,
-`MECHANISM_CURRENT_STATE`, …). The machinery works; this job simply has none.
+**Project compatibility comes from persisted relationships**, not the caller:
+the interpretation's own `project_slug`/`project_slugs` must include the slug
+of the project the document belongs to. An arbitrary unrelated classified
+interpretation therefore cannot be bound. No schema gap — the relationship
+already exists.
 
-## Normal path vs D-128 resumed path — the exact missing object
+Intent is never inferred from the document, project, component, locator or
+Evidence.
 
-**Normal:** `POST /api/interpretations` runs the interpreter (a model call)
-and persists an `interpretations` row carrying `normalized_intent`. `POST
-/api/research-jobs` then takes that `interpretationId`, creates the job, and
-**links the interpretation to it** (`interpretations.research_job_id`, set
-under a guard in `start-owner-alpha-research.ts`). S7 later finds it.
+## Linking — the production primitive, not a second contract
 
-**Resumed:** Stage B is given a *document id, component and step*. It calls
-`createResearchJob` directly. **No interpretation is created, and none is
-linked** — so S7's lookup finds nothing.
+The guards mirror `start-owner-alpha-research.ts`, and the link is the same
+**compare-and-set**: `UPDATE … WHERE id = X AND research_job_id IS NULL`. If
+the row is claimed between validation and linking, the update matches nothing
+and the run stops **before extraction**, so nothing is spent and the document
+stays resumable.
 
-The missing object is therefore precise: **a persisted, linked
-`interpretations` row with a classified `normalized_intent`.** Not planning,
-not Evidence, not the plan contract.
+**One guard deliberately not copied:** the product path checks
+`interpretations.userId === session.userId`, because it has a session user.
+Stage B has none — it used to mint a throwaway user per run. It now creates
+the job **for the interpretation's own user** instead, which is strictly
+better: the chain Original Question → Interpretation → Job stays genuine, no
+synthetic user is minted, and ownership is inherited rather than asserted.
 
-**`runMemoryPlanningStage` is not a substitute** (question 3: correct,
-insufficient). Planning decides *which components to research* from the
-Pattern and memory; interpretation decides *what the user asked*. They are
-different stages answering different questions, and S7 reads only the latter.
+## Ordering — the failure guarantee
 
-## Why S5 SUPPORTED did not make S7 SUPPORTED
+Verified by an offset test on the script's own source:
 
-Because they answer different questions, and D-103 fixes that boundary: S6/S5
-say what is *structurally established*; S7 says whether it is *sufficient for
-the user's claim*. With no claim, there is nothing to be sufficient for — S7
-returned before evaluating any requirement. Component support is not claim
-support, and converting one into the other is exactly the overclaim the
-architecture forbids.
+```
+validation → link → planning → extraction → consumption
+```
 
-Worth noting independently: the S6 assembly for this job carries
-`MISSING_COMPONENT` gaps for `SOURCE_OF_VALUE` and `FLOW_PATH`. One supported
-component out of ten is not a mechanism.
+Every refusal happens before the job is used, so a validation failure means
+**no extraction, no Evidence, no S5/S6/S7/S8, no Proof, and no consumption
+mark** — the acquired document stays exactly as resumable as D-128 specifies.
+Extraction failure keeps its existing D-128 semantics unchanged.
 
-## Why boundEvidence = 0 — correct, not a defect
+**On retry safety:** a refused run leaves the interpretation unlinked, so it
+can be reused. A run that links and then fails during extraction leaves the
+interpretation bound to that job — matching the product contract, where an
+interpretation is used once. A retry then needs a fresh interpretation, which
+is correct: the same question asked again is a new request, and silently
+re-pointing a used interpretation at a second job would break the one-to-one
+chain the schema and `start-owner-alpha-research.ts` both enforce.
 
-S8 cites Evidence only through `requirementResults[].provenance`, intersected
-with what the component treated as supporting and what exists. S7 returned
-`requirementResults: []`, so there is **nothing to cite**, and the single
-`OFFICIAL_DOCS / CONFIRMED / SUPPORTS` DESTINATION row correctly stays
-`proof_id = NULL`.
+## S7 reads it normally
 
-Binding it manually because S5 supported it would assert that it supports a
-claim **that was never evaluated**. The canonical rule produced the right
-answer here.
+No intent is passed into S7 and no engine parameter was added. The script
+calls `evaluateAndPersistClaimSupport(db, job.id, …)` exactly as `run-job.ts`
+does, and S7's own `loadIntentAndTaskType` reads
+`interpretations WHERE research_job_id = job`. Pinned: the script never calls
+`evaluateClaimSupport(` directly and never passes an intent.
 
-## One honest quality observation (not this task's fix)
+Test-proven end to end: with a `PROTOCOL_REVENUE_TO_TOKEN` interpretation
+linked, S7 returns `intent = "PROTOCOL_REVENUE_TO_TOKEN"` and **no longer**
+emits `INTENT_NOT_CLASSIFIED`.
 
-Layer 6 — "what could change this conclusion" — is **empty** on this Proof,
-because S8 builds it from requirement blocking gaps, claim context gaps and
-non-`SUPPORTED` component reason codes, and this job had none of the three
-(its one component was `SUPPORTED`). The S6 flow gaps are not among S8's
-sources. An `INSUFFICIENT_EVIDENCE` Proof whose "what would change this" block
-is empty reads as less honest than the engine actually is. Recorded as an
-observation; **not** fixed here, and not the intent problem.
+## Downstream unchanged
 
-## Smallest generic fix
+S5 → S6 → S7 → S8 as before; S8, S9 and D-135 untouched; `run-job.ts` links no
+interpretation itself and is unmodified.
 
-**Stage B must consume a real, already-classified interpretation and link it
-to the job it creates — the same contract the product path uses.**
+## Recorded separately, not fixed
 
-Concretely: a new required argument (e.g. `--interpretation-id=<uuid>`) naming
-an existing `interpretations` row; Stage B validates it (exists, has a
-non-`UNKNOWN` `normalized_intent`, belongs to this project, is not already
-linked to another job) and sets `interpretations.research_job_id` to its new
-job, mirroring `start-owner-alpha-research.ts`'s guarded linking. Nothing else
-changes: S7 then finds the row exactly as it does for a product job.
+The first real Proof also exposed that an `INSUFFICIENT_EVIDENCE` Proof can
+have an **empty layer 6** even when S6 recorded flow-level gaps. Now in
+`BACKLOG.md` under Product surface. Deliberately out of scope here.
 
-Answers to the posed questions:
+## Exact future Stage B command shape
 
-1. **Yes** — Stage B must consume a persisted interpretation.
-2. **The resume entrypoint**, not Stage A. Stage A acquires a document; the
-   intent belongs to the research request, and Stage B is where the job that
-   carries it is created.
-3. **Correct** — planning ≠ interpretation, as above.
-4. **No.** The interpreter resolves an Anthropic gateway; classification *is*
-   a model call. It cannot be reused offline — which is exactly why the fix
-   consumes an interpretation created earlier rather than classifying inline.
-5. **A new argument is required.** The intent states what the *user asked*; it
-   is not recoverable from the document, the project or the Evidence, and
-   deriving it from any of those is explicitly forbidden.
+```
+npx tsx scripts/extract-from-document.ts --document-id=<uuid> --interpretation-id=<uuid> --component=DESTINATION --step=6 --actor=owner --project=raydium --mode=documentary-only
+```
 
-**Code change required: yes** — small, in `scripts/extract-from-document.ts`
-plus tests. No engine change, no S7/S8/S9 change, no new classification logic,
-and no relaxation of anything.
-
-**Files likely involved:** `scripts/extract-from-document.ts`,
-`tests/two-stage-acquisition.test.ts`, and read-only reuse of
-`start-owner-alpha-research.ts`'s linking pattern.
-
-**Fable needed?** No. This is a small, well-specified change in one owner
-script with existing patterns to copy; correctness-critical work stays on
-Opus, single-agent, per the working style.
-
-## Practical note for the next run
-
-There are 8 unlinked classified interpretations, but **all are `pump_fun`** —
-**none for raydium**. So a raydium interpretation must be created first
-through `POST /api/interpretations` (a model call, MantaRay ON) before a Stage
-B run could reach a claim-evaluable Proof. The already-consumed document also
-means Stage A must re-acquire (MantaRay OFF).
+**Prerequisites for the next real run**, in order: a raydium interpretation
+created through `POST /api/interpretations` (a model call — MantaRay ON; all 8
+existing unlinked classified interpretations are `pump_fun`), and a re-acquired
+document via Stage A (MantaRay OFF — the previous one is consumed).
 
 ### Standing boundaries
 
-- Intent must originate upstream from the user's question — never from
-  Evidence, the project, the document or S8.
-- Never convert component support into claim support.
-- Never weaken S7 or let S8 guess an intent.
-- No hardcoded project, component or claim anywhere.
+- Intent originates upstream from the user's question — never from Evidence,
+  the project, the document, or S8.
+- Stage B never calls the interpreter and never classifies.
+- Never steal an interpretation already linked to another job.
+- Validation before creation: a refusal must never leave a job, Evidence, a
+  Proof, or a consumed document behind.

@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-29: **2432 passing, 4 skipped, 1 failing**
-  (2437 total). Run the suite ALONE — two concurrent `vitest run` invocations
+- Full suite, last verified 2026-08-29: **2442 passing, 4 skipped, 1 failing**
+  (2447 total). Run the suite ALONE — two concurrent `vitest run` invocations
   share the one test database and produce mass spurious failures (observed:
   193 "failures" that vanished on a clean serial run). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
@@ -251,12 +251,37 @@ context gaps and non-`SUPPORTED` component reason codes — none of which this
 job had — and does not read S6's flow gaps. An `INSUFFICIENT_EVIDENCE` Proof
 with an empty change-block reads as less honest than the engine is.
 
-**The fix, not yet implemented:** Stage B must consume a real, already
-classified interpretation and link it to the job it creates, exactly as the
-product path does. Classification cannot be done inline — the interpreter is a
-model call — so it must be created earlier via `POST /api/interpretations`.
-Detail in `CURRENT_TASK.md`. Note: all 8 unlinked classified interpretations
-are `pump_fun`; **none exists for raydium**.
+**The fix — IMPLEMENTED 2026-08-29.** `extract-from-document.ts` now takes a
+**required** `--interpretation-id=<uuid>`, validates it against persisted
+state and binds it to the job it creates with the same **compare-and-set**
+`start-owner-alpha-research.ts` uses (`WHERE id = X AND research_job_id IS
+NULL`). S7 then finds it through its own canonical query — no intent is passed
+in and no engine parameter was added.
+
+Refusals, all fail-closed and all **before** the job is used:
+not found · not `READY` · already linked · `normalized_intent` absent or
+`UNKNOWN` · not `DEEP_RESEARCH` · no `research_task` · project mismatch.
+**Project compatibility comes from persisted relationships** — the
+interpretation's own `project_slug`/`project_slugs` must include the document's
+project — so an unrelated classified interpretation cannot be bound.
+
+Ordering is pinned by an offset test on the script's own source:
+**validation → link → planning → extraction → consumption**. A validation
+failure therefore leaves no job used, no Evidence, no Proof and **no
+consumption mark**; the document stays exactly as resumable as D-128
+specifies.
+
+**One guard deliberately not copied and one improvement:** the product path
+checks `interpretations.userId === session.userId`, but Stage B has no session
+user. It used to mint a throwaway user per run; it now creates the job **for
+the interpretation's own user**, so the chain Original Question →
+Interpretation → Job stays genuine and ownership is inherited rather than
+asserted.
+
+Stage B still **classifies nothing** — the interpreter is a model call, and
+the script never imports it (test-pinned). Note: all 8 unlinked classified
+interpretations are `pump_fun`; **none exists for raydium**, so one must be
+created via `POST /api/interpretations` before the next run.
 
 ## The two required network states are mutually exclusive (2026-08-29)
 

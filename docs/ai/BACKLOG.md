@@ -84,6 +84,19 @@ together they stopped project #2 before it could start. Kept for context.
   (D-123). A client no longer needs them, so they can be dropped when that view
   moves onto `proof` — a UI change, not an API one.
 
+- **An `INSUFFICIENT_EVIDENCE` Proof can have an EMPTY layer 6.** Observed on
+  the first real Proof (`b192ab99-…`): the mandatory "what could change this
+  conclusion" block was empty even though S6 had recorded
+  `MISSING_COMPONENT` gaps at `SOURCE_OF_VALUE` and `FLOW_PATH`. S8 builds
+  that layer from requirement blocking gaps, claim context gaps and
+  non-`SUPPORTED` component reason codes — the job had none of the three (its
+  one component was `SUPPORTED`) — and never reads S6's flow-level gaps. The
+  Proof therefore reads as less honest than the engine actually is, which is
+  the opposite of what that block exists for. Fix is likely one more gap
+  source in the builder, plus a test that an unestablished verdict cannot have
+  an empty change-block while any gap is recorded anywhere. Not urgent, but it
+  touches the product's core promise.
+
 - **Foreign-mint CONTEXT rendering** — Proof/UI must present a foreign-mint
   observation as visually neutral. It is neutral in reconciliation; nothing yet
   guarantees it reads that way to a user.

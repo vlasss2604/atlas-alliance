@@ -49,7 +49,7 @@ import { eq } from "drizzle-orm";
 
 import { INTERNAL_ALPHA_V1, loadProductConfig } from "../src/server/config/product";
 import { createDatabase } from "../src/server/db/client";
-import { evidence, projects, researchTraceEvents, topics, users } from "../src/server/db/schema";
+import { evidence, interpretations, projects, researchTraceEvents, topics } from "../src/server/db/schema";
 import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import type { EntitlementSnapshot } from "../src/server/domain/types";
 import {
@@ -74,9 +74,27 @@ import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { resolveSourceRoute } from "../src/server/engine/source-authority";
 import { createBoss } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
+import { and, sql } from "drizzle-orm";
 import { parseRunMode } from "./alpha-acquire-url";
 
-const KNOWN_ARGS = new Set(["document-id", "component", "step", "actor", "project", "mode"]);
+const KNOWN_ARGS = new Set([
+  "document-id",
+  "component",
+  "step",
+  "actor",
+  "project",
+  "mode",
+  // REQUIRED. The id of an ALREADY-CLASSIFIED interpretation, created
+  // upstream through the normal product entrypoint. Stage B never
+  // classifies: the interpreter is a model call, and what the user asked
+  // is not recoverable from a document, a project, a component, a locator
+  // or the Evidence. Without it S7 reads normalized_intent = UNKNOWN and
+  // answers INTENT_NOT_CLASSIFIED, which is exactly what the first real
+  // Proof demonstrated.
+  "interpretation-id",
+]);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function parseArgs(argv: string[]): { args: Record<string, string>; unknown: string[] } {
   const args: Record<string, string> = {};
@@ -91,7 +109,7 @@ function parseArgs(argv: string[]): { args: Record<string, string>; unknown: str
 
 function usage(): never {
   console.error(
-    "usage: npx tsx scripts/extract-from-document.ts --document-id=<uuid> --component=<NAME> --step=<n> --actor=<name> --project=<slug> [--mode=<mode>]",
+    "usage: npx tsx scripts/extract-from-document.ts --document-id=<uuid> --interpretation-id=<uuid> --component=<NAME> --step=<n> --actor=<name> --project=<slug> [--mode=<mode>]",
   );
   console.error("");
   console.error("Runs the real extraction/Evidence path against ONE document previously");
@@ -173,9 +191,100 @@ async function main(): Promise<void> {
       process.exit(1);
     }
 
+    // ---- REQUIRED INTERPRETATION -------------------------------------
+    //
+    // Validated BEFORE the job exists and before a single byte is
+    // extracted, so every refusal below leaves the acquired document
+    // untouched and fully resumable (D-128): no job, no Evidence, no S5,
+    // no Proof, and no consumption mark.
+    //
+    // The guards mirror start-owner-alpha-research.ts's, which is the
+    // production owner path — not a second ownership contract. What is
+    // deliberately NOT copied is its `userId` equality check: that path
+    // is given a session user, whereas this one has none. Instead the job
+    // is created FOR THE INTERPRETATION'S OWN USER below, which is
+    // stronger: the chain Original Question -> Interpretation -> Job stays
+    // genuine and no synthetic user is minted at all.
+    const interpretationId = args["interpretation-id"];
+    if (!interpretationId) {
+      console.error("[extract-from-document] refusing: --interpretation-id is required.");
+      console.error("  S7 reads normalized_intent from the interpretation linked to this job;");
+      console.error("  without one it answers INTENT_NOT_CLASSIFIED and no claim is evaluated.");
+      console.error("  Create one first through the normal product interpretation entrypoint.");
+      process.exit(1);
+    }
+    if (!UUID_RE.test(interpretationId)) {
+      console.error("[extract-from-document] refusing: --interpretation-id is not a uuid.");
+      process.exit(1);
+    }
+    const [interp] = await db
+      .select()
+      .from(interpretations)
+      .where(eq(interpretations.id, interpretationId));
+    if (!interp) {
+      console.error("[extract-from-document] refusing: INTERPRETATION_NOT_FOUND.");
+      process.exit(1);
+    }
+    if (interp.status !== "READY") {
+      console.error("[extract-from-document] refusing: INTERPRETATION_NOT_READY (" + interp.status + ").");
+      process.exit(1);
+    }
+    if (interp.researchJobId) {
+      // Never steal an interpretation from the job that already owns it.
+      console.error("[extract-from-document] refusing: INTERPRETATION_ALREADY_USED by job " + interp.researchJobId + ".");
+      process.exit(1);
+    }
+    const interpResult = (interp.result ?? {}) as {
+      normalized_intent?: unknown;
+      project_slug?: unknown;
+      project_slugs?: unknown;
+      route?: unknown;
+      research_task?: unknown;
+    };
+    const normalizedIntent =
+      typeof interpResult.normalized_intent === "string" ? interpResult.normalized_intent : null;
+    // UNKNOWN is precisely the value S7 treats as unclassified, so binding
+    // one would reproduce the defect this argument exists to fix.
+    if (normalizedIntent === null || normalizedIntent === "UNKNOWN") {
+      console.error(
+        "[extract-from-document] refusing: INTENT_NOT_CLASSIFIED (normalized_intent=" +
+          String(normalizedIntent) +
+          ").",
+      );
+      process.exit(1);
+    }
+    if (interpResult.route !== "DEEP_RESEARCH") {
+      console.error("[extract-from-document] refusing: INTERPRETATION_NOT_DEEP_RESEARCH.");
+      process.exit(1);
+    }
+    if (typeof interpResult.research_task !== "string" || interpResult.research_task.length === 0) {
+      console.error("[extract-from-document] refusing: INTERPRETATION_INCOMPLETE (no research_task).");
+      process.exit(1);
+    }
+    // PROJECT COMPATIBILITY, from persisted relationships only: the
+    // interpretation names the project(s) the question is about, and the
+    // document belongs to `project`. An arbitrary unrelated classified
+    // interpretation therefore cannot be bound to this document's job.
+    const interpSlugs = Array.isArray(interpResult.project_slugs)
+      ? interpResult.project_slugs.filter((x): x is string => typeof x === "string")
+      : typeof interpResult.project_slug === "string"
+        ? [interpResult.project_slug]
+        : [];
+    if (!interpSlugs.includes(project.slug)) {
+      console.error(
+        "[extract-from-document] refusing: INTERPRETATION_PROJECT_MISMATCH — interpretation names [" +
+          interpSlugs.join(", ") +
+          "], document belongs to " +
+          project.slug +
+          ".",
+      );
+      process.exit(1);
+    }
+    console.log("interpretation:   " + interp.id);
+    console.log("normalizedIntent: " + normalizedIntent);
+
     const [topic] = await db.select().from(topics).where(eq(topics.isActive, true));
     if (!topic) throw new Error("no active topic found — is the database seeded?");
-    const [user] = await db.insert(users).values({}).returning();
 
     const budget = { ...INTERNAL_ALPHA_V1, maxSearchQueries: 1, maxSourceOpens: 2 };
     const entitlement: EntitlementSnapshot = {
@@ -188,7 +297,9 @@ async function main(): Promise<void> {
       db,
       boss,
       {
-        userId: user.id,
+        // The job belongs to whoever asked the question, not to a user
+        // minted for this run — see the note above.
+        userId: interp.userId,
         topicId: topic.id,
         projectId: project.id,
         originalQuestion: `extract evidence from the acquired document ${row.id}`,
@@ -198,13 +309,30 @@ async function main(): Promise<void> {
           task: `run the ordinary extraction path against one already-acquired document`,
         },
         normalizedTaskHash: `extract-from-document-${createdAt.getTime()}`,
-        idempotencyKey: `extract-from-document-${user.id}-${createdAt.getTime()}`,
+        idempotencyKey: `extract-from-document-${interp.id}-${createdAt.getTime()}`,
         entitlement,
         demoLifetimeProofLimit: config.demo_lifetime_proof_limit,
       },
       { skipEnqueue: true },
     );
     console.log("jobId:            " + job.id);
+
+    // THE LINK, as a compare-and-set — the same primitive
+    // start-owner-alpha-research.ts uses, for the same reason: two
+    // concurrent binds must not both win. If the row was claimed between
+    // validation and here, this updates nothing and the run stops before
+    // extraction, so the document stays resumable.
+    const linked = await db
+      .update(interpretations)
+      .set({ researchJobId: job.id })
+      .where(and(eq(interpretations.id, interp.id), sql`${interpretations.researchJobId} IS NULL`))
+      .returning({ id: interpretations.id });
+    if (linked.length === 0) {
+      console.error("[extract-from-document] refusing: INTERPRETATION_ALREADY_USED (claimed concurrently).");
+      console.error("  no extraction ran; the acquired document remains unconsumed and resumable.");
+      process.exit(1);
+    }
+    console.log("interpretation:   linked to this job   (S7 will read normalized_intent from it)");
 
     // The SAME planning stage worker.ts runs, in the same order and for the
     // same reason: S6 refuses to assemble without the job’s frozen Boundary
