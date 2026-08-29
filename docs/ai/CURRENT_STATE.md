@@ -210,6 +210,51 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## The product path is blocked by ONE coupling, and the obvious fix is barred
+
+Designed 2026-08-29, **not implemented**.
+
+**The coupling is inside one `execute()` call for one component**:
+`contentFetcher.fetch` (s4-executor.ts:1468) and
+`evidenceExtractor.extract` (:1643) run in the same function, process and
+instant. That is why a job needs the source host and the model provider
+reachable simultaneously.
+
+**The obvious fix — attempt each component twice — is barred by the attempt
+budget.** `controller.ts` treats any attempt after the first on a component
+key as a RECOVERY attempt, charged against `reservedRecoverySteps`, which
+`INTERNAL_ALPHA_V1` sets to **1 for the whole job**. Two attempts per
+component would exhaust the pool on the first one. The two phases therefore
+must not be two attempts of the same work item — that single fact determines
+the architecture.
+
+**The design that survives it:** a job-level `SOURCE_ACQUISITION` pass runs
+BEFORE the controller, deriving urls deterministically
+(`buildTargetedQueries` + confirmed `SOURCE_ROUTE`s — no model call, a path
+S4 already supports via `MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER`), sealing
+documents through `persistAcquiredDocument` and writing no Evidence and no
+attempts. Then the **normal controller run** proceeds unchanged, with
+`contentFetcher` swapped for a replay fetcher over that job's sealed set — so
+every component gets its FIRST attempt and S5-S9 behave exactly as today.
+Handoff is the existing pg-boss queue plus a job phase; ATLAS names
+capabilities (`SOURCE_ACQUISITION` / `MODEL_EXTRACTION`) and never a VPN.
+
+This moves D-128 **underneath** the product path rather than beside it:
+`acquired-documents.ts` is already an engine capability (seal, both-ends
+authority, replay, at-most-once consumption); only the owner scripts'
+orchestration is script-only, and none of it is copied.
+
+**Recommended ordering, honestly:** fix the environment first — one network
+state reaching both hosts restores the single-process path with **zero code
+change** and makes all of the above unnecessary. Build the phased design only
+if no such state exists; it has independent value (offline reprocessing,
+provider outages) but is a distributed stage machine added to a system that
+otherwise runs in one process.
+
+**Biggest unknown:** Brave has never been exercised live, so the assumption
+that search groups with source fetch rather than with the model is untested —
+and it decides where the split line goes.
+
 ## THE FIRST CLAIM-AWARE PROOF (2026-08-29, job `f8e1d880-…`)
 
 With a real `PROTOCOL_REVENUE_TO_TOKEN` interpretation bound, **S7 evaluated a

@@ -2,152 +2,169 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — first claim-aware Proof analysed; two blockers, not one
+## NONE — the product-path unblock is designed, not implemented
 
-Analysis only. No live call, no DB mutation, no code changed.
-*(Note: the round's prompt named `c04bf03` as HEAD; it was already `9b1b43b`.)*
+Offline analysis/design. No live call, no DB mutation, no code changed.
 
-## The Proof, verified
-
-`9c5f7683-…` for job `f8e1d880-…`: `PRIVATE` / `DRAFT`,
-`INSUFFICIENT_EVIDENCE`, confidence **40 = LIMITED** (bounded by
-`REQUIRED_BLOCKING_GAP`), seven layers with layer 5 empty, `researchCutoff`
-null, **0 bound Evidence**. S9 projects it unchanged.
-
-**This is the first Proof where a claim was actually evaluated** — S7 ran two
-real requirements instead of short-circuiting on an unclassified intent.
-
-## `PROTOCOL_REVENUE_TO_TOKEN` — the exact requirements
-
-| # | id | kind | target | result | persisted reason | blocking gap |
-|---|---|---|---|---|---|---|
-| 1 | `PRT-1` | `COMPONENT_ESTABLISHED` | `SOURCE_OF_VALUE` | **UNSATISFIED** | `REQUIRED_COMPONENT_MISSING` | `MISSING_COMPONENT` @ `SOURCE_OF_VALUE`, afterStep 1 |
-| 2 | `PRT-2` | `FLOW_RELATIONSHIP` | `SOURCE_OF_VALUE` → `DESTINATION` | **UNSATISFIED** | `REQUIRED_RELATIONSHIP_UNRESOLVED` | `DESTINATION_UNRESOLVED` @ `DESTINATION`, afterStep 6 |
-
-Both REQUIRED, both with `evidenceIds: []` in provenance.
-
-## Why `DESTINATION = SUPPORTED` is not enough
-
-The flow's lineage holds **exactly one element** — step 6 `DESTINATION`. The
-claim is not "is there a destination"; it is "**does protocol revenue reach
-the token**", which the Pattern encodes as a *source* plus a *path from source
-to destination*. One endpoint is not a chain.
-
-`evaluateFlowRelationship` is explicit: it returns `SATISFIED` only when
-`fromStatus !== null && toStatus !== null`. Here `from` (`SOURCE_OF_VALUE`) is
-absent from the lineage, so the relationship cannot even be assessed.
-
-**Component supported ≠ relationship resolved.** S5 said "this component's
-evidence establishes it." S7 asks "do the components form the mechanism the
-claim needs." Those are different questions, and D-103 fixes that boundary.
-
-## The finding that changes the milestone: there are TWO blockers
-
-`DESTINATION` **is** in the lineage, yet S6 still emitted
-`DESTINATION_UNRESOLVED`. The reason is not absence — it is the second branch
-of the assembler:
+## 1. The canonical loop, and where it couples
 
 ```
-if (!lineageStepFor(l, "DESTINATION"))      → absent          (not taken)
-else if (destinationKind === "UNKNOWN")     → UNRESOLVED      (taken)
+POST /api/interpretations → POST /api/research-jobs → worker
+  → runMemoryPlanningStage → runS4ResearchJob → controller (work queue)
+  → per component: WorkExecutor.execute()
+       ├─ queryProposer  (MODEL)
+       ├─ searchGateway  (BRAVE)
+       ├─ contentFetcher (SOURCE HOST)      ← s4-executor.ts:1468
+       └─ evidenceExtractor (MODEL)         ← s4-executor.ts:1643
+  → S5 → S6 → S7 → S8 → S9
 ```
 
-`classifyDestinationKind` is a **literal phrase dictionary**. `BUYBACK_HOLD`
-matches only `"buyback and hold"`, `"bought back and held"`, `"held in
-reserve"`. The persisted Evidence says:
+**The coupling is tighter than "same job": it is inside ONE `execute()` call
+for ONE component.** Fetch and extract are ~170 lines apart in the same
+function, same process, same instant. No boundary exists between them today.
 
-> "Bought-back RAY is **held at the address** DdHDoz94o2WJ…"
+## 2. The landmine that kills the obvious fix
 
-Semantically that is buyback-and-hold. Lexically it matches none of the three
-phrases, so the kind is `UNKNOWN` and the gap fires — **with the supporting
-evidence id attached to it**.
+The obvious design — run each component twice, once to fetch and once to
+extract — **cannot work**, and the reason is precise:
 
-**Consequence:** `PRT-2` would still fail *even if `SOURCE_OF_VALUE` were
-established*, because the `unresolvedRelationship` branch is checked before
-the generic fallback. Establishing more components fixes `PRT-1`; it does not
-by itself fix `PRT-2`.
+`controller.ts` treats *any* attempt after the first on a component key as a
+**recovery attempt** (`isRecoveryAttempt = maxAttemptByKey.get(key) > 0`),
+charged against `budget.reservedRecoverySteps`, which `INTERNAL_ALPHA_V1`
+sets to **1 for the entire job**. A two-attempt-per-component scheme would
+exhaust the whole recovery pool on the first component and stall.
 
-I am **not** proposing to add a phrase to make this case pass. Tuning a
-classifier dictionary until one document classifies is fitting the answer to
-the question. Whether the dictionary is too literal is a real, separate
-research-quality decision — recorded in `BACKLOG.md`, not decided here.
+So the two phases **must not be two attempts of the same work item.** That
+single fact determines the architecture.
 
-## Why `boundEvidence = 0` — correct
+## 3. Reusable D-128 engine primitives (A) vs owner-script orchestration (B)
 
-S8 cites through `requirementResults[].provenance.evidenceIds`. Both
-requirements are `UNSATISFIED` and both carry `evidenceIds: []` — the
-evaluator deliberately returns no evidence on its unsatisfied branches.
-So there is nothing to cite, and both Evidence rows correctly keep
-`proof_id = NULL`.
+`src/server/engine/acquired-documents.ts` is already a clean 209-line
+**engine capability**, not script logic:
 
-Binding the `SUPPORTS` row anyway would assert it supports a claim the engine
-just recorded as unsatisfied.
+| primitive | what it gives the product path |
+|---|---|
+| `persistAcquiredDocument` | seal (`text_sha256`) + authority snapshot |
+| `loadAcquiredDocumentForResume` | seal verify · both-ends authority · project scope · consumption check |
+| `replayContentFetcher` | exact replay, refuses any other url |
+| `markAcquiredDocumentConsumed` | at-most-once |
+| `authorityPermitsAcquisition`, `textSha256` | shared predicates |
 
-## Is D-128's single-component contract the main limitation?
+**Owner-script-only (B), to be reused by nobody:** CLI parsing, job creation,
+interpretation binding, the fixture proposer/single-url search gateway, the
+S5→S8 projection calls, and all printing. The product path reuses **A** and
+copies none of **B**.
 
-**For multi-component intents, yes — but it is not the only one.** Every
-research intent except `TOKEN_UTILITY` needs ≥ 2 components, and a Stage B run
-yields exactly one. That bounds what the two-window route can demonstrate.
+## 4. The design — two phases, one job, one controller
 
-It is not sufficient on its own, per the `destinationKind` finding above.
+**Phase A — `SOURCE_ACQUISITION`** (runs on a source-capable worker):
+job-level, **before** the controller. Derives candidate urls
+**deterministically** — `buildTargetedQueries` plus the project's confirmed
+`SOURCE_ROUTE`s — searches and fetches, and seals each document via
+`persistAcquiredDocument`. Writes **no Evidence, no component attempts, no
+component results, and makes no model call**.
 
-## Next major milestone — the honest answer is **C**
+This is not a new capability: S4 already has a model-free targeting path and
+already tolerates skipping the proposer
+(`MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER`).
 
-**The production path already solves multi-component.** `run-job.ts` +
-`controller.ts` take one job, walk a work queue of many components, run S4 per
-component, then project S5→S6→S7→S8 **once**. That is precisely the
-"one intent, one job, many component Evidence units, one projection" shape
-requested — it exists, it is tested, and it is the path a real user takes.
+**Phase B — `MODEL_EXTRACTION`** (runs on a model-capable worker): **the
+normal controller run, unchanged.** The only difference is that
+`contentFetcher` is a **replay fetcher over this job's sealed documents**
+instead of the network fetcher. Every component therefore gets its **first**
+attempt here — the recovery pool is untouched — and S5/S6/S7/S8/S9 behave
+exactly as they do today.
 
-D-128 is a **workaround for a network constraint**, not a research
-architecture. Growing it into a multi-component orchestrator would duplicate
-the controller in a script: a second work queue, a second stopping rule, a
-second projection trigger — exactly the "another Proof pipeline" the last few
-rounds were careful to avoid.
+**Why this is the minimal correct shape:** the controller is not modified, no
+second work queue or stopping rule is introduced, Evidence is created exactly
+once in one job, and the D-128 concept moves *underneath* the product path
+instead of beside it.
 
-**So the milestone I recommend is: make the product path runnable** — the
-environment/network work, not more script surface. That yields a real Proof
-through `POST /api/research-jobs`, with many components, in one job.
+## 5. Process/queue boundaries, stated without a VPN in them
 
-**If** the network cannot be fixed and D-128 must be extended, then **B**, not
-A: multiple Stage B extractions attach to the **same** research job, and a
-**separate explicit finalize step** runs S6/S7/S8 once. B is better than A
-because it keeps each document sealed and independently consumed, preserves
-one-intent/one-job, and makes projection an explicit act rather than something
-that fires after every partial. Note this would require changing what I built
-last round, where S6/S7/S8 run at the end of *every* Stage B — with several
-units per job those would re-run repeatedly (idempotent, so no duplicate rows,
-but a premature intermediate Proof each time).
+The handoff is the **existing pg-boss queue**: one additional queue name and a
+phase recorded on the job. Two **worker roles** consume different queues; each
+role is deployed where it has the network access its phase needs.
 
-## Layer 6 — the BACKLOG issue did NOT reproduce here
+**ATLAS names capabilities, never a provider or a VPN.** The domain knows
+`SOURCE_ACQUISITION` and `MODEL_EXTRACTION`; which process can reach what is a
+deployment fact. "MantaRay" must appear nowhere in the codebase, and no
+process ever changes its own routing.
 
-Layer 6 is **populated**, with both gaps:
+## 6. Failure / resume contract — unchanged
 
-```
-MISSING_COMPONENT at component SOURCE_OF_VALUE
-DESTINATION_UNRESOLVED at component DESTINATION
-```
+Sealed documents, exact replay, both-ends authority, at-most-once consumption
+(now per document within one job), no raw-text injection, failed extraction
+leaves its document resumable, no fabricated Proof, no duplicated component
+work (first attempts only), one Proof per job (DB-enforced).
 
-The two S7 reason codes appear in **layer 4** ("Claim-level reasons:
-REQUIRED_COMPONENT_MISSING, REQUIRED_RELATIONSHIP_UNRESOLVED"), which is
-where claim-level limitations belong.
+## 7. Product UX afterwards
 
-So the recorded issue is narrower than first written: layer 6 is empty **only
-when `requirementResults` is empty** — i.e. when no claim was evaluated at all
-(the `INTENT_NOT_CLASSIFIED` case). BACKLOG updated to say so.
+Ask question → Start Proof → receive Proof. The user never sees a stage, a
+document id, a replay transport, or any network concept. Phase A/B are
+infrastructure, invisible above the queue.
 
-**When to address it: after.** It did not manifest on a claim-aware Proof, and
-the multi-component question is far more consequential.
+## 8. Risks, named rather than smoothed
 
-## Fable needed?
+1. **Brave's network requirement is unknown** — it has never been exercised
+   live. Phase A assumes search groups with source fetch. If search needs the
+   model network instead, the split line is in the wrong place and the design
+   must move it. **This is the assumption most worth testing first, and it is
+   cheap to test.**
+2. **Deterministic targeting is narrower than model-proposed queries**, so
+   Phase A may acquire fewer or worse documents than a single-process run —
+   a research-quality regression traded for runnability.
+3. **Staleness between phases.** D-128's rule already applies: a resume
+   evaluates exactly what was captured, and a fresh look is a new acquisition.
+4. **Two worker roles are deployment surface.** A mis-provisioned role stalls
+   jobs silently unless the phase is observable.
 
-**No.** This is correctness-critical engine/architecture work — Opus, High,
-single-agent, per the working style. Nothing here is a parallelisable bulk
-task.
+## 9. Recommendation — and the honest ordering
+
+**Fix the environment first.** One network state that reaches both the docs
+host and Anthropic restores the single-process product path with **zero code
+change**, and everything above becomes unnecessary. It is strictly smaller
+than building a distributed stage machine.
+
+**Build this only if the environment genuinely cannot provide one state.** It
+does have independent long-term value — offline reprocessing, provider
+outages, rate-limit windows, air-gapped extraction — so it is not wasted work,
+but it should be chosen deliberately, not by default.
+
+## 10. Minimum implementation slice (if chosen)
+
+Do **not** start with the queue split. Start with the two halves under one
+process, proven offline:
+
+1. A **multi-document replay fetcher** — generalise `replayContentFetcher`
+   from one document to a job's sealed set, refusing any url outside it.
+2. A **job-level acquisition pass** reusing `persistAcquiredDocument`, behind
+   an explicit mode, writing no Evidence and making no model call.
+3. An offline test that one job acquires N documents, then runs the **normal
+   controller** with the replay fetcher and reaches S8 with **first attempts
+   only** — proving the recovery pool is untouched.
+
+Only after that: the job phase column, the second queue name, and the worker
+role split. **Migration:** a phase column on `research_jobs` (or a small
+companion table) plus a queue name — no data migration.
+
+**Files likely involved:** `acquired-documents.ts` (replay set),
+a new job-level acquisition module, `run-job.ts` / `worker.ts` /
+`jobs/queue.ts` for the phase and queue, `research.ts` schema for the phase.
+`controller.ts`, `s4-executor.ts`, S5/S6/S7/S8/S9 should need **no** change —
+if they do, the design has drifted.
+
+**Fable needed?** No. Correctness-critical engine work: Opus, High,
+single-agent.
+
+## Deliberately untouched this round
+
+Raydium `destinationKind` near-miss · owner-user fragmentation · layer-6 edge
+case · transaction history · EVM · Promise/Risk · UI · the Windows test bug.
 
 ### Standing boundaries
 
-- Never tune a classifier dictionary to make one document pass.
-- Component supported ≠ relationship resolved ≠ claim supported.
-- No second Proof pipeline, no second work queue in a script.
-- Never bind Evidence to a claim the engine recorded as unsatisfied.
+- Never weaken SSRF, whitelist a reserved range, or special-case a domain.
+- No VPN toggling inside a process; no VPN brand in domain logic.
+- No second orchestrator, no second work queue, no second Proof pipeline.
+- D-128 stays a bounded capability; the product path reuses it, never copies it.
