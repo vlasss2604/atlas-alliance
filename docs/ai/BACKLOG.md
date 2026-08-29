@@ -84,6 +84,19 @@ together they stopped project #2 before it could start. Kept for context.
   (D-123). A client no longer needs them, so they can be dropped when that view
   moves onto `proof` — a UI change, not an API one.
 
+- **`classifyDestinationKind` is a literal phrase dictionary and misses
+  ordinary paraphrases.** On the first claim-aware Proof (`9c5f7683-…`) the
+  Evidence read "Bought-back RAY is held at the address …", which is
+  semantically buyback-and-hold, but `BUYBACK_HOLD` matches only
+  `"buyback and hold"`, `"bought back and held"`, `"held in reserve"`. The kind
+  resolved `UNKNOWN`, S6 emitted `DESTINATION_UNRESOLVED` on a component that
+  was `SUPPORTED`, and S7's `FLOW_RELATIONSHIP` requirement failed on that
+  branch — so the requirement would fail **even after `SOURCE_OF_VALUE` is
+  established**. **Do not fix by appending the phrase that makes this document
+  pass**; that is fitting the classifier to one case. The real question is
+  whether kind classification should stay a literal dictionary at all, and
+  that is a research-quality decision needing its own scoped task.
+
 - **A D-128 resumed job can only ever establish ONE component**, because
   Stage B takes a single `--component`/`--step` and S5–S8 are job-scoped.
   Verified against the Pattern's `intentRequirements`: every research intent's
@@ -96,10 +109,13 @@ together they stopped project #2 before it could start. Kept for context.
   two-window route can ever demonstrate, and the real product path (many
   components per job) is what removes the bound.
 
-- **An `INSUFFICIENT_EVIDENCE` Proof can have an EMPTY layer 6.** Observed on
-  the first real Proof (`b192ab99-…`): the mandatory "what could change this
-  conclusion" block was empty even though S6 had recorded
-  `MISSING_COMPONENT` gaps at `SOURCE_OF_VALUE` and `FLOW_PATH`. S8 builds
+- **An `INSUFFICIENT_EVIDENCE` Proof can have an EMPTY layer 6 — but only when
+  NO claim was evaluated.** Observed on `b192ab99-…` (intent unclassified, so
+  `requirementResults` was empty): the mandatory "what could change this
+  conclusion" block was empty even though S6 had recorded `MISSING_COMPONENT`
+  gaps at `SOURCE_OF_VALUE` and `FLOW_PATH`. **Narrowed 2026-08-29:** the
+  later claim-aware Proof `9c5f7683-…` populated layer 6 correctly from
+  requirement blocking gaps, so this bites only the no-claim case. S8 builds
   that layer from requirement blocking gaps, claim context gaps and
   non-`SUPPORTED` component reason codes — the job had none of the three (its
   one component was `SUPPORTED`) — and never reads S6's flow-level gaps. The

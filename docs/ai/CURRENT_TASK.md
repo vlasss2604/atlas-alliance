@@ -2,138 +2,152 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — the interpretation window is READY, with one structural caveat
+## NONE — first claim-aware Proof analysed; two blockers, not one
 
-Offline preparation. Nothing executed, no DB mutation, no code changed.
+Analysis only. No live call, no DB mutation, no code changed.
+*(Note: the round's prompt named `c04bf03` as HEAD; it was already `9b1b43b`.)*
 
-## The API contract, read from the route
+## The Proof, verified
 
-- **`POST /api/interpretations`**
-- **Body:** `{ "question": "<string>" }` — that is the *only* field read.
-  Trimmed, non-empty, length-capped; anything else is ignored.
-- **Auth:** `requireMutation` = allowed Origin **+ session cookie + CSRF
-  token**. Per-user rate limit applies.
-- **Gate:** `interpreter_enabled` must be true — **verified true**.
-- **Response 201:** `{ interpretation: { id, status, attempt, route, … },
-  gates: { … } }`. **The id you need is `interpretation.id`.**
-- **The project slug is NOT supplied in the request.** The model proposes
-  entities and the server resolves them (`resolveAllEntities` →
-  `applyServerDecisions`), which also decides `status`. So project association
-  is *earned* by the question naming the project recognisably — it cannot be
-  forced through the API.
-- `normalized_intent` and `route` live inside the persisted `result` jsonb,
-  not in the request.
+`9c5f7683-…` for job `f8e1d880-…`: `PRIVATE` / `DRAFT`,
+`INSUFFICIENT_EVIDENCE`, confidence **40 = LIMITED** (bounded by
+`REQUIRED_BLOCKING_GAP`), seven layers with layer 5 empty, `researchCutoff`
+null, **0 bound Evidence**. S9 projects it unchanged.
 
-## Gates — all already correct, nothing to change
+**This is the first Proof where a claim was actually evaluated** — S7 ran two
+real requirements instead of short-circuiting on an unclassified intent.
 
-`interpreter_enabled = true` · `internal_alpha_enabled = true` ·
-`research_enabled = false` (correct — enabling it would *close* the owner
-path) · `interpreter_model = claude-haiku-4-5` · one ADMIN user exists.
+## `PROTOCOL_REVENUE_TO_TOKEN` — the exact requirements
 
-## The question
+| # | id | kind | target | result | persisted reason | blocking gap |
+|---|---|---|---|---|---|---|
+| 1 | `PRT-1` | `COMPONENT_ESTABLISHED` | `SOURCE_OF_VALUE` | **UNSATISFIED** | `REQUIRED_COMPONENT_MISSING` | `MISSING_COMPONENT` @ `SOURCE_OF_VALUE`, afterStep 1 |
+| 2 | `PRT-2` | `FLOW_RELATIONSHIP` | `SOURCE_OF_VALUE` → `DESTINATION` | **UNSATISFIED** | `REQUIRED_RELATIONSHIP_UNRESOLVED` | `DESTINATION_UNRESOLVED` @ `DESTINATION`, afterStep 6 |
+
+Both REQUIRED, both with `evidenceIds: []` in provenance.
+
+## Why `DESTINATION = SUPPORTED` is not enough
+
+The flow's lineage holds **exactly one element** — step 6 `DESTINATION`. The
+claim is not "is there a destination"; it is "**does protocol revenue reach
+the token**", which the Pattern encodes as a *source* plus a *path from source
+to destination*. One endpoint is not a chain.
+
+`evaluateFlowRelationship` is explicit: it returns `SATISFIED` only when
+`fromStatus !== null && toStatus !== null`. Here `from` (`SOURCE_OF_VALUE`) is
+absent from the lineage, so the relationship cannot even be assessed.
+
+**Component supported ≠ relationship resolved.** S5 said "this component's
+evidence establishes it." S7 asks "do the components form the mechanism the
+claim needs." Those are different questions, and D-103 fixes that boundary.
+
+## The finding that changes the milestone: there are TWO blockers
+
+`DESTINATION` **is** in the lineage, yet S6 still emitted
+`DESTINATION_UNRESOLVED`. The reason is not absence — it is the second branch
+of the assembler:
 
 ```
-Where does the revenue from Raydium's trading fees go, and what happens to the RAY that is bought back?
+if (!lineageStepFor(l, "DESTINATION"))      → absent          (not taken)
+else if (destinationKind === "UNKNOWN")     → UNRESOLVED      (taken)
 ```
 
-It names the project explicitly (so entity resolution can bind it), asks about
-a mechanism the acquired document actually describes (12% of trading fees →
-buyback → held at a documented address), and needs **no transaction history** —
-it asks where value goes, not whether a particular transfer executed.
+`classifyDestinationKind` is a **literal phrase dictionary**. `BUYBACK_HOLD`
+matches only `"buyback and hold"`, `"bought back and held"`, `"held in
+reserve"`. The persisted Evidence says:
 
-**Classification hypothesis only — the interpreter decides, and I have not
-forced it:** most likely `PROTOCOL_REVENUE_TO_TOKEN`, plausibly
-`VALUE_CAPTURE` or `TOKEN_UTILITY`. All three are in the existing vocabulary;
-no new intent is needed.
+> "Bought-back RAY is **held at the address** DdHDoz94o2WJ…"
 
-## The structural caveat you should know BEFORE running
+Semantically that is buyback-and-hold. Lexically it matches none of the three
+phrases, so the kind is `UNKNOWN` and the gap fires — **with the supporting
+evidence id attached to it**.
 
-**A Stage B run establishes exactly ONE component** (`--component`, `--step`),
-and S5→S8 are job-scoped, so one resumed job carries one component result.
+**Consequence:** `PRT-2` would still fail *even if `SOURCE_OF_VALUE` were
+established*, because the `unresolvedRelationship` branch is checked before
+the generic fallback. Establishing more components fixes `PRT-1`; it does not
+by itself fix `PRT-2`.
 
-Every research intent's REQUIRED set needs more than `DESTINATION` alone:
+I am **not** proposing to add a phrase to make this case pass. Tuning a
+classifier dictionary until one document classifies is fitting the answer to
+the question. Whether the dictionary is too literal is a real, separate
+research-quality decision — recorded in `BACKLOG.md`, not decided here.
 
-| intent | REQUIRED | reachable from one component? |
-|---|---|---|
-| `PROTOCOL_REVENUE_TO_TOKEN` | `SOURCE_OF_VALUE` + flow → `DESTINATION` | no — two |
-| `USAGE_TO_TOKEN_LINKAGE` | same shape | no |
-| `VALUE_CAPTURE` | those two **+ NET_EFFECT** | no — three |
-| `BURN_OR_SUPPLY_EFFECT` | `NET_EFFECT_ESTABLISHED` | not established (held, not burned) |
-| `MECHANISM_CURRENT_STATE` | lifecycle `CURRENT` | needs `CURRENT_STATE` |
-| `TOKEN_UTILITY` | **`SOURCE_OF_VALUE` only** (its second requirement is OPTIONAL) | **yes** |
+## Why `boundEvidence = 0` — correct
 
-So: **a `SUPPORTED` verdict is not reachable from one Stage B run** unless the
-classification lands on `TOKEN_UTILITY` *and* Stage B targets
-`--component=SOURCE_OF_VALUE --step=1`.
+S8 cites through `requirementResults[].provenance.evidenceIds`. Both
+requirements are `UNSATISFIED` and both carry `evidenceIds: []` — the
+evaluator deliberately returns no evidence on its unsatisfied branches.
+So there is nothing to cite, and both Evidence rows correctly keep
+`proof_id = NULL`.
 
-For any other classification the honest expected outcome is
-`PARTIALLY_SUPPORTED` or `INSUFFICIENT_EVIDENCE` **with named requirement gaps**
-— which is still a large step past today's `INTENT_NOT_CLASSIFIED`: a claim
-actually evaluated, with the missing bridge named. I am not proposing to bend
-the question toward `TOKEN_UTILITY` to manufacture a green verdict; that would
-be choosing the question to fit the answer.
+Binding the `SUPPORTS` row anyway would assert it supports a claim the engine
+just recorded as unsatisfied.
 
-## Live footprint of this one request
+## Is D-128's single-component contract the main limitation?
 
-**1 interpreter model generation.** No `count_tokens` on this path, **0**
-retries (a failure surfaces as an error), **0** search, **0** source fetches,
-**0** RPC. Classification only — the request starts no research.
+**For multi-component intents, yes — but it is not the only one.** Every
+research intent except `TOKEN_UTILITY` needs ≥ 2 components, and a Stage B run
+yields exactly one. That bounds what the two-window route can demonstrate.
 
-## MantaRay: **ON**
+It is not sufficient on its own, per the `destinationKind` finding above.
 
-Anthropic requires it. This request touches **no Raydium host** — it reads only
-the question text and the local DB — so the blocked-address problem is
-irrelevant here. No VPN toggling inside the request.
+## Next major milestone — the honest answer is **C**
 
-## Success conditions, in real column names
+**The production path already solves multi-component.** `run-job.ts` +
+`controller.ts` take one job, walk a work queue of many components, run S4 per
+component, then project S5→S6→S7→S8 **once**. That is precisely the
+"one intent, one job, many component Evidence units, one projection" shape
+requested — it exists, it is tested, and it is the path a real user takes.
 
-Persisted row in `interpretations` with:
-`status = 'READY'` · `result->>'normalized_intent'` ≠ `'UNKNOWN'` and present ·
-`result->>'route' = 'DEEP_RESEARCH'` · `result->'project_slugs'` (or
-`project_slug`) containing **`raydium`** · `result->>'research_task'` non-empty ·
-`research_job_id IS NULL`.
+D-128 is a **workaround for a network constraint**, not a research
+architecture. Growing it into a multi-component orchestrator would duplicate
+the controller in a script: a second work queue, a second stopping rule, a
+second projection trigger — exactly the "another Proof pipeline" the last few
+rounds were careful to avoid.
 
-Those are exactly what Stage B's new validation checks.
+**So the milestone I recommend is: make the product path runnable** — the
+environment/network work, not more script surface. That yields a real Proof
+through `POST /api/research-jobs`, with many components, in one job.
 
-**One honest risk:** `status` and the project binding are decided by the server
-from the model's output. If the question comes back `NEEDS_CLARIFICATION`, or
-resolves to no project, the row is not usable and a second attempt (a second
-model call) is needed. That is a genuine possibility, not a certainty — it
-cannot be settled offline.
+**If** the network cannot be fixed and D-128 must be extended, then **B**, not
+A: multiple Stage B extractions attach to the **same** research job, and a
+**separate explicit finalize step** runs S6/S7/S8 once. B is better than A
+because it keeps each document sealed and independently consumed, preserves
+one-intent/one-job, and makes projection an explicit act rather than something
+that fires after every partial. Note this would require changing what I built
+last round, where S6/S7/S8 run at the end of *every* Stage B — with several
+units per job those would re-run repeatedly (idempotent, so no duplicate rows,
+but a premature intermediate Proof each time).
 
-## Owner procedure — use the app, not a shell
+## Layer 6 — the BACKLOG issue did NOT reproduce here
 
-`POST /api/interpretations` requires an **Origin check, a session cookie and a
-CSRF token**. A bare PowerShell/curl call cannot reproduce those safely, and I
-will not invent a token or a bypass. So:
+Layer 6 is **populated**, with both gaps:
 
-**Ask the question in the Mini App**, signed in as the ADMIN user, with
-MantaRay **ON**. That is the real supported route and the one a user takes.
-
-Then read the id back — read-only:
-
-```bash
-psql "$env:DATABASE_URL" -c "SELECT id, status, result->>'normalized_intent' AS intent, result->>'route' AS route, result->'project_slugs' AS slugs, research_job_id FROM interpretations ORDER BY created_at DESC LIMIT 3;"
+```
+MISSING_COMPONENT at component SOURCE_OF_VALUE
+DESTINATION_UNRESOLVED at component DESTINATION
 ```
 
-Use that `id` as `--interpretation-id` in Stage B.
+The two S7 reason codes appear in **layer 4** ("Claim-level reasons:
+REQUIRED_COMPONENT_MISSING, REQUIRED_RELATIONSHIP_UNRESOLVED"), which is
+where claim-level limitations belong.
 
-## Full sequence to the next real Proof
+So the recorded issue is narrower than first written: layer 6 is empty **only
+when `requirementResults` is empty** — i.e. when no claim was evaluated at all
+(the `INTENT_NOT_CLASSIFIED` case). BACKLOG updated to say so.
 
-1. **Interpretation** — app, ADMIN, MantaRay **ON**. 1 model call.
-2. **Stage A** — `acquire-document.ts`, MantaRay **OFF** (the previous
-   document is consumed, and ON reproducibly hits `BLOCKED_ADDRESS`).
-3. **Stage B** — MantaRay **ON**, with both ids, choosing `--component` /
-   `--step` to match the classified intent's requirements.
+**When to address it: after.** It did not manifest on a claim-aware Proof, and
+the multi-component question is far more consequential.
 
-## READY
+## Fable needed?
 
-No blocker. Nothing in the repository needs to change. The caveat above is
-about what verdict to *expect*, not about whether the run can proceed.
+**No.** This is correctness-critical engine/architecture work — Opus, High,
+single-agent, per the working style. Nothing here is a parallelisable bulk
+task.
 
 ### Standing boundaries
 
-- The interpreter classifies; never force or hardcode an intent.
-- Do not choose the question to fit a desired verdict.
-- No live call without a separate authorized window.
-- Never weaken SSRF, and never toggle the VPN inside a running process.
+- Never tune a classifier dictionary to make one document pass.
+- Component supported ≠ relationship resolved ≠ claim supported.
+- No second Proof pipeline, no second work queue in a script.
+- Never bind Evidence to a claim the engine recorded as unsatisfied.

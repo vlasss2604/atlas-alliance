@@ -210,6 +210,50 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## THE FIRST CLAIM-AWARE PROOF (2026-08-29, job `f8e1d880-…`)
+
+With a real `PROTOCOL_REVENUE_TO_TOKEN` interpretation bound, **S7 evaluated a
+claim for the first time** instead of short-circuiting. Proof
+`9c5f7683-…`: `PRIVATE`/`DRAFT`, `INSUFFICIENT_EVIDENCE`, confidence **40 =
+LIMITED** (bounded by `REQUIRED_BLOCKING_GAP`), seven layers, 0 bound
+Evidence. S9 projects it unchanged.
+
+**Both requirements failed, for two INDEPENDENT reasons:**
+
+- `PRT-1` (`COMPONENT_ESTABLISHED` on `SOURCE_OF_VALUE`) — **UNSATISFIED**,
+  `REQUIRED_COMPONENT_MISSING`. The flow's lineage holds exactly one element,
+  step 6 `DESTINATION`. A Stage B run establishes one component, and this
+  intent needs two.
+- `PRT-2` (`FLOW_RELATIONSHIP` `SOURCE_OF_VALUE` → `DESTINATION`) —
+  **UNSATISFIED**, `REQUIRED_RELATIONSHIP_UNRESOLVED`, blocked by
+  `DESTINATION_UNRESOLVED`.
+
+**The second reason is not the missing component.** `DESTINATION` IS in the
+lineage; the gap fired from the assembler's *other* branch, because
+`classifyDestinationKind` returned `UNKNOWN`. That classifier is a literal
+phrase dictionary, and the Evidence — "Bought-back RAY is held at the address
+…" — is semantically buyback-and-hold but matches none of `"buyback and
+hold"` / `"bought back and held"` / `"held in reserve"`. **So `PRT-2` would
+fail even after `SOURCE_OF_VALUE` is established.** Recorded in `BACKLOG.md`;
+deliberately NOT fixed by appending the phrase that makes this document pass.
+
+**`boundEvidence = 0` is correct**: both requirements are unsatisfied and the
+evaluator returns `evidenceIds: []` on those branches, so there is nothing to
+cite. Binding the `SUPPORTS` row would assert support for a claim just
+recorded as unsatisfied.
+
+**Layer 6 was populated here** (`MISSING_COMPONENT at SOURCE_OF_VALUE`,
+`DESTINATION_UNRESOLVED at DESTINATION`), and the two claim-level reason codes
+appear in layer 4 — so the empty-layer-6 backlog item is narrower than first
+written: it bites only when no claim was evaluated at all.
+
+**The architectural conclusion:** the production path
+(`run-job.ts` + `controller.ts`) *already* does one intent → one job → many
+components → one projection. D-128 is a workaround for a network constraint,
+not a research architecture, and growing it into a multi-component
+orchestrator would duplicate the controller in a script. The next milestone is
+therefore to make the **product path** runnable, not to extend Stage B.
+
 ## THE FIRST REAL PERSISTED PROOF (2026-08-29, job `6bc1a1ca-…`)
 
 A real D-128 two-window run produced the project's **first persisted Proof**:
