@@ -84,6 +84,18 @@ together they stopped project #2 before it could start. Kept for context.
   (D-123). A client no longer needs them, so they can be dropped when that view
   moves onto `proof` — a UI change, not an API one.
 
+- **A D-128 resumed job can only ever establish ONE component**, because
+  Stage B takes a single `--component`/`--step` and S5–S8 are job-scoped.
+  Verified against the Pattern's `intentRequirements`: every research intent's
+  REQUIRED set needs more than `DESTINATION` alone, and only `TOKEN_UTILITY`
+  has a single REQUIRED requirement (`SOURCE_OF_VALUE`) reachable from one
+  component. So a `SUPPORTED` verdict is generally unreachable from one
+  resumed run, and the honest outcome is `PARTIALLY_SUPPORTED` /
+  `INSUFFICIENT_EVIDENCE` with named requirement gaps. Not a defect — the
+  resumed path was built to replay one document — but it bounds what the
+  two-window route can ever demonstrate, and the real product path (many
+  components per job) is what removes the bound.
+
 - **An `INSUFFICIENT_EVIDENCE` Proof can have an EMPTY layer 6.** Observed on
   the first real Proof (`b192ab99-…`): the mandatory "what could change this
   conclusion" block was empty even though S6 had recorded
