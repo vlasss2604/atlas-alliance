@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-29: **2424 passing, 4 skipped, 1 failing**
-  (2429 total). Run the suite ALONE — two concurrent `vitest run` invocations
+- Full suite, last verified 2026-08-29: **2432 passing, 4 skipped, 1 failing**
+  (2437 total). Run the suite ALONE — two concurrent `vitest run` invocations
   share the one test database and produce mass spurious failures (observed:
   193 "failures" that vanished on a clean serial run). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
@@ -239,13 +239,36 @@ a reserved range, special-casing the domain or relaxing the SSRF check would
 each remove the protection that correctly stopped the fetch, and none is
 acceptable.
 
-**A second gap found while checking the alternative:** the D-128 two-stage
-path is network-compatible but **stops at S5** —
-`extract-from-document.ts` calls `executor.execute` then
-`reconcileAndPersistComponent`, and never `assembleAndPersistMechanism` (S6),
-`evaluateAndPersistClaimSupport` (S7) or `buildAndPersistProof` (S8). Only
-`run-job.ts` runs that chain. So the two-stage route halts one stage short of
-the three that now exist.
+**A second gap found while checking the alternative — now CLOSED
+(2026-08-29).** The D-128 two-stage path was network-compatible but stopped at
+S5. `extract-from-document.ts` now continues through the same production
+functions `run-job.ts` calls — `assembleAndPersistMechanism` (S6),
+`evaluateAndPersistClaimSupport` (S7), `buildAndPersistProof` (S8) — adding no
+external call of any kind, since all three are projections over already
+persisted rows.
+
+Two things that fix required, both recorded because they are easy to get
+wrong. **S6 needs the job's frozen Boundary Contract**, and Stage B never
+created one (planning belongs to the worker), so the naive wiring threw
+`MissingActivePatternError`; the fix calls the real `runMemoryPlanningStage`,
+DB-only, in the worker's own position — never a hand-written
+`research_plans` row, which would assert a planning stage that did not happen.
+And the projections run **only when Evidence was persisted**, deliberately
+diverging from `run-job.ts`: that path projects a whole work queue, while this
+one holds a single document for a single component, where a Proof from a
+failed replay would describe the failure rather than the project.
+
+**The D-128 consumption boundary did not move.** `consumed_at` is still set on
+successful Evidence persistence, still before the projections, so
+**DOCUMENT CONSUMED != PROOF NECESSARILY PERSISTED** — pinned by a source-scan
+test. S9 projects the resulting Proof unchanged; it cannot tell a resumed job
+from a normal one.
+
+**What this does and does not prove:** the two-window sequence (Stage A OFF,
+Stage B ON) can now yield a real Proof from real evidence without touching the
+blocked-address problem. It does **not** prove the product API path — the
+entrypoint is owner tooling, and the single-process product run stays blocked
+by the network matrix.
 
 The probe persisted nothing: job `19e86520-…`, 6 trace rows ending
 `FETCH_FAILED`, **no new `acquired_documents` row**, 0 evidence, 0 artifacts,

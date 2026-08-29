@@ -2,105 +2,111 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — the probe answered: the two network states are mutually exclusive
+## NONE — the D-128 resumed path now ends in a Proof
 
-Analysis only. No live call this round; the local Postgres was read, never
-mutated.
+Offline implementation. No live call, no model call, no RPC, no network. No
+change to S8, S9, D-127, D-128 or D-135. No Raydium networking retried.
 
-## The probe result, and why it is decisive
+## What changed
 
-One owner window, MantaRay **ON**, Stage A against the classified route:
+`extract-from-document.ts` stopped at S5. It now continues through the **same
+production functions `run-job.ts` calls**, in the same order:
 
 ```
-status: FAILED
-reason: CONTENT_FETCHER_FAILED:ContentFetchError:BLOCKED_ADDRESS
+stored sealed document → replay → extraction → Evidence → S5
+  → assembleAndPersistMechanism   (S6)
+  → evaluateAndPersistClaimSupport (S7)
+  → buildAndPersistProof           (S8)
 ```
 
-**`BLOCKED_ADDRESS` is OUR OWN SSRF GUARD, not a refusal by Raydium.** It is
-raised in `content-fetcher.ts` at `resolveAndValidate`: DNS for
-`docs.raydium.io` resolved to an address inside a blocked (private / reserved /
-loopback) range, and the fetcher refused **before opening any connection**. No
-packet reached the host; the site never saw the request. This is the guard
-working exactly as designed.
+No second Proof implementation exists; the script hand-rolls nothing and has
+no `.insert(proofs)` anywhere. All three are pure projections over rows that
+are already persisted, so the stage's network footprint is **unchanged from
+when it stopped at S5**: zero fetch, zero render, zero search, zero RPC, and
+zero model generation or `count_tokens` after extraction.
 
-**So MantaRay ON is proven INCOMPATIBLE with `docs.raydium.io`** — under ON,
-that hostname resolves into a blocked range, which is the split-DNS / filtered
-resolution shape a VPN produces when it intercepts or blackholes a name.
+## One defect the tests caught, and the honest fix
 
-Combined with the already-proven other direction, both are now established
-rather than inferred:
+S6 refuses to assemble without the job's frozen Boundary Contract
+(`research_plans`) to cross-check the pattern version — and **Stage B never
+created one**, because planning belongs to the worker. Wired naively, my first
+version would have thrown `MissingActivePatternError` at S6 in a real run.
 
-| MantaRay | Anthropic | `docs.raydium.io` |
-|---|---|---|
-| **ON** | SUCCESS | **`BLOCKED_ADDRESS`** (DNS → blocked range) |
-| **OFF** | `PERMISSION_DENIED:403` | HTTP 200, `text/markdown` |
+Fixed by calling the **real** `runMemoryPlanningStage` — the same function
+`worker.ts` calls, in the same position (right after job creation). It is
+DB-only (memory retrieval, active Pattern, deterministic planner), so it adds
+no external call of any kind. Hand-writing a `research_plans` row instead
+would have asserted a planning stage that never happened — exactly the lie
+D-128 refuses elsewhere when it declines to invent jobs and sources.
 
-A single-process production job needs both in one process. **No network state
-satisfies both.** The blocker did not dissolve — it hardened into a fact.
+## Where the resumed path deliberately DIVERGES from `run-job.ts`
 
-**The fix is not in this repository.** Whitelisting a reserved range,
-special-casing the domain, or relaxing the SSRF check would each make the
-fetch "work" by removing the protection that correctly stopped it. None is
-acceptable, and none is on the table.
+`run-job.ts` runs S6/S7/S8 unconditionally. The resumed path runs them **only
+when Evidence was actually persisted**.
 
-## A second, independent gap found while checking the alternative
+The reason is the input, not caution: `run-job.ts` projects a whole work
+queue, so an empty result there is still a statement about the research that
+was attempted. Here the input is **one document for one component** — a Proof
+built from a failed replay would be a conclusion about that failure, not about
+the project. So extraction failure stops before S6 and writes no Proof at all.
 
-The D-128 two-stage path *is* network-compatible (Stage A with OFF, Stage B
-with ON, replay transport, zero refetch). But it **cannot produce a Proof
-today**: `extract-from-document.ts` calls `executor.execute` and then
-`reconcileAndPersistComponent` — **S5 and stop**. It never calls
-`assembleAndPersistMechanism` (S6), `evaluateAndPersistClaimSupport` (S7) or
-`buildAndPersistProof` (S8). Only `run-job.ts` runs that chain, and the
-two-stage scripts do not go through it.
+## Consumption semantics — the boundary did NOT move
 
-So the two-stage route reaches S5 and halts one stage short of the three that
-now exist.
+D-128 marks `consumed_at` / `consumed_by_job_id` on **successful Evidence
+persistence**, and it still does: the mark sits exactly where it did, gated on
+`rows.length > 0`, and the projections run **after** it.
 
-## The two honest options
+Stated plainly, because it is now literally observable:
 
-**A — fix the environment (preserves the true product path).** If a network
-state can be found where `docs.raydium.io` resolves to a public address *and*
-Anthropic is reachable, the single-process run works with no code change and
-the first Proof comes from the real product API, exactly as a user would get
-it. This is a MantaRay/DNS configuration question — split tunnelling, a
-different exit, or an exclusion for that host — and it is outside this
-repository. **Free to try, and strictly better if it works.**
+> **DOCUMENT CONSUMED ≠ PROOF NECESSARILY PERSISTED.**
 
-**B — extend the two-stage path to S6→S7→S8 (offline coding task).** Small and
-testable: after `reconcileAndPersistComponent`, call the same three production
-functions `run-job.ts` already calls, in the same order. Reuses existing code,
-adds no new engine logic, needs no live call to build or test.
+A failure inside S6/S7/S8 leaves the Evidence and the consumption exactly as
+D-128 specifies, and the projections can be re-run — they are idempotent.
+A source-scan test pins the ordering so a later edit cannot quietly move it.
 
-**Caveat that must not be glossed:** the resulting Proof would be genuine
-research through the genuine executor, but the *entrypoint* would be owner
-tooling rather than `POST /api/research-jobs`. It proves S5→S6→S7→S8 end to
-end on real acquired evidence; it does **not** prove the product API path.
-Those are different claims and the record must say which one was made.
+## Fail-closed, unchanged
 
-## Recommendation
+- Extraction failure → no Evidence → **no S6, no S7, no S8, no Proof**.
+- No S7 → S8 refuses `NO_CLAIM_SUPPORT`; no row, no partial write.
+- S8 persistence is one transaction — no half-bound Proof.
+- Re-running creates no duplicate (one Proof per job, DB-enforced).
+- A `REVIEWED`/`VERIFIED` Proof is never overwritten (`PROOF_NOT_DRAFT`).
+- Retry semantics, seal verification, both-ends authority revalidation and the
+  documentary-only chain guarantee are all untouched.
 
-**Try A first** — it costs nothing, and it is the only route that yields a
-first Proof through the path a real user takes. If the DNS behaviour cannot be
-changed, **B** is the smallest honest way to get a real Proof from real
-Raydium evidence, with its entrypoint caveat recorded plainly.
+## S9 compatibility
 
-I did not start either.
+The resulting Proof is the ordinary canonical one — `PRIVATE`, `DRAFT`, D-135
+band, the seven layers with layer 5 empty, citations bound via
+`evidence.proof_id`. `services/proof-view.ts` projects it unchanged: **S9
+cannot tell a resumed job from a normal one**, and no resumed-path DTO exists.
 
-## What the probe left behind
+## What this unblocks — and what it does not
 
-Job `19e86520-…` (origin `PRODUCT`), 6 trace rows ending
-`FETCH_FAILED / PROVIDER_ERROR`. **Nothing else**: 0 evidence, 0 sources,
-0 on-chain artifacts, 0 component results, 0 proofs, and **no new
-`acquired_documents` row** — the table still holds exactly the one consumed
-document from 2026-08-28. Model usage columns are null: the reserved
-`6560 µUSD` is the authorization ceiling around the injected fixture proposer,
-which calls no model. **0 model calls, 0 RPC.**
+With MantaRay OFF for Stage A and ON for Stage B, the two-window path can now
+produce a **real Proof from real Raydium evidence**, without touching the
+blocked-address problem and without weakening any gate.
 
-## Standing boundaries
+**It does not prove the product API path.** The entrypoint is owner tooling,
+not `POST /api/research-jobs`. Those are different claims, and the record must
+keep saying which one was made. The single-process product run remains blocked
+by the network matrix (Anthropic needs ON, `docs.raydium.io` resolves into a
+blocked range under ON — reproduced twice).
+
+## Next — the owner's choice
+
+1. **Run the two-window sequence** for the first real Proof: Stage A with
+   MantaRay OFF (re-acquire the document — the previous one is consumed), then
+   Stage B with MantaRay ON. Two authorized live windows, standing commands in
+   the scripts' own usage lines.
+2. **Fix the environment** so one state satisfies both, and get the first Proof
+   through the real product API instead.
+3. **Stop and consolidate.**
+
+### Standing boundaries
 
 - No live call without a separate authorized window; no retries.
-- **Never whitelist a reserved range, special-case a domain, or weaken SSRF**
-  to make a blocked address fetchable. `BLOCKED_ADDRESS` here is the guard
-  succeeding, not failing.
-- Never enable `research_enabled` to reach the owner path — it would close it.
-- Never toggle the VPN inside a running process.
+- Never weaken SSRF, whitelist a reserved range, or special-case a domain.
+- Never move the D-128 consumption boundary because a later stage was added.
+- The resumed path may never invent planning, Evidence or a Proof it did not
+  earn from persisted state.

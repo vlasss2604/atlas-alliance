@@ -4,8 +4,15 @@
 // S4 extraction/persistence path against its stored text: the real
 // EvidenceExtractor, the real fact validation and containment, the real
 // Source/Evidence persistence, the real documentary-locator validator,
-// the ordinary S5 reconciliation. Evidence and admitted locators can come
-// into existence ONLY through that path — this script owns no shortcut.
+// the ordinary S5 reconciliation, and then — when Evidence was actually
+// persisted — the same S6 assembly, S7 claim support and S8 Proof Writer
+// that run-job.ts calls. Evidence, admitted locators and the Proof can
+// come into existence ONLY through those paths; this script owns no
+// shortcut and no second Proof implementation.
+//
+// The three projections are pure over already-persisted rows, so they add
+// zero external calls: the stage's network footprint is unchanged from
+// when it stopped at S5.
 //
 // STRUCTURALLY ZERO external document traffic: the executor's transport
 // is a replay ContentFetcher that can serve exactly one stored document
@@ -52,6 +59,10 @@ import {
   replayContentFetcher,
 } from "../src/server/engine/acquired-documents";
 import { reconcileAndPersistComponent } from "../src/server/engine/component-reconciliation-store";
+import { assembleAndPersistMechanism } from "../src/server/engine/mechanism-assembly-store";
+import { evaluateAndPersistClaimSupport } from "../src/server/engine/claim-support-store";
+import { buildAndPersistProof } from "../src/server/engine/proof-store";
+import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { locatorsForEvidence } from "../src/server/engine/documentary-locator-store";
 import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
@@ -194,6 +205,18 @@ async function main(): Promise<void> {
       { skipEnqueue: true },
     );
     console.log("jobId:            " + job.id);
+
+    // The SAME planning stage worker.ts runs, in the same order and for the
+    // same reason: S6 refuses to assemble without the job’s frozen Boundary
+    // Contract (`research_plans`) to cross-check the pattern version against,
+    // and a resumed job is otherwise indistinguishable from a normal one. It
+    // is DB-only — memory retrieval, the active Pattern, the deterministic
+    // planner — so it adds no fetch, no render, no search, no RPC and no
+    // model call. Fabricating a plan row by hand instead would assert a
+    // planning stage that never happened, which is exactly the lie D-128
+    // refuses elsewhere.
+    await runMemoryPlanningStage(db, job.id);
+    console.log("planning:         done   (frozen contract persisted; no external call)");
     console.log("actor:            " + actor + "   (printed, not persisted)");
     console.log("mode:             " + mode);
     console.log(
@@ -299,6 +322,56 @@ async function main(): Promise<void> {
       console.log("document consumed: " + consumed + "   (further resumes will be refused)");
     } else {
       console.log("document NOT consumed — no Evidence was persisted; it remains resumable.");
+    }
+
+    // --- S6 -> S7 -> S8, the SAME production functions run-job.ts calls ----
+    //
+    // The resumed path used to stop at S5, one stage short of the three
+    // that now exist. These are pure derived projections over rows that
+    // are already persisted: they open no socket, resolve no provider and
+    // spend no budget, so continuing here adds ZERO external calls to a
+    // documentary-only window — no fetch, no render, no search, no RPC,
+    // and no model generation or count_tokens after extraction.
+    //
+    // GATED ON EVIDENCE, deliberately — and this is where the resumed path
+    // DIVERGES from run-job.ts, which runs S6/S7/S8 unconditionally.
+    // run-job.ts projects a whole work queue, so an empty result there is
+    // still a statement about the research that was attempted. Here the
+    // input is ONE document for ONE component: if extraction produced no
+    // Evidence, a Proof built from it would be a conclusion about a
+    // single failed replay, not about the project. Extraction failure
+    // therefore stops before S6 and no Proof is written at all.
+    //
+    // ORDER: after the consumption mark, never before. D-128 defines
+    // consumption at successful EVIDENCE persistence, and moving that
+    // boundary merely because S8 now follows would change a locked
+    // contract. The consequence is explicit and intended:
+    //   DOCUMENT CONSUMED != PROOF NECESSARILY PERSISTED.
+    // A crash inside S6/S7/S8 leaves the Evidence and the consumption
+    // exactly as D-128 specifies, and the projections can be re-run.
+    if (rows.length === 0) {
+      console.log("--- S6/S7/S8 skipped: no Evidence was persisted, so there is nothing to project ---");
+    } else {
+      const projectionAt = new Date();
+      console.log("--- S6 mechanism assembly ---");
+      const assembly = await assembleAndPersistMechanism(db, job.id, projectionAt);
+      console.log("flows:            " + assembly.flows.length);
+      console.log("unassignedGaps:   " + assembly.unassignedGaps.length);
+
+      console.log("--- S7 claim support ---");
+      const claim = await evaluateAndPersistClaimSupport(db, job.id, projectionAt);
+      console.log("status:           " + (claim === null ? "NONE (no S6 projection yet)" : claim.status));
+      if (claim !== null) console.log("reasonCodes:      " + JSON.stringify(claim.reasonCodes));
+
+      console.log("--- S8 Proof ---");
+      const proof = await buildAndPersistProof(db, job.id);
+      console.log("proofId:          " + String(proof.proofId));
+      console.log("refusal:          " + String(proof.refusal));
+      if (proof.draft !== null) {
+        console.log("verdict:          " + proof.draft.verdict);
+        console.log("confidence:       " + proof.draft.confidenceBand + " (" + proof.draft.confidenceScore + ")");
+        console.log("boundEvidence:    " + proof.boundEvidenceIds.length);
+      }
     }
   } finally {
     __setRenderedDocsFetcher(null);

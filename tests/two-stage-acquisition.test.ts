@@ -22,6 +22,13 @@ import type { ExtractedFact, FetchedDocument } from "../src/server/engine/provid
 import type { EvidenceExtractor } from "../src/server/engine/providers/evidence-extractor";
 import type { ModelCostProfile } from "../src/server/engine/model-cost-profile";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
+import { reconcileAndPersistComponent } from "../src/server/engine/component-reconciliation-store";
+import { assembleAndPersistMechanism } from "../src/server/engine/mechanism-assembly-store";
+import { evaluateAndPersistClaimSupport } from "../src/server/engine/claim-support-store";
+import { buildAndPersistProof } from "../src/server/engine/proof-store";
+import { loadProofForJob } from "../src/server/services/proof-view";
+import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
+import { proofs, researchJobs } from "../src/server/db/schema";
 import { resolveSourceRoute } from "../src/server/engine/source-authority";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
@@ -462,6 +469,207 @@ describe("Stage B — resume against the stored document, through the ordinary p
     });
     expect(calls.n).toBe(0);
     __setOnchainRetriever(null);
+  });
+});
+
+// ---- the resumed path continues through S6 -> S7 -> S8 ---------------
+//
+// The D-128 resume used to stop at S5. These pin that it now runs the SAME
+// production projections run-job.ts calls, that they add no external call of
+// any kind, and that every fail-closed rule still holds.
+describe("resumed path — S5 -> S6 -> S7 -> S8, the production functions", () => {
+  // Reproduces the script tail exactly: S5, then (only when Evidence was
+  // persisted) S6, S7, S8. Counters prove no provider is touched.
+  async function projectAfterStageB(jobId: string) {
+    const now = new Date();
+    const s5 = await reconcileAndPersistComponent(ctx.db, jobId, ITEM, now);
+    const evidenceRows = await evidenceCountFor(jobId);
+    if (evidenceRows === 0) return { s5, s6: null, s7: null, s8: null, skipped: true as const };
+    const s6 = await assembleAndPersistMechanism(ctx.db, jobId, now);
+    const s7 = await evaluateAndPersistClaimSupport(ctx.db, jobId, now);
+    const s8 = await buildAndPersistProof(ctx.db, jobId);
+    return { s5, s6, s7, s8, skipped: false as const };
+  }
+
+  // A FRESH Stage A document per test: the shared `stashed` one is
+  // deliberately consumed by the earlier consumption test, and reusing it
+  // here would exercise ALREADY_CONSUMED rather than the projection path.
+  async function freshDocument() {
+    const project = await makeClassifiedProject();
+    const { jobId: acquiringJobId, captured } = await runStageA(project);
+    const route = await resolveSourceRoute(ctx.db, project.id, DOC_URL);
+    const persisted = await persistAcquiredDocument(ctx.db, {
+      projectId: project.id,
+      acquiringJobId,
+      doc: captured.doc!,
+      route,
+      renderMode: "STATIC",
+    });
+    if (!persisted.ok) throw new Error("fixture document did not persist");
+    const loaded = await loadAcquiredDocumentForResume(ctx.db, {
+      documentId: persisted.id,
+      projectId: project.id,
+    });
+    if (!loaded.ok) throw new Error("fixture document did not load");
+    return { project, documentId: persisted.id, doc: loaded.doc };
+  }
+
+  async function stageBWithEvidence() {
+    const { project, doc } = await freshDocument();
+    const loaded = { ok: true as const, doc };
+    const jobId = await makeJob(project.id);
+    // The script runs the real planning stage for its job; mirror it, or
+    // S6 correctly refuses for want of the frozen contract.
+    await runMemoryPlanningStage(ctx.db, jobId);
+    const counters = { fetch: 0, extract: 0 };
+    const replay = replayContentFetcher(loaded.doc);
+    await run(project, jobId, {
+      contentFetcher: {
+        name: replay.name,
+        fetch: async (url: string) => {
+          counters.fetch += 1;
+          return replay.fetch(url);
+        },
+      },
+      extractor: {
+        name: "fixture-extractor",
+        async extract() {
+          counters.extract += 1;
+          return [goodFact()];
+        },
+      },
+    });
+    return { project, jobId, counters };
+  }
+
+  it("1/2/3/4/5/6/7. reaches S6, S7 and S8; exactly one canonical Proof, D-135 band, cited Evidence bound", async () => {
+    const { jobId } = await stageBWithEvidence();
+    expect(await evidenceCountFor(jobId)).toBeGreaterThan(0);
+
+    const out = await projectAfterStageB(jobId);
+    expect(out.skipped).toBe(false);
+    expect(out.s6).not.toBeNull();
+    expect(out.s7).not.toBeNull();
+    expect(out.s8!.refusal).toBeNull();
+    expect(out.s8!.proofId).not.toBeNull();
+
+    // 4. exactly one Proof for the job.
+    const rows = await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId));
+    expect(rows).toHaveLength(1);
+    // 5/6. the normal S8 contract — no owner-tool-specific schema.
+    expect(rows[0].visibility).toBe("PRIVATE");
+    expect(rows[0].verificationStatus).toBe("DRAFT");
+    expect([20, 40, 60, 80]).toContain(rows[0].confidence);
+    const layers = rows[0].layers as { layers: { layer: number; lines: string[] }[] };
+    expect(layers.layers.map((l) => l.layer)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(layers.layers.find((l) => l.layer === 5)!.lines).toEqual([]);
+
+    // 7/8. only cited Evidence is bound; anything unbound stays unbound.
+    const ev = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, jobId));
+    const bound = ev.filter((e) => e.proofId !== null).map((e) => e.id).sort();
+    expect(bound).toEqual([...out.s8!.boundEvidenceIds].sort());
+    for (const e of ev) {
+      if (!out.s8!.boundEvidenceIds.includes(e.id)) expect(e.proofId).toBeNull();
+    }
+  }, 60_000);
+
+  it("9. S9 projects the resulting Proof unchanged — it cannot tell a resumed job from a normal one", async () => {
+    const { project, jobId } = await stageBWithEvidence();
+    await projectAfterStageB(jobId);
+    const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+    const view = await loadProofForJob(ctx.db, jobId, job.userId);
+    expect(view).not.toBeNull();
+    expect(view!.researchJobId).toBe(jobId);
+    expect(view!.projectId).toBe(project.id);
+    expect(["LOW", "LIMITED", "STRONG", "VERY_STRONG"]).toContain(view!.confidence.band);
+    expect(view!.verificationStatus).toBe("DRAFT");
+  }, 60_000);
+
+  it("10/11/12/13/14. the projections add zero fetch, render, search, RPC and model calls", async () => {
+    const retriever = spyRetriever();
+    __setOnchainRetriever(retriever.retriever as unknown as OnchainRetriever);
+    try {
+      const { jobId, counters } = await stageBWithEvidence();
+      const afterStageB = { ...counters };
+      // Everything below is pure projection over persisted rows.
+      await projectAfterStageB(jobId);
+      expect(counters.fetch).toBe(afterStageB.fetch);
+      expect(counters.extract).toBe(afterStageB.extract);
+      expect(retriever.calls.n).toBe(0);
+    } finally {
+      __setOnchainRetriever(null);
+    }
+  }, 60_000);
+
+  it("15/16. no Evidence -> no S6, no S7, no S8, no Proof", async () => {
+    const { project, doc } = await freshDocument();
+    const jobId = await makeJob(project.id);
+    await runMemoryPlanningStage(ctx.db, jobId);
+    const replay = replayContentFetcher(doc);
+    await run(project, jobId, {
+      contentFetcher: replay,
+      extractor: { name: "empty", async extract() { return []; } },
+    });
+    expect(await evidenceCountFor(jobId)).toBe(0);
+
+    const out = await projectAfterStageB(jobId);
+    expect(out.skipped).toBe(true);
+    expect(out.s6).toBeNull();
+    expect(out.s7).toBeNull();
+    expect(await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId))).toHaveLength(0);
+  }, 60_000);
+
+  it("16b. with no S7 at all, S8 refuses NO_CLAIM_SUPPORT rather than inventing a Proof", async () => {
+    const project = await makeClassifiedProject();
+    const jobId = await makeJob(project.id);
+    const s8 = await buildAndPersistProof(ctx.db, jobId);
+    expect(s8.refusal).toBe("NO_CLAIM_SUPPORT");
+    expect(s8.proofId).toBeNull();
+    expect(await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId))).toHaveLength(0);
+  }, 60_000);
+
+  it("18/19. re-running the projections creates no duplicate, and a non-DRAFT Proof is never overwritten", async () => {
+    const { jobId } = await stageBWithEvidence();
+    const first = await projectAfterStageB(jobId);
+    const again = await projectAfterStageB(jobId);
+    expect(again.s8!.proofId).toBe(first.s8!.proofId);
+    expect(await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId))).toHaveLength(1);
+
+    await ctx.db.update(proofs).set({ verificationStatus: "VERIFIED" }).where(eq(proofs.id, first.s8!.proofId!));
+    const third = await buildAndPersistProof(ctx.db, jobId);
+    expect(third.refusal).toBe("PROOF_NOT_DRAFT");
+    const [row] = await ctx.db.select().from(proofs).where(eq(proofs.id, first.s8!.proofId!));
+    expect(row.verificationStatus).toBe("VERIFIED");
+  }, 60_000);
+
+  it("22. consumption still means Evidence persisted, NOT Proof persisted — the boundary did not move", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../scripts/extract-from-document.ts", import.meta.url), "utf-8");
+    // The consumption mark is still gated on Evidence rows, and still sits
+    // BEFORE the projections — so a failure inside S6/S7/S8 cannot change
+    // whether the document was consumed.
+    const consume = src.indexOf("markAcquiredDocumentConsumed");
+    const s6 = src.indexOf("assembleAndPersistMechanism(db, job.id");
+    const s8 = src.indexOf("buildAndPersistProof(db, job.id");
+    expect(consume).toBeGreaterThan(-1);
+    expect(s6).toBeGreaterThan(consume);
+    expect(s8).toBeGreaterThan(s6);
+    expect(src).toContain("DOCUMENT CONSUMED != PROOF NECESSARILY PERSISTED");
+  });
+
+  it("23/24. the script reuses the production projections and defines no second Proof path", async () => {
+    const fs = await import("node:fs/promises");
+    const src = await fs.readFile(new URL("../scripts/extract-from-document.ts", import.meta.url), "utf-8");
+    expect(src).toContain("assembleAndPersistMechanism");
+    expect(src).toContain("evaluateAndPersistClaimSupport");
+    expect(src).toContain("buildAndPersistProof");
+    expect(src).not.toContain(".insert(proofs)");
+    expect(src).not.toContain("buildProof(");
+    // run-job.ts, the normal path, still calls the same three itself.
+    const runJob = await fs.readFile(new URL("../src/server/engine/run-job.ts", import.meta.url), "utf-8");
+    expect(runJob).toContain("assembleAndPersistMechanism(db, jobId, now)");
+    expect(runJob).toContain("evaluateAndPersistClaimSupport(db, jobId, now)");
+    expect(runJob).toContain("buildAndPersistProof(db, jobId)");
   });
 });
 
