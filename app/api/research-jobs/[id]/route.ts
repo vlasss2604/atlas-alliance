@@ -16,6 +16,7 @@ import {
   sources,
 } from "@/src/server/db/schema";
 import { getDb } from "@/src/server/runtime";
+import { loadProofForJob } from "@/src/server/services/proof-view";
 
 // Owner Manual Alpha App Test (D-123) — result-detail read. Same
 // ownership rule as every other /api/research-jobs/[id]/* route
@@ -326,15 +327,35 @@ export async function GET(
       establishedComponents: components.filter((c) => c.status === "SUPPORTED").length,
     };
 
+    // S9 — THE PRODUCT BOUNDARY. `proof` is the canonical, client-facing
+    // answer: verdict, confidence band, the locked layers and the
+    // citations S8 actually bound. It comes from the ONE shared
+    // serializer (services/proof-view.ts), so any future route returns
+    // the same representation instead of assembling a second one.
+    //
+    // Null means exactly "no Proof exists for this job under this owner"
+    // — a job still running, a job that finished without one, or a job
+    // that is not this caller's. Nothing is fabricated on a GET, and the
+    // job's own `state` remains the authority on whether it is still
+    // working.
+    //
+    // Everything BELOW `proof` is engine state kept for owner
+    // transparency during the manual alpha test (D-123). A client no
+    // longer needs any of it to read a Proof; it is retained rather than
+    // deleted because removing it would change the existing result view,
+    // which this task deliberately does not touch.
+    const proof = await loadProofForJob(db, id, session.userId);
+
     return Response.json({
       job,
+      proof,
       claimSupport: claimSupport ?? null,
       mechanism: mechanism ?? null,
       execution,
       finding,
       components,
       // Retained for transparency/debug, now carrying its ownership links.
-      // NOT the Proof source — `finding` is.
+      // NOT the Proof source — `proof` is, and `finding` was before it.
       evidence: evidenceRows.map((e) => ({
         ...e,
         links: linksByEvidenceId.get(e.id) ?? [],

@@ -76,12 +76,13 @@ together they stopped project #2 before it could start. Kept for context.
   cap table is exhaustive over `ResultReasonCode` at compile time and fails
   closed to LOW at runtime.
 
-- **The job-detail API still returns engine projections, not the Proof.**
-  `GET /api/research-jobs/[id]` predates S8 and renders claim-support rows,
-  component results and evidence arrays. Now that a Proof exists, this surface
-  should return it (band + verdict + layers + citations) so internal research
-  complexity stops leaking to the client. Deliberately out of scope for the S8
-  milestone, which was engine-side only.
+- ~~**The job-detail API still returns engine projections, not the Proof.**~~
+  **Closed 2026-08-29 by S9** — the route now returns a canonical `proof` field
+  from the one shared serializer `services/proof-view.ts`. **Remaining, smaller:**
+  the engine projections (`claimSupport` / `mechanism` / `components` / flat
+  `evidence`) are still returned alongside it for the owner manual-alpha view
+  (D-123). A client no longer needs them, so they can be dropped when that view
+  moves onto `proof` — a UI change, not an API one.
 
 - **Foreign-mint CONTEXT rendering** — Proof/UI must present a foreign-mint
   observation as visually neutral. It is neutral in reconciliation; nothing yet

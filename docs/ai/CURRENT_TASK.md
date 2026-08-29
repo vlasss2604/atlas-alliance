@@ -2,94 +2,96 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — S8 is complete
+## NONE — S9 is complete
 
-Offline implementation. No live call, no model call, and no existing verdict,
-Evidence row, component result or claim-support row altered.
+Offline implementation. No live call, no model call, no RPC, and no S8 change,
+no decision change, no UI change. Existing Proof rows untouched.
 
-**The pipeline now ends in a Proof.** `run-job.ts` runs S4 → S5 → S6 → S7 →
-**S8**, and a finished job persists one Proof with `evidence.proof_id` bound on
-the rows it cites — which makes D-088's `PROOF_BOUND` ownership branch
-reachable for the first time in the project's history.
+**The Proof is now the product boundary.** `GET /api/research-jobs/[id]`
+returns a canonical `proof` field — verdict, confidence band + encoding, the
+locked layers, and the citations S8 actually bound — so a client never has to
+read S5 component rows, S6 assembly, S7 claim support or exclusion plumbing to
+know what ATLAS concluded.
 
-### D-135 ratified and implemented
+### One serializer, not two
 
-Recorded in `docs/DECISIONS.md` as LOCKED. Confidence is a **closed ordinal
-band** — `LOW 20 / LIMITED 40 / STRONG 60 / VERY_STRONG 80` — expressing
-structural confidence in the verdict, never a probability, never a percentage.
-`proof-confidence.ts` computes it: the verdict sets a ceiling, each recorded
-signal imposes a cap, and the result is the **minimum**. No arithmetic, no
-weighting, no citation counting, no source popularity, no model judgement.
+`src/server/services/proof-view.ts` is the single canonical projection. The
+route calls `loadProofForJob` and never queries the `proofs` table itself —
+pinned by a test — so a future route (a dedicated Proof resource, an external
+API) reuses the same function instead of growing a second representation.
 
-`0` and `100` are unreachable by construction and asserted so across every
-input combination. The cap table is `Record<ResultReasonCode, …>`, so adding a
-reason code without deciding its cap is a **compile error**, and an
-unrecognised code reaching runtime **fails closed to LOW** rather than
-inflating. Deliberately non-monotonic in verdict positivity — a reasoned
-`INSUFFICIENT_EVIDENCE` (60) outranks a blocked `PARTIALLY_SUPPORTED` (40) —
-because otherwise the field would merely re-encode the verdict.
+Chosen over a new `/api/proofs/[id]` route deliberately: retrieving the Proof
+*for a job* is the stated need, the job endpoint is what the client already
+calls, and a second route would add another ownership surface for no product
+gain. The serializer is route-agnostic, so adding that route later is trivial.
 
-All five ratified acceptance cases pass: clean documentary **80**,
-authority-limited chain **60**, all-excluded-with-blocking-gap **40**,
-bare-absence **20**, strong contradiction **80**.
+### What it refuses to do
 
-### What S8 refuses to do
+**S9 reads S8 and recomputes nothing.** Pinned by writing a verdict/confidence
+pair the engine would never produce for that state and showing the DTO reports
+it unchanged rather than "correcting" it — while the S7 row still says
+something else, proving no reconciliation ran.
 
-Verdict is **copied** from S7 and never recomputed — ten satisfied citations
-under an `INSUFFICIENT_EVIDENCE` claim still yield `INSUFFICIENT_EVIDENCE`.
-`NOT_APPLICABLE` is excluded at the *type* level, so the compiler guarantees
-S8 cannot invent a verdict S7 never made. Confidence never overrides S7:
-the weakest confidence leaves a `SUPPORTED` verdict `SUPPORTED`.
+**Citations come from the binding** (`evidence.proof_id`), never from job
+membership. Excluded and context rows are absent because they were never
+bound, not because a filter hid them.
 
-Citations resolve or vanish — an id is bound only if the requirement names it,
-the component treated it as *supporting*, and it exists as an Evidence row for
-the job. Excluded rows are never bound merely for belonging to the job.
+**Ownership is a query predicate**, not a post-hoc check: `WHERE
+researchJobId = … AND ownerUserId = …`. A stranger guessing an id gets the
+same `null` as "no Proof yet" and can distinguish neither. **A GET never
+writes**, and a missing Proof is never fabricated.
 
-Fail closed three ways: **no S7 → `NO_CLAIM_SUPPORT`, no Proof** (never an
-empty or `UNKNOWN` placeholder); no project → `NO_PROJECT` (`proofs.project_id`
-is NOT NULL while the job's is nullable); already `REVIEWED`/`VERIFIED` →
-`PROOF_NOT_DRAFT`, never silently rewritten, because that status gates memory
-promotion (D-041/D-055). Only a `DRAFT` is replaced, which makes a re-run
-stable rather than duplicating.
+**Verification is copied, never inferred** from confidence, verdict or
+citation count — verification is a human act (D-041/D-055) and confidence is a
+structural indicator; conflating them would let a machine mark its own work
+verified.
 
-D-083 is untouched: seven layers, **layer 5 empty**, layer 6 assembled only
-from recorded gaps and exclusion reasons. `research_cutoff` stays NULL —
-its semantics are not locked, and I did not invent a second one.
+**Platform-independent (D-125):** no Telegram field, no markdown, no
+formatting. Layers travel exactly as S8 wrote them.
 
-### What this unblocks
+### One honest edge case
 
-Research Memory promotion is gated on a **VERIFIED Proof**. Until now nothing
-produced a Proof to verify, so the learning loop was structurally blocked
-rather than merely unbuilt. There is now an object for a human to review.
+`proofs.confidence` has `CHECK 0..100`, so a row predating D-135 (or written
+by hand in a fixture) can hold a value outside the four band encodings. That
+reports `band: null` with the raw score rather than a guessed or rounded band
+— decoding is not computing, and inventing a band would be inventing
+confidence. Test-pinned.
+
+### Acceptance — all five verdict/band pairs project correctly
+
+`SUPPORTED`/VERY_STRONG 80 · `PARTIALLY_SUPPORTED`/STRONG 60 (D-074 ceiling) ·
+`INSUFFICIENT_EVIDENCE`/LIMITED 40 · `INSUFFICIENT_EVIDENCE`/LOW 20 ·
+`NOT_SUPPORTED`/VERY_STRONG 80. Citations resolve in each.
 
 ### Honest limits — what is NOT done
 
-1. **No production job has run S8 end to end.** The pipeline stays behind
-   `research_enabled=false`; every test drives the store directly or through
-   fixtures. The first real Proof does not exist yet.
-2. **The job-detail API still returns engine projections, not the Proof.**
-   `GET /api/research-jobs/[id]` predates S8. Now that a Proof exists, that
-   surface should return it — recorded in `BACKLOG.md`, deliberately out of
-   scope for an engine-side milestone.
-3. **Layer prose is templated, not editorial.** D-083 defers the copy system;
-   the lines are mechanical by design and trace to persisted fields.
+1. **No production job has run the pipeline end to end.** It stays behind
+   `research_enabled=false`, so **no real Proof exists yet** — every test
+   builds its own fixture. S9 is proven against persisted state, not against a
+   live run.
+2. **The engine projections are still in the same response.** `claimSupport` /
+   `mechanism` / `components` / flat `evidence` remain for the owner
+   manual-alpha view (D-123). A client no longer *needs* them, but they are
+   not gone — removing them is a UI change, explicitly out of scope here.
+   Recorded in `BACKLOG.md`.
+3. **No client renders `proof` yet.** The field exists; the UI still reads the
+   old shape.
 
 ### Next — the owner's choice
 
-1. **Surface the Proof through the API** — the smallest step that makes S8
-   visible to a user, and the last thing between the engine and the product
-   experience.
+1. **Move the result view onto `proof`**, then drop the engine projections
+   from the response — the step that actually makes the boundary real for a
+   user, and closes the remaining BACKLOG half.
 2. **Run one job end to end** behind the alpha gate to produce the first real
-   Proof, then review and VERIFY it — which would exercise the memory
-   promotion path for the first time.
+   Proof, then review and VERIFY it — exercising the memory-promotion path for
+   the first time.
 3. **Stop and consolidate.**
 
 ### Standing boundaries
 
-- S8 never re-judges S5/S6/S7, never calls a model, never touches the network.
+- S9 reads S8; it never recomputes a verdict, confidence, layers or citations.
 - Confidence is never a probability and its score is never rendered as a
   percentage; the band is the semantic value.
-- Never rewrite a non-DRAFT Proof.
-- Fail closed: no S7 ⇒ no Proof. `INSUFFICIENT_EVIDENCE` with named gaps is a
-  valid, successful outcome.
-- Private by default; no public Proof URLs in v1.
+- A GET never creates or mutates a Proof.
+- Proof is PRIVATE by default; no public Proof URLs in v1.
+- No Telegram-specific field in Core (D-125).

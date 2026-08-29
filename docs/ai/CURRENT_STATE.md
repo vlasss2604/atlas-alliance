@@ -7,8 +7,10 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-29: **2405 passing, 4 skipped, 1 failing**
-  (2410 total). Only the second item below failed on that run; the first passed
+- Full suite, last verified 2026-08-29: **2424 passing, 4 skipped, 1 failing**
+  (2429 total). Run the suite ALONE — two concurrent `vitest run` invocations
+  share the one test database and produce mass spurious failures (observed:
+  193 "failures" that vanished on a clean serial run). Only the second item below failed on that run; the first passed
   because the working copy happened to hold LF. Both are pre-existing and
   unrelated to research behaviour:
   - `first-real-run-stage2.test.ts` — a source-regex assertion against
@@ -208,6 +210,47 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
+## S9 exists: the Proof is the product boundary
+
+**Closed 2026-08-29.** `GET /api/research-jobs/[id]` now returns a canonical
+`proof` field — verdict, confidence band + encoding, the locked layers, and the
+citations S8 actually bound — produced by ONE shared serializer,
+`services/proof-view.ts`. Any future route (a dedicated Proof resource, an
+external API) calls that same function, so a second representation cannot
+appear beside it.
+
+**S9 reads S8 and recomputes nothing** — not the verdict, not the confidence,
+not the layers, not the citation set. Pinned by a test that writes a
+verdict/confidence pair the engine would never produce and shows the DTO
+reports it unchanged rather than "correcting" it.
+
+**Citations come from the binding, not from job membership.** Only rows
+carrying `evidence.proof_id` appear; excluded and context rows are absent
+because they were never bound. `SOURCE != EVIDENCE != FACT != PROOF CLAIM` —
+the source is named by public title/publisher/type and the retrieved url, and
+no content hash, model output, raw body, provider identifier or acquisition
+metadata rides along.
+
+**Ownership is a query predicate**, not a post-hoc check: the Proof is selected
+`WHERE researchJobId = … AND ownerUserId = …`. A stranger guessing an id gets
+the same `null` as "no Proof yet" and can distinguish neither. A GET never
+writes, and a missing Proof is never fabricated.
+
+**Platform-independent (D-125).** No Telegram field, no markdown, no
+formatting — the layers travel exactly as S8 wrote them.
+
+**One honest edge case:** `proofs.confidence` has a `CHECK 0..100`, so a row
+predating D-135 (or hand-written in a fixture) can hold a value outside the
+four band encodings. Such a row reports `band: null` with its raw score rather
+than a guessed or rounded band — decoding is not computing, and inventing a
+band would be inventing confidence.
+
+**Still out of scope, deliberately:** the engine projections
+(`claimSupport` / `mechanism` / `components` / flat `evidence`) remain in the
+same response for the owner manual-alpha view (D-123). A client no longer
+*needs* them to read a Proof; removing them is a UI change, which this task did
+not touch.
+
 ## S8 exists: the pipeline now ends in a Proof
 
 **Closed 2026-08-29.** `run-job.ts` runs S4 → S5 → S6 → S7 → **S8**, and a
@@ -222,10 +265,10 @@ ownership branch reachable for the first time. Contract in `ARCHITECTURE.md`;
 loop was structurally blocked rather than merely unbuilt. There is now an
 object for a human to review.
 
-**Not yet done, and deliberately out of scope:** no production job has run S8
-end to end (the pipeline stays behind `research_enabled=false`), and the
-job-detail API still returns engine projections rather than the Proof — wiring
-that surface is its own task.
+**Not yet done:** no production job has run S8 end to end (the pipeline stays
+behind `research_enabled=false`), so no real Proof exists yet. *(The second
+item recorded here — the job-detail API returning engine projections rather
+than the Proof — was closed by S9 above.)*
 
 The section below records the state that held before this, and why it
 mattered.

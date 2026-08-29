@@ -266,6 +266,38 @@ Downstream: `mechanism-assembler.ts` (S6) composes the chain,
 `claim-evaluator.ts` (S7) evaluates claim requirements, and **`S8` writes the
 Proof**.
 
+**S9 — the product boundary — is where the Proof leaves the engine.**
+`services/proof-view.ts` is the ONE canonical projection from persisted S8
+state into a client-safe shape, so no route assembles its own and two
+representations cannot drift. `GET /api/research-jobs/[id]` returns it as
+`proof`; any future route (a dedicated Proof resource, an external API) calls
+the same function. **S9 reads S8 and recomputes nothing** — not the verdict,
+not the confidence, not the layers, not the citations. It imports no provider,
+no network client and no engine stage.
+
+Citations come from the **binding** (`evidence.proof_id`), never from job
+membership, so excluded and context rows are absent because they were never
+bound rather than because a filter hid them. The citation projection carries
+the source's public identity (title, publisher, type, retrieved url) and no
+content hash, model output, raw body, provider identifier or acquisition
+metadata — `SOURCE != EVIDENCE != FACT != PROOF CLAIM` all the way to the wire.
+
+Ownership is a **query predicate**, not a post-hoc check: the Proof is selected
+`WHERE researchJobId = … AND ownerUserId = …`, so a stranger guessing an id
+receives the same `null` as "no Proof yet" and can distinguish neither. A GET
+never writes and never fabricates a Proof. The DTO is platform-independent
+(D-125): no Telegram field, no markdown, no formatting; the layers travel
+exactly as S8 wrote them.
+
+Confidence is **decoded, not computed**: the column stores the band's encoding
+and the band is read back from it. Because the `CHECK` admits any 0..100
+integer, a row predating D-135 can hold a value outside the four encodings —
+that reports `band: null` with its raw score rather than a guessed or rounded
+band, since inventing one would be inventing confidence. Verification status is
+copied faithfully and **never inferred** from confidence, verdict or citation
+count: verification is a human act (D-041/D-055) and confidence is a structural
+indicator, so conflating them would let a machine mark its own work verified.
+
 **S8 — the Proof Writer — is a projection, not a reasoning engine.**
 `proof-builder.ts` is pure (no IO, no model, no clock, no randomness) and
 `proof-store.ts` persists what it produces; both are wired after S7 in
