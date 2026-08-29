@@ -114,6 +114,25 @@ export const researchJobOrigin = pgEnum("research_job_origin", [
   "OWNER_MANUAL_ALPHA",
 ]);
 
+// D-136 — the acquisition phase a research job is currently in. A CLOSED
+// set of exactly three, one per live external capability: SEARCHING runs
+// query proposing + search, FETCHING runs direct document fetch,
+// EXTRACTING runs the normal controller with replay providers and the
+// live extractor. Deliberately SEPARATE from research_job_state: state
+// says what the job's execution outcome is, phase says which capability
+// it is currently crossing. Neither is derivable from the other, and
+// neither is ever overloaded to carry the other's meaning.
+//
+// The column is NULLABLE and has no default: NULL means "this job does
+// not run the phased path at all" — every historical row, and every job
+// the single-process worker path handles. A phase handler that receives
+// a message for a NULL-phase job refuses closed rather than guessing.
+export const researchAcquisitionPhase = pgEnum("research_acquisition_phase", [
+  "SEARCHING",
+  "FETCHING",
+  "EXTRACTING",
+]);
+
 // Фаза 5 (phase-5-plan.md §5). Lifecycle памяти — единственный барьер
 // против отравления (D-025): переход в ACTIVE только человеком, прямая
 // вставка ACTIVE отклоняется триггером (0006_research_memory.sql).

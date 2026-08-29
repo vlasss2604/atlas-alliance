@@ -9,6 +9,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 
 import { createDatabase } from "../src/server/db/client";
+import { readAcquisitionPhase } from "../src/server/jobs/acquisition-phase-worker";
 import {
   evidence,
   interpretations,
@@ -53,6 +54,20 @@ async function main() {
     line("finishedAt", job.finishedAt?.toISOString() ?? null);
     line("entitlementAtStart", job.entitlementAtStart);
     line("capabilityAtStart", job.capabilityAtStart);
+
+    // D-136 — which network-capability phase this job is crossing, and
+    // whether that phase still has work in front of it. NULL means the
+    // job does not use the phased path at all (every historical row).
+    section("ACQUISITION PHASE (D-136)");
+    const phase = await readAcquisitionPhase(db, jobId);
+    if (!phase || phase.phase === null) {
+      line("acquisitionPhase", "(none — single-process job)");
+    } else {
+      line("acquisitionPhase", phase.phase);
+      line("lastTransition", phase.at ? phase.at.toISOString() : null);
+      line("pendingFetchTargets", phase.pendingTargets);
+      line("sealedDocuments", phase.sealedDocuments);
+    }
 
     section("INPUT");
     line("originalQuestion", job.originalQuestion);

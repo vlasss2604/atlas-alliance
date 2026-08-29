@@ -1,14 +1,12 @@
-import { desc, eq } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { researchComponentResults, researchJobs, researchPlans } from "../db/schema";
+import { researchComponentResults } from "../db/schema";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
-import { buildContractView } from "./contract-view";
-import type { ContractView } from "./contract-view";
 import { runResearchController } from "./controller";
 import type { ControllerRunResult, WorkExecutor } from "./controller";
-import { parseContract } from "../memory/contract";
-import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
+import { MissingActivePatternError } from "./active-pattern";
+import { loadJobContractView } from "./job-contract-view";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
@@ -68,32 +66,10 @@ export async function runS4ResearchJob(
   executor: WorkExecutor,
   now: Date,
 ): Promise<ControllerRunResult> {
-  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
-  if (!job) throw new Error(`research job not found: ${jobId}`);
-  if (!job.topicId) throw new Error(`research job ${jobId} has no topicId`);
-
-  const [planRow] = await db
-    .select()
-    .from(researchPlans)
-    .where(eq(researchPlans.researchJobId, jobId))
-    .orderBy(desc(researchPlans.version))
-    .limit(1);
-  if (!planRow) throw new Error(`no research_plans row for job ${jobId}`);
-
-  const contract = parseContract(planRow.contract);
-  const activePatternVersion = await loadActivePatternVersion(db, job.topicId);
-  if (activePatternVersion === null) {
-    throw new MissingActivePatternError(
-      `no ACTIVE research_patterns row for topic ${job.topicId} — refusing to run research without a confirmed active Pattern version`,
-    );
-  }
-
-  const view: ContractView = buildContractView({
-    contract,
-    mode: planRow.mode,
-    capabilityAtStart: job.capabilityAtStart,
-    activePatternVersion,
-  });
+  // Lifted verbatim into job-contract-view.ts (D-136) so the search
+  // phase derives the SAME work queue this controller run will walk.
+  // Identical reads, identical order, identical failure messages.
+  const { view } = await loadJobContractView(db, jobId);
 
   let result: ControllerRunResult;
   try {

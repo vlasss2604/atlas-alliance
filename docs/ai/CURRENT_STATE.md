@@ -210,7 +210,7 @@ unknown, so the address's absence from it is **not** established.
   reusing the existing lifecycle. Confirming a host and classifying a page are
   separate decisions.
 
-## D-136 IS RATIFIED AND SLICE 1 IS PROVEN OFFLINE (2026-08-29)
+## D-136 IS RATIFIED AND BOTH SLICES ARE PROVEN OFFLINE (2026-08-29)
 
 The owner ran the prepared Brave probe in both states. The matrix is now
 fully established, and it **refuted the earlier design's split**:
@@ -266,9 +266,55 @@ component the controller will later process. Cover only one component and the
 others legitimately have nothing to replay — correct behaviour, and the reason
 the phase pass takes the controller's own work queue rather than an ad-hoc list.
 
-`controller.ts`, `s4-executor.ts`, S5, S6, S7, S8 and S9: **zero changes.**
-Still not built (Slice 2): the two queues, the worker roles, the
-`acquisition_phase` column and migration, deployment/capability configuration.
+**Slice 2 is implemented and proven, also offline** — `jobs/worker-capabilities.ts`,
+`jobs/acquisition-phase-worker.ts`, the two new queues, and
+`tests/d136-phase-queues.test.ts` (28 tests). What Slice 2 adds is only what
+exists once a job crosses processes:
+
+- **Three queues, one payload.** The existing `research` queue carries
+  SEARCHING (and still carries single-process jobs); `research-fetch` and
+  `research-extract` carry the other two. Every message is `{ jobId }` and
+  nothing else — no document, no candidate list, no url, no Evidence. The
+  worker reloads state from the database.
+- **Capability is declared, never discovered.** One env var
+  (`ATLAS_WORKER_CAPABILITIES` ∈ SEARCH_EXTRACT | FETCH) decides which
+  queues a process subscribes to. No DNS, no address, no reachability
+  probe, and an unconfigured process serves no phase at all.
+- **The phase is a column, not a state.** `research_jobs.acquisition_phase`
+  (+ `acquisition_phase_at`), nullable with no default, separate from
+  `job.state`. NULL means "not a phased job" — which is every historical
+  row and the whole single-process path, so the migration is additive and
+  needed no backfill. Verified against the real dev database: 42 jobs, 2
+  Proofs, 415 Evidence rows, 4 sealed documents, all intact, all 42 rows
+  reading NULL.
+- **One transaction per handoff.** The phase advance and the next queue
+  message share a transaction (pg-boss's own transactional send, the
+  mechanism job creation has used since Phase 1), and the advance is
+  conditional on the phase it claims to be leaving. So neither half can
+  outlive the other, and two concurrent deliveries cannot both advance.
+- **At-least-once delivery is safe by persisted state, not by locks.** A
+  redelivered SEARCHING re-plans nothing and re-searches nothing (the
+  ledger already knows every executed query); a redelivered FETCHING opens
+  no url twice and seals nothing twice; a redelivered EXTRACTING meets a
+  terminal job and refuses. Stale and premature messages are the same
+  closed `PHASE_MISMATCH`.
+- **Admission is unchanged.** `research_enabled` and
+  `internal_alpha_enabled` are still false, entitlement is untouched, and
+  the EXTRACTING executor passes the SAME owner-alpha gate the
+  single-process path uses — only its acquisition providers differ.
+
+`controller.ts`, `s4-executor.ts`, S5, S6, S7, S8 and S9: **zero changes**,
+in both slices.
+
+**Open finding, deliberately NOT fixed here.** `s4-executor` reserves
+`searchQueries`/`sourceOpens` before every provider call and cannot tell a
+replay from a live call, so the EXTRACTING phase charges the acquisition
+budget a SECOND time for work the earlier phases already paid for. This is
+a property of the meter, not of the queues — Slice 1 had it too, inside one
+process — and it is now pinned by a measuring test. Fixing it means
+teaching the executor that a replay is not an external call, which is a
+semantic change to a core file and therefore an owner decision, not a
+side effect of this round.
 
 ## The product path is blocked by ONE coupling, and the obvious fix is barred
 

@@ -20,6 +20,7 @@ import {
   interpreterStatus,
   memoryStatus,
   quotaReservationState,
+  researchAcquisitionPhase,
   researchCapability,
   researchJobOrigin,
   researchJobState,
@@ -68,6 +69,16 @@ export const researchJobs = pgTable(
     // admin's session ended). PRODUCT is the default for every existing/
     // normal job; this column alone never widens what a PRODUCT job can do.
     origin: researchJobOrigin("origin").notNull().default("PRODUCT"),
+    // D-136 — which network-capability phase this job is crossing.
+    // NULL for every job that does not use the phased path (all
+    // historical rows, and anything the single-process worker runs), so
+    // adding this column changed no existing behaviour and required no
+    // backfill. Advanced ONLY by advancePhaseAndEnqueue
+    // (acquisition-phase-worker.ts), in the same transaction as the next
+    // phase's queue message: no commit, no message — and no message
+    // without the commit.
+    acquisitionPhase: researchAcquisitionPhase("acquisition_phase"),
+    acquisitionPhaseAt: timestamp("acquisition_phase_at", { withTimezone: true }),
     clarificationAttempts: smallint("clarification_attempts")
       .notNull()
       .default(0),

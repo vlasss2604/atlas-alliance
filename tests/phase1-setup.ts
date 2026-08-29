@@ -4,7 +4,7 @@ import { PgBoss } from "pg-boss";
 
 import { createDatabase, type Database } from "../src/server/db/client";
 import { seed } from "../src/server/db/seed";
-import { createBoss, RESEARCH_QUEUE } from "../src/server/jobs/queue";
+import { ALL_RESEARCH_QUEUES, createBoss } from "../src/server/jobs/queue";
 import type { EntitlementSnapshot } from "../src/server/domain/types";
 import { DEFAULT_PRODUCT_CONFIG } from "../src/server/config/product";
 
@@ -34,7 +34,9 @@ export async function setupTestDatabase(): Promise<TestContext> {
   const boss = createBoss(TEST_DATABASE_URL);
   boss.on("error", () => {});
   await boss.start();
-  await boss.createQueue(RESEARCH_QUEUE);
+  for (const queue of ALL_RESEARCH_QUEUES) {
+    await boss.createQueue(queue);
+  }
 
   return {
     db,

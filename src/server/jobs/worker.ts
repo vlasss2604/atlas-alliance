@@ -11,9 +11,34 @@ import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
-import { resolveOwnerAlphaWorkExecutor } from "./owner-alpha-routing";
-import { createBoss, RESEARCH_QUEUE } from "./queue";
+import {
+  finishPhasedJob,
+  handleExtractingPhase,
+  handleFetchingPhase,
+  handleSearchingPhase,
+  type PhaseHandlerResult,
+  type PhaseWorkerContext,
+} from "./acquisition-phase-worker";
+import {
+  resolveOwnerAlphaExtractionExecutor,
+  resolveOwnerAlphaWorkExecutor,
+} from "./owner-alpha-routing";
+import {
+  createBoss,
+  RESEARCH_EXTRACT_QUEUE,
+  RESEARCH_FETCH_QUEUE,
+  RESEARCH_QUEUE,
+  type ResearchQueuePayload,
+} from "./queue";
 import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
+import { resolveContentFetcher } from "../engine/providers/content-fetcher";
+import { resolveQueryProposer } from "../engine/providers/query-proposer";
+import { resolveSearchGateway } from "../engine/providers/search-gateway";
+import {
+  loadWorkerCapabilities,
+  workerServesPhase,
+  type PhaseCapability,
+} from "./worker-capabilities";
 
 // Standalone entrypoint (tsx, outside the Next.js runtime) — Next's own
 // dev-server env loading (.env.local etc.) never applies here, so this
@@ -274,6 +299,153 @@ export async function handleResearchJobTask(
   return { claimed: true };
 }
 
+// D-136 — PHASED DISPATCH.
+//
+// The entry queue keeps both meanings it can have: a job with no
+// acquisition phase is the single-process path, byte for byte what
+// handleResearchJobTask has always done; a job WITH a phase is a phased
+// job whose SEARCHING message this is. Which one a message is, is read
+// from the job's own persisted state — never from the message.
+export async function dispatchResearchQueueMessage(
+  ctx: PhaseWorkerContext,
+  jobId: string,
+): Promise<
+  | { kind: "LEGACY"; result: HandleResearchJobTaskResult }
+  | { kind: "PHASED"; result: PhaseHandlerResult }
+> {
+  const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job || job.acquisitionPhase === null) {
+    return { kind: "LEGACY", result: await handleResearchJobTask(ctx.db, jobId) };
+  }
+  // Live search providers are resolved here, in the worker, exactly where
+  // the single-process path resolves its own — this module is the one
+  // place that decides a real provider may be constructed, and the
+  // resolvers themselves still fail closed when unconfigured.
+  const result = await handleSearchingPhase(ctx, jobId, {
+    queryProposer: await resolveQueryProposer(),
+    searchGateway: resolveSearchGateway(),
+  });
+  await finishPhasedJobOnRefusal(ctx, jobId, result);
+  return { kind: "PHASED", result };
+}
+
+// A phase that could not run because the JOB is wrong (not because this
+// worker is wrong) is terminal for the job: leaving it RUNNING forever
+// would be the silent stall the phased design exists to avoid. A
+// capability refusal is deliberately NOT terminal — that message belongs
+// to another worker.
+async function finishPhasedJobOnRefusal(
+  ctx: PhaseWorkerContext,
+  jobId: string,
+  result: PhaseHandlerResult,
+): Promise<void> {
+  if (result.ran) return;
+  if (result.refusal !== "NOT_FOUND" && result.refusal !== "NOT_PHASED") return;
+  const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job || job.state !== "RUNNING") return;
+  await finishPhasedJob(
+    ctx.db,
+    jobId,
+    { state: "FAILED", terminationReason: "SYSTEM_OR_PROVIDER_FAILURE", errorCode: result.refusal },
+    job.entitlementAtStart,
+    "phase dispatch: " + result.refusal,
+  );
+}
+
+// The FETCHING message. The source-side role owns exactly one live
+// capability — the bounded content fetcher — and nothing else.
+export async function dispatchFetchQueueMessage(
+  ctx: PhaseWorkerContext,
+  jobId: string,
+): Promise<PhaseHandlerResult> {
+  const result = await handleFetchingPhase(ctx, jobId, resolveContentFetcher());
+  await finishPhasedJobOnRefusal(ctx, jobId, result);
+  return result;
+}
+
+// The EXTRACTING message. The executor is resolved through the SAME
+// owner-alpha admission gate the single-process path uses; only the
+// acquisition providers differ, and they are replays of this job's own
+// persisted state.
+export async function dispatchExtractQueueMessage(
+  ctx: PhaseWorkerContext,
+  jobId: string,
+): Promise<PhaseHandlerResult> {
+  const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job) return { ran: false, refusal: "NOT_FOUND" };
+  const config = await loadProductConfig(ctx.db);
+
+  let result: PhaseHandlerResult;
+  try {
+    result = await handleExtractingPhase(ctx, jobId, async (replay) =>
+      resolveOwnerAlphaExtractionExecutor({
+        db: ctx.db,
+        job,
+        project: replay.project,
+        internalAlphaEnabled: config.internal_alpha_enabled,
+        replay: {
+          queryProposer: replay.queryProposer,
+          searchGateway: replay.searchGateway,
+          contentFetcher: replay.contentFetcher,
+        },
+      }),
+    );
+  } catch (e) {
+    console.error("[worker] phased extraction failed", e);
+    const budget = e instanceof BudgetExhaustedError;
+    await finishPhasedJob(
+      ctx.db,
+      jobId,
+      {
+        state: budget ? "BUDGET_LIMIT_REACHED" : "FAILED",
+        terminationReason: budget ? "BUDGET_EXHAUSTED" : "SYSTEM_OR_PROVIDER_FAILURE",
+        errorCode: budget ? null : e instanceof Error ? e.name : "ENGINE_EXECUTION_FAILED",
+      },
+      job.entitlementAtStart,
+      "phased extraction failed",
+    );
+    return { ran: false, refusal: "JOB_NOT_RUNNABLE" };
+  }
+
+  if (result.ran) {
+    // The SAME terminal mapping the single-process path uses — one
+    // vocabulary for one engine, whatever process it ran in.
+    const outcome = result.budgetExhausted
+      ? { state: "BUDGET_LIMIT_REACHED" as const, terminationReason: "BUDGET_EXHAUSTED", errorCode: null }
+      : result.controller
+        ? mapEngineOutcome(result.controller.stopReason)
+        : null;
+    if (outcome) {
+      await finishPhasedJob(
+        ctx.db,
+        jobId,
+        outcome,
+        job.entitlementAtStart,
+        "engine: " + outcome.terminationReason,
+      );
+    }
+  } else {
+    await finishPhasedJobOnRefusal(ctx, jobId, result);
+  }
+  return result;
+}
+
+// A message this process is not configured to serve must go BACK to the
+// queue for a worker that is — never be consumed, never be silently
+// dropped. Throwing is how pg-boss is told the message was not handled.
+export class PhaseCapabilityMissingError extends Error {
+  constructor(public readonly phase: string) {
+    super("this worker is not configured to serve phase " + phase);
+    this.name = "PhaseCapabilityMissingError";
+  }
+}
+
+function throwIfCapabilityRefusal(result: PhaseHandlerResult, phase: string): void {
+  if (!result.ran && result.refusal === "CAPABILITY_NOT_CONFIGURED") {
+    throw new PhaseCapabilityMissingError(phase);
+  }
+}
+
 // Entrypoint worker-процесса. В Фазе 1 хендлер — no-op (инфраструктура);
 // реальный research-pipeline подключается в Фазах 4–6.
 export async function startWorker() {
@@ -283,6 +455,13 @@ export async function startWorker() {
 
   await boss.start();
   await boss.createQueue(RESEARCH_QUEUE);
+  await boss.createQueue(RESEARCH_FETCH_QUEUE);
+  await boss.createQueue(RESEARCH_EXTRACT_QUEUE);
+
+  // D-136 — what this process may do is DECLARED, in one env var, and
+  // never inferred from what it happens to be able to reach.
+  const capabilities: ReadonlySet<PhaseCapability> = loadWorkerCapabilities();
+  const ctx: PhaseWorkerContext = { db, boss, capabilities };
 
   await sweepStaleRunningJobs(db);
   await runMaintenance(db);
@@ -291,9 +470,24 @@ export async function startWorker() {
     10 * 60 * 1000,
   );
 
-  await boss.work<{ jobId: string }>(RESEARCH_QUEUE, async ([task]) => {
-    await handleResearchJobTask(db, task.data.jobId);
+  // The entry queue is always served: it still carries single-process
+  // jobs, which need no phase capability at all.
+  await boss.work<ResearchQueuePayload>(RESEARCH_QUEUE, async ([task]) => {
+    const out = await dispatchResearchQueueMessage(ctx, task.data.jobId);
+    if (out.kind === "PHASED") throwIfCapabilityRefusal(out.result, "SEARCHING");
   });
+
+  // The phase queues are served ONLY by a process configured for them.
+  if (workerServesPhase(capabilities, "FETCHING")) {
+    await boss.work<ResearchQueuePayload>(RESEARCH_FETCH_QUEUE, async ([task]) => {
+      throwIfCapabilityRefusal(await dispatchFetchQueueMessage(ctx, task.data.jobId), "FETCHING");
+    });
+  }
+  if (workerServesPhase(capabilities, "EXTRACTING")) {
+    await boss.work<ResearchQueuePayload>(RESEARCH_EXTRACT_QUEUE, async ([task]) => {
+      throwIfCapabilityRefusal(await dispatchExtractQueueMessage(ctx, task.data.jobId), "EXTRACTING");
+    });
+  }
 
   const shutdown = async () => {
     clearInterval(maintenanceTimer);
@@ -303,7 +497,17 @@ export async function startWorker() {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
-  console.log("[worker] started, queue:", RESEARCH_QUEUE);
+  const servedQueues = [
+    RESEARCH_QUEUE,
+    ...(workerServesPhase(capabilities, "FETCHING") ? [RESEARCH_FETCH_QUEUE] : []),
+    ...(workerServesPhase(capabilities, "EXTRACTING") ? [RESEARCH_EXTRACT_QUEUE] : []),
+  ];
+  console.log(
+    "[worker] started, queues:",
+    servedQueues.join(", "),
+    "capabilities:",
+    [...capabilities].join(",") || "(none — single-process jobs only)",
+  );
 }
 
 // Запуск: npm run worker:dev

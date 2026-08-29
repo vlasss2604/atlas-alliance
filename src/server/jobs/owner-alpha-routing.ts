@@ -5,8 +5,13 @@ import { users } from "../db/schema";
 import type { WorkExecutor } from "../engine/controller";
 import {
   createLiveS4WorkExecutor,
+  InternalAlphaGateClosedError,
   INTERNAL_ALPHA_LIVE_PROJECT_SLUGS,
 } from "../engine/live-executor";
+import { createS4WorkExecutor } from "../engine/s4-executor";
+import type { ContentFetcher } from "../engine/providers/content-fetcher";
+import type { QueryProposer } from "../engine/providers/query-proposer";
+import type { SearchGateway } from "../engine/providers/search-gateway";
 import type { S4ExecutorDeps } from "../engine/s4-executor";
 
 // Owner Manual Alpha App Test (D-123) — the ONLY place in the worker path
@@ -59,9 +64,10 @@ export interface ResolveOwnerAlphaExecutorDeps {
 // executor — callers that want the non-live path call
 // createNonLiveS4WorkExecutor directly, exactly as before this file
 // existed.
-export async function resolveOwnerAlphaWorkExecutor(
-  deps: ResolveOwnerAlphaExecutorDeps,
-): Promise<WorkExecutor> {
+// The three owner-alpha admission checks, in one place so the phased
+// extraction path below cannot drift from the single-process one. Throws
+// on any failure; returns nothing on success.
+async function assertOwnerAlphaAdmitted(deps: ResolveOwnerAlphaExecutorDeps): Promise<void> {
   if (deps.job.origin !== "OWNER_MANUAL_ALPHA") {
     throw new OwnerAlphaLiveRefusedError("NOT_OWNER_MANUAL_ALPHA");
   }
@@ -75,6 +81,45 @@ export async function resolveOwnerAlphaWorkExecutor(
   if (!INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has(deps.project.slug)) {
     throw new OwnerAlphaLiveRefusedError("PROJECT_NOT_ALLOWLISTED");
   }
+}
+
+// D-136 — the EXTRACTING phase's executor. Same admission as the
+// single-process live path below, plus the same internal-alpha gate
+// (InternalAlphaGateClosedError, imported from live-executor.ts rather
+// than re-invented), and one difference that is the entire point of the
+// phase: the acquisition providers are REPLAYS of this job's own
+// persisted phase-1/phase-2 outputs, so the extraction process performs
+// no search and no source fetch of its own.
+//
+// The evidence extractor is deliberately NOT overridden — it falls
+// through to the real resolver, exactly as createLiveS4WorkExecutor
+// leaves it, because extraction is the one live capability this phase is
+// for. live-executor.ts itself is untouched (D-122): this function
+// re-states its gate rather than editing it.
+export async function resolveOwnerAlphaExtractionExecutor(
+  deps: ResolveOwnerAlphaExecutorDeps & {
+    replay: {
+      queryProposer: QueryProposer;
+      searchGateway: SearchGateway;
+      contentFetcher: ContentFetcher;
+    };
+  },
+): Promise<WorkExecutor> {
+  await assertOwnerAlphaAdmitted(deps);
+  if (!deps.internalAlphaEnabled) throw new InternalAlphaGateClosedError();
+  return createS4WorkExecutor({
+    db: deps.db,
+    project: deps.project,
+    queryProposer: deps.replay.queryProposer,
+    searchGateway: deps.replay.searchGateway,
+    contentFetcher: deps.replay.contentFetcher,
+  });
+}
+
+export async function resolveOwnerAlphaWorkExecutor(
+  deps: ResolveOwnerAlphaExecutorDeps,
+): Promise<WorkExecutor> {
+  await assertOwnerAlphaAdmitted(deps);
   return createLiveS4WorkExecutor({
     db: deps.db,
     project: deps.project,
