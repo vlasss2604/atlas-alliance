@@ -46,6 +46,34 @@ export function textSha256(text: string): string {
 
 export type PersistAcquiredRefusal = "TEXT_TOO_LARGE" | "AUTHORITY_NOT_CONFIRMED";
 
+// D-136 — WHICH ADMISSION RULE SEALED THIS DOCUMENT.
+//
+// OWNER_STRICT is D-128's rule, unchanged and default: only a
+// human-CONFIRMED, classified route may be sealed, and the same predicate
+// is re-checked at resume (the both-ends rule). Every existing caller
+// keeps it by omission.
+//
+// PRODUCT_ACQUISITION exists because the canonical product path
+// researches beyond first-party documentation: a search-discovered page
+// must be sealable so a later phase can extract from it in a different
+// network environment. It means EXACTLY ONE THING —
+//
+//   "the bounded transport produced this document, and it may be
+//    replayed to an extractor later"
+//
+// — and it means NONE of: official docs, confirmed authority, established
+// project identity, Evidence, fact truth, or claim support. The authority
+// snapshot is recorded AS RESOLVED, including UNKNOWN/unclassified, and is
+// never upgraded because a fetch happened to succeed. Evidence authority
+// stays where it already is: computed by resolveSourceClass on the
+// production path at extraction time.
+//
+// Both modes still fail closed on the size bound, because a row that
+// could not have come from the bounded transport must not be creatable
+// through this function either.
+export const ACQUISITION_ADMISSIONS = ["OWNER_STRICT", "PRODUCT_ACQUISITION"] as const;
+export type AcquisitionAdmission = (typeof ACQUISITION_ADMISSIONS)[number];
+
 export type PersistAcquiredResult =
   | { ok: false; refusal: PersistAcquiredRefusal; detail: string }
   | { ok: true; id: string; textSha256: string };
@@ -58,6 +86,9 @@ export async function persistAcquiredDocument(
     doc: FetchedDocument;
     route: ResolvedSourceRoute;
     renderMode: "STATIC" | "RENDERED";
+    // Defaults to OWNER_STRICT so every pre-D-136 caller is byte-for-byte
+    // unchanged: omitting it cannot silently relax the gate.
+    admission?: AcquisitionAdmission;
   },
 ): Promise<PersistAcquiredResult> {
   // Fail closed on both bounds even though the transport already enforces
@@ -66,7 +97,12 @@ export async function persistAcquiredDocument(
   if (input.doc.normalizedText.length > MAX_PERSISTED_TEXT_CHARS) {
     return { ok: false, refusal: "TEXT_TOO_LARGE", detail: "normalized text exceeds the transport bound" };
   }
-  if (!authorityPermitsAcquisition(input.route)) {
+  const admission: AcquisitionAdmission = input.admission ?? "OWNER_STRICT";
+  // The authority GATE applies to OWNER_STRICT only. Under
+  // PRODUCT_ACQUISITION the same authority is still resolved and recorded
+  // below — it simply does not decide admission, because sealing is a
+  // statement about the transport, not about authority.
+  if (admission === "OWNER_STRICT" && !authorityPermitsAcquisition(input.route)) {
     return {
       ok: false,
       refusal: "AUTHORITY_NOT_CONFIRMED",
