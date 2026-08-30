@@ -165,7 +165,12 @@ export interface RenderEligibilityInput {
 // The route and transport gates, shared verbatim by both ways in. Every
 // condition the owner required lives here, so no caller can satisfy a
 // subset and no second copy can drift away from this one.
-function routeEligibility(
+// D-146 — exported so an acquisition path that reaches the renderer after
+// a TRANSPORT failure (no HTTP status exists to judge) can ask exactly the
+// route question the two policies below already ask, instead of a second
+// notion of "may this url be rendered". The refusal-status gate stays in
+// evaluateRefusalRenderEligibility, where it belongs.
+export function routeEligibility(
   url: string,
   route: ResolvedSourceRoute,
   rendererEnabled: boolean,

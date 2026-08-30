@@ -71,6 +71,23 @@ export type PersistAcquiredRefusal = "TEXT_TOO_LARGE" | "AUTHORITY_NOT_CONFIRMED
 // Both modes still fail closed on the size bound, because a row that
 // could not have come from the bounded transport must not be creatable
 // through this function either.
+// D-146 — the CLOSED set of bounded acquisition strategies. Three, and
+// only ever three in ATLAS 1.0: the ordinary safe-http request, the same
+// request asking for a different standard representation of the SAME url,
+// and the isolated renderer. There is no plugin surface and no
+// project-specific or vendor-specific member; a new strategy is a new
+// owner decision, not a registration.
+//
+// Recorded as provenance only. A strategy NEVER alters officiality,
+// routeClass, source class or admissibility — see the admission comment
+// below: succeeding through a different transport promotes nothing.
+export const ACQUISITION_STRATEGIES = [
+  "DIRECT_HTTP",
+  "CONTENT_NEGOTIATION",
+  "ISOLATED_RENDER",
+] as const;
+export type AcquisitionStrategy = (typeof ACQUISITION_STRATEGIES)[number];
+
 export const ACQUISITION_ADMISSIONS = ["OWNER_STRICT", "PRODUCT_ACQUISITION"] as const;
 export type AcquisitionAdmission = (typeof ACQUISITION_ADMISSIONS)[number];
 
@@ -86,6 +103,9 @@ export async function persistAcquiredDocument(
     doc: FetchedDocument;
     route: ResolvedSourceRoute;
     renderMode: "STATIC" | "RENDERED";
+    // D-146 — which bounded strategy produced this document. Optional so
+    // every pre-D-146 caller is unchanged and its rows read NULL.
+    acquisitionStrategy?: AcquisitionStrategy;
     // Defaults to OWNER_STRICT so every pre-D-136 caller is byte-for-byte
     // unchanged: omitting it cannot silently relax the gate.
     admission?: AcquisitionAdmission;
@@ -128,6 +148,10 @@ export async function persistAcquiredDocument(
       contentHash: input.doc.contentHash,
       textSha256: textSha256(input.doc.normalizedText),
       renderMode: input.renderMode,
+      // D-146 provenance. Both are audit fields: neither is ever read by
+      // an authority, admissibility or reconciliation decision.
+      acquisitionStrategy: input.acquisitionStrategy ?? null,
+      admission,
       authority,
       acquiringJobId: input.acquiringJobId,
     })

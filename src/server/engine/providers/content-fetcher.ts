@@ -31,6 +31,20 @@ import {
 //   - content is normalized to plain text and handed back as DATA; this
 //     module never executes, evaluates, or interprets anything it fetches
 
+// D-146 — the closed set of representation preferences. Two members, both
+// code-owned; a caller cannot supply a header.
+export const ACCEPT_PREFERENCES = ["DEFAULT", "TEXT_REPRESENTATION"] as const;
+export type AcceptPreference = (typeof ACCEPT_PREFERENCES)[number];
+
+// The exact header each preference sends. DEFAULT is byte-for-byte the
+// header this fetcher sent before D-146, so an ordinary fetch is
+// unchanged. TEXT_REPRESENTATION lists the same admissible types with
+// ordinary q-values, preferring the plainest complete representation.
+const ACCEPT_HEADERS: Record<AcceptPreference, string> = {
+  DEFAULT: "text/html,text/plain,application/json,application/xml",
+  TEXT_REPRESENTATION: "text/markdown,text/plain;q=0.9,text/html;q=0.5",
+};
+
 export interface ContentFetcher extends MeteredProvider {
   readonly name: string;
   fetch(url: string, opts?: FetchOptions): Promise<FetchedDocument>;
@@ -40,6 +54,20 @@ export interface FetchOptions {
   maxBytes?: number;
   timeoutMs?: number;
   maxRedirects?: number;
+  // D-146 — which standard representation of the SAME resource this
+  // request prefers. "DEFAULT" is the header this fetcher has always
+  // sent. "TEXT_REPRESENTATION" asks the origin, through ordinary HTTP
+  // content negotiation, for a text/markdown or text/plain rendering of
+  // the very same URL.
+  //
+  // This is a representation preference and NOTHING else: the url, the
+  // host, the DNS validation, the blocked-address check, the pinned
+  // connection, the redirect revalidation, the size and time bounds and
+  // the content-type allowlist are all unchanged and unbypassed. A
+  // markdown answer is not more authoritative than an HTML one — MIME is
+  // representation, never authority — and no vendor-specific header is
+  // ever sent.
+  acceptPreference?: AcceptPreference;
   // Stage 0 opt-in. Only set by a caller that has already confirmed this
   // url is a human-confirmed OFFICIAL_DOCS route with a matched
   // pathPrefix. Default off: an ordinary search candidate never receives
@@ -442,7 +470,7 @@ function fetchOneHop(
         lookup: createPinnedLookup(pinnedIp) as unknown as http.RequestOptions["lookup"],
         headers: {
           "User-Agent": "AtlasProofResearchEngine/1 (+content-fetch)",
-          Accept: "text/html,text/plain,application/json,application/xml",
+          Accept: ACCEPT_HEADERS[opts.acceptPreference],
         },
         timeout: opts.timeoutMs,
       },
@@ -597,6 +625,8 @@ export function createContentFetcher(
         maxRedirects: opts?.maxRedirects ?? DEFAULT_MAX_REDIRECTS,
         // Off unless the caller explicitly opted in.
         recoverEmbeddedPayloads: opts?.recoverEmbeddedPayloads ?? false,
+        // D-146: the historical header unless a caller asks otherwise.
+        acceptPreference: opts?.acceptPreference ?? "DEFAULT",
       };
       // Validate before any network activity — REDIRECT_TARGET_BLOCKED vs
       // BLOCKED_ADDRESS both flow through resolveAndValidate per hop

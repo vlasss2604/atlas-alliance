@@ -72,6 +72,20 @@ export const acquiredDocuments = pgTable(
     // Stage B performs, and Evidence authority itself is still computed
     // by the production path at extraction time.
     authority: jsonb("authority").notNull(),
+    // D-146 — WHICH BOUNDED STRATEGY PRODUCED THIS DOCUMENT.
+    //
+    // Closed in application code to DIRECT_HTTP | CONTENT_NEGOTIATION |
+    // ISOLATED_RENDER. Audit only, and deliberately NOT authority:
+    // succeeding through a different transport promotes nothing. It
+    // answers "how was this obtained", never "how much may it prove".
+    // renderMode stays what it always was — the SHAPE of the output —
+    // while this records the PATH that produced it.
+    acquisitionStrategy: text("acquisition_strategy"),
+    // D-146 — which admission rule sealed this row (D-136's
+    // OWNER_STRICT | PRODUCT_ACQUISITION). Until now the mode was a
+    // function parameter that was never persisted, so an auditor could
+    // not tell which gate a row had passed.
+    admission: text("admission"),
     acquiringJobId: uuid("acquiring_job_id").references(() => researchJobs.id, {
       onDelete: "set null",
     }),

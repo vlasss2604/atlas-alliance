@@ -338,6 +338,61 @@ happen). Instead `alpha-inspect` now prints the state-transition journal,
 where the explanation was already persisted as the note "stale RUNNING
 sweep" — the line that identified this incident in the first place.
 
+## ACQUISITION IS A BOUNDED CHAIN NOW, NOT A SINGLE TRANSPORT (D-146 Slice 1)
+
+The phased FETCHING path no longer gives up when one transport fails. It runs
+a **closed chain of three** code-owned strategies and stops at the first
+COMPLETE document:
+
+```
+DIRECT_HTTP  →  CONTENT_NEGOTIATION  →  ISOLATED_RENDER
+```
+
+`CONTENT_NEGOTIATION` is the same URL through the same safe-http path with
+one different standard `Accept` header — no new host, no guessed path, no
+vendor header, every SSRF check unchanged. `ISOLATED_RENDER` is the existing
+isolated renderer reached through its existing seam; **Slice 1 starts no
+browser** (production still has no renderer installed, so that branch is
+inert until Slice 2).
+
+**Stage-0 is not a strategy.** Embedded-payload recovery is deterministic
+processing of the very response the fetch is already making, requested via
+`recoverEmbeddedPayloads` on the same call under the existing
+`docsPayloadRecoveryEligible` gate, and it reserves no extra source open.
+
+**A fallback is justified by the failure class, never by hope.**
+`BLOCKED_ADDRESS` and `REDIRECT_TARGET_BLOCKED` end the chain outright —
+every strategy shares one address classifier, so another transport could only
+"succeed" by weakening the boundary the first correctly enforced. Deterministic
+refusals and untyped failures also end it. `NETWORK_ERROR`/`TIMEOUT` — the
+class where the origin demonstrably had more to send — earn negotiation and
+then render; `UNSUPPORTED_CONTENT_TYPE` earns negotiation; `HTTP_ERROR`
+401/403/429 earns render under the untouched render-on-refusal policy. The SPA
+upgrade is the canonical one; no second shortfall detector exists.
+
+Bounds: two fallbacks per URL, four renders per job (a policy ceiling read
+from persisted trace, so redelivery cannot reset it), everything inside the
+unchanged 24 source opens. No new budget axis. D-137 metering unchanged.
+
+**Strategy-aware memory.** The ledger now records which strategies attempted
+each URL (`strategiesAttempted`, from the same `FETCH_ATTEMPTED` rows), and a
+URL leaves the target list when it has been ACQUIRED rather than when one
+provider failed on it. So a worker that dies between strategies lets the
+redelivery continue with the next one — without repeating or re-paying for the
+first. The broader environmental-class re-attempt is deliberately Slice 3.
+
+**Transport is not authority.** `acquisition_strategy` (migration 0037,
+nullable, additive) records how a document was obtained and changes nothing
+about officiality, routeClass, source class or admissibility — pinned by a test
+where negotiation succeeds on an unconfirmed route and authority stays
+CLAIMED/null. `admission` is now persisted too; it was a function parameter
+that no row ever recorded. Completeness is deliberately NOT a column: a sealed
+document is complete by invariant.
+
+**One integrity asymmetry closed.** The phased replay now verifies the same
+`textSha256` seal the strict resume path verifies. A mismatch simply removes
+the document from the replay set — never repaired, never re-sealed.
+
 ## RAYDIUM LIVE ACQUISITION: ENVIRONMENTALLY_BLOCKED / INCOMPLETE_TRANSPORT (2026-08-30)
 
 **Documentation status, not a runtime state.** No enum, no column, no code

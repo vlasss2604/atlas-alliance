@@ -2,7 +2,12 @@ import { eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { acquiredDocuments, researchTraceEvents } from "../db/schema";
-import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
+import {
+  loadAcquisitionLedger,
+  planQueries,
+  providerAttemptCount,
+  strategyAlreadyAttempted,
+} from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
@@ -13,7 +18,26 @@ import {
 import type { ModelCostProfile } from "./model-cost-profile";
 import { loadProductConfig } from "../config/product";
 import { researchJobs } from "../db/schema";
-import { persistAcquiredDocument, replayContentFetcher } from "./acquired-documents";
+import {
+  persistAcquiredDocument,
+  replayContentFetcher,
+  textSha256,
+  type AcquisitionStrategy,
+} from "./acquired-documents";
+import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
+import {
+  evaluateRefusalRenderEligibility,
+  evaluateRenderEligibility,
+  RENDER_ON_REFUSAL_STATUSES,
+  routeEligibility,
+} from "./rendered-docs-policy";
+import {
+  RenderedDocsError,
+  isRenderedDocsFailureReason,
+  renderedDocsAvailable,
+  renderedDocsEnabled,
+  resolveRenderedDocsFetcher,
+} from "./providers/rendered-docs-fetcher";
 import type { ComponentWorkItem } from "./contract-view";
 import { reserveJobBudget } from "./budget-reservation";
 import { ContentFetchError } from "./providers/content-fetcher";
@@ -79,6 +103,11 @@ export interface SearchPhaseResult {
 
 export interface FetchPhaseResult {
   sealedDocumentIds: string[];
+  // D-146 — urls whose every eligible strategy had already been attempted
+  // in an earlier delivery, so this pass performed no external call.
+  exhaustedUrls: string[];
+  // Every real external strategy invocation this pass made, in order.
+  strategyAttempts: Array<{ url: string; strategy: AcquisitionStrategy }>;
   // Urls skipped because the ledger already knows them dead or fetched.
   skippedUrls: string[];
   // Urls whose fetch was attempted and failed in this pass.
@@ -384,7 +413,10 @@ export async function loadFetchTargets(
       const canonical = canonicalTargetRef(url);
       if (seen.has(canonical)) continue;
       seen.add(canonical);
-      if (isKnownDeadUrl(url, ledger)) continue;
+      // D-146 — a url leaves the target list when it has been ACQUIRED,
+      // not when one strategy failed on it. Which strategies remain
+      // eligible is decided per url by the chain, from persisted trace,
+      // so a failed strategy is still never repeated.
       if (ledger.fetchedUrls.has(canonical)) continue;
       out.push(url);
     }
@@ -392,15 +424,95 @@ export async function loadFetchTargets(
   return out;
 }
 
+// D-146 — THE BOUNDED ACQUISITION CHAIN.
+//
+// Provider names are the strategy identity everywhere: in the trace row
+// that records the attempt, in the ledger that remembers which strategies
+// a url has already had, and in the job-level render ceiling. DIRECT_HTTP
+// keeps the transport's own name so every pre-D-146 row still reads as
+// the strategy it was.
+const STRATEGY_PROVIDER: Record<AcquisitionStrategy, string> = {
+  DIRECT_HTTP: "safe-http",
+  CONTENT_NEGOTIATION: "content-negotiation",
+  ISOLATED_RENDER: "isolated-render",
+};
+
+// At most two strategies beyond the first for one url (owner-ratified).
+const MAX_FALLBACK_ATTEMPTS_PER_URL = 2;
+// A job-level ceiling on real renders, counted from persisted trace so a
+// redelivery cannot reset it. This is a POLICY ceiling only — the
+// sourceOpens reservation remains the single budget authority.
+const MAX_RENDER_ATTEMPTS_PER_JOB = 4;
+
+// WHICH FAILURES JUSTIFY WHICH FALLBACK.
+//
+// A fallback is justified by the failure CLASS, never by hope. The two
+// security refusals terminate the chain outright: every strategy shares
+// the same address classifier, so another transport could only "succeed"
+// by weakening the boundary the first one correctly enforced — that is
+// the one thing a fallback must never become.
+//
+// Deterministic refusals (a malformed url, an unsupported scheme, a
+// redirect loop, an oversized body, a 404 or a 5xx) end the chain too:
+// the server or the policy already answered, and asking again through a
+// different pipe cannot change the answer.
+//
+// What remains is the honest middle: a connection that broke mid-message
+// or timed out (the class where a complete document demonstrably exists
+// but this transport could not finish it), a representation this fetcher
+// cannot read, and the refusal statuses the canonical render-on-refusal
+// policy already recognises.
+export function plannedFallbacks(
+  diagnostic: string | null,
+  httpStatus: number | null,
+): AcquisitionStrategy[] {
+  switch (diagnostic) {
+    // SECURITY STOP. Never anything after these.
+    case "BLOCKED_ADDRESS":
+    case "REDIRECT_TARGET_BLOCKED":
+      return [];
+    // The transport could not finish a message the origin was sending.
+    case "NETWORK_ERROR":
+    case "TIMEOUT":
+      return ["CONTENT_NEGOTIATION", "ISOLATED_RENDER"];
+    // This fetcher cannot read what was offered; ask for a representation
+    // it can. A browser would face the same allowlist, so no render.
+    case "UNSUPPORTED_CONTENT_TYPE":
+      return ["CONTENT_NEGOTIATION"];
+    // The server answered, and the answer decides. Only the canonical
+    // refusal statuses admit the renderer.
+    case "HTTP_ERROR":
+      return httpStatus !== null && RENDER_ON_REFUSAL_STATUS_SET.has(httpStatus)
+        ? ["ISOLATED_RENDER"]
+        : [];
+    // Deterministic policy refusals, resolver failure, and anything
+    // untyped: fail closed with no fallback. (Environmental classes may
+    // earn a later re-attempt under D-146 Slice 3; that is a separate
+    // decision and is deliberately not implemented here.)
+    default:
+      return [];
+  }
+}
+
+// Read from the canonical policy module rather than restated here.
+const RENDER_ON_REFUSAL_STATUS_SET = RENDER_ON_REFUSAL_STATUSES;
+
 // PHASE 2 — FETCHING (source-side environment).
 //
-// Consumes ONLY the persisted candidate handoff, fetches through the
-// ordinary bounded transport, and seals each document under
-// PRODUCT_ACQUISITION. Makes no model call, runs no search, writes no
-// Evidence and no attempt.
+// Consumes ONLY the persisted candidate handoff and seals each document
+// under PRODUCT_ACQUISITION. Makes no model call, runs no search, writes
+// no Evidence and no attempt.
 //
-// A url that cannot be parsed is refused before the transport is called —
-// the fetcher must never be handed something that was not a real url.
+// D-146: each url is acquired through a BOUNDED CHAIN of at most three
+// code-owned strategies, stopping at the first complete document. The
+// phased path thereby gains the recovery abilities the single-process
+// executor already had — Stage-0 embedded-payload recovery, render on
+// refusal, render on an SPA shell — by reusing those exact primitives,
+// plus one new representation preference on the same transport.
+//
+// What the chain never does: accept an incomplete document, continue past
+// a security refusal, invent a url the search phase did not find, or let
+// a successful transport promote authority.
 export async function runFetchPhase(input: {
   db: Database;
   jobId: string;
@@ -413,6 +525,8 @@ export async function runFetchPhase(input: {
     skippedUrls: [],
     failedUrls: [],
     refusedUrls: [],
+    exhaustedUrls: [],
+    strategyAttempts: [],
   };
   const targets = await loadFetchTargets(input.db, input.jobId);
 
@@ -429,6 +543,86 @@ export async function runFetchPhase(input: {
       continue;
     }
 
+    const outcome = await acquireOneUrl(input, url, out);
+    if (outcome === "BUDGET_EXHAUSTED") break;
+  }
+  return out;
+}
+
+type UrlOutcome = "SEALED" | "FAILED" | "EXHAUSTED" | "BUDGET_EXHAUSTED";
+
+// One url, one bounded chain. Returns how the url ended, so the caller can
+// stop the whole phase when the job's source-open axis is spent.
+async function acquireOneUrl(
+  input: {
+    db: Database;
+    jobId: string;
+    projectId: string;
+    contentFetcher: ContentFetcher;
+    maxSourceOpens: number;
+  },
+  url: string,
+  out: FetchPhaseResult,
+): Promise<UrlOutcome> {
+  // The route is resolved BEFORE any transport call because two decisions
+  // depend on it up front: whether Stage-0 recovery may be requested on
+  // the very same fetch, and whether the renderer is even eligible. It is
+  // re-resolved on the document's finalUrl at seal time — a redirect must
+  // not let a pre-fetch decision speak for where the transport landed.
+  const preFetchRoute = await resolveSourceRoute(input.db, input.projectId, url);
+  const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
+  const rendererEnabled = renderedDocsEnabled() && renderedDocsAvailable();
+
+  const plan: AcquisitionStrategy[] = ["DIRECT_HTTP"];
+  let attempted = 0;
+  let lastDiagnostic: string | null = null;
+  // Per url, never module state: two urls — or two jobs sharing a
+  // process — must never be able to read each other's last failure.
+  let lastHttpStatus: number | null = null;
+
+  for (let i = 0; i < plan.length; i++) {
+    const strategy = plan[i];
+    const providerName = STRATEGY_PROVIDER[strategy];
+
+    // Ledger is re-read per attempt: another delivery may have run this
+    // exact strategy for this url already, and a strategy is never run
+    // twice for one url.
+    const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+    if (strategyAlreadyAttempted(url, providerName, ledger)) continue;
+
+    if (strategy === "ISOLATED_RENDER") {
+      if (!rendererEnabled) continue;
+      if (providerAttemptCount(providerName, ledger) >= MAX_RENDER_ATTEMPTS_PER_JOB) continue;
+      // Which question to ask depends on HOW the chain got here, and both
+      // questions are the canonical ones.
+      //
+      // After an HTTP refusal there IS a status, and the existing
+      // render-on-refusal policy owns which statuses qualify — that
+      // policy is preserved exactly. After a transport failure there is
+      // no status at all: the message never completed. Asking the refusal
+      // policy there would always answer NOT_A_RENDERABLE_REFUSAL and the
+      // renderer could never finish a document the origin was genuinely
+      // sending — so that case asks the shared ROUTE gate instead, which
+      // is the same https + CONFIRMED + OFFICIAL_DOCS + matched-prefix
+      // test both existing policies are built on. No third notion of
+      // renderability is introduced, and the route bar is not lowered.
+      const eligibility =
+        lastHttpStatus !== null
+          ? evaluateRefusalRenderEligibility({
+              url,
+              route: preFetchRoute,
+              rendererEnabled,
+              httpStatus: lastHttpStatus,
+            })
+          : routeEligibility(url, preFetchRoute, rendererEnabled);
+      if (!eligibility.eligible) continue;
+      const rendered = await attemptRender(input, url, eligibility, out);
+      if (rendered === "BUDGET_EXHAUSTED") return "BUDGET_EXHAUSTED";
+      if (rendered === "SEALED") return "SEALED";
+      attempted += 1;
+      continue;
+    }
+
     const reserved = await reserveJobBudget(
       input.db,
       input.jobId,
@@ -438,72 +632,270 @@ export async function runFetchPhase(input: {
     );
     if (!reserved) {
       out.skippedUrls.push(url);
-      continue;
+      return "BUDGET_EXHAUSTED";
     }
 
     await recordTraceEvent(input.db, {
       researchJobId: input.jobId,
       operationType: "FETCH_ATTEMPTED",
       providerKind: "FETCH",
-      providerName: input.contentFetcher.name,
+      providerName,
       targetRef: url,
       status: "OK",
       budgetAxis: "sourceOpens",
       budgetAmount: 1,
     });
+    out.strategyAttempts.push({ url, strategy });
+    attempted += 1;
 
     let doc: FetchedDocument;
     try {
-      doc = await input.contentFetcher.fetch(url);
+      doc = await input.contentFetcher.fetch(url, {
+        // Stage-0 is NOT a strategy and takes no reservation of its own:
+        // it is deterministic processing of the very response this fetch
+        // is already making, requested on the same call, exactly as the
+        // single-process executor requests it.
+        ...(recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : {}),
+        ...(strategy === "CONTENT_NEGOTIATION"
+          ? { acceptPreference: "TEXT_REPRESENTATION" as const }
+          : {}),
+      });
     } catch (e) {
-      out.failedUrls.push(url);
-      // D-143 — the canonical reason stays PROVIDER_ERROR, exactly as the
-      // single-process executor records it. What changes is that the
-      // provider's own categorical code survives instead of being
-      // discarded here: a real run failed 17 of 25 targets and the trace
-      // could not say whether that was a blocked address, a DNS failure,
-      // a timeout or a reset connection. The class vouches for the field;
-      // recordTraceEvent re-checks membership before it is stored.
-      const diagnosticCode = e instanceof ContentFetchError ? e.reason : null;
+      // D-143 — canonical reason stays PROVIDER_ERROR; the provider's own
+      // categorical code survives beside it.
+      const typed = e instanceof ContentFetchError ? e : null;
+      lastDiagnostic = typed?.reason ?? null;
+      lastHttpStatus = typed?.httpStatus ?? null;
       await recordTraceEvent(input.db, {
         researchJobId: input.jobId,
         operationType: "FETCH_FAILED",
         providerKind: "FETCH",
-        providerName: input.contentFetcher.name,
+        providerName,
         targetRef: url,
         status: "FAILED",
         reasonCode: "PROVIDER_ERROR",
-        diagnosticCode,
+        diagnosticCode: typed ? typed.reason : null,
       });
+
+      // Plan the rest of the chain from the failure class, once, and only
+      // as far as the per-url bound allows.
+      if (attempted <= MAX_FALLBACK_ATTEMPTS_PER_URL) {
+        for (const next of plannedFallbacks(lastDiagnostic, lastHttpStatus)) {
+          if (!plan.includes(next)) plan.push(next);
+        }
+      }
       continue;
     }
 
-    // Authority is RESOLVED and recorded, never granted. An unclassified
-    // or unconfirmed route is persisted exactly as it resolved.
-    const route = await resolveSourceRoute(input.db, input.projectId, doc.finalUrl);
-    const stored = await persistAcquiredDocument(input.db, {
-      projectId: input.projectId,
-      acquiringJobId: input.jobId,
-      doc,
-      route,
-      renderMode: "STATIC",
-      admission: "PRODUCT_ACQUISITION",
-    });
-    if (!stored.ok) {
-      out.failedUrls.push(url);
-      continue;
-    }
-    out.sealedDocumentIds.push(stored.id);
-    await recordTraceEvent(input.db, {
-      researchJobId: input.jobId,
-      operationType: "FETCH_OK",
-      providerKind: "FETCH",
-      providerName: input.contentFetcher.name,
-      targetRef: url,
-      status: "OK",
-    });
+    const sealed = await sealDocument(input, url, doc, strategy, out, preFetchRoute, rendererEnabled);
+    if (sealed === "BUDGET_EXHAUSTED") return "BUDGET_EXHAUSTED";
+    if (sealed === "SEALED") return "SEALED";
+    // A refused seal is a failure for this url; no other strategy can fix
+    // a document the seal store itself rejected.
+    return "FAILED";
   }
-  return out;
+
+  if (attempted === 0) {
+    out.exhaustedUrls.push(url);
+    return "EXHAUSTED";
+  }
+  out.failedUrls.push(url);
+  return "FAILED";
+}
+
+// Seals a complete document, after giving the canonical render-upgrade
+// policy its say: a static response that is a substantial HTML shell with
+// almost no text is exactly what the renderer exists to finish, and that
+// judgement is the existing shared one, not a second detector.
+async function sealDocument(
+  input: {
+    db: Database;
+    jobId: string;
+    projectId: string;
+    maxSourceOpens: number;
+  },
+  url: string,
+  doc: FetchedDocument,
+  strategy: AcquisitionStrategy,
+  out: FetchPhaseResult,
+  preFetchRoute: Awaited<ReturnType<typeof resolveSourceRoute>>,
+  rendererEnabled: boolean,
+): Promise<UrlOutcome> {
+  let finalDoc = doc;
+  let finalStrategy = strategy;
+
+  const upgrade = evaluateRenderEligibility({
+    url: doc.finalUrl,
+    route: preFetchRoute,
+    staticHtmlBytes: doc.byteLength,
+    staticTextLength: doc.staticTextLength ?? doc.normalizedText.length,
+    rendererEnabled,
+  });
+  if (upgrade.eligible) {
+    const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+    const providerName = STRATEGY_PROVIDER.ISOLATED_RENDER;
+    if (
+      providerAttemptCount(providerName, ledger) < MAX_RENDER_ATTEMPTS_PER_JOB &&
+      !strategyAlreadyAttempted(doc.finalUrl, providerName, ledger)
+    ) {
+      const reserved = await reserveJobBudget(
+        input.db,
+        input.jobId,
+        "sourceOpens",
+        1,
+        input.maxSourceOpens,
+      );
+      if (reserved) {
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "FETCH_ATTEMPTED",
+          providerKind: "FETCH",
+          providerName,
+          targetRef: doc.finalUrl,
+          status: "OK",
+          budgetAxis: "sourceOpens",
+          budgetAmount: 1,
+        });
+        out.strategyAttempts.push({ url: doc.finalUrl, strategy: "ISOLATED_RENDER" });
+        try {
+          const rendered = await resolveRenderedDocsFetcher().render(doc.finalUrl, {
+            confirmedHost: upgrade.confirmedHost,
+            matchedPathPrefix: upgrade.matchedPathPrefix,
+          });
+          rendered.staticTextLength = doc.staticTextLength ?? doc.normalizedText.length;
+          finalDoc = rendered;
+          finalStrategy = "ISOLATED_RENDER";
+        } catch (e) {
+          // Fail closed, exactly as the executor does: a failed render is
+          // never evidence and never fails the acquisition — the complete
+          // static document stands.
+          await recordRenderFailure(input, doc.finalUrl, e);
+        }
+      }
+    }
+  }
+
+  // Authority is RESOLVED and recorded, never granted — and never by the
+  // strategy that happened to succeed.
+  const route = await resolveSourceRoute(input.db, input.projectId, finalDoc.finalUrl);
+  const stored = await persistAcquiredDocument(input.db, {
+    projectId: input.projectId,
+    acquiringJobId: input.jobId,
+    doc: finalDoc,
+    route,
+    renderMode: finalStrategy === "ISOLATED_RENDER" ? "RENDERED" : "STATIC",
+    acquisitionStrategy: finalStrategy,
+    admission: "PRODUCT_ACQUISITION",
+  });
+  if (!stored.ok) {
+    out.failedUrls.push(url);
+    return "FAILED";
+  }
+  out.sealedDocumentIds.push(stored.id);
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_OK",
+    providerKind: "FETCH",
+    providerName: STRATEGY_PROVIDER[finalStrategy],
+    targetRef: url,
+    status: "OK",
+  });
+  return "SEALED";
+}
+
+// The renderer as a FALLBACK strategy (after a transport or refusal
+// failure), as opposed to the upgrade path above.
+async function attemptRender(
+  input: {
+    db: Database;
+    jobId: string;
+    projectId: string;
+    maxSourceOpens: number;
+  },
+  url: string,
+  eligibility: { eligible: true; confirmedHost: string; matchedPathPrefix: string },
+  out: FetchPhaseResult,
+): Promise<UrlOutcome> {
+  const providerName = STRATEGY_PROVIDER.ISOLATED_RENDER;
+  const reserved = await reserveJobBudget(
+    input.db,
+    input.jobId,
+    "sourceOpens",
+    1,
+    input.maxSourceOpens,
+  );
+  if (!reserved) {
+    out.skippedUrls.push(url);
+    return "BUDGET_EXHAUSTED";
+  }
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_ATTEMPTED",
+    providerKind: "FETCH",
+    providerName,
+    targetRef: url,
+    status: "OK",
+    budgetAxis: "sourceOpens",
+    budgetAmount: 1,
+  });
+  out.strategyAttempts.push({ url, strategy: "ISOLATED_RENDER" });
+
+  let rendered: FetchedDocument;
+  try {
+    rendered = await resolveRenderedDocsFetcher().render(url, {
+      confirmedHost: eligibility.confirmedHost,
+      matchedPathPrefix: eligibility.matchedPathPrefix,
+    });
+  } catch (e) {
+    await recordRenderFailure(input, url, e);
+    return "FAILED";
+  }
+
+  const route = await resolveSourceRoute(input.db, input.projectId, rendered.finalUrl);
+  const stored = await persistAcquiredDocument(input.db, {
+    projectId: input.projectId,
+    acquiringJobId: input.jobId,
+    doc: rendered,
+    route,
+    renderMode: "RENDERED",
+    acquisitionStrategy: "ISOLATED_RENDER",
+    admission: "PRODUCT_ACQUISITION",
+  });
+  if (!stored.ok) {
+    out.failedUrls.push(url);
+    return "FAILED";
+  }
+  out.sealedDocumentIds.push(stored.id);
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_OK",
+    providerKind: "FETCH",
+    providerName,
+    targetRef: url,
+    status: "OK",
+  });
+  return "SEALED";
+}
+
+// A render failure records the RENDERER's own closed category — never a
+// fetch reason that would be false, and never a message.
+async function recordRenderFailure(
+  input: { db: Database; jobId: string },
+  url: string,
+  e: unknown,
+): Promise<void> {
+  const diagnosticCode =
+    e instanceof RenderedDocsError && isRenderedDocsFailureReason(e.reason) ? e.reason : null;
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_FAILED",
+    providerKind: "FETCH",
+    providerName: STRATEGY_PROVIDER.ISOLATED_RENDER,
+    targetRef: url,
+    status: "FAILED",
+    reasonCode: "PROVIDER_ERROR",
+    diagnosticCode,
+  });
 }
 
 // PHASE 3 INPUT — the replay providers.
@@ -527,7 +919,17 @@ export async function prepareExtractionReplayFetcher(
     .where(eq(acquiredDocuments.acquiringJobId, jobId));
 
   const byUrl = new Map<string, ContentFetcher>();
+  let admitted = 0;
   for (const row of rows) {
+    // D-146 — the SAME tamper seal the strict resume path verifies. The
+    // phased replay previously served persisted text without recomputing
+    // it, so the two Stage-B entry points disagreed about whether a
+    // sealed document had to still hash to what was sealed. A mismatch
+    // fails closed by omission: the document is simply not in the replay
+    // set, and the fetcher's existing refusal covers any request for it.
+    // Altered content is never repaired and never re-sealed.
+    if (textSha256(row.normalizedText) !== row.textSha256) continue;
+    admitted += 1;
     const doc: FetchedDocument = {
       finalUrl: row.finalUrl,
       requestedUrl: row.url,
@@ -547,7 +949,9 @@ export async function prepareExtractionReplayFetcher(
   }
 
   return {
-    documentCount: rows.length,
+    // Admitted documents only: a row refused by the tamper seal is not
+    // part of the replay set and must not be counted as one.
+    documentCount: admitted,
     fetcher: {
       name: "acquired-document-replay",
       // D-137: every document here was fetched and charged by the FETCH

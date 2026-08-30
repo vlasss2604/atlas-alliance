@@ -190,10 +190,16 @@ describe("D-143 — a typed fetch failure keeps its category", () => {
         failingFetcher(new ContentFetchError(reason, "read ECONNRESET", TARGET)),
       );
       const failed = (await fetchRows(jobId)).filter((r) => r.op === "FETCH_FAILED");
-      expect(failed).toHaveLength(1);
-      expect(failed[0].status).toBe("FAILED");
-      expect(failed[0].reason).toBe("PROVIDER_ERROR");
-      expect(failed[0].diagnostic).toBe(reason);
+      // D-146: NETWORK_ERROR now also earns a bounded fallback, so one
+      // url may record several failed attempts. Every one of them must
+      // still carry the canonical reason and its own category, and the
+      // FIRST is always the direct transport.
+      expect(failed.length).toBeGreaterThanOrEqual(1);
+      for (const row of failed) {
+        expect(row.status).toBe("FAILED");
+        expect(row.reason).toBe("PROVIDER_ERROR");
+        expect(row.diagnostic).toBe(reason);
+      }
     });
   }
 
@@ -303,9 +309,14 @@ describe("D-143 — boundaries (F, G, H)", () => {
     );
     expect(result.failedUrls).toEqual([TARGET]);
     expect(result.sealedDocumentIds).toEqual([]);
+    const firstDeliveryFailures = (await fetchRows(jobId)).filter(
+      (r) => r.op === "FETCH_FAILED",
+    ).length;
+    expect(firstDeliveryFailures).toBeGreaterThanOrEqual(1);
 
-    // A redelivery still opens nothing: the url is known dead, exactly as
-    // before D-143.
+    // A redelivery still opens nothing for THIS url: every strategy the
+    // failure class permitted has already been attempted and persisted,
+    // and D-146 never repeats a strategy for a url.
     const again = await runFetchPhase({
       db: ctx.db,
       jobId,
@@ -315,10 +326,15 @@ describe("D-143 — boundaries (F, G, H)", () => {
     });
     expect(again.sealedDocumentIds).toEqual([]);
     expect(again.failedUrls).toEqual([]);
-    // ...so no second diagnostic row was written either.
+    // The redelivery made no external call at all: the url is reported as
+    // exhausted rather than re-attempted.
+    expect(again.strategyAttempts).toEqual([]);
+    expect(again.exhaustedUrls).toEqual([TARGET]);
+    // ...so the second delivery wrote no new diagnostic rows: the row
+    // count is whatever the FIRST delivery produced, unchanged.
     const failed = (await fetchRows(jobId)).filter((r) => r.op === "FETCH_FAILED");
-    expect(failed).toHaveLength(1);
-    expect(failed[0].diagnostic).toBe("NETWORK_ERROR");
+    expect(failed.length).toBe(firstDeliveryFailures);
+    for (const row of failed) expect(row.diagnostic).toBe("NETWORK_ERROR");
   });
 
   it("H. no project, domain, VPN or network-product name enters the diagnostic path", async () => {

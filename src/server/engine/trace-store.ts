@@ -6,6 +6,10 @@ import {
   CONTENT_FETCH_FAILURE_REASONS,
   type ContentFetchFailureReason,
 } from "./providers/content-fetcher";
+import {
+  RENDERED_DOCS_FAILURE_REASONS,
+  type RenderedDocsFailureReason,
+} from "./providers/rendered-docs-fetcher";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — the
 // only writer of research_trace_events. Append-only by discipline: no
@@ -39,7 +43,7 @@ export interface TraceEventInput {
   // closed set so a caller cannot pass a raw message: the compiler refuses
   // anything that is not one of the provider's own literals, and the
   // writer re-checks membership at runtime.
-  diagnosticCode?: ContentFetchFailureReason | null;
+  diagnosticCode?: ContentFetchFailureReason | RenderedDocsFailureReason | null;
   // S10 (live-provider-enablement.md §7) — AUDIT ONLY. See engine.ts's
   // column comments and model-cost-profile.ts's calculateActualCostMicro.
   actualInputTokens?: number | null;
@@ -162,7 +166,16 @@ export class TracePersistenceError extends Error {
 // D-143 — the only values this column may ever hold. Mirrors the
 // safeFailureDetail discipline in s4-executor.ts: the closed set is the
 // authority, not the caller's word.
-const DIAGNOSTIC_CODES: ReadonlySet<string> = new Set<string>(CONTENT_FETCH_FAILURE_REASONS);
+// D-146 (owner-ratified) — the union of the TWO existing code-owned
+// closed vocabularies, because acquisition now has two transports and
+// each already classifies its own failures. Still no second taxonomy: no
+// value here was invented for the diagnostic, and a render failure
+// records the renderer's own reason rather than a fetch reason that would
+// be false.
+const DIAGNOSTIC_CODES: ReadonlySet<string> = new Set<string>([
+  ...CONTENT_FETCH_FAILURE_REASONS,
+  ...RENDERED_DOCS_FAILURE_REASONS,
+]);
 
 function safeDiagnosticCode(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;

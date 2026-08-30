@@ -49,6 +49,20 @@ export interface AcquisitionLedger {
   // deduped query still contributes what it found instead of silently
   // shrinking the component's candidate pool.
   candidatesByQuery: ReadonlyMap<string, readonly string[]>;
+  // D-146 — which STRATEGIES have already attempted a given canonical
+  // url in this job, keyed by the provider name the attempt was traced
+  // under.
+  //
+  // URL-wide "dead" memory was sufficient while one transport existed. It
+  // is not once a url can be attempted by several bounded strategies: a
+  // worker that died after the direct fetch must let redelivery continue
+  // with the NEXT strategy without repeating — or re-paying for — the
+  // first. Derived from the same persisted FETCH_ATTEMPTED rows as the
+  // rest of the ledger, so it survives crash and redelivery.
+  strategiesAttempted: ReadonlyMap<string, ReadonlySet<string>>;
+  // How many times each provider name attempted anything in this job.
+  // Used for job-level policy ceilings that must survive redelivery.
+  attemptsByProvider: ReadonlyMap<string, number>;
 }
 
 export const EMPTY_LEDGER: AcquisitionLedger = {
@@ -56,6 +70,8 @@ export const EMPTY_LEDGER: AcquisitionLedger = {
   deadUrls: new Set(),
   fetchedUrls: new Set(),
   candidatesByQuery: new Map(),
+  strategiesAttempted: new Map(),
+  attemptsByProvider: new Map(),
 };
 
 // Reconstructs the ledger from this job's own trace. Degrade-never-throw,
@@ -72,6 +88,7 @@ export async function loadAcquisitionLedger(
         operationType: researchTraceEvents.operationType,
         targetRef: researchTraceEvents.targetRef,
         status: researchTraceEvents.status,
+        providerName: researchTraceEvents.providerName,
       })
       .from(researchTraceEvents)
       .where(eq(researchTraceEvents.researchJobId, jobId))
@@ -81,6 +98,8 @@ export async function loadAcquisitionLedger(
     const attemptedUrls = new Set<string>();
     const fetchedUrls = new Set<string>();
     const candidatesByQuery = new Map<string, string[]>();
+    const strategiesAttempted = new Map<string, Set<string>>();
+    const attemptsByProvider = new Map<string, number>();
 
     // CANDIDATE_RETURNED rows are written by the executor immediately
     // after the SEARCH_EXECUTED row for the query that produced them, in
@@ -119,6 +138,21 @@ export async function loadAcquisitionLedger(
         }
         case "FETCH_ATTEMPTED": {
           if (ref) attemptedUrls.add(ref);
+          // D-146: the provider name on the row IS the strategy identity.
+          // A row without one contributes to the url-wide memory but to
+          // no strategy, which is the safe direction: an unnamed attempt
+          // never licenses skipping a named one.
+          if (ref && row.providerName) {
+            const byUrl = strategiesAttempted.get(ref) ?? new Set<string>();
+            byUrl.add(row.providerName);
+            strategiesAttempted.set(ref, byUrl);
+          }
+          if (row.providerName) {
+            attemptsByProvider.set(
+              row.providerName,
+              (attemptsByProvider.get(row.providerName) ?? 0) + 1,
+            );
+          }
           break;
         }
         case "FETCH_OK": {
@@ -138,7 +172,14 @@ export async function loadAcquisitionLedger(
       if (!fetchedUrls.has(url)) deadUrls.add(url);
     }
 
-    return { executedQueries, deadUrls, fetchedUrls, candidatesByQuery };
+    return {
+      executedQueries,
+      deadUrls,
+      fetchedUrls,
+      candidatesByQuery,
+      strategiesAttempted,
+      attemptsByProvider,
+    };
   } catch {
     // No memory is always safe: the engine simply behaves as it did
     // before this module existed.
@@ -179,7 +220,26 @@ export function planQueries(
   return out;
 }
 
-// True when this URL is already known to be unfetchable in this job, so
+// D-146 — has this exact strategy already attempted this url in this job?
+// Attempted means the reservation was taken and the call was made; whether
+// it succeeded is a separate question the caller already knows. A strategy
+// is never run twice for one url: within a delivery because the chain
+// moves forward, across deliveries because this reads persisted trace.
+export function strategyAlreadyAttempted(
+  url: string,
+  providerName: string,
+  ledger: AcquisitionLedger,
+): boolean {
+  return ledger.strategiesAttempted.get(canonicalTargetRef(url))?.has(providerName) ?? false;
+}
+
+// D-146 — how many times a provider has been invoked in this job, read
+// from persisted trace so a redelivery cannot reset a policy ceiling.
+export function providerAttemptCount(providerName: string, ledger: AcquisitionLedger): number {
+  return ledger.attemptsByProvider.get(providerName) ?? 0;
+}
+
+// True when this URL is already known to be unfetchable in this job, so// True when this URL is already known to be unfetchable in this job, so
 // opening it again would spend a source-open reservation on a proven dead
 // end. Fetched-successfully URLs are NOT filtered here: re-reading a
 // document is a separate question from re-trying a broken one, and the
