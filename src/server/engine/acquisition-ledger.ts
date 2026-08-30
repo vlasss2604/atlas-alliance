@@ -63,6 +63,21 @@ export interface AcquisitionLedger {
   // How many times each provider name attempted anything in this job.
   // Used for job-level policy ceilings that must survive redelivery.
   attemptsByProvider: ReadonlyMap<string, number>;
+  // D-146 Slice 2 — the persisted FAILURE CLASS of each attempt on a
+  // given canonical url, in sequence order.
+  //
+  // Slice 1 could plan the rest of a url's chain only from a failure it
+  // watched happen. That made the chain unable to CONTINUE across a
+  // delivery boundary: on redelivery the already-attempted strategies are
+  // skipped, no live failure occurs, so nothing extended the plan and the
+  // url was reported exhausted with a never-attempted strategy still
+  // available. Persisting the class is what makes continuation possible
+  // without repeating anything — the same rows, read for what they
+  // already say.
+  //
+  // Only the closed diagnostic vocabulary is ever stored here (D-143), so
+  // this carries no message, no address and no host-specific text.
+  failureDiagnosticsByUrl: ReadonlyMap<string, readonly string[]>;
 }
 
 export const EMPTY_LEDGER: AcquisitionLedger = {
@@ -72,6 +87,7 @@ export const EMPTY_LEDGER: AcquisitionLedger = {
   candidatesByQuery: new Map(),
   strategiesAttempted: new Map(),
   attemptsByProvider: new Map(),
+  failureDiagnosticsByUrl: new Map(),
 };
 
 // Reconstructs the ledger from this job's own trace. Degrade-never-throw,
@@ -89,6 +105,7 @@ export async function loadAcquisitionLedger(
         targetRef: researchTraceEvents.targetRef,
         status: researchTraceEvents.status,
         providerName: researchTraceEvents.providerName,
+        diagnosticCode: researchTraceEvents.diagnosticCode,
       })
       .from(researchTraceEvents)
       .where(eq(researchTraceEvents.researchJobId, jobId))
@@ -100,6 +117,7 @@ export async function loadAcquisitionLedger(
     const candidatesByQuery = new Map<string, string[]>();
     const strategiesAttempted = new Map<string, Set<string>>();
     const attemptsByProvider = new Map<string, number>();
+    const failureDiagnosticsByUrl = new Map<string, string[]>();
 
     // CANDIDATE_RETURNED rows are written by the executor immediately
     // after the SEARCH_EXECUTED row for the query that produced them, in
@@ -159,6 +177,17 @@ export async function loadAcquisitionLedger(
           if (ref) fetchedUrls.add(ref);
           break;
         }
+        case "FETCH_FAILED": {
+          // An untyped failure is recorded as such (null), never dropped:
+          // "this url failed in a way nothing classified" is exactly the
+          // case that must NOT license a fallback, and the planner reads
+          // null that way.
+          if (!ref) break;
+          const list = failureDiagnosticsByUrl.get(ref) ?? [];
+          list.push(row.diagnosticCode ?? "");
+          failureDiagnosticsByUrl.set(ref, list);
+          break;
+        }
         default:
           break;
       }
@@ -179,6 +208,7 @@ export async function loadAcquisitionLedger(
       candidatesByQuery,
       strategiesAttempted,
       attemptsByProvider,
+      failureDiagnosticsByUrl,
     };
   } catch {
     // No memory is always safe: the engine simply behaves as it did
@@ -239,7 +269,19 @@ export function providerAttemptCount(providerName: string, ledger: AcquisitionLe
   return ledger.attemptsByProvider.get(providerName) ?? 0;
 }
 
-// True when this URL is already known to be unfetchable in this job, so// True when this URL is already known to be unfetchable in this job, so
+// D-146 Slice 2 — the failure classes this job has already persisted for
+// this url, oldest first. An empty string means the attempt failed with no
+// typed class at all, which is preserved rather than dropped: the caller
+// must be able to tell "failed, unclassified" from "never failed".
+export function persistedFailureDiagnostics(
+  url: string,
+  ledger: AcquisitionLedger,
+): readonly (string | null)[] {
+  const raw = ledger.failureDiagnosticsByUrl.get(canonicalTargetRef(url)) ?? [];
+  return raw.map((d) => (d === "" ? null : d));
+}
+
+// True when this URL is already known to be unfetchable in this job, so
 // opening it again would spend a source-open reservation on a proven dead
 // end. Fetched-successfully URLs are NOT filtered here: re-reading a
 // document is a separate question from re-trying a broken one, and the

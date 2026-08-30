@@ -4,6 +4,7 @@ import type { Database, Transaction } from "../db/client";
 import { acquiredDocuments, researchTraceEvents } from "../db/schema";
 import {
   loadAcquisitionLedger,
+  persistedFailureDiagnostics,
   planQueries,
   providerAttemptCount,
   strategyAlreadyAttempted,
@@ -574,6 +575,36 @@ async function acquireOneUrl(
   const rendererEnabled = renderedDocsEnabled() && renderedDocsAvailable();
 
   const plan: AcquisitionStrategy[] = ["DIRECT_HTTP"];
+
+  // D-146 Slice 2 — REBUILD THE PLAN FROM WHAT IS PERSISTED, before the
+  // first attempt of this delivery.
+  //
+  // The chain is per url, not per delivery. A delivery that finds
+  // DIRECT_HTTP and CONTENT_NEGOTIATION already attempted has no live
+  // failure to learn from, so without this the plan would never grow past
+  // its first entry and the url would be reported exhausted while a
+  // strategy that has NEVER been attempted was still owed to it. That is
+  // not a retry: nothing already tried is tried again. It is the same
+  // chain, continuing.
+  //
+  // Only the persisted CLASS is consulted, and it decides exactly what a
+  // live failure of that class would have decided. The HTTP status is not
+  // persisted (D-143 stores the category alone, deliberately), so a
+  // reconstructed HTTP_ERROR is planned with a null status — which
+  // plannedFallbacks answers with no fallback. That is the fail-closed
+  // direction: a refusal-status render is earned inside the delivery that
+  // saw the refusal, and never inferred afterwards from a class that
+  // cannot distinguish 403 from 404.
+  {
+    const priorLedger = await loadAcquisitionLedger(input.db, input.jobId);
+    for (const diagnostic of persistedFailureDiagnostics(url, priorLedger)) {
+      if (plan.length > MAX_FALLBACK_ATTEMPTS_PER_URL) break;
+      for (const next of plannedFallbacks(diagnostic, null)) {
+        if (!plan.includes(next)) plan.push(next);
+      }
+    }
+  }
+
   let attempted = 0;
   let lastDiagnostic: string | null = null;
   // Per url, never module state: two urls — or two jobs sharing a
@@ -696,6 +727,9 @@ async function acquireOneUrl(
   }
 
   if (attempted === 0) {
+    // Every strategy this url is owed has now been attempted at some
+    // point in this job's life. Exhausted is a statement about the URL's
+    // whole chain, never about one delivery's share of it.
     out.exhaustedUrls.push(url);
     return "EXHAUSTED";
   }

@@ -338,6 +338,86 @@ happen). Instead `alpha-inspect` now prints the state-transition journal,
 where the explanation was already persisted as the note "stale RUNNING
 sweep" — the line that identified this incident in the first place.
 
+## THE FETCH WORKER CAN RENDER NOW — IF, AND ONLY IF, IT WAS TOLD TO (D-146 Slice 2)
+
+Slice 1's third strategy was inert because nothing in production ever
+installed a renderer. It is installed now, by one small module
+(`src/server/jobs/renderer-capability.ts`), on exactly two explicit
+declarations:
+
+1. the worker ROLE includes `FETCH` (`ATLAS_WORKER_CAPABILITIES`), and
+2. `RENDERED_DOCS_ENABLED=1`.
+
+Nothing else is consulted — no VPN state, no DNS, no reachability probe,
+no hostname, no project, not even whether a browser happens to be on the
+box. **Capability is declared, never discovered**, exactly as D-136
+established for phase capability.
+
+**Only the FETCH role starts a browser.** A SEARCH_EXTRACT process on a
+machine where the flag is set installs nothing and launches nothing: the
+flag is not the licence, the role is. D-136's separation of external reach
+survives renderer enablement intact.
+
+**Self-test first, install second, both before any queue is served.** A
+FETCHING message can therefore never be picked up by a process that is
+still deciding whether it can render. If the owner declares the capability
+and the browser will not start, **startup fails** with the self-test's own
+closed reason — there is no quiet degraded direct-only mode, because a
+worker that silently drops a declared capability looks healthy while every
+render-eligible document fails for a reason that has nothing to do with
+any source. The self-test navigates nowhere but `about:blank`: it opens no
+source, writes no trace and reserves **no sourceOpen**. Its failure is an
+operational fact, never a research one.
+
+**Lifecycle.** One capability object per process, reused by every eligible
+FETCH job. Per-render process isolation (each render spawns and tears down
+its own child and egress proxy) IS the security model and is not traded
+for reuse. Teardown removes the capability exactly once — guarded, because
+a supervisor may send both SIGINT and SIGTERM — and removes it first, so a
+draining job cannot begin a render on the way out.
+
+### A Slice 1 regression the owner predicted, and it was real
+
+Slice 1 grew a URL's chain only from a failure it watched happen live. On
+a redelivery the already-attempted strategies were skipped, no live
+failure occurred, the plan never grew past its first entry — and the URL
+was reported `exhaustedUrls` while a strategy that had **never** been
+attempted was still owed to it. That would have made Slice 2 pointless: a
+renderer that became available later would never be reached for a URL
+whose transports had already run.
+
+The fix is generic. The ledger gained `failureDiagnosticsByUrl` (from the
+same `FETCH_FAILED` rows, carrying only D-143's closed vocabulary — no
+messages, no addresses, no hosts), and `acquireOneUrl` **reconstructs the
+plan from persisted failure CLASSES before the delivery's first attempt**.
+This is not a retry: nothing already tried is tried again. It is the same
+chain, continuing.
+
+The HTTP status is deliberately not persisted, so a reconstructed
+`HTTP_ERROR` is planned with a null status and earns no fallback. A
+refusal-render is earned inside the delivery that actually saw the
+401/403/429, never inferred afterwards from a category that cannot tell
+403 from 404 — the fail-closed direction.
+
+### Unchanged
+
+Bounds (4 renders per job, 2 fallbacks per URL), metering (every real
+render reserves one sourceOpen before the call, inside the same 24), the
+security stops (`BLOCKED_ADDRESS` / `REDIRECT_TARGET_BLOCKED` never reach
+the renderer even when one is installed), the confirmed-route render gate,
+the trace vocabulary, and **transport ≠ authority**.
+
+### Operator probe
+
+`npm run probe:renderer -- <https url> <projectSlug>` — generic, no project
+or host hardcoded. It runs the SAME production installer and the SAME
+route gate the chain applies, performs one render with zero retries,
+writes nothing (the pool closes before the render begins), and prints only
+bounded output: success/failure, final URL, an observed status if any,
+sizes, duration, and a closed failure category. Never page content, never
+network observations, never proxy internals. **It is not run
+automatically.**
+
 ## ACQUISITION IS A BOUNDED CHAIN NOW, NOT A SINGLE TRANSPORT (D-146 Slice 1)
 
 The phased FETCHING path no longer gives up when one transport fails. It runs

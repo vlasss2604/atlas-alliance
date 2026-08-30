@@ -38,6 +38,10 @@ import { resolveContentFetcher } from "../engine/providers/content-fetcher";
 import { resolveQueryProposer } from "../engine/providers/query-proposer";
 import { resolveSearchGateway } from "../engine/providers/search-gateway";
 import {
+  installFetchRendererCapability,
+  uninstallRendererCapability,
+} from "./renderer-capability";
+import {
   loadWorkerCapabilities,
   workerServesPhase,
   type PhaseCapability,
@@ -580,6 +584,15 @@ export async function startWorker() {
   const capabilities: ReadonlySet<PhaseCapability> = loadWorkerCapabilities();
   const ctx: PhaseWorkerContext = { db, boss, capabilities };
 
+  // D-146 Slice 2 — the renderer is installed BEFORE any queue is served,
+  // so no FETCHING message can ever be picked up by a process that is
+  // still deciding whether it can render. Only the FETCH role installs
+  // one; a declared-but-broken renderer fails startup here rather than
+  // degrading quietly (see renderer-capability.ts). The self-test opens
+  // no source and reserves no budget.
+  const renderer = await installFetchRendererCapability({ capabilities });
+  console.log("[worker] renderer capability:", renderer.outcome);
+
   await sweepStaleRunningJobs(db);
   await runMaintenance(db);
   const maintenanceTimer = setInterval(
@@ -606,7 +619,16 @@ export async function startWorker() {
     });
   }
 
+  // Both signals are handled, and a supervisor may well send both — so
+  // teardown runs exactly once. Uninstalling the renderer first is what
+  // makes the ordering meaningful: after this line renderedDocsAvailable()
+  // is false, so a job still draining cannot begin a render while the
+  // process is on its way out.
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    uninstallRendererCapability();
     clearInterval(maintenanceTimer);
     await boss.stop({ graceful: true });
     await pool.end();
@@ -624,6 +646,8 @@ export async function startWorker() {
     servedQueues.join(", "),
     "capabilities:",
     [...capabilities].join(",") || "(none — single-process jobs only)",
+    "renderer:",
+    renderer.outcome,
   );
 }
 

@@ -18,7 +18,8 @@
     "eval:memory": "tsx scripts/eval-memory.ts",
     "test": "vitest run",
     "smoke:interpreter": "tsx scripts/smoke-interpreter.ts",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "probe:renderer": "tsx scripts/renderer-probe.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
