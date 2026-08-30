@@ -338,6 +338,45 @@ happen). Instead `alpha-inspect` now prints the state-transition journal,
 where the explanation was already persisted as the note "stale RUNNING
 sweep" — the line that identified this incident in the first place.
 
+**The second real phased run completed the whole pipeline and still proved
+almost nothing (2026-08-30, job `b77170f6-…`, D-141).** SEARCHING → FETCHING
+→ EXTRACTING → SUCCEEDED, and the Proof was INSUFFICIENT_EVIDENCE / LOW 20
+with one succeeded component out of ten and four Evidence rows, all from one
+third-party article, all excluded as CLASS_NOT_ADMISSIBLE.
+
+The infrastructure worked. Coverage did not, and the trace says exactly where:
+SEARCHING discovered **60 candidates** correctly attributed across all ten
+components, FETCHING sealed **6 documents**, and then **nine of ten components
+reported NO_SEARCH_CANDIDATES having spent nothing**.
+
+The cause is a vocabulary mismatch, not a network, budget or admissibility
+problem. The executor's targeting (D-129/D-133) REPLACES a component's model
+queries with `site:<domain>` or `site:<explorer> <tokenAddress>` forms; the
+SEARCHING phase searches proposer queries as given. Measured on the real run:
+every generic query returned 5 candidates and **every targeted query returned
+0**. The replay gateway was keyed only on the exact query string, so it
+answered "nothing" for strings the phase had never run — while the job's own
+candidates sat in the trace under those very components. The one component
+that produced Evidence, GOVERNANCE_BASIS, is the one whose targeting failed to
+rewrite anything, so its generic query survived and matched.
+
+D-141 keys the replay the way the corpus was actually discovered:
+`CANDIDATE_RETURNED` rows carry step and component, so the gateway answers for
+the component being researched, with exact-query matches still first. It
+admits no URL the job did not discover for that component, and touches no
+authority, admissibility or budget.
+
+**Disproven hypothesis, worth recording:** documents are NOT claimed by the
+first component to use them. All six sealed documents have `consumed_at` null,
+and the replay fetcher serves any of them to any component repeatedly — one
+document may legitimately support several components, now pinned by test.
+
+**Open, not fixed here:** every `docs.raydium.io` target failed in FETCHING
+with `PROVIDER_ERROR`, so no official document was ever sealed; and both the
+phase and the canonical executor collapse typed fetch failures into that one
+code, so the trace cannot distinguish a blocked address from a timeout or a
+404. Diagnosing the official-docs failure needs that distinction.
+
 **Both of that post-mortem's other findings are now closed by D-140.**
 
 `runSearchPhase` asks D-130's own `componentSearchAllowance` — the same

@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { acquiredDocuments } from "../db/schema";
+import { acquiredDocuments, researchTraceEvents } from "../db/schema";
 import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { componentSearchAllowance } from "./budget-fairness";
@@ -22,7 +22,7 @@ import type { SearchGateway } from "./providers/search-gateway";
 import { isReplayProvider } from "./providers/types";
 import type { ComponentTarget, FetchedDocument, ModelUsage } from "./providers/types";
 import { resolveSourceRoute } from "./source-authority";
-import { canonicalTargetRef, recordTraceEvent } from "./trace-store";
+import { canonicalTargetRef, isLossyTargetRef, recordTraceEvent } from "./trace-store";
 
 // D-136 — NETWORK-CAPABILITY PHASES.
 //
@@ -557,21 +557,86 @@ export async function prepareExtractionReplayFetcher(
   };
 }
 
-// Replays the search phase's candidates for a query. Returns exactly what
-// this job already discovered, so the extraction phase reaches the same
-// candidate set without a live search call.
+// Replays what this job already discovered FOR THIS COMPONENT.
+//
+// D-141 — the defect this closes, measured on a real run:
+//
+// The SEARCHING phase asks the proposer for queries and searches them as
+// given. The executor does not: buildTargetedQueries (D-129/D-133)
+// REPLACES a component's model queries with targeted ones — a
+// site:<confirmed-domain> form, or a site:<explorer> <tokenAddress>
+// locator. So the two halves of a phased job speak different query
+// vocabularies BY DESIGN.
+//
+// A replay keyed only on the query string therefore answers "I have
+// nothing" for a string the SEARCH phase never ran, even when the job's
+// own trace holds candidates that phase discovered for exactly this
+// component. On the real run every generic query returned 5 candidates
+// and every targeted query returned 0, so nine of ten components entered
+// extraction with an empty candidate list and reported
+// NO_SEARCH_CANDIDATES — while 60 discovered URLs sat in the trace,
+// including documents that had been fetched and sealed. The only
+// component that produced Evidence was the one whose targeting failed to
+// rewrite anything, so its generic query still matched the ledger.
+//
+// The replay is therefore keyed the way the corpus was actually
+// discovered: CANDIDATE_RETURNED rows carry patternStep and component, so
+// the gateway can answer for the component being researched. Exact-query
+// matches still come first, so a query the phase really did run replays
+// byte-for-byte; the component's own corpus fills the rest.
+//
+// This invents nothing. It admits no URL this job did not discover, for a
+// component it did not discover it for; it changes no authority, no
+// admissibility and no budget; every downstream check runs unchanged. It
+// only stops the extraction phase from being blind to its own findings.
 export async function prepareExtractionReplaySearch(
   db: Database | Transaction,
   jobId: string,
 ): Promise<SearchGateway> {
   const ledger = await loadAcquisitionLedger(db, jobId);
+
+  // The per-component corpus, from the same closed event type the ledger
+  // reads. Lossy refs are excluded here exactly as the ledger excludes
+  // them: a redacted or truncated ref is not a fetchable URL.
+  const rows = await db
+    .select({
+      operationType: researchTraceEvents.operationType,
+      patternStep: researchTraceEvents.patternStep,
+      component: researchTraceEvents.component,
+      targetRef: researchTraceEvents.targetRef,
+    })
+    .from(researchTraceEvents)
+    .where(eq(researchTraceEvents.researchJobId, jobId));
+
+  const byComponent = new Map<string, string[]>();
+  for (const row of rows) {
+    if (row.operationType !== "CANDIDATE_RETURNED") continue;
+    if (row.patternStep === null || row.component === null || !row.targetRef) continue;
+    if (isLossyTargetRef(row.targetRef)) continue;
+    const key = `${row.patternStep}:${row.component}`;
+    const list = byComponent.get(key) ?? [];
+    if (!list.includes(row.targetRef)) list.push(row.targetRef);
+    byComponent.set(key, list);
+  }
+
   return {
     name: "search-replay",
     // D-137: these candidates were discovered and charged by the SEARCH
     // phase. Replaying them performs no external search.
     metering: "REPLAY" as const,
-    async search(query, _target, opts) {
-      const urls = ledger.candidatesByQuery.get(canonicalTargetRef(query)) ?? [];
+    async search(query, target, opts) {
+      const exact = ledger.candidatesByQuery.get(canonicalTargetRef(query)) ?? [];
+      const forComponent = byComponent.get(`${target.step}:${target.component}`) ?? [];
+      const seen = new Set<string>();
+      const urls: string[] = [];
+      // Exact-query candidates first — a faithful replay of a query the
+      // phase really ran — then the rest of this component's corpus.
+      for (const url of [...exact, ...forComponent]) {
+        const canonical = canonicalTargetRef(url);
+        if (seen.has(canonical)) continue;
+        seen.add(canonical);
+        urls.push(url);
+      }
       return urls.slice(0, opts.maxResults).map((url) => ({ url, title: null, snippet: null }));
     },
   };
