@@ -338,6 +338,47 @@ happen). Instead `alpha-inspect` now prints the state-transition journal,
 where the explanation was already persisted as the note "stale RUNNING
 sweep" — the line that identified this incident in the first place.
 
+**Why every official document failed to fetch — and what is actually proven
+(2026-08-30, D-142/D-143).** Two facts survive scrutiny. The failure was **per
+host, not per authority**: 8 of the 10 failing hosts were third-party, 6 hosts
+fetched fine, and `provider_name` was `safe-http` on all 25 attempts, so the
+intended transport was used and officiality played no part. And the typed
+detail was destroyed **in the phase, not by the provider** — `runFetchPhase`
+caught the typed `ContentFetchError` in a bare `catch {}` and wrote only
+`PROVIDER_ERROR`.
+
+**The exact typed reason for the historical `docs.raydium.io` failures is
+therefore UNKNOWN and unrecoverable.** Timing (11.3–12.7 s for the failing
+hosts against 32 ms–2.0 s for the successful ones, with `DEFAULT_TIMEOUT_MS`
+= 15 000 covering only the HTTP request) pointed at a pre-HTTP failure, and the
+first analysis named `DNS_RESOLUTION_FAILED` — **that was inference, not a
+persisted fact, and it is retracted.** A later controlled run of the canonical
+primitive (MantaRay OFF, one URL from this job's own trace, no DB, no job)
+returned `FAILED reason= NETWORK_ERROR status= null`, with `read ECONNRESET`
+observed operationally: DNS resolved, validation passed, a connection was
+attempted. That later probe does **not** retroactively prove the historical job
+failed the same way either — different time, different network state. The raw
+message is never persisted.
+
+**D-143 makes the next one readable.** An additive nullable
+`research_trace_events.diagnostic_code` (migration 0036) carries only the
+provider's own closed `CONTENT_FETCH_FAILURE_REASONS` code beside the
+unchanged canonical `PROVIDER_ERROR`. Two independent gates gate it — the
+error class for the field, membership in the closed set for the value — so a
+message, stack, IP, DNS answer or hostname can never reach the column. Untyped
+errors and success rows carry null; historical rows keep NULL, which reads as
+"older than the diagnostic". Verified against the real dev database: 4067 trace
+rows before and after, 3 Proofs and 419 Evidence rows untouched, column
+nullable with no default.
+
+**Also recorded:** `research-fetch` carried `retry_count = 1`. Delivery 1
+(Aug 29, 23:41–23:43) made 14 attempts including all seven
+`docs.raydium.io` failures, then the worker died before advancing the phase;
+delivery 2 (Aug 30, 09:41–09:42) made 11 and advanced. Idempotency worked, but
+URLs marked dead by delivery 1 were never retried by delivery 2 — job-scoped
+dead-URL memory survives a phase re-delivery that may happen in a different
+network environment.
+
 **The second real phased run completed the whole pipeline and still proved
 almost nothing (2026-08-30, job `b77170f6-…`, D-141).** SEARCHING → FETCHING
 → EXTRACTING → SUCCEEDED, and the Proof was INSUFFICIENT_EVIDENCE / LOW 20

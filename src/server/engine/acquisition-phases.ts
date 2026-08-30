@@ -16,6 +16,7 @@ import { researchJobs } from "../db/schema";
 import { persistAcquiredDocument, replayContentFetcher } from "./acquired-documents";
 import type { ComponentWorkItem } from "./contract-view";
 import { reserveJobBudget } from "./budget-reservation";
+import { ContentFetchError } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import type { QueryProposer } from "./providers/query-proposer";
 import type { SearchGateway } from "./providers/search-gateway";
@@ -454,8 +455,16 @@ export async function runFetchPhase(input: {
     let doc: FetchedDocument;
     try {
       doc = await input.contentFetcher.fetch(url);
-    } catch {
+    } catch (e) {
       out.failedUrls.push(url);
+      // D-143 — the canonical reason stays PROVIDER_ERROR, exactly as the
+      // single-process executor records it. What changes is that the
+      // provider's own categorical code survives instead of being
+      // discarded here: a real run failed 17 of 25 targets and the trace
+      // could not say whether that was a blocked address, a DNS failure,
+      // a timeout or a reset connection. The class vouches for the field;
+      // recordTraceEvent re-checks membership before it is stored.
+      const diagnosticCode = e instanceof ContentFetchError ? e.reason : null;
       await recordTraceEvent(input.db, {
         researchJobId: input.jobId,
         operationType: "FETCH_FAILED",
@@ -464,6 +473,7 @@ export async function runFetchPhase(input: {
         targetRef: url,
         status: "FAILED",
         reasonCode: "PROVIDER_ERROR",
+        diagnosticCode,
       });
       continue;
     }

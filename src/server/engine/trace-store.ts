@@ -2,6 +2,10 @@ import { and, desc, eq, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { researchAttempts, researchJobs, researchTraceEvents } from "../db/schema";
+import {
+  CONTENT_FETCH_FAILURE_REASONS,
+  type ContentFetchFailureReason,
+} from "./providers/content-fetcher";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — the
 // only writer of research_trace_events. Append-only by discipline: no
@@ -30,6 +34,12 @@ export interface TraceEventInput {
   evidenceId?: string | null;
   budgetAxis?: (typeof researchTraceEvents.$inferInsert)["budgetAxis"];
   budgetAmount?: number | null;
+  // D-143 — the provider's own categorical failure code, alongside (never
+  // instead of) the canonical reasonCode. Typed to the fetch provider's
+  // closed set so a caller cannot pass a raw message: the compiler refuses
+  // anything that is not one of the provider's own literals, and the
+  // writer re-checks membership at runtime.
+  diagnosticCode?: ContentFetchFailureReason | null;
   // S10 (live-provider-enablement.md §7) — AUDIT ONLY. See engine.ts's
   // column comments and model-cost-profile.ts's calculateActualCostMicro.
   actualInputTokens?: number | null;
@@ -149,6 +159,16 @@ export class TracePersistenceError extends Error {
 // EVIDENCE" collapse. Callers that consider a given event optional/
 // best-effort catch this explicitly at the call site instead of this
 // function silently deciding that for them.
+// D-143 — the only values this column may ever hold. Mirrors the
+// safeFailureDetail discipline in s4-executor.ts: the closed set is the
+// authority, not the caller's word.
+const DIAGNOSTIC_CODES: ReadonlySet<string> = new Set<string>(CONTENT_FETCH_FAILURE_REASONS);
+
+function safeDiagnosticCode(value: string | null | undefined): string | null {
+  if (typeof value !== "string") return null;
+  return DIAGNOSTIC_CODES.has(value) ? value : null;
+}
+
 export async function recordTraceEvent(db: Database | Transaction, input: TraceEventInput): Promise<void> {
   try {
     await db.transaction(async (tx) => {
@@ -178,6 +198,11 @@ export async function recordTraceEvent(db: Database | Transaction, input: TraceE
         evidenceId: input.evidenceId ?? null,
         budgetAxis: input.budgetAxis ?? null,
         budgetAmount: input.budgetAmount ?? null,
+        // Second, independent gate: a runtime value can violate a
+        // compile-time union, so membership is re-checked here rather
+        // than trusted. Anything else becomes null — the diagnostic is
+        // audit-only and must never become a channel for arbitrary text.
+        diagnosticCode: safeDiagnosticCode(input.diagnosticCode),
         actualInputTokens: input.actualInputTokens ?? null,
         actualOutputTokens: input.actualOutputTokens ?? null,
         actualCostMicro: input.actualCostMicro ?? null,

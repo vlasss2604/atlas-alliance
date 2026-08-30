@@ -2,77 +2,71 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-141: EXTRACTING can now see what its own job discovered
+## NONE — D-143: durable categorical fetch diagnostics
 
 Offline round. No live HTTP, no RPC, no model call, no worker started, no new
-live run. Read-only diagnosis of the real job first, then one narrow fix.
+Proof, no further network probe. Observability only.
 
-### The diagnosis (job `b77170f6-…`)
+### What changed
 
-| stage | measured |
-|---|---|
-| search candidates | 60, correctly attributed across all 10 components |
-| fetch targets | 25 attempted, 7 OK, 17 failed `PROVIDER_ERROR` |
-| sealed documents | 6, all third-party (`consumed_at` null on every one) |
-| documents visible to EXTRACTING | all 6, to every component, repeatedly |
-| component attempts | 10, all `attemptNumber` 1 |
-| extractor model calls | **1** |
-| Evidence | 4 rows, one document, GOVERNANCE_BASIS |
-| 9 other components | `NO_SEARCH_CANDIDATES`, **0 spent on every axis** |
+`research_trace_events.diagnostic_code` — additive, nullable text, migration
+`0036`, no default, no NOT NULL, no backfill.
 
-**First loss boundary: candidate discovery inside EXTRACTING** — before any
-fetch, any model call, any admissibility rule.
+The canonical vocabulary is untouched: a provider failure is still
+`status = FAILED`, `reasonCode = PROVIDER_ERROR`. The diagnostic sits beside
+it and answers the one question the catch-all cannot — which of its own closed
+codes the provider classified.
 
-**Root cause.** The executor's targeting (D-129/D-133) *replaces* a
-component's model queries with `site:<domain>` or `site:<explorer> <token>`
-forms. The SEARCHING phase searches proposer queries as given. The two halves
-of a phased job therefore speak different query vocabularies by design — and
-the replay gateway was keyed only on the exact query string, so it truthfully
-answered "nothing" for strings SEARCHING had never run, while the job's own
-candidates sat in the trace under those very components.
+**Only source of a value:** the existing `CONTENT_FETCH_FAILURE_REASONS` set
+(`NETWORK_ERROR`, `DNS_RESOLUTION_FAILED`, `BLOCKED_ADDRESS`,
+`REDIRECT_TARGET_BLOCKED`, `TIMEOUT`, `HTTP_ERROR`, `INVALID_URL`,
+`UNSUPPORTED_PROTOCOL`, `TOO_MANY_REDIRECTS`, `TOO_LARGE`,
+`UNSUPPORTED_CONTENT_TYPE`). No second taxonomy.
 
-Measured: **every generic query returned 5 candidates; every targeted query
-returned 0.** GOVERNANCE_BASIS produced the only Evidence because it is the
-one component whose targeting failed to rewrite anything
-(`CLASS_REQUIRES_CONFIRMED_ROUTE:GOVERNANCE`), so its generic query survived
-and matched the ledger. The single successful component was the one where
-targeting broke.
+**Never stored:** raw `error.message`, `read ECONNRESET` text, stacks, IPs,
+DNS answers, hostnames, or any arbitrary provider string. A real failure whose
+message is `read ECONNRESET` records exactly `NETWORK_ERROR`.
 
-### The fix
+Two independent gates, mirroring `safeFailureDetail` in `s4-executor.ts`: the
+error class vouches for the field (`e instanceof ContentFetchError`), and
+membership in the closed set vouches for the value (`safeDiagnosticCode`
+re-checks at write time, because a runtime value can violate a compile-time
+union). Untyped error → null. Success row → null. Historical rows → NULL,
+which reads as "older than the diagnostic", never as "no failure".
 
-`prepareExtractionReplaySearch` is keyed the way the corpus was actually
-discovered. `CANDIDATE_RETURNED` rows carry `patternStep` and `component`, so
-the gateway answers for the component being researched; exact-query matches
-still come first, so a query the phase really ran replays byte-for-byte.
-Lossy refs are excluded exactly as the ledger excludes them.
+### D-142 correction — read this before trusting the old analysis
 
-It admits no URL this job did not discover, for a component it did not
-discover it for. No authority, admissibility, budget or reconciliation rule
-was touched.
+- The exact typed reason for the historical `docs.raydium.io` failures is
+  **UNKNOWN and unrecoverable**. `runFetchPhase` discarded it.
+- Timing suggested a pre-HTTP/DNS-like failure, and the first analysis named
+  `DNS_RESOLUTION_FAILED`. **That was inference, not a persisted fact, and it
+  is retracted.**
+- A later controlled canonical probe with MantaRay OFF returned
+  `FAILED reason= NETWORK_ERROR status= null`, message observed operationally
+  as `read ECONNRESET` — so DNS resolved, validation passed, and a connection
+  was attempted.
+- That probe does **not** retroactively prove the historical job failed as
+  `NETWORK_ERROR` either. Different time, different network state.
 
-### Disproven hypothesis
+What does hold from D-142: the failure was per **host**, not per authority
+(8 of 10 failing hosts were third-party, 6 hosts succeeded), and
+`provider_name` was `safe-http` on all 25 attempts.
 
-Documents are **not** claimed by the first component to use them. All six
-sealed documents have `consumed_at` null; the replay fetcher serves any of
-them to any component repeatedly; one document may legitimately support
-several components. Pinned by test.
+### Verified against the real dev database
 
-### Open, deliberately not fixed
+4067 trace rows before and after the migration; 3 Proofs, 419 Evidence rows,
+45 jobs untouched; column nullable with no default; zero non-null diagnostics
+(nothing was backfilled or invented).
 
-- Every `docs.raydium.io` target failed in FETCHING with `PROVIDER_ERROR`, so
-  **no official document was ever sealed**. The known buyback document was
-  never even returned by search.
-- Both the phase and the canonical executor collapse typed fetch failures into
-  the single `PROVIDER_ERROR` code, so the trace cannot distinguish
-  `BLOCKED_ADDRESS` from a timeout or a 404. Diagnosing the above needs that
-  distinction, and adding it means extending a closed trace vocabulary — an
-  owner decision, not a side effect.
+### Unchanged
+
+Fetch behaviour, SSRF, redirect revalidation, dead-URL semantics, D-141
+replay, budgets, reconciliation, S5–S9.
 
 ### Standing boundaries
 
+- The diagnostic is audit-only and may only ever hold a code-owned category.
+- `PROVIDER_ERROR` remains the single canonical reason for a provider failure.
 - Replay serves only what this job discovered, for the component it was
   discovered for.
-- Dedupe prevents duplicate Evidence, never independent component evaluation.
-- The budget default is expensive; replay stays free under D-137.
 - Capability is declared, never discovered.
-- Phases are never component attempts; the controller runs once.

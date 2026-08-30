@@ -281,6 +281,27 @@ export const researchTraceEvents = pgTable(
     // returned usage; null for every non-live/fixture/failed call.
     // Computed with the SAME approved role-specific ModelCostProfile
     // used to size the reservation — never a dynamic pricing lookup.
+    // D-143 — CATEGORICAL FAILURE DIAGNOSTIC, audit only.
+    //
+    // reason_code answers "what kind of thing went wrong" in the closed
+    // vocabulary the whole engine shares; PROVIDER_ERROR is deliberately
+    // its single catch-all for "the provider call itself failed", and it
+    // stays exactly that. This column answers the narrower question the
+    // catch-all cannot: WHICH code-owned failure the provider classified.
+    //
+    // Written ONLY from a provider's own closed reason set (today:
+    // CONTENT_FETCH_FAILURE_REASONS). Never a raw exception message,
+    // never a stack, never a hostname, an IP, a DNS answer or any other
+    // provider string — a real fetch failure carrying "read ECONNRESET"
+    // records NETWORK_ERROR here and nothing else. The two-gate discipline
+    // that guards every other sanitized field applies: the error class
+    // vouches for the field existing, membership in the closed set
+    // vouches for the value.
+    //
+    // Nullable and additive: every historical row keeps NULL, which reads
+    // correctly as "this failure predates the diagnostic" rather than as
+    // an absent failure. Never populated on a success row.
+    diagnosticCode: text("diagnostic_code"),
     actualInputTokens: integer("actual_input_tokens"),
     actualOutputTokens: integer("actual_output_tokens"),
     actualCostMicro: integer("actual_cost_micro"),
