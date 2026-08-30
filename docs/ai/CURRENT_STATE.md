@@ -27,6 +27,38 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## OPERATIONAL REQUIREMENT: every worker needs the control plane AND its own reach
+
+A phase worker has two independent network dependencies, and it needs both at
+the same time for its whole life:
+
+1. the **ATLAS control plane** — PostgreSQL and pg-boss (job state, budgets,
+   trace, delivery leases); and
+2. the **source-acquisition network** its declared capability requires.
+
+This is not a property of any one machine or any one network product. It is a
+property of the D-136 design: a worker holds a delivery lease while it works,
+so a worker that can reach its sources but not the control plane cannot record
+what it found, cannot renew its lease, and cannot fail honestly. Any deployment
+that gives a worker one of the two at a time — for any reason — will lose
+workers mid-delivery.
+
+**A dropped control-plane connection is now survivable rather than fatal.** The
+central pool installs its `error` listener at construction
+(`src/server/db/client.ts`): an idle pooled client dying is logged with a
+class-name-plus-shape-checked-code label and the dead client is purged by
+pg-pool's ordinary lifecycle, so the next query opens a fresh connection.
+Before that listener existed, an unhandled EventEmitter `error` killed the
+process for a connection it was not even using. Active queries and
+transactions are unaffected: pg-pool attaches that listener only while a
+client is idle, so a failure during real work still rejects where the caller
+can see it, and worker/pg-boss retry semantics remain authoritative.
+
+**What this does NOT do:** it does not retry research, requeue a job, or repair
+a delivery. A worker that dies mid-delivery is still recovered the way it
+always was — by pg-boss redelivery after the lease expires, with the D-146
+strategy-aware chain continuing from persisted state rather than restarting.
+
 ## What works today
 
 **Markdown is a readable document representation.** The static fetcher's closed
