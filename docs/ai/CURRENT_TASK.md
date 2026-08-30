@@ -2,71 +2,64 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-143: durable categorical fetch diagnostics
+## NONE — D-145 closeout: Raydium live acquisition is ENVIRONMENTALLY_BLOCKED / INCOMPLETE_TRANSPORT
 
-Offline round. No live HTTP, no RPC, no model call, no worker started, no new
-Proof, no further network probe. Observability only.
+Documentation-only round. **No runtime code changed, no runtime state added,
+no Proof run.** The status above is a research-operations conclusion recorded
+in prose — not an enum, not a column, not a job state.
 
-### What changed
+### The controlled fact
 
-`research_trace_events.diagnostic_code` — additive, nullable text, migration
-`0036`, no default, no NOT NULL, no backfill.
+MantaRay OFF, exact url `https://docs.raydium.io/ray/protocol-fees`, three
+independent clients, one answer:
 
-The canonical vocabulary is untouched: a provider failure is still
-`status = FAILED`, `reasonCode = PROVIDER_ERROR`. The diagnostic sits beside
-it and answers the one question the catch-all cannot — which of its own closed
-codes the provider classified.
+| client | result |
+|---|---|
+| curl | HTTP 200, 23 164 bytes, exit 56, `Recv failure: Connection was reset` |
+| plain Node https | 200, `transfer-encoding: chunked`, 22 119 / 26 219 bytes, then `req:error:ECONNRESET` |
+| canonical safe-http | `NETWORK_ERROR` |
 
-**Only source of a value:** the existing `CONTENT_FETCH_FAILURE_REASONS` set
-(`NETWORK_ERROR`, `DNS_RESOLUTION_FAILED`, `BLOCKED_ADDRESS`,
-`REDIRECT_TARGET_BLOCKED`, `TIMEOUT`, `HTTP_ERROR`, `INVALID_URL`,
-`UNSUPPORTED_PROTOCOL`, `TOO_MANY_REDIRECTS`, `TOO_LARGE`,
-`UNSUPPORTED_CONTENT_TYPE`). No second taxonomy.
+DNS resolves to public addresses; SSRF classification is correct; TLS and
+headers succeed; the **body is truncated** — the terminal chunk never arrives
+and the cut-off moves between runs, so it is not a stable-boundary truncation.
+The response is incomplete by HTTP framing.
 
-**Never stored:** raw `error.message`, `read ECONNRESET` text, stacks, IPs,
-DNS answers, hostnames, or any arbitrary provider string. A real failure whose
-message is `read ECONNRESET` records exactly `NETWORK_ERROR`.
+### What is settled
 
-Two independent gates, mirroring `safeFailureDetail` in `s4-executor.ts`: the
-error class vouches for the field (`e instanceof ContentFetchError`), and
-membership in the closed set vouches for the value (`safeDiagnosticCode`
-re-checks at write time, because a runtime value can violate a compile-time
-union). Untyped error → null. Success row → null. Historical rows → NULL,
-which reads as "older than the diagnostic", never as "no failure".
+1. No safe-http defect — **refuted**, not merely unproven. A complete
+   `Content-Length` body followed by a hard RST already returns OK 200; short,
+   chunk-truncated and reset-before-close bodies all fail closed. The
+   "tolerate a late reset" idea is already the behaviour where HTTP proves
+   completeness, and refusing elsewhere is required by RFC 9112 §6.3.
+2. ATLAS must not accept this document.
+3. Nothing added: no whitelist, no partial-body tolerance, no VPN awareness,
+   no Mintlify/Cloudflare case, no SSRF/pinning/redirect change.
+4. The 24 × `BLOCKED_ADDRESS` run was a separate transient DNS/environment
+   state and does not reproduce; the classifier is exact on every literal and
+   every CIDR boundary.
+5. **Raydium is no longer a useful live acceptance target in this
+   environment.**
 
-### D-142 correction — read this before trusting the old analysis
+### The representation observation worth carrying forward
 
-- The exact typed reason for the historical `docs.raydium.io` failures is
-  **UNKNOWN and unrecoverable**. `runFetchPhase` discarded it.
-- Timing suggested a pre-HTTP/DNS-like failure, and the first analysis named
-  `DNS_RESOLUTION_FAILED`. **That was inference, not a persisted fact, and it
-  is retracted.**
-- A later controlled canonical probe with MantaRay OFF returned
-  `FAILED reason= NETWORK_ERROR status= null`, message observed operationally
-  as `read ECONNRESET` — so DNS resolved, validation passed, and a connection
-  was attempted.
-- That probe does **not** retroactively prove the historical job failed as
-  `NETWORK_ERROR` either. Different time, different network state.
+The same host, the same day, served `docs.raydium.io/ray/ray-buybacks.md`
+**four times** — sealed, STATIC, 200, 2 939 chars — hours before the FETCHING
+phase failed every docs url. Markdown completes; the HTML documentation page
+does not. Search never returned the `.md` url, so the loss was in
+**discovery**, not transport. Inventing `.md` targets is barred: it would
+fabricate acquisition targets search never found.
 
-What does hold from D-142: the failure was per **host**, not per authority
-(8 of 10 failing hosts were third-party, 6 hosts succeeded), and
-`provider_name` was `safe-http` on all 25 attempts.
+### Recommended next milestone
 
-### Verified against the real dev database
-
-4067 trace rows before and after the migration; 3 Proofs, 419 Evidence rows,
-45 jobs untouched; column nullable with no default; zero non-null diagnostics
-(nothing was backfilled or invented).
-
-### Unchanged
-
-Fetch behaviour, SSRF, redirect revalidation, dead-URL semantics, D-141
-replay, budgets, reconciliation, S5–S9.
+**A second real project acceptance case**, chosen for acquirability rather
+than familiarity. The engine is proven end to end (D-136 → D-141); what has
+never been demonstrated is a project whose authoritative documents this
+environment can actually fetch to completion. Selection criteria are in the
+report accompanying this round.
 
 ### Standing boundaries
 
-- The diagnostic is audit-only and may only ever hold a code-owned category.
-- `PROVIDER_ERROR` remains the single canonical reason for a provider failure.
-- Replay serves only what this job discovered, for the component it was
-  discovered for.
+- A truncated document is never Evidence, at any layer.
+- Discovery gaps are fixed by discovery, never by inventing URLs.
+- The budget default is expensive; replay stays free under D-137.
 - Capability is declared, never discovered.

@@ -338,6 +338,62 @@ happen). Instead `alpha-inspect` now prints the state-transition journal,
 where the explanation was already persisted as the note "stale RUNNING
 sweep" — the line that identified this incident in the first place.
 
+## RAYDIUM LIVE ACQUISITION: ENVIRONMENTALLY_BLOCKED / INCOMPLETE_TRANSPORT (2026-08-30)
+
+**Documentation status, not a runtime state.** No enum, no column, no code
+change — this is a research-operations conclusion about one project in one
+environment.
+
+Controlled test with MantaRay OFF, exact url
+`https://docs.raydium.io/ray/protocol-fees`, three independent clients, one
+answer:
+
+| client | result |
+|---|---|
+| curl | HTTP 200, 23 164 bytes, exit 56, `Recv failure: Connection was reset` |
+| plain Node https | 200, `transfer-encoding: chunked`, 22 119 and 26 219 bytes in two runs, then `req:error:ECONNRESET` |
+| canonical safe-http | `NETWORK_ERROR` |
+
+DNS resolves to public addresses, SSRF classification is correct, TLS and
+headers succeed — and the **body is truncated**: the terminal chunk never
+arrives, and the cut-off point moves between runs (22 KB / 23 KB / 26 KB), so
+it is not a truncation at a stable boundary. The response is incomplete by
+HTTP framing and ATLAS must refuse it.
+
+**No safe-http defect — refuted, not merely unproven.** Six scenarios were run
+offline through the real `fetch()`: a complete `Content-Length` body followed
+by a hard RST already returns **OK 200** (the reset never reaches the code);
+a short body + RST, a chunked body missing its terminator + RST, and
+body-until-close + RST all fail closed; clean closes succeed. The
+"tolerate a late reset" change that was considered is already the behaviour
+wherever HTTP can prove completeness, and everywhere else refusing is required
+by RFC 9112 §6.3.
+
+Deliberately NOT added: domain or project whitelist, partial-body tolerance,
+VPN awareness, Mintlify/Cloudflare special case, weakened SSRF, removed IP
+pinning or redirect revalidation.
+
+**The 24 × BLOCKED_ADDRESS run is a separate, transient state** and does not
+reproduce. The production classifier was executed directly against the exact
+literals — `162.159.143.13`, `172.66.3.9`, `52.85.154.81`, `8.47.69.0`,
+`140.82.121.4` and the rest — and returns `blocked = false` for every one,
+while the whole RFC1918/policy set returns true and every CIDR boundary
+(`172.15.255.255` / `172.16.0.1` / `172.31.255.254` / `172.32.0.1`) is exact.
+
+**The representation observation, which is the useful part.** The same host on
+the same day served `https://docs.raydium.io/ray/ray-buybacks.md` **four
+times** — sealed, `render_mode STATIC`, 200, 2 939 chars, the last of them
+hours before the FETCHING phase that failed every docs url. The difference is
+not officiality and not transport: **markdown completes, the HTML
+documentation page does not**. Search never returned the `.md` url, so the
+loss was in DISCOVERY. Inventing `.md` targets is not an option — it would
+fabricate acquisition targets the search never found.
+
+**Consequence:** Raydium is no longer a useful live acceptance target in this
+environment while its authoritative documents cannot be acquired reliably.
+Nothing about the engine is blocked by this; the pipeline itself has been
+proven end to end.
+
 **Why every official document failed to fetch — and what is actually proven
 (2026-08-30, D-142/D-143).** Two facts survive scrutiny. The failure was **per
 host, not per authority**: 8 of the 10 failing hosts were third-party, 6 hosts
