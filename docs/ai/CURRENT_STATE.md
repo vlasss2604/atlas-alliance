@@ -127,6 +127,67 @@ never reset and no queue row is written. The invariant is *bounded retries
 job*, and never an automatic recovery loop. Continuing a job whose delivery
 is genuinely spent is a deliberate, separately authorized owner act.
 
+## BOTH WORKERS NOW RUN AT ONCE, AND THE ENVIRONMENT IS CHECKED (D-149)
+
+Local development no longer changes network state between phases. The OS
+network stays permanently direct — so the virtual switch, Docker and
+PostgreSQL stop being disturbed, and system DNS keeps returning honest
+public addresses for the SSRF-validated path — while the processes that
+need model and search providers get their reach from a LOCAL PROXY PORT,
+per process, at launch. Three repository-side pieces support that, and none
+of them is domain logic:
+
+**Role launchers.** `npm run worker:search-extract`, `npm run worker:fetch`,
+`npm run dev:proxied` (`scripts/dev-launch.ts`). A human no longer assembles
+an environment by hand. The launcher **deletes inherited provider-proxy
+variables in every role** and re-adds them only where they belong, which
+closes the realistic mistake: reusing the terminal that started the
+model-side worker. Cross-platform without a new dependency, since
+`VAR=value command` is POSIX syntax that does not work in cmd/PowerShell.
+The endpoint is a per-developer detail (`ATLAS_DEV_PROVIDER_PROXY`), never a
+product constant.
+
+**Egress-integrity guarantee** (`egress-integrity.ts`, asserted at worker
+bootstrap before the renderer is installed and before any queue is
+subscribed). If a process declares FETCH and its environment contains any of
+`HTTP_PROXY` / `HTTPS_PROXY` / `ALL_PROXY` / `NODE_USE_ENV_PROXY` (either
+case), **it refuses to start**. The reason is specific and was measured on
+this runtime rather than assumed: Node's env-proxy support routes
+`node:http`/`node:https` as well as fetch, and it **bypasses a custom
+`lookup`** — so the pinned-address connection silently stops happening while
+the pre-connect `isBlockedIp` validation still passes. Acquisition would
+then leave through somewhere else entirely with nothing reporting an error.
+That is the only failure here that is both security-relevant and completely
+invisible, so it is refused rather than documented. The message names
+**variables only, never values** (a value is an endpoint and may carry
+credentials), and the environment is never silently repaired — hiding a
+launch mistake whose whole danger is invisibility would defeat the point.
+Note the direction: capability is still declared and only declared; what is
+validated is that the environment AGREES with the declaration, which is the
+converse of the inference D-136 forbids.
+
+**The entry queue is now subscribed conditionally.** Because
+`PHASE_QUEUE.SEARCHING === RESEARCH_QUEUE`, the entry queue carries both
+legacy single-process jobs and the SEARCHING phase. With two workers alive
+permanently, the source-only worker took SEARCHING messages it could never
+execute and handed them back by throwing — and every hand-back spends one of
+the message's bounded deliveries, so unlucky polling could terminate a
+perfectly good Research as `PHASE_DELIVERY_EXHAUSTED`. **The fix is not a
+larger retry budget** (that would make the wrong outcome rarer while keeping
+it possible, and would blunt D-147's terminal reconciliation) but the rule
+the other two queues always followed: a worker does not subscribe to work it
+is structurally incapable of doing. A worker with **no** declared
+capabilities is unchanged — it is the single-process box and legacy jobs
+need no phase capability; only a worker that declared its roles and did not
+declare SEARCH_EXTRACT stays out. Capability is also now checked **first**
+inside the dispatcher, where it used to be checked last — after config load,
+after the live-admission gate (which can terminate a job) and after a model
+provider was constructed.
+
+**pg-boss retry policy is unchanged**, and SSRF classification, pinned-IP
+dialling, the renderer environment allowlist and the renderer egress proxy
+are all untouched.
+
 ## OPERATIONAL REQUIREMENT: every worker needs the control plane AND its own reach
 
 A phase worker has two independent network dependencies, and it needs both at

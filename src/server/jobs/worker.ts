@@ -38,6 +38,7 @@ import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./
 import { resolveContentFetcher } from "../engine/providers/content-fetcher";
 import { resolveQueryProposer } from "../engine/providers/query-proposer";
 import { resolveSearchGateway } from "../engine/providers/search-gateway";
+import { assertDirectAcquisitionEgress } from "./egress-integrity";
 import {
   installFetchRendererCapability,
   uninstallRendererCapability,
@@ -448,6 +449,19 @@ export async function dispatchResearchQueueMessage(
   if (!job || job.acquisitionPhase === null) {
     return { kind: "LEGACY", result: await handleResearchJobTask(ctx.db, jobId) };
   }
+  // D-149 — CAPABILITY IS ASKED FIRST, before anything else touches this
+  // job. It used to be asked last, inside the phase handler, which meant a
+  // process that structurally cannot run SEARCHING would still load config,
+  // run the live-admission gate (which can terminate a job) and construct a
+  // model provider before discovering it had nothing to do. Refusing here
+  // costs one row read, has no side effect on the job, and — because the
+  // entry queue is no longer subscribed by a process that cannot serve
+  // SEARCHING (see startWorker) — should now be unreachable in practice.
+  // It stays as the structural guarantee behind that subscription rule.
+  if (!workerServesPhase(ctx.capabilities, "SEARCHING")) {
+    return { kind: "PHASED", result: { ran: false, refusal: "CAPABILITY_NOT_CONFIGURED" } };
+  }
+
   const config = await loadProductConfig(ctx.db);
   // D-138 — the SAME live gate EXTRACTING uses, asked BEFORE a provider
   // is even constructed. Eligibility is re-checked here and not inherited
@@ -680,6 +694,15 @@ export async function startWorker() {
   // D-136 — what this process may do is DECLARED, in one env var, and
   // never inferred from what it happens to be able to reach.
   const capabilities: ReadonlySet<PhaseCapability> = loadWorkerCapabilities();
+
+  // D-149 — the environment must agree with the declared capability. A
+  // source-acquisition process whose egress has been redirected cannot
+  // honour its pinned-address contract, and the failure would be silent, so
+  // it refuses to start at all. Asserted BEFORE the renderer is installed
+  // and before any queue is subscribed: a process that should not run must
+  // not first acquire resources or accept a message.
+  assertDirectAcquisitionEgress(capabilities);
+
   const ctx: PhaseWorkerContext = { db, boss, capabilities };
 
   // D-146 Slice 2 — the renderer is installed BEFORE any queue is served,
@@ -707,12 +730,40 @@ export async function startWorker() {
     );
   }, 10 * 60 * 1000);
 
-  // The entry queue is always served: it still carries single-process
-  // jobs, which need no phase capability at all.
-  await boss.work<ResearchQueuePayload>(RESEARCH_QUEUE, async ([task]) => {
-    const out = await dispatchResearchQueueMessage(ctx, task.data.jobId);
-    if (out.kind === "PHASED") throwIfCapabilityRefusal(out.result, "SEARCHING");
-  });
+  // D-149 — WHO MAY SERVE THE ENTRY QUEUE.
+  //
+  // The entry queue carries two kinds of work: legacy single-process jobs,
+  // which need no phase capability, and — because PHASE_QUEUE.SEARCHING is
+  // this same queue — the SEARCHING phase, which requires SEARCH_EXTRACT.
+  // It used to be subscribed unconditionally, which was safe only while one
+  // worker existed. With two roles running permanently, a source-only
+  // worker would take SEARCHING messages it can never execute and hand them
+  // back by throwing — and every hand-back spends one of the message's
+  // bounded deliveries. Enough unlucky pickups and a perfectly good
+  // Research is terminated as PHASE_DELIVERY_EXHAUSTED for no reason but
+  // which process happened to poll first.
+  //
+  // The fix is not a bigger retry budget — that would only make the wrong
+  // outcome rarer while hiding it. A worker simply does not subscribe to
+  // work it is structurally incapable of doing, which is the rule the other
+  // two queues have always followed.
+  //
+  // A worker that declares NO capability at all is unchanged: it is the
+  // single-process box, it serves the entry queue, and legacy jobs need no
+  // phase capability. Only a worker that HAS declared its roles and did not
+  // declare SEARCH_EXTRACT stays out — it has said, in the one place the
+  // system reads such statements, that model and search work is not its job.
+  const servesEntryQueue =
+    capabilities.size === 0 || workerServesPhase(capabilities, "SEARCHING");
+  if (servesEntryQueue) {
+    await boss.work<ResearchQueuePayload>(RESEARCH_QUEUE, async ([task]) => {
+      const out = await dispatchResearchQueueMessage(ctx, task.data.jobId);
+      // Still thrown rather than swallowed: a refusal that reaches here is
+      // now a real inconsistency, and returning normally would COMPLETE the
+      // message and lose the job.
+      if (out.kind === "PHASED") throwIfCapabilityRefusal(out.result, "SEARCHING");
+    });
+  }
 
   // The phase queues are served ONLY by a process configured for them.
   if (workerServesPhase(capabilities, "FETCHING")) {
@@ -744,7 +795,7 @@ export async function startWorker() {
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
   const servedQueues = [
-    RESEARCH_QUEUE,
+    ...(servesEntryQueue ? [RESEARCH_QUEUE] : []),
     ...(workerServesPhase(capabilities, "FETCHING") ? [RESEARCH_FETCH_QUEUE] : []),
     ...(workerServesPhase(capabilities, "EXTRACTING") ? [RESEARCH_EXTRACT_QUEUE] : []),
   ];
