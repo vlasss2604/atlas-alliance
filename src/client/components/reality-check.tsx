@@ -3,27 +3,33 @@
 import {
   deriveRealityCheck,
   REALITY_STATE_LABELS,
+  type RealityRungView,
   type RealityState,
 } from "../research-model";
 
-// REALITY CHECK — how far up the ladder this research actually got.
+// REALITY CHECK — how far the mechanism story is actually demonstrable, and
+// what else was established alongside it.
 //
-// Every rung reads exactly one persisted component result. Nothing here is
+// Every rung reads exactly one persisted component result. Nothing is
 // inferred from the verdict, from the evidence count, or from the absence of
 // a row: a component with no result is "not assessed", a component with
 // insufficient evidence is "could not verify", and ONLY a positively
 // CONTRADICTED component is shown as verified-not-happening.
 //
-// "Reality stops here" is drawn only where research-model says it is safely
-// derivable — meaning at least one rung really was verified, so the marker
-// describes the end of an established chain rather than implying a failure
-// at a rung nothing ever tested.
+// THE CHAIN AND THE INDEPENDENT FINDINGS ARE SEPARATE, and that separation is
+// the fix this section exists for. Documented → approved → activated →
+// executing really is sequential, so a break in it is meaningful. Where the
+// value lands and who receives it are established independently: a document
+// can state them whether or not execution was ever observed. Listing them
+// under a break marker implied an unverified execution step made them
+// impossible — a claim the engine never makes.
 export function RealityCheck({
   components,
 }: {
   components: { component: string; status: string }[];
 }) {
   const view = deriveRealityCheck(components);
+  const shownIndependent = view.independent.filter((r) => r.state !== "NOT_ASSESSED");
 
   return (
     <section className="panel p-5 sm:p-6" data-testid="reality-check">
@@ -36,48 +42,73 @@ export function RealityCheck({
         </p>
       )}
 
-      <div className="mt-4">
-        {view.rungs.map((rung, i) => (
+      <p className="mt-4 mb-2 text-[0.7rem] uppercase tracking-[0.12em] text-[var(--atlas-text-dim)]">
+        Mechanism chain
+      </p>
+      <div data-testid="reality-chain">
+        {view.chain.map((rung, i) => (
           <div key={rung.key}>
-            {view.stopsAtIndex === i && (
-              <p className="stop-marker" data-testid="reality-stop">
-                Reality stops here
+            {view.chainStopsAtIndex === i && (
+              <p className="stop-marker" data-testid="chain-stop">
+                Could not verify the next step
               </p>
             )}
-            <div
-              className={
-                "ladder-row " +
-                (rung.state === "VERIFIED"
-                  ? "ladder-row-verified"
-                  : rung.state === "NOT_ASSESSED"
-                    ? "ladder-row-dim"
-                    : "")
-              }
-              data-rung={rung.key}
-              data-state={rung.state}
-            >
-              <span className="flex min-w-0 items-center gap-2.5">
-                <RungIcon state={rung.state} />
-                <span
-                  className={
-                    "truncate text-[0.9rem] " +
-                    (rung.state === "VERIFIED"
-                      ? "text-[var(--atlas-text)]"
-                      : "text-[var(--atlas-text-dim)]")
-                  }
-                >
-                  {rung.label}
-                </span>
-              </span>
-              <span className="flex shrink-0 items-center gap-2 text-[0.7rem] text-[var(--atlas-text-dim)]">
-                {REALITY_STATE_LABELS[rung.state]}
-                <span className={`dot ${stateDot(rung.state)}`} aria-hidden />
-              </span>
-            </div>
+            <RungRow rung={rung} />
           </div>
         ))}
       </div>
+
+      {shownIndependent.length > 0 && (
+        <>
+          <p className="mt-5 mb-2 text-[0.7rem] uppercase tracking-[0.12em] text-[var(--atlas-text-dim)]">
+            Independent findings
+          </p>
+          <p className="mb-2.5 text-[0.72rem] leading-snug text-[var(--atlas-text-dim)]">
+            Established separately from the chain above — not later steps of it.
+          </p>
+          <div data-testid="reality-independent">
+            {shownIndependent.map((rung) => (
+              <RungRow key={rung.key} rung={rung} />
+            ))}
+          </div>
+        </>
+      )}
     </section>
+  );
+}
+
+function RungRow({ rung }: { rung: RealityRungView }) {
+  return (
+    <div
+      className={
+        "ladder-row " +
+        (rung.state === "VERIFIED"
+          ? "ladder-row-verified"
+          : rung.state === "NOT_ASSESSED"
+            ? "ladder-row-dim"
+            : "")
+      }
+      data-rung={rung.key}
+      data-state={rung.state}
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        <RungIcon state={rung.state} />
+        <span
+          className={
+            "truncate text-[0.9rem] " +
+            (rung.state === "VERIFIED"
+              ? "text-[var(--atlas-text)]"
+              : "text-[var(--atlas-text-dim)]")
+          }
+        >
+          {rung.label}
+        </span>
+      </span>
+      <span className="flex shrink-0 items-center gap-2 text-[0.7rem] text-[var(--atlas-text-dim)]">
+        {REALITY_STATE_LABELS[rung.state]}
+        <span className={`dot ${stateDot(rung.state)}`} aria-hidden />
+      </span>
+    </div>
   );
 }
 

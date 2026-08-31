@@ -127,6 +127,60 @@ never reset and no queue row is written. The invariant is *bounded retries
 job*, and never an automatic recovery loop. Continuing a job whose delivery
 is genuinely spent is a deliberate, separately authorized owner act.
 
+## THE RESULT ANSWERS THE QUESTION FIRST (UI V1.1)
+
+The surface from V1 stands; what changed is what a reader meets first and
+how much of the engine's structure they have to wade through.
+
+**The answer leads.** The first card is verdict + confidence + two to four
+plain sentences, then everything analytical. Each sentence is a restatement
+of one persisted component status or the stored verdict — no model call, no
+inference across components, so documentation never becomes execution and a
+buyback never becomes a burn. A component with NO row contributes nothing:
+saying "could not verify" about something never attempted would misreport the
+run. Component counts survive as a quiet footnote under the answer, where
+"3 established · 7 unresolved" is metadata rather than the headline it used
+to be.
+
+**The Reality Check is two things, not one.** Documented → approved →
+activated → executing is genuinely sequential, so a break in it is
+meaningful and carries the marker. Destination, recipient and net effect are
+established INDEPENDENTLY — a document can state where value lands whether or
+not execution was observed — so they are listed separately, under their own
+heading, and the break says nothing about them. The old single ladder implied
+an unverified execution step made a later verified fact impossible, which the
+engine never claims. "Verified not happening" still comes only from a
+positively CONTRADICTED component.
+
+**Research history is history, not a job log.** /research groups finished
+runs by project (identity is the SLUG, so two projects with the same display
+name cannot merge) and, inside each project, by the question that was asked
+(so materially different questions stay distinct). `normalized_task_hash`
+was checked first and rejected on evidence: measured against the real table,
+four runs of the same user-visible question carry four different hashes, so
+it produces singletons. Grouping is client-side projection only — no new
+persistence.
+
+**Non-verdict outcomes read as themselves.** "No proof" never reaches a
+reader. A run is In progress / a verdict / No conclusion / Stopped at limit /
+Cancelled / Research failed — and FAILED gets its own tone, because a broken
+run is a product fault that says nothing about the project and must never be
+confused with a legitimate INSUFFICIENT_EVIDENCE.
+
+**One acquired document is one source.** A document that establishes three
+components produced three Evidence rows and rendered as three cards, making a
+single source look like three corroborating ones. Cards are now keyed by
+canonical document, list the components they support, and open to every
+underlying row. Presentation only: stored Evidence, its links and its
+admission are untouched, and excluded material still renders in its own
+section.
+
+**Depth is disclosed, not deleted.** The ten-component grid is behind "View
+mechanism breakdown"; gaps are one scannable panel with a row per unresolved
+component instead of ten near-identical cards; and once a run is finished the
+research process collapses below the evidence, while a LIVE run still leads
+with it.
+
 ## THE PRODUCT HAS A REAL SURFACE: HOME + RESEARCH (UI V1)
 
 Two screens, and they are a **projection of persisted research truth** —

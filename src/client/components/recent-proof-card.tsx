@@ -3,8 +3,8 @@
 import Link from "next/link";
 
 import type { ResearchJobListItem } from "../api";
-import { deriveProgress, isTerminal, relativeAge } from "../research-model";
-import { VerdictBadge } from "./verdict-badge";
+import { deriveProgress, isTerminal, jobOutcome, relativeAge } from "../research-model";
+import { OutcomeBadge } from "./verdict-badge";
 
 // One row of RECENT PROOFS.
 //
@@ -14,6 +14,7 @@ import { VerdictBadge } from "./verdict-badge";
 export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
   const terminal = isTerminal(job.state);
   const title = job.projectName ?? job.projectTicker ?? "Unresolved project";
+  const outcome = jobOutcome(job);
   const progress = deriveProgress({
     state: job.state,
     progressStage: job.progressStage,
@@ -23,7 +24,8 @@ export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
   return (
     <Link
       href={`/research/${job.id}`}
-      className="row-card flex items-center gap-3.5 px-4 py-3.5 sm:gap-4 sm:px-5"
+      className="row-card tone-edge flex items-center gap-3.5 px-4 py-3.5 sm:gap-4 sm:px-5"
+      style={{ "--edge": edgeTint(outcome.tone) } as React.CSSProperties}
       data-testid={`proof-card-${job.id}`}
     >
       <span
@@ -48,10 +50,11 @@ export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
       </span>
 
       <span className="flex shrink-0 items-center gap-2 sm:gap-3">
-        {job.verdict ? (
-          <VerdictBadge verdict={job.verdict} size="sm" />
-        ) : terminal ? (
-          <span className="tone tone-neutral text-[0.625rem]">No proof</span>
+        {terminal ? (
+          // Any finished run: a verdict when there is one, otherwise the real
+          // lifecycle outcome in product language. "No proof" is an
+          // implementation detail and never reaches a reader.
+          <OutcomeBadge job={job} size="sm" />
         ) : (
           <span
             className="tone tone-neutral text-[0.625rem]"
@@ -65,6 +68,23 @@ export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
       </span>
     </Link>
   );
+}
+
+// A quiet 3px tone bar on the row edge, so a history list is scannable by
+// colour before it is read. Same closed tone vocabulary as every badge.
+function edgeTint(tone: string): string {
+  switch (tone) {
+    case "supported":
+      return "rgba(45, 212, 191, 0.6)";
+    case "partial":
+      return "rgba(167, 139, 250, 0.6)";
+    case "negative":
+      return "rgba(248, 113, 113, 0.6)";
+    case "insufficient":
+      return "rgba(251, 191, 36, 0.55)";
+    default:
+      return "rgba(148, 163, 184, 0.28)";
+  }
 }
 
 function initials(name: string): string {

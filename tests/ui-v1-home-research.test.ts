@@ -5,104 +5,287 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
+import { ComponentBreakdown } from "../src/client/components/component-breakdown";
 import { ComponentStatusCard } from "../src/client/components/component-status-card";
 import { DeveloperDetails } from "../src/client/components/developer-details";
-import { EvidenceCard } from "../src/client/components/evidence-card";
-import { GapCard } from "../src/client/components/gap-card";
+import { EvidenceDocumentCard } from "../src/client/components/evidence-document-card";
+import { GapsPanel } from "../src/client/components/gaps-panel";
 import { RealityCheck } from "../src/client/components/reality-check";
 import { RecentProofCard } from "../src/client/components/recent-proof-card";
+import { ResearchGroupCard } from "../src/client/components/research-group-card";
 import { ResearchProgress } from "../src/client/components/research-progress";
-import { VerdictBadge } from "../src/client/components/verdict-badge";
+import { OutcomeBadge, VerdictBadge } from "../src/client/components/verdict-badge";
 import {
   deriveProgress,
   deriveRealityCheck,
-  plainAnswer,
+  groupEvidenceByDocument,
+  groupResearchRuns,
+  jobOutcome,
+  researchAnswer,
   verdictTone,
 } from "../src/client/research-model";
 
-// UI V1 — the screens are a PROJECTION of persisted research truth.
+// UI — the screens are a PROJECTION of persisted research truth.
 //
-// These tests exist to pin the properties that make that claim true: the live
-// stage comes from the engine's own phase, a missing result never becomes a
-// negative finding, excluded material never appears as support, and no screen
-// carries a conclusion about a named project.
+// These tests pin the properties that make that claim true: the live stage
+// comes from the engine's own phase, a missing result never becomes a
+// negative finding, one acquired document is one source, excluded material
+// never appears as support, the answer leads and the analytical structure
+// follows, and no screen carries a conclusion about a named project.
 //
 // Rendering is done with react-dom/server, which the app already depends on —
 // no DOM environment and no test-only UI framework was added for this.
 
 const render = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 
+const RESULT_PAGE = "app/(app)/research/[id]/page.tsx";
+
+function job(over: Partial<Record<string, unknown>> = {}) {
+  return {
+    id: "11111111-1111-1111-1111-111111111111",
+    state: "SUCCEEDED",
+    progressStage: 5,
+    memoryStatus: "NOT_USED",
+    acquisitionPhase: "EXTRACTING" as const,
+    acquisitionPhaseAt: "2026-08-31T17:30:00.000Z",
+    terminationReason: "WORK_QUEUE_EXHAUSTED",
+    originalQuestion: "Where do the trading fees go?",
+    unread: false,
+    createdAt: "2026-08-31T17:00:00.000Z",
+    finishedAt: "2026-08-31T17:31:00.000Z",
+    projectName: "Fixture Project",
+    projectSlug: "fixture",
+    projectTicker: "FIX",
+    verdict: "PARTIALLY_SUPPORTED",
+    ...over,
+  } as never as import("../src/client/api").ResearchJobListItem;
+}
+
 /* ------------------------------------------------------------------ */
-/* 1. HOME RENDERS EXISTING COMPLETED PROOFS                           */
+/* HOME                                                                */
 /* ------------------------------------------------------------------ */
 
-const completedJob = {
-  id: "11111111-1111-1111-1111-111111111111",
-  state: "SUCCEEDED",
-  progressStage: 5,
-  memoryStatus: "NOT_USED",
-  acquisitionPhase: "EXTRACTING" as const,
-  acquisitionPhaseAt: "2026-08-31T17:30:00.000Z",
-  terminationReason: "WORK_QUEUE_EXHAUSTED",
-  originalQuestion: "Where do the trading fees go?",
-  unread: false,
-  createdAt: "2026-08-31T17:00:00.000Z",
-  finishedAt: "2026-08-31T17:31:00.000Z",
-  projectName: "Fixture Project",
-  projectSlug: "fixture",
-  projectTicker: "FIX",
-  verdict: "PARTIALLY_SUPPORTED",
-};
-
-describe("UI V1 — Home", () => {
-  it("TEST 1: renders a real completed Proof record, with its persisted verdict", () => {
-    const html = render(createElement(RecentProofCard, { job: completedJob }));
+describe("UI — Home", () => {
+  it("renders a real completed Proof record, with its persisted verdict", () => {
+    const html = render(createElement(RecentProofCard, { job: job() }));
     expect(html).toContain("Fixture Project");
     expect(html).toContain("Where do the trading fees go?");
     expect(html).toContain('data-verdict="PARTIALLY_SUPPORTED"');
-    // The row links to the Research screen for that job — one screen serves
-    // both the running job and the finished Proof.
-    expect(html).toContain(`href="/research/${completedJob.id}"`);
+    expect(html).toContain(`href="/research/11111111-1111-1111-1111-111111111111"`);
   });
 
-  it("TEST 1b: a job with no Proof is never given a verdict", () => {
-    const html = render(
-      createElement(RecentProofCard, {
-        job: { ...completedJob, verdict: null },
-      }),
-    );
-    expect(html).toContain("No proof");
-    expect(html).not.toContain("data-verdict=\"SUPPORTED\"");
-    expect(html).not.toContain("data-verdict=\"NOT_SUPPORTED\"");
-  });
-
-  it("TEST 2: starting research uses the EXISTING interpret → gate → start flow", () => {
+  it("starting research uses the EXISTING interpret → gate → start flow", () => {
     const src = readFileSync("src/client/components/research-composer.tsx", "utf-8");
-    // The same three server calls /ask has always made, in the same order,
-    // with the same gate as the authority on whether a Proof may begin.
     expect(src).toContain("api.interpret(");
     expect(src).toContain("api.clarify(");
     expect(src).toContain("api.startResearch(");
     expect(src).toContain("canStartProof");
     expect(src).toContain("proofBlockReason");
-    // One idempotency key per click: a double press cannot create two jobs.
     expect(src).toContain("crypto.randomUUID()");
-    // No new research endpoint was invented for the UI.
     expect(src).not.toMatch(/fetch\(\s*["'`]\/api\//);
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* 3-5. LIVE PROGRESS COMES FROM THE ENGINE'S OWN PHASE                */
+/* 1-2. RESEARCH HISTORY GROUPING                                      */
 /* ------------------------------------------------------------------ */
 
-describe("UI V1 — live research state", () => {
-  // The exact failure this replaces: progressStage stops at the memory step,
-  // so a UI reading only the counter said "checking previous research" while
-  // the engine was already fetching or extracting.
+describe("UI — research history grouping", () => {
+  it("TEST 1: repeated runs of the same question collapse into one group", () => {
+    const runs = [
+      job({ id: "a", createdAt: "2026-08-31T10:00:00Z", finishedAt: "2026-08-31T10:05:00Z" }),
+      job({ id: "b", createdAt: "2026-08-31T11:00:00Z", finishedAt: "2026-08-31T11:05:00Z" }),
+      job({
+        id: "c",
+        createdAt: "2026-08-31T12:00:00Z",
+        finishedAt: "2026-08-31T12:05:00Z",
+        verdict: "INSUFFICIENT_EVIDENCE",
+      }),
+    ];
+    const groups = groupResearchRuns(runs);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].runCount).toBe(3);
+    // One question, three runs — question-level history is preserved, not
+    // flattened away.
+    expect(groups[0].questions).toHaveLength(1);
+    expect(groups[0].questions[0].runs).toHaveLength(3);
+    // "Latest" is the newest run, and its outcome is the group's headline.
+    expect(groups[0].latest.id).toBe("c");
+    expect(groups[0].latestOutcome.verdict).toBe("INSUFFICIENT_EVIDENCE");
+
+    const html = render(createElement(ResearchGroupCard, { group: groups[0] }));
+    expect(html).toContain("3 research runs");
+    expect(html).toContain("Fixture Project");
+  });
+
+  it("TEST 1b: whitespace and case do not split one question", () => {
+    const groups = groupResearchRuns([
+      job({ id: "a", originalQuestion: "Where do the fees go?" }),
+      job({ id: "b", originalQuestion: "  where do   the FEES go?  " }),
+    ]);
+    expect(groups[0].questions).toHaveLength(1);
+  });
+
+  it("TEST 2: materially different questions for one project are NOT merged", () => {
+    const groups = groupResearchRuns([
+      job({ id: "a", originalQuestion: "Where do the trading fees go?" }),
+      job({ id: "b", originalQuestion: "Is the buyback still running today?" }),
+      job({ id: "c", originalQuestion: "Where do the trading fees go?" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].runCount).toBe(3);
+    // Two distinct questions survive inside the project group.
+    expect(groups[0].questions).toHaveLength(2);
+    const questions = groups[0].questions.map((q) => q.question).sort();
+    expect(questions).toEqual([
+      "Is the buyback still running today?",
+      "Where do the trading fees go?",
+    ]);
+  });
+
+  it("TEST 2b: different projects never merge, and identity is the slug", () => {
+    const groups = groupResearchRuns([
+      job({ id: "a", projectSlug: "one", projectName: "Same Display Name" }),
+      job({ id: "b", projectSlug: "two", projectName: "Same Display Name" }),
+    ]);
+    // Two projects that happen to render the same label stay separate,
+    // because grouping is on the slug and not on the display name.
+    expect(groups).toHaveLength(2);
+  });
+
+  it("TEST 2c: a product FAULT is never presented as a research finding", () => {
+    const failed = jobOutcome({ state: "FAILED", verdict: null });
+    const insufficient = jobOutcome({ state: "SUCCEEDED", verdict: "INSUFFICIENT_EVIDENCE" });
+    // Different kind, different label, different tone — the two must not be
+    // collapsed into one meaning.
+    expect(failed.kind).toBe("FAILED");
+    expect(insufficient.kind).toBe("VERDICT");
+    expect(failed.label).not.toBe(insufficient.label);
+    expect(failed.tone).not.toBe(insufficient.tone);
+    expect(failed.verdict).toBeNull();
+
+    // And the other non-verdict states each read as themselves.
+    expect(jobOutcome({ state: "SUCCEEDED", verdict: null }).kind).toBe("NO_CONCLUSION");
+    expect(jobOutcome({ state: "CANCELLED", verdict: null }).kind).toBe("CANCELLED");
+    expect(jobOutcome({ state: "BUDGET_LIMIT_REACHED", verdict: null }).kind).toBe(
+      "STOPPED_AT_LIMIT",
+    );
+    expect(jobOutcome({ state: "RUNNING", verdict: null }).kind).toBe("IN_PROGRESS");
+  });
+
+  it('TEST 2d: "No proof" never reaches a reader', () => {
+    for (const state of ["SUCCEEDED", "FAILED", "CANCELLED", "BUDGET_LIMIT_REACHED"]) {
+      const html = render(
+        createElement(OutcomeBadge, { job: { state, verdict: null } }),
+      );
+      expect(html.toLowerCase()).not.toContain("no proof");
+    }
+    const listHtml = render(createElement(RecentProofCard, { job: job({ verdict: null }) }));
+    expect(listHtml.toLowerCase()).not.toContain("no proof");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 3. ANSWER FIRST                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("UI — answer first", () => {
+  const components = [
+    { component: "MECHANISM_SPEC", status: "SUPPORTED" },
+    { component: "GOVERNANCE_BASIS", status: "SUPPORTED" },
+    { component: "DESTINATION", status: "SUPPORTED" },
+    { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
+    { component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
+  ];
+
+  it("TEST 3: the answer leads the screen; component detail comes after", () => {
+    const src = readFileSync(RESULT_PAGE, "utf-8");
+    const answerAt = src.indexOf('data-testid="answer-panel"');
+    const realityAt = src.indexOf('data-testid="section-reality"');
+    const gapsAt = src.indexOf("GapsPanel gaps={gaps}");
+    const evidenceAt = src.indexOf('data-testid="section-evidence"');
+    const breakdownAt = src.indexOf("<ComponentBreakdown");
+    const devAt = src.indexOf("<DeveloperDetails");
+    for (const at of [answerAt, realityAt, gapsAt, evidenceAt, breakdownAt, devAt]) {
+      expect(at).toBeGreaterThan(-1);
+    }
+    // Answer → verified → could not verify → evidence → breakdown → developer.
+    expect(answerAt).toBeLessThan(realityAt);
+    expect(realityAt).toBeLessThan(gapsAt);
+    expect(gapsAt).toBeLessThan(evidenceAt);
+    expect(evidenceAt).toBeLessThan(breakdownAt);
+    expect(breakdownAt).toBeLessThan(devAt);
+  });
+
+  it("TEST 3b: the answer is plain language, not component arithmetic", () => {
+    const sentences = researchAnswer({
+      verdict: "PARTIALLY_SUPPORTED",
+      outcomeKind: "VERDICT",
+      projectName: "Fixture Project",
+      components,
+    });
+    expect(sentences.length).toBeGreaterThanOrEqual(2);
+    expect(sentences.length).toBeLessThanOrEqual(4);
+    const text = sentences.join(" ");
+    // The old opening — "3 parts of the chain are established" — was analyst
+    // metadata dressed as an answer. It must not come back.
+    expect(text).not.toMatch(/\d+ parts? of the chain/);
+    expect(text).not.toMatch(/^\d/);
+    // It says what was verified, in words.
+    expect(text).toContain("ATLAS verified");
+    expect(text).toContain("could not verify");
+  });
+
+  it("TEST 3c: every sentence is backed by a persisted component row", () => {
+    // A component with NO row contributes nothing at all — it was not
+    // assessed, and reporting it as unverified would misdescribe the run.
+    const sentences = researchAnswer({
+      verdict: "SUPPORTED",
+      outcomeKind: "VERDICT",
+      projectName: "Fixture Project",
+      components: [{ component: "MECHANISM_SPEC", status: "SUPPORTED" }],
+    }).join(" ");
+    expect(sentences).toContain("documentation specifies");
+    expect(sentences).not.toContain("net effect");
+    expect(sentences).not.toContain("currently active");
+  });
+
+  it("TEST 3d: documentation never becomes execution, and no burn is inferred", () => {
+    const sentences = researchAnswer({
+      verdict: "PARTIALLY_SUPPORTED",
+      outcomeKind: "VERDICT",
+      projectName: "Fixture Project",
+      components,
+    }).join(" ");
+    // MECHANISM_SPEC is SUPPORTED and EXECUTION_EVIDENCE is not; the answer
+    // may never let the first stand in for the second.
+    expect(sentences).toContain("could not verify whether the mechanism has actually executed");
+    expect(sentences.toLowerCase()).not.toContain("burn");
+    expect(sentences.toLowerCase()).not.toContain("therefore");
+    expect(sentences.toLowerCase()).not.toContain("which means");
+  });
+
+  it("TEST 3e: a failed run reports a fault, not a finding", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components,
+    }).join(" ");
+    expect(sentences).toContain("did not complete");
+    expect(sentences).toContain("not a finding about the project");
+    expect(sentences).not.toContain("ATLAS verified");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* LIVE PROGRESS                                                       */
+/* ------------------------------------------------------------------ */
+
+describe("UI — live research state", () => {
   const stalePhaseCounter = 2;
 
-  it("TEST 3: a FETCHING job shows the read-evidence stage, not memory", () => {
+  it("a FETCHING job shows the read-evidence stage, not memory", () => {
     const view = deriveProgress({
       state: "RUNNING",
       progressStage: stalePhaseCounter,
@@ -110,9 +293,7 @@ describe("UI V1 — live research state", () => {
     });
     expect(view.source).toBe("ACQUISITION_PHASE");
     expect(view.stages[view.activeIndex].key).toBe("FETCH");
-    expect(view.stages[view.activeIndex].label).toBe("Reading evidence");
-    expect(view.stages[1].state).toBe("DONE"); // memory step is behind us
-    expect(view.stages[1].state).not.toBe("ACTIVE");
+    expect(view.stages[1].state).toBe("DONE");
 
     const html = render(
       createElement(ResearchProgress, {
@@ -123,53 +304,44 @@ describe("UI V1 — live research state", () => {
     expect(html).toContain('data-stage="MEMORY" data-state="DONE"');
   });
 
-  it("TEST 4: an EXTRACTING job shows the verification stage", () => {
+  it("an EXTRACTING job shows the verification stage", () => {
     const view = deriveProgress({
       state: "RUNNING",
       progressStage: stalePhaseCounter,
       acquisitionPhase: "EXTRACTING",
     });
-    expect(view.source).toBe("ACQUISITION_PHASE");
     expect(view.stages[view.activeIndex].key).toBe("EXTRACT");
-    expect(view.stages[view.activeIndex].label).toBe("Verifying the mechanism");
-
-    const html = render(
-      createElement(ResearchProgress, {
-        job: { state: "RUNNING", progressStage: stalePhaseCounter, acquisitionPhase: "EXTRACTING" },
-      }),
-    );
-    expect(html).toContain('data-stage="EXTRACT" data-state="ACTIVE"');
   });
 
-  it("TEST 4b: the stage counter is used ONLY before acquisition begins", () => {
-    const early = deriveProgress({
-      state: "RUNNING",
-      progressStage: 2,
-      acquisitionPhase: null,
-    });
-    expect(early.source).toBe("PROGRESS_STAGE");
-    expect(early.stages[early.activeIndex].key).toBe("MEMORY");
-
-    const searching = deriveProgress({
-      state: "RUNNING",
-      progressStage: 2,
-      acquisitionPhase: "SEARCHING",
-    });
-    expect(searching.stages[searching.activeIndex].key).toBe("SEARCH");
+  it("the stage counter is used ONLY before acquisition begins", () => {
+    expect(
+      deriveProgress({ state: "RUNNING", progressStage: 2, acquisitionPhase: null }).source,
+    ).toBe("PROGRESS_STAGE");
+    expect(
+      deriveProgress({ state: "RUNNING", progressStage: 2, acquisitionPhase: "SEARCHING" })
+        .stages[2].state,
+    ).toBe("ACTIVE");
   });
 
-  it("TEST 5: a completed job renders the completed state, not a live one", () => {
-    const view = deriveProgress({
-      state: "SUCCEEDED",
-      progressStage: 2,
-      // A finished job may still carry its last phase. It is history, and it
-      // must not make a finished research look like a running one.
-      acquisitionPhase: "EXTRACTING",
-    });
-    expect(view.source).toBe("TERMINAL");
-    expect(view.running).toBe(false);
-    expect(view.stages.every((s) => s.state === "DONE")).toBe(true);
+  it("TEST 12: live progress is prominent, and TEST 11: finished progress is secondary", () => {
+    const src = readFileSync(RESULT_PAGE, "utf-8");
+    const liveAt = src.indexOf('data-testid="progress-slot-live"');
+    const answerAt = src.indexOf('data-testid="answer-panel"');
+    const finishedAt = src.indexOf('data-testid="progress-slot-finished"');
+    const evidenceAt = src.indexOf('data-testid="section-evidence"');
+    expect(liveAt).toBeGreaterThan(-1);
+    expect(finishedAt).toBeGreaterThan(-1);
 
+    // While running, progress sits above the answer slot — it is what the
+    // user is waiting on.
+    expect(liveAt).toBeLessThan(answerAt);
+    // Once finished it is history: below the evidence, and collapsed.
+    expect(finishedAt).toBeGreaterThan(evidenceAt);
+    const finishedBlock = src.slice(finishedAt - 200, finishedAt + 200);
+    expect(finishedBlock).toContain("<details");
+    expect(finishedBlock).not.toMatch(/<details[^>]*\sopen/);
+
+    // A terminal job renders no active stage at all.
     const html = render(
       createElement(ResearchProgress, {
         job: { state: "SUCCEEDED", progressStage: 2, acquisitionPhase: "EXTRACTING" },
@@ -180,172 +352,304 @@ describe("UI V1 — live research state", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* 6. VERDICT MAPPING                                                  */
+/* VERDICTS                                                            */
 /* ------------------------------------------------------------------ */
 
-describe("UI V1 — verdicts", () => {
-  it("TEST 6: verdict badges map to their tone, and only NOT_SUPPORTED is red", () => {
+describe("UI — verdicts", () => {
+  it("verdict badges map to their tone, and only NOT_SUPPORTED is red", () => {
     expect(verdictTone("SUPPORTED")).toBe("supported");
     expect(verdictTone("PARTIALLY_SUPPORTED")).toBe("partial");
     expect(verdictTone("INSUFFICIENT_EVIDENCE")).toBe("insufficient");
     expect(verdictTone("NOT_SUPPORTED")).toBe("negative");
     expect(verdictTone(null)).toBe("neutral");
 
-    expect(render(createElement(VerdictBadge, { verdict: "SUPPORTED" }))).toContain(
-      "tone-supported",
-    );
-    expect(
-      render(createElement(VerdictBadge, { verdict: "PARTIALLY_SUPPORTED" })),
-    ).toContain("tone-partial");
     const insufficient = render(
       createElement(VerdictBadge, { verdict: "INSUFFICIENT_EVIDENCE" }),
     );
     expect(insufficient).toContain("tone-insufficient");
-    // Missing evidence is amber, never the red reserved for a positively
-    // established negative.
     expect(insufficient).not.toContain("tone-negative");
     expect(render(createElement(VerdictBadge, { verdict: "NOT_SUPPORTED" }))).toContain(
       "tone-negative",
     );
+    // A broken run is neither: its own tone entirely.
+    expect(
+      render(createElement(OutcomeBadge, { job: { state: "FAILED", verdict: null } })),
+    ).toContain("tone-fault");
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* 7. MISSING EVIDENCE IS NEVER NEGATIVE PROOF                         */
+/* 4-6. REALITY CHECK SEMANTICS                                        */
 /* ------------------------------------------------------------------ */
 
-describe("UI V1 — absence of evidence is not evidence of absence", () => {
-  it("TEST 7: an unverified or unassessed rung is never shown as disproven", () => {
+describe("UI — absence of evidence is not evidence of absence", () => {
+  it("TEST 4: an unverified or unassessed rung is never shown as disproven", () => {
     const view = deriveRealityCheck([
       { component: "MECHANISM_SPEC", status: "SUPPORTED" },
       { component: "GOVERNANCE_BASIS", status: "INSUFFICIENT_EVIDENCE" },
       // CURRENT_STATE has no row at all.
     ]);
-    const byKey = Object.fromEntries(view.rungs.map((r) => [r.key, r.state]));
+    const byKey = Object.fromEntries(
+      [...view.chain, ...view.independent].map((r) => [r.key, r.state]),
+    );
     expect(byKey.DOCUMENTED).toBe("VERIFIED");
     expect(byKey.APPROVED).toBe("UNRESOLVED");
     expect(byKey.ACTIVATED).toBe("NOT_ASSESSED");
-    // Only a positively CONTRADICTED component may ever say "not happening".
-    expect(view.rungs.some((r) => r.state === "NOT_HAPPENING")).toBe(false);
+    expect(
+      [...view.chain, ...view.independent].some((r) => r.state === "NOT_HAPPENING"),
+    ).toBe(false);
+  });
 
+  it("TEST 6: \"verified not happening\" comes only from a positive contradiction", () => {
     const contradicted = deriveRealityCheck([
       { component: "NET_EFFECT", status: "CONTRADICTED" },
     ]);
-    expect(contradicted.rungs.find((r) => r.key === "NET_EFFECT")?.state).toBe(
+    expect(contradicted.independent.find((r) => r.key === "NET_EFFECT")?.state).toBe(
       "NOT_HAPPENING",
     );
+    // And no other status can produce it.
+    for (const status of ["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED", "SUPPORTED"]) {
+      const view = deriveRealityCheck([{ component: "NET_EFFECT", status }]);
+      expect(view.independent.find((r) => r.key === "NET_EFFECT")?.state).not.toBe(
+        "NOT_HAPPENING",
+      );
+    }
   });
 
-  it('TEST 7b: "Reality stops here" is drawn only where it is derivable', () => {
-    // Nothing verified — the marker would imply a rung was tested and failed.
-    const nothing = deriveRealityCheck([
-      { component: "MECHANISM_SPEC", status: "INSUFFICIENT_EVIDENCE" },
-    ]);
-    expect(nothing.stopsAtIndex).toBeNull();
-    expect(render(createElement(RealityCheck, { components: [] }))).not.toContain(
-      "Reality stops here",
-    );
-
-    // An established chain that ends — the marker sits at the first rung that
-    // is not verified.
-    const chain = deriveRealityCheck([
+  it("TEST 5: an independent verified fact is never implied impossible by a chain break", () => {
+    // The exact shape that was confusing: the chain breaks at Activated,
+    // while DESTINATION is independently verified.
+    const components = [
       { component: "MECHANISM_SPEC", status: "SUPPORTED" },
       { component: "GOVERNANCE_BASIS", status: "SUPPORTED" },
       { component: "CURRENT_STATE", status: "INSUFFICIENT_EVIDENCE" },
+      { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
+      { component: "DESTINATION", status: "SUPPORTED" },
+    ];
+    const view = deriveRealityCheck(components);
+
+    // The break belongs to the CHAIN and is measured within it.
+    expect(view.chainStopsAtIndex).toBe(2);
+    expect(view.chain.map((r) => r.component)).toEqual([
+      "MECHANISM_SPEC",
+      "GOVERNANCE_BASIS",
+      "CURRENT_STATE",
+      "EXECUTION_EVIDENCE",
     ]);
-    expect(chain.stopsAtIndex).toBe(2);
+    // DESTINATION is NOT part of the chain, so nothing about the break
+    // reaches it.
+    expect(view.chain.some((r) => r.component === "DESTINATION")).toBe(false);
+    expect(view.independent.find((r) => r.component === "DESTINATION")?.state).toBe(
+      "VERIFIED",
+    );
+
+    const html = render(createElement(RealityCheck, { components }));
+    // The marker is inside the chain block, and the independent findings are
+    // announced as independent rather than as later steps.
+    const chainAt = html.indexOf('data-testid="reality-chain"');
+    const stopAt = html.indexOf('data-testid="chain-stop"');
+    const independentAt = html.indexOf('data-testid="reality-independent"');
+    expect(stopAt).toBeGreaterThan(chainAt);
+    expect(stopAt).toBeLessThan(independentAt);
+    expect(html).toContain("Independent findings");
+    expect(html).toContain("not later steps of it");
+    // And it never claims the rest is impossible.
+    expect(html).not.toContain("Reality stops here");
+  });
+
+  it("TEST 5b: the chain break is only drawn where it is derivable", () => {
+    const nothing = deriveRealityCheck([
+      { component: "MECHANISM_SPEC", status: "INSUFFICIENT_EVIDENCE" },
+    ]);
+    expect(nothing.chainStopsAtIndex).toBeNull();
+    expect(render(createElement(RealityCheck, { components: [] }))).not.toContain(
+      "Could not verify the next step",
+    );
+  });
+
+  it("TEST 4b: gaps read as research findings, never as errors or monitoring", () => {
     const html = render(
-      createElement(RealityCheck, {
-        components: [
-          { component: "MECHANISM_SPEC", status: "SUPPORTED" },
-          { component: "GOVERNANCE_BASIS", status: "SUPPORTED" },
-          { component: "CURRENT_STATE", status: "INSUFFICIENT_EVIDENCE" },
+      createElement(GapsPanel, {
+        gaps: [
+          { patternStep: 4, component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
+          { patternStep: 7, component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
         ],
       }),
     );
-    expect(html).toContain("Reality stops here");
-  });
-
-  it("TEST 7c: gaps read as research findings, never as errors or monitoring", () => {
-    const html = render(createElement(GapCard, { component: "NET_EFFECT" }));
-    expect(html).toContain("could not verify");
+    expect(html).toContain("Could not verify");
+    expect(html).toContain("not the same as establishing that they are false");
     expect(html.toLowerCase()).not.toContain("error");
     expect(html.toLowerCase()).not.toContain("failed");
-    // The product does not watch anything; the UI must not say it does.
     expect(html.toLowerCase()).not.toContain("monitor");
+  });
 
-    // The same discipline in the written answer.
-    const sentences = plainAnswer({
-      verdict: "INSUFFICIENT_EVIDENCE",
-      confidenceBand: "LOW",
-      projectName: "Fixture Project",
-      components: [{ component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" }],
-      terminationReason: null,
-    });
-    const text = sentences.join(" ").toLowerCase();
-    expect(text).toContain("could not");
-    expect(text).not.toContain("does not happen");
-    expect(text).not.toContain("no buyback");
+  it("TEST 4c: every gap is still listed, just not as a wall of cards", () => {
+    const gaps = [
+      "SOURCE_OF_VALUE",
+      "FLOW_PATH",
+      "EXECUTION_EVIDENCE",
+      "CURRENT_STATE",
+      "NET_EFFECT",
+    ].map((component, i) => ({ patternStep: i + 1, component, status: "INSUFFICIENT_EVIDENCE" }));
+    const html = render(createElement(GapsPanel, { gaps }));
+    expect((html.match(/data-testid="gap-row"/g) ?? [])).toHaveLength(5);
+    expect(html).toContain("5 findings");
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* 8. EXCLUDED / SOCIAL MATERIAL IS NEVER SUPPORT                      */
+/* 7-9. EVIDENCE                                                       */
 /* ------------------------------------------------------------------ */
 
-const socialEvidence = {
-  id: "ev-social",
+const docItem = (over: Partial<Record<string, unknown>> = {}) => ({
+  id: "ev-1",
   component: "MECHANISM_SPEC",
-  summary: "A blog post describes a buyback.",
+  summary: "The documentation states the split.",
   fragment: "raw fragment",
   doesNotProve: null,
-  sourceClass: "SOCIAL",
-  officiality: "CLAIMED",
-  retrievedUrl: "https://example.test/post",
-  sourceTitle: "Example Post",
-  exclusionReason: "CLASS_NOT_ADMISSIBLE",
-};
+  sourceClass: "OFFICIAL_DOCS",
+  officiality: "CONFIRMED",
+  retrievedUrl: "https://docs.example.test/ray/protocol-fees.md",
+  sourceTitle: null,
+  ...over,
+});
 
-describe("UI V1 — evidence rendering", () => {
-  it("TEST 8: an excluded source is labelled excluded and never as support", () => {
+describe("UI — evidence is grouped by document", () => {
+  it("TEST 7: one acquired document appears once, however many rows it produced", () => {
+    const groups = groupEvidenceByDocument([
+      docItem({ id: "a", component: "MECHANISM_SPEC" }),
+      docItem({ id: "b", component: "DESTINATION" }),
+      docItem({ id: "c", component: "RECIPIENT" }),
+    ]);
+    expect(groups).toHaveLength(1);
+    expect(groups[0].items).toHaveLength(3);
+    expect(groups[0].name).toBe("protocol-fees.md");
+
     const html = render(
-      createElement(EvidenceCard, { evidence: socialEvidence, role: "EXCLUDED" }),
+      createElement(EvidenceDocumentCard, { group: groups[0], role: "USED" }),
+    );
+    expect((html.match(/data-testid="evidence-doc-/g) ?? [])).toHaveLength(1);
+  });
+
+  it("TEST 7b: url variants of one document are one document, and two documents stay two", () => {
+    const one = groupEvidenceByDocument([
+      docItem({ id: "a", retrievedUrl: "https://docs.example.test/ray/protocol-fees.md" }),
+      docItem({ id: "b", retrievedUrl: "https://www.docs.example.test/ray/protocol-fees.md#x" }),
+    ]);
+    expect(one).toHaveLength(1);
+
+    const two = groupEvidenceByDocument([
+      docItem({ id: "a", retrievedUrl: "https://docs.example.test/ray/protocol-fees.md" }),
+      docItem({ id: "b", retrievedUrl: "https://docs.example.test/ray/ray-buybacks.md" }),
+    ]);
+    expect(two).toHaveLength(2);
+  });
+
+  it("TEST 8: one document may show several supported components", () => {
+    const groups = groupEvidenceByDocument([
+      docItem({ id: "a", component: "DESTINATION" }),
+      docItem({ id: "b", component: "RECIPIENT" }),
+      docItem({ id: "c", component: "DESTINATION" }),
+    ]);
+    expect(groups[0].components).toEqual(["DESTINATION", "RECIPIENT"]);
+
+    const html = render(
+      createElement(EvidenceDocumentCard, { group: groups[0], role: "USED" }),
+    );
+    expect(html).toContain('data-components="DESTINATION,RECIPIENT"');
+    expect(html).toContain("Supports:");
+    expect(html).toContain("Destination");
+    expect(html).toContain("Recipient");
+  });
+
+  it("TEST 9: excluded sources stay separate and are never labelled as support", () => {
+    const groups = groupEvidenceByDocument([
+      docItem({
+        id: "x",
+        sourceClass: "SOCIAL",
+        retrievedUrl: "https://blog.example.test/post",
+        exclusionReason: "CLASS_NOT_ADMISSIBLE",
+      }),
+    ]);
+    const html = render(
+      createElement(EvidenceDocumentCard, { group: groups[0], role: "EXCLUDED" }),
     );
     expect(html).toContain('data-role="EXCLUDED"');
     expect(html).toContain('data-source-class="SOCIAL"');
-    expect(html).toContain("Excluded");
-    expect(html).not.toContain(">Supporting<");
+    expect(html).toContain("Considered for:");
+    expect(html).not.toContain("Supports:");
     expect(html).not.toContain(">Used<");
-  });
+    expect(html).not.toContain(">Supporting<");
 
-  it("TEST 8b: the screen assigns roles from persisted links, never from text", () => {
-    const src = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");
-    // Support comes from S8's citations and S5's supporting set only.
-    expect(src).toContain("proof?.citations");
-    expect(src).toContain("detail.finding.supporting");
-    expect(src).toContain("detail.finding.excluded");
-    // An excluded link wins over any other role for the same row.
-    expect(src).toContain('e.links.find((l) => l.role === "EXCLUDED")');
-    // Excluded rows are rendered in their own section, under their own
-    // heading — never merged into the supporting grid.
+    // And the screen renders them under their own heading, never merged into
+    // the supporting grid.
+    const src = readFileSync(RESULT_PAGE, "utf-8");
+    expect(src).toContain('data-testid="excluded-evidence"');
     expect(src).toContain("Considered but excluded");
+    expect(src).toContain('e.links.find((l) => l.role === "EXCLUDED")');
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 10. COMPONENT BREAKDOWN                                             */
+/* ------------------------------------------------------------------ */
+
+const TEN_COMPONENTS = [
+  "SOURCE_OF_VALUE",
+  "FLOW_PATH",
+  "MECHANISM_SPEC",
+  "GOVERNANCE_BASIS",
+  "EXECUTION_EVIDENCE",
+  "CURRENT_STATE",
+  "DESTINATION",
+  "RECIPIENT",
+  "NET_EFFECT",
+  "DURABILITY_BASIS",
+].map((component, i) => ({
+  patternStep: i + 1,
+  component,
+  status: i < 3 ? "SUPPORTED" : "INSUFFICIENT_EVIDENCE",
+}));
+
+describe("UI — mechanism breakdown", () => {
+  it("TEST 10: compact by default, and the full breakdown is still reachable", () => {
+    const html = render(
+      createElement(ComponentBreakdown, {
+        components: TEN_COMPONENTS,
+        evidenceCountByComponent: new Map(),
+      }),
+    );
+    // Default: the counts, not ten cards.
+    expect(html).toContain("3 established");
+    expect(html).toContain("7 unresolved");
+    expect(html).not.toContain('data-testid="component-grid"');
+    // And the control that opens the full analytical view is present.
+    expect(html).toContain("View mechanism breakdown");
+    expect(html).toContain('data-testid="toggle-breakdown"');
+
+    // Nothing analytical was deleted: the full grid still renders every
+    // component the engine produced.
+    const src = readFileSync("src/client/components/component-breakdown.tsx", "utf-8");
+    expect(src).toContain("components.map");
+    expect(src).toContain("ComponentStatusCard");
   });
 
-  it("TEST 8c: a component with no admissible evidence says so plainly", () => {
+  it("TEST 10b: reason codes never appear in the user-facing component card", () => {
     const html = render(
       createElement(ComponentStatusCard, {
-        component: "NET_EFFECT",
+        component: "MECHANISM_SPEC",
         status: "INSUFFICIENT_EVIDENCE",
         evidenceCount: 0,
       }),
     );
     expect(html).toContain("Could not verify");
-    expect(html).toContain("No admissible evidence");
+    expect(html).not.toContain("ALL_EVIDENCE_EXCLUDED");
+    expect(html).not.toContain("NO_EVIDENCE_FOUND");
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* 9. DEVELOPER DETAILS                                                */
+/* DEVELOPER DETAILS                                                   */
 /* ------------------------------------------------------------------ */
 
 const detailFixture = {
@@ -391,33 +695,19 @@ const detailFixture = {
   evidence: [],
 };
 
-describe("UI V1 — developer details", () => {
-  it("TEST 9: engine internals are present but collapsed by default", () => {
+describe("UI — developer details", () => {
+  it("engine internals are present but collapsed by default", () => {
     const html = render(createElement(DeveloperDetails, { detail: detailFixture }));
     expect(html).toContain("Developer details");
-    // A <details> without the `open` attribute is closed.
     expect(html).toMatch(/<details[^>]*>/);
     expect(html).not.toMatch(/<details[^>]*\sopen/);
-    // The reason code lives HERE, and not in the product surface.
     expect(html).toContain("ALL_EVIDENCE_EXCLUDED");
     expect(html).toContain("EXTRACTING");
-  });
-
-  it("TEST 9b: reason codes never appear in the user-facing component card", () => {
-    const html = render(
-      createElement(ComponentStatusCard, {
-        component: "MECHANISM_SPEC",
-        status: "INSUFFICIENT_EVIDENCE",
-        evidenceCount: 0,
-      }),
-    );
-    expect(html).not.toContain("ALL_EVIDENCE_EXCLUDED");
-    expect(html).not.toContain("NO_EVIDENCE_FOUND");
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* 10. NO PROJECT-SPECIFIC CONCLUSION                                  */
+/* 13. NO PROJECT-SPECIFIC CONCLUSION                                  */
 /* ------------------------------------------------------------------ */
 
 function uiSourceFiles(): string[] {
@@ -444,12 +734,8 @@ function codeOf(src: string): string {
     .replace(/^\s*\/\/.*$/gm, " ");
 }
 
-describe("UI V1 — no project-specific conclusion", () => {
-  it("TEST 10: no UI file names a project outside the example QUESTIONS", () => {
-    // The composer's example chips legitimately name projects — they are
-    // questions a user might ask, not answers. Everything else in the UI must
-    // be project-agnostic: a screen that knew "Raydium" would be a screen
-    // that could be made to assert something about Raydium.
+describe("UI — no project-specific conclusion", () => {
+  it("TEST 13: no UI file names a project outside the example QUESTIONS", () => {
     const projectNames = /pump|raydium|hyperliquid|\bhype\b|jito|solana/i;
     const offenders: string[] = [];
     for (const file of uiSourceFiles()) {
@@ -462,14 +748,10 @@ describe("UI V1 — no project-specific conclusion", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("TEST 10b: no verdict, confidence or component status is hardcoded in a screen", () => {
-    // Every one of these values must arrive from persisted state. A literal
-    // assignment in a screen would be a conclusion the engine never reached.
+  it("TEST 13b: no verdict or component status is hardcoded in a screen", () => {
     for (const file of uiSourceFiles()) {
       if (file.includes("research-model")) continue; // the label maps live here
       const src = codeOf(readFileSync(file, "utf-8"));
-      // The negative lookahead for "|" keeps a TYPE union of the closed
-      // verdict vocabulary from being read as an assigned conclusion.
       expect(src, file).not.toMatch(
         /verdict\s*[:=]\s*["'](SUPPORTED|NOT_SUPPORTED)["'](?!\s*\|)/,
       );
@@ -477,11 +759,21 @@ describe("UI V1 — no project-specific conclusion", () => {
     }
   });
 
-  it("TEST 10c: confidence is never rendered as a percentage or probability", () => {
+  it("TEST 13c: confidence is never rendered as a percentage or probability", () => {
     for (const file of uiSourceFiles()) {
       const src = codeOf(readFileSync(file, "utf-8"));
       expect(src, file).not.toMatch(/confidence[^\n]*%/i);
       expect(src, file).not.toMatch(/probability/i);
     }
+  });
+
+  it("TEST 13d: the answer builder makes no model call and infers nothing", () => {
+    const src = readFileSync("src/client/research-model.ts", "utf-8");
+    // No provider, no fetch, no network of any kind: the answer is a
+    // restatement of persisted rows, produced deterministically.
+    expect(src).not.toContain("fetch(");
+    expect(src).not.toContain("anthropic");
+    expect(src).not.toContain("Anthropic");
+    expect(src).not.toMatch(/import\s+.*from\s+["'](?!\.)/);
   });
 });

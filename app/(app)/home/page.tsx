@@ -7,6 +7,7 @@ import { api, type ResearchJobListItem } from "@/src/client/api";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
+import { groupResearchRuns } from "@/src/client/research-model";
 
 // HOME — what you can do, and what you have already proved.
 //
@@ -22,7 +23,17 @@ export default function HomePage() {
       .catch(() => setJobs([]));
   }, []);
 
-  const recent = (jobs ?? []).slice(0, 4);
+  // RECENT PROOFS, not recent runs. Six rows of the same question re-run six
+  // times tells a reader nothing they did not learn from the first; the
+  // latest run of each distinct question does. Nothing is hidden — "View all"
+  // opens the full grouped history, with every run inside it.
+  const recent = groupResearchRuns(jobs ?? [])
+    .flatMap((group) => group.questions.map((q) => q.latest))
+    .sort(
+      (a, b) =>
+        Date.parse(b.finishedAt ?? b.createdAt) - Date.parse(a.finishedAt ?? a.createdAt),
+    )
+    .slice(0, 6);
 
   return (
     <main className="enter flex flex-col gap-7 pb-6">
@@ -51,7 +62,7 @@ export default function HomePage() {
             No research yet. Ask a question above and ATLAS will build your first Proof.
           </div>
         ) : (
-          <div className="flex flex-col gap-2.5">
+          <div className="grid gap-2.5 lg:grid-cols-2">
             {recent.map((job) => (
               <RecentProofCard key={job.id} job={job} />
             ))}

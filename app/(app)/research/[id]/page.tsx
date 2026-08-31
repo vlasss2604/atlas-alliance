@@ -6,32 +6,44 @@ import { useParams } from "next/navigation";
 import { api, type ResearchJobDetail } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
-import { ComponentStatusCard } from "@/src/client/components/component-status-card";
+import { ComponentBreakdown } from "@/src/client/components/component-breakdown";
 import { DeveloperDetails } from "@/src/client/components/developer-details";
 import {
-  EvidenceCard,
-  type EvidenceCardData,
+  EvidenceDocumentCard,
   type EvidenceRole,
-} from "@/src/client/components/evidence-card";
-import { GapCard } from "@/src/client/components/gap-card";
+} from "@/src/client/components/evidence-document-card";
+import { GapsPanel } from "@/src/client/components/gaps-panel";
 import { RealityCheck } from "@/src/client/components/reality-check";
 import { ResearchProgress } from "@/src/client/components/research-progress";
-import { VerdictBadge } from "@/src/client/components/verdict-badge";
+import { OutcomeBadge } from "@/src/client/components/verdict-badge";
 import {
   CONFIDENCE_LABELS,
+  groupEvidenceByDocument,
   isTerminal,
-  plainAnswer,
+  jobOutcome,
+  researchAnswer,
   relativeAge,
-  verdictTone,
+  summariseComponents,
+  type EvidenceItemLike,
 } from "@/src/client/research-model";
 import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 
 // THE RESEARCH SCREEN — one page for a running job and a finished Proof.
 //
-// There is no separate "loading experience": the same layout is present
-// throughout, and the sections fill in as the engine produces them. What
-// changes is which persisted state is available, never which screen you are
-// on.
+// INFORMATION HIERARCHY, after completion:
+//   1. the answer to the question that was asked
+//   2. verdict and confidence
+//   3. what was verified (reality check)
+//   4. what could not be verified
+//   5. evidence
+//   6. mechanism breakdown
+//   7. research process
+//   8. developer details
+//
+// While a run is LIVE the order inverts at the top: progress is what the user
+// is waiting on, so it leads. Once the run is finished, progress is history
+// and drops below the answer — the same screen, reordered by what is now
+// worth reading first.
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
@@ -39,8 +51,8 @@ export default function ResearchDetailPage() {
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
 
-  // Re-read the whole detail. Used on mount and again when the job reaches a
-  // terminal state, because the Proof only exists once the job has finished.
+  // Re-read the whole detail. Used when the job reaches a terminal state,
+  // because the Proof only exists once the job has finished.
   const load = useCallback(() => {
     if (!jobId) return;
     api
@@ -84,9 +96,7 @@ export default function ResearchDetailPage() {
   // LIVE STATE COMES FROM THE SERVER, ALWAYS.
   //
   // Each event is a fresh read of the job row, so `acquisitionPhase` here is
-  // the engine's own persisted phase and not a client guess. On a terminal
-  // event the full detail is re-fetched, because the Proof only exists once
-  // the job has finished.
+  // the engine's own persisted phase and not a client guess.
   const onEvent = useCallback(
     (e: JobEvent) => {
       setDetail((prev) =>
@@ -137,19 +147,20 @@ export default function ResearchDetailPage() {
   const { job, proof, components } = detail;
   const projectName = job.projectName ?? job.projectTicker ?? "Unresolved project";
   const finished = isTerminal(job.state);
-  const answer = plainAnswer({
+  const outcome = jobOutcome({ state: job.state, verdict: proof?.verdict ?? null });
+  const summary = summariseComponents(components);
+  const answer = researchAnswer({
     verdict: proof?.verdict ?? null,
-    confidenceBand: proof?.confidence.band ?? null,
+    outcomeKind: outcome.kind,
     projectName: job.projectName,
     components,
-    terminationReason: job.terminationReason,
   });
 
   // Evidence roles come from PERSISTED relationships only — S8's citation
   // binding first, then S5's component sets. An excluded row is labelled
   // EXCLUDED at the source and can never reach the supporting list.
   const citedIds = new Set((proof?.citations ?? []).map((c) => c.evidenceId));
-  const used: { data: EvidenceCardData; role: EvidenceRole }[] = (proof?.citations ?? []).map(
+  const used: { data: EvidenceItemLike; role: EvidenceRole }[] = (proof?.citations ?? []).map(
     (c) => ({
       data: {
         id: c.evidenceId,
@@ -167,13 +178,13 @@ export default function ResearchDetailPage() {
   );
   const supporting = detail.finding.supporting
     .filter((e) => !citedIds.has(e.id))
-    .map((e) => ({ data: toCardData(e), role: "SUPPORTING" as const }));
+    .map((e) => ({ data: toItem(e), role: "SUPPORTING" as const }));
   const contradicting = detail.finding.contradicting.map((e) => ({
-    data: toCardData(e),
+    data: toItem(e),
     role: "CONTRADICTING" as const,
   }));
   const excluded = detail.finding.excluded.map((e) => ({
-    data: { ...toCardData(e), exclusionReason: e.exclusionReason },
+    data: { ...toItem(e), exclusionReason: e.exclusionReason },
     role: "EXCLUDED" as const,
   }));
   const admitted = [...used, ...supporting, ...contradicting];
@@ -202,10 +213,24 @@ export default function ResearchDetailPage() {
             ? "SUPPORTING"
             : "READ";
       return {
-        data: { ...toCardData(e), exclusionReason: excludedLink?.exclusionReason ?? null },
+        data: { ...toItem(e), exclusionReason: excludedLink?.exclusionReason ?? null },
         role,
       };
     });
+
+  // ONE ACQUIRED DOCUMENT, ONE CARD — per role, so an excluded document can
+  // never be folded together with an admitted one.
+  const byRole = (rows: { data: EvidenceItemLike; role: EvidenceRole }[], role: EvidenceRole) =>
+    groupEvidenceByDocument(rows.filter((r) => r.role === role).map((r) => r.data));
+  const admittedDocs: { role: EvidenceRole; groups: ReturnType<typeof groupEvidenceByDocument> }[] =
+    (["USED", "SUPPORTING", "CONTRADICTING"] as const).map((role) => ({
+      role,
+      groups: byRole(admitted, role),
+    }));
+  const excludedDocs = groupEvidenceByDocument(excluded.map((e) => e.data));
+  const otherDocs = (["READ", "SUPPORTING", "CONTRADICTING", "EXCLUDED"] as const).map(
+    (role) => ({ role, groups: byRole(other, role) }),
+  );
 
   const evidenceCountByComponent = new Map<string, number>();
   for (const c of components) {
@@ -213,36 +238,60 @@ export default function ResearchDetailPage() {
   }
 
   const gaps = components.filter((c) => c.status === "INSUFFICIENT_EVIDENCE");
+  const hasAdmittedDocs = admittedDocs.some((d) => d.groups.length > 0);
+  const hasOtherDocs = otherDocs.some((d) => d.groups.length > 0);
 
   return (
     <main className="enter flex flex-col gap-5 pb-6">
       <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
 
-      {/* ---- header ------------------------------------------------- */}
+      {/* ---- 0. project + question ---------------------------------- */}
       <section className="flex items-start gap-4 px-1 pt-1">
-        <span className="orb h-14 w-14 shrink-0 text-[0.95rem] font-semibold text-[var(--atlas-cyan)] sm:h-16 sm:w-16" aria-hidden>
+        <span
+          className="orb h-14 w-14 shrink-0 text-[0.95rem] font-semibold text-[var(--atlas-cyan)] sm:h-16 sm:w-16"
+          aria-hidden
+        >
           {projectName.slice(0, 2).toUpperCase()}
         </span>
         <div className="min-w-0 flex-1">
           <p className="eyebrow eyebrow-violet">Research result</p>
-          <h1 className="mt-1.5 text-[1.6rem] font-semibold leading-tight tracking-tight sm:text-[2rem]">
+          <h1 className="mt-1.5 text-[1.6rem] font-semibold leading-tight tracking-tight sm:text-[2.15rem]">
             {projectName}
           </h1>
-          <p className="mt-1.5 text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]">
+          <p className="mt-2 text-[0.95rem] leading-snug text-[var(--atlas-text-dim)]">
             {job.originalQuestion}
           </p>
         </div>
       </section>
 
-      {/* ---- verdict / live banner ---------------------------------- */}
-      {finished ? (
+      {/* ---- live: progress leads ----------------------------------- */}
+      {!finished && (
+        <>
+          <section className="panel panel-raised panel-hero p-5 sm:p-6" data-testid="live-banner">
+            <div className="flex items-center gap-3">
+              <span className="pulse-dot" aria-hidden />
+              <p className="text-[0.95rem] font-medium">Research in progress</p>
+            </div>
+            <p className="mt-2 text-[0.85rem] text-[var(--atlas-text-dim)]">
+              You can leave this screen. ATLAS keeps working and the result will be
+              here when you come back.
+            </p>
+          </section>
+          <div data-testid="progress-slot-live">
+            <ResearchProgress job={job} />
+          </div>
+        </>
+      )}
+
+      {/* ---- 1+2. THE ANSWER, then verdict/confidence ---------------- */}
+      {finished && (
         <section
-          className="panel panel-raised tone-edge p-5 sm:p-6"
-          style={{ "--edge": edgeColor(verdictTone(proof?.verdict)) } as React.CSSProperties}
-          data-testid="verdict-panel"
+          className="panel panel-raised tone-edge p-5 sm:p-7"
+          style={{ "--edge": edgeColor(outcome.tone) } as React.CSSProperties}
+          data-testid="answer-panel"
         >
           <div className="flex flex-wrap items-center gap-3">
-            <VerdictBadge verdict={proof?.verdict ?? null} />
+            <OutcomeBadge job={{ state: job.state, verdict: proof?.verdict ?? null }} />
             {proof?.confidence.band && (
               <span className="tone tone-neutral" data-testid="confidence-band">
                 {CONFIDENCE_LABELS[proof.confidence.band] ?? proof.confidence.band} confidence
@@ -252,109 +301,117 @@ export default function ResearchDetailPage() {
               {relativeAge(job.finishedAt)}
             </span>
           </div>
-          <div className="mt-4 flex flex-col gap-2 text-[0.95rem] leading-relaxed">
+
+          <div
+            className="mt-4 flex flex-col gap-2.5 text-[1.02rem] leading-relaxed sm:text-[1.08rem]"
+            data-testid="answer-text"
+          >
             {answer.map((s) => (
               <p key={s}>{s}</p>
             ))}
           </div>
-          {!proof && job.terminationReason && (
-            <p className="mt-3 text-[0.8rem] text-[var(--atlas-text-dim)]">
-              The research ended before a Proof was written.
+
+          {/* Component counts are analyst metadata, so they sit BELOW the
+              answer as a quiet footnote rather than leading it. */}
+          {components.length > 0 && (
+            <p
+              className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--hairline)] pt-3.5 text-[0.75rem] text-[var(--atlas-text-dim)]"
+              data-testid="answer-metadata"
+            >
+              <span className="flex items-center gap-1.5">
+                <span className="dot dot-supported" aria-hidden />
+                {summary.established} established
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="dot dot-insufficient" aria-hidden />
+                {summary.unresolved} unresolved
+              </span>
+              {summary.contradicted > 0 && (
+                <span className="flex items-center gap-1.5">
+                  <span className="dot dot-negative" aria-hidden />
+                  {summary.contradicted} contradicted
+                </span>
+              )}
             </p>
           )}
         </section>
-      ) : (
-        <section className="panel panel-raised panel-hero p-5 sm:p-6" data-testid="live-banner">
-          <div className="flex items-center gap-3">
-            <span className="pulse-dot" aria-hidden />
-            <p className="text-[0.95rem] font-medium">Research in progress</p>
-          </div>
-          <p className="mt-2 text-[0.85rem] text-[var(--atlas-text-dim)]">
-            You can leave this screen. ATLAS keeps working and the result will be
-            here when you come back.
-          </p>
-        </section>
       )}
 
-      {/* ---- process + reality -------------------------------------- */}
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ResearchProgress job={job} />
+      {/* ---- 3. what was verified ------------------------------------ */}
+      <div data-testid="section-reality">
         <RealityCheck components={components} />
       </div>
 
-      {/* ---- components --------------------------------------------- */}
-      {components.length > 0 && (
-        <section>
-          <p className="eyebrow mb-3 px-1">Key components</p>
-          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-            {components.map((c) => (
-              <ComponentStatusCard
-                key={`${c.patternStep}:${c.component}`}
-                component={c.component}
-                status={c.status}
-                evidenceCount={evidenceCountByComponent.get(c.component) ?? 0}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      {/* ---- 4. what could not be verified --------------------------- */}
+      <GapsPanel gaps={gaps} />
 
-      {/* ---- evidence ------------------------------------------------ */}
-      <section>
+      {/* ---- 5. evidence --------------------------------------------- */}
+      <section data-testid="section-evidence">
         <p className="eyebrow mb-3 px-1">Evidence &amp; sources</p>
-        {admitted.length === 0 ? (
+        {!hasAdmittedDocs ? (
           <div className="panel px-5 py-5 text-sm text-[var(--atlas-text-dim)]">
             No evidence was bound in support of this finding.
           </div>
         ) : (
           <div className="grid gap-2.5 lg:grid-cols-2">
-            {admitted.map((e) => (
-              <EvidenceCard key={e.data.id} evidence={e.data} role={e.role} />
-            ))}
+            {admittedDocs.flatMap((d) =>
+              d.groups.map((g) => (
+                <EvidenceDocumentCard key={`${d.role}:${g.key}`} group={g} role={d.role} />
+              )),
+            )}
           </div>
         )}
 
-        {excluded.length > 0 && (
-          <div className="mt-5">
+        {excludedDocs.length > 0 && (
+          <div className="mt-5" data-testid="excluded-evidence">
             <p className="eyebrow mb-2 px-1">Considered but excluded</p>
             <p className="mb-3 px-1 text-[0.78rem] text-[var(--atlas-text-dim)]">
               These sources were read and refused. They support nothing here.
             </p>
             <div className="grid gap-2.5 lg:grid-cols-2">
-              {excluded.map((e) => (
-                <EvidenceCard key={e.data.id} evidence={e.data} role={e.role} />
+              {excludedDocs.map((g) => (
+                <EvidenceDocumentCard key={g.key} group={g} role="EXCLUDED" />
               ))}
             </div>
           </div>
         )}
 
-        {other.length > 0 && (
+        {hasOtherDocs && (
           <div className="mt-5">
             <p className="eyebrow mb-2 px-1">Other material read</p>
             <p className="mb-3 px-1 text-[0.78rem] text-[var(--atlas-text-dim)]">
               Read during this research but not bound to the finding above.
             </p>
             <div className="grid gap-2.5 lg:grid-cols-2">
-              {other.map((e) => (
-                <EvidenceCard key={e.data.id} evidence={e.data} role={e.role} />
-              ))}
+              {otherDocs.flatMap((d) =>
+                d.groups.map((g) => (
+                  <EvidenceDocumentCard key={`${d.role}:${g.key}`} group={g} role={d.role} />
+                )),
+              )}
             </div>
           </div>
         )}
       </section>
 
-      {/* ---- gaps ---------------------------------------------------- */}
-      {gaps.length > 0 && (
-        <section>
-          <p className="eyebrow mb-3 px-1">Could not verify</p>
-          <div className="flex flex-col gap-2.5">
-            {gaps.map((g) => (
-              <GapCard key={`${g.patternStep}:${g.component}`} component={g.component} />
-            ))}
+      {/* ---- 6. mechanism breakdown ---------------------------------- */}
+      <ComponentBreakdown
+        components={components}
+        evidenceCountByComponent={evidenceCountByComponent}
+      />
+
+      {/* ---- 7. research process (secondary once finished) ----------- */}
+      {finished && (
+        <details className="panel px-5 py-4" data-testid="progress-slot-finished">
+          <summary className="cursor-pointer select-none text-[0.8rem] text-[var(--atlas-text-dim)]">
+            Research process
+          </summary>
+          <div className="mt-4">
+            <ResearchProgress job={job} />
           </div>
-        </section>
+        </details>
       )}
 
+      {/* ---- 8. developer details ------------------------------------ */}
       <DeveloperDetails detail={detail} />
     </main>
   );
@@ -375,7 +432,7 @@ function edgeColor(tone: string): string {
   }
 }
 
-function toCardData(e: {
+function toItem(e: {
   id: string;
   component: string | null;
   summary: string | null;
@@ -385,7 +442,7 @@ function toCardData(e: {
   officiality: string | null;
   retrievedUrl: string;
   sourceTitle: string | null;
-}): EvidenceCardData {
+}): EvidenceItemLike {
   return {
     id: e.id,
     component: e.component,
