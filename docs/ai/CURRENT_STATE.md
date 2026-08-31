@@ -127,6 +127,51 @@ never reset and no queue row is written. The invariant is *bounded retries
 job*, and never an automatic recovery loop. Continuing a job whose delivery
 is genuinely spent is a deliberate, separately authorized owner act.
 
+## THE PRODUCT HAS A REAL SURFACE: HOME + RESEARCH (UI V1)
+
+Two screens, and they are a **projection of persisted research truth** —
+nothing on either is computed, inferred or filled in to look complete.
+
+**Home** (`/home`) is the composer plus real records. The composer is the
+existing flow, not a new one: interpret → (clarify) → server gate →
+`startResearch`, with one idempotency key per click and the gate still the
+only authority on whether a Proof may begin. Recent Proofs come from
+`/api/research-jobs`, which now carries the project, the persisted verdict
+(LEFT JOINed from the owner's own Proof) and the acquisition phase. A job with
+no Proof shows no verdict.
+
+**Research** (`/research/[id]`) is ONE screen for a running job and a
+finished Proof. There is no separate loading experience; the same layout fills
+in as the engine produces state.
+
+**Live progress reads the engine's own phase.** `progressStage` stops at the
+memory step, so a UI driven by it said "checking accumulated experience" while
+the job was already fetching or extracting — which is exactly what the live
+Raydium runs showed on screen. `acquisitionPhase` is now exposed on the job
+list, the detail and every SSE event, and `src/client/research-model.ts`
+`deriveProgress` reads it FIRST, falling back to the counter only before
+acquisition begins and ignoring both for a terminal job. This is a
+presentation mapping, not a second phase machine: it decides nothing, is never
+written back, and reports which field it used.
+
+**Reality Check** is derived from persisted component results and nothing
+else. Each rung reads one component: SUPPORTED → verified; CONTRADICTED →
+"verified not happening" (the only status that may say so); INSUFFICIENT →
+"could not verify"; no row → "not assessed". "Reality stops here" is drawn
+only when at least one rung really was verified, so it marks the end of an
+established chain instead of implying a failure at a rung nothing tested.
+
+**Evidence roles come from persisted relationships.** S8's citation binding is
+"used"; S5's sets give supporting / contradicting / excluded. Excluded
+material renders in its own section with the reason it was refused and can
+never reach the supporting grid. The job-wide evidence array is read only for
+a separately headed "Other material read" — never as the finding, preserving
+the claim-scoped rule that fix put in place.
+
+**Developer details** (reason codes, job state, acquisition phase, raw JSON)
+are present on the screen and closed by default, so engine work continues
+against the real UI without leaking internals into the product surface.
+
 ## AN APPROVED RESOURCE NOW SURVIVES THE CAP, NOT JUST THE CORPUS (D-151)
 
 D-150 made a curated document visible to its component. It did not make it

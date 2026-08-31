@@ -1,4 +1,4 @@
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import {
   errorResponse,
@@ -6,7 +6,7 @@ import {
   requireMutation,
   requireSession,
 } from "@/src/server/auth/guards";
-import { researchJobs } from "@/src/server/db/schema";
+import { projects, proofs, researchJobs } from "@/src/server/db/schema";
 import { startOwnerManualAlphaResearch } from "@/src/server/services/start-owner-alpha-research";
 import { startResearch } from "@/src/server/services/start-research";
 import { getBoss, getDb, getProductConfig } from "@/src/server/runtime";
@@ -17,17 +17,46 @@ export async function GET(req: Request): Promise<Response> {
   try {
     const db = getDb();
     const session = await requireSession(db, req);
+    // UI V1 — the list carries what a Recent Proof card actually shows, so
+    // the client never has to fetch every job's detail to render a list, and
+    // never has to guess a verdict it was not given.
+    //
+    // `verdict` is LEFT JOINed from the persisted Proof: null means "this
+    // job has no Proof", which is a real state (still running, or finished
+    // without one) and is rendered as such — never as a verdict.
+    //
+    // `acquisitionPhase` is the engine's own persisted phase. It is exposed
+    // because `progressStage` alone cannot say where an acquiring job
+    // actually is: the stage counter stops at the memory step while the
+    // engine goes on to search, fetch and extract, so a UI driven by it
+    // shows "checking accumulated experience" for a job that is already
+    // extracting. Nothing is computed here — the column is copied.
     const rows = await db
       .select({
         id: researchJobs.id,
         state: researchJobs.state,
         progressStage: researchJobs.progressStage,
+        memoryStatus: researchJobs.memoryStatus,
+        acquisitionPhase: researchJobs.acquisitionPhase,
+        acquisitionPhaseAt: researchJobs.acquisitionPhaseAt,
+        terminationReason: researchJobs.terminationReason,
         originalQuestion: researchJobs.originalQuestion,
         unread: researchJobs.unread,
         createdAt: researchJobs.createdAt,
         finishedAt: researchJobs.finishedAt,
+        projectName: projects.name,
+        projectSlug: projects.slug,
+        projectTicker: projects.ticker,
+        verdict: proofs.verdict,
       })
       .from(researchJobs)
+      .leftJoin(projects, eq(researchJobs.projectId, projects.id))
+      // Ownership is a predicate on the Proof too: a Proof is private, so
+      // it is joined only where this caller owns it.
+      .leftJoin(
+        proofs,
+        and(eq(proofs.researchJobId, researchJobs.id), eq(proofs.ownerUserId, session.userId)),
+      )
       .where(eq(researchJobs.userId, session.userId))
       .orderBy(desc(researchJobs.createdAt))
       .limit(50);

@@ -387,10 +387,15 @@ describe("result projection — evidence is scoped to the displayed claim", () =
 // reintroduces `detail.evidence.map` in the proof section reintroduces the
 // exact bug, and a DB-level test cannot see that.
 describe("result view — proof section reads only claim-scoped evidence", () => {
-  it("the research page renders finding.supporting and never maps the job-wide evidence array", async () => {
+  // UI V1 moved the result view from app/(app)/research/page.tsx (now the
+  // index) to app/(app)/research/[id]/page.tsx (the Research screen). The
+  // invariant is unchanged and is asserted against the new file: the FINDING
+  // is built from claim-scoped sources only, and the job-wide `evidence`
+  // array may never become it.
+  it("the research screen builds the finding from claim-scoped sources, never from the job-wide evidence array", async () => {
     const fs = await import("node:fs/promises");
     const raw = await fs.readFile(
-      new URL("../app/(app)/research/page.tsx", import.meta.url),
+      new URL("../app/(app)/research/[id]/page.tsx", import.meta.url),
       "utf-8",
     );
     // Comments in that file legitimately NAME the old expressions to
@@ -402,14 +407,34 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*\/\/.*$/gm, "");
 
-    expect(code).toContain("detail.finding.supporting.map");
-    expect(code).not.toContain("detail.evidence.map");
+    // The finding's own lists come from S8's citation binding and S5's
+    // claim-scoped component sets.
+    expect(code).toContain("detail.finding.supporting");
+    expect(code).toContain("detail.finding.excluded");
+    expect(code).toContain("proof?.citations");
+    // `admitted` IS the finding grid. It is composed only of those sources —
+    // the job-wide array is not among them.
+    expect(code).toMatch(
+      /const admitted = \[\.\.\.used, \.\.\.supporting, \.\.\.contradicting\];/,
+    );
+    expect(code).not.toMatch(/const admitted[^;]*detail\.evidence/);
+
+    // The job-wide array may be read ONLY for the separate, differently
+    // headed section, and only for rows the finding did not already claim.
+    const usesJobWideEvidence = /detail\.evidence\s*\n?\s*\.filter/.test(code);
+    if (usesJobWideEvidence) {
+      expect(code).toContain("shownIds");
+      expect(code).toContain("Other material read");
+      // Nothing in that section may be presented as supporting the verdict:
+      // an excluded link outranks every other role for the same row.
+      expect(code).toContain('e.links.find((l) => l.role === "EXCLUDED")');
+    }
+
     // The honest empty state must exist rather than falling back to
     // whatever else the job happens to hold.
-    expect(code).toContain("noSupportingEvidence");
-    // And the step count must not come from mechanism branch structure.
+    expect(code).toContain("No evidence was bound in support of this finding.");
+    // And no step count may come from mechanism branch structure.
     expect(code).not.toContain("mechanism.flows.length");
-    expect(code).toContain("execution.attemptedSteps");
   });
 });
 

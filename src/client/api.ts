@@ -173,11 +173,80 @@ export interface ResearchEvidenceView {
   sourceType: string;
 }
 
+// UI V1 — one row of the job list. Everything a Recent Proof card renders
+// comes from here, so a list never has to fetch N details and never has to
+// guess a value it was not given: `verdict` is null when no Proof exists,
+// and that is displayed as "no verdict", never as one.
+export interface ResearchJobListItem {
+  id: string;
+  state: string;
+  progressStage: number;
+  memoryStatus: string;
+  // The engine's own persisted acquisition phase. Authoritative for live
+  // progress; null before acquisition starts.
+  acquisitionPhase: "SEARCHING" | "FETCHING" | "EXTRACTING" | null;
+  acquisitionPhaseAt: string | null;
+  terminationReason: string | null;
+  originalQuestion: string;
+  unread: boolean;
+  createdAt: string;
+  finishedAt: string | null;
+  projectName: string | null;
+  projectSlug: string | null;
+  projectTicker: string | null;
+  verdict: string | null;
+}
+
+// S9's client-facing Proof, exactly as services/proof-view.ts serializes it.
+// The route has always returned this; the client type simply stopped
+// declaring it, so the screens could not read the canonical answer and read
+// engine internals instead.
+export interface ProofCitationView {
+  evidenceId: string;
+  patternStep: number | null;
+  component: string | null;
+  relationship: string;
+  directness: string | null;
+  summary: string | null;
+  fragment: string;
+  doesNotProve: string | null;
+  mechanismState: string | null;
+  sourceClass: string | null;
+  officiality: string | null;
+  entityBinding: string | null;
+  publishedAt: string | null;
+  retrievedUrl: string;
+  source: { title: string | null; publisher: string | null; sourceType: string };
+}
+
+export interface ProofView {
+  proofId: string;
+  researchJobId: string;
+  projectId: string;
+  topicId: string;
+  verdict: string;
+  // `band` is the semantic value; `score` is its encoding and is NEVER a
+  // percentage or a probability. Nothing may render it with a "%".
+  confidence: { band: string | null; score: number };
+  verificationStatus: string;
+  visibility: string;
+  layers: unknown;
+  citations: ProofCitationView[];
+  researchCutoff: string | null;
+  createdAt: string;
+}
+
 export interface ResearchJobDetail {
   job: {
     id: string;
     state: string;
     progressStage: number;
+    memoryStatus: string;
+    acquisitionPhase: "SEARCHING" | "FETCHING" | "EXTRACTING" | null;
+    acquisitionPhaseAt: string | null;
+    projectName: string | null;
+    projectSlug: string | null;
+    projectTicker: string | null;
     originalQuestion: string;
     terminationReason: string | null;
     errorCode: string | null;
@@ -186,6 +255,9 @@ export interface ResearchJobDetail {
     startedAt: string | null;
     finishedAt: string | null;
   };
+  // Null means "no Proof exists for this job" — still running, or finished
+  // without one. Never fabricated on a read.
+  proof: ProofView | null;
   claimSupport: {
     intent: string;
     status: "SUPPORTED" | "PARTIALLY_SUPPORTED" | "NOT_SUPPORTED" | "INSUFFICIENT_EVIDENCE";
@@ -266,18 +338,7 @@ export const api = {
     request<{
       projects: { slug: string; name: string; ticker: string | null; researchable: boolean }[];
     }>("/api/projects"),
-  getResearchJobs: () =>
-    request<{
-      jobs: {
-        id: string;
-        state: string;
-        progressStage: number;
-        originalQuestion: string;
-        unread: boolean;
-        createdAt: string;
-        finishedAt: string | null;
-      }[];
-    }>("/api/research-jobs"),
+  getResearchJobs: () => request<{ jobs: ResearchJobListItem[] }>("/api/research-jobs"),
   getResearchJob: (id: string) =>
     requestChecked<ResearchJobDetail>(`/api/research-jobs/${id}`, {
       method: "GET",

@@ -6,6 +6,11 @@ export interface JobEvent {
   state: string;
   progressStage: number;
   memoryStatus: string;
+  // UI V1 — the engine's persisted acquisition phase, carried on every
+  // event. It is what lets a live screen say "reading evidence" while the
+  // job is fetching, instead of the stage counter's last word before
+  // acquisition began.
+  acquisitionPhase: "SEARCHING" | "FETCHING" | "EXTRACTING" | null;
   unread: boolean;
   finishedAt: string | null;
 }

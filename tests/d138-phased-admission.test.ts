@@ -585,9 +585,33 @@ describe("D-138 §6 — boundaries (items 21, 26, 27, 28)", () => {
   it("21. the Start Proof request contract is unchanged: no phase field anywhere in the client", async () => {
     const { readFile } = await import("node:fs/promises");
     const api = await readFile("src/client/api.ts", "utf-8");
-    for (const word of ["phased", "acquisitionPhase", "acquisition_phase", "capability", "SEARCHING"]) {
+
+    // The client never learns about phased execution as a CONCEPT it can act
+    // on: no phase vocabulary, no capability, nothing it could branch upon.
+    for (const word of ["phased", "acquisition_phase", "capability"]) {
       expect(api, `client must not mention ${word}`).not.toContain(word);
     }
+
+    // UI V1 — the client now READS a persisted `acquisitionPhase` back, to
+    // show a live research the stage the engine is actually in. That is the
+    // opposite direction from the one this item protects, and it is checked
+    // as such: what must never change is the REQUEST contract.
+    //
+    // So the assertion is on the payloads themselves rather than on the
+    // whole file — stricter in the direction that matters, because it now
+    // inspects what is actually sent instead of what the file happens to
+    // mention.
+    const bodies = [...api.matchAll(/body:\s*JSON\.stringify\(([\s\S]*?)\),/g)].map(
+      (m) => m[1],
+    );
+    expect(bodies.length).toBeGreaterThan(0);
+    for (const body of bodies) {
+      for (const word of ["phase", "Phase", "capability", "SEARCHING", "FETCHING", "EXTRACTING"]) {
+        expect(body, `no request body may carry ${word}`).not.toContain(word);
+      }
+    }
+    // And Start Proof specifically still sends exactly what it always sent.
+    expect(api).toContain("JSON.stringify({ interpretationId, idempotencyKey })");
     // The service decides from configuration, which the client never sees.
     const service = await readFile("src/server/services/start-owner-alpha-research.ts", "utf-8");
     expect(service).toContain("config.phased_research_enabled");

@@ -58,6 +58,13 @@ export async function GET(
           state: researchJobs.state,
           progressStage: researchJobs.progressStage,
           memoryStatus: researchJobs.memoryStatus,
+          // UI V1 — the engine's own persisted acquisition phase travels
+          // with every event. Without it a live client can only read
+          // progressStage, which stops at the memory step and therefore
+          // keeps saying "checking accumulated experience" while the job is
+          // already fetching or extracting. Copied, never computed: this
+          // stream stays a notification transport over a DB read.
+          acquisitionPhase: researchJobs.acquisitionPhase,
           unread: researchJobs.unread,
           finishedAt: researchJobs.finishedAt,
         })

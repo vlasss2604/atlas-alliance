@@ -3,11 +3,16 @@
 /* ATLAS PROOF — визуальный язык и Motion System (phase-2-plan §5).
    Тёмная research-intelligence атмосфера: near-black/navy фон, cyan/teal
    акцент только для активного элемента и primary CTA, glass-панели,
-   pill-кнопки. Единый источник токенов — здесь. */
+   pill-кнопки. Единый источник токенов — здесь.
+
+   UI V1 extends this with the premium surface layer: luminous hairline
+   borders, layered glass, the evidence-network field and the verdict tone
+   scale. Everything below is presentation only — no rule here decides
+   anything about research. */
 
 :root {
   /* Палитра */
-  --atlas-bg: #060b12; /* near-black / navy-black */
+  --atlas-bg: #04070d; /* near-black / navy-black */
   --atlas-bg-raised: #0a1220;
   --atlas-glass: rgba(16, 28, 44, 0.6);
   --atlas-border: rgba(94, 234, 212, 0.14); /* тонкий светящийся border */
@@ -18,6 +23,19 @@
   --atlas-green: #34d399; /* supported */
   --atlas-amber: #fbbf24; /* nuance */
   --atlas-red: #f87171; /* conflict */
+
+  /* UI V1 surface scale — three depths, used consistently. */
+  --surface-1: rgba(12, 22, 38, 0.82);
+  --surface-2: rgba(16, 29, 48, 0.9);
+  --surface-3: rgba(21, 37, 60, 0.85);
+  --hairline: rgba(148, 190, 220, 0.13);
+  --hairline-strong: rgba(120, 220, 245, 0.3);
+  --violet: #a78bfa;
+  --violet-dim: rgba(167, 139, 250, 0.16);
+  --cyan-dim: rgba(34, 211, 238, 0.14);
+  --amber-dim: rgba(251, 191, 36, 0.14);
+  --green-dim: rgba(52, 211, 153, 0.14);
+  --red-dim: rgba(248, 113, 113, 0.14);
 
   /* Motion System: durations в канонных диапазонах (100–180/150–250/200–350),
      навигации 500ms+ нет. */
@@ -48,7 +66,80 @@ body {
   min-height: 100dvh;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
+  font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  letter-spacing: -0.011em;
 }
+
+/* ---------------------------------------------------------------- *
+ * ATMOSPHERE — the evidence-network field.
+ * Two wide, very low-opacity light sources (violet left, cyan right)
+ * plus a faint grid. Fixed, non-interactive, behind everything.
+ * ---------------------------------------------------------------- */
+.atlas-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.atlas-field::before,
+.atlas-field::after {
+  content: "";
+  position: absolute;
+  width: 78vmax;
+  height: 78vmax;
+  border-radius: 50%;
+  /* No filter: blur() here. The gradients are already soft, and a
+     full-viewport blur filter forces an expensive off-screen pass on every
+     paint — it made scrolling visibly stutter. */
+  opacity: 0.9;
+}
+.atlas-field::before {
+  top: -34vmax;
+  left: -30vmax;
+  background: radial-gradient(
+    circle at center,
+    rgba(139, 92, 246, 0.24) 0%,
+    rgba(76, 29, 149, 0.1) 42%,
+    transparent 68%
+  );
+}
+.atlas-field::after {
+  top: -30vmax;
+  right: -32vmax;
+  background: radial-gradient(
+    circle at center,
+    rgba(34, 211, 238, 0.22) 0%,
+    rgba(14, 116, 144, 0.09) 44%,
+    transparent 70%
+  );
+}
+.atlas-grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(120, 190, 220, 0.045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(120, 190, 220, 0.045) 1px, transparent 1px);
+  background-size: 64px 64px;
+  mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, #000 20%, transparent 78%);
+  -webkit-mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, #000 20%, transparent 78%);
+}
+/* The evidence-network filaments: a few long, very faint arcs sweeping in
+   from both edges. Drawn as an SVG so the curves stay smooth at any width,
+   and masked so they never compete with content in the middle. */
+.atlas-arcs {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.55;
+  mask-image: linear-gradient(90deg, #000 0%, transparent 34%, transparent 66%, #000 100%);
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 34%, transparent 66%, #000 100%);
+}
+
+/* ---------------------------------------------------------------- *
+ * GLASS
+ * ---------------------------------------------------------------- */
 
 /* Glass-панель */
 .glass {
@@ -58,6 +149,217 @@ body {
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
 }
+
+/* UI V1 panel — layered glass with a luminous top hairline and depth.
+   The ::before is the light catching the top edge; the shadow is what
+   lifts the panel off the field. */
+.panel {
+  position: relative;
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0) 42%),
+    var(--surface-1);
+  border: 1px solid var(--hairline);
+  /* Deliberately NO backdrop-filter. What sits behind every panel is the
+     smooth gradient field, and blurring a gradient looks identical to a
+     translucent fill — while costing a full re-rasterisation of the
+     stacking context on every scroll frame. The one place it earns its
+     price is the fixed navbar, which really does pass over content. */
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 18px 44px -24px rgba(0, 0, 0, 0.9);
+}
+.panel-raised {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 38%),
+    var(--surface-2);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
+    0 26px 60px -28px rgba(0, 0, 0, 0.95);
+}
+/* The hero composer: a cyan-lit edge, one step brighter than any other
+   panel, because it is the one thing the product asks you to do. */
+.panel-hero {
+  border-color: rgba(56, 189, 248, 0.26);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
+    0 0 0 1px rgba(34, 211, 238, 0.05),
+    0 30px 70px -30px rgba(8, 47, 73, 0.9);
+}
+.panel-hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: radial-gradient(
+    120% 90% at 50% -20%,
+    rgba(34, 211, 238, 0.1) 0%,
+    transparent 60%
+  );
+}
+
+/* A tone-coloured edge on a panel — the verdict's colour, restated once at
+   the boundary of the block it belongs to, rather than washed over it. */
+.tone-edge {
+  overflow: hidden;
+}
+.tone-edge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--edge, transparent);
+  box-shadow: 0 0 22px 0 var(--edge, transparent);
+}
+
+/* A row that behaves like a link: lifts and lights its edge on hover. */
+.row-card {
+  position: relative;
+  border-radius: 1.15rem;
+  /* Opaque rather than blurred: a list can hold dozens of these, and one
+     backdrop-filter per row is what turns a scroll into a slideshow. */
+  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0)) , rgba(11, 21, 36, 0.82);
+  border: 1px solid var(--hairline);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out);
+}
+.row-card:hover {
+  border-color: var(--hairline-strong);
+  background: var(--surface-2);
+}
+.row-card:active {
+  transform: scale(0.995);
+}
+
+/* ---------------------------------------------------------------- *
+ * TYPOGRAPHY
+ * ---------------------------------------------------------------- */
+
+.eyebrow {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--atlas-text-dim);
+}
+.eyebrow-cyan {
+  color: rgba(103, 232, 249, 0.92);
+}
+.eyebrow-violet {
+  color: rgba(196, 181, 253, 0.92);
+}
+.wordmark {
+  font-weight: 300;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+.text-gradient-cyan {
+  background: linear-gradient(100deg, #67e8f9 0%, #22d3ee 45%, #7dd3fc 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ---------------------------------------------------------------- *
+ * LOGO ORB
+ * ---------------------------------------------------------------- */
+.orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  background:
+    radial-gradient(circle at 50% 34%, rgba(34, 211, 238, 0.16) 0%, transparent 62%),
+    rgba(6, 14, 26, 0.9);
+  border: 1px solid rgba(34, 211, 238, 0.45);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.08),
+    0 0 28px rgba(34, 211, 238, 0.32),
+    0 0 60px rgba(34, 211, 238, 0.12) inset;
+}
+.orb-sm {
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.06),
+    0 0 14px rgba(34, 211, 238, 0.26);
+}
+
+/* ---------------------------------------------------------------- *
+ * TONE PILLS — verdict / status. Colour is meaning, so each tone is
+ * declared once and reused everywhere it appears.
+ * ---------------------------------------------------------------- */
+.tone {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 0.3rem 0.72rem;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.tone-supported {
+  color: #5eead4;
+  background: var(--green-dim);
+  border-color: rgba(45, 212, 191, 0.34);
+}
+.tone-partial {
+  color: #c4b5fd;
+  background: var(--violet-dim);
+  border-color: rgba(167, 139, 250, 0.34);
+}
+.tone-insufficient {
+  color: #fcd34d;
+  background: var(--amber-dim);
+  border-color: rgba(251, 191, 36, 0.36);
+}
+.tone-negative {
+  color: #fca5a5;
+  background: var(--red-dim);
+  border-color: rgba(248, 113, 113, 0.36);
+}
+.tone-neutral {
+  color: var(--atlas-text-dim);
+  background: rgba(148, 163, 184, 0.1);
+  border-color: rgba(148, 163, 184, 0.22);
+}
+
+.dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  flex: none;
+}
+.dot-supported {
+  background: #34d399;
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.8);
+}
+.dot-partial {
+  background: #a78bfa;
+  box-shadow: 0 0 10px rgba(167, 139, 250, 0.75);
+}
+.dot-insufficient {
+  background: #fbbf24;
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+}
+.dot-negative {
+  background: #f87171;
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.7);
+}
+.dot-neutral {
+  background: rgba(148, 163, 184, 0.5);
+}
+
+/* ---------------------------------------------------------------- *
+ * CONTROLS
+ * ---------------------------------------------------------------- */
 
 /* Pill-кнопки. Только transform/opacity в анимации. */
 .pill {
@@ -79,6 +381,239 @@ body {
 .cta:disabled {
   opacity: 0.45;
 }
+
+/* The composer's send control — a gradient ring, not a filled blob. */
+.send-orb {
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  color: #e6f9ff;
+  background:
+    radial-gradient(circle at 30% 25%, rgba(34, 211, 238, 0.28), transparent 65%),
+    rgba(8, 20, 34, 0.85);
+  border: 1px solid rgba(34, 211, 238, 0.55);
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.28);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out),
+    opacity var(--motion-micro) var(--ease-out);
+}
+.send-orb:hover:not(:disabled) {
+  box-shadow: 0 0 26px rgba(34, 211, 238, 0.5);
+}
+.send-orb:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.send-orb:disabled {
+  opacity: 0.4;
+  box-shadow: none;
+}
+
+.field {
+  width: 100%;
+  background: rgba(6, 14, 25, 0.7);
+  border: 1px solid var(--hairline);
+  border-radius: 1.1rem;
+  color: var(--atlas-text);
+  outline: none;
+  transition:
+    border-color var(--motion-transition) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
+}
+.field::placeholder {
+  color: rgba(139, 155, 176, 0.75);
+}
+.field:focus {
+  border-color: rgba(34, 211, 238, 0.5);
+  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1);
+}
+
+/* Example chips — one accent hue each, kept low-saturation. */
+.chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  border-radius: 1rem;
+  padding: 0.7rem 0.85rem;
+  text-align: left;
+  font-size: 0.8125rem;
+  line-height: 1.3;
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  color: var(--atlas-text);
+  transition:
+    border-color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out),
+    transform var(--motion-micro) var(--ease-out);
+}
+.chip:hover {
+  background: var(--surface-2);
+  border-color: var(--hairline-strong);
+}
+.chip:active {
+  transform: scale(0.985);
+}
+.chip-violet {
+  color: #ddd6fe;
+  border-color: rgba(167, 139, 250, 0.4);
+  background: linear-gradient(180deg, rgba(167,139,250,0.09), rgba(167,139,250,0.02)), var(--surface-1);
+}
+.chip-cyan {
+  color: #cffafe;
+  border-color: rgba(34, 211, 238, 0.4);
+  background: linear-gradient(180deg, rgba(34,211,238,0.09), rgba(34,211,238,0.02)), var(--surface-1);
+}
+.chip-teal {
+  color: #ccfbf1;
+  border-color: rgba(45, 212, 191, 0.4);
+  background: linear-gradient(180deg, rgba(45,212,191,0.09), rgba(45,212,191,0.02)), var(--surface-1);
+}
+
+/* ---------------------------------------------------------------- *
+ * PROGRESS RAIL
+ * ---------------------------------------------------------------- */
+.rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.rail-item {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  padding-bottom: 0.85rem;
+}
+.rail-item:last-child {
+  padding-bottom: 0;
+}
+.rail-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--hairline);
+  background: rgba(8, 18, 32, 0.9);
+  font-size: 0.625rem;
+  color: var(--atlas-text-dim);
+  flex: none;
+}
+/* The connector is drawn from the mark itself, so it can never drift out
+   of alignment with the row it belongs to. */
+.rail-item:not(:last-child) .rail-mark::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 0.85rem;
+  transform: translateX(-50%);
+  background: linear-gradient(180deg, var(--hairline), transparent);
+}
+.rail-mark-done {
+  border-color: rgba(45, 212, 191, 0.45);
+  color: #5eead4;
+  background: rgba(13, 42, 45, 0.8);
+}
+.rail-mark-active {
+  border-color: rgba(34, 211, 238, 0.75);
+  color: #a5f3fc;
+  background: rgba(8, 38, 52, 0.9);
+  box-shadow: 0 0 16px rgba(34, 211, 238, 0.4);
+}
+
+/* ---------------------------------------------------------------- *
+ * REALITY LADDER
+ * ---------------------------------------------------------------- */
+.ladder-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid transparent;
+  background: rgba(10, 20, 34, 0.5);
+}
+.ladder-row + .ladder-row {
+  margin-top: 0.4rem;
+}
+.ladder-row-verified {
+  border-color: rgba(45, 212, 191, 0.22);
+  background: rgba(11, 34, 38, 0.45);
+}
+.ladder-row-dim {
+  opacity: 0.62;
+}
+.stop-marker {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0.55rem 0;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #fcd34d;
+}
+.stop-marker::before,
+.stop-marker::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.5), transparent);
+}
+
+/* ---------------------------------------------------------------- *
+ * NAVIGATION
+ * ---------------------------------------------------------------- */
+.navbar {
+  background: rgba(8, 15, 27, 0.86);
+  border: 1px solid var(--hairline);
+  border-radius: 1.35rem;
+  backdrop-filter: blur(22px) saturate(140%);
+  -webkit-backdrop-filter: blur(22px) saturate(140%);
+  box-shadow: 0 20px 50px -24px rgba(0, 0, 0, 0.95);
+}
+.nav-item {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  padding: 0.6rem 0.25rem 0.55rem;
+  font-size: 0.6875rem;
+  color: var(--atlas-text-dim);
+  border-radius: 1rem;
+  transition: color var(--motion-transition) var(--ease-out);
+}
+.nav-item-active {
+  color: var(--atlas-cyan);
+}
+.nav-item-active::after {
+  content: "";
+  position: absolute;
+  bottom: 0.15rem;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 1.6rem;
+  height: 2px;
+  border-radius: 9999px;
+  background: var(--atlas-cyan);
+  box-shadow: 0 0 10px var(--atlas-cyan);
+}
+.nav-item-disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* ---------------------------------------------------------------- *
+ * MOTION
+ * ---------------------------------------------------------------- */
 
 /* Motion-примитивы: enter/exit */
 @keyframes atlas-fade-up {
@@ -154,7 +689,10 @@ body {
     opacity: 1;
   }
   .pill,
-  .pill:active {
+  .pill:active,
+  .chip,
+  .row-card,
+  .send-orb {
     transition: none;
     transform: none;
   }
@@ -163,4 +701,18 @@ body {
 /* Safe areas Telegram */
 .safe-bottom {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+
+/* Scrollbars, so a long evidence list does not look like a different app. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(148, 190, 220, 0.22) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(148, 190, 220, 0.22);
+  border-radius: 9999px;
 }

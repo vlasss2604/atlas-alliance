@@ -46,19 +46,21 @@ test("12. bottom nav walks all tabs; ARI opens ask; example fills input; submit 
   await page.goto("/home");
   await expect(page).toHaveURL(/\/home$/);
 
-  await page.getByRole("link", { name: /Research|Исследования/ }).click();
+  // UI V1 navigation: Proof / Research / Watchlist / Profile. Watchlist is a
+  // visibly disabled placeholder rather than a link, Projects is no longer in
+  // the bar (reached by URL), and the centre ARI button is gone — the
+  // composer now lives on Home itself.
+  await page.getByRole("link", { name: /Research/ }).first().click();
   await expect(page).toHaveURL(/\/research$/);
 
-  await page.getByRole("link", { name: /Projects|Проекты/ }).click();
-  await expect(page).toHaveURL(/\/projects$/);
+  await page.goto("/projects");
   // Реальный roster из сида
   await expect(page.getByText("Pump.fun")).toBeVisible();
 
-  await page.getByRole("link", { name: /Profile|Профиль/ }).click();
+  await page.getByRole("link", { name: /Profile/ }).first().click();
   await expect(page).toHaveURL(/\/profile$/);
 
-  // Центральная ARI-кнопка
-  await page.getByRole("link", { name: /Ask ARI|Спросить ARI/ }).click();
+  await page.goto("/ask");
   await expect(page).toHaveURL(/\/ask$/);
 
   // «?» → примеры → клик заполняет input
@@ -78,8 +80,8 @@ test("13. prefers-reduced-motion keeps the app fully functional", async ({ brows
   const page = await context.newPage();
   await page.goto("http://localhost:3100/home");
   await expect(page).toHaveURL(/\/home$/);
-  await page.getByRole("link", { name: /Ask ARI|Спросить ARI/ }).click();
-  await expect(page).toHaveURL(/\/ask$/);
-  await expect(page.locator("textarea")).toBeVisible();
+  // The composer is on Home now; reduced motion must leave it usable.
+  await expect(page.getByTestId("composer-input")).toBeVisible();
+  await expect(page.getByTestId("composer-submit")).toBeVisible();
   await context.close();
 });

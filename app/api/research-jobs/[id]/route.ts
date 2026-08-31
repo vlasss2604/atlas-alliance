@@ -8,6 +8,7 @@ import {
 } from "@/src/server/auth/guards";
 import {
   evidence,
+  projects,
   researchAttempts,
   researchClaimSupport,
   researchComponentResults,
@@ -90,6 +91,12 @@ export async function GET(
         id: researchJobs.id,
         state: researchJobs.state,
         progressStage: researchJobs.progressStage,
+        // UI V1 — persisted engine phase and memory outcome, copied so the
+        // Research screen can describe where the job actually is instead of
+        // inferring it from a stage counter that stops at the memory step.
+        memoryStatus: researchJobs.memoryStatus,
+        acquisitionPhase: researchJobs.acquisitionPhase,
+        acquisitionPhaseAt: researchJobs.acquisitionPhaseAt,
         originalQuestion: researchJobs.originalQuestion,
         terminationReason: researchJobs.terminationReason,
         errorCode: researchJobs.errorCode,
@@ -97,8 +104,15 @@ export async function GET(
         createdAt: researchJobs.createdAt,
         startedAt: researchJobs.startedAt,
         finishedAt: researchJobs.finishedAt,
+        // The project this research is about, for the screen header. A
+        // LEFT JOIN because projectId is nullable — an unresolved project
+        // stays null and the header says so rather than inventing a name.
+        projectName: projects.name,
+        projectSlug: projects.slug,
+        projectTicker: projects.ticker,
       })
       .from(researchJobs)
+      .leftJoin(projects, eq(researchJobs.projectId, projects.id))
       .where(and(eq(researchJobs.id, id), eq(researchJobs.userId, session.userId)));
     if (!job) throw new HttpError(404, "NOT_FOUND");
 
