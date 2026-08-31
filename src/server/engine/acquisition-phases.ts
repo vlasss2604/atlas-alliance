@@ -5,6 +5,7 @@ import { acquiredDocuments, researchTraceEvents } from "../db/schema";
 import {
   loadAcquisitionLedger,
   persistedFailureDiagnostics,
+  componentScopeKey,
   planQueries,
   providerAttemptCount,
   strategyAlreadyAttempted,
@@ -305,11 +306,32 @@ export async function runSearchPhase(input: {
     // Job-scoped dedup, read fresh per component so a query executed for
     // an earlier component in THIS pass is not paid for twice.
     const ledger = await loadAcquisitionLedger(input.db, input.jobId);
-    for (const entry of planQueries(proposed, ledger)) {
+    // D-152 — scoped to the component, so "already searched" means "already
+    // searched by THIS component". The SEARCH phase always talks to a live,
+    // metered gateway, so the second branch below preserves its budget
+    // behaviour exactly: a query another component already paid for is still
+    // never paid for twice.
+    for (const entry of planQueries(proposed, ledger, {
+      step: item.step,
+      component: item.component,
+    })) {
       if (!entry.needsSearch) {
         out.dedupedQueries.push(entry.query);
-        // A deduped query still contributes what it already found.
+        // A deduped query still contributes what THIS component found.
         for (const url of entry.knownCandidates) {
+          if (!seenCandidates.has(url)) {
+            seenCandidates.add(url);
+            out.candidateUrls.push(url);
+          }
+        }
+        continue;
+      }
+      if (entry.alreadyPaid) {
+        // Paid for by another component. The urls are still worth acquiring
+        // — acquisition is job-wide — but they are NOT recorded as this
+        // component's discovery, so they cannot become its extraction corpus.
+        out.dedupedQueries.push(entry.query);
+        for (const url of entry.jobWideCandidates) {
           if (!seenCandidates.has(url)) {
             seenCandidates.add(url);
             out.candidateUrls.push(url);
@@ -1275,7 +1297,22 @@ export async function prepareExtractionReplaySearch(
       // and provenance limits each one to the components it was approved
       // to serve, so this prefix cannot grow to crowd out the corpus.
       const seeds = seedByComponent.get(key) ?? [];
-      const exact = ledger.candidatesByQuery.get(canonicalTargetRef(query)) ?? [];
+      // D-152 — the exact-query list is scoped to THIS component too.
+      //
+      // It used to be `ledger.candidatesByQuery`, which is job-wide: a query
+      // string proposed by several components returned the first component's
+      // findings to all of them. That put another component's urls at the
+      // front of this component's corpus — ahead of everything except the
+      // seeds, and inside the same cap — so the fix in planQueries alone
+      // would have routed a component here only to hand it the same foreign
+      // list. Both halves of the identity have to hold, or neither does.
+      const exactKey = componentScopeKey(
+        target.step,
+        target.component,
+        canonicalTargetRef(query),
+      );
+      const exact =
+        exactKey === null ? [] : (ledger.candidatesByQueryComponent.get(exactKey) ?? []);
       const forComponent = searchByComponent.get(key) ?? [];
       const seen = new Set<string>();
       const urls: string[] = [];

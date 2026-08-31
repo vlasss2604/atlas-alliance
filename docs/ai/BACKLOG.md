@@ -8,17 +8,10 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
-- **`candidatesByQuery` is keyed by query string alone** — so the same query
-  string executed for two components shares one candidate list, and the
-  extraction replay serves component A's candidates to component B. Observed in
-  Raydium job `d13a0d79`: the query `site:solscan.io <mint>` ran at steps 1, 5
-  and 6, and step 1's candidates (`raydium.io/liquidity/create-pool/` among
-  them) were served to CURRENT_STATE and DESTINATION, where they extracted
-  nothing. Not the cause of the D-151 failure and deliberately not fixed in that
-  round: it wastes corpus seats and pollutes per-component replay, but it admits
-  no url the job did not discover and changes no authority. Needs its own scoped
-  task — the fix is to key the reuse by (query, step, component), which touches
-  `acquisition-ledger.ts` reconstruction.
+- ~~**`candidatesByQuery` is keyed by query string alone**~~ **CLOSED
+  2026-09-01** by D-152: reuse identity is now (canonical query, patternStep,
+  component), both the new-search and reused-query paths reach the same
+  seed-first corpus builder, and no budget moved.
 - **`tests/s10-live-provider-enablement.test.ts` fails on Windows** — the
   static boundary check builds its scan root with `new URL(...).pathname`,
   which yields `/C:/...`; `readdir` then resolves that against the current

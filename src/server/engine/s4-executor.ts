@@ -1276,15 +1276,41 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // recovery without any new state.
       const ledger = await loadAcquisitionLedger(deps.db, ctx.jobId);
       const searchMetered = !isReplayProvider(searchGateway);
-      for (const entry of planQueries(queries, ledger)) {
+      // D-152 — REUSE IS SCOPED TO THE COMPONENT THAT DID THE WORK.
+      //
+      // The same canonical query is legitimately proposed by several
+      // components. Keyed on the string alone, the first component to run it
+      // handed its candidate list to every later one — and, worse, those
+      // later components then skipped the gateway entirely, so the seed-first
+      // ordering that puts an approved SOURCE_RESOURCE ahead of search
+      // results never ran for them. That is how an approved document could be
+      // selected, fetched and sealed and still reach no component.
+      for (const entry of planQueries(queries, ledger, {
+        step: item.step,
+        component: item.component,
+      })) {
         const query = entry.query;
         if (!entry.needsSearch) {
-          // Already searched in this job: re-running it would spend a unit
-          // of the scarce axis to receive the identical result set. Reuse
-          // what it found instead — the candidates are still subject to
-          // every downstream check, so nothing is admitted by shortcut.
+          // THIS component already ran this query in this job: reusing its
+          // own result set spends nothing and invents nothing.
           observations.add("QUERY_ALREADY_SEARCHED_IN_JOB");
           for (const url of entry.knownCandidates) {
+            if (!candidateUrls.has(url)) candidateUrls.set(url, { url });
+          }
+          continue;
+        }
+        if (entry.alreadyPaid && searchMetered) {
+          // Another component already paid a unit of the scarce axis for this
+          // exact query. Asking again would buy the identical result set
+          // twice, so the job-wide candidates stand in — the pre-D-152
+          // behaviour, kept EXACTLY for the metered path so no budget moves.
+          //
+          // A replay gateway is never metered (D-137: it is
+          // network-impossible and already paid for), so this branch cannot
+          // fire during extraction: there, every component asks the gateway
+          // and every component therefore gets the seed-first corpus.
+          observations.add("QUERY_ALREADY_SEARCHED_IN_JOB");
+          for (const url of entry.jobWideCandidates) {
             if (!candidateUrls.has(url)) candidateUrls.set(url, { url });
           }
           continue;
@@ -1378,17 +1404,33 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // never reach evidence-extractor or persistence.
           if (typeof r.url === "string" && r.url.length > 0) {
             const wasDuplicate = candidateUrls.has(r.url);
-            await recordTraceEvent(deps.db, {
-              researchJobId: ctx.jobId,
-              researchAttemptId: attemptId,
-              operationType: "CANDIDATE_RETURNED",
-              providerKind: "SEARCH",
-              patternStep: item.step,
-              component: item.component,
-              targetRef: r.url,
-              status: "OK",
-            });
-            if (wasDuplicate) {
+            // D-152 — A REPLAY DISCOVERS NOTHING, SO IT RECORDS NO DISCOVERY.
+            //
+            // CANDIDATE_RETURNED means "a search returned this". Every url a
+            // replay gateway serves is already in this job's trace — as a
+            // CANDIDATE_RETURNED row from the real search, or as a
+            // SOURCE_RESOURCE_SELECTED row for a curated resource. Writing
+            // the row again adds no information and, for a curated url,
+            // actively corrupts search provenance: it would forge exactly
+            // the event D-150 refused to forge, and the trace would stop
+            // being able to tell a discovered candidate from an approved one.
+            //
+            // Reachable only since components stopped bypassing the gateway,
+            // which is what the rest of D-152 fixes. The candidate itself is
+            // still admitted below; only the duplicate claim is dropped.
+            if (searchMetered) {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "CANDIDATE_RETURNED",
+                providerKind: "SEARCH",
+                patternStep: item.step,
+                component: item.component,
+                targetRef: r.url,
+                status: "OK",
+              });
+            }
+            if (wasDuplicate && searchMetered) {
               await recordTraceEvent(deps.db, {
                 researchJobId: ctx.jobId,
                 researchAttemptId: attemptId,

@@ -48,7 +48,30 @@ export interface AcquisitionLedger {
   // Candidate URLs previously discovered by a given canonical query, so a
   // deduped query still contributes what it found instead of silently
   // shrinking the component's candidate pool.
+  //
+  // JOB-WIDE ON PURPOSE, and used for exactly two things: the acquisition
+  // target list (a url worth fetching is worth fetching once for the whole
+  // job) and the budget fallback below. It is NOT a component's corpus —
+  // see the component-scoped maps that follow.
   candidatesByQuery: ReadonlyMap<string, readonly string[]>;
+  // D-152 — THE SAME QUERY ASKED BY TWO COMPONENTS IS TWO DIFFERENT FACTS.
+  //
+  // Keyed `step:component:canonicalQuery`. A canonical query string is not
+  // a unique key for "what this component discovered": several components
+  // legitimately propose the same query (a `site:` lookup on the project's
+  // mint, for instance), and reuse keyed on the string alone hands one
+  // component another component's findings.
+  //
+  // That is not a theoretical concern. In the live Raydium run the query
+  // `site:solscan.io <mint>` was proposed by steps 1, 5 and 6; step 1 ran it,
+  // and every later component silently inherited step 1's candidate list —
+  // which meant those components never called the search gateway at all, and
+  // so never reached the seed-first ordering that puts an approved
+  // SOURCE_RESOURCE ahead of search results. An approved document was
+  // selected, fetched and sealed, and then shown to nobody, exactly as
+  // before that ordering rule existed.
+  executedQueryComponents: ReadonlySet<string>;
+  candidatesByQueryComponent: ReadonlyMap<string, readonly string[]>;
   // D-146 — which STRATEGIES have already attempted a given canonical
   // url in this job, keyed by the provider name the attempt was traced
   // under.
@@ -85,6 +108,8 @@ export const EMPTY_LEDGER: AcquisitionLedger = {
   deadUrls: new Set(),
   fetchedUrls: new Set(),
   candidatesByQuery: new Map(),
+  executedQueryComponents: new Set(),
+  candidatesByQueryComponent: new Map(),
   strategiesAttempted: new Map(),
   attemptsByProvider: new Map(),
   failureDiagnosticsByUrl: new Map(),
@@ -106,6 +131,11 @@ export async function loadAcquisitionLedger(
         status: researchTraceEvents.status,
         providerName: researchTraceEvents.providerName,
         diagnosticCode: researchTraceEvents.diagnosticCode,
+        // D-152 — the component a row belongs to. Already persisted on
+        // every SEARCH_EXECUTED and CANDIDATE_RETURNED row; the ledger
+        // simply stopped reading it.
+        patternStep: researchTraceEvents.patternStep,
+        component: researchTraceEvents.component,
       })
       .from(researchTraceEvents)
       .where(eq(researchTraceEvents.researchJobId, jobId))
@@ -115,6 +145,8 @@ export async function loadAcquisitionLedger(
     const attemptedUrls = new Set<string>();
     const fetchedUrls = new Set<string>();
     const candidatesByQuery = new Map<string, string[]>();
+    const executedQueryComponents = new Set<string>();
+    const candidatesByQueryComponent = new Map<string, string[]>();
     const strategiesAttempted = new Map<string, Set<string>>();
     const attemptsByProvider = new Map<string, number>();
     const failureDiagnosticsByUrl = new Map<string, string[]>();
@@ -135,7 +167,11 @@ export async function loadAcquisitionLedger(
           currentQuery = ref;
           // A SKIPPED row means the call was refused before it happened
           // (budget denial) — no unit was spent, so it is not "executed".
-          if (row.status !== "SKIPPED") executedQueries.add(ref);
+          if (row.status !== "SKIPPED") {
+            executedQueries.add(ref);
+            const scoped = componentScopeKey(row.patternStep, row.component, ref);
+            if (scoped !== null) executedQueryComponents.add(scoped);
+          }
           if (!candidatesByQuery.has(ref)) candidatesByQuery.set(ref, []);
           break;
         }
@@ -152,6 +188,15 @@ export async function loadAcquisitionLedger(
           if (isLossyTargetRef(ref)) break;
           const list = candidatesByQuery.get(currentQuery);
           if (list && !list.includes(ref)) list.push(ref);
+          // D-152 — the same candidate, attributed to the component that
+          // actually discovered it. The component comes from the row's own
+          // columns, never from the query string.
+          const scoped = componentScopeKey(row.patternStep, row.component, currentQuery);
+          if (scoped !== null) {
+            const scopedList = candidatesByQueryComponent.get(scoped) ?? [];
+            if (!scopedList.includes(ref)) scopedList.push(ref);
+            candidatesByQueryComponent.set(scoped, scopedList);
+          }
           break;
         }
         case "FETCH_ATTEMPTED": {
@@ -206,6 +251,8 @@ export async function loadAcquisitionLedger(
       deadUrls,
       fetchedUrls,
       candidatesByQuery,
+      executedQueryComponents,
+      candidatesByQueryComponent,
       strategiesAttempted,
       attemptsByProvider,
       failureDiagnosticsByUrl,
@@ -219,10 +266,39 @@ export async function loadAcquisitionLedger(
 
 export interface QueryPlanEntry {
   query: string;
-  // False when this job already spent a search unit on this exact query.
+  // False when THIS COMPONENT already ran this exact query in this job (or,
+  // when no component scope is given, when the job did).
   needsSearch: boolean;
-  // Candidates this query is already known to return (empty unless deduped).
+  // What this component itself already found for the query. Empty when the
+  // component has never run it — another component's findings never appear
+  // here, because they are not this component's discovery.
   knownCandidates: readonly string[];
+  // D-152 — has ANY component in this job already paid a search unit for
+  // this query? A budget fact, deliberately separate from the corpus facts
+  // above, so the two can never be confused for one another again.
+  alreadyPaid: boolean;
+  // The job-wide candidates for the query. Usable ONLY as the metered
+  // caller's alternative to paying a second time for the same result set;
+  // never as a component's corpus.
+  jobWideCandidates: readonly string[];
+}
+
+export interface QueryScope {
+  step: number;
+  component: string;
+}
+
+// D-152 — the reuse identity. A candidate list belongs to the (step,
+// component) that discovered it, for the canonical query that discovered
+// it. Returns null when the row carries no component, so an unattributed
+// row can never be mistaken for one component's finding.
+export function componentScopeKey(
+  step: number | null,
+  component: string | null,
+  canonicalQuery: string,
+): string | null {
+  if (step === null || component === null) return null;
+  return `${step}:${component}:${canonicalQuery}`;
 }
 
 // Splits an attempt's intended queries into "must actually search" and
@@ -231,6 +307,7 @@ export interface QueryPlanEntry {
 export function planQueries(
   queries: readonly string[],
   ledger: AcquisitionLedger,
+  scope?: QueryScope,
 ): QueryPlanEntry[] {
   const seenThisAttempt = new Set<string>();
   const out: QueryPlanEntry[] = [];
@@ -240,11 +317,30 @@ export function planQueries(
     // dedupes exact pre-canonical strings.
     if (seenThisAttempt.has(canonical)) continue;
     seenThisAttempt.add(canonical);
-    const alreadyExecuted = ledger.executedQueries.has(canonical);
+
+    const alreadyPaid = ledger.executedQueries.has(canonical);
+    const scopeKey = scope
+      ? componentScopeKey(scope.step, scope.component, canonical)
+      : null;
+    // Without a scope the caller gets the pre-D-152 behaviour unchanged.
+    // With one, "already searched" means "already searched BY THIS
+    // COMPONENT" — the only reading under which reusing the result is
+    // reusing your own work rather than someone else's.
+    const alreadyExecutedHere =
+      scopeKey === null
+        ? alreadyPaid
+        : ledger.executedQueryComponents.has(scopeKey);
+    const ownCandidates =
+      scopeKey === null
+        ? (ledger.candidatesByQuery.get(canonical) ?? [])
+        : (ledger.candidatesByQueryComponent.get(scopeKey) ?? []);
+
     out.push({
       query: raw,
-      needsSearch: !alreadyExecuted,
-      knownCandidates: alreadyExecuted ? (ledger.candidatesByQuery.get(canonical) ?? []) : [],
+      needsSearch: !alreadyExecutedHere,
+      knownCandidates: alreadyExecutedHere ? ownCandidates : [],
+      alreadyPaid,
+      jobWideCandidates: ledger.candidatesByQuery.get(canonical) ?? [],
     });
   }
   return out;

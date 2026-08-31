@@ -226,6 +226,53 @@ the claim-scoped rule that fix put in place.
 are present on the screen and closed by default, so engine work continues
 against the real UI without leaking internals into the product surface.
 
+## THE SAME QUERY ASKED BY TWO COMPONENTS IS TWO DIFFERENT FACTS (D-152)
+
+D-151 put an approved resource first in the corpus the extraction gateway
+serves. It could not help a component that never asked the gateway.
+
+Candidate reuse was keyed on the canonical query string alone. Several
+components legitimately propose the same query, so the first one to run it
+handed its candidate list to every later one through `knownCandidates` — and
+those components then skipped `prepareExtractionReplaySearch` entirely, which
+is where the seed-first ordering lives.
+
+Measured on the live Raydium trace: `site:solscan.io <mint>` was proposed by
+steps 1, 5 and 6. Step 1 ran it and wrote `SEARCH_EXECUTED` +
+`CANDIDATE_RETURNED`; steps 2, 4, 5 and 6 wrote **no `SEARCH_EXECUTED` row at
+all** and went straight to extraction on step 1's urls. That is why
+`ray-buybacks.md` — selected, fetched, sealed `OFFICIAL_DOCS` — still reached
+neither DESTINATION nor RECIPIENT.
+
+**The reuse identity is now (canonical query, patternStep, component).** The
+ledger builds `executedQueryComponents` and `candidatesByQueryComponent` from
+the `pattern_step` / `component` columns the trace already carried;
+`planQueries` takes a scope and returns only that component's own findings.
+
+**Both paths reach the same seed-first builder.** A component that has not run
+a query itself must ask the gateway, and in EXTRACTING the gateway is the
+replay provider — network-impossible and already paid for (D-137), so asking
+costs nothing.
+
+**No budget moved.** "A unit was already spent" is a separate field,
+`alreadyPaid`. On the METERED path a query another component paid for is
+still never paid for twice: the job-wide candidates stand in, as acquisition
+targets, and never as this component's corpus.
+
+**The exact-query list is component-scoped too.** It read
+`ledger.candidatesByQuery`, which is job-wide; routing a component to the
+gateway would otherwise have handed it the same foreign list, ahead of
+everything but the seeds. Both halves of the identity have to hold or neither
+does.
+
+**A replay no longer forges search provenance.** `CANDIDATE_RETURNED` is
+written only on the metered path. Every url a replay serves is already in the
+trace — as a real search's `CANDIDATE_RETURNED`, or as a curated resource's
+`SOURCE_RESOURCE_SELECTED` — so re-recording it adds nothing and, for a
+curated url, would forge exactly the event D-150 refused to forge. Reachable
+only once components stopped bypassing the gateway, which is the rest of this
+change.
+
 ## AN APPROVED RESOURCE NOW SURVIVES THE CAP, NOT JUST THE CORPUS (D-151)
 
 D-150 made a curated document visible to its component. It did not make it
