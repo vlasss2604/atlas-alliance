@@ -27,6 +27,46 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## A PHASED JOB CAN NO LONGER BE ORPHANED BY AN EXHAUSTED DELIVERY
+
+A phase hands off through a queue message with a bounded retry budget
+(pg-boss's default `retry_limit` of 2 — initial delivery plus two retries;
+unchanged, and deliberately not raised). When that budget is spent pg-boss
+moves the message to `failed` — its own rule is `retry_count < retry_limit`
+-> retry, otherwise failed. Nothing then remained to carry the job forward
+while `research_jobs` still said RUNNING with a phase set, and D-139's stale
+sweep excludes phased jobs by design, so the research was orphaned:
+**not finished, not failed, not runnable, and out of reach of every existing
+recovery path.**
+
+`reconcileExhaustedPhaseDeliveries` (worker.ts, beside the D-139 sweep it
+completes) closes that. **Its predicate is terminal delivery state, never
+age** — which is exactly why it is safe where a wall-clock rule is not: a
+phased job may legitimately sit for hours between capability environments,
+and elapsed time says nothing about whether it can still run. It acts only
+when the queue for the job's CURRENT phase holds a terminally `failed`
+message for it AND holds no message for it in a runnable state
+(`created`/`retry`/`active`). An old failure superseded by a legitimate newer
+delivery leaves a runnable row and is skipped; an in-flight delivery is
+`active` and is skipped. If pg-boss has already deleted the history, it says
+nothing rather than guessing.
+
+The outcome uses the existing terminal vocabulary and nothing new:
+`FAILED` / `SYSTEM_OR_PROVIDER_FAILURE` / `PHASE_DELIVERY_EXHAUSTED`. It is a
+**technical execution failure and says nothing whatever about the project's
+evidence** — `INSUFFICIENT_EVIDENCE` remains reserved for research that
+actually ran and found the world wanting. Existing product-failure metering
+applies unchanged (a DEMO reservation is RELEASED), so an execution failure
+is never billed as a completed research result.
+
+**Nothing is rolled back and no delivery is manufactured.** Acquired
+documents, trace, the source-open ledger, D-146 strategy history and the
+recorded phase all survive exactly as the run left them; retry counts are
+never reset and no queue row is written. The invariant is *bounded retries
+-> terminal product failure*, never *bounded retries -> orphaned RUNNING
+job*, and never an automatic recovery loop. Continuing a job whose delivery
+is genuinely spent is a deliberate, separately authorized owner act.
+
 ## OPERATIONAL REQUIREMENT: every worker needs the control plane AND its own reach
 
 A phase worker has two independent network dependencies, and it needs both at

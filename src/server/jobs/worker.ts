@@ -28,6 +28,7 @@ import {
 } from "./owner-alpha-routing";
 import {
   createBoss,
+  PHASE_QUEUE,
   RESEARCH_EXTRACT_QUEUE,
   RESEARCH_FETCH_QUEUE,
   RESEARCH_QUEUE,
@@ -158,6 +159,103 @@ export async function sweepStaleRunningJobs(db: Database): Promise<number> {
     });
   }
   return stale.length;
+}
+
+// D-139's sweep deliberately excludes phased jobs, and that exclusion left a
+// hole this closes: a phased job whose delivery has run out of retries.
+//
+// A phase hands off through a queue message, and that message has a bounded
+// retry budget. When it is spent, pg-boss moves the message to `failed`
+// (its own rule: `retry_count < retry_limit` -> retry, otherwise failed).
+// At that point nothing is left to carry the job forward — no worker will
+// ever be handed it again — while research_jobs still says RUNNING with a
+// phase set. The job is orphaned: not finished, not failed, not runnable,
+// and deliberately out of reach of the stale sweep. That is a product
+// failure, not a research outcome, and it must terminate.
+//
+// THE PREDICATE IS TERMINAL DELIVERY STATE, NEVER AGE. This is what makes
+// it safe to apply to phased jobs where a wall-clock rule is not: a phased
+// job may legitimately sit for hours between capability environments, and
+// elapsed time says nothing about whether it can still run. Two conditions,
+// both read from persisted queue state:
+//
+//   * the queue for the job's CURRENT phase holds a terminally failed
+//     message for it, and
+//   * that same queue holds NO message for it in a runnable state
+//     (created / retry / active).
+//
+// The second condition is what prevents a false failure. A message that is
+// merely old, or that failed once and was superseded by a legitimate newer
+// delivery, leaves a runnable row behind and is skipped; an in-flight
+// delivery is `active` and is skipped for the same reason. Requiring the
+// failed row to actually EXIST is the other half: if pg-boss has already
+// deleted the history (its retention is days, not minutes) this reconciler
+// says nothing rather than guessing, which is the fail-closed direction.
+//
+// It creates no delivery, resets no retry count, and touches no queue row —
+// bounded retries end in a terminal product failure, never in a manufactured
+// extra generation. Acquired documents, trace, the source-open ledger and
+// D-146 strategy history are all left exactly as the run left them: the job
+// is being terminated, not rolled back, and a later authorized recovery
+// still has everything it needs.
+export async function reconcileExhaustedPhaseDeliveries(db: Database): Promise<number> {
+  // Built from PHASE_QUEUE so a new phase cannot silently escape this check;
+  // both sides are code-owned constants bound as parameters.
+  const phaseToQueue = sql.join(
+    Object.entries(PHASE_QUEUE).map(([phase, queue]) => sql`WHEN ${phase} THEN ${queue}`),
+    sql` `,
+  );
+
+  const orphaned = await db.execute<{
+    id: string;
+    level: string;
+    phase: string;
+  }>(sql`
+    WITH phased AS (
+      SELECT j.id,
+             j.entitlement_at_start AS level,
+             j.acquisition_phase AS phase,
+             CASE j.acquisition_phase ${phaseToQueue} END AS queue
+        FROM research_jobs j
+       WHERE j.state = 'RUNNING'
+         AND j.acquisition_phase IS NOT NULL
+    )
+    SELECT p.id, p.level, p.phase
+      FROM phased p
+     WHERE p.queue IS NOT NULL
+       AND EXISTS (
+             SELECT 1 FROM pgboss.job b
+              WHERE b.name = p.queue
+                AND b.data->>'jobId' = p.id::text
+                AND b.state = 'failed')
+       AND NOT EXISTS (
+             SELECT 1 FROM pgboss.job b
+              WHERE b.name = p.queue
+                AND b.data->>'jobId' = p.id::text
+                AND b.state IN ('created', 'retry', 'active'))
+  `);
+
+  for (const job of orphaned.rows) {
+    // The existing terminal vocabulary, unchanged: a technical execution
+    // failure, explicitly NOT an evidentiary outcome. Nothing here claims
+    // anything about the project's evidence — INSUFFICIENT_EVIDENCE remains
+    // reserved for research that actually ran and found the world wanting.
+    // finishPhasedJob also carries the existing product-failure metering:
+    // a DEMO reservation is RELEASED, so an execution failure is never
+    // billed as a completed research result.
+    await finishPhasedJob(
+      db,
+      job.id,
+      {
+        state: "FAILED",
+        terminationReason: "SYSTEM_OR_PROVIDER_FAILURE",
+        errorCode: "PHASE_DELIVERY_EXHAUSTED",
+      },
+      job.level,
+      "phase delivery exhausted: no runnable " + job.phase + " delivery remains",
+    );
+  }
+  return orphaned.rows.length;
 }
 
 // Обработчик одной задачи очереди — вынесен из startWorker() именованной
@@ -594,11 +692,20 @@ export async function startWorker() {
   console.log("[worker] renderer capability:", renderer.outcome);
 
   await sweepStaleRunningJobs(db);
+  // Runs after boss.start()/createQueue above, so the queue tables this
+  // reads are guaranteed to exist.
+  await reconcileExhaustedPhaseDeliveries(db);
   await runMaintenance(db);
-  const maintenanceTimer = setInterval(
-    () => runMaintenance(db).catch((e) => console.error("[maintenance]", e)),
-    10 * 60 * 1000,
-  );
+  const maintenanceTimer = setInterval(() => {
+    runMaintenance(db).catch((e) => console.error("[maintenance]", e));
+    // Separate call, separate catch: a queue-reconciliation failure must not
+    // stop session/rate-limit maintenance, or the reverse. A delivery can
+    // exhaust its retries long after this process started, so this is
+    // periodic rather than startup-only.
+    reconcileExhaustedPhaseDeliveries(db).catch((e) =>
+      console.error("[phase reconcile]", e),
+    );
+  }, 10 * 60 * 1000);
 
   // The entry queue is always served: it still carries single-process
   // jobs, which need no phase capability at all.
