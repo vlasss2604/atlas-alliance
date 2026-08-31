@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { asc, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { acquiredDocuments, researchTraceEvents } from "../db/schema";
@@ -1194,9 +1194,14 @@ export async function prepareExtractionReplaySearch(
 ): Promise<SearchGateway> {
   const ledger = await loadAcquisitionLedger(db, jobId);
 
-  // The per-component corpus, from the same closed event type the ledger
+  // The per-component corpus, from the same closed event types the ledger
   // reads. Lossy refs are excluded here exactly as the ledger excludes
   // them: a redacted or truncated ref is not a fetchable URL.
+  //
+  // Ordered by the trace's own monotonic per-job `sequence`, so the corpus
+  // this function serves is a deterministic function of the job's history
+  // and not of physical row order — the same reconstruction discipline
+  // acquisition-ledger.ts already applies.
   const rows = await db
     .select({
       operationType: researchTraceEvents.operationType,
@@ -1205,7 +1210,8 @@ export async function prepareExtractionReplaySearch(
       targetRef: researchTraceEvents.targetRef,
     })
     .from(researchTraceEvents)
-    .where(eq(researchTraceEvents.researchJobId, jobId));
+    .where(eq(researchTraceEvents.researchJobId, jobId))
+    .orderBy(asc(researchTraceEvents.sequence));
 
   // D-150 — A COMPONENT'S CORPUS HAS TWO PROVENANCES, AND BOTH ARE
   // PERSISTED FACTS ABOUT THIS RUN.
@@ -1221,17 +1227,39 @@ export async function prepareExtractionReplaySearch(
   //
   // The two events stay distinct in the trace, so search analytics is not
   // contaminated by curated targets; only the corpus is merged.
-  const byComponent = new Map<string, string[]>();
+  //
+  // D-151 — THE TWO PROVENANCES ARE KEPT APART, BECAUSE THEY RANK
+  // DIFFERENTLY.
+  //
+  // D-150 made a curated resource VISIBLE to its component. It did not
+  // make it SURVIVE: merged into one list it landed after every search
+  // candidate, and the per-query search-result cap then cut it. In the
+  // first live run that happened in all five seeded slots — the documents
+  // were selected first, opened first, sealed with full authority, and
+  // then shown to no component at all, because they were always at index
+  // >= the cap.
+  //
+  // A resource is not a search result and must not be ranked as one: a
+  // human approved it FOR this component, which is why acquisition serves
+  // it first. Extraction now honours the same priority instead of
+  // inverting it. This is an ORDERING rule only — it grants no authority,
+  // admits no url this job did not persist provenance for, changes no
+  // class, no admissibility and no budget.
+  const seedByComponent = new Map<string, string[]>();
+  const searchByComponent = new Map<string, string[]>();
   for (const row of rows) {
     const isSearchProvenance = row.operationType === "CANDIDATE_RETURNED";
     const isSeedProvenance = row.operationType === "SOURCE_RESOURCE_SELECTED";
     if (!isSearchProvenance && !isSeedProvenance) continue;
     if (row.patternStep === null || row.component === null || !row.targetRef) continue;
     if (isLossyTargetRef(row.targetRef)) continue;
+    // Keyed by (step, component): provenance recorded for one component
+    // never reaches another, in either direction.
     const key = `${row.patternStep}:${row.component}`;
-    const list = byComponent.get(key) ?? [];
+    const target = isSeedProvenance ? seedByComponent : searchByComponent;
+    const list = target.get(key) ?? [];
     if (!list.includes(row.targetRef)) list.push(row.targetRef);
-    byComponent.set(key, list);
+    target.set(key, list);
   }
 
   return {
@@ -1240,18 +1268,32 @@ export async function prepareExtractionReplaySearch(
     // phase. Replaying them performs no external search.
     metering: "REPLAY" as const,
     async search(query, target, opts) {
+      const key = `${target.step}:${target.component}`;
+      // D-151 — approved resources for THIS component, ahead of anything a
+      // search returned. Bounded by what acquisition already bounded: the
+      // per-job seed cap limits how many resources can be selected at all,
+      // and provenance limits each one to the components it was approved
+      // to serve, so this prefix cannot grow to crowd out the corpus.
+      const seeds = seedByComponent.get(key) ?? [];
       const exact = ledger.candidatesByQuery.get(canonicalTargetRef(query)) ?? [];
-      const forComponent = byComponent.get(`${target.step}:${target.component}`) ?? [];
+      const forComponent = searchByComponent.get(key) ?? [];
       const seen = new Set<string>();
       const urls: string[] = [];
-      // Exact-query candidates first — a faithful replay of a query the
-      // phase really ran — then the rest of this component's corpus.
-      for (const url of [...exact, ...forComponent]) {
+      // Approved resources first, then exact-query candidates — a faithful
+      // replay of a query the phase really ran — then the rest of this
+      // component's search corpus. A url reached by both provenances is
+      // ONE entry, taken at its earliest position: the same canonical
+      // dedup as everywhere else, so nothing is served twice and no seat
+      // is spent twice.
+      for (const url of [...seeds, ...exact, ...forComponent]) {
         const canonical = canonicalTargetRef(url);
         if (seen.has(canonical)) continue;
         seen.add(canonical);
         urls.push(url);
       }
+      // The cap itself is UNCHANGED. What changes is which entries are
+      // worth the seats: a displaced search candidate is the intended
+      // trade against an approved authoritative document.
       return urls.slice(0, opts.maxResults).map((url) => ({ url, title: null, snippet: null }));
     },
   };

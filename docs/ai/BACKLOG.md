@@ -8,6 +8,25 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
+- **`candidatesByQuery` is keyed by query string alone** — so the same query
+  string executed for two components shares one candidate list, and the
+  extraction replay serves component A's candidates to component B. Observed in
+  Raydium job `d13a0d79`: the query `site:solscan.io <mint>` ran at steps 1, 5
+  and 6, and step 1's candidates (`raydium.io/liquidity/create-pool/` among
+  them) were served to CURRENT_STATE and DESTINATION, where they extracted
+  nothing. Not the cause of the D-151 failure and deliberately not fixed in that
+  round: it wastes corpus seats and pollutes per-component replay, but it admits
+  no url the job did not discover and changes no authority. Needs its own scoped
+  task — the fix is to key the reuse by (query, step, component), which touches
+  `acquisition-ledger.ts` reconstruction.
+- **`tests/s10-live-provider-enablement.test.ts` fails on Windows** — the
+  static boundary check builds its scan root with `new URL(...).pathname`,
+  which yields `/C:/...`; `readdir` then resolves that against the current
+  drive and looks for `C:\C:\...`. Verified pre-existing at `511862d` in a
+  clean worktree, so it is a test-harness path bug, not a product defect —
+  the sibling `app/` case only passes because it swallows ENOENT. Whoever
+  fixes it should use `fileURLToPath`, and check the ENOENT catch is not
+  hiding a second silent skip.
 - **Reserved vs spent source-open accounting** — a discrepancy between what the
   budget reserves and what it records as spent.
 - **Cross-component duplicate chain facts** — the same chain observation can be

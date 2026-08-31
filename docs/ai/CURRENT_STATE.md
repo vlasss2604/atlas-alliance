@@ -127,6 +127,45 @@ never reset and no queue row is written. The invariant is *bounded retries
 job*, and never an automatic recovery loop. Continuing a job whose delivery
 is genuinely spent is a deliberate, separately authorized owner act.
 
+## AN APPROVED RESOURCE NOW SURVIVES THE CAP, NOT JUST THE CORPUS (D-151)
+
+D-150 made a curated document visible to its component. It did not make it
+survive. `prepareExtractionReplaySearch` merged both provenances into one
+list ordered `exact → component corpus`, so a resource — which by
+definition has no search provenance — always landed behind every search
+candidate, and `slice(0, maxResults)` with `MAX_SEARCH_RESULTS_PER_QUERY
+= 5` then cut it.
+
+The first live Raydium run (`d13a0d79`) showed the cost with no ambiguity.
+In **all five** seeded slots the resource sat at index 5, 5, 5, 10 and 10
+against a cap of 5. Both official `.md` documents were selected first,
+opened first, sealed `CONFIRMED` / `OFFICIAL_DOCS` — and read by nobody.
+Zero characters of either reached a model. The three facts the run did
+extract came from social pages and were correctly excluded, so the Proof
+had no admissible official-doc Evidence.
+
+**Serve order is now: approved resources → exact-query candidates → the
+rest of the component's search corpus**, then the existing, unchanged cap.
+The two provenances are held in separate maps because they rank
+differently. A resource is not a search result: a human approved it FOR
+this component, which is why acquisition already serves it first —
+extraction simply stops inverting that priority.
+
+**Ordering is deterministic.** The corpus is read `ORDER BY sequence`, the
+trace's own monotonic per-job counter, so what a component is served is a
+function of the job's history rather than of physical row order — the same
+reconstruction discipline `acquisition-ledger.ts` already applies.
+
+**It is an ordering rule and nothing else.** A prioritised entry is shaped
+exactly like a search candidate (`url`/`title`/`snippet`); being served
+first says "read this", never "this is authoritative". Class and
+officiality are still decided by `resolveSourceRoute` at acquisition, and
+admission is untouched. No bound moved: `maxResults` unchanged, the
+`sourceOpens` budget unchanged, D-148's per-job seed cap unchanged,
+acquisition unchanged, prompts and model logic unchanged, and current
+Project Memory is still never consulted at extraction. Displacing a search
+candidate is the intended trade.
+
 ## A CURATED DOCUMENT NOW REACHES THE COMPONENT IT WAS APPROVED FOR (D-150)
 
 D-148 put human-approved resources into acquisition. It did not put them
