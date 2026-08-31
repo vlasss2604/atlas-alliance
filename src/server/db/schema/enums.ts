@@ -182,6 +182,13 @@ export const projectMemoryKind = pgEnum("project_memory_kind", [
   // row), and neither is ever evidence: a locator proves where to look,
   // never what is true. SOURCE != EVIDENCE != FACT.
   "PROJECT_IDENTITY",
+  // D-148 — an EXACT, human-approved, fetchable source url. Distinct from
+  // SOURCE_ROUTE, which grants a CLASS to everything under a path prefix:
+  // a prefix may be a whole documentation tree and is never itself a
+  // resource. A SOURCE_RESOURCE grants no authority — it only says this
+  // one url is worth attempting, and its class is resolved by the route
+  // resolver at acquisition time, every time.
+  "SOURCE_RESOURCE",
 ]);
 
 // Фаза 6 (phase-6-plan.md §6.2). Прямота доказательства — правило

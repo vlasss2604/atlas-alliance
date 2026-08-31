@@ -27,6 +27,66 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## A KNOWN SOURCE NO LONGER DEPENDS ON SEARCH REDISCOVERING IT (D-148)
+
+Acquisition targets came only from search discovery. So a project could
+hold an ACTIVE, human-classified route AND a known-good document under it,
+and still never fetch that document because search returned an
+unclassified sibling path instead — which is exactly what happened:
+`/ray/protocol-fees` was found, `/ray/protocol-fees.md` was classified, the
+two are **disjoint** routes (`.md` does not begin a new segment), so
+`routeClass` resolved null and every fact was correctly admitted at the
+weakest source class. The admission layer was right; the PLAN was blind.
+
+**`SOURCE_RESOURCE` is a new project-memory kind, deliberately NOT a field
+on `SOURCE_ROUTE`**, because the two answer different questions:
+
+```
+SOURCE_ROUTE     what authority does content under this PREFIX carry?
+SOURCE_RESOURCE  which exact URL has a human approved as worth fetching?
+```
+
+A prefix is not a resource. This database already holds an ACTIVE
+classified `/docs` route — a whole documentation tree — and two ACTIVE
+prefixes whose own urls serve no document at all (one 404s, one never
+returns a readable page). Telling a prefix from a document by inspection
+needs a path-shape heuristic (`.md`, an extension, depth) that breaks on
+the first project publishing extensionless documents, so **the distinction
+is recorded by a human rather than guessed by code**.
+
+**A resource grants no authority.** It never carries a `routeClass`, never
+reaches Evidence, and its only power is to put a url in front of the
+ordinary bounded acquisition path. What that url is worth is decided by
+`resolveSourceRoute` at acquisition, every time.
+
+**Registration** (`scripts/register-source-resource.ts`, an owner act)
+canonicalizes the url, requires https, and asks the REAL resolver that it
+resolves for THIS project to CONFIRMED with a non-null `routeClass` —
+making cross-project and unclassified registration impossible rather than
+merely discouraged. `componentKeys` are mandatory, non-empty, and validated
+against the ACTIVE pattern's own component vocabulary: no new taxonomy, and
+no model input.
+
+**Eligibility is re-decided at planning time from current state** — the row
+is ACTIVE, its components intersect the boundary contract's work queue
+(question-bounded), and the url STILL resolves through an ACTIVE classified
+route. An approval therefore cannot outlive the route that justified it,
+and can never borrow authority from another path.
+
+**Bounds unchanged**: at most 3 seeds per Research, spending the SAME
+`maxSourceOpens` and every existing ceiling — no budget grows because a
+project has curated sources. Dedup is shared through `canonicalTargetRef`,
+so a url known both ways is one target and one spend. Priority is expressed
+purely as ORDER: seeds enter the same bounded list ahead of search
+candidates, so the ceilings cut the unclassified tail first. Selection is
+deterministic and stable (oldest approval, tie-broken by id) and never
+involves a model.
+
+Untouched: source admission, OFFICIAL_DOCS semantics, component matrices,
+officiality rules and route matching. **`/foo` still does not inherit
+`/foo.md`'s authority**, and a confirmed host is still not documentation
+authority.
+
 ## A PHASED JOB CAN NO LONGER BE ORPHANED BY AN EXHAUSTED DELIVERY
 
 A phase hands off through a queue message with a bounded retry budget

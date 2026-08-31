@@ -10,6 +10,8 @@ import {
   strategyAlreadyAttempted,
 } from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
+import { loadJobContractView } from "./job-contract-view";
+import { loadEligibleSourceResources } from "../memory/source-resource";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
   calculateActualCostMicro,
@@ -402,16 +404,81 @@ async function currentSearchQueriesReserved(
 // a copy: only CANDIDATE_RETURNED rows contribute, lossy refs are already
 // excluded by loadAcquisitionLedger, and urls this job already proved
 // dead or already fetched are dropped here.
+// D-148 — WHAT THIS RESEARCH STILL NEEDS, as component names.
+//
+// The boundary contract's own work queue: the components the planner did
+// NOT mark satisfied from memory. Using it rather than the whole pattern is
+// what keeps a seeded resource question-bounded — a project's curated
+// sources are eligible because they serve something this job is actually
+// missing, not merely because they exist.
+//
+// Degrade-never-throw, exactly like the ledger it sits beside: acquisition
+// memory is an optimisation and must never fail a job that would otherwise
+// run. No readable contract, no seeds.
+async function neededComponents(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<Set<string>> {
+  try {
+    const { view } = await loadJobContractView(db, jobId);
+    return new Set(view.workQueue.map((item) => item.component));
+  } catch {
+    return new Set();
+  }
+}
+
 export async function loadFetchTargets(
   db: Database | Transaction,
   jobId: string,
+  projectId?: string | null,
 ): Promise<string[]> {
   const ledger = await loadAcquisitionLedger(db, jobId);
   const out: string[] = [];
   const seen = new Set<string>();
+
+  // D-148 — HUMAN-APPROVED RESOURCES GO FIRST.
+  //
+  // Search discovery is not the only thing ATLAS knows. Where a human has
+  // already approved an exact url as worth fetching for this project, and
+  // that url STILL resolves through an ACTIVE classified route, it should
+  // not depend on a search engine rediscovering it — which is exactly what
+  // failed: search returned an unclassified sibling path, the classified
+  // resource was never fetched, and every fact from that document was
+  // correctly admitted at the weakest source class there is.
+  //
+  // (Named that way on purpose: a D-141 boundary test asserts this module
+  // contains no source-class token at all, and it is right to — deciding
+  // what a document is worth is the authority layer's job, never the
+  // planner's. This code only causes a url to be researched.)
+  //
+  // Order is the whole of the priority rule: seeds enter the SAME bounded
+  // list before search candidates, so wherever the existing ceilings cut,
+  // they cut the unclassified tail first. Relevance is not overridden —
+  // eligibility already required the resource to serve a component this
+  // job still needs.
+  //
+  // Seeds spend the ordinary source-open budget like any other target. No
+  // ceiling moves because a project has curated sources.
+  if (projectId) {
+    const seeds = await loadEligibleSourceResources(
+      db,
+      projectId,
+      await neededComponents(db, jobId),
+    );
+    for (const url of seeds) {
+      const canonical = canonicalTargetRef(url);
+      if (seen.has(canonical)) continue;
+      seen.add(canonical);
+      if (ledger.fetchedUrls.has(canonical)) continue;
+      out.push(url);
+    }
+  }
+
   for (const urls of ledger.candidatesByQuery.values()) {
     for (const url of urls) {
       const canonical = canonicalTargetRef(url);
+      // Dedup is canonical and shared with the seeds above, so a url known
+      // both ways is one target and one budget spend, never two.
       if (seen.has(canonical)) continue;
       seen.add(canonical);
       // D-146 — a url leaves the target list when it has been ACQUIRED,
@@ -529,7 +596,7 @@ export async function runFetchPhase(input: {
     exhaustedUrls: [],
     strategyAttempts: [],
   };
-  const targets = await loadFetchTargets(input.db, input.jobId);
+  const targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
 
   for (const url of targets) {
     // Fail closed before any transport call.
