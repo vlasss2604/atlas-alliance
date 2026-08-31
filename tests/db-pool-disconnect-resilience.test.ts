@@ -1,7 +1,26 @@
+import { spawn } from "node:child_process";
+import path from "node:path";
+
 import { afterAll, describe, expect, it } from "vitest";
 
 import { createDatabase, safeDbErrorLabel } from "../src/server/db/client";
 import { TEST_DATABASE_URL } from "./phase1-setup";
+
+const CHILD_SCRIPT = path.join("tests", "fixtures", "db-disconnect-child.ts");
+
+// Polls the child's stdout for the backend pid it reports from inside its
+// open transaction. Polling its real output beats sleeping a guessed
+// interval: the kill lands only once the transaction genuinely holds a
+// connection.
+async function waitForPid(read: () => string, timeoutMs = 30_000): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const m = /PID=(\d+)/.exec(read());
+    if (m) return Number(m[1]);
+    if (Date.now() > deadline) throw new Error("child never reported a backend pid");
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
 
 // THE CENTRAL POOL MUST SURVIVE LOSING AN IDLE CONNECTION.
 //
@@ -114,9 +133,13 @@ describe("central pool: an idle client dying is survivable", () => {
     const killer = makePool();
 
     const client = await pool.connect();
-    // pg attaches no error listener to a checked-out client; the test owns
-    // it for the duration, exactly as an ordinary caller would have to.
-    client.on("error", () => {});
+
+    // NO test-owned error listener here, deliberately. An earlier version of
+    // this test attached one and thereby supplied the exact cover production
+    // was missing — it passed while the real worker died. The listener that
+    // keeps this process alive must be the PRODUCTION one, installed by
+    // createDatabase on the pool's `connect` event, so assert it is there.
+    expect(client.listenerCount("error")).toBeGreaterThan(0);
 
     const { rows } = await client.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
     const pid = Number(rows[0].pid);
@@ -172,4 +195,61 @@ describe("what a database error is allowed to say", () => {
     }
     expect(safeDbErrorLabel("not an error")).toBe("UnknownError");
   });
+});
+
+// ---------------------------------------------------------------- child
+// THE CHECKED-OUT CLIENT, OBSERVED AS A REAL PROCESS.
+//
+// An unhandled EventEmitter `error` kills a process, and a process death is
+// not observable from inside the process it kills. This suite therefore
+// runs the failure in a child and judges it by its EXIT CODE — the same
+// signal the production incident produced.
+describe("checked-out client: a transaction losing its connection is survivable", () => {
+  it("rejects the transaction, keeps the child alive, and recovers on a fresh backend", async () => {
+    const child = spawn(
+      process.execPath,
+      [path.join("node_modules", "tsx", "dist", "cli.mjs"), CHILD_SCRIPT],
+      {
+        cwd: process.cwd(),
+        env: { ...process.env, TEST_DATABASE_URL },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+
+    let out = "";
+    let errOut = "";
+    child.stdout.on("data", (b: Buffer) => {
+      out += b.toString();
+    });
+    child.stderr.on("data", (b: Buffer) => {
+      errOut += b.toString();
+    });
+
+    const exited = new Promise<number>((resolve) => {
+      child.on("exit", (code) => resolve(code ?? -1));
+    });
+
+    // Wait for the child to be inside its transaction and tell us which
+    // backend is serving it.
+    const pid = await waitForPid(() => out);
+
+    // Kill that backend from an entirely separate connection, while the
+    // transaction's pg_sleep is genuinely in flight.
+    const killer = makePool();
+    await killer.pool.query("SELECT pg_terminate_backend($1)", [pid]);
+
+    const code = await exited;
+
+    // The production crash was a NON-ZERO exit with this signature on
+    // stderr. Assert against it by name so a regression reads unmistakably.
+    expect(errOut).not.toMatch(/Emitted 'error' event on Client instance/);
+    expect(out).toContain("TX_REJECTED");
+    expect(out).toContain("DONE");
+    expect(code).toBe(0);
+
+    // ...and the recovery really used a different, live backend.
+    const recovered = /RECOVERED_PID=(\d+)/.exec(out);
+    expect(recovered).not.toBeNull();
+    expect(Number(recovered?.[1])).not.toBe(pid);
+  }, 90_000);
 });

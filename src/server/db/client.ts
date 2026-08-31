@@ -71,6 +71,46 @@ export function createDatabase(connectionString = process.env.DATABASE_URL) {
     console.error("[db pool] idle client error:", safeDbErrorLabel(err));
   });
 
+  // A CHECKED-OUT CLIENT DYING MUST NOT KILL THE PROCESS EITHER.
+  //
+  // The pool listener above covers exactly one half of the problem, because
+  // pg-pool routes a client error to the POOL only while that client is
+  // idle — it detaches its own listener on acquire. A client checked out by
+  // a Drizzle transaction (`db.transaction()` takes one for the whole
+  // transaction) therefore has no pool-level cover at all, and pg emits the
+  // socket failure directly on the CLIENT (`Client._handleErrorEvent`).
+  // With nothing listening there, Node kills the process:
+  // "Emitted 'error' event on Client instance". A worker died mid-transaction
+  // for the same environmental cause the pool listener already survives.
+  //
+  // So every physical connection gets a permanent client-level listener,
+  // installed here rather than at each call site. `connect` is the right
+  // seam for three reasons: pg-pool emits it once per NEW client
+  // (`_acquireClient(..., isNew=true)`), it fires BEFORE `acquire` and
+  // before the client is handed to the caller — so no application work can
+  // ever touch a client that lacks the listener — and because it is once
+  // per connection rather than per checkout, listeners cannot accumulate.
+  //
+  // The listener is permanent by design: it is never removed, so it covers
+  // the client while idle, while checked out, and for the whole life of a
+  // transaction. The pool-level handler is untouched and still fires for
+  // idle clients; the two report from different boundaries and say so,
+  // which is why one idle failure legitimately logs both lines.
+  //
+  // THIS DOES NOT SWALLOW ANYTHING, and pg's own ordering is the proof.
+  // `_handleErrorEvent` sets `_queryable = false`, calls
+  // `_errorAllQueries(err)` — rejecting every in-flight query and thereby
+  // the transaction — and only THEN emits `error`. The rejection has
+  // already happened before this handler can run, so an active query or
+  // transaction still fails exactly as it did before, at the caller, where
+  // worker and pg-boss retry semantics remain authoritative. There is no
+  // SQL retry, no transaction replay, and no rejection is absorbed here.
+  pool.on("connect", (client) => {
+    client.on("error", (err) => {
+      console.error("[db client] connection error:", safeDbErrorLabel(err));
+    });
+  });
+
   const db = drizzle(pool, { schema });
   return { db, pool };
 }
