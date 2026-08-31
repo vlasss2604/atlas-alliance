@@ -256,12 +256,17 @@ export async function registerSourceResource(
 // superseded, the resource loses its standing the moment that happens. An
 // approval cannot outlive its authority, and it can never borrow authority
 // from some other path.
-export async function loadEligibleSourceResources(
+// D-150 — the same eligibility decision, returning the approved coverage
+// alongside the url. The planner needs both: the url to acquire, and the
+// components the human approved it for, so it can persist WHY this run
+// selected it. Nothing else changes — coverage is read from the same row
+// that was already being filtered on.
+export async function loadEligibleSourceResourcesWithCoverage(
   db: Database | Transaction,
   projectId: string,
   neededComponents: ReadonlySet<string>,
   limit: number = MAX_SOURCE_RESOURCE_SEEDS,
-): Promise<string[]> {
+): Promise<SourceResourceContent[]> {
   if (limit <= 0 || neededComponents.size === 0) return [];
 
   const rows = await db
@@ -275,18 +280,13 @@ export async function loadEligibleSourceResources(
       ),
     );
 
-  // Deterministic, stable order: oldest approval first, tie-broken by id.
-  // No existing candidate ordering applies to resources (search candidates
-  // are ordered by query provenance, which a resource has none of), so this
-  // is the smallest code-owned rule that produces the same plan for the
-  // same database on every run — and it never depends on a model.
   const ordered = [...rows].sort((a, b) => {
     const at = a.createdAt?.getTime() ?? 0;
     const bt = b.createdAt?.getTime() ?? 0;
     return at === bt ? a.id.localeCompare(b.id) : at - bt;
   });
 
-  const out: string[] = [];
+  const out: SourceResourceContent[] = [];
   for (const row of ordered) {
     if (out.length >= limit) break;
     const content = readSourceResourceContent(row.content);
@@ -296,7 +296,19 @@ export async function loadEligibleSourceResources(
     const resolved = await resolveSourceRoute(db, projectId, content.canonicalUrl);
     if (resolved.officiality !== "CONFIRMED" || resolved.routeClass === null) continue;
 
-    out.push(content.canonicalUrl);
+    out.push(content);
   }
   return out;
+}
+
+export async function loadEligibleSourceResources(
+  db: Database | Transaction,
+  projectId: string,
+  neededComponents: ReadonlySet<string>,
+  limit: number = MAX_SOURCE_RESOURCE_SEEDS,
+): Promise<string[]> {
+  // Urls only, for callers that do not need coverage. One eligibility
+  // implementation, so the two can never disagree about what is seedable.
+  const eligible = await loadEligibleSourceResourcesWithCoverage(db, projectId, neededComponents, limit);
+  return eligible.map((r) => r.canonicalUrl);
 }

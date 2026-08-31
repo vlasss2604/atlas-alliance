@@ -127,6 +127,53 @@ never reset and no queue row is written. The invariant is *bounded retries
 job*, and never an automatic recovery loop. Continuing a job whose delivery
 is genuinely spent is a deliberate, separately authorized owner act.
 
+## A CURATED DOCUMENT NOW REACHES THE COMPONENT IT WAS APPROVED FOR (D-150)
+
+D-148 put human-approved resources into acquisition. It did not put them
+into extraction, and the first live Raydium run showed exactly what that
+costs: both authoritative `.md` documents were selected first, fetched
+(`FETCH_OK`, 6302 and 2940 bytes) and sealed `CONFIRMED` /
+`OFFICIAL_DOCS` — then shown to **no component at all**. Seven extraction
+model calls read only the social corpus and produced zero Evidence. The
+cause: D-141 builds a component's corpus from `CANDIDATE_RETURNED` rows,
+and a seeded resource has none, because no search ever returned it.
+
+**Provenance is now persisted at SELECTION time**, as a fact about the run.
+A new trace operation `SOURCE_RESOURCE_SELECTED` (migration 0039, one enum
+value) records canonical url + patternStep + component +
+`providerName: "source-resource"` for each component the resource was
+approved to serve **in this job** — the intersection of its human-approved
+`componentKeys` with the boundary contract's work queue, never its whole
+coverage and never a component outside the job. The step travels with the
+component because it comes from the same contract, built from the ACTIVE
+pattern; there is no second lookup to drift. Writing is idempotent, so a
+redelivered phase does not double the trace.
+
+**`CANDIDATE_RETURNED` was deliberately not forged.** That event means "a
+search returned this". Emitting it for a curated url would have made the
+existing map work by corrupting search provenance — the trace could no
+longer tell a discovered candidate from an approved one. The two events
+stay distinct; only the corpus is merged.
+
+**The extraction corpus is the union** of the two provenances per
+(step, component), through the existing canonical dedup: a url known both
+ways is one acquisition target, one source open, one corpus entry — and two
+distinguishable trace events.
+
+**Current memory is never consulted at extraction.** The chain runs forward
+only: memory at planning time → provenance on the run's trace → acquisition
+→ sealed authority snapshot → replay. A resource superseded, re-scoped or
+withdrawn after planning cannot retroactively change what an already-running
+job was entitled to read, and a route superseded after acquisition cannot
+change the snapshot the document already carries.
+
+**Provenance grants no authority.** It says "this document was selected FOR
+component X", never "this document proves X". The class is still decided by
+`resolveSourceRoute` at acquisition, Evidence is still written only by the
+ordinary extraction path, and admission is unchanged. Extraction still reads
+only documents already acquired for the job and makes no live request; a
+seed whose acquisition failed leaves provenance and nothing else.
+
 ## BOTH WORKERS NOW RUN AT ONCE, AND THE ENVIRONMENT IS CHECKED (D-149)
 
 Local development no longer changes network state between phases. The OS

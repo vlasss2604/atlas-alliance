@@ -297,6 +297,14 @@ export const traceOperationType = pgEnum("trace_operation_type", [
   "CANDIDATE_RETURNED",
   "CANDIDATE_DEDUPED",
   "CANDIDATE_SKIPPED_BUDGET",
+  // D-150 — an acquisition target admitted from a human-approved
+  // SOURCE_RESOURCE rather than discovered by search. Deliberately NOT
+  // CANDIDATE_RETURNED: that event means "a search returned this", and
+  // forging it to make the extraction replay map work would corrupt
+  // search provenance. Carries the component (and its pattern step) the
+  // resource was approved to serve in THIS job, so extraction can replay
+  // it without re-reading memory that may since have changed.
+  "SOURCE_RESOURCE_SELECTED",
   "FETCH_ATTEMPTED",
   "FETCH_OK",
   "FETCH_FAILED",

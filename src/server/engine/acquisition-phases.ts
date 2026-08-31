@@ -11,7 +11,7 @@ import {
 } from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { loadJobContractView } from "./job-contract-view";
-import { loadEligibleSourceResources } from "../memory/source-resource";
+import { loadEligibleSourceResourcesWithCoverage } from "../memory/source-resource";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
   calculateActualCostMicro,
@@ -415,16 +415,90 @@ async function currentSearchQueriesReserved(
 // Degrade-never-throw, exactly like the ledger it sits beside: acquisition
 // memory is an optimisation and must never fail a job that would otherwise
 // run. No readable contract, no seeds.
-async function neededComponents(
+async function neededWorkItems(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<Array<{ step: number; component: string }>> {
+  try {
+    const { view } = await loadJobContractView(db, jobId);
+    // The step travels with the component because provenance must record
+    // BOTH: the extraction replay is keyed by (step, component), and the
+    // canonical mapping between them belongs to the ACTIVE pattern the
+    // contract was built from — never to a second lookup that could drift.
+    return view.workQueue.map((item) => ({ step: item.step, component: item.component }));
+  } catch {
+    return [];
+  }
+}
+
+// D-150 — WHY A COMPONENT MAY READ A DOCUMENT NO SEARCH RETURNED.
+//
+// A seeded resource has no search provenance, and the extraction replay
+// builds each component's corpus from search provenance. Without this, a
+// seeded document is fetched, sealed with full authority, and then shown to
+// nobody — which is exactly what happened on the first live run.
+//
+// So the association is PERSISTED AT SELECTION TIME, once, as a fact about
+// this run: this url was admitted for these components of this job. It is
+// written before the url is returned as a target, so a document can never
+// be acquired for a component that cannot later read it.
+//
+// It is deliberately NOT a CANDIDATE_RETURNED row. That event means "a
+// search returned this", and forging it would make the extraction map work
+// by corrupting search provenance — the trace would no longer be able to
+// tell a discovered candidate from a curated one.
+//
+// Idempotent across redelivery: what is already recorded is not recorded
+// again, so a phase that runs twice does not double the trace.
+async function recordSeedProvenance(
+  db: Database | Transaction,
+  jobId: string,
+  url: string,
+  components: readonly string[],
+  workItems: ReadonlyArray<{ step: number; component: string }>,
+  already: ReadonlySet<string>,
+): Promise<void> {
+  const canonical = canonicalTargetRef(url);
+  for (const item of workItems) {
+    // Only components this resource was APPROVED to serve, intersected
+    // with what this job still needs. Never the resource's whole coverage,
+    // and never a component outside the job's boundary.
+    if (!components.includes(item.component)) continue;
+    if (already.has(`${item.step}:${item.component}:${canonical}`)) continue;
+    await recordTraceEvent(db, {
+      researchJobId: jobId,
+      operationType: "SOURCE_RESOURCE_SELECTED",
+      providerKind: "FETCH",
+      // Names the provenance channel, so search and curated targets stay
+      // distinguishable in the trace by more than the operation alone.
+      providerName: "source-resource",
+      patternStep: item.step,
+      component: item.component,
+      targetRef: url,
+      status: "OK",
+    });
+  }
+}
+
+// What this job has ALREADY recorded, so redelivery is quiet.
+async function existingSeedProvenance(
   db: Database | Transaction,
   jobId: string,
 ): Promise<Set<string>> {
-  try {
-    const { view } = await loadJobContractView(db, jobId);
-    return new Set(view.workQueue.map((item) => item.component));
-  } catch {
-    return new Set();
+  const rows = await db
+    .select({
+      patternStep: researchTraceEvents.patternStep,
+      component: researchTraceEvents.component,
+      targetRef: researchTraceEvents.targetRef,
+    })
+    .from(researchTraceEvents)
+    .where(eq(researchTraceEvents.researchJobId, jobId));
+  const out = new Set<string>();
+  for (const row of rows) {
+    if (row.patternStep === null || row.component === null || !row.targetRef) continue;
+    out.add(`${row.patternStep}:${row.component}:${canonicalTargetRef(row.targetRef)}`);
   }
+  return out;
 }
 
 export async function loadFetchTargets(
@@ -460,17 +534,27 @@ export async function loadFetchTargets(
   // Seeds spend the ordinary source-open budget like any other target. No
   // ceiling moves because a project has curated sources.
   if (projectId) {
-    const seeds = await loadEligibleSourceResources(
-      db,
-      projectId,
-      await neededComponents(db, jobId),
-    );
-    for (const url of seeds) {
-      const canonical = canonicalTargetRef(url);
+    const workItems = await neededWorkItems(db, jobId);
+    const needed = new Set(workItems.map((item) => item.component));
+    const seeds = await loadEligibleSourceResourcesWithCoverage(db, projectId, needed);
+    const already = seeds.length > 0 ? await existingSeedProvenance(db, jobId) : new Set<string>();
+    for (const seed of seeds) {
+      const canonical = canonicalTargetRef(seed.canonicalUrl);
       if (seen.has(canonical)) continue;
       seen.add(canonical);
+      // D-150 — provenance is written even when the url is already
+      // acquired: a redelivery must still be able to tell extraction which
+      // components this document was selected for.
+      await recordSeedProvenance(
+        db,
+        jobId,
+        seed.canonicalUrl,
+        seed.componentKeys,
+        workItems,
+        already,
+      );
       if (ledger.fetchedUrls.has(canonical)) continue;
-      out.push(url);
+      out.push(seed.canonicalUrl);
     }
   }
 
@@ -1123,9 +1207,25 @@ export async function prepareExtractionReplaySearch(
     .from(researchTraceEvents)
     .where(eq(researchTraceEvents.researchJobId, jobId));
 
+  // D-150 — A COMPONENT'S CORPUS HAS TWO PROVENANCES, AND BOTH ARE
+  // PERSISTED FACTS ABOUT THIS RUN.
+  //
+  // What search found for this component, and what a human-approved
+  // resource was admitted for. The union is taken from the job's own trace
+  // and from nowhere else: current project memory is deliberately NOT
+  // consulted here. Selection happened at a moment in time, and a resource
+  // that has since been superseded, re-scoped or withdrawn must not
+  // retroactively change what this run was entitled to read. The chain runs
+  // forward only — memory at planning time, provenance on the run, then
+  // replay — never backwards from today's memory.
+  //
+  // The two events stay distinct in the trace, so search analytics is not
+  // contaminated by curated targets; only the corpus is merged.
   const byComponent = new Map<string, string[]>();
   for (const row of rows) {
-    if (row.operationType !== "CANDIDATE_RETURNED") continue;
+    const isSearchProvenance = row.operationType === "CANDIDATE_RETURNED";
+    const isSeedProvenance = row.operationType === "SOURCE_RESOURCE_SELECTED";
+    if (!isSearchProvenance && !isSeedProvenance) continue;
     if (row.patternStep === null || row.component === null || !row.targetRef) continue;
     if (isLossyTargetRef(row.targetRef)) continue;
     const key = `${row.patternStep}:${row.component}`;
