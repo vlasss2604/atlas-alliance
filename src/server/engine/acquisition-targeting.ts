@@ -270,9 +270,23 @@ export function genericSearchMayEstablish(
 // #1; it never simply drains query #1's list first.
 //
 // This is ordering only. It changes which admissible-looking candidate is
-// tried FIRST, never which evidence is admissible: the pre-fetch class
-// here is a prediction from the URL alone, and S5 still classifies the
+// tried FIRST, never which evidence is admissible: the pre-fetch class here
+// is a PREDICTION — from the url, and (D-155) from the project's own already
+// ACTIVE source routes where one matches — and S5 still classifies the
 // fetched document independently and decides establishment on its own.
+//
+// D-155 — WHY THE RESOLVED ROUTE CLASS BELONGS HERE.
+//
+// `activeRouteClass` was always a parameter of this ranking, and the caller
+// always passed null, so a candidate whose route the project has already
+// confirmed as OFFICIAL_DOCS was ranked as an unrecognised host and lost to
+// any positively-recognised one. That discarded metadata the system had
+// already established through the ordinary route system — it did not protect
+// anything, because resolveSourceClass consults a route class ONLY at its
+// final fall-through, after every public, project-independent recognition
+// rule has had its say. A route class can therefore never override an
+// explorer, a social platform or a data provider; it can only speak where
+// nothing else recognised the host at all.
 //
 // Conservative on the unknown: a host nothing recognizes cannot be
 // distinguished from the project's own site, so it ranks BETWEEN
@@ -327,17 +341,29 @@ function isUnrecognisedHost(url: string): boolean {
 // both survive right up to the final source-open boundary and are discarded
 // there: an equally-ranked search candidate discovered earlier takes the one
 // available open, fails, and the approved document is never attempted.
+// D-155 — `routeClassByUrl` carries the class the project's OWN already
+// resolved, already ACTIVE source routes give each candidate, keyed by
+// canonical url. It is a MAP rather than one class for the whole list because
+// candidates in one component's list belong to different hosts, and a class
+// resolved for one of them says nothing about the others.
+//
+// Null (the default) keeps the pre-D-155 behaviour exactly: every candidate
+// is ranked from its url alone.
 export function orderCandidatesForComponent(
   urls: readonly string[],
   establishingClasses: readonly EvidenceSourceClass[],
-  activeRouteClass: RouteClass | null = null,
+  routeClassByUrl: ReadonlyMap<string, RouteClass | null> | null = null,
   approvedResources: ReadonlySet<string> = new Set(),
 ): string[] {
   return urls
     .map((url, index) => ({
       url,
       index,
-      rank: rankCandidateForComponent(url, establishingClasses, activeRouteClass),
+      rank: rankCandidateForComponent(
+        url,
+        establishingClasses,
+        routeClassByUrl?.get(canonicalTargetRef(url)) ?? null,
+      ),
       // 0 sorts ahead of 1, so an approved resource leads its rank band.
       approved: approvedResources.has(canonicalTargetRef(url)) ? 0 : 1,
     }))

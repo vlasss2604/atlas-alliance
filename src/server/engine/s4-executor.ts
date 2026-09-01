@@ -72,7 +72,7 @@ import {
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { computeEntityBinding } from "../domain/project-identity";
-import { findAttemptId, recordTraceEvent } from "./trace-store";
+import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
 
@@ -1498,6 +1498,35 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // in discovery order, which drained query #1's list and never
       // reached a later query's admissible candidate.
       // B: and never re-open a URL this job has already proven dead.
+      // D-155 — the class the project's OWN already-ACTIVE source routes give
+      // each candidate, resolved through the ONE canonical resolver
+      // (resolveSourceRoute) that every other consumer uses. Nothing is
+      // manufactured here: a class appears only where a human already
+      // confirmed a route for THIS project that matches THIS url, and the
+      // resolver's own rules (ACTIVE only, project-scoped, domain + optional
+      // path prefix, conflicting or invalid classes collapsing to null)
+      // decide entirely.
+      //
+      // Resolved for every candidate BEFORE ordering, because ordering is
+      // what was throwing the information away; the open loop below then
+      // reuses these instead of resolving the same url a second time.
+      const routeByCandidate = new Map<string, Awaited<ReturnType<typeof resolveSourceRoute>>>();
+      await Promise.all(
+        [...candidateUrls.keys()].map(async (url) => {
+          routeByCandidate.set(canonicalTargetRef(url), await resolveSourceRoute(deps.db, deps.project.id, url));
+        }),
+      );
+      // Only a CONFIRMED route may contribute a class. routeClass is already
+      // null unless a matching ACTIVE row supplied exactly one valid class,
+      // so this is belt-and-braces rather than a second rule — stated so the
+      // narrowest valid state is visible at the point of use.
+      const routeClassByCandidate = new Map(
+        [...routeByCandidate].map(([key, route]) => [
+          key,
+          route.officiality === "CONFIRMED" ? route.routeClass : null,
+        ]),
+      );
+
       // D-154 — an approved SOURCE_RESOURCE for THIS component wins a tie
       // among equally-ranked candidates, and only a tie. Read from this
       // job's own persisted SOURCE_RESOURCE_SELECTED provenance, so the
@@ -1506,7 +1535,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const orderedCandidates = orderCandidatesForComponent(
         [...candidateUrls.keys()],
         plan.establishingClasses,
-        null,
+        routeClassByCandidate,
         approvedResourcesForComponent(ledger, item.step, item.component),
       ).filter((url) => {
         if (!isKnownDeadUrl(url, ledger)) return true;
@@ -1562,7 +1591,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // a pre-fetch decision speak for where we actually landed. This
         // read is a cheap local query over the project's own confirmed
         // routes; it consults no provider.
-        const preFetchRoute = await resolveSourceRoute(deps.db, deps.project.id, url);
+        // D-155 — already resolved above, for ordering, by the same canonical
+        // resolver on the same url. Reused rather than re-queried, so the
+        // gate below and the ordering above can never disagree about what
+        // this project's routes say. Still deliberately re-resolved on
+        // doc.finalUrl at persist time: a redirect must not let a pre-fetch
+        // decision speak for where we actually landed.
+        const preFetchRoute =
+          routeByCandidate.get(canonicalTargetRef(url)) ??
+          (await resolveSourceRoute(deps.db, deps.project.id, url));
         const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
         const fetchResult = await callProvider("CONTENT_FETCHER", () =>
           contentFetcher.fetch(url, recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : undefined),

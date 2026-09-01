@@ -20,17 +20,11 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   the sibling `app/` case only passes because it swallows ENOENT. Whoever
   fixes it should use `fileURLToPath`, and check the ENOENT catch is not
   hiding a second silent skip.
-- **Candidate ordering never consults the project's CONFIRMED SOURCE_ROUTE.**
-  `orderCandidatesForComponent` is called with `activeRouteClass = null`, so
-  `rankCandidateForComponent` predicts a class from the URL alone. Measured
-  2026-09-01: `docs.raydium.io/ray/ray-buybacks.md` — a host with a CONFIRMED
-  OFFICIAL_DOCS route — ranks as an unrecognised host (middle rank), while
-  `etherscan.io` ranks as positively establishing for DESTINATION. An approved
-  official document therefore loses to an explorer url on RANK, not on a tie,
-  and D-154's tie breaker cannot reach it. Passing the resolved route class
-  into ordering would fix it, but that changes what "establishing relevance"
-  means during acquisition and is an owner decision, not a mechanical one.
-  **OWNER DECISION REQUIRED.**
+- ~~**Candidate ordering never consults the project's CONFIRMED SOURCE_ROUTE.**~~
+  **CLOSED 2026-09-01** by D-155: the executor resolves each candidate's route
+  through the canonical resolver before ordering and passes the resulting class
+  per candidate. Acquisition prioritisation only — the class still speaks only
+  at `resolveSourceClass`'s final fall-through, and grants no authority.
 - **Reserved vs spent source-open accounting** — a discrepancy between what the
   budget reserves and what it records as spent.
 - **Cross-component duplicate chain facts** — the same chain observation can be

@@ -262,6 +262,49 @@ through a callback on the same convention as `onUsage`; the executor records
 already carries the step and component. No raw output, no rejected value, no
 migration.
 
+## ORDERING NOW USES THE ROUTE CLASS THE PROJECT ALREADY HAD (D-155)
+
+`rankCandidateForComponent` always accepted an `activeRouteClass`, and the
+caller always passed `null`. A candidate whose route the project had ALREADY
+confirmed — through the ordinary human source-route system — was therefore
+ranked as an unrecognised host and lost to any positively-recognised one.
+
+Measured at DESTINATION on the fresh Raydium run: the approved
+`ray-buybacks.md` ranked **1** (SOCIAL fallback) against an explorer url's
+**0** (ONCHAIN_VERIFIABLE). That is rank, not a tie, so D-154's tie breaker
+could not reach it — the approved document lost before approval was consulted.
+
+**The executor now resolves each candidate's route before ordering**, through
+the one canonical `resolveSourceRoute` every other consumer uses, and passes a
+`canonical url → RouteClass | null` map into `orderCandidatesForComponent`.
+The open loop below reuses that already-resolved value instead of querying the
+same url again, so ordering and the Stage-0 gate can never disagree and no
+extra query is added.
+
+**Nothing is manufactured.** A class appears only where `officiality` is
+CONFIRMED and the resolver's own rules produced one: ACTIVE rows only,
+project-scoped, domain plus optional path prefix, conflicting or invalid
+classes collapsing to null. It is never inferred from
+`SOURCE_RESOURCE_SELECTED`, from approval, from a project name, from a domain
+string, from an owner-supplied url, or from search provenance — approval still
+grants no classification and no authority.
+
+**Authority is not widened.** `resolveSourceClass` consults a route class ONLY
+at its final fall-through, after every public, project-independent recognition
+rule has had its say. A route class therefore cannot override an explorer, a
+social platform or a data provider; it speaks only where nothing else
+recognised the host at all.
+
+**Acquisition prioritisation only.** Admission, reconciliation, officiality,
+the source class computed at persist time, and the deliberate re-resolution on
+`doc.finalUrl` after a redirect are all untouched. A high rank buys an attempt,
+never a fact: a failed fetch still records FETCH_FAILED and produces no
+document. Budgets, open caps, query caps and D-148's seed cap are unchanged.
+
+**With D-154:** once the class is correct the official doc and the explorer
+reach the SAME establishing rank, and D-154's approval tie breaker then
+decides — which is the order the two decisions were meant to compose in.
+
 ## AN APPROVAL NOW SURVIVES THE LAST BOUNDARY, NOT JUST THE FIRST (D-154)
 
 D-151 put an approved SOURCE_RESOURCE first in the corpus its component is
