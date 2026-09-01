@@ -218,6 +218,24 @@ restart the PUMP investigation, and none is a correctness defect.
 
 ### Tooling / environment
 
+- **A `next dev` server can serve a stale route table, and it looks exactly
+  like a broken page.** Observed 2026-09-01: `/research/<job-id>` returned a
+  route-level 404 for every job id while `/research` returned 200 and
+  `/api/research-jobs/[id]` resolved normally. The cause was not the code —
+  Next's own generated `.next/dev/types/routes.d.ts` had discovered every
+  route in the app EXCEPT `/research/[id]`, because the running server had
+  resumed from a persisted Turbopack cache written before that route existed.
+  Creating any file under `app/` forced a rescan, after which the identical,
+  unchanged page served 200 for every id.
+
+  **Recognising it:** the route is missing from `AppRoutes` in
+  `.next/dev/types/routes.d.ts` and from `.next/dev/server/app-paths-manifest.json`,
+  and there is no `GET /api/...` in the log before the 404 (the page never
+  renders, so its fetch never runs). **Recovering from it:** touch any file
+  under `app/`, or delete `.next/` and restart. Worth suspecting first for any
+  "this page 404s but its siblings work" report, before reading the page code.
+
+
 - **Every owner-tooling run creates a NEW `users` row.** Confirmed read-only
   2026-08-29: 15 users exist, one carries 19 jobs (seeded/alpha) and the
   recent owner-tool jobs each have their own. `extract-from-document.ts`,

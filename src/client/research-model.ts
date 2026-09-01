@@ -322,13 +322,58 @@ function questionKeyOf(job: GroupableJob): string {
   return job.originalQuestion.trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function timeOf(job: GroupableJob): number {
-  return Date.parse(job.finishedAt ?? job.createdAt) || 0;
+// When a run last produced something worth dating: when it finished, or —
+// while it is still running — when it was created.
+//
+// Returns NULL rather than 0 for anything unparseable. `Date.parse(...) || 0`
+// silently turned a malformed timestamp into the epoch, which sorts as the
+// OLDEST possible run: a single bad row on the newest job would have pushed it
+// to the bottom and left the group header quoting a stale run while the run
+// list showed the fresh one. Unknown is not "very old", and the two must not
+// be spelled the same way.
+function timestampOf(job: GroupableJob): number | null {
+  const raw = job.finishedAt ?? job.createdAt;
+  if (!raw) return null;
+  const parsed = Date.parse(raw);
+  return Number.isNaN(parsed) ? null : parsed;
 }
 
 // Newest first, everywhere, so "latest" means the same thing at every level.
+// A run with no usable timestamp sorts last — it cannot be shown as the most
+// recent thing that happened — and ties break on id so the order is total and
+// stable rather than dependent on input order.
 function byNewest<T extends GroupableJob>(a: T, b: T): number {
-  return timeOf(b) - timeOf(a);
+  const ta = timestampOf(a);
+  const tb = timestampOf(b);
+  if (ta === null && tb === null) return a.id.localeCompare(b.id);
+  if (ta === null) return 1;
+  if (tb === null) return -1;
+  if (tb !== ta) return tb - ta;
+  return a.id.localeCompare(b.id);
+}
+
+// "LAST RESEARCHED" IS THE MAXIMUM, TAKEN EXPLICITLY.
+//
+// Reading it off whichever run happened to sort first makes the header depend
+// on the comparator agreeing with the label — a coupling with no reason to
+// hold and no way to notice when it stops. Computing the maximum directly
+// means the header can only ever quote the newest run it is summarising.
+//
+// The fallback is used only when NO run in the group carries a usable
+// timestamp, which keeps the field non-null for callers without inventing a
+// time that no row supports.
+function lastAtOf<T extends GroupableJob>(runs: readonly T[], fallback: T): string {
+  let best: T | null = null;
+  let bestAt = -Infinity;
+  for (const run of runs) {
+    const at = timestampOf(run);
+    if (at !== null && at > bestAt) {
+      bestAt = at;
+      best = run;
+    }
+  }
+  const chosen = best ?? fallback;
+  return chosen.finishedAt ?? chosen.createdAt;
 }
 
 export function groupResearchRuns<T extends GroupableJob>(jobs: T[]): ProjectGroup<T>[] {
@@ -361,10 +406,10 @@ export function groupResearchRuns<T extends GroupableJob>(jobs: T[]): ProjectGro
           runs: qSorted,
           latest: qSorted[0],
           latestOutcome: jobOutcome(qSorted[0]),
-          lastAt: qSorted[0].finishedAt ?? qSorted[0].createdAt,
+          lastAt: lastAtOf(qSorted, qSorted[0]),
         };
       })
-      .sort((a, b) => timeOf(b.latest) - timeOf(a.latest));
+      .sort((a, b) => byNewest(a.latest, b.latest));
 
     groups.push({
       key,
@@ -375,11 +420,11 @@ export function groupResearchRuns<T extends GroupableJob>(jobs: T[]): ProjectGro
       latestOutcome: jobOutcome(latest),
       questions,
       runCount: sorted.length,
-      lastAt: latest.finishedAt ?? latest.createdAt,
+      lastAt: lastAtOf(sorted, latest),
     });
   }
 
-  return groups.sort((a, b) => timeOf(b.latest) - timeOf(a.latest));
+  return groups.sort((a, b) => byNewest(a.latest, b.latest));
 }
 
 /* ------------------------------------------------------------------ *
@@ -870,15 +915,35 @@ export function researchAnswer(input: AnswerInput): string[] {
   return sentences.slice(0, 4);
 }
 
+function plural(n: number, unit: string): string {
+  return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
+}
+
+// UNITS ARE SPELLED OUT, BECAUSE "m" IS NOT ONE UNIT.
+//
+// This used to render "19m ago" / "19h ago" / "19d ago". A reader looking at
+// "Last researched 2m ago" reads MONTHS, not minutes — which is exactly what
+// happened: a group header quoting a run from nineteen minutes earlier was
+// read as two months stale, and looked like it contradicted the run list
+// directly beneath it that said the same thing. The derivation was right and
+// the label was ambiguous, so the label is what changes.
+//
+// The scale also runs past days now. "63d ago" is arithmetic, not an answer;
+// a reader wants "2 months ago".
 export function relativeAge(iso: string | null | undefined, now = Date.now()): string {
   if (!iso) return "";
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const mins = Math.max(0, Math.round((now - then) / 60000));
   if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
+  if (mins < 60) return plural(mins, "minute");
   const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
+  if (hours < 24) return plural(hours, "hour");
   const days = Math.round(hours / 24);
-  return `${days}d ago`;
+  if (days < 31) return plural(days, "day");
+  // 30.44 is the mean Gregorian month, so the months bucket does not drift
+  // against the days bucket it takes over from.
+  const months = Math.round(days / 30.44);
+  if (months < 12) return plural(Math.max(1, months), "month");
+  return plural(Math.round(months / 12), "year");
 }
