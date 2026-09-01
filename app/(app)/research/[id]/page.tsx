@@ -269,6 +269,13 @@ export default function ResearchDetailPage() {
   // reader never meets a source without the conclusion it is there for,
   // so "why am I looking at this?" cannot arise.
   const evidenceByComponent: Record<string, EvidenceItemLike[]> = {};
+  // WHAT EACH FINDING ACTUALLY FOUND, IN THE ENGINE'S OWN WORDS.
+  //
+  // SUPPORTING links only, so a contradicting or refused row can never
+  // become a finding's answer. The order is S5's own: this picks the
+  // engine's first supporting statement rather than applying a judgment
+  // of ours about which reads best.
+  const supportingSummariesByComponent: Record<string, string[]> = {};
   const admittedById = new Map(admitted.map((e) => [e.data.id, e.data]));
   for (const e of detail.evidence) {
     for (const link of e.links) {
@@ -278,6 +285,9 @@ export default function ResearchDetailPage() {
       // Prefer the claim-scoped copy where one exists: it carries S8's
       // citation binding rather than the job-wide projection of the row.
       list.push(admittedById.get(e.id) ?? toItem(e));
+      if (link.role === "SUPPORTING" && e.summary) {
+        (supportingSummariesByComponent[link.component] ??= []).push(e.summary);
+      }
     }
   }
 
@@ -480,6 +490,7 @@ export default function ResearchDetailPage() {
           components={components}
           sourceClassesByComponent={sourceClassesByComponent}
           evidenceByComponent={evidenceByComponent}
+          supportingSummariesByComponent={supportingSummariesByComponent}
           questionFindings={detail.questionFindings}
         />
       )}
@@ -508,6 +519,7 @@ export default function ResearchDetailPage() {
                   components={components}
                   sourceClassesByComponent={sourceClassesByComponent}
                   evidenceByComponent={evidenceByComponent}
+          supportingSummariesByComponent={supportingSummariesByComponent}
                 />
               </div>
             )}

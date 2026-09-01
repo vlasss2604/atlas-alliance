@@ -6,6 +6,7 @@ import {
   deriveQuestionFindings,
   deriveResultLadder,
   findingExplanation,
+  findingMicroAnswer,
   sourceClassLabel,
   type EvidenceItemLike,
   type LadderComponentInput,
@@ -37,6 +38,7 @@ export function ResultLadder({
   components,
   sourceClassesByComponent,
   evidenceByComponent,
+  supportingSummariesByComponent,
   questionFindings,
 }: {
   components: LadderComponentInput[];
@@ -45,6 +47,10 @@ export function ResultLadder({
   // links. A finding renders ONLY its own component's entry — this
   // component never joins evidence to a finding itself.
   evidenceByComponent?: Record<string, EvidenceItemLike[]>;
+  // SUPPORTING-linked evidence summaries per component, in S5 order.
+  // These ground the collapsed row's micro-answer, and being keyed per
+  // component is what stops one finding answering another's question.
+  supportingSummariesByComponent?: Record<string, string[]>;
   questionFindings?:
     | {
         label: string;
@@ -76,6 +82,7 @@ export function ResultLadder({
     open: openRows.has(row.component),
     onToggle: () => toggle(row.component),
     evidence: evidenceByComponent?.[row.component] ?? [],
+    supportingSummaries: supportingSummariesByComponent?.[row.component] ?? [],
   });
 
   // THE QUESTION SHAPES THE SCREEN WHEN IT CAN.
@@ -153,18 +160,25 @@ function LadderRow({
   open,
   onToggle,
   evidence,
+  supportingSummaries,
   isBoundary,
 }: {
   row: ResultRow;
   open: boolean;
   onToggle: () => void;
   evidence: EvidenceItemLike[];
+  supportingSummaries: string[];
   isBoundary: boolean;
 }) {
   // Proof state is LOCAL to this row. Opening it cannot reach another
   // finding, and cannot close the one it lives in.
   const [proofOpen, setProofOpen] = useState(false);
-  const explanation = findingExplanation(row);
+  const microAnswer = findingMicroAnswer(row, supportingSummaries);
+  // The expansion answers "why?", so it must not open with the sentence
+  // the reader has already read on the collapsed row. This only ever fires
+  // on the fallback path, where the micro-answer had no admitted statement
+  // to use and borrowed the explanation's own opening line.
+  const explanation = findingExplanation(row).filter((s) => s !== microAnswer);
 
   return (
     <div
@@ -183,31 +197,39 @@ function LadderRow({
       >
         <StateIcon state={row.state} />
         <span className="min-w-0 flex-1">
-          <span
-            className={
-              "block truncate text-[0.92rem] " +
-              (row.state === "VERIFIED"
-                ? "text-[var(--atlas-text)]"
-                : "text-[var(--atlas-text-dim)]")
-            }
-          >
-            {row.label}
+          <span className="flex items-baseline gap-3">
+            <span className="min-w-0 flex-1 text-[0.92rem] text-[var(--atlas-text)]">
+              {row.label}
+            </span>
+            <span
+              className="shrink-0 text-[0.72rem]"
+              style={stateColor(row.state)}
+              data-testid="ladder-state"
+            >
+              {row.stateLabel}
+            </span>
           </span>
+          {/* THE ANSWER, ON THE COLLAPSED ROW.
+              The badge above says how strongly; this says what. Without it
+              a reader had to open "Where does trading fee revenue go?"
+              purely to discover where it goes, which made expansion a
+              retrieval step rather than the "why?" it is meant to be. */}
+          {microAnswer && (
+            <span
+              className="mt-1 block text-[0.82rem] leading-snug text-[var(--atlas-text-dim)]"
+              data-testid="finding-micro-answer"
+            >
+              {microAnswer}
+            </span>
+          )}
           {isBoundary && (
             <span
-              className="mt-0.5 block text-[0.7rem] text-[#fcd34d]"
+              className="mt-1 block text-[0.7rem] text-[#fcd34d]"
               data-testid="ladder-boundary"
             >
               The evidence stops here
             </span>
           )}
-        </span>
-        <span
-          className="shrink-0 text-[0.72rem]"
-          style={stateColor(row.state)}
-          data-testid="ladder-state"
-        >
-          {row.stateLabel}
         </span>
         <span
           className={`shrink-0 text-[var(--atlas-text-dim)] transition-transform ${open ? "rotate-90" : ""}`}

@@ -1240,6 +1240,85 @@ function buildRow(
   };
 }
 
+// THE MICRO-ANSWER — WHAT THE RESULT IS, NOT HOW STRONGLY IT IS HELD.
+//
+// A collapsed finding used to read:
+//
+//   Where does trading fee revenue go?          Established
+//   The checked evidence establishes where the value ends up.
+//
+// The badge already says "Established". The sentence said it again in
+// longer words and never answered the question, so a reader had to open
+// every finding just to learn what was found. The status carries STRENGTH;
+// this line carries SUBSTANCE.
+//
+// GROUNDING. For an established or partial finding the sentence is the
+// engine's OWN statement of what the admitted evidence supports for this
+// component — a persisted Evidence summary that already passed admission,
+// selected in S5's canonical order rather than by any judgment of ours.
+// Nothing is generated, nothing is re-worded, and no model is called.
+//
+// The candidates handed in are SUPPORTING-linked evidence for THIS
+// component only, so the sentence cannot answer a different claim than
+// the one the badge beside it grades. Where no such statement exists, the
+// fallback is the narrowest honest sentence about the component itself —
+// never a stronger claim reached for to fill the space.
+export function findingMicroAnswer(
+  row: ResultRow,
+  supportingSummaries: readonly string[] = [],
+): string | null {
+  const phrase = COMPONENT_PHRASES[row.component] ?? null;
+  if (phrase === null) return null;
+
+  // A run that was blocked has no result to state. It says what could not
+  // be checked and stops — the reason belongs in the expansion, and a
+  // limitation must never read as a finding about the project.
+  if (row.coverage === "BLOCKED") {
+    return `${capitalise(phrase)} could not be checked in this research run.`;
+  }
+
+  switch (row.state) {
+    case "VERIFIED":
+    case "PARTIAL": {
+      const grounded = firstUsableSummary(supportingSummaries);
+      // The preamble survives ONLY where there is no admitted statement to
+      // put in its place. Then it is the honest thing to say: something was
+      // established, and this projection cannot say more than that.
+      return grounded ?? `The checked evidence establishes ${phrase}.`;
+    }
+    case "NOT_HAPPENING":
+      // Deliberately still framed as what the EVIDENCE indicates. A
+      // contradiction is the strongest thing a run can say and it is still
+      // a statement about evidence, not a bare assertion of the negative.
+      return `On ${phrase}, the checked evidence indicates otherwise.`;
+    default:
+      // Says what remains unknown, and nothing about whether it is true.
+      // "Was not established" is not "does not happen".
+      return `${capitalise(phrase)} was not established.`;
+  }
+}
+
+// One sentence, never a truncation. A summary is admitted Evidence: cutting
+// it mid-clause could change what it says, so an over-long first sentence
+// is DECLINED rather than shortened, and the caller falls back.
+const MAX_MICRO_ANSWER = 200;
+
+function firstUsableSummary(summaries: readonly string[]): string | null {
+  for (const raw of summaries) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (trimmed.length === 0) continue;
+    const first = /^[\s\S]*?[.!?](?=\s|$)/.exec(trimmed)?.[0]?.trim() ?? trimmed;
+    if (first.length === 0 || first.length > MAX_MICRO_ANSWER) continue;
+    return /[.!?]$/.test(first) ? first : `${first}.`;
+  }
+  return null;
+}
+
+function capitalise(s: string): string {
+  return s.length > 0 ? s[0].toUpperCase() + s.slice(1) : s;
+}
+
 // ONE CONNECTED EXPLANATION, NOT A FILING SYSTEM.
 //
 // A finding used to expand into three headed blocks — what ATLAS checked,
