@@ -72,6 +72,23 @@ export interface AcquisitionLedger {
   // before that ordering rule existed.
   executedQueryComponents: ReadonlySet<string>;
   candidatesByQueryComponent: ReadonlyMap<string, readonly string[]>;
+  // D-154 — WHICH URLS A HUMAN APPROVED FOR WHICH COMPONENT, keyed
+  // `step:component`.
+  //
+  // D-151 put an approved resource first in the corpus a component is
+  // served, and D-152 made sure every component actually reaches that
+  // corpus. Neither survives the LAST boundary: the executor re-ranks the
+  // aggregated candidates by predicted establishing class and then breaks
+  // ties on discovery order, at which point the approved resource is just
+  // another url. An equally-ranked search candidate that happened to be
+  // discovered earlier takes the seat, and when a component has one open
+  // and that candidate fails, the approved document is never attempted.
+  //
+  // Read from the job's own SOURCE_RESOURCE_SELECTED rows — the same
+  // persisted provenance D-150 writes at selection time — so the final
+  // ordering is answering from the run's history, never from memory as it
+  // stands today.
+  sourceResourcesByComponent: ReadonlyMap<string, readonly string[]>;
   // D-146 — which STRATEGIES have already attempted a given canonical
   // url in this job, keyed by the provider name the attempt was traced
   // under.
@@ -110,6 +127,7 @@ export const EMPTY_LEDGER: AcquisitionLedger = {
   candidatesByQuery: new Map(),
   executedQueryComponents: new Set(),
   candidatesByQueryComponent: new Map(),
+  sourceResourcesByComponent: new Map(),
   strategiesAttempted: new Map(),
   attemptsByProvider: new Map(),
   failureDiagnosticsByUrl: new Map(),
@@ -147,6 +165,7 @@ export async function loadAcquisitionLedger(
     const candidatesByQuery = new Map<string, string[]>();
     const executedQueryComponents = new Set<string>();
     const candidatesByQueryComponent = new Map<string, string[]>();
+    const sourceResourcesByComponent = new Map<string, string[]>();
     const strategiesAttempted = new Map<string, Set<string>>();
     const attemptsByProvider = new Map<string, number>();
     const failureDiagnosticsByUrl = new Map<string, string[]>();
@@ -197,6 +216,18 @@ export async function loadAcquisitionLedger(
             if (!scopedList.includes(ref)) scopedList.push(ref);
             candidatesByQueryComponent.set(scoped, scopedList);
           }
+          break;
+        }
+        case "SOURCE_RESOURCE_SELECTED": {
+          // D-154 — the approval, as this run recorded it. Keyed by the
+          // component the resource was approved to serve, so priority can
+          // never leak to a component it was not approved for.
+          if (!ref || row.patternStep === null || row.component === null) break;
+          if (isLossyTargetRef(ref)) break;
+          const key = `${row.patternStep}:${row.component}`;
+          const list = sourceResourcesByComponent.get(key) ?? [];
+          if (!list.includes(ref)) list.push(ref);
+          sourceResourcesByComponent.set(key, list);
           break;
         }
         case "FETCH_ATTEMPTED": {
@@ -253,6 +284,7 @@ export async function loadAcquisitionLedger(
       candidatesByQuery,
       executedQueryComponents,
       candidatesByQueryComponent,
+      sourceResourcesByComponent,
       strategiesAttempted,
       attemptsByProvider,
       failureDiagnosticsByUrl,
@@ -351,6 +383,19 @@ export function planQueries(
 // it succeeded is a separate question the caller already knows. A strategy
 // is never run twice for one url: within a delivery because the chain
 // moves forward, across deliveries because this reads persisted trace.
+// D-154 — the approved urls for ONE component of this job, canonicalised
+// for comparison the same way every other url in the ledger is. Empty for a
+// component nothing was approved for, which is the overwhelmingly common
+// case and costs the caller nothing.
+export function approvedResourcesForComponent(
+  ledger: AcquisitionLedger,
+  step: number,
+  component: string,
+): ReadonlySet<string> {
+  const urls = ledger.sourceResourcesByComponent.get(`${step}:${component}`) ?? [];
+  return new Set(urls.map((url) => canonicalTargetRef(url)));
+}
+
 export function strategyAlreadyAttempted(
   url: string,
   providerName: string,

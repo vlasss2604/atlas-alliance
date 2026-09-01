@@ -3,7 +3,11 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
 import { classifyExtractionSchemaFailure, EvidenceExtractorUnavailableError } from "./evidence-extractor";
-import type { EvidenceExtractionInput, EvidenceExtractor } from "./evidence-extractor";
+import type {
+  EvidenceExtractionInput,
+  EvidenceExtractor,
+  RejectedFactReport,
+} from "./evidence-extractor";
 import { isTransientAnthropicApiError } from "./retry";
 import { classifyTokenCountFailure, countThenGate } from "./token-gate";
 import type { ModelUsage } from "./types";
@@ -60,6 +64,27 @@ const extractedFactSchema = z.object({
   onchainLocators: z.array(z.string()).max(10).nullable(),
 });
 const extractionResultSchema = z.object({ facts: z.array(extractedFactSchema).max(20) });
+
+// D-153 — THE ENVELOPE AND THE ELEMENTS ARE VALIDATED SEPARATELY.
+//
+// The response used to be checked with ONE whole-response parse, so a single
+// malformed field on a single fact destroyed every valid sibling in the same
+// response: zod fails the array, the array fails the object, and the caller
+// receives OUTPUT_SCHEMA_INVALID with nothing salvaged. Two materially
+// identical Raydium runs over byte-identical official documents disagreed on
+// four components for exactly this reason — the document had not changed, one
+// sibling's `doesNotProve` had.
+//
+// The envelope is still validated strictly: the output must be an object
+// carrying a `facts` array within the same length cap, and anything else is
+// still refused outright. What changes is that the ELEMENTS are then checked
+// one at a time, against the identical canonical fact schema, so a malformed
+// element costs itself and nothing else.
+//
+// Nothing is repaired, completed or guessed. A rejected fact is dropped whole
+// — never partially admitted, never given a synthesised `doesNotProve`, and
+// never allowed to become Evidence.
+const extractionEnvelopeSchema = z.object({ facts: z.array(z.unknown()).max(20) });
 
 // D-128 — publishedAt arrives as untrusted model text. The schema only
 // proves it is A string, never that it is a PARSEABLE date: a real live
@@ -158,6 +183,7 @@ export function createAnthropicEvidenceExtractor(
   maxOutputTokens = DEFAULT_MAX_TOKENS,
   maxInputTokens = DEFAULT_MAX_INPUT_TOKENS,
   onUsage?: (usage: ModelUsage) => void,
+  onRejectedFacts?: (rejected: readonly RejectedFactReport[]) => void,
 ): EvidenceExtractor {
   return {
     name: "anthropic",
@@ -166,7 +192,7 @@ export function createAnthropicEvidenceExtractor(
     // reservation) is now owned entirely by s4-executor.ts's
     // reserveAndCallWithRetry, never by this provider primitive.
     async extract(input: EvidenceExtractionInput) {
-      return doExtract(input, model, maxOutputTokens, maxInputTokens, onUsage);
+      return doExtract(input, model, maxOutputTokens, maxInputTokens, onUsage, onRejectedFacts);
     },
   };
 }
@@ -177,6 +203,7 @@ async function doExtract(
   maxOutputTokens: number,
   maxInputTokens: number,
   onUsage?: (usage: ModelUsage) => void,
+  onRejectedFacts?: (rejected: readonly RejectedFactReport[]) => void,
 ) {
   const userContent = buildEvidenceExtractorUserContent(input);
   // S10 acceptance closure (HIGH-1, D-119): ONE shared base request
@@ -242,8 +269,11 @@ async function doExtract(
     // shape, not about the call having happened.
     throw new EvidenceExtractorUnavailableError("model output is not valid JSON", false, "OUTPUT_NOT_JSON");
   }
-  const parsed = extractionResultSchema.safeParse(raw);
-  if (!parsed.success) {
+  // THE ENVELOPE. Still strict, still fail-closed: output that is not the
+  // result object at all, or whose facts array is missing, not an array, or
+  // over the length cap, is refused exactly as before.
+  const envelope = extractionEnvelopeSchema.safeParse(raw);
+  if (!envelope.success) {
     // Emitted ONLY from the actual schema-validation failure. The zod
     // error message is DERIVED FROM MODEL OUTPUT (received values) —
     // untrusted text — and is deliberately not interpolated. What IS
@@ -256,10 +286,53 @@ async function doExtract(
       false,
       "OUTPUT_SCHEMA_INVALID",
       null,
-      classifyExtractionSchemaFailure(parsed.error.issues),
+      classifyExtractionSchemaFailure(envelope.error.issues),
     );
   }
-  return parsed.data.facts.map((f) => ({
+
+  // THE ELEMENTS, one at a time, against the identical canonical schema.
+  const admitted: z.infer<typeof extractedFactSchema>[] = [];
+  const rejected: RejectedFactReport[] = [];
+  for (const [index, element] of envelope.data.facts.entries()) {
+    const fact = extractedFactSchema.safeParse(element);
+    if (fact.success) {
+      admitted.push(fact.data);
+      continue;
+    }
+    // The issue paths are re-rooted at `facts[index]` before classification.
+    // Validating an element on its own yields paths relative to the FACT
+    // (`["step"]`), while the classifier's documented contract is the
+    // whole-response shape (`["facts", 0, "step"]`) — without the prefix
+    // every per-fact rejection would collapse to UNKNOWN_SCHEMA_FIELD, and an
+    // element that is not an object at all would report ROOT instead of
+    // FACTS. One classifier, one closed vocabulary, unchanged.
+    const issues = fact.error.issues.map((issue) => ({
+      path: ["facts", index, ...issue.path],
+    }));
+    // The index is this code's own position counter, and the field comes
+    // from the same closed, code-owned vocabulary a whole-response failure
+    // already reports. Neither carries model text or a rejected value.
+    rejected.push({ index, field: classifyExtractionSchemaFailure(issues) });
+  }
+
+  if (rejected.length > 0) onRejectedFacts?.(rejected);
+
+  // FAIL CLOSED WHEN NOTHING SURVIVED. A response whose every fact was
+  // malformed is not an extraction that found nothing — it is an extraction
+  // whose output could not be read, and it keeps exactly the failure it
+  // always had. A genuinely EMPTY facts array never reaches this branch and
+  // stays the normal, valid "this document says nothing for this component".
+  if (admitted.length === 0 && rejected.length > 0) {
+    throw new EvidenceExtractorUnavailableError(
+      "model output failed schema validation",
+      false,
+      "OUTPUT_SCHEMA_INVALID",
+      null,
+      rejected[0].field,
+    );
+  }
+
+  return admitted.map((f) => ({
     ...f,
     publishedAt: parseModelPublishedAt(f.publishedAt),
   }));

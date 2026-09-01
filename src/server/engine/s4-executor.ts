@@ -29,7 +29,7 @@ import {
   isExtractorSchemaField,
   resolveEvidenceExtractor,
 } from "./providers/evidence-extractor";
-import type { EvidenceExtractor } from "./providers/evidence-extractor";
+import type { EvidenceExtractor, RejectedFactReport } from "./providers/evidence-extractor";
 import { resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
@@ -45,7 +45,12 @@ import {
   modelQueriesCanBeUsed,
   orderCandidatesForComponent,
 } from "./acquisition-targeting";
-import { isKnownDeadUrl, loadAcquisitionLedger, planQueries } from "./acquisition-ledger";
+import {
+  approvedResourcesForComponent,
+  isKnownDeadUrl,
+  loadAcquisitionLedger,
+  planQueries,
+} from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
 import type { LocatorRejection } from "./documentary-locator";
@@ -713,6 +718,10 @@ interface Preflight {
 interface UsageCapture {
   queryProposer: ModelUsage | null;
   evidenceExtractor: ModelUsage | null;
+  // D-153 — the same capture-box discipline, for the facts a response
+  // carried that could not be read. Overwritten per extraction call and
+  // read immediately after it, exactly like evidenceExtractor above.
+  rejectedFacts: readonly RejectedFactReport[] | null;
 }
 
 // S10 LAST HIGH CLOSURE (HIGH-2, D-121) — structured preflight failure:
@@ -735,6 +744,10 @@ interface PreflightFailure {
   kind: PreflightFailureKind;
   code: string;
   reason: string;
+}
+
+function clearRejectedFacts(u: UsageCapture): void {
+  u.rejectedFacts = null;
 }
 
 function capabilityFatalPreflight(code: string, reason: string): PreflightFailure {
@@ -795,6 +808,9 @@ async function preflight(
         ep.profile.maxInputTokens,
         (u) => {
           usage.evidenceExtractor = u;
+        },
+        (r) => {
+          usage.rejectedFacts = r;
         },
       ));
   } catch (e) {
@@ -860,7 +876,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // MEDIUM-4/LOW-1: resolve every provider and cost profile THIS
       // ATTEMPT could need, before any reservation, so a resolver failure
       // is always zero-cost and always a typed FAILED result.
-      const usage: UsageCapture = { queryProposer: null, evidenceExtractor: null };
+      const usage: UsageCapture = { queryProposer: null, evidenceExtractor: null, rejectedFacts: null };
       const pre = await preflight(deps, config, usage);
       if (!pre.ok) {
         // HIGH-2 (S10 LAST HIGH CLOSURE, D-121): a capability-fatal
@@ -1482,9 +1498,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // in discovery order, which drained query #1's list and never
       // reached a later query's admissible candidate.
       // B: and never re-open a URL this job has already proven dead.
+      // D-154 — an approved SOURCE_RESOURCE for THIS component wins a tie
+      // among equally-ranked candidates, and only a tie. Read from this
+      // job's own persisted SOURCE_RESOURCE_SELECTED provenance, so the
+      // priority that D-151 established in the corpus and D-152 delivered to
+      // every component survives the final source-open boundary too.
       const orderedCandidates = orderCandidatesForComponent(
         [...candidateUrls.keys()],
         plan.establishingClasses,
+        null,
+        approvedResourcesForComponent(ledger, item.step, item.component),
       ).filter((url) => {
         if (!isKnownDeadUrl(url, ledger)) return true;
         observations.add("SKIPPED_KNOWN_DEAD_URL");
@@ -1705,6 +1728,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
         // BEFORE every real extraction attempt, including a retry —
         // EXTRACT_ATTEMPTED fires once per real attempt via onAttempt.
+        // D-153 — cleared before every call, so a rejection reported for an
+        // earlier document can never be attributed to this one. Cleared
+        // through a helper rather than inline, so the read below stays typed
+        // as the report array instead of being narrowed to the null this
+        // statement just wrote.
+        clearRejectedFacts(usage);
         const extractOutcome = await reserveAndCallWithRetry({
           db: deps.db,
           jobId: ctx.jobId,
@@ -1839,6 +1868,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         }
         // "ok"
         const facts: ExtractedFact[] = extractOutcome.value!;
+        // D-153 — a fact the canonical schema could not read is dropped
+        // alone; its valid siblings in the same response survive. What is
+        // recorded is the closed, code-owned schema field that rejected it
+        // and this code's own position counter — never the model's text and
+        // never the rejected value. The observation lands on the attempt,
+        // which already carries the step and component this happened under.
+        for (const r of usage.rejectedFacts ?? []) {
+          observations.add(`FACT_SCHEMA_REJECTED:${r.field}:${r.index}`);
+        }
         // S10 (§7) — audit-only actual usage/cost for THIS document's
         // extraction call, priced with the SAME approved profile that
         // sized the reservation above. Captured immediately after this

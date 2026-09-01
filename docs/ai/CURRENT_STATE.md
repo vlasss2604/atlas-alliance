@@ -226,6 +226,82 @@ the claim-scoped rule that fix put in place.
 are present on the screen and closed by default, so engine work continues
 against the real UI without leaking internals into the product surface.
 
+## ONE MALFORMED FACT NO LONGER ERASES ITS VALID SIBLINGS (D-153)
+
+The extractor response was validated with ONE whole-response schema parse.
+One bad field on one fact failed the element, the element failed the array,
+the array failed the object, and the caller got `OUTPUT_SCHEMA_INVALID` with
+nothing salvaged.
+
+That made research materially unrepeatable. Two runs of the same question over
+**byte-identical** official documents disagreed on four components purely
+because one sibling fact's `doesNotProve` came back malformed in one of them.
+The document had not changed; the component moved between SUPPORTED and
+INSUFFICIENT_EVIDENCE anyway.
+
+**The envelope and the elements are now validated separately.** The response
+must still be an object carrying a `facts` array within the same length cap —
+anything else is refused exactly as before. Each element is then checked
+against the identical canonical fact schema, so a malformed element costs
+itself and nothing else.
+
+**Nothing is repaired.** `doesNotProve` is never synthesised, a rejected fact
+is dropped whole rather than partially admitted, and it never becomes Evidence.
+When NO fact survives, the behaviour stays fail-closed with the same
+diagnostic it always had — an unreadable response is not "found nothing". A
+genuinely empty `facts` array is untouched and remains the normal valid answer.
+
+**One classifier, one vocabulary.** Element issue paths are re-rooted at
+`facts[index]` before classification, so the existing closed classifier maps
+them exactly as it always did; without that, every per-fact rejection would
+have collapsed to `UNKNOWN_SCHEMA_FIELD`.
+
+**Diagnostics carry no model text.** The provider reports `{ index, field }`
+through a callback on the same convention as `onUsage`; the executor records
+`FACT_SCHEMA_REJECTED:<field>:<index>` as an observation on the attempt, which
+already carries the step and component. No raw output, no rejected value, no
+migration.
+
+## AN APPROVAL NOW SURVIVES THE LAST BOUNDARY, NOT JUST THE FIRST (D-154)
+
+D-151 put an approved SOURCE_RESOURCE first in the corpus its component is
+served. D-152 made sure every component actually reaches that corpus. Neither
+survived the FINAL step: the executor re-ranks aggregated candidates by
+predicted establishing class and breaks ties on discovery order, and there the
+approved resource is just another url.
+
+On the fresh Raydium run, at DESTINATION: the approved `ray-buybacks.md` and
+an explorer candidate ranked EQUAL, stable ordering put the explorer first
+because it was discovered first, the component had one open, the explorer
+fetch failed — and the approved document, already selected and fetched and
+sealed, was never attempted.
+
+**Approval is now a tie breaker, and only a tie breaker.** The ledger builds
+`sourceResourcesByComponent` from this job's own `SOURCE_RESOURCE_SELECTED`
+rows, and `orderCandidatesForComponent` compares approval AFTER rank:
+rank → approval → the existing stable order.
+
+That placement is the whole point. Approval cannot lift a resource above a
+**better-ranked** candidate, so it never becomes authority, class or
+relevance; it cannot admit a url the job did not already hold as a candidate;
+it changes only which equally-eligible candidate is tried first. SSRF, source
+classification, component containment, admission and Evidence requirements are
+all untouched, and S5 still classifies the fetched document independently.
+
+**No bound moved.** `maxSourceOpens`, per-attempt opens,
+`MAX_SEARCH_RESULTS_PER_QUERY`, the query budget, D-148's seed cap and the
+model budgets are unchanged. Priority REORDERS the queue; it never lengthens
+it, and it displaces another candidate when there is no room.
+
+**Known limit, deliberately not addressed here.** A candidate whose predicted
+class positively establishes the component (an `etherscan.io` url for
+DESTINATION, say) ranks strictly ABOVE an approved document on a host
+`source-authority` does not positively recognise — including a host the
+project has a CONFIRMED SOURCE_ROUTE for, because the ordering call passes no
+`activeRouteClass`. That is rank, not a tie, so D-154 does not change it, and
+changing it would mean approval overriding establishing relevance. Recorded in
+the backlog as an owner decision.
+
 ## THE SAME QUERY ASKED BY TWO COMPONENTS IS TWO DIFFERENT FACTS (D-152)
 
 D-151 put an approved resource first in the corpus the extraction gateway

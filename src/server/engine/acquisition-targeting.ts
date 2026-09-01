@@ -1,6 +1,7 @@
 import { deriveSourceType, resolveSourceClass, targetDomainsForClass } from "./source-authority";
 import type { RouteClass } from "./source-authority";
 import type { EvidenceSourceClass } from "./providers/types";
+import { canonicalTargetRef } from "./trace-store";
 
 // D-129 — component-aware source-class targeting (acquisition).
 //
@@ -305,18 +306,46 @@ function isUnrecognisedHost(url: string): boolean {
 
 // Stable: candidates of equal rank keep their discovery order, so query
 // priority still decides ties and the ordering stays deterministic.
+//
+// D-154 — AN APPROVED RESOURCE WINS AN EQUAL-RANK TIE.
+//
+// `approvedResources` holds the canonical urls a human approved for THIS
+// component, and it is consulted ONLY to break a tie between candidates that
+// already rank the same. That placement is the whole point:
+//
+//   * it cannot lift a resource above a better-ranked candidate, so approval
+//     never becomes relevance, class or authority — the predicted
+//     establishing class still decides first, and S5 still classifies the
+//     fetched document independently and decides establishment on its own;
+//   * it cannot admit a url this job did not already have as a candidate;
+//   * it changes only WHICH equally-eligible candidate is tried first, which
+//     is exactly what was being lost. Discovery order is an accident of
+//     which query ran first; a human approving a document for this component
+//     is not, and the accident should not outrank the intent.
+//
+// Without it, D-151's seed-first corpus and D-152's component-scoped reuse
+// both survive right up to the final source-open boundary and are discarded
+// there: an equally-ranked search candidate discovered earlier takes the one
+// available open, fails, and the approved document is never attempted.
 export function orderCandidatesForComponent(
   urls: readonly string[],
   establishingClasses: readonly EvidenceSourceClass[],
   activeRouteClass: RouteClass | null = null,
+  approvedResources: ReadonlySet<string> = new Set(),
 ): string[] {
   return urls
     .map((url, index) => ({
       url,
       index,
       rank: rankCandidateForComponent(url, establishingClasses, activeRouteClass),
+      // 0 sorts ahead of 1, so an approved resource leads its rank band.
+      approved: approvedResources.has(canonicalTargetRef(url)) ? 0 : 1,
     }))
-    .sort((a, b) => (a.rank !== b.rank ? a.rank - b.rank : a.index - b.index))
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;
+      if (a.approved !== b.approved) return a.approved - b.approved;
+      return a.index - b.index;
+    })
     .map((c) => c.url);
 }
 

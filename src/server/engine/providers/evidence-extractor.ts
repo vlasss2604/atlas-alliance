@@ -26,6 +26,19 @@ export interface EvidenceExtractor {
   extract(input: EvidenceExtractionInput): Promise<ExtractedFact[]>;
 }
 
+// D-153 — ONE MALFORMED FACT IS NOT A FAILED EXTRACTION.
+//
+// What a per-fact rejection is allowed to say. `index` is this code's own
+// position counter over the response array, and `field` is the same closed,
+// code-owned schema vocabulary a whole-response failure already reports. No
+// model-derived text and no rejected value ever appears here — the report
+// says WHICH element failed and WHICH code-owned field rejected it, and
+// nothing about what the model actually wrote.
+export interface RejectedFactReport {
+  index: number;
+  field: ExtractorSchemaField;
+}
+
 // WHY the generation call failed, on the OUTPUT side — the three
 // conditions the generation path itself can identify deterministically,
 // each emitted only from its own branch (never inferred from anything
@@ -207,6 +220,10 @@ export async function resolveEvidenceExtractor(
   maxOutputTokens?: number,
   maxInputTokens?: number,
   onUsage?: (usage: ModelUsage) => void,
+  // D-153 — same capture-box convention as onUsage: the provider reports,
+  // the caller decides what to record. Optional, so every existing call
+  // site and every fixture extractor stays valid.
+  onRejectedFacts?: (rejected: readonly RejectedFactReport[]) => void,
 ): Promise<EvidenceExtractor> {
   if (_override) return _override;
   const kind = process.env.MODEL_GATEWAY ?? "anthropic";
@@ -225,5 +242,6 @@ export async function resolveEvidenceExtractor(
     maxOutputTokens,
     maxInputTokens,
     onUsage,
+    onRejectedFacts,
   );
 }

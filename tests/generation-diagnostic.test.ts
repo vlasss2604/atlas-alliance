@@ -282,9 +282,24 @@ describe("OUTPUT_SCHEMA_INVALID names WHICH code-owned field failed (items 1-4)"
       // A nested array index inside a fact field: the index is dropped,
       // the FIELD is what is named.
       [JSON.stringify({ facts: [validFact({ onchainLocators: ["ok", 7] })] }), "FACTS_ONCHAIN_LOCATORS"],
-      // The index of WHICH fact also never appears — fact 2's bad field
-      // reports the same code as fact 0's would.
-      [JSON.stringify({ facts: [validFact(), validFact(), validFact({ directness: "SIDEWAYS" })] }), "FACTS_DIRECTNESS"],
+      // The index of WHICH fact also never appears in the CODE — a bad
+      // field on fact 2 reports the same code as fact 0's would.
+      //
+      // D-153: this case is now an ALL-invalid response, because a response
+      // with valid siblings no longer fails at all — one malformed fact is
+      // dropped alone and the valid ones are returned (see
+      // d153-per-fact-extraction-validation.test.ts). All-invalid still fails
+      // closed, which is what keeps this classification assertion meaningful.
+      [
+        JSON.stringify({
+          facts: [
+            validFact({ directness: "SIDEWAYS" }),
+            validFact({ directness: "SIDEWAYS" }),
+            validFact({ directness: "SIDEWAYS" }),
+          ],
+        }),
+        "FACTS_DIRECTNESS",
+      ],
     ] as const) {
       const { err } = await extractFailure(async () => modelResponse(body));
       expect(err.schemaField, expected).toBe(expected);
