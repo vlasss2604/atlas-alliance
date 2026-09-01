@@ -742,6 +742,7 @@ const detailFixture = {
     establishedComponents: 0,
   },
   finding: { componentKeys: [], supporting: [], contradicting: [], excluded: [] },
+  questionFindings: null,
   components: [
     {
       patternStep: 3,

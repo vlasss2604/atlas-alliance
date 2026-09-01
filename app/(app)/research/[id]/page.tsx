@@ -14,6 +14,7 @@ import { ResultLadder } from "@/src/client/components/result-ladder";
 import { OutcomeBadge } from "@/src/client/components/verdict-badge";
 import {
   CONFIDENCE_LABELS,
+  deriveQuestionFindings,
   deriveResultLadder,
   groupEvidenceByDocument,
   isTerminal,
@@ -268,6 +269,27 @@ export default function ResearchDetailPage() {
   const usedDocs = admittedDocs.reduce((n, d) => n + d.groups.length, 0);
 
   const ladder = deriveResultLadder(components, sourceClassesByComponent);
+  // WHERE THE EVIDENCE STOPS, ON THE QUESTION'S OWN TERMS.
+  //
+  // With a projection, the boundary is the first thing the QUESTION asked
+  // about that the evidence did not establish — which is what a reader is
+  // actually looking for. Without one it falls back to the Pattern
+  // ladder's own conservative boundary, which is only drawn where an
+  // established run exists to end.
+  const questionRows = detail.questionFindings
+    ? deriveQuestionFindings(detail.questionFindings, components, sourceClassesByComponent)
+    : [];
+  // A row established by NOTHING is a harder stop than one established in
+  // part, so it is preferred even when the projection ordered a partial
+  // row first. "Partly established" is progress; "not established" is the
+  // edge of what the evidence reaches, which is what a reader is asking
+  // about when they ask where it stops.
+  const boundary =
+    questionRows.length > 0
+      ? (questionRows.find((r) => r.state === "UNRESOLVED") ??
+        questionRows.find((r) => r.state === "PARTIAL") ??
+        null)
+      : ladder.boundary;
 
   return (
     <main className="enter flex flex-col gap-5 pb-6">
@@ -344,18 +366,18 @@ export default function ResearchDetailPage() {
               is drawn only where the ladder derived a boundary, which needs
               an established run to end — so it never appears as a verdict on
               a research that had no foothold to begin with. */}
-          {ladder.boundary && (
+          {boundary && (
             <div
               className="mt-5 border-t border-[var(--hairline)] pt-4"
               data-testid="answer-boundary"
             >
               <p className="text-[0.86rem] leading-snug">
                 <span className="text-[#fcd34d]">The evidence stops at:</span>{" "}
-                <span className="text-[var(--atlas-text)]">{ladder.boundary.label}</span>
+                <span className="text-[var(--atlas-text)]">{boundary.label}</span>
               </p>
-              {ladder.boundary.reason && (
+              {boundary.reason && (
                 <p className="mt-1.5 text-[0.82rem] leading-snug text-[var(--atlas-text-dim)]">
-                  {ladder.boundary.reason}
+                  {boundary.reason}
                 </p>
               )}
             </div>
@@ -390,6 +412,7 @@ export default function ResearchDetailPage() {
         <ResultLadder
           components={components}
           sourceClassesByComponent={sourceClassesByComponent}
+          questionFindings={detail.questionFindings}
           onViewEvidence={openEvidence}
         />
       )}
@@ -408,13 +431,32 @@ export default function ResearchDetailPage() {
         />
       )}
 
-      {/* ---- how the research ran (secondary once finished) ---------- */}
+      {/* ---- FULL RESEARCH AUDIT ------------------------------------- *
+       * Everything the research did, rather than everything the question
+       * needed. When a projection resolved, this is the ONLY place the
+       * Pattern's own ten components appear — a reader who asked where
+       * fees go should not have to meet SOURCE_OF_VALUE or DURABILITY_BASIS
+       * to understand the answer, but an expert who wants to check the
+       * work must still be able to see every one of them.
+       *
+       * It is not a second answer, and it is not renamed developer data:
+       * the rows here are the same canonical component results, derived by
+       * the same function, under the Pattern's own grouping.
+       */}
       {finished && (
         <details className="panel px-5 py-4" data-testid="progress-slot-finished">
           <summary className="cursor-pointer select-none text-[0.8rem] text-[var(--atlas-text-dim)]">
-            How this research ran
+            Full research audit
           </summary>
-          <div className="mt-4">
+          <div className="mt-4 flex flex-col gap-4">
+            {questionRows.length > 0 && (
+              <div data-testid="audit-full-ladder">
+                <ResultLadder
+                  components={components}
+                  sourceClassesByComponent={sourceClassesByComponent}
+                />
+              </div>
+            )}
             <ResearchProgress job={job} />
           </div>
         </details>

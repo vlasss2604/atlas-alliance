@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import {
+  deriveQuestionFindings,
   deriveResultLadder,
   sourceClassCaveat,
   sourceClassLabel,
@@ -38,10 +39,21 @@ import {
 export function ResultLadder({
   components,
   sourceClassesByComponent,
+  questionFindings,
   onViewEvidence,
 }: {
   components: LadderComponentInput[];
   sourceClassesByComponent?: Record<string, string[]>;
+  // When a projection resolved, these are the findings the question
+  // itself calls for, already named in the reader's words. When it is
+  // absent — never generated, failed, or its refs no longer resolve — the
+  // Pattern-driven ladder below is the conservative fallback.
+  questionFindings?: {
+    label: string;
+    patternStep: number;
+    component: string;
+    supportingComponents: string[];
+  }[] | null;
   onViewEvidence?: () => void;
 }) {
   // ONE ROW OPEN AT A TIME. Progressive disclosure is only progressive if
@@ -49,6 +61,40 @@ export function ResultLadder({
   // at once is the wall of panels this section exists to replace.
   const [openRow, setOpenRow] = useState<string | null>(null);
   const view = deriveResultLadder(components, sourceClassesByComponent);
+  const question =
+    questionFindings && questionFindings.length > 0
+      ? deriveQuestionFindings(questionFindings, components, sourceClassesByComponent)
+      : [];
+
+  // THE QUESTION SHAPES THE SCREEN WHEN IT CAN.
+  //
+  // These rows carry the same statuses, reasons and evidence the ladder
+  // below would show for the same components — the only difference is
+  // WHICH ones are here and what they are called. The Pattern's own
+  // grouping does not appear at all, because a reader did not ask about
+  // the Pattern.
+  if (question.length > 0) {
+    return (
+      <section className="panel p-5 sm:p-6" data-testid="result-ladder">
+        <p className="eyebrow eyebrow-violet">What ATLAS established for this question</p>
+        <div className="mt-3.5" data-testid="ladder-question">
+          {question.map((row) => (
+            <LadderRow
+              key={row.component}
+              row={row}
+              open={openRow === row.component}
+              onToggle={() => setOpenRow((p) => (p === row.component ? null : row.component))}
+              onViewEvidence={onViewEvidence}
+              isBoundary={false}
+            />
+          ))}
+        </div>
+        <p className="mt-4 text-[0.72rem] text-[var(--atlas-text-dim)]">
+          Everything else ATLAS checked is in the full research audit.
+        </p>
+      </section>
+    );
+  }
 
   if (!view.derivable) {
     return (

@@ -11,6 +11,7 @@ import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 import { buildAndPersistProof } from "./proof-store";
+import { generateQuestionProjectionSafely } from "./question-projection-store";
 
 // Phase 6, S4 — the actual production wiring point: given a jobId, load
 // its frozen entitlement/budget, its persisted Research Boundary
@@ -175,6 +176,27 @@ export async function runS4ResearchJob(
   // failure, so the refusal is returned rather than thrown and the job
   // result is unchanged by it.
   await buildAndPersistProof(db, jobId);
+
+  // QUESTION-DRIVEN PROJECTION — presentation, after the fact, isolated.
+  //
+  // The ONLY place a projection model call originates. It runs here, once,
+  // after canonical research has finished and its Proof exists; no read
+  // path can reach it, which is what makes "one model call per Proof" a
+  // structural property of the system rather than a convention.
+  //
+  // It is deliberately the LAST thing this function does, and it cannot
+  // throw: `generateQuestionProjectionSafely` returns every outcome,
+  // including its own failures, and persists terminal failure so a later
+  // page load never becomes a reason to call the model again.
+  //
+  // Nothing above this line can be changed by what happens below it. The
+  // job's state, the S7 verdict, the Proof and every component result are
+  // already written and are not revisited. That separation is the point:
+  // a projection decides how an answer is ARRANGED, never what it says, so
+  // a projection that fails must mean nothing whatsoever about the project
+  // — the reader simply gets the canonical result without the
+  // question-shaped breakdown.
+  await generateQuestionProjectionSafely(db, jobId);
 
   return result;
 }

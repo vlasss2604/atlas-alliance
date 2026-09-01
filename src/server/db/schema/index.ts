@@ -7,3 +7,4 @@ export * from "./memory";
 export * from "./config";
 export * from "./engine";
 export * from "./acquired";
+export * from "./projection";

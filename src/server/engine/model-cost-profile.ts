@@ -55,7 +55,15 @@ export interface ModelCostProfile {
 // SAME closed pair s4-executor.ts's preflight() already resolves
 // providers for. Not an open string: a role outside this pair cannot
 // exist in the catalogue key, by construction.
-export type ModelRole = "QUERY_PROPOSER" | "EVIDENCE_EXTRACTOR";
+// PROJECTION is a THIRD role, and the only one that runs after research
+// has finished. Owner decision: it is exempt from the job's closed
+// research budget — that budget measures acquisition, evidence and
+// verification work, and this is bounded post-research presentation work —
+// but it must still be economically observable. It therefore takes a
+// profile here like any other role, so its ceiling is approved in the same
+// version-controlled place and its actual cost is computed by the same
+// arithmetic. Exempt from the budget is not exempt from the books.
+export type ModelRole = "QUERY_PROPOSER" | "EVIDENCE_EXTRACTOR" | "PROJECTION";
 
 export class ModelCostProfileMissingError extends Error {
   constructor(
@@ -97,6 +105,20 @@ const PRODUCTION_MODEL_COST_PROFILES: Record<string, ModelCostProfile> = {
     outputPriceMicroUsdPerToken: 5,
     maxInputTokens: 48_000,
     maxOutputTokens: 1_536,
+    priceVersion: "anthropic-2026-08",
+  },
+  // The projection sees a compact status summary — never a document, a
+  // fragment, a url or a provider response — so its input ceiling is small
+  // by design rather than by trimming. 4k in / 512 out bounds one call at
+  // 4_000×1 + 512×5 = 6_560 micro-USD, roughly a tenth of a SINGLE
+  // evidence-extraction call's ceiling and a small fraction of a research
+  // job, which makes one call per completed Proof economically trivial.
+  [catalogueKey("PROJECTION", "claude-haiku-4-5")]: {
+    modelId: "claude-haiku-4-5",
+    inputPriceMicroUsdPerToken: 1,
+    outputPriceMicroUsdPerToken: 5,
+    maxInputTokens: 4_000,
+    maxOutputTokens: 512,
     priceVersion: "anthropic-2026-08",
   },
 };

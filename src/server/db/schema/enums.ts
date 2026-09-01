@@ -286,6 +286,27 @@ export const componentReconciliationStatus = pgEnum("component_reconciliation_st
   "INSUFFICIENT_EVIDENCE",
 ]);
 
+// QUESTION PROJECTION — a DERIVED PRESENTATION artifact, never research
+// truth. Three terminal states, and the split between the two failures is
+// the point: FAILED_MODEL means the provider call did not produce usable
+// output at all, FAILED_VALIDATION means it did and our own deterministic
+// rules refused it. They fail the same way for the reader (conservative
+// canonical fallback) and mean completely different things to us.
+//
+// A terminal failure is PERSISTED rather than left absent, so a result
+// page can never become a reason to call the model again. Generation
+// happens once, after research completes; nothing on a read path may
+// trigger it.
+//
+// There is deliberately no fourth value. "Not enough canonical input to
+// project" is not a failure — no row is written, the reader gets the same
+// conservative fallback, and no model call was ever made to fail.
+export const questionProjectionStatus = pgEnum("question_projection_status", [
+  "VALID",
+  "FAILED_VALIDATION",
+  "FAILED_MODEL",
+]);
+
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) —
 // operational trace vocabulary. This is TRACE, never Evidence and never
 // a claim judgment: it records "what S4 did", not "what is true about

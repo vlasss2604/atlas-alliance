@@ -31,6 +31,12 @@ const productConfigSchema = z.object({
   // ключи (ON CONFLICT DO NOTHING) — это защита в глубину, не замена.
   query_proposer_model: z.string().min(1).default("claude-haiku-4-5"),
   evidence_extractor_model: z.string().min(1).default("claude-haiku-4-5"),
+  // Question-driven Proof projection. Same .default(...) discipline as the
+  // two roles above and for the same reason: an existing database that has
+  // been migrated but never re-seeded has no product_config row for this
+  // key, and loadProductConfig() must not throw for every caller because a
+  // presentation feature is unconfigured.
+  projection_model: z.string().min(1).default("claude-haiku-4-5"),
   // S10 (live-provider-enablement.md §10) — internal-alpha gate, SEPARATE
   // from research_enabled (the public/product gate, which MUST remain
   // false throughout S10 internal alpha). Live executor construction
@@ -89,6 +95,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   // D-032: механическая генерация/извлечение — Haiku.
   query_proposer_model: "claude-haiku-4-5",
   evidence_extractor_model: "claude-haiku-4-5",
+  projection_model: "claude-haiku-4-5",
   internal_alpha_enabled: false,
   phased_research_enabled: false,
   ari_core_price_stars: 2999,

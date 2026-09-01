@@ -290,6 +290,25 @@ export interface ResearchJobDetail {
     contradicting: ResearchEvidenceView[];
     excluded: (ResearchEvidenceView & { exclusionReason: string })[];
   };
+  // QUESTION-DRIVEN FINDINGS — presentation only, and note what is absent.
+  //
+  // A label and canonical component keys. NO status, NO reason, NO
+  // evidence id: those are derived on the client from the `components`
+  // rows in this same response, exactly as they were before this existed.
+  // The projection decides which findings matter to the question that was
+  // asked and what to call them; canonical research decides what is true.
+  //
+  // Null means no usable projection — never generated, generated and
+  // failed, or its references no longer resolve. The UI falls back to the
+  // canonical result rather than inventing a question-shaped one.
+  questionFindings:
+    | {
+        label: string;
+        patternStep: number;
+        component: string;
+        supportingComponents: string[];
+      }[]
+    | null;
   components: {
     patternStep: number;
     component: string;

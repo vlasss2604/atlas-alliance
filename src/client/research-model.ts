@@ -1240,6 +1240,36 @@ function buildRow(
   };
 }
 
+// THE QUESTION-DRIVEN VIEW — SAME DERIVATION, DIFFERENT SELECTION.
+//
+// A projection supplies two things and only two: WHICH canonical component
+// results matter to the question that was asked, and what to CALL them.
+// Everything a reader is told about truth still comes from `buildRow`,
+// reading the same persisted component row it would have read anyway —
+// status, reason code copy, coverage, limitation, evidence counts, source
+// classes. That is the whole safety property, expressed as code reuse: a
+// projection cannot make a row say anything a Pattern-driven row could not
+// say about the same component, because it is the identical function.
+//
+// So the model chose the rows and named them; canonical research decided
+// every word of what they mean. A row whose component has no persisted
+// result is dropped here exactly as it is in the Pattern-driven ladder.
+export function deriveQuestionFindings(
+  findings: readonly {
+    label: string;
+    patternStep: number;
+    component: string;
+    supportingComponents: string[];
+  }[],
+  components: readonly LadderComponentInput[],
+  classesByComponent?: Record<string, readonly string[]>,
+): ResultRow[] {
+  const byComponent = new Map(components.map((c) => [c.component, c]));
+  return findings
+    .map((f) => buildRow({ component: f.component, label: f.label }, byComponent, classesByComponent))
+    .filter((r) => r.state !== "NOT_ASSESSED");
+}
+
 // NOT_ASSESSED ROWS ARE HIDDEN, NOT DIMMED.
 //
 // A component with no persisted result was not tested. Listing it greyed out

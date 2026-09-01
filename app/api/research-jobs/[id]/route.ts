@@ -15,8 +15,13 @@ import {
   researchComponentResults,
   researchJobs,
   researchMechanismAssembly,
+  researchQuestionProjections,
   sources,
 } from "@/src/server/db/schema";
+import {
+  PROJECTION_VERSION,
+  resolveProjectionFindings,
+} from "@/src/server/engine/question-projection";
 import { getDb } from "@/src/server/runtime";
 import { loadProofForJob } from "@/src/server/services/proof-view";
 
@@ -410,6 +415,43 @@ export async function GET(
     // which this task deliberately does not touch.
     const proof = await loadProofForJob(db, id, session.userId);
 
+    // QUESTION-DRIVEN PROJECTION — READ ONLY, ALWAYS.
+    //
+    // This route never generates a projection and never retries a failed
+    // one. Generation happens exactly once, in run-job.ts, after research
+    // completes. A GET that could trigger a model call would turn every
+    // page load into cost and would make the result non-repeatable, so the
+    // read path has no way to reach the provider at all.
+    //
+    // Only a VALID row is projected to the client. A persisted
+    // FAILED_MODEL or FAILED_VALIDATION row is what STOPS a retry; it is
+    // not something a reader is shown, and it must never be mistaken for a
+    // research outcome. Absent or failed both yield null here, and the UI
+    // falls back to the canonical result.
+    const [projectionRow] = await db
+      .select({
+        status: researchQuestionProjections.status,
+        findings: researchQuestionProjections.findings,
+        projectionVersion: researchQuestionProjections.projectionVersion,
+      })
+      .from(researchQuestionProjections)
+      .where(
+        and(
+          eq(researchQuestionProjections.researchJobId, id),
+          eq(researchQuestionProjections.projectionVersion, PROJECTION_VERSION),
+        ),
+      );
+
+    // Re-validated on the way OUT, against this response's own canonical
+    // rows. The row was validated when written, but the canonical result
+    // it points at is the thing that decides status — so a reference that
+    // no longer resolves is dropped here rather than rendered against
+    // something else. Presentation degrades; it never guesses.
+    const questionFindings =
+      projectionRow?.status === "VALID"
+        ? resolveProjectionFindings(projectionRow.findings, components)
+        : null;
+
     return Response.json({
       job,
       proof,
@@ -417,6 +459,7 @@ export async function GET(
       mechanism: mechanism ?? null,
       execution,
       finding,
+      questionFindings,
       components,
       // Retained for transparency/debug, now carrying its ownership links.
       // NOT the Proof source — `proof` is, and `finding` was before it.
