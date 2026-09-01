@@ -199,17 +199,21 @@ describe("UI — answer first", () => {
     const src = readFileSync(RESULT_PAGE, "utf-8");
     const answerAt = src.indexOf('data-testid="answer-panel"');
     const ladderAt = src.indexOf("<ResultLadder");
+    const auditAt = src.indexOf('data-testid="progress-slot-finished"');
     const evidenceAt = src.indexOf("<EvidenceSection");
-    const processAt = src.indexOf('data-testid="progress-slot-finished"');
     const devAt = src.indexOf("<DeveloperDetails");
-    for (const at of [answerAt, ladderAt, evidenceAt, processAt, devAt]) {
+    for (const at of [answerAt, ladderAt, auditAt, evidenceAt, devAt]) {
       expect(at).toBeGreaterThan(-1);
     }
-    // Answer → the claims → the sources → how it ran → engine internals.
+    // Answer → the findings → the full audit → engine internals.
     expect(answerAt).toBeLessThan(ladderAt);
-    expect(ladderAt).toBeLessThan(evidenceAt);
-    expect(evidenceAt).toBeLessThan(processAt);
-    expect(processAt).toBeLessThan(devAt);
+    expect(ladderAt).toBeLessThan(auditAt);
+    expect(auditAt).toBeLessThan(devAt);
+    // The document inventory is INSIDE the audit now, not a section of the
+    // normal result: proof reaches a reader through the finding it proves,
+    // so a general source list has no place above this point.
+    expect(evidenceAt).toBeGreaterThan(auditAt);
+    expect(evidenceAt).toBeLessThan(devAt);
   });
 
   it("TEST 3b: the answer is plain language, and never claims more than the evidence", () => {

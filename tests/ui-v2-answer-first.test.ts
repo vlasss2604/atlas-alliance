@@ -242,14 +242,17 @@ describe("V2 — a blocked check is separated from a completed one", () => {
     expect(html).not.toContain("Evidence indicates otherwise");
 
     // The expansion itself renders only once a reader opens the row, and
-    // there is no DOM here to click with. What is pinned instead is that
-    // the limitation leads that expansion — before any sentence about what
-    // the evidence did or did not show.
+    // there is no DOM here to click with. What is pinned instead is that a
+    // limitation gets its OWN frame rather than becoming one more sentence
+    // in the ordinary explanation — the two are mutually exclusive
+    // branches, so a blocked step can never read as a finding.
     const src = readFileSync("src/client/components/result-ladder.tsx", "utf-8");
     const limitationAt = src.indexOf('data-testid="ladder-limitation"');
-    const whyAt = src.indexOf('Block label="Why this status"');
+    const explanationAt = src.indexOf('data-testid="finding-explanation"');
     expect(limitationAt).toBeGreaterThan(-1);
-    expect(limitationAt).toBeLessThan(whyAt);
+    expect(explanationAt).toBeGreaterThan(-1);
+    expect(src).toContain("row.limitation ? (");
+    expect(limitationAt).toBeLessThan(explanationAt);
     expect(src).toContain("Research limitation");
   });
 
@@ -520,15 +523,17 @@ describe("V2 — every exclusion reason the engine emits has real copy", () => {
 describe("V2 — what the default screen does and does not carry", () => {
   it("TEST 13: the deep sections are closed by default and the payload is gated", () => {
     const src = readFileSync(RESULT_PAGE, "utf-8");
-    // Evidence starts closed; a row's "View evidence" is what opens it.
+    // Deep sections start closed, and proof now reaches a reader through
+    // the finding it proves rather than through a page-level control.
     expect(src).toContain("useState(false)");
-    expect(src).toContain("onViewEvidence={openEvidence}");
-    expect(src).toContain("setEvidenceOpen(true)");
+    expect(src).toContain("evidenceByComponent={evidenceByComponent}");
     // The old screen rendered the component grid, the gaps panel and the
-    // reality ladder as three more equal-weight sections. They are gone.
+    // reality ladder as three more equal-weight sections. They are gone,
+    // and so is the general evidence wall that replaced them.
     expect(src).not.toContain("ComponentBreakdown");
     expect(src).not.toContain("GapsPanel");
     expect(src).not.toContain("RealityCheck");
+    expect(src).not.toContain('data-testid="answer-view-evidence"');
   });
 
   it("TEST 13b: the source count is one fact, counted once, over distinct documents", () => {

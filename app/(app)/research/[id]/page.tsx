@@ -92,16 +92,6 @@ export default function ResearchDetailPage() {
       .catch(() => {});
   }, [jobId, refresh]);
 
-  // A row's "View evidence" opens Level 3 and moves the reader to it. The
-  // alternative — leaving them to find a collapsed section further down —
-  // is how progressive disclosure turns back into a scavenger hunt.
-  const openEvidence = useCallback(() => {
-    setEvidenceOpen(true);
-    requestAnimationFrame(() => {
-      evidenceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  }, []);
-
   const live = detail !== null && !isTerminal(detail.job.state);
 
   // LIVE STATE COMES FROM THE SERVER, ALWAYS.
@@ -257,6 +247,30 @@ export default function ResearchDetailPage() {
     }
   }
 
+  // PROOF, RESOLVED TO THE CONCLUSION IT SUPPORTS.
+  //
+  // Built from PERSISTED component links and nothing else — a row reaches
+  // a finding because S5 linked it to that component, never because the
+  // text looked relevant. An EXCLUDED link is skipped here: a source the
+  // engine read and refused must never appear as proof of anything, and
+  // it remains visible in the full audit where it belongs.
+  //
+  // This is what lets the normal result carry no document list at all. A
+  // reader never meets a source without the conclusion it is there for,
+  // so "why am I looking at this?" cannot arise.
+  const evidenceByComponent: Record<string, EvidenceItemLike[]> = {};
+  const admittedById = new Map(admitted.map((e) => [e.data.id, e.data]));
+  for (const e of detail.evidence) {
+    for (const link of e.links) {
+      if (link.role === "EXCLUDED") continue;
+      const list = (evidenceByComponent[link.component] ??= []);
+      if (list.some((x) => x.id === e.id)) continue;
+      // Prefer the claim-scoped copy where one exists: it carries S8's
+      // citation binding rather than the job-wide projection of the row.
+      list.push(admittedById.get(e.id) ?? toItem(e));
+    }
+  }
+
   // A QUIET INDICATOR THAT WORK HAPPENED, AND A DELIBERATE UNDERCOUNT.
   //
   // This counts distinct documents that produced at least one evidence row.
@@ -394,14 +408,12 @@ export default function ResearchDetailPage() {
                 {readDocs} {readDocs === 1 ? "source" : "sources"} read
               </span>
               {readDocs - usedDocs > 0 && <span>{readDocs - usedDocs} not used as evidence</span>}
-              <button
-                type="button"
-                onClick={openEvidence}
-                className="ml-auto text-[var(--atlas-cyan)] hover:underline"
-                data-testid="answer-view-evidence"
-              >
-                View evidence
-              </button>
+              {/* NO "VIEW EVIDENCE" LINK HERE ANY MORE.
+                  It used to open a general document section, which is the
+                  thing this round removed: proof now lives inside the
+                  finding it proves, so the only honest way to reach a
+                  source is through the conclusion it supports. The counts
+                  stay as a quiet note that work happened. */}
             </p>
           )}
         </section>
@@ -412,22 +424,8 @@ export default function ResearchDetailPage() {
         <ResultLadder
           components={components}
           sourceClassesByComponent={sourceClassesByComponent}
+          evidenceByComponent={evidenceByComponent}
           questionFindings={detail.questionFindings}
-          onViewEvidence={openEvidence}
-        />
-      )}
-
-      {/* ---- 3. LEVEL 3 — the sources themselves --------------------- */}
-      {finished && (
-        <EvidenceSection
-          ref={evidenceRef}
-          admittedDocs={admittedDocs}
-          excludedDocs={excludedDocs}
-          otherDocs={otherDocs}
-          readCount={readDocs}
-          usedCount={usedDocs}
-          open={evidenceOpen}
-          onToggle={() => setEvidenceOpen((v) => !v)}
         />
       )}
 
@@ -454,9 +452,26 @@ export default function ResearchDetailPage() {
                 <ResultLadder
                   components={components}
                   sourceClassesByComponent={sourceClassesByComponent}
+                  evidenceByComponent={evidenceByComponent}
                 />
               </div>
             )}
+            {/* THE COMPLETE SOURCE INVENTORY LIVES HERE, AND ONLY HERE.
+                Used, refused and merely-read, with every exclusion reason
+                intact. On the normal result a source appears only under
+                the finding it supports; this is where an expert checks
+                what was read and not used, which is the part a chat
+                answer structurally cannot show. */}
+            <EvidenceSection
+              ref={evidenceRef}
+              admittedDocs={admittedDocs}
+              excludedDocs={excludedDocs}
+              otherDocs={otherDocs}
+              readCount={readDocs}
+              usedCount={usedDocs}
+              open={evidenceOpen}
+              onToggle={() => setEvidenceOpen((v) => !v)}
+            />
             <ResearchProgress job={job} />
           </div>
         </details>

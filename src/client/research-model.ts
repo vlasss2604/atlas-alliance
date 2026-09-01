@@ -1240,6 +1240,87 @@ function buildRow(
   };
 }
 
+// ONE CONNECTED EXPLANATION, NOT A FILING SYSTEM.
+//
+// A finding used to expand into three headed blocks — what ATLAS checked,
+// what the evidence shows, what it does not establish. Each was accurate
+// and the set of them read like an internal report: the reader had to
+// visit three boxes and join them up, which is the assembly work this
+// product exists to have already done.
+//
+// The same facts, in the same order, as prose a person reads once.
+// EVERY SENTENCE IS STILL DERIVED, never written for the occasion: the
+// state, the persisted reason code, the coverage classification and the
+// admitted source classes are the only inputs, and each contributes at
+// most one sentence. There is no model call here and no free text.
+//
+// Two to four sentences. Past that a reader stops reading, and a fourth
+// sentence nobody reaches is not more honest than three they finish.
+
+// Which kind of source speaks for a finding when several do. A fixed
+// precedence rather than evidence-link order, so the caveat a reader is
+// shown is stable across runs and is always the STRONGEST kind of source
+// behind the finding — the one whose limits matter most.
+const CAVEAT_PRECEDENCE = [
+  "ONCHAIN_VERIFIABLE",
+  "GOVERNANCE",
+  "OFFICIAL_DOCS",
+  "OFFICIAL_REPORT",
+  "DATA_PROVIDER",
+  "RESEARCH_MEDIA",
+  "SOCIAL",
+];
+
+export function findingExplanation(row: ResultRow): string[] {
+  const phrase = COMPONENT_PHRASES[row.component] ?? null;
+
+  // A RESEARCH LIMITATION IS ITS OWN EXPLANATION, AND LEADS.
+  //
+  // It must never be blended into sentences about what the evidence
+  // showed, because in this case there is no evidence to have shown
+  // anything — and a reader who skims would otherwise take "not
+  // established" as a fact about the project.
+  if (row.coverage === "BLOCKED") {
+    return [
+      "Required source access failed during this part of the research, so ATLAS could not complete the necessary checks here.",
+      "This is a limit of the research run, not evidence for or against the project.",
+    ];
+  }
+
+  const sentences: string[] = [];
+
+  // 1 — what the checked evidence did or did not establish.
+  if (phrase) {
+    if (row.state === "VERIFIED") sentences.push(`The checked evidence establishes ${phrase}.`);
+    else if (row.state === "PARTIAL")
+      sentences.push(`The checked evidence partly establishes ${phrase}.`);
+    else if (row.state === "NOT_HAPPENING")
+      sentences.push(`On ${phrase}, the checked evidence indicates otherwise.`);
+    else sentences.push(`The checked evidence does not establish ${phrase}.`);
+  }
+
+  // 2 — why it stands where it does, from the persisted reason code. On an
+  // established finding a reason code is a QUALIFIER (indirect only,
+  // authority short of the bar) and is worth just as much as it is on an
+  // unresolved one.
+  if (row.reason) sentences.push(row.reason);
+
+  // 3 — the boundary that the KIND of source cannot cross, whatever it
+  // said. This is where "documented" is kept from reading as "happening",
+  // and it belongs only where something was actually admitted.
+  const strongest = CAVEAT_PRECEDENCE.find((c) => row.sourceClasses.includes(c));
+  const caveat = strongest ? sourceClassCaveat(strongest) : null;
+  if (caveat && (row.state === "VERIFIED" || row.state === "PARTIAL")) {
+    sentences.push(`${sourceClassLabel(strongest!)}: ${lowerFirst(caveat.cannot)}`);
+  }
+
+  return sentences.slice(0, 4);
+}
+
+function lowerFirst(s: string): string {
+  return s.length > 0 ? s[0].toLowerCase() + s.slice(1) : s;
+}
+
 // THE QUESTION-DRIVEN VIEW — SAME DERIVATION, DIFFERENT SELECTION.
 //
 // A projection supplies two things and only two: WHICH canonical component
