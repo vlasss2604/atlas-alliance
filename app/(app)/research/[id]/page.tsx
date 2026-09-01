@@ -16,6 +16,7 @@ import {
   CONFIDENCE_LABELS,
   deriveQuestionFindings,
   deriveResultLadder,
+  findingExplanation,
   groupEvidenceByDocument,
   isTerminal,
   jobOutcome,
@@ -29,13 +30,13 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 //
 // THREE LEVELS, AND NOTHING BETWEEN THEM.
 //
-//   LEVEL 1, always visible: the question, the answer, where the evidence
-//   stops, and a compact list of claims with a state each.
+//   LEVEL 1, always visible: the question, the answer, what is still
+//   unresolved, and a compact list of findings with a state each.
 //
-//   LEVEL 2, one row at a time: why that row has that state, what was
-//   checked, what the evidence shows, what it does not establish.
+//   LEVEL 2, per finding: one connected explanation of why it stands where
+//   it does.
 //
-//   LEVEL 3, closed by default: the sources themselves, verbatim.
+//   LEVEL 3, per finding: the sources behind that finding, verbatim.
 //
 // What this replaces is not a styling problem. The previous screen laid out
 // nine sections of roughly equal weight — a reality ladder, a gaps panel, an
@@ -43,6 +44,15 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 // and a raw payload — and left the reader to assemble a conclusion from
 // them. Every part was individually honest. The assembly was the defect, and
 // doing that assembly is most of what this product is for.
+//
+// ONE COMPOSITION AT THE TOP, NOT A BANNER AND A CARD.
+//
+// The project identity, the question, the status, the answer, what remains
+// unresolved and the evidence footnote are ONE object. They used to be a
+// large project name with the question as a grey subtitle, followed by a
+// separate panel where the answer began — which read as a page header next
+// to an unrelated result window, and buried the one thing a reader most
+// needs on returning to a finished research: the question they asked.
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
@@ -309,7 +319,12 @@ export default function ResearchDetailPage() {
     <main className="enter flex flex-col gap-5 pb-6">
       <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
 
-      {/* ---- 0. project + question ---------------------------------- */}
+      {/* ---- 0. WHILE THE RUN IS LIVE, the subject and the question are
+           the header — there is no result yet for them to belong to.
+           Once it finishes they move INSIDE the result panel below, so the
+           finished screen is one composition rather than a banner sitting
+           next to an unrelated card. ---------------------------------- */}
+      {!finished && (
       <section className="flex items-start gap-4 px-1 pt-1">
         <span
           className="orb h-14 w-14 shrink-0 text-[0.95rem] font-semibold text-[var(--atlas-cyan)] sm:h-16 sm:w-16"
@@ -318,15 +333,16 @@ export default function ResearchDetailPage() {
           {projectName.slice(0, 2).toUpperCase()}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="eyebrow eyebrow-violet">Research result</p>
-          <h1 className="mt-1.5 text-[1.6rem] font-semibold leading-tight tracking-tight sm:text-[2.15rem]">
+          <p className="eyebrow eyebrow-violet">Researching</p>
+          <p className="mt-1 text-[1.05rem] font-semibold leading-tight tracking-tight">
             {projectName}
-          </h1>
-          <p className="mt-2 text-[0.95rem] leading-snug text-[var(--atlas-text-dim)]">
+          </p>
+          <p className="mt-1.5 text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]">
             {job.originalQuestion}
           </p>
         </div>
       </section>
+      )}
 
       {/* ---- live: progress leads ----------------------------------- */}
       {!finished && (
@@ -354,7 +370,42 @@ export default function ResearchDetailPage() {
           style={{ "--edge": edgeColor(outcome.tone) } as React.CSSProperties}
           data-testid="answer-panel"
         >
-          <div className="flex flex-wrap items-center gap-3">
+          {/* THE SUBJECT, INSIDE THE RESULT IT BELONGS TO. */}
+          <div className="flex items-center gap-3">
+            <span
+              className="orb h-10 w-10 shrink-0 text-[0.8rem] font-semibold text-[var(--atlas-cyan)]"
+              aria-hidden
+            >
+              {projectName.slice(0, 2).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <p className="eyebrow eyebrow-violet">Research result</p>
+              <p className="mt-0.5 text-[1rem] font-semibold leading-tight tracking-tight">
+                {projectName}
+              </p>
+            </div>
+          </div>
+
+          {/* THE QUESTION IS THE HEADING OF THIS RESULT.
+              It used to be a grey subtitle under a 2.15rem project name,
+              in a header that sat OUTSIDE this panel — so the screen read
+              as an identity banner followed by an unrelated result window,
+              and the one thing a reader most needs on returning to a
+              finished research ("what did I actually ask?") was the
+              smallest text in the composition.
+              The project names the subject; the question names the task,
+              and this is a question-driven product. */}
+          <p className="eyebrow mt-5" style={{ color: "var(--atlas-text-dim)" }}>
+            Your question
+          </p>
+          <h1
+            className="mt-2 text-[1.16rem] font-semibold leading-snug tracking-tight sm:text-[1.3rem]"
+            data-testid="result-question"
+          >
+            {job.originalQuestion}
+          </h1>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--hairline)] pt-4">
             <OutcomeBadge job={{ state: job.state, verdict: proof?.verdict ?? null }} />
             {proof?.confidence.band && (
               <span className="tone tone-neutral" data-testid="confidence-band">
@@ -367,7 +418,7 @@ export default function ResearchDetailPage() {
           </div>
 
           <div
-            className="mt-4 flex flex-col gap-2.5 text-[1.05rem] leading-relaxed sm:text-[1.12rem]"
+            className="mt-4 flex flex-col gap-2.5 text-[1.02rem] leading-relaxed"
             data-testid="answer-text"
           >
             {answer.map((s) => (
@@ -375,45 +426,49 @@ export default function ResearchDetailPage() {
             ))}
           </div>
 
-          {/* WHERE THE EVIDENCE STOPS, AND WHY, IN ONE LINE.
-              The single question the old screen made hardest to answer. It
-              is drawn only where the ladder derived a boundary, which needs
-              an established run to end — so it never appears as a verdict on
-              a research that had no foothold to begin with. */}
+          {/* WHAT REMAINS UNRESOLVED, AND WHY.
+              This said "The evidence stops at: …", which describes ATLAS's
+              own workflow rather than the reader's knowledge. Nobody asked
+              where our evidence collection ended; they asked what is still
+              unknown. So the block now names the unresolved thing and the
+              reason it is unresolved, and nothing about the process.
+              The heading also separates the two cases the rest of the
+              product works hard to keep apart: evidence that was checked
+              and did not establish something, versus a research run that
+              was blocked from checking at all. */}
           {boundary && (
             <div
               className="mt-5 border-t border-[var(--hairline)] pt-4"
               data-testid="answer-boundary"
             >
-              <p className="text-[0.86rem] leading-snug">
-                <span className="text-[#fcd34d]">The evidence stops at:</span>{" "}
-                <span className="text-[var(--atlas-text)]">{boundary.label}</span>
+              <p className="eyebrow" style={{ color: "#fcd34d" }}>
+                {boundary.coverage === "BLOCKED" ? "Research limitation" : "Still unresolved"}
               </p>
-              {boundary.reason && (
-                <p className="mt-1.5 text-[0.82rem] leading-snug text-[var(--atlas-text-dim)]">
-                  {boundary.reason}
-                </p>
-              )}
+              <p className="mt-1.5 text-[0.9rem] leading-snug text-[var(--atlas-text)]">
+                {boundary.label}
+              </p>
+              <p className="mt-1.5 text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]">
+                {findingExplanation(boundary).join(" ")}
+              </p>
             </div>
           )}
 
-          {/* Effort, as a footnote. Never a claim, and never a count the
-              reader is invited to weigh against the sources themselves. */}
-          {readDocs > 0 && (
+          {/* WHAT THE ANSWER RESTS ON — ONE NUMBER, AND ONLY THIS ONE.
+              This used to read "4 sources read · 2 not used as evidence".
+              How many were read and discarded is audit accounting: it
+              tells a reader nothing about the answer, and inviting them
+              to weigh 4 against 2 is exactly the source-arithmetic this
+              product refuses. The full tally stays in the audit.
+              What remains is metadata, not a score. A higher count is
+              never a stronger result — one official document can settle
+              what twenty repetitions of it cannot — so this is styled as
+              a quiet footnote and never as a measure. */}
+          {usedDocs > 0 && (
             <p
-              className="mt-5 flex flex-wrap items-center gap-x-3 border-t border-[var(--hairline)] pt-3.5 text-[0.75rem] text-[var(--atlas-text-dim)]"
+              className="mt-5 border-t border-[var(--hairline)] pt-3.5 text-[0.75rem] text-[var(--atlas-text-dim)]"
               data-testid="answer-metadata"
             >
-              <span>
-                {readDocs} {readDocs === 1 ? "source" : "sources"} read
-              </span>
-              {readDocs - usedDocs > 0 && <span>{readDocs - usedDocs} not used as evidence</span>}
-              {/* NO "VIEW EVIDENCE" LINK HERE ANY MORE.
-                  It used to open a general document section, which is the
-                  thing this round removed: proof now lives inside the
-                  finding it proves, so the only honest way to reach a
-                  source is through the conclusion it supports. The counts
-                  stay as a quiet note that work happened. */}
+              {usedDocs} {usedDocs === 1 ? "source" : "sources"} used as evidence
             </p>
           )}
         </section>
