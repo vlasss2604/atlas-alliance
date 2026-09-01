@@ -226,12 +226,55 @@ export interface OutcomeView {
   verdict: string | null;
 }
 
+// A TERMINAL PRODUCT STATE OUTRANKS A PERSISTED VERDICT.
+//
+// The state switch used to sit BELOW `if (job.verdict)`, so any job carrying
+// a Proof row rendered as that Proof's verdict no matter how the run ended —
+// and `loadProofForJob` is not gated on job state, so a Proof written before
+// a run broke, was cancelled, or hit its budget ceiling came back on the GET
+// and won. A run that FAILED would have announced "Insufficient evidence"
+// about the project: a product fault, silently restated as a finding.
+//
+// The order is now state first. FAILED, CANCELLED and BUDGET_LIMIT_REACHED
+// each say something about the RUN, and none of them may be read as a claim
+// about the project. `verdict` is still carried on the view for the deep
+// audit, so nothing is destroyed — it simply stops being the headline.
+//
+// BUDGET_LIMIT_REACHED is a COVERAGE limit, not a negative result. Component
+// rows established before the ceiling are unaffected and still render; what
+// this suppresses is the leap from "we stopped early" to "it is not true".
 export function jobOutcome(job: {
   state: JobState;
   verdict?: string | null;
 }): OutcomeView {
   if (isActive(job.state)) {
     return { kind: "IN_PROGRESS", label: "In progress", tone: "neutral", verdict: null };
+  }
+  switch (job.state) {
+    case "FAILED":
+      // A fault, not a finding.
+      return {
+        kind: "FAILED",
+        label: "Research failed",
+        tone: "fault",
+        verdict: job.verdict ?? null,
+      };
+    case "CANCELLED":
+      return {
+        kind: "CANCELLED",
+        label: "Cancelled",
+        tone: "neutral",
+        verdict: job.verdict ?? null,
+      };
+    case "BUDGET_LIMIT_REACHED":
+      return {
+        kind: "STOPPED_AT_LIMIT",
+        label: "Stopped early",
+        tone: "neutral",
+        verdict: job.verdict ?? null,
+      };
+    default:
+      break;
   }
   if (job.verdict) {
     return {
@@ -241,24 +284,9 @@ export function jobOutcome(job: {
       verdict: job.verdict,
     };
   }
-  switch (job.state) {
-    case "FAILED":
-      // A fault, not a finding.
-      return { kind: "FAILED", label: "Research failed", tone: "fault", verdict: null };
-    case "CANCELLED":
-      return { kind: "CANCELLED", label: "Cancelled", tone: "neutral", verdict: null };
-    case "BUDGET_LIMIT_REACHED":
-      return {
-        kind: "STOPPED_AT_LIMIT",
-        label: "Stopped at limit",
-        tone: "neutral",
-        verdict: null,
-      };
-    default:
-      // The run completed without writing a Proof. Honest, and distinct from
-      // both "insufficient evidence" and "it broke".
-      return { kind: "NO_CONCLUSION", label: "No conclusion", tone: "neutral", verdict: null };
-  }
+  // The run completed without writing a Proof. Honest, and distinct from
+  // both "insufficient evidence" and "it broke".
+  return { kind: "NO_CONCLUSION", label: "No conclusion", tone: "neutral", verdict: null };
 }
 
 /* ------------------------------------------------------------------ *
@@ -497,67 +525,24 @@ export function summariseComponents(
  * REALITY CHECK
  * ------------------------------------------------------------------ */
 
-// TWO DIFFERENT KINDS OF FINDING, KEPT APART.
+// THE TWO-GROUP SEPARATION AND THE STATE MAPPING LIVE ON, IN THE LADDER.
 //
-// The mechanism chain is genuinely sequential: a mechanism is written down,
-// then authorised, then switched on, then observed executing. A break in that
-// chain is meaningful — it is where the story stops being demonstrable.
+// The rung sets that used to sit here spelled their labels as four bare
+// adjectives — Documented / Approved / Activated / Executing — and named the
+// second group "Independent findings", which asks a reader to care that the
+// engine models them separately. `MECHANISM_ROWS` and `VALUE_ROWS` at the
+// foot of this file carry the same components, the same order and the same
+// separation, written as claims a reader can evaluate.
 //
-// Destination, recipient and net effect are NOT further rungs of that ladder.
-// A document can state where value lands regardless of whether execution was
-// observed, and the engine establishes them independently. Rendering them
-// below a break marker implied that an unverified execution step made them
-// impossible, which is a claim the engine never makes. They are now listed
-// separately, as independent findings, and the break marker belongs only to
-// the chain.
-export const MECHANISM_CHAIN_RUNGS = [
-  { key: "DOCUMENTED", label: "Documented", component: "MECHANISM_SPEC" },
-  { key: "APPROVED", label: "Approved", component: "GOVERNANCE_BASIS" },
-  { key: "ACTIVATED", label: "Activated", component: "CURRENT_STATE" },
-  { key: "EXECUTING", label: "Executing", component: "EXECUTION_EVIDENCE" },
-] as const;
-
-export const INDEPENDENT_FINDING_RUNGS = [
-  { key: "DESTINATION", label: "Destination verified", component: "DESTINATION" },
-  { key: "RECIPIENT", label: "Recipient verified", component: "RECIPIENT" },
-  { key: "NET_EFFECT", label: "Net effect proven", component: "NET_EFFECT" },
-] as const;
-
+// `rungState` below is unchanged and is what the ladder still reads. Its
+// asymmetry is the load-bearing part: only CONTRADICTED can mean "the
+// evidence indicates otherwise".
 export type RealityState =
   | "VERIFIED"
   | "PARTIAL"
   | "UNRESOLVED"
   | "NOT_HAPPENING"
   | "NOT_ASSESSED";
-
-export interface RealityRungView {
-  key: string;
-  label: string;
-  component: string;
-  state: RealityState;
-  // The persisted component status this rung was read from, or null when no
-  // component result exists. Shown in developer details, never asserted.
-  rawStatus: string | null;
-}
-
-export interface RealityCheckView {
-  chain: RealityRungView[];
-  // Index within `chain` of the first rung that is not verified — where the
-  // sequential story stops being demonstrable. Null when not safely
-  // derivable. It applies to the CHAIN ONLY and says nothing about the
-  // independent findings below it.
-  chainStopsAtIndex: number | null;
-  independent: RealityRungView[];
-  derivable: boolean;
-}
-
-export const REALITY_STATE_LABELS: Record<RealityState, string> = {
-  VERIFIED: "Verified",
-  PARTIAL: "Partly verified",
-  UNRESOLVED: "Could not verify",
-  NOT_HAPPENING: "Verified not happening",
-  NOT_ASSESSED: "Not assessed",
-};
 
 // STATUS -> RUNG STATE. The asymmetry is the point.
 //
@@ -581,38 +566,6 @@ function rungState(status: string | null): RealityState {
   }
 }
 
-export function deriveRealityCheck(
-  components: { component: string; status: string }[],
-): RealityCheckView {
-  const byComponent = new Map(components.map((c) => [c.component, c.status]));
-  const build = (defs: readonly { key: string; label: string; component: string }[]) =>
-    defs.map((r) => {
-      const rawStatus = byComponent.get(r.component) ?? null;
-      return {
-        key: r.key,
-        label: r.label,
-        component: r.component,
-        state: rungState(rawStatus),
-        rawStatus,
-      };
-    });
-
-  const chain = build(MECHANISM_CHAIN_RUNGS);
-  const independent = build(INDEPENDENT_FINDING_RUNGS);
-
-  // DEGRADE CONSERVATIVELY. The break marker is a claim about where an
-  // established chain ends, so it is only drawn when there IS an established
-  // chain to end: at least one CHAIN rung actually verified. A research that
-  // established nothing in the chain gets the rungs without the marker,
-  // rather than a marker implying the first rung was tested and failed.
-  const firstVerified = chain.findIndex((r) => r.state === "VERIFIED");
-  const firstUnverified = chain.findIndex((r) => r.state !== "VERIFIED");
-  const chainStopsAtIndex =
-    firstVerified === -1 || firstUnverified === -1 ? null : firstUnverified;
-
-  return { chain, chainStopsAtIndex, independent, derivable: components.length > 0 };
-}
-
 /* ------------------------------------------------------------------ *
  * EVIDENCE
  * ------------------------------------------------------------------ */
@@ -632,16 +585,38 @@ export function sourceClassLabel(sourceClass: string | null): string {
   return SOURCE_CLASS_LABELS[sourceClass] ?? sourceClass;
 }
 
+// WHY A SOURCE WAS READ AND THEN REFUSED, IN ORDINARY WORDS.
+//
+// The keys below are the ENGINE's own closed `ExclusionReason` vocabulary
+// (component-reconciler.ts). The previous map named five reasons, four of
+// which the engine never emits — so eleven of the twelve real reasons fell
+// through to a de-snaking fallback and rendered as "wrong component",
+// "duplicate unit", "superseded by newer". That is an internal identifier
+// with its underscores removed, shown to a reader as though it were English.
+//
+// This section is one of the few things a research product can show that a
+// chat answer structurally cannot: proof that a source was read and then
+// deliberately not used. It is worth stating properly.
 export const EXCLUSION_LABELS: Record<string, string> = {
-  CLASS_NOT_ADMISSIBLE: "Source class cannot establish this component",
-  OFFICIALITY_NOT_ADMISSIBLE: "Source is not a confirmed official channel",
-  ENTITY_BINDING_NOT_ADMISSIBLE: "Not bound to this project's on-chain identity",
-  STALE: "Too old to establish current state",
-  DIRECTNESS_NOT_ADMISSIBLE: "Only indirect for this component",
+  WRONG_COMPONENT: "Relevant to a different part of the mechanism",
+  WRONG_PROJECT: "About a different project",
+  LEGACY_CONTRACT_VERSION: "Read under an older evidence contract, so it was not reused",
+  CLASS_NOT_ADMISSIBLE: "This type of source cannot establish this step",
+  DIRECTNESS_INSUFFICIENT: "Refers to this only indirectly",
+  RELATIONSHIP_NOT_SUPPORTING: "Mentions this without supporting it",
+  NOT_CURRENT_STATE_BEARING: "Does not say whether this is true now",
+  MISSING_PUBLICATION_DATE: "Undated, so it cannot establish the current state",
+  STALE_FOR_CURRENT_STATE: "Too old to establish the current state",
+  SUPERSEDED_BY_NEWER: "Superseded by a more recent source",
+  DUPLICATE_UNIT: "The same passage was already counted once",
+  ENTITY_NOT_CONFIRMED: "Not bound to this project's confirmed on-chain identity",
 };
 
+// The fallback is a SENTENCE, never the code with its underscores removed.
+// An unrecognised reason means this map has fallen behind the engine, which
+// is a copy bug — it must not become a leak.
 export function exclusionLabel(reason: string): string {
-  return EXCLUSION_LABELS[reason] ?? reason.replace(/_/g, " ").toLowerCase();
+  return EXCLUSION_LABELS[reason] ?? "Did not meet the evidence standard for this step";
 }
 
 export function domainOf(url: string): string {
@@ -852,7 +827,7 @@ export function researchAnswer(input: AnswerInput): string[] {
       return [`This research was cancelled before it reached a conclusion.`];
     case "STOPPED_AT_LIMIT":
       sentences.push(
-        `This research stopped at its budget limit before reaching a conclusion about ${subject}.`,
+        `This research stopped at its limit before it had covered everything it set out to check about ${subject}.`,
       );
       break;
     case "NO_CONCLUSION":
@@ -863,21 +838,23 @@ export function researchAnswer(input: AnswerInput): string[] {
     default:
       switch (input.verdict) {
         case "SUPPORTED":
-          sentences.push(`ATLAS verified the mechanism it was asked about for ${subject}.`);
+          sentences.push(
+            `The checked evidence establishes the mechanism this question asked about for ${subject}.`,
+          );
           break;
         case "PARTIALLY_SUPPORTED":
           sentences.push(
-            `ATLAS verified part of what it was asked about for ${subject}, but not the whole path.`,
+            `The checked evidence establishes part of what this question asked about for ${subject}, but not the whole path.`,
           );
           break;
         case "NOT_SUPPORTED":
           sentences.push(
-            `The evidence ATLAS gathered contradicts the claim it was asked to check for ${subject}.`,
+            `On the claim this question asked about for ${subject}, the checked evidence indicates otherwise.`,
           );
           break;
         case "INSUFFICIENT_EVIDENCE":
           sentences.push(
-            `ATLAS could not gather enough admissible evidence to answer this question about ${subject}.`,
+            `The checked evidence does not establish an answer to this question about ${subject}.`,
           );
           break;
         default:
@@ -891,28 +868,39 @@ export function researchAnswer(input: AnswerInput): string[] {
   // thing a run can say, and it comes only from a CONTRADICTED row.
   const contradicted = pick(input.components, "CONTRADICTED", UNVERIFIED_PRIORITY, 2);
   if (contradicted.length > 0) {
-    sentences.push(`Evidence contradicts ${joinPhrases(contradicted, "and")}.`);
+    sentences.push(`On ${joinPhrases(contradicted, "and")}, the evidence indicates otherwise.`);
   }
 
-  // 3 — what was established.
+  // 3 — what was established. THE SUBJECT OF THE VERB IS THE EVIDENCE, NEVER
+  // ATLAS AND NEVER THE WORLD. "ATLAS verified where the value ends up" is
+  // read as "that is where it ends up"; "the checked evidence establishes
+  // where the value ends up" keeps the reader inside what was actually
+  // shown, and stays true even when the only source was documentation.
   const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
   if (verified.length > 0) {
-    sentences.push(`ATLAS verified ${joinPhrases(verified)}.`);
+    sentences.push(`The checked evidence establishes ${joinPhrases(verified)}.`);
   }
 
-  // 4 — what could not be established. Only components that were actually
-  // attempted and came back short.
+  // 4 — what it did not establish. Only components that were actually
+  // attempted and came back short. Phrased as a limit of the EVIDENCE, not
+  // as a failure by ATLAS and not as a claim that the thing is absent.
   const unresolved = pick(
     input.components,
     "INSUFFICIENT_EVIDENCE",
     UNVERIFIED_PRIORITY,
     verified.length > 0 ? 2 : 3,
   );
-  if (unresolved.length > 0 && sentences.length < 4) {
-    sentences.push(`ATLAS could not verify ${joinPhrases(unresolved, "or")}.`);
+  if (unresolved.length > 0 && sentences.length < 3) {
+    sentences.push(
+      verified.length > 0
+        ? `It does not establish ${joinPhrases(unresolved, "or")}.`
+        : `The checked evidence does not establish ${joinPhrases(unresolved, "or")}.`,
+    );
   }
 
-  return sentences.slice(0, 4);
+  // THREE SENTENCES, NOT FOUR. The default screen is read in about half a
+  // minute; a fourth sentence is the one nobody reaches.
+  return sentences.slice(0, 3);
 }
 
 function plural(n: number, unit: string): string {
@@ -946,4 +934,338 @@ export function relativeAge(iso: string | null | undefined, now = Date.now()): s
   const months = Math.round(days / 30.44);
   if (months < 12) return plural(Math.max(1, months), "month");
   return plural(Math.round(months / 12), "year");
+}
+
+/* ------------------------------------------------------------------ *
+ * RESULT LADDER — THE DEFAULT SCREEN, IN THE READER'S WORDS
+ * ------------------------------------------------------------------ */
+
+// WHY A STEP HAS THE STATUS IT HAS.
+//
+// `research_component_results.reasonCodes` is a CLOSED, code-owned
+// vocabulary (component-reconciler.ts) that the engine has always written
+// and always persisted, and it was reaching the client already. Until now
+// its only rendering was a monospace enum dump inside Developer details,
+// while every unresolved step on the product surface shared ONE generic
+// sentence with the component name substituted in. The engine knew why and
+// the screen said "could not verify" ten times over.
+//
+// Each entry below restates exactly one persisted code. None is stronger
+// than the code it renders: an unresolved step never becomes a claim that
+// the thing is absent, and "the sources ATLAS checked" never quietly becomes
+// "the sources that exist".
+export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
+  NO_EVIDENCE_FOUND:
+    "The sources ATLAS successfully checked did not provide evidence for this step.",
+  ALL_EVIDENCE_EXCLUDED:
+    "Sources discussed this, but none met the evidence standard required for this step.",
+  MISSING_EXECUTION_EVIDENCE:
+    "The mechanism is described, but the checked evidence does not show it actually executing.",
+  MISSING_CURRENT_STATE:
+    "The checked evidence does not establish whether this is active now.",
+  STALE_CURRENT_STATE:
+    "The available state evidence is too old to establish the current status.",
+  INSUFFICIENT_AUTHORITY:
+    "The claim appears in evidence that is not authoritative enough for this step.",
+  INDIRECT_ONLY:
+    "The checked sources refer to this indirectly, but do not establish it directly.",
+  STATE_NOT_FULLY_LIVE:
+    "The evidence shows implementation or preparation, not a fully live state.",
+  CONFLICTING_STATE: "The checked evidence conflicts about the current state.",
+  TOKEN_STATE_UNQUALIFIED:
+    "The evidence mentions token state, but not precisely enough to establish the required effect.",
+};
+
+// The FIRST recognised code wins. `reasonCodes` arrives in the order S5
+// wrote it, and S5 writes the specific code first, so this is deterministic
+// without a ranking of its own. An unrecognised code yields null rather than
+// a de-snaked identifier: a copy gap must never become a leak.
+export function reasonExplanation(
+  codes: readonly unknown[] | null | undefined,
+): string | null {
+  for (const code of codes ?? []) {
+    if (typeof code !== "string") continue;
+    const explanation = REASON_CODE_EXPLANATIONS[code];
+    if (explanation) return explanation;
+  }
+  return null;
+}
+
+// WHAT A CLASS OF SOURCE CAN AND CANNOT SETTLE.
+//
+// Attached to the CLASS, once, rather than written per document — a caveat
+// repeated under every source becomes furniture and stops being read. This
+// is a capability statement, not a score: it says what kind of question the
+// source is competent to answer, which is falsifiable, where a trust number
+// would not be.
+//
+// The distinction it protects is the product's founding one. Official
+// documentation is not a weaker on-chain record; it answers a DIFFERENT
+// question. It settles what a project states, and nothing whatsoever about
+// whether the stated thing is happening.
+export const SOURCE_CLASS_CAVEATS: Record<string, { can: string; cannot: string }> = {
+  OFFICIAL_DOCS: {
+    can: "Can establish what the project officially documents.",
+    cannot: "Does not by itself establish that the documented thing is happening.",
+  },
+  GOVERNANCE: {
+    can: "Can establish that a decision was formally approved.",
+    cannot: "Does not by itself establish that the decision was carried out.",
+  },
+  ONCHAIN_VERIFIABLE: {
+    can: "Can establish recorded transactions and on-chain state.",
+    cannot: "Linking that record to a specific mechanism may still be required.",
+  },
+  OFFICIAL_REPORT: {
+    can: "Can establish what the project reports about itself.",
+    cannot: "Does not by itself establish independent confirmation.",
+  },
+  DATA_PROVIDER: {
+    can: "Can establish measured data within the provider's methodology.",
+    cannot: "Depends on that methodology, which is not itself verified here.",
+  },
+  RESEARCH_MEDIA: {
+    can: "Useful as context, and for finding leads worth checking.",
+    cannot: "Does not replace the primary evidence a step requires.",
+  },
+  SOCIAL: {
+    can: "Can establish that a statement was made, and by whom.",
+    cannot: "Does not by itself establish that the statement is accurate.",
+  },
+};
+
+export function sourceClassCaveat(
+  sourceClass: string | null | undefined,
+): { can: string; cannot: string } | null {
+  if (!sourceClass) return null;
+  return SOURCE_CLASS_CAVEATS[sourceClass] ?? null;
+}
+
+// HOW COMPLETE THE CHECKING FOR ONE STEP ACTUALLY WAS.
+//
+// Derived on the server from `research_attempts`, which already carries a
+// terminal status per (job, step, component). Nothing new is stored and no
+// engine behaviour changes — that row was already being read and reduced to
+// three aggregate counters before it reached the client.
+//
+// This exists to keep apart TWO situations the reconciler cannot itself
+// distinguish. S5 sees Evidence rows and nothing else, so a step whose every
+// fetch failed and a step whose sources genuinely said nothing both arrive
+// as INSUFFICIENT_EVIDENCE carrying NO_EVIDENCE_FOUND. One of those is a
+// finding about the public record; the other is a limitation of this run.
+// Rendering them identically tells the reader a project lacks something when
+// the truth is that ATLAS could not look.
+export type ComponentCoverage = "COMPLETED" | "PARTIAL" | "BLOCKED" | "NOT_ATTEMPTED";
+
+export interface ResultRow {
+  // The persisted component this row reads. Carried for keys, test hooks and
+  // the deep audit — NEVER rendered as a label.
+  component: string;
+  label: string;
+  state: RealityState;
+  stateLabel: string;
+  rawStatus: string | null;
+  // One sentence saying why this row has this state, from persisted reason
+  // codes. Null where the state needs no explanation.
+  reason: string | null;
+  // What the evidence positively shows, restated from the component's own
+  // ordinary-words phrase. Null on an unresolved row, where `reason` speaks.
+  shows: string | null;
+  coverage: ComponentCoverage;
+  // Present ONLY where attempt data clearly shows the checking was blocked.
+  // Never a claim for or against the project.
+  limitation: string | null;
+  admittedCount: number;
+  refusedCount: number;
+  checkedSummary: string;
+  // Distinct admitted source classes behind this row, for the caveats about
+  // what those sources cannot settle. Empty where nothing was admitted.
+  sourceClasses: string[];
+}
+
+export interface ResultLadderView {
+  mechanism: ResultRow[];
+  value: ResultRow[];
+  // The first mechanism row that is not established, and only where an
+  // earlier mechanism row IS — the same conservative discipline
+  // `chainStopsAtIndex` uses. Null when there is no established run to end,
+  // because a boundary on an empty ladder implies a test that failed rather
+  // than one that never had a foothold.
+  boundary: ResultRow | null;
+  derivable: boolean;
+}
+
+// TWO GROUPS, AND THE SEPARATION BETWEEN THEM IS LOAD-BEARING.
+//
+// The mechanism group is genuinely sequential: something is written down,
+// then authorised, then switched on, then observed running. A break in it is
+// meaningful, and it is where the story stops being demonstrable.
+//
+// The value group is NOT a continuation of that sequence. A document can
+// state where value lands whether or not execution was ever observed, and
+// the engine establishes those independently. Presenting them as later links
+// of one chain would assert that an unverified execution step makes them
+// impossible — a claim the engine never makes. That is why there are two
+// groups here and not one arrow.
+//
+// Every label is a claim a reader can evaluate. None is a component name.
+const MECHANISM_ROWS = [
+  { component: "MECHANISM_SPEC", label: "The project documents the mechanism" },
+  { component: "GOVERNANCE_BASIS", label: "A governing decision authorises it" },
+  { component: "CURRENT_STATE", label: "It is currently active" },
+  { component: "EXECUTION_EVIDENCE", label: "It has been observed executing" },
+] as const;
+
+const VALUE_ROWS = [
+  { component: "SOURCE_OF_VALUE", label: "Where the value comes from" },
+  { component: "FLOW_PATH", label: "The path the value takes" },
+  { component: "DESTINATION", label: "Where the value is meant to go" },
+  { component: "RECIPIENT", label: "Who receives it" },
+  { component: "NET_EFFECT", label: "Effect on token supply" },
+  { component: "DURABILITY_BASIS", label: "How durable the arrangement is" },
+] as const;
+
+// ROW STATE LABELS, AND WHY NONE OF THEM SAYS "COULD NOT VERIFY".
+//
+// That phrase used to name three different things on one screen — a panel
+// heading, a component status and a rung state — so a reader could not tell
+// whether they were seeing one finding restated or three separate ones. It
+// also blamed ATLAS for what is usually a fact about the public record.
+// "Not established" is the honest form: it describes the evidence, makes no
+// claim that the thing is absent, and reads the same wherever it appears.
+export const RESULT_STATE_LABELS: Record<RealityState, string> = {
+  VERIFIED: "Established",
+  PARTIAL: "Partly established",
+  UNRESOLVED: "Not established",
+  NOT_HAPPENING: "Evidence indicates otherwise",
+  NOT_ASSESSED: "Not assessed",
+};
+
+// ONE NAME PER COMPONENT, EVERYWHERE A READER CAN SEE IT.
+//
+// `componentLabel` renders the Pattern's own vocabulary — "Net effect",
+// "Flow path", "Durability basis" — which is precise for an analyst and
+// close to meaningless for a reader ("net effect on what?"). Evidence cards
+// used it to say which part of the mechanism a fragment supported, so the
+// same internal words the ladder stopped showing reappeared one level down.
+//
+// The claim label is the SAME sentence the ladder row uses, so a reader who
+// opens "Where the value is meant to go" and follows it into the evidence
+// meets that phrase again instead of a new word for the same thing.
+const CLAIM_LABELS: Record<string, string> = Object.fromEntries(
+  [...MECHANISM_ROWS, ...VALUE_ROWS].map((r) => [r.component, r.label]),
+);
+
+export function componentClaimLabel(component: string | null | undefined): string {
+  if (!component) return "This research";
+  return CLAIM_LABELS[component] ?? componentLabel(component);
+}
+
+export interface LadderComponentInput {
+  component: string;
+  status: string;
+  reasonCodes?: readonly unknown[];
+  supportingEvidenceIds?: readonly string[];
+  contradictingEvidenceIds?: readonly string[];
+  excludedEvidence?: readonly { evidenceId: string; reason: string }[];
+  coverage?: ComponentCoverage;
+}
+
+function countLabel(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+function buildRow(
+  def: { component: string; label: string },
+  byComponent: Map<string, LadderComponentInput>,
+  classesByComponent: Record<string, readonly string[]> | undefined,
+): ResultRow {
+  const row = byComponent.get(def.component) ?? null;
+  const rawStatus = row?.status ?? null;
+  const state = rungState(rawStatus);
+  const coverage: ComponentCoverage = row?.coverage ?? "NOT_ATTEMPTED";
+  const admittedCount =
+    (row?.supportingEvidenceIds?.length ?? 0) + (row?.contradictingEvidenceIds?.length ?? 0);
+  const refusedCount = row?.excludedEvidence?.length ?? 0;
+  const phrase = COMPONENT_PHRASES[def.component] ?? null;
+
+  // A BLOCKED step must not borrow copy that implies checking happened.
+  // "The sources ATLAS successfully checked did not provide evidence" is
+  // true of an exhaustive search and false of a run whose fetches failed,
+  // and the two arrive here indistinguishable at the reconciler. Where the
+  // attempt data says the checking was blocked, the limitation speaks and
+  // the reason-code sentence is withheld rather than restated wrongly.
+  const blocked = coverage === "BLOCKED";
+  const reason = blocked
+    ? "ATLAS could not complete the checks for this step, so the evidence here is incomplete."
+    : reasonExplanation(row?.reasonCodes);
+
+  const shows =
+    phrase === null
+      ? null
+      : state === "VERIFIED"
+        ? `The checked evidence establishes ${phrase}.`
+        : state === "PARTIAL"
+          ? `The checked evidence partly establishes ${phrase}.`
+          : state === "NOT_HAPPENING"
+            ? `On ${phrase}, the checked evidence indicates otherwise.`
+            : null;
+
+  const checkedSummary = blocked
+    ? "Sources for this step could not be opened."
+    : admittedCount === 0 && refusedCount === 0
+      ? "No source ATLAS read carried evidence for this step."
+      : refusedCount === 0
+        ? `${countLabel(admittedCount, "source", "sources")} used as evidence.`
+        : admittedCount === 0
+          ? `${countLabel(refusedCount, "source", "sources")} read and not used.`
+          : `${countLabel(admittedCount, "source", "sources")} used as evidence, ${refusedCount} read and not used.`;
+
+  return {
+    component: def.component,
+    label: def.label,
+    state,
+    stateLabel: RESULT_STATE_LABELS[state],
+    rawStatus,
+    reason,
+    shows,
+    coverage,
+    limitation: blocked
+      ? "Required source access failed during this step. This is a limit of the research run, not evidence for or against the project."
+      : null,
+    admittedCount,
+    refusedCount,
+    checkedSummary,
+    sourceClasses: [...(classesByComponent?.[def.component] ?? [])],
+  };
+}
+
+// NOT_ASSESSED ROWS ARE HIDDEN, NOT DIMMED.
+//
+// A component with no persisted result was not tested. Listing it greyed out
+// asks the reader to interpret an engine-internal absence, and it reads as a
+// further failure sitting beside the real findings. What a run did not
+// assess is not part of what that run found.
+export function deriveResultLadder(
+  components: readonly LadderComponentInput[],
+  classesByComponent?: Record<string, readonly string[]>,
+): ResultLadderView {
+  const byComponent = new Map(components.map((c) => [c.component, c]));
+  const build = (defs: readonly { component: string; label: string }[]) =>
+    defs
+      .map((d) => buildRow(d, byComponent, classesByComponent))
+      .filter((r) => r.state !== "NOT_ASSESSED");
+
+  const mechanism = build(MECHANISM_ROWS);
+  const value = build(VALUE_ROWS);
+
+  // The same conservative rule the reality-check break marker uses: a
+  // boundary is a claim about where an ESTABLISHED run ends, so it is drawn
+  // only when there is one to end.
+  const firstEstablished = mechanism.findIndex((r) => r.state === "VERIFIED");
+  const firstOpen = mechanism.findIndex((r) => r.state !== "VERIFIED");
+  const boundary =
+    firstEstablished === -1 || firstOpen === -1 ? null : (mechanism[firstOpen] ?? null);
+
+  return { mechanism, value, boundary, derivable: components.length > 0 };
 }

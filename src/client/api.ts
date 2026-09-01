@@ -1,6 +1,7 @@
 "use client";
 
 import { getPlatform } from "./platform";
+import type { ComponentCoverage } from "./research-model";
 
 // API-клиент (phase-2-plan §5, B11): мгновенный UI-отклик, наблюдение
 // состояния; CSRF-токен держится в памяти модуля, не в storage.
@@ -297,6 +298,11 @@ export interface ResearchJobDetail {
     supportingEvidenceIds: string[];
     contradictingEvidenceIds: string[];
     excludedEvidence: { evidenceId: string; reason: string }[];
+    // How complete the checking for THIS component was, reduced from
+    // research_attempts on the server. Separates "the public record is
+    // silent" from "this run could not look" — a distinction the
+    // reconciler cannot make, because it only ever sees Evidence rows.
+    coverage: ComponentCoverage;
   }[];
   evidence: (ResearchEvidenceView & {
     links: {

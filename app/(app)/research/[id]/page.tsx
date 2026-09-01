@@ -1,55 +1,55 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { api, type ResearchJobDetail } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
-import { ComponentBreakdown } from "@/src/client/components/component-breakdown";
 import { DeveloperDetails } from "@/src/client/components/developer-details";
-import {
-  EvidenceDocumentCard,
-  type EvidenceRole,
-} from "@/src/client/components/evidence-document-card";
-import { GapsPanel } from "@/src/client/components/gaps-panel";
-import { RealityCheck } from "@/src/client/components/reality-check";
+import { type EvidenceRole } from "@/src/client/components/evidence-document-card";
+import { EvidenceSection } from "@/src/client/components/evidence-section";
 import { ResearchProgress } from "@/src/client/components/research-progress";
+import { ResultLadder } from "@/src/client/components/result-ladder";
 import { OutcomeBadge } from "@/src/client/components/verdict-badge";
 import {
   CONFIDENCE_LABELS,
+  deriveResultLadder,
   groupEvidenceByDocument,
   isTerminal,
   jobOutcome,
   researchAnswer,
   relativeAge,
-  summariseComponents,
   type EvidenceItemLike,
 } from "@/src/client/research-model";
 import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 
-// THE RESEARCH SCREEN — one page for a running job and a finished Proof.
+// THE RESEARCH SCREEN — one page for a running job and a finished result.
 //
-// INFORMATION HIERARCHY, after completion:
-//   1. the answer to the question that was asked
-//   2. verdict and confidence
-//   3. what was verified (reality check)
-//   4. what could not be verified
-//   5. evidence
-//   6. mechanism breakdown
-//   7. research process
-//   8. developer details
+// THREE LEVELS, AND NOTHING BETWEEN THEM.
 //
-// While a run is LIVE the order inverts at the top: progress is what the user
-// is waiting on, so it leads. Once the run is finished, progress is history
-// and drops below the answer — the same screen, reordered by what is now
-// worth reading first.
+//   LEVEL 1, always visible: the question, the answer, where the evidence
+//   stops, and a compact list of claims with a state each.
+//
+//   LEVEL 2, one row at a time: why that row has that state, what was
+//   checked, what the evidence shows, what it does not establish.
+//
+//   LEVEL 3, closed by default: the sources themselves, verbatim.
+//
+// What this replaces is not a styling problem. The previous screen laid out
+// nine sections of roughly equal weight — a reality ladder, a gaps panel, an
+// evidence grid across eight role buckets, a component grid, a progress log
+// and a raw payload — and left the reader to assemble a conclusion from
+// them. Every part was individually honest. The assembly was the defect, and
+// doing that assembly is most of what this product is for.
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
   const { refresh } = useApp();
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [evidenceOpen, setEvidenceOpen] = useState(false);
+  const evidenceRef = useRef<HTMLElement | null>(null);
 
   // Re-read the whole detail. Used when the job reaches a terminal state,
   // because the Proof only exists once the job has finished.
@@ -90,6 +90,16 @@ export default function ResearchDetailPage() {
       .then(() => refresh())
       .catch(() => {});
   }, [jobId, refresh]);
+
+  // A row's "View evidence" opens Level 3 and moves the reader to it. The
+  // alternative — leaving them to find a collapsed section further down —
+  // is how progressive disclosure turns back into a scavenger hunt.
+  const openEvidence = useCallback(() => {
+    setEvidenceOpen(true);
+    requestAnimationFrame(() => {
+      evidenceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }, []);
 
   const live = detail !== null && !isTerminal(detail.job.state);
 
@@ -148,7 +158,6 @@ export default function ResearchDetailPage() {
   const projectName = job.projectName ?? job.projectTicker ?? "Unresolved project";
   const finished = isTerminal(job.state);
   const outcome = jobOutcome({ state: job.state, verdict: proof?.verdict ?? null });
-  const summary = summariseComponents(components);
   const answer = researchAnswer({
     verdict: proof?.verdict ?? null,
     outcomeKind: outcome.kind,
@@ -189,13 +198,13 @@ export default function ResearchDetailPage() {
   }));
   const admitted = [...used, ...supporting, ...contradicting];
 
-  // OTHER MATERIAL THIS RESEARCH READ — deliberately a SEPARATE section.
+  // OTHER MATERIAL THIS RESEARCH READ — deliberately a SEPARATE list.
   //
   // The finding above stays claim-scoped: evidence belonging to a component
   // the claim does not rest on must never appear beneath it. But a research
   // that read sources and bound none of them to its claim should not look
-  // like a research that read nothing, so the rest is listed here, plainly
-  // labelled and never attributed to the verdict.
+  // like a research that read nothing, so the rest is listed separately,
+  // plainly labelled and never attributed to the result.
   //
   // Each row's role comes from its PERSISTED component links, in a fixed
   // precedence, never from the text: a row any component excluded is shown
@@ -222,24 +231,43 @@ export default function ResearchDetailPage() {
   // never be folded together with an admitted one.
   const byRole = (rows: { data: EvidenceItemLike; role: EvidenceRole }[], role: EvidenceRole) =>
     groupEvidenceByDocument(rows.filter((r) => r.role === role).map((r) => r.data));
-  const admittedDocs: { role: EvidenceRole; groups: ReturnType<typeof groupEvidenceByDocument> }[] =
-    (["USED", "SUPPORTING", "CONTRADICTING"] as const).map((role) => ({
-      role,
-      groups: byRole(admitted, role),
-    }));
+  const admittedDocs = (["USED", "SUPPORTING", "CONTRADICTING"] as const).map((role) => ({
+    role: role as EvidenceRole,
+    groups: byRole(admitted, role),
+  }));
   const excludedDocs = groupEvidenceByDocument(excluded.map((e) => e.data));
-  const otherDocs = (["READ", "SUPPORTING", "CONTRADICTING", "EXCLUDED"] as const).map(
-    (role) => ({ role, groups: byRole(other, role) }),
-  );
+  const otherDocs = (["READ", "SUPPORTING", "CONTRADICTING", "EXCLUDED"] as const).map((role) => ({
+    role: role as EvidenceRole,
+    groups: byRole(other, role),
+  }));
 
-  const evidenceCountByComponent = new Map<string, number>();
-  for (const c of components) {
-    evidenceCountByComponent.set(c.component, c.supportingEvidenceIds.length);
+  // WHICH KINDS OF SOURCE ACTUALLY BACK EACH ROW.
+  //
+  // Read from persisted evidence links, so "what this does not establish"
+  // at Level 2 is a statement about the sources this run really admitted for
+  // that step — never a sentence written for the occasion.
+  const sourceClassesByComponent: Record<string, string[]> = {};
+  for (const e of detail.evidence) {
+    if (!e.sourceClass) continue;
+    for (const link of e.links) {
+      if (link.role === "EXCLUDED") continue;
+      const list = (sourceClassesByComponent[link.component] ??= []);
+      if (!list.includes(e.sourceClass)) list.push(e.sourceClass);
+    }
   }
 
-  const gaps = components.filter((c) => c.status === "INSUFFICIENT_EVIDENCE");
-  const hasAdmittedDocs = admittedDocs.some((d) => d.groups.length > 0);
-  const hasOtherDocs = otherDocs.some((d) => d.groups.length > 0);
+  // A QUIET INDICATOR THAT WORK HAPPENED, AND A DELIBERATE UNDERCOUNT.
+  //
+  // This counts distinct documents that produced at least one evidence row.
+  // A document that was fetched and yielded nothing extractable has no row
+  // and is not counted here — so the number can only ever be lower than the
+  // work actually done, never higher. Under-claiming is the safe direction:
+  // this is a footnote about effort, not a measure of authority, and source
+  // COUNT is never evidence of anything.
+  const readDocs = groupEvidenceByDocument(detail.evidence.map((e) => toItem(e))).length;
+  const usedDocs = admittedDocs.reduce((n, d) => n + d.groups.length, 0);
+
+  const ladder = deriveResultLadder(components, sourceClassesByComponent);
 
   return (
     <main className="enter flex flex-col gap-5 pb-6">
@@ -283,7 +311,7 @@ export default function ResearchDetailPage() {
         </>
       )}
 
-      {/* ---- 1+2. THE ANSWER, then verdict/confidence ---------------- */}
+      {/* ---- 1. THE ANSWER ------------------------------------------ */}
       {finished && (
         <section
           className="panel panel-raised tone-edge p-5 sm:p-7"
@@ -303,7 +331,7 @@ export default function ResearchDetailPage() {
           </div>
 
           <div
-            className="mt-4 flex flex-col gap-2.5 text-[1.02rem] leading-relaxed sm:text-[1.08rem]"
+            className="mt-4 flex flex-col gap-2.5 text-[1.05rem] leading-relaxed sm:text-[1.12rem]"
             data-testid="answer-text"
           >
             {answer.map((s) => (
@@ -311,99 +339,80 @@ export default function ResearchDetailPage() {
             ))}
           </div>
 
-          {/* Component counts are analyst metadata, so they sit BELOW the
-              answer as a quiet footnote rather than leading it. */}
-          {components.length > 0 && (
+          {/* WHERE THE EVIDENCE STOPS, AND WHY, IN ONE LINE.
+              The single question the old screen made hardest to answer. It
+              is drawn only where the ladder derived a boundary, which needs
+              an established run to end — so it never appears as a verdict on
+              a research that had no foothold to begin with. */}
+          {ladder.boundary && (
+            <div
+              className="mt-5 border-t border-[var(--hairline)] pt-4"
+              data-testid="answer-boundary"
+            >
+              <p className="text-[0.86rem] leading-snug">
+                <span className="text-[#fcd34d]">The evidence stops at:</span>{" "}
+                <span className="text-[var(--atlas-text)]">{ladder.boundary.label}</span>
+              </p>
+              {ladder.boundary.reason && (
+                <p className="mt-1.5 text-[0.82rem] leading-snug text-[var(--atlas-text-dim)]">
+                  {ladder.boundary.reason}
+                </p>
+              )}
+            </div>
+          )}
+
+          {/* Effort, as a footnote. Never a claim, and never a count the
+              reader is invited to weigh against the sources themselves. */}
+          {readDocs > 0 && (
             <p
-              className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-[var(--hairline)] pt-3.5 text-[0.75rem] text-[var(--atlas-text-dim)]"
+              className="mt-5 flex flex-wrap items-center gap-x-3 border-t border-[var(--hairline)] pt-3.5 text-[0.75rem] text-[var(--atlas-text-dim)]"
               data-testid="answer-metadata"
             >
-              <span className="flex items-center gap-1.5">
-                <span className="dot dot-supported" aria-hidden />
-                {summary.established} established
+              <span>
+                {readDocs} {readDocs === 1 ? "source" : "sources"} read
               </span>
-              <span className="flex items-center gap-1.5">
-                <span className="dot dot-insufficient" aria-hidden />
-                {summary.unresolved} unresolved
-              </span>
-              {summary.contradicted > 0 && (
-                <span className="flex items-center gap-1.5">
-                  <span className="dot dot-negative" aria-hidden />
-                  {summary.contradicted} contradicted
-                </span>
-              )}
+              {readDocs - usedDocs > 0 && <span>{readDocs - usedDocs} not used as evidence</span>}
+              <button
+                type="button"
+                onClick={openEvidence}
+                className="ml-auto text-[var(--atlas-cyan)] hover:underline"
+                data-testid="answer-view-evidence"
+              >
+                View evidence
+              </button>
             </p>
           )}
         </section>
       )}
 
-      {/* ---- 3. what was verified ------------------------------------ */}
-      <div data-testid="section-reality">
-        <RealityCheck components={components} />
-      </div>
+      {/* ---- 2. THE CLAIMS, AND LEVEL 2 INSIDE THEM ------------------ */}
+      {finished && (
+        <ResultLadder
+          components={components}
+          sourceClassesByComponent={sourceClassesByComponent}
+          onViewEvidence={openEvidence}
+        />
+      )}
 
-      {/* ---- 4. what could not be verified --------------------------- */}
-      <GapsPanel gaps={gaps} />
+      {/* ---- 3. LEVEL 3 — the sources themselves --------------------- */}
+      {finished && (
+        <EvidenceSection
+          ref={evidenceRef}
+          admittedDocs={admittedDocs}
+          excludedDocs={excludedDocs}
+          otherDocs={otherDocs}
+          readCount={readDocs}
+          usedCount={usedDocs}
+          open={evidenceOpen}
+          onToggle={() => setEvidenceOpen((v) => !v)}
+        />
+      )}
 
-      {/* ---- 5. evidence --------------------------------------------- */}
-      <section data-testid="section-evidence">
-        <p className="eyebrow mb-3 px-1">Evidence &amp; sources</p>
-        {!hasAdmittedDocs ? (
-          <div className="panel px-5 py-5 text-sm text-[var(--atlas-text-dim)]">
-            No evidence was bound in support of this finding.
-          </div>
-        ) : (
-          <div className="grid gap-2.5 lg:grid-cols-2">
-            {admittedDocs.flatMap((d) =>
-              d.groups.map((g) => (
-                <EvidenceDocumentCard key={`${d.role}:${g.key}`} group={g} role={d.role} />
-              )),
-            )}
-          </div>
-        )}
-
-        {excludedDocs.length > 0 && (
-          <div className="mt-5" data-testid="excluded-evidence">
-            <p className="eyebrow mb-2 px-1">Considered but excluded</p>
-            <p className="mb-3 px-1 text-[0.78rem] text-[var(--atlas-text-dim)]">
-              These sources were read and refused. They support nothing here.
-            </p>
-            <div className="grid gap-2.5 lg:grid-cols-2">
-              {excludedDocs.map((g) => (
-                <EvidenceDocumentCard key={g.key} group={g} role="EXCLUDED" />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {hasOtherDocs && (
-          <div className="mt-5">
-            <p className="eyebrow mb-2 px-1">Other material read</p>
-            <p className="mb-3 px-1 text-[0.78rem] text-[var(--atlas-text-dim)]">
-              Read during this research but not bound to the finding above.
-            </p>
-            <div className="grid gap-2.5 lg:grid-cols-2">
-              {otherDocs.flatMap((d) =>
-                d.groups.map((g) => (
-                  <EvidenceDocumentCard key={`${d.role}:${g.key}`} group={g} role={d.role} />
-                )),
-              )}
-            </div>
-          </div>
-        )}
-      </section>
-
-      {/* ---- 6. mechanism breakdown ---------------------------------- */}
-      <ComponentBreakdown
-        components={components}
-        evidenceCountByComponent={evidenceCountByComponent}
-      />
-
-      {/* ---- 7. research process (secondary once finished) ----------- */}
+      {/* ---- how the research ran (secondary once finished) ---------- */}
       {finished && (
         <details className="panel px-5 py-4" data-testid="progress-slot-finished">
           <summary className="cursor-pointer select-none text-[0.8rem] text-[var(--atlas-text-dim)]">
-            Research process
+            How this research ran
           </summary>
           <div className="mt-4">
             <ResearchProgress job={job} />
@@ -411,7 +420,7 @@ export default function ResearchDetailPage() {
         </details>
       )}
 
-      {/* ---- 8. developer details ------------------------------------ */}
+      {/* ---- engine internals, behind an explicit opt-in ------------- */}
       <DeveloperDetails detail={detail} />
     </main>
   );
@@ -427,6 +436,8 @@ function edgeColor(tone: string): string {
       return "rgba(248, 113, 113, 0.75)";
     case "insufficient":
       return "rgba(251, 191, 36, 0.7)";
+    case "fault":
+      return "rgba(148, 163, 184, 0.55)";
     default:
       return "rgba(148, 163, 184, 0.35)";
   }

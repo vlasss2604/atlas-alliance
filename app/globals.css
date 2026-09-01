@@ -234,8 +234,11 @@ body {
   .eyebrow {
     font-size: 0.72rem;
   }
-  .ladder-row {
-    padding: 0.8rem 1rem;
+  .ladder-item {
+    margin-left: -0.65rem;
+    margin-right: -0.65rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
   }
 }
 
@@ -549,45 +552,33 @@ body {
 }
 
 /* ---------------------------------------------------------------- *
- * REALITY LADDER
- * ---------------------------------------------------------------- */
-.ladder-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  padding: 0.7rem 0.9rem;
-  border-radius: 0.9rem;
-  border: 1px solid transparent;
-  background: rgba(10, 20, 34, 0.5);
+ * RESULT LADDER
+ * ----------------------------------------------------------------
+ * Rows separated by a hairline rather than boxed individually. Ten
+ * boxed cards read as ten separate problems; ten hairline rows read
+ * as one list, which is what they are. Weight is carried by the row
+ * label and its state colour, not by a border per row.
+ */
+.ladder-item {
+  margin-left: -0.5rem;
+  margin-right: -0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0.75rem;
+  transition: background 140ms ease;
 }
-.ladder-row + .ladder-row {
-  margin-top: 0.4rem;
+.ladder-item:last-child {
+  border-bottom: none;
 }
-.ladder-row-verified {
-  border-color: rgba(45, 212, 191, 0.22);
-  background: rgba(11, 34, 38, 0.45);
+.ladder-item:hover {
+  background: rgba(255, 255, 255, 0.02);
 }
-.ladder-row-dim {
-  opacity: 0.62;
-}
-.stop-marker {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  margin: 0.55rem 0;
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: #fcd34d;
-}
-.stop-marker::before,
-.stop-marker::after {
-  content: "";
-  height: 1px;
-  flex: 1;
-  background: linear-gradient(90deg, transparent, rgba(251, 191, 36, 0.5), transparent);
+/* The open row is the one the reader is working on, so it holds a
+   visible seat while it is open rather than merely pushing content. */
+.ladder-item-open {
+  background: rgba(255, 255, 255, 0.035);
+  border-bottom-color: transparent;
 }
 
 /* ---------------------------------------------------------------- *

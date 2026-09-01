@@ -1,5 +1,6 @@
 import { and, desc, eq } from "drizzle-orm";
 
+import type { ComponentCoverage } from "@/src/client/research-model";
 import {
   errorResponse,
   HttpError,
@@ -27,10 +28,18 @@ import { loadProofForJob } from "@/src/server/services/proof-view";
 //
 // Returns ONLY structured, already-admitted data: job lifecycle, S7 claim
 // support, S6 mechanism assembly, and admitted Evidence with its source
-// provenance. Never touches research_attempts or research_trace_events
-// (operational/provider internals, §M of the S10 spec) and never returns
-// a provider credential or raw provider response — there is nothing in
-// this query that could contain one.
+// provenance. Never touches research_trace_events (operational/provider
+// internals, §M of the S10 spec) and never returns a provider credential
+// or raw provider response — there is nothing in this query that could
+// contain one.
+//
+// It DOES read research_attempts, and reads only the terminal status per
+// (step, component). That status is reduced here to a four-value coverage
+// classification before it leaves the server: no attempt `reason` string,
+// no provider label, no failure detail. The reason strings are assembled
+// from provider labels and HTTP detail, so they are exactly the kind of
+// operational text that must not cross this boundary — the UI needs to know
+// THAT the checking was blocked, never the provider's words for why.
 //
 // CLAIM-SCOPED PROJECTION
 // -----------------------
@@ -200,6 +209,54 @@ export async function GET(
       linksByEvidenceId.set(evidenceId, list);
     };
 
+    // ---- How complete was the checking for each component? ---------------
+    //
+    // `research_attempts` already carries a terminal status per (job, step,
+    // component) and was already being read below for the execution counts —
+    // it was simply reduced to three integers before it reached the client.
+    // Nothing new is stored, no engine behaviour changes, no migration.
+    //
+    // This answers a question S5 structurally cannot. The reconciler sees
+    // Evidence rows and nothing else, so a component whose every fetch
+    // failed and a component whose sources genuinely said nothing both
+    // arrive as INSUFFICIENT_EVIDENCE carrying NO_EVIDENCE_FOUND. Only the
+    // attempt record separates "the public record is silent" from "this run
+    // could not look", and the product must never present the second as the
+    // first.
+    const attemptRows = await db
+      .select({
+        patternStep: researchAttempts.patternStep,
+        component: researchAttempts.component,
+        status: researchAttempts.status,
+      })
+      .from(researchAttempts)
+      .where(eq(researchAttempts.researchJobId, id));
+
+    // DELIBERATELY CONSERVATIVE. COMPLETED is the only value that asserts
+    // the checking finished cleanly, and it requires every attempt for that
+    // component to have SUCCEEDED — one FAILED or one still-STARTED row
+    // downgrades to PARTIAL rather than claiming exhaustiveness. BLOCKED is
+    // the only value the UI may present as a research limitation, and it
+    // requires that NOTHING succeeded and something positively failed.
+    // Anything ambiguous lands in PARTIAL, which claims nothing either way.
+    const attemptsByComponent = new Map<string, { ok: number; failed: number; other: number }>();
+    for (const a of attemptRows) {
+      const key = keyOf(a.patternStep, a.component);
+      const acc = attemptsByComponent.get(key) ?? { ok: 0, failed: 0, other: 0 };
+      if (a.status === "SUCCEEDED") acc.ok += 1;
+      else if (a.status === "FAILED") acc.failed += 1;
+      else acc.other += 1;
+      attemptsByComponent.set(key, acc);
+    }
+    const coverageOf = (step: number, component: string): ComponentCoverage => {
+      const acc = attemptsByComponent.get(keyOf(step, component));
+      if (!acc) return "NOT_ATTEMPTED";
+      if (acc.ok === 0 && acc.failed === 0) return "NOT_ATTEMPTED";
+      if (acc.ok === 0 && acc.failed > 0) return "BLOCKED";
+      if (acc.failed === 0 && acc.other === 0) return "COMPLETED";
+      return "PARTIAL";
+    };
+
     const components = componentRows.map((row) => {
       const supportingEvidenceIds = asArray(row.supportingEvidenceIds).filter(
         (v): v is string => typeof v === "string",
@@ -232,6 +289,7 @@ export async function GET(
         supportingEvidenceIds,
         contradictingEvidenceIds,
         excludedEvidence: excluded,
+        coverage: coverageOf(row.patternStep, row.component),
       };
     });
 
@@ -314,15 +372,7 @@ export async function GET(
     // 1), not Pattern steps, so a job that attempted all 8 steps reported
     // "1 step traced". research_attempts is the authoritative record of
     // what the controller actually attempted.
-    const attemptRows = await db
-      .select({
-        patternStep: researchAttempts.patternStep,
-        component: researchAttempts.component,
-        status: researchAttempts.status,
-      })
-      .from(researchAttempts)
-      .where(eq(researchAttempts.researchJobId, id));
-
+    // Same rows the coverage projection above reads, counted a second way.
     const attemptedStepSet = new Set<number>();
     const attemptedComponentSet = new Set<string>();
     const succeededComponentSet = new Set<string>();

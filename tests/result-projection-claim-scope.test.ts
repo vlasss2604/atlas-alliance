@@ -394,11 +394,19 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
   // array may never become it.
   it("the research screen builds the finding from claim-scoped sources, never from the job-wide evidence array", async () => {
     const fs = await import("node:fs/promises");
-    const raw = await fs.readFile(
-      new URL("../app/(app)/research/[id]/page.tsx", import.meta.url),
-      "utf-8",
-    );
-    // Comments in that file legitimately NAME the old expressions to
+    // The screen now COMPOSES the lists and the evidence section RENDERS
+    // them, so the invariant spans both files. Scanning only the page would
+    // let the headings and the empty state disappear unnoticed; scanning
+    // only the section would miss where the lists come from.
+    const raw = (
+      await Promise.all(
+        [
+          "../app/(app)/research/[id]/page.tsx",
+          "../src/client/components/evidence-section.tsx",
+        ].map((p) => fs.readFile(new URL(p, import.meta.url), "utf-8")),
+      )
+    ).join("\n");
+    // Comments in those files legitimately NAME the old expressions to
     // explain why they are wrong, so strip every comment form (JSX
     // {/* */}, block /* */, and line //) before scanning — otherwise the
     // documentation would trip its own guard.

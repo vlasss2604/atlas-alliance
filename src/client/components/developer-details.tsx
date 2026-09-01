@@ -1,15 +1,56 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
+
 import type { ResearchJobDetail } from "../api";
 
-// DEVELOPER DETAILS — engine internals, closed by default.
+// DEVELOPER DETAILS — engine internals, and NOT part of the normal result.
 //
 // Everything a normal reader should never meet lives here: component reason
-// codes, job state, acquisition phase, termination reason and the raw
-// payload. Keeping it in the page (rather than deleting it) is what lets
-// engine work continue against the real UI without leaking reason codes into
-// the product surface.
+// codes as raw enums, job state, acquisition phase, termination reason and
+// the entire response payload as JSON.
+//
+// "Collapsed by default" was not enough. A <details> element still renders
+// its summary on every result for every user, so the last thing on the
+// screen after the answer was an invitation labelled "Developer details" —
+// and one click printed the whole engine payload. This is a development
+// tool; it is now behind an explicit opt-in and is absent from the normal
+// flow entirely.
+//
+// It is NOT renamed into a user-facing audit. The audit a reader wants is
+// the evidence section: sources, verbatim fragments, and why each one was
+// used or refused. A JSON dump answers a different question, for a different
+// person, and conflating the two would make the product look like it was
+// showing its work when it was showing its plumbing.
+//
+// The opt-in is read from the URL rather than held in state, so a shared
+// link never carries it and a reload never keeps it by accident.
+//
+// `useSyncExternalStore` rather than an effect: the URL is an external
+// value, and this is exactly the read-with-a-server-snapshot case it
+// exists for. Reading it in an effect would set state on the first render
+// (a cascading render the lint rule rightly refuses), and reading it in a
+// useState initialiser would render `true` on the client against the
+// server's `false` and produce a hydration mismatch. The server snapshot
+// is `false`, which is also the correct answer for every reader who did
+// not ask for this.
+const subscribeToNothing = () => () => {};
+
+function readDebugFlag(): boolean {
+  try {
+    return new URLSearchParams(window.location.search).get("debug") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function useDeveloperOptIn(): boolean {
+  return useSyncExternalStore(subscribeToNothing, readDebugFlag, () => false);
+}
+
 export function DeveloperDetails({ detail }: { detail: ResearchJobDetail }) {
+  const enabled = useDeveloperOptIn();
+  if (!enabled) return null;
   return (
     <details className="panel px-5 py-4" data-testid="developer-details">
       <summary className="cursor-pointer select-none text-[0.8rem] text-[var(--atlas-text-dim)]">

@@ -5,19 +5,16 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
-import { ComponentBreakdown } from "../src/client/components/component-breakdown";
-import { ComponentStatusCard } from "../src/client/components/component-status-card";
 import { DeveloperDetails } from "../src/client/components/developer-details";
 import { EvidenceDocumentCard } from "../src/client/components/evidence-document-card";
-import { GapsPanel } from "../src/client/components/gaps-panel";
-import { RealityCheck } from "../src/client/components/reality-check";
 import { RecentProofCard } from "../src/client/components/recent-proof-card";
 import { ResearchGroupCard } from "../src/client/components/research-group-card";
 import { ResearchProgress } from "../src/client/components/research-progress";
+import { ResultLadder } from "../src/client/components/result-ladder";
 import { OutcomeBadge, VerdictBadge } from "../src/client/components/verdict-badge";
 import {
   deriveProgress,
-  deriveRealityCheck,
+  deriveResultLadder,
   groupEvidenceByDocument,
   groupResearchRuns,
   jobOutcome,
@@ -198,26 +195,24 @@ describe("UI — answer first", () => {
     { component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
   ];
 
-  it("TEST 3: the answer leads the screen; component detail comes after", () => {
+  it("TEST 3: the answer leads the screen; everything else is below it", () => {
     const src = readFileSync(RESULT_PAGE, "utf-8");
     const answerAt = src.indexOf('data-testid="answer-panel"');
-    const realityAt = src.indexOf('data-testid="section-reality"');
-    const gapsAt = src.indexOf("GapsPanel gaps={gaps}");
-    const evidenceAt = src.indexOf('data-testid="section-evidence"');
-    const breakdownAt = src.indexOf("<ComponentBreakdown");
+    const ladderAt = src.indexOf("<ResultLadder");
+    const evidenceAt = src.indexOf("<EvidenceSection");
+    const processAt = src.indexOf('data-testid="progress-slot-finished"');
     const devAt = src.indexOf("<DeveloperDetails");
-    for (const at of [answerAt, realityAt, gapsAt, evidenceAt, breakdownAt, devAt]) {
+    for (const at of [answerAt, ladderAt, evidenceAt, processAt, devAt]) {
       expect(at).toBeGreaterThan(-1);
     }
-    // Answer → verified → could not verify → evidence → breakdown → developer.
-    expect(answerAt).toBeLessThan(realityAt);
-    expect(realityAt).toBeLessThan(gapsAt);
-    expect(gapsAt).toBeLessThan(evidenceAt);
-    expect(evidenceAt).toBeLessThan(breakdownAt);
-    expect(breakdownAt).toBeLessThan(devAt);
+    // Answer → the claims → the sources → how it ran → engine internals.
+    expect(answerAt).toBeLessThan(ladderAt);
+    expect(ladderAt).toBeLessThan(evidenceAt);
+    expect(evidenceAt).toBeLessThan(processAt);
+    expect(processAt).toBeLessThan(devAt);
   });
 
-  it("TEST 3b: the answer is plain language, not component arithmetic", () => {
+  it("TEST 3b: the answer is plain language, and never claims more than the evidence", () => {
     const sentences = researchAnswer({
       verdict: "PARTIALLY_SUPPORTED",
       outcomeKind: "VERDICT",
@@ -225,15 +220,24 @@ describe("UI — answer first", () => {
       components,
     });
     expect(sentences.length).toBeGreaterThanOrEqual(2);
-    expect(sentences.length).toBeLessThanOrEqual(4);
+    // THREE, not four. A fourth sentence is the one nobody reaches on a
+    // screen meant to be read in half a minute.
+    expect(sentences.length).toBeLessThanOrEqual(3);
     const text = sentences.join(" ");
     // The old opening — "3 parts of the chain are established" — was analyst
     // metadata dressed as an answer. It must not come back.
     expect(text).not.toMatch(/\d+ parts? of the chain/);
     expect(text).not.toMatch(/^\d/);
-    // It says what was verified, in words.
-    expect(text).toContain("ATLAS verified");
-    expect(text).toContain("could not verify");
+
+    // THE SUBJECT OF THE VERB IS THE EVIDENCE, NEVER ATLAS AND NEVER THE
+    // WORLD. "ATLAS verified where the value ends up" is read as "that is
+    // where it ends up" — the documented-becomes-true collapse, in the one
+    // sentence most likely to be the only one read.
+    expect(text).toContain("The checked evidence establishes");
+    expect(text).not.toContain("ATLAS verified");
+    // And a limit of the evidence is never reported as ATLAS failing.
+    expect(text).toContain("does not establish");
+    expect(text).not.toContain("ATLAS could not verify");
   });
 
   it("TEST 3c: every sentence is backed by a persisted component row", () => {
@@ -259,7 +263,10 @@ describe("UI — answer first", () => {
     }).join(" ");
     // MECHANISM_SPEC is SUPPORTED and EXECUTION_EVIDENCE is not; the answer
     // may never let the first stand in for the second.
-    expect(sentences).toContain("could not verify whether the mechanism has actually executed");
+    expect(sentences).toContain("whether the mechanism has actually executed");
+    expect(sentences).toMatch(
+      /does not establish[^.]*whether the mechanism has actually executed/,
+    );
     expect(sentences.toLowerCase()).not.toContain("burn");
     expect(sentences.toLowerCase()).not.toContain("therefore");
     expect(sentences.toLowerCase()).not.toContain("which means");
@@ -274,7 +281,22 @@ describe("UI — answer first", () => {
     }).join(" ");
     expect(sentences).toContain("did not complete");
     expect(sentences).toContain("not a finding about the project");
-    expect(sentences).not.toContain("ATLAS verified");
+    expect(sentences).not.toContain("The checked evidence establishes");
+  });
+
+  it("TEST 3f: a budget-limited run reads as coverage, never as a negative result", () => {
+    // Stopping early says nothing about the project. The wording must not
+    // let "we did not finish looking" become "there is nothing there".
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "STOPPED_AT_LIMIT",
+      projectName: "Fixture Project",
+      components,
+    }).join(" ");
+    expect(sentences).toContain("stopped at its limit");
+    expect(sentences).toContain("covered everything");
+    expect(sentences.toLowerCase()).not.toContain("not supported");
+    expect(sentences.toLowerCase()).not.toContain("does not exist");
   });
 });
 
@@ -383,42 +405,60 @@ describe("UI — verdicts", () => {
 /* ------------------------------------------------------------------ */
 
 describe("UI — absence of evidence is not evidence of absence", () => {
-  it("TEST 4: an unverified or unassessed rung is never shown as disproven", () => {
-    const view = deriveRealityCheck([
+  it("TEST 4: an unresolved or unassessed row is never shown as disproven", () => {
+    const view = deriveResultLadder([
       { component: "MECHANISM_SPEC", status: "SUPPORTED" },
       { component: "GOVERNANCE_BASIS", status: "INSUFFICIENT_EVIDENCE" },
       // CURRENT_STATE has no row at all.
     ]);
-    const byKey = Object.fromEntries(
-      [...view.chain, ...view.independent].map((r) => [r.key, r.state]),
+    const byComponent = Object.fromEntries(
+      [...view.mechanism, ...view.value].map((r) => [r.component, r.state]),
     );
-    expect(byKey.DOCUMENTED).toBe("VERIFIED");
-    expect(byKey.APPROVED).toBe("UNRESOLVED");
-    expect(byKey.ACTIVATED).toBe("NOT_ASSESSED");
+    expect(byComponent.MECHANISM_SPEC).toBe("VERIFIED");
+    expect(byComponent.GOVERNANCE_BASIS).toBe("UNRESOLVED");
+    // A component with no persisted result was not tested. It is absent
+    // entirely rather than listed greyed-out, because an engine-internal
+    // absence rendered beside real findings reads as one more failure.
+    expect(byComponent.CURRENT_STATE).toBeUndefined();
     expect(
-      [...view.chain, ...view.independent].some((r) => r.state === "NOT_HAPPENING"),
+      [...view.mechanism, ...view.value].some((r) => r.state === "NOT_HAPPENING"),
     ).toBe(false);
   });
 
-  it("TEST 6: \"verified not happening\" comes only from a positive contradiction", () => {
-    const contradicted = deriveRealityCheck([
+  it("TEST 6: \"evidence indicates otherwise\" comes only from a positive contradiction", () => {
+    const contradicted = deriveResultLadder([
       { component: "NET_EFFECT", status: "CONTRADICTED" },
     ]);
-    expect(contradicted.independent.find((r) => r.key === "NET_EFFECT")?.state).toBe(
-      "NOT_HAPPENING",
-    );
+    const row = contradicted.value.find((r) => r.component === "NET_EFFECT");
+    expect(row?.state).toBe("NOT_HAPPENING");
+    expect(row?.stateLabel).toBe("Evidence indicates otherwise");
     // And no other status can produce it.
     for (const status of ["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED", "SUPPORTED"]) {
-      const view = deriveRealityCheck([{ component: "NET_EFFECT", status }]);
-      expect(view.independent.find((r) => r.key === "NET_EFFECT")?.state).not.toBe(
+      const view = deriveResultLadder([{ component: "NET_EFFECT", status }]);
+      expect(view.value.find((r) => r.component === "NET_EFFECT")?.state).not.toBe(
         "NOT_HAPPENING",
       );
     }
   });
 
-  it("TEST 5: an independent verified fact is never implied impossible by a chain break", () => {
-    // The exact shape that was confusing: the chain breaks at Activated,
-    // while DESTINATION is independently verified.
+  it("TEST 6b: a contradiction stays distinct from an unresolved row, in state and in words", () => {
+    const view = deriveResultLadder([
+      { component: "NET_EFFECT", status: "CONTRADICTED" },
+      { component: "RECIPIENT", status: "INSUFFICIENT_EVIDENCE" },
+    ]);
+    const contradicted = view.value.find((r) => r.component === "NET_EFFECT");
+    const unresolved = view.value.find((r) => r.component === "RECIPIENT");
+    expect(contradicted?.state).not.toBe(unresolved?.state);
+    expect(contradicted?.stateLabel).not.toBe(unresolved?.stateLabel);
+    // The strongest thing a run can say must not be flattened into the
+    // weakest. "Not established" means nothing was shown; "evidence
+    // indicates otherwise" means something was.
+    expect(unresolved?.stateLabel).toBe("Not established");
+  });
+
+  it("TEST 5: an established independent finding is never implied impossible by a boundary", () => {
+    // The exact shape that was confusing: the mechanism stops at "currently
+    // active", while DESTINATION is independently established.
     const components = [
       { component: "MECHANISM_SPEC", status: "SUPPORTED" },
       { component: "GOVERNANCE_BASIS", status: "SUPPORTED" },
@@ -426,74 +466,80 @@ describe("UI — absence of evidence is not evidence of absence", () => {
       { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
       { component: "DESTINATION", status: "SUPPORTED" },
     ];
-    const view = deriveRealityCheck(components);
+    const view = deriveResultLadder(components);
 
-    // The break belongs to the CHAIN and is measured within it.
-    expect(view.chainStopsAtIndex).toBe(2);
-    expect(view.chain.map((r) => r.component)).toEqual([
+    // The boundary belongs to the MECHANISM group and is found within it.
+    expect(view.boundary?.component).toBe("CURRENT_STATE");
+    expect(view.mechanism.map((r) => r.component)).toEqual([
       "MECHANISM_SPEC",
       "GOVERNANCE_BASIS",
       "CURRENT_STATE",
       "EXECUTION_EVIDENCE",
     ]);
-    // DESTINATION is NOT part of the chain, so nothing about the break
+    // DESTINATION is NOT in that group, so nothing about the boundary
     // reaches it.
-    expect(view.chain.some((r) => r.component === "DESTINATION")).toBe(false);
-    expect(view.independent.find((r) => r.component === "DESTINATION")?.state).toBe(
-      "VERIFIED",
-    );
+    expect(view.mechanism.some((r) => r.component === "DESTINATION")).toBe(false);
+    expect(view.value.find((r) => r.component === "DESTINATION")?.state).toBe("VERIFIED");
 
-    const html = render(createElement(RealityCheck, { components }));
-    // The marker is inside the chain block, and the independent findings are
-    // announced as independent rather than as later steps.
-    const chainAt = html.indexOf('data-testid="reality-chain"');
-    const stopAt = html.indexOf('data-testid="chain-stop"');
-    const independentAt = html.indexOf('data-testid="reality-independent"');
-    expect(stopAt).toBeGreaterThan(chainAt);
-    expect(stopAt).toBeLessThan(independentAt);
-    expect(html).toContain("Independent findings");
-    expect(html).toContain("not later steps of it");
+    const html = render(createElement(ResultLadder, { components }));
+    const mechanismAt = html.indexOf('data-testid="ladder-mechanism"');
+    const boundaryAt = html.indexOf('data-testid="ladder-boundary"');
+    const valueAt = html.indexOf('data-testid="ladder-value"');
+    expect(boundaryAt).toBeGreaterThan(mechanismAt);
+    expect(boundaryAt).toBeLessThan(valueAt);
+    // The second group is announced as separate rather than as later steps.
+    expect(html).toContain("Established separately");
+    expect(html).toContain("not later steps of the mechanism above");
     // And it never claims the rest is impossible.
     expect(html).not.toContain("Reality stops here");
   });
 
-  it("TEST 5b: the chain break is only drawn where it is derivable", () => {
-    const nothing = deriveRealityCheck([
+  it("TEST 5b: the boundary is only drawn where it is derivable", () => {
+    // Nothing established in the mechanism group means there is no
+    // established run to end, so no boundary is claimed — otherwise the
+    // marker implies the first row was tested and failed.
+    const nothing = deriveResultLadder([
       { component: "MECHANISM_SPEC", status: "INSUFFICIENT_EVIDENCE" },
     ]);
-    expect(nothing.chainStopsAtIndex).toBeNull();
-    expect(render(createElement(RealityCheck, { components: [] }))).not.toContain(
-      "Could not verify the next step",
+    expect(nothing.boundary).toBeNull();
+    expect(render(createElement(ResultLadder, { components: [] }))).not.toContain(
+      "The evidence stops here",
     );
   });
 
-  it("TEST 4b: gaps read as research findings, never as errors or monitoring", () => {
+  it("TEST 4b: an unresolved row reads as a limit of the evidence, never as ATLAS failing", () => {
     const html = render(
-      createElement(GapsPanel, {
-        gaps: [
-          { patternStep: 4, component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
-          { patternStep: 7, component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
+      createElement(ResultLadder, {
+        components: [
+          {
+            component: "EXECUTION_EVIDENCE",
+            status: "INSUFFICIENT_EVIDENCE",
+            reasonCodes: ["MISSING_EXECUTION_EVIDENCE"],
+            coverage: "COMPLETED" as const,
+          },
         ],
       }),
     );
-    expect(html).toContain("Could not verify");
-    expect(html).toContain("not the same as establishing that they are false");
+    expect(html).toContain("Not established");
+    // The old copy said "ATLAS could not verify X" about what is usually a
+    // fact concerning the public record, not a shortcoming of the run.
+    expect(html).not.toContain("ATLAS could not verify");
     expect(html.toLowerCase()).not.toContain("error");
-    expect(html.toLowerCase()).not.toContain("failed");
     expect(html.toLowerCase()).not.toContain("monitor");
   });
 
-  it("TEST 4c: every gap is still listed, just not as a wall of cards", () => {
-    const gaps = [
+  it("TEST 4c: every assessed component is still listed, across the two groups", () => {
+    const components = [
       "SOURCE_OF_VALUE",
       "FLOW_PATH",
       "EXECUTION_EVIDENCE",
       "CURRENT_STATE",
       "NET_EFFECT",
-    ].map((component, i) => ({ patternStep: i + 1, component, status: "INSUFFICIENT_EVIDENCE" }));
-    const html = render(createElement(GapsPanel, { gaps }));
-    expect((html.match(/data-testid="gap-row"/g) ?? [])).toHaveLength(5);
-    expect(html).toContain("5 findings");
+    ].map((component) => ({ component, status: "INSUFFICIENT_EVIDENCE" }));
+    const view = deriveResultLadder(components);
+    expect(view.mechanism.length + view.value.length).toBe(5);
+    const html = render(createElement(ResultLadder, { components }));
+    expect(html.match(/data-testid="ladder-row"/g) ?? []).toHaveLength(5);
   });
 });
 
@@ -557,9 +603,14 @@ describe("UI — evidence is grouped by document", () => {
       createElement(EvidenceDocumentCard, { group: groups[0], role: "USED" }),
     );
     expect(html).toContain('data-components="DESTINATION,RECIPIENT"');
-    expect(html).toContain("Supports:");
-    expect(html).toContain("Destination");
-    expect(html).toContain("Recipient");
+    // The closed card states HOW MUCH of the mechanism the document carries,
+    // not a row of component chips. Those chips rendered `componentLabel`,
+    // so "Destination" and "Recipient" — the Pattern's own vocabulary —
+    // reappeared here after the ladder above had stopped showing it. Which
+    // claims a document touches is named properly once the card is open.
+    expect(html).toContain("Supports 2 parts of the mechanism");
+    expect(html).not.toContain(">Destination<");
+    expect(html).not.toContain(">Recipient<");
   });
 
   it("TEST 9: excluded sources stay separate and are never labelled as support", () => {
@@ -576,17 +627,20 @@ describe("UI — evidence is grouped by document", () => {
     );
     expect(html).toContain('data-role="EXCLUDED"');
     expect(html).toContain('data-source-class="SOCIAL"');
-    expect(html).toContain("Considered for:");
-    expect(html).not.toContain("Supports:");
+    expect(html).toContain("Considered for 1 part of the mechanism");
+    expect(html).not.toContain("Supports ");
     expect(html).not.toContain(">Used<");
     expect(html).not.toContain(">Supporting<");
 
-    // And the screen renders them under their own heading, never merged into
-    // the supporting grid.
-    const src = readFileSync(RESULT_PAGE, "utf-8");
+    // And the evidence section renders them under their own heading, never
+    // merged into the supporting grid. That section now lives at Level 3,
+    // closed by default, so the heading is asserted where it is written.
+    const src = readFileSync("src/client/components/evidence-section.tsx", "utf-8");
     expect(src).toContain('data-testid="excluded-evidence"');
-    expect(src).toContain("Considered but excluded");
-    expect(src).toContain('e.links.find((l) => l.role === "EXCLUDED")');
+    expect(src).toContain("Sources ATLAS checked but did not use");
+    expect(readFileSync(RESULT_PAGE, "utf-8")).toContain(
+      'e.links.find((l) => l.role === "EXCLUDED")',
+    );
   });
 });
 
@@ -611,40 +665,47 @@ const TEN_COMPONENTS = [
   status: i < 3 ? "SUPPORTED" : "INSUFFICIENT_EVIDENCE",
 }));
 
-describe("UI — mechanism breakdown", () => {
-  it("TEST 10: compact by default, and the full breakdown is still reachable", () => {
-    const html = render(
-      createElement(ComponentBreakdown, {
-        components: TEN_COMPONENTS,
-        evidenceCountByComponent: new Map(),
-      }),
-    );
-    // Default: the counts, not ten cards.
-    expect(html).toContain("3 established");
-    expect(html).toContain("7 unresolved");
-    expect(html).not.toContain('data-testid="component-grid"');
-    // And the control that opens the full analytical view is present.
-    expect(html).toContain("View mechanism breakdown");
-    expect(html).toContain('data-testid="toggle-breakdown"');
-
-    // Nothing analytical was deleted: the full grid still renders every
-    // component the engine produced.
-    const src = readFileSync("src/client/components/component-breakdown.tsx", "utf-8");
-    expect(src).toContain("components.map");
-    expect(src).toContain("ComponentStatusCard");
+describe("UI — the ladder carries every component, without the component grid", () => {
+  it("TEST 10: compact by default, and every assessed component is still reachable", () => {
+    const html = render(createElement(ResultLadder, { components: TEN_COMPONENTS }));
+    // Every one of the ten is present as a row — nothing analytical was
+    // dropped when the grid went away.
+    expect(html.match(/data-testid="ladder-row"/g) ?? []).toHaveLength(10);
+    // Compact by DEFAULT: no expansion is rendered until a row is opened.
+    expect(html).not.toContain('data-testid="ladder-expansion"');
   });
 
-  it("TEST 10b: reason codes never appear in the user-facing component card", () => {
+  it("TEST 10b: raw reason codes never appear on the user-facing surface", () => {
     const html = render(
-      createElement(ComponentStatusCard, {
-        component: "MECHANISM_SPEC",
-        status: "INSUFFICIENT_EVIDENCE",
-        evidenceCount: 0,
+      createElement(ResultLadder, {
+        components: [
+          {
+            component: "MECHANISM_SPEC",
+            status: "INSUFFICIENT_EVIDENCE",
+            reasonCodes: ["ALL_EVIDENCE_EXCLUDED", "NO_EVIDENCE_FOUND"],
+          },
+        ],
       }),
     );
-    expect(html).toContain("Could not verify");
+    expect(html).toContain("Not established");
     expect(html).not.toContain("ALL_EVIDENCE_EXCLUDED");
     expect(html).not.toContain("NO_EVIDENCE_FOUND");
+    expect(html).not.toContain("INSUFFICIENT_EVIDENCE");
+  });
+
+  it("TEST 10c: no internal Pattern component name reaches a rendered label", () => {
+    const html = render(createElement(ResultLadder, { components: TEN_COMPONENTS }));
+    // The component is carried as a data attribute for keys and test hooks,
+    // so strip those before looking at what a reader can actually see.
+    const visible = html.replace(/data-component="[^"]*"/g, "");
+    for (const name of TEN_COMPONENTS.map((c) => c.component)) {
+      expect(visible, name).not.toContain(name);
+    }
+    // Nor the Pattern's own prose labels, which are precise for an analyst
+    // and close to meaningless for a reader ("net effect on what?").
+    for (const label of ["Net effect", "Flow path", "Durability basis", "Source of value"]) {
+      expect(visible, label).not.toContain(label);
+    }
   });
 });
 
@@ -686,6 +747,7 @@ const detailFixture = {
       patternStep: 3,
       component: "MECHANISM_SPEC",
       status: "INSUFFICIENT_EVIDENCE",
+      coverage: "COMPLETED" as const,
       reasonCodes: ["ALL_EVIDENCE_EXCLUDED"],
       supportingEvidenceIds: [],
       contradictingEvidenceIds: [],
@@ -696,13 +758,33 @@ const detailFixture = {
 };
 
 describe("UI — developer details", () => {
-  it("engine internals are present but collapsed by default", () => {
+  it("the engine payload is absent from the normal flow, not merely collapsed", () => {
+    // "Collapsed by default" was not enough. A <details> element still
+    // renders its summary for every reader on every result, so the last
+    // thing after the answer was an invitation labelled "Developer
+    // details" — and one click printed the entire response as JSON,
+    // reason-code enums included.
+    //
+    // Server-rendered output is the normal flow: the opt-in is read from
+    // the URL in an effect, so it is off here exactly as it is off for a
+    // reader who did not ask for it.
     const html = render(createElement(DeveloperDetails, { detail: detailFixture }));
-    expect(html).toContain("Developer details");
-    expect(html).toMatch(/<details[^>]*>/);
-    expect(html).not.toMatch(/<details[^>]*\sopen/);
-    expect(html).toContain("ALL_EVIDENCE_EXCLUDED");
-    expect(html).toContain("EXTRACTING");
+    expect(html).toBe("");
+    expect(html).not.toContain("Developer details");
+    expect(html).not.toContain("ALL_EVIDENCE_EXCLUDED");
+    expect(html).not.toContain("EXTRACTING");
+  });
+
+  it("it is gated on an explicit opt-in, and is not renamed into a user-facing audit", () => {
+    const src = readFileSync("src/client/components/developer-details.tsx", "utf-8");
+    // Still available for development, behind something a reader cannot
+    // reach by accident and a shared link does not carry.
+    expect(src).toContain('get("debug") === "1"');
+    expect(src).toContain("if (!enabled) return null");
+    // A JSON dump is not an audit. The audit a reader wants is the evidence
+    // section; calling this one would make plumbing look like showing work.
+    expect(src).not.toContain("Full technical audit");
+    expect(src).not.toContain("Full audit");
   });
 });
 

@@ -3,8 +3,9 @@
 import { useState } from "react";
 
 import {
-  componentLabel,
+  componentClaimLabel,
   exclusionLabel,
+  sourceClassCaveat,
   sourceClassLabel,
   type DocumentGroup,
   type EvidenceItemLike,
@@ -21,7 +22,10 @@ const ROLE_LABEL: Record<EvidenceRole, string> = {
   USED: "Used",
   SUPPORTING: "Supporting",
   CONTRADICTING: "Contradicting",
-  EXCLUDED: "Excluded",
+  // "Excluded" is the engine's word for it and sounds like a verdict on the
+  // publisher. What happened is narrower and worth saying plainly: ATLAS
+  // read this and did not rest anything on it.
+  EXCLUDED: "Not used",
   READ: "Read",
 };
 
@@ -55,6 +59,7 @@ export function EvidenceDocumentCard({
   const [open, setOpen] = useState(false);
   const exclusionReason =
     group.items.find((i) => i.exclusionReason)?.exclusionReason ?? null;
+  const caveat = sourceClassCaveat(group.sourceClass);
 
   return (
     <div
@@ -86,19 +91,18 @@ export function EvidenceDocumentCard({
             </span>
             <span className="truncate">{group.domain}</span>
           </span>
+          {/* A COUNT, NOT A ROW OF COMPONENT CHIPS.
+              These chips rendered `componentLabel`, so the Pattern's own
+              vocabulary — "Net effect", "Flow path", "Durability basis" —
+              reappeared here after the ladder above had stopped showing it.
+              Which claims a document touches is named properly inside, once
+              the card is open; on the closed card the useful fact is simply
+              how much of the mechanism it carries. */}
           {group.components.length > 0 && (
-            <span className="mt-2 flex flex-wrap items-center gap-1.5 text-[0.72rem]">
-              <span className="text-[var(--atlas-text-dim)]">
-                {role === "EXCLUDED" ? "Considered for:" : "Supports:"}
-              </span>
-              {group.components.map((c) => (
-                <span
-                  key={c}
-                  className="rounded-md border border-[var(--hairline)] bg-[rgba(255,255,255,0.03)] px-1.5 py-0.5"
-                >
-                  {componentLabel(c)}
-                </span>
-              ))}
+            <span className="mt-2 block text-[0.72rem] text-[var(--atlas-text-dim)]">
+              {role === "EXCLUDED" ? "Considered for " : "Supports "}
+              {group.components.length}{" "}
+              {group.components.length === 1 ? "part" : "parts"} of the mechanism
             </span>
           )}
         </span>
@@ -115,9 +119,23 @@ export function EvidenceDocumentCard({
       {open && (
         <div className="border-t border-[var(--hairline)] px-4 py-4 text-[0.85rem]">
           {role === "EXCLUDED" && exclusionReason && (
-            <p className="mb-4 rounded-lg border border-[rgba(251,191,36,0.28)] bg-[var(--amber-dim)] px-3 py-2 text-[0.78rem] text-[#fcd34d]">
-              Excluded — {exclusionLabel(exclusionReason)}. This material
-              establishes nothing here and does not support the verdict.
+            <p className="mb-4 rounded-lg border border-[rgba(251,191,36,0.28)] bg-[var(--amber-dim)] px-3 py-2 text-[0.78rem] leading-snug text-[#fcd34d]">
+              Not used — {exclusionLabel(exclusionReason)}. ATLAS read this and
+              rested nothing on it. That is not a judgement that it is wrong.
+            </p>
+          )}
+
+          {/* WHAT THIS CLASS OF SOURCE CAN AND CANNOT SETTLE — stated once
+              per document rather than per row, and attached to the class
+              badge above it. A reader looking at an official document needs
+              to know it settles what the project states and nothing about
+              whether the stated thing happens. */}
+          {caveat && role !== "EXCLUDED" && (
+            <p
+              className="mb-4 rounded-lg border border-[var(--hairline)] bg-[rgba(255,255,255,0.02)] px-3 py-2 text-[0.75rem] leading-snug text-[var(--atlas-text-dim)]"
+              data-testid="source-class-caveat"
+            >
+              {caveat.can} {caveat.cannot}
             </p>
           )}
 
@@ -125,15 +143,32 @@ export function EvidenceDocumentCard({
             {group.items.map((item) => (
               <div key={item.id} data-testid={`evidence-${item.id}`}>
                 {item.component && (
-                  <p className="eyebrow eyebrow-cyan mb-2">{componentLabel(item.component)}</p>
+                  <p className="eyebrow eyebrow-cyan mb-2">
+                    {componentClaimLabel(item.component)}
+                  </p>
                 )}
-                <p className="eyebrow">What it proves</p>
-                <p className="mt-1.5 text-[var(--atlas-text)]">
-                  {item.summary ?? item.fragment}
-                </p>
+                {/* THE VERBATIM FRAGMENT LEADS.
+                    This block rendered `summary ?? fragment`, so the model's
+                    paraphrase displaced the literal passage whenever one was
+                    written — which is almost always. The fragment is the one
+                    artifact on this screen that is checked against the
+                    fetched document rather than generated: it is the reason
+                    to believe any of the rest, and it was the part a reader
+                    could not reach. The summary stays, underneath, labelled
+                    as the reading rather than the source. */}
+                <p className="eyebrow">What the source says</p>
+                <blockquote className="mt-1.5 border-l-2 border-[rgba(45,212,191,0.4)] pl-3 text-[var(--atlas-text)]">
+                  {item.fragment}
+                </blockquote>
+                {item.summary && (
+                  <>
+                    <p className="eyebrow mt-3">What it supports</p>
+                    <p className="mt-1.5 text-[var(--atlas-text-dim)]">{item.summary}</p>
+                  </>
+                )}
                 {item.doesNotProve && (
                   <>
-                    <p className="eyebrow mt-3">What it does not prove</p>
+                    <p className="eyebrow mt-3">What it does not establish</p>
                     <p className="mt-1.5 text-[var(--atlas-text-dim)]">{item.doesNotProve}</p>
                   </>
                 )}
