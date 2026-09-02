@@ -71,18 +71,25 @@ export function isAcceptableEndpoint(raw: string): boolean {
 
 let _override: OnchainRetriever | null = null;
 
-// Test-only. There is no production "fake" branch — an unconfigured
-// environment throws, exactly like the other provider roles.
+// THE ONE INSTALL SEAM, for tests and for production capability wiring
+// alike — the same convention __setRenderedDocsFetcher follows. Production
+// installs a real retriever from jobs/onchain-capability.ts, which is
+// gated on the worker ROLE plus an explicit flag; tests install a
+// fixture-backed one. There is still no production "fake" branch: an
+// unconfigured environment installs nothing at all.
 export function __setOnchainRetriever(r: OnchainRetriever | null): void {
   _override = r;
 }
 
 export function resolveOnchainRetriever(): OnchainRetriever {
   if (_override) return _override;
-  // v1 ships no production transport wiring: the bounded live smoke is a
-  // separate, owner-authorized step. Failing loudly here is the honest
-  // state — never a silent fallback to a fixture, and never a fabricated
-  // "no on-chain data found" conclusion.
+  // Reached only when nothing installed a retriever. Production
+  // installation is jobs/onchain-capability.ts, which fails worker
+  // STARTUP when the capability is declared and unconstructible — so a
+  // running worker either has one or was never told to have one. Failing
+  // loudly here is the honest state for every other caller: never a
+  // silent fallback to a fixture, and never a fabricated "no on-chain
+  // data found" conclusion.
   throw new OnchainRetrieverUnavailableError(
     "no OnchainRetriever is configured in this environment — structured on-chain retrieval " +
       "requires a server-side RPC endpoint that has not been enabled; tests must call " +

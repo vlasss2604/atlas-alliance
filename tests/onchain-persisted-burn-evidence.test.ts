@@ -384,8 +384,16 @@ describe("4. what SUPPORTED here does not reach", () => {
   const facts = synthesizeOnchainFacts(artifact(storedResult()), { step: STEP, component: COMPONENT });
   const rows = facts.map(asRow);
 
-  // The burn establishes step 4 and step 4 only. Offered for any other
-  // component it is either inadmissible or simply not what was asked.
+  // The burn establishes step 4, and reaches exactly ONE other component.
+  //
+  // NET_EFFECT is deliberately absent from this list. A transaction can be
+  // reached only through EXECUTION_EVIDENCE's promotion chain, so filing
+  // the burn there and nowhere else made the one observation that destroys
+  // tokens structurally invisible to the component whose whole question is
+  // whether supply changed. A closed, typed applicability map now lets
+  // NET_EFFECT READ this row — without copying it — and the case below
+  // pins both that it arrives and that it establishes nothing more than a
+  // gross event. Every other component still gets no drift at all.
   for (const [component, step] of [
     ["SOURCE_OF_VALUE", 1],
     ["FLOW_PATH", 2],
@@ -393,7 +401,6 @@ describe("4. what SUPPORTED here does not reach", () => {
     ["GOVERNANCE_BASIS", 3],
     ["DESTINATION", 6],
     ["RECIPIENT", 6],
-    ["NET_EFFECT", 7],
     ["DURABILITY_BASIS", 8],
   ] as const) {
     it(`${component} is not established by this burn row`, () => {
@@ -412,6 +419,32 @@ describe("4. what SUPPORTED here does not reach", () => {
       expect(out.supportingEvidenceIds).toHaveLength(0);
     });
   }
+
+  it("NET_EFFECT reads this burn, and still establishes only a gross event", () => {
+    const out = reconcileComponent({
+      jobId: JOB,
+      item: { step: 7, component: "NET_EFFECT" },
+      requirements: requirements("NET_EFFECT"),
+      evidence: rows,
+      now: new Date("2026-08-27T00:00:00Z"),
+      freshnessPolicyDays: FRESHNESS_POLICY,
+    });
+    // The row arrives — by typed applicability, not by drifting: it is
+    // still persisted at step 4 / EXECUTION_EVIDENCE and was not copied.
+    expect(out.supportingEvidenceIds.length).toBeGreaterThan(0);
+    const burnRow = rows.find((r) => r.onchainFactKind === "BURN");
+    expect(burnRow).toBeDefined();
+    expect(burnRow!.patternStep).toBe(4);
+    expect(burnRow!.component).toBe("EXECUTION_EVIDENCE");
+    expect(out.supportingEvidenceIds).toContain(burnRow!.id);
+
+    // And it establishes a GROSS reduction only. A real burn on a real
+    // mint still may not become net deflation.
+    expect(out.reasonCodes).not.toContain("SUPPLY_REDUCTION_NOT_ESTABLISHED");
+    expect(out.reasonCodes).toContain("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
+    expect(out.status).toBe("PARTIALLY_SUPPORTED");
+    expect(out.status).not.toBe("SUPPORTED");
+  });
 
   it("nothing in the fact mentions any other transaction", () => {
     // The acquisition-shaped transaction at a later slot is a separate

@@ -1,5 +1,6 @@
 import {
   isGrossSupplyReductionFact,
+  onchainFactAppliesToComponent,
   type OnchainFactKind,
 } from "./onchain-facts";
 import type { EvidenceSourceClass } from "./providers/types";
@@ -71,8 +72,15 @@ export type ResultReasonCode =
   // evidence is a typed gross supply-reduction event. A documented
   // buyback, an observed purchase, a holding balance, a transfer and a
   // point-in-time supply level all land here — they are the four things
-  // this product must never let become "supply was reduced". CLEARABLE
-  // TODAY: one deterministic BURN clears it.
+  // this product must never let become "supply was reduced".
+  //
+  // CLEARABLE, AND NOW CLEARABLE IN A LIVE RUN. One deterministic BURN
+  // clears it. When B1 shipped that was true of this function and false of
+  // the engine: NET_EFFECT plans only TOKEN_SUPPLY and has no promotion
+  // rule, so no live route could file a BURN here. The typed applicability
+  // map (onchain-facts.ts) closed that gap — a BURN acquired through
+  // EXECUTION_EVIDENCE's promotion chain is now readable by NET_EFFECT
+  // without being copied.
   //
   // NET_SUPPLY_CHANGE_NOT_ESTABLISHED: a gross reduction IS established,
   // and net supply change across an interval is still not. A burn destroys
@@ -517,7 +525,25 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       excluded.set(row.id, "LEGACY_CONTRACT_VERSION");
       continue;
     }
-    if (row.patternStep !== item.step || row.component !== item.component) {
+    // A row is normally read only by the component it was written for.
+    //
+    // THE ONE EXCEPTION IS TYPED AND CLOSED. A deterministic chain
+    // observation may also be read by a component its KIND is declared
+    // relevant to (onchain-facts.ts). This exists because a transaction is
+    // reachable only through EXECUTION_EVIDENCE's promotion chain, so a
+    // BURN — the single observation that destroys tokens — was filed there
+    // and was structurally invisible to NET_EFFECT, whose entire question
+    // is whether supply changed.
+    //
+    // It cannot leak documentary evidence: `onchainFactKind` is null on
+    // every model-extracted, documentary and data-provider row, and a null
+    // kind is never applicable to anything. It cannot leak across
+    // arbitrary components either — the map declares exactly one pair.
+    // And it grants only VISIBILITY: the row still faces job scope, class
+    // admissibility, entity binding, directness, relationship, freshness
+    // and dedup exactly as it would in its own component.
+    const ownComponent = row.patternStep === item.step && row.component === item.component;
+    if (!ownComponent && !onchainFactAppliesToComponent(row.onchainFactKind, item.component)) {
       excluded.set(row.id, "WRONG_COMPONENT");
       continue;
     }

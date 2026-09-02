@@ -44,6 +44,10 @@ import {
   uninstallRendererCapability,
 } from "./renderer-capability";
 import {
+  installOnchainResearchCapability,
+  uninstallOnchainResearchCapability,
+} from "./onchain-capability";
+import {
   loadWorkerCapabilities,
   workerServesPhase,
   type PhaseCapability,
@@ -714,6 +718,19 @@ export async function startWorker() {
   const renderer = await installFetchRendererCapability({ capabilities });
   console.log("[worker] renderer capability:", renderer.outcome);
 
+  // Structured on-chain retrieval, installed BEFORE any queue is served
+  // for the same reason: no EXTRACTING message may be picked up by a
+  // process still deciding whether it can reach a chain. Only the role
+  // that runs the executor installs one; a declared-but-unconstructible
+  // retriever fails startup here rather than degrading into a silently
+  // documentary-only engine (see onchain-capability.ts).
+  const onchain = installOnchainResearchCapability({ capabilities });
+  console.log(
+    "[worker] on-chain capability:",
+    onchain.outcome,
+    onchain.providerId ?? "",
+  );
+
   await sweepStaleRunningJobs(db);
   // Runs after boss.start()/createQueue above, so the queue tables this
   // reads are guaranteed to exist.
@@ -787,6 +804,7 @@ export async function startWorker() {
     if (shuttingDown) return;
     shuttingDown = true;
     uninstallRendererCapability();
+    uninstallOnchainResearchCapability();
     clearInterval(maintenanceTimer);
     await boss.stop({ graceful: true });
     await pool.end();

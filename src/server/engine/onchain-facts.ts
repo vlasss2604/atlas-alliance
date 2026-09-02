@@ -161,6 +161,75 @@ export function isGrossSupplyReductionFact(kind: string | null | undefined): boo
     : false;
 }
 
+// ---- ONE FACT, THE COMPONENTS IT IS RELEVANT TO -----------------------
+//
+// A deterministic chain observation is filed under the component whose
+// acquisition produced it. That is correct provenance and, on its own, it
+// silently lost a real semantic: a transaction can only be reached by
+// EXECUTION_EVIDENCE (it is the only component permitted the signature ->
+// transaction promotion), so a BURN — the one observation that destroys
+// tokens — was filed at EXECUTION_EVIDENCE and was invisible to
+// NET_EFFECT, the component whose entire question is whether supply
+// changed. NET_EFFECT could therefore never see the only fact that could
+// answer it, in any live run.
+//
+// THIS IS AN APPLICABILITY MAP, NOT A COPY. The Evidence row stays where
+// it was written, once, with one artifact and one provenance chain. What
+// this declares is which OTHER components may READ it. Nothing is
+// duplicated, no second row is created, no artifact is referenced twice,
+// and no count grows.
+//
+// CLOSED, CODE-OWNED, AND DELIBERATELY TINY. One entry, because one is
+// what current semantics justify:
+//
+//   BURN -> NET_EFFECT   A burn destroys tokens. That is a supply fact by
+//                        definition, and it is the only kind that is.
+//
+// Every other kind is absent on purpose, and the absences are the
+// substance of this map:
+//
+//   TOKEN_ACCOUNTS_BY_OWNER / TOKEN_ACCOUNT_BALANCE — a position at a
+//     moment. Holding a token is not reducing supply, and letting a
+//     balance reach NET_EFFECT would re-open exactly the false positive
+//     B1 closed.
+//   TOKEN_TRANSFER / NATIVE_TRANSFER / RECIPROCAL_ASSET_FLOW — a
+//     movement. Tokens moved; none stopped existing.
+//   DECODED_EXCHANGE — a purchase. Buying a token creates no supply
+//     change whatever; this is the "buyback is not burn" boundary itself.
+//   TOKEN_SUPPLY — a level, not a change, and NET_EFFECT already acquires
+//     it directly (INTENTS_BY_COMPONENT). Nothing to cross.
+//   ACCOUNT_INFO / ACCOUNT_TOKEN_RELATION(_FOREIGN) /
+//     SIGNATURES_FOR_ADDRESS / TRANSACTION_DETAIL — identity, existence
+//     and history. None bears on any component but its own.
+//
+// A DOCUMENT CAN NEVER TRAVEL THIS ROUTE. Applicability is keyed on
+// `onchain_fact_kind`, which is null on every documentary, data-provider
+// and model-extracted row, so the crossover is structurally unreachable
+// for anything but a deterministic chain observation. Widening this map is
+// an owner decision about research semantics, not an implementation
+// liberty.
+const APPLICABLE_COMPONENTS_BY_KIND: Partial<Record<OnchainFactKind, readonly string[]>> = {
+  BURN: ["NET_EFFECT"],
+};
+
+// May a row of this kind, filed under some other component, be READ when
+// reconciling `component`? False for a null kind, always — absence of a
+// typed kind is absence of permission.
+export function onchainFactAppliesToComponent(
+  kind: string | null | undefined,
+  component: string,
+): boolean {
+  if (kind === null || kind === undefined) return false;
+  const applicable = APPLICABLE_COMPONENTS_BY_KIND[kind as OnchainFactKind];
+  return applicable !== undefined && applicable.includes(component);
+}
+
+// Exposed for tests, so the map itself can be asserted rather than only
+// its consequences.
+export function applicableComponentsForFactKind(kind: OnchainFactKind): readonly string[] {
+  return APPLICABLE_COMPONENTS_BY_KIND[kind] ?? [];
+}
+
 // A deterministic fact plus the kind it was synthesized as. Separate from
 // ExtractedFact so the model's shape is untouched and cannot carry a kind.
 export type SynthesizedFact = ExtractedFact & { onchainFactKind: OnchainFactKind };
