@@ -814,10 +814,19 @@ export function researchAnswer(input: AnswerInput): string[] {
   const subject = input.projectName ?? "this project";
   const sentences: string[] = [];
 
-  // 1 — the lead: what the run concluded, in the reader's terms.
+  // THE LEAD SENTENCE IS GONE FOR EVERY NORMAL OUTCOME.
+  //
+  // It used to open "The checked evidence establishes part of what this
+  // question asked about, but not the whole path" — which is the verdict
+  // badge, restated in twenty words, before a single fact. The badge
+  // already says PARTIALLY SUPPORTED. What a reader does not have yet is
+  // WHAT was and was not settled, so the answer now starts there.
+  //
+  // The fault outcomes keep their lead, because in those cases there is
+  // no finding to lead with and the state of the RUN is the whole answer.
   switch (input.outcomeKind ?? "VERDICT") {
     case "IN_PROGRESS":
-      return [`ATLAS is still researching this question about ${subject}.`];
+      return [`Still researching this question about ${subject}.`];
     case "FAILED":
       return [
         `This research run did not complete, so it established nothing about ${subject}.`,
@@ -827,40 +836,14 @@ export function researchAnswer(input: AnswerInput): string[] {
       return [`This research was cancelled before it reached a conclusion.`];
     case "STOPPED_AT_LIMIT":
       sentences.push(
-        `This research stopped at its limit before it had covered everything it set out to check about ${subject}.`,
+        `This research stopped at its limit before covering everything it set out to check about ${subject}.`,
       );
       break;
     case "NO_CONCLUSION":
-      sentences.push(
-        `This research finished without producing a Proof for ${subject}.`,
-      );
+      sentences.push(`This research finished without producing a Proof for ${subject}.`);
       break;
     default:
-      switch (input.verdict) {
-        case "SUPPORTED":
-          sentences.push(
-            `The checked evidence establishes the mechanism this question asked about for ${subject}.`,
-          );
-          break;
-        case "PARTIALLY_SUPPORTED":
-          sentences.push(
-            `The checked evidence establishes part of what this question asked about for ${subject}, but not the whole path.`,
-          );
-          break;
-        case "NOT_SUPPORTED":
-          sentences.push(
-            `On the claim this question asked about for ${subject}, the checked evidence indicates otherwise.`,
-          );
-          break;
-        case "INSUFFICIENT_EVIDENCE":
-          sentences.push(
-            `The checked evidence does not establish an answer to this question about ${subject}.`,
-          );
-          break;
-        default:
-          sentences.push(`No conclusion was recorded for this research.`);
-          break;
-      }
+      // No lead. The lists below are the answer.
       break;
   }
 
@@ -871,19 +854,21 @@ export function researchAnswer(input: AnswerInput): string[] {
     sentences.push(`On ${joinPhrases(contradicted, "and")}, the evidence indicates otherwise.`);
   }
 
-  // 3 — what was established. THE SUBJECT OF THE VERB IS THE EVIDENCE, NEVER
-  // ATLAS AND NEVER THE WORLD. "ATLAS verified where the value ends up" is
-  // read as "that is where it ends up"; "the checked evidence establishes
-  // where the value ends up" keeps the reader inside what was actually
-  // shown, and stays true even when the only source was documentation.
+  // 3 — WHAT WAS SETTLED, LED BY THE WORD THAT SAYS SO.
+  //
+  // "Established:" carries the epistemic frame in one word, where "The
+  // checked evidence establishes …" spent seven on it before reaching a
+  // fact. The claim is identical and no weaker: this still describes what
+  // the EVIDENCE reached, never what is true of the world, and it stays
+  // accurate when the only source was documentation.
   const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
   if (verified.length > 0) {
-    sentences.push(`The checked evidence establishes ${joinPhrases(verified)}.`);
+    sentences.push(`Established: ${joinPhrases(verified)}.`);
   }
 
-  // 4 — what it did not establish. Only components that were actually
-  // attempted and came back short. Phrased as a limit of the EVIDENCE, not
-  // as a failure by ATLAS and not as a claim that the thing is absent.
+  // 4 — what it did not settle. Only components that were actually
+  // attempted and came back short. A limit of the EVIDENCE — never a
+  // failure of the run, and never a claim that the thing is absent.
   const unresolved = pick(
     input.components,
     "INSUFFICIENT_EVIDENCE",
@@ -891,11 +876,7 @@ export function researchAnswer(input: AnswerInput): string[] {
     verified.length > 0 ? 2 : 3,
   );
   if (unresolved.length > 0 && sentences.length < 3) {
-    sentences.push(
-      verified.length > 0
-        ? `It does not establish ${joinPhrases(unresolved, "or")}.`
-        : `The checked evidence does not establish ${joinPhrases(unresolved, "or")}.`,
-    );
+    sentences.push(`Not established: ${joinPhrases(unresolved, "or")}.`);
   }
 
   // THREE SENTENCES, NOT FOUR. The default screen is read in about half a
@@ -956,24 +937,24 @@ export function relativeAge(iso: string | null | undefined, now = Date.now()): s
 // "the sources that exist".
 export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
   NO_EVIDENCE_FOUND:
-    "The sources ATLAS successfully checked did not provide evidence for this step.",
+    "The sources checked here carried nothing on this point.",
   ALL_EVIDENCE_EXCLUDED:
-    "Sources discussed this, but none met the evidence standard required for this step.",
+    "Sources discussed this, but none met the standard this claim requires.",
   MISSING_EXECUTION_EVIDENCE:
-    "The mechanism is described, but the checked evidence does not show it actually executing.",
+    "The mechanism is described, but nothing checked shows it actually running.",
   MISSING_CURRENT_STATE:
-    "The checked evidence does not establish whether this is active now.",
+    "Nothing checked says whether this is active now.",
   STALE_CURRENT_STATE:
-    "The available state evidence is too old to establish the current status.",
+    "The only sources describing this are too old to speak for the present.",
   INSUFFICIENT_AUTHORITY:
-    "The claim appears in evidence that is not authoritative enough for this step.",
+    "The claim appears only in sources that cannot settle it.",
   INDIRECT_ONLY:
-    "The checked sources refer to this indirectly, but do not establish it directly.",
+    "The sources refer to this indirectly, without stating it.",
   STATE_NOT_FULLY_LIVE:
-    "The evidence shows implementation or preparation, not a fully live state.",
-  CONFLICTING_STATE: "The checked evidence conflicts about the current state.",
+    "What is described is implementation or preparation, not a fully live state.",
+  CONFLICTING_STATE: "The sources disagree about the current state.",
   TOKEN_STATE_UNQUALIFIED:
-    "The evidence mentions token state, but not precisely enough to establish the required effect.",
+    "Token state is mentioned, but not precisely enough to settle the effect in question.",
 };
 
 // The FIRST recognised code wins. `reasonCodes` arrives in the order S5
@@ -1003,40 +984,57 @@ export function reasonExplanation(
 // documentation is not a weaker on-chain record; it answers a DIFFERENT
 // question. It settles what a project states, and nothing whatsoever about
 // whether the stated thing is happening.
-export const SOURCE_CLASS_CAVEATS: Record<string, { can: string; cannot: string }> = {
+// `from` is WHERE the finding came from and is the one thing a reader does
+// not already know from the answer itself — so it is what the expansion
+// leads with, instead of restating the answer in longer words.
+// `can` explains why that kind of source is the right one to ask, and is
+// what a source card shows. `cannot` is the boundary, and is the reason
+// this map exists at all: documentation is not a weaker on-chain record,
+// it answers a DIFFERENT question.
+export const SOURCE_CLASS_CAVEATS: Record<
+  string,
+  { from: string; can: string; cannot: string }
+> = {
   OFFICIAL_DOCS: {
-    can: "Can establish what the project officially documents.",
-    cannot: "Does not by itself establish that the documented thing is happening.",
+    from: "This comes from the project's own documentation.",
+    can: "Shows what the project officially documents.",
+    cannot: "Documentation alone does not establish that the documented thing is happening.",
   },
   GOVERNANCE: {
-    can: "Can establish that a decision was formally approved.",
-    cannot: "Does not by itself establish that the decision was carried out.",
+    from: "This comes from a formal governance decision.",
+    can: "Shows that a decision was formally approved.",
+    cannot: "An approved decision is not proof that it was carried out.",
   },
   ONCHAIN_VERIFIABLE: {
-    can: "Can establish recorded transactions and on-chain state.",
-    cannot: "Linking that record to a specific mechanism may still be required.",
+    from: "This comes from on-chain records.",
+    can: "Shows transactions and state recorded on-chain.",
+    cannot: "Tying a record to a particular mechanism can still require more evidence.",
   },
   OFFICIAL_REPORT: {
-    can: "Can establish what the project reports about itself.",
-    cannot: "Does not by itself establish independent confirmation.",
+    from: "This comes from the project's own reporting.",
+    can: "Shows what the project reports about itself.",
+    cannot: "Self-reporting is not independent confirmation.",
   },
   DATA_PROVIDER: {
-    can: "Can establish measured data within the provider's methodology.",
-    cannot: "Depends on that methodology, which is not itself verified here.",
+    from: "This comes from a third-party data provider.",
+    can: "Shows measured data, within that provider's methodology.",
+    cannot: "The methodology behind the numbers is not itself verified here.",
   },
   RESEARCH_MEDIA: {
-    can: "Useful as context, and for finding leads worth checking.",
-    cannot: "Does not replace the primary evidence a step requires.",
+    from: "This comes from secondary reporting.",
+    can: "Useful for context and for finding leads worth checking.",
+    cannot: "Reporting does not replace the primary evidence a claim requires.",
   },
   SOCIAL: {
-    can: "Can establish that a statement was made, and by whom.",
-    cannot: "Does not by itself establish that the statement is accurate.",
+    from: "This comes from a public statement.",
+    can: "Shows that a statement was made, and by whom.",
+    cannot: "A statement being made is not evidence that it is accurate.",
   },
 };
 
 export function sourceClassCaveat(
   sourceClass: string | null | undefined,
-): { can: string; cannot: string } | null {
+): { from: string; can: string; cannot: string } | null {
   if (!sourceClass) return null;
   return SOURCE_CLASS_CAVEATS[sourceClass] ?? null;
 }
@@ -1161,6 +1159,44 @@ export function componentClaimLabel(component: string | null | undefined): strin
   return CLAIM_LABELS[component] ?? componentLabel(component);
 }
 
+// THE SEMANTIC ENVELOPE OF A CANONICAL COMPONENT.
+//
+// A projection label is model-written presentation, and presentation may
+// rename a finding but must never WIDEN it. Observed live: NET_EFFECT —
+// whose canonical meaning is a durable effect on token SUPPLY — was
+// labelled "the intended effect of buybacks on token value". A reader
+// sees "value" and reasonably reads price. The research never checked
+// price, so the label was quietly claiming a different question had been
+// answered than the one the status underneath it grades.
+//
+// The guard is per COMPONENT, not per project: it names the vocabulary
+// that is canonically wrong for a given component's meaning, and it holds
+// for every project the engine will ever run. There is no token here, no
+// domain, no question text — a Raydium run and a run on anything else are
+// checked by the identical rule.
+//
+// A label that trips it is REPLACED with that component's own canonical
+// label, never patched or reworded. Presentation degrades to the safe
+// wording; it never tries to guess what the model meant.
+const CLAIM_LABEL_FORBIDDEN: Record<string, RegExp> = {
+  // Supply, not markets. Price/return/valuation are a different question.
+  NET_EFFECT: /\b(price|valuation|market cap|marketcap|return|returns|yield|worth|value)\b/i,
+  // Where value COMES FROM is not where it goes.
+  SOURCE_OF_VALUE: /\b(destination|recipient|receives?|ends? up|goes? to)\b/i,
+  // What is written down is not what is happening.
+  MECHANISM_SPEC: /\b(execut|running|happening|live|active)/i,
+  // An authorisation is not an execution.
+  GOVERNANCE_BASIS: /\b(execut|running|happening)/i,
+  // An intended destination is not an observed transfer.
+  DESTINATION: /\b(execut|transferred|actually sent|observed)/i,
+};
+
+export function safeClaimLabel(component: string, label: string): string {
+  const forbidden = CLAIM_LABEL_FORBIDDEN[component];
+  if (forbidden && forbidden.test(label)) return componentClaimLabel(component);
+  return label;
+}
+
 export interface LadderComponentInput {
   component: string;
   status: string;
@@ -1279,18 +1315,19 @@ export function findingMicroAnswer(
 
   switch (row.state) {
     case "VERIFIED":
-    case "PARTIAL": {
-      const grounded = firstUsableSummary(supportingSummaries);
-      // The preamble survives ONLY where there is no admitted statement to
-      // put in its place. Then it is the honest thing to say: something was
-      // established, and this projection cannot say more than that.
-      return grounded ?? `The checked evidence establishes ${phrase}.`;
-    }
+    case "PARTIAL":
+      // NOTHING, rather than a sentence that says only what the badge
+      // already said. Where there is no admitted statement to put here,
+      // "the checked evidence establishes where the value ends up" adds
+      // no fact a reader did not have from the question and the status
+      // beside it — it just costs them a line. The row stays question +
+      // status, and the expansion supplies where it came from.
+      return firstUsableSummary(supportingSummaries);
     case "NOT_HAPPENING":
-      // Deliberately still framed as what the EVIDENCE indicates. A
-      // contradiction is the strongest thing a run can say and it is still
-      // a statement about evidence, not a bare assertion of the negative.
-      return `On ${phrase}, the checked evidence indicates otherwise.`;
+      // Still framed as what the SOURCES show. A contradiction is the
+      // strongest thing a run can say and it is still a statement about
+      // evidence, not a bare assertion of the negative.
+      return `On ${phrase}, the sources point the other way.`;
     default:
       // Says what remains unknown, and nothing about whether it is true.
       // "Was not established" is not "does not happen".
@@ -1359,45 +1396,51 @@ export function findingExplanation(row: ResultRow): string[] {
   // showed, because in this case there is no evidence to have shown
   // anything — and a reader who skims would otherwise take "not
   // established" as a fact about the project.
+  //
+  // Stated as the state of the QUESTION, not as a narration of the run:
+  // what is unavailable, what that leaves open, and whose limitation it
+  // is. "Could not complete this stage" describes our workflow; nobody
+  // asked about our workflow.
   if (row.coverage === "BLOCKED") {
     return [
-      "Required source access failed during this part of the research, so ATLAS could not complete the necessary checks here.",
-      "This is a limit of the research run, not evidence for or against the project.",
+      "The sources needed to check this were unavailable during this research run, so the question remains open.",
+      "The limit is in research coverage, not evidence for or against the project.",
     ];
   }
 
   const sentences: string[] = [];
+  const strongest = CAVEAT_PRECEDENCE.find((c) => row.sourceClasses.includes(c));
+  const caveat = strongest ? sourceClassCaveat(strongest) : null;
+  const established = row.state === "VERIFIED" || row.state === "PARTIAL";
 
-  // 1 — what the checked evidence did or did not establish.
-  if (phrase) {
-    if (row.state === "VERIFIED") sentences.push(`The checked evidence establishes ${phrase}.`);
-    else if (row.state === "PARTIAL")
-      sentences.push(`The checked evidence partly establishes ${phrase}.`);
-    else if (row.state === "NOT_HAPPENING")
-      sentences.push(`On ${phrase}, the checked evidence indicates otherwise.`);
-    else sentences.push(`The checked evidence does not establish ${phrase}.`);
-  }
+  // 1 — WHERE IT CAME FROM. The one thing a reader cannot already know:
+  // the row above states WHAT was found and the badge states how firmly,
+  // so repeating either here would spend the reader's click on something
+  // they have already read. What kind of source stands behind it is new.
+  if (established && caveat) sentences.push(caveat.from);
 
   // 2 — why it stands where it does, from the persisted reason code. On an
   // established finding a reason code is a QUALIFIER (indirect only,
   // authority short of the bar) and is worth just as much as it is on an
-  // unresolved one.
+  // unresolved one. On an unresolved row this is the whole explanation.
   if (row.reason) sentences.push(row.reason);
 
   // 3 — the boundary that the KIND of source cannot cross, whatever it
   // said. This is where "documented" is kept from reading as "happening",
   // and it belongs only where something was actually admitted.
-  const strongest = CAVEAT_PRECEDENCE.find((c) => row.sourceClasses.includes(c));
-  const caveat = strongest ? sourceClassCaveat(strongest) : null;
-  if (caveat && (row.state === "VERIFIED" || row.state === "PARTIAL")) {
-    sentences.push(`${sourceClassLabel(strongest!)}: ${lowerFirst(caveat.cannot)}`);
+  if (caveat && established) sentences.push(caveat.cannot);
+
+  // A row with nothing else to say still says the honest minimum rather
+  // than opening onto an empty panel.
+  if (sentences.length === 0 && phrase) {
+    sentences.push(
+      row.state === "NOT_HAPPENING"
+        ? `On ${phrase}, the sources point the other way.`
+        : `Nothing checked settles ${phrase}.`,
+    );
   }
 
-  return sentences.slice(0, 4);
-}
-
-function lowerFirst(s: string): string {
-  return s.length > 0 ? s[0].toLowerCase() + s.slice(1) : s;
+  return sentences.slice(0, 3);
 }
 
 // THE QUESTION-DRIVEN VIEW — SAME DERIVATION, DIFFERENT SELECTION.
@@ -1426,7 +1469,16 @@ export function deriveQuestionFindings(
 ): ResultRow[] {
   const byComponent = new Map(components.map((c) => [c.component, c]));
   return findings
-    .map((f) => buildRow({ component: f.component, label: f.label }, byComponent, classesByComponent))
+    .map((f) =>
+      buildRow(
+        // The label passes the semantic-envelope guard before it is
+        // rendered. A projection may rename a finding; it may not turn it
+        // into a question the research did not ask.
+        { component: f.component, label: safeClaimLabel(f.component, f.label) },
+        byComponent,
+        classesByComponent,
+      ),
+    )
     .filter((r) => r.state !== "NOT_ASSESSED");
 }
 

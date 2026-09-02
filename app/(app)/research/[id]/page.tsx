@@ -485,7 +485,13 @@ export default function ResearchDetailPage() {
               className="mt-5 border-t border-[var(--hairline)] pt-3.5 text-[0.75rem] text-[var(--atlas-text-dim)]"
               data-testid="answer-metadata"
             >
-              {usedDocs} {usedDocs === 1 ? "source" : "sources"} used as evidence
+              {/* One vocabulary for one idea. This read "N sources used as
+                  evidence" while the control below said "Show proof" and
+                  the card said "Supports:" — three names for the same
+                  chain. The context already makes "used as evidence"
+                  obvious; the count alone is enough, and staying terse
+                  keeps it a footnote rather than a score. */}
+              Sources · {usedDocs}
             </p>
           )}
         </section>

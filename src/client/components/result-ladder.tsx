@@ -5,8 +5,10 @@ import { useState } from "react";
 import {
   deriveQuestionFindings,
   deriveResultLadder,
+  documentName,
   findingExplanation,
   findingMicroAnswer,
+  sourceClassCaveat,
   sourceClassLabel,
   type EvidenceItemLike,
   type LadderComponentInput,
@@ -89,14 +91,16 @@ export function ResultLadder({
   if (question.length > 0) {
     return (
       <section className="panel p-5 sm:p-6" data-testid="result-ladder">
-        <p className="eyebrow eyebrow-violet">What ATLAS established for this question</p>
+        {/* The reader is inside the product; the brand does not need to
+            appear in the heading of every section it renders. */}
+        <p className="eyebrow eyebrow-violet">Key findings</p>
         <div className="mt-3.5" data-testid="ladder-question">
           {question.map((row) => (
             <LadderRow key={row.component} {...rowProps(row)} isBoundary={false} />
           ))}
         </div>
         <p className="mt-4 text-[0.72rem] text-[var(--atlas-text-dim)]">
-          Everything else ATLAS checked is in the full research audit.
+          Everything else checked is in the full research audit.
         </p>
       </section>
     );
@@ -327,11 +331,14 @@ function FindingEvidence({
         data-testid="toggle-finding-evidence"
         className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--hairline)] bg-[rgba(34,211,238,0.045)] px-2.5 py-1.5 text-[0.75rem] font-medium text-[var(--atlas-cyan)] transition-colors hover:border-[var(--hairline-strong)] hover:bg-[rgba(34,211,238,0.08)]"
       >
+        {/* ONE ACTION VOCABULARY. This said "Show proof · 2 sources" while
+            the page above said "sources used as evidence" and the card
+            below said "Supports:" — three words for one idea. Everything
+            that leads to a source now says SOURCES, and the only other
+            verb in the chain is OPEN ORIGINAL at the end of it. */}
         <ProofIcon />
-        {open ? "Hide proof" : "Show proof"}
-        <span className="font-normal text-[var(--atlas-text-dim)]">
-          · {items.length} {items.length === 1 ? "source" : "sources"}
-        </span>
+        {open ? "Hide sources" : "Sources"}
+        <span className="font-normal text-[var(--atlas-text-dim)]">· {items.length}</span>
       </button>
 
       {open && (
@@ -344,7 +351,7 @@ function FindingEvidence({
               className="self-start text-[0.75rem] text-[var(--atlas-cyan)] hover:underline"
               data-testid="toggle-supporting-sources"
             >
-              + {rest.length} supporting {rest.length === 1 ? "source" : "sources"}
+              + {rest.length} more {rest.length === 1 ? "source" : "sources"}
             </button>
           )}
           {restOpen && rest.map((item) => <EvidenceItem key={item.id} item={item} />)}
@@ -360,37 +367,75 @@ function FindingEvidence({
 // read on request, and the card should look like the second thing, not
 // compete with the first.
 function EvidenceItem({ item }: { item: EvidenceItemLike }) {
+  const caveat = sourceClassCaveat(item.sourceClass);
+  // The source-class limit is generic to the KIND of source; doesNotProve
+  // is what the extractor recorded about THIS passage. The specific one
+  // wins where it exists.
+  const limit = item.doesNotProve ?? caveat?.cannot ?? null;
+
   return (
     <div
       className="rounded-xl border border-[var(--hairline)] bg-[rgba(255,255,255,0.022)] p-3.5"
       data-testid={`finding-evidence-${item.id}`}
     >
-      <div className="flex flex-wrap items-center gap-2 text-[0.7rem] text-[var(--atlas-text-dim)]">
-        <span className="rounded-md border border-[var(--hairline)] bg-[rgba(255,255,255,0.03)] px-1.5 py-0.5 font-medium uppercase tracking-wider">
+      {/* PROVENANCE FIRST — WHO SAID IT, AND WHAT KIND OF THING THEY ARE.
+          A card that opened straight into a quotation looked like text
+          this product had written about itself. Name, publisher and class
+          are what let a reader answer "how do I know you did not write
+          this?" before reading a word of the passage. */}
+      <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
+        Source
+      </p>
+      <p className="mt-1 truncate text-[0.85rem] font-medium text-[var(--atlas-text)]">
+        {item.sourceTitle ?? documentName(item.retrievedUrl, null)}
+      </p>
+      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--atlas-text-dim)]">
+        <span
+          className="rounded-md border px-1.5 py-0.5 font-medium uppercase tracking-wider"
+          style={sourceClassChipStyle(item.sourceClass)}
+          data-testid="source-class-chip"
+        >
           {sourceClassLabel(item.sourceClass)}
         </span>
-        <span className="truncate text-[var(--atlas-text)]/90">
-          {item.sourceTitle ?? domainOf(item.retrievedUrl)}
-        </span>
-      </div>
+        <span className="truncate">{domainOf(item.retrievedUrl)}</span>
+      </p>
 
-      {/* THE SOURCE'S OWN WORDS FIRST. The fragment is the only thing on
-          this screen checked against the fetched document rather than
-          generated, so it is the reason to believe any of the rest. */}
-      <blockquote className="mt-2.5 border-l-2 border-[rgba(45,212,191,0.4)] pl-3 text-[0.84rem] leading-relaxed text-[var(--atlas-text)]/92">
+      {/* AN EXCERPT, CALLED AN EXCERPT. This is the passage the extractor
+          took, not the document — saying "source excerpt" is the honest
+          description of what is actually on screen, and it is the only
+          thing here checked against the fetched page rather than written. */}
+      <p className="eyebrow mt-3.5" style={{ color: "var(--atlas-text-dim)" }}>
+        Relevant excerpt
+      </p>
+      <blockquote className="mt-1.5 border-l-2 border-[rgba(45,212,191,0.4)] pl-3 text-[0.84rem] leading-relaxed text-[var(--atlas-text)]/92">
         {item.fragment}
       </blockquote>
 
-      {item.summary && (
-        <p className="mt-2.5 text-[0.8rem] leading-relaxed text-[var(--atlas-text-dim)]">
-          <span className="font-medium text-[var(--atlas-text)]">Supports:</span> {item.summary}
-        </p>
+      {/* WHY THIS SOURCE, AND WHAT IT STILL CANNOT SETTLE.
+          What is deliberately NOT here is `summary` — the model's reading
+          of this passage, which is the same sentence the collapsed finding
+          already showed. Reading one fact three times on the way down is
+          what made depth feel like padding; these two lines are new
+          information instead. */}
+      {caveat && (
+        <>
+          <p className="eyebrow mt-3.5" style={{ color: "var(--atlas-text-dim)" }}>
+            Why this source
+          </p>
+          <p className="mt-1.5 text-[0.8rem] leading-relaxed text-[var(--atlas-text-dim)]">
+            {caveat.can}
+          </p>
+        </>
       )}
-      {item.doesNotProve && (
-        <p className="mt-1.5 text-[0.8rem] leading-relaxed text-[var(--atlas-text-dim)]">
-          <span className="font-medium text-[var(--atlas-text)]">Does not establish:</span>{" "}
-          {item.doesNotProve}
-        </p>
+      {limit && (
+        <>
+          <p className="eyebrow mt-3.5" style={{ color: "var(--atlas-text-dim)" }}>
+            Source limit
+          </p>
+          <p className="mt-1.5 text-[0.8rem] leading-relaxed text-[var(--atlas-text-dim)]">
+            {limit}
+          </p>
+        </>
       )}
 
       <a
@@ -430,6 +475,30 @@ function ProofIcon() {
       <path d="M4.3 6.1 5.5 7.3 7.8 4.8" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
+}
+
+// SOURCE CLASSES SHOULD NOT ALL LOOK THE SAME.
+//
+// A reader scanning several cards needs to tell an on-chain record from a
+// blog at a glance, because the two answer different kinds of question.
+// This is a KIND marker, never a quality score: nothing here ranks
+// sources, an official document gets no brighter treatment than a data
+// provider, and the class's real limits are stated in words beside it.
+// Anything unrecognised falls back to plain neutral rather than guessing.
+function sourceClassChipStyle(sourceClass: string | null): React.CSSProperties {
+  switch (sourceClass) {
+    case "ONCHAIN_VERIFIABLE":
+      return { color: "#7dd3fc", borderColor: "rgba(125, 211, 252, 0.35)" };
+    case "GOVERNANCE":
+      return { color: "#c4b5fd", borderColor: "rgba(167, 139, 250, 0.35)" };
+    case "OFFICIAL_DOCS":
+    case "OFFICIAL_REPORT":
+      return { color: "#5eead4", borderColor: "rgba(45, 212, 191, 0.32)" };
+    case "DATA_PROVIDER":
+      return { color: "#cbd5e1", borderColor: "rgba(148, 163, 184, 0.35)" };
+    default:
+      return { color: "var(--atlas-text-dim)", borderColor: "var(--hairline)" };
+  }
 }
 
 function domainOf(url: string): string {

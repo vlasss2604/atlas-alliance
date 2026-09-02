@@ -541,7 +541,7 @@ describe("projection — the question shapes the default screen", () => {
     );
     expect(html.match(/data-testid="ladder-row"/g) ?? []).toHaveLength(2);
     expect(html).toContain("Where do the trading fees go?");
-    expect(html).toContain("What ATLAS established for this question");
+    expect(html).toContain("Key findings");
     // The Pattern's own grouping is absent from the default screen.
     expect(html).not.toContain("How the mechanism stands");
     expect(html).not.toContain("What the evidence says about the value");
@@ -558,7 +558,7 @@ describe("projection — the question shapes the default screen", () => {
         createElement(ResultLadder, { components: ladderComponents, questionFindings: fallback }),
       );
       expect(html).toContain("How the mechanism stands");
-      expect(html).not.toContain("What ATLAS established for this question");
+      expect(html).not.toContain("Key findings");
     }
   });
 

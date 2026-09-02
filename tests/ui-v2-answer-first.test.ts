@@ -207,8 +207,8 @@ describe("V2 — a blocked check is separated from a completed one", () => {
     expect(blocked.reason).not.toBe(completed.reason);
     // And the blocked row must not borrow copy asserting the checking
     // happened, which is exactly what the reason code would have implied.
-    expect(blocked.reason).not.toContain("successfully checked");
-    expect(completed.reason).toContain("successfully checked");
+    expect(blocked.reason).not.toContain("sources checked here");
+    expect(completed.reason).toContain("sources checked here");
   });
 
   it("TEST 5b: the limitation is a fact about the run, never about the project", () => {
@@ -274,7 +274,9 @@ describe("V2 — a blocked check is separated from a completed one", () => {
     // The reason it does show is a statement about the checked evidence,
     // which stays true whether or not the checking was exhaustive.
     expect(partial.reason).toBe(REASON_CODE_EXPLANATIONS.MISSING_CURRENT_STATE);
-    expect(partial.reason).toContain("The checked evidence");
+    // A statement about what was checked, which stays true whether or not
+    // the checking was exhaustive — it never claims completeness.
+    expect(partial.reason).toContain("Nothing checked");
   });
 
   it("TEST 6b: the server projection is conservative in both directions", () => {
@@ -438,8 +440,7 @@ describe("V2 — the source's own words come before the model's", () => {
     }
     // Official documentation must never be allowed to stand for execution.
     expect(sourceClassCaveat("OFFICIAL_DOCS")!.cannot).toContain(
-      "does not by itself establish that the documented thing is happening"
-        .replace(/^d/, "D"),
+      "does not establish that the documented thing is happening",
     );
     expect(sourceClassCaveat("UNKNOWN_CLASS")).toBeNull();
   });
@@ -608,8 +609,8 @@ describe("V2 — what the default screen does and does not carry", () => {
         { component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
       ],
     }).join(" ");
-    expect(text).toContain("The checked evidence establishes");
-    expect(text).toContain("does not establish");
+    expect(text).toContain("Established:");
+    expect(text).toContain("Not established:");
     expect(text.toLowerCase()).not.toContain("burn");
     expect(text.toLowerCase()).not.toContain("is executing");
     expect(text.toLowerCase()).not.toContain("therefore");

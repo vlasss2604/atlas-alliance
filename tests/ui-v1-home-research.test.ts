@@ -233,15 +233,20 @@ describe("UI — answer first", () => {
     expect(text).not.toMatch(/\d+ parts? of the chain/);
     expect(text).not.toMatch(/^\d/);
 
-    // THE SUBJECT OF THE VERB IS THE EVIDENCE, NEVER ATLAS AND NEVER THE
-    // WORLD. "ATLAS verified where the value ends up" is read as "that is
-    // where it ends up" — the documented-becomes-true collapse, in the one
-    // sentence most likely to be the only one read.
-    expect(text).toContain("The checked evidence establishes");
+    // THE EPISTEMIC FRAME STILL LEADS, IN ONE WORD INSTEAD OF SEVEN.
+    // "Established:" carries exactly what "The checked evidence
+    // establishes …" carried — a statement about what the EVIDENCE
+    // reached, never about what is true of the world — but reaches the
+    // fact itself far sooner. The world-claim collapse is still refused.
+    expect(text).toContain("Established:");
+    expect(text).toContain("Not established:");
     expect(text).not.toContain("ATLAS verified");
-    // And a limit of the evidence is never reported as ATLAS failing.
-    expect(text).toContain("does not establish");
     expect(text).not.toContain("ATLAS could not verify");
+
+    // And the verdict is no longer restated in prose above the facts —
+    // the badge beside the answer already says it.
+    expect(text).not.toContain("The checked evidence establishes part of what");
+    expect(text).not.toContain("but not the whole path");
   });
 
   it("TEST 3c: every sentence is backed by a persisted component row", () => {
@@ -269,7 +274,7 @@ describe("UI — answer first", () => {
     // may never let the first stand in for the second.
     expect(sentences).toContain("whether the mechanism has actually executed");
     expect(sentences).toMatch(
-      /does not establish[^.]*whether the mechanism has actually executed/,
+      /Not established:[^.]*whether the mechanism has actually executed/,
     );
     expect(sentences.toLowerCase()).not.toContain("burn");
     expect(sentences.toLowerCase()).not.toContain("therefore");
@@ -298,7 +303,7 @@ describe("UI — answer first", () => {
       components,
     }).join(" ");
     expect(sentences).toContain("stopped at its limit");
-    expect(sentences).toContain("covered everything");
+    expect(sentences).toContain("covering everything");
     expect(sentences.toLowerCase()).not.toContain("not supported");
     expect(sentences.toLowerCase()).not.toContain("does not exist");
   });

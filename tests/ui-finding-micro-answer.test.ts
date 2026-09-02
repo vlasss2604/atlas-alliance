@@ -81,21 +81,27 @@ describe("an established finding states what was found", () => {
     }
   });
 
-  it("TEST 2b: the preamble survives ONLY as the no-statement fallback", () => {
-    // Honest in that case: something was established and this projection
-    // cannot say more than that. It is never reached for to fill space.
-    const answer = findingMicroAnswer(row({ component: "DESTINATION" }), []);
-    expect(answer).toBe("The checked evidence establishes where the value ends up.");
+  it("TEST 2b: with no admitted statement, the row says NOTHING rather than a tautology", () => {
+    // It used to fall back to "The checked evidence establishes where the
+    // value ends up" — which is the badge and the question restated, and
+    // no fact at all. A line that teaches the reader nothing costs them a
+    // line; the question and the status stand alone, and the expansion
+    // supplies where it came from.
+    expect(findingMicroAnswer(row({ component: "DESTINATION" }), [])).toBeNull();
+    expect(findingMicroAnswer(row({ component: "DESTINATION", status: "PARTIALLY_SUPPORTED" }), []))
+      .toBeNull();
   });
 
-  it("TEST 2c: the fallback is not then repeated inside the expansion", () => {
-    const built = row({ component: "DESTINATION" });
-    const micro = findingMicroAnswer(built, []);
+  it("TEST 2c: the expansion still cannot repeat the collapsed row's sentence", () => {
     const src = readFileSync(LADDER, "utf-8");
     expect(src).toContain("findingExplanation(row).filter((s) => s !== microAnswer)");
-    // The explanation's opening line IS that fallback, so without the
-    // filter a reader would meet the same sentence twice.
-    expect(findingExplanation(built)[0]).toBe(micro);
+    // The guard now has nothing to catch on the established path, because
+    // the two levels no longer draw from the same sentence at all: the row
+    // carries the admitted statement, the expansion carries provenance and
+    // the boundary. It stays as a structural backstop.
+    const built = row({ component: "DESTINATION" });
+    const micro = findingMicroAnswer(built, [REAL_SUMMARY]);
+    expect(findingExplanation(built)).not.toContain(micro);
   });
 });
 
@@ -153,11 +159,11 @@ describe("the micro-answer never says more than the canonical result", () => {
       [REAL_SUMMARY],
     );
     expect(answer).toBe(
-      "On a durable effect on token supply, the checked evidence indicates otherwise.",
+      "On a durable effect on token supply, the sources point the other way.",
     );
-    // The strongest thing a run can say is still a statement about
-    // evidence, never a bare assertion of the negative.
-    expect(answer).toContain("the checked evidence");
+    // The strongest thing a run can say is still a statement about what
+    // the SOURCES show, never a bare assertion of the negative.
+    expect(answer).toContain("the sources");
     expect(answer).not.toContain("was not established");
   });
 });
@@ -202,9 +208,9 @@ describe("a micro-answer cannot broaden its canonical claim", () => {
     // A summary is admitted Evidence. Cutting it mid-clause could change
     // what it says, so the fallback is used instead.
     const long = `${"x".repeat(260)}.`;
-    expect(findingMicroAnswer(row({ component: "DESTINATION" }), [long])).toBe(
-      "The checked evidence establishes where the value ends up.",
-    );
+    // Declined, and with no tautology to fall back to, the row simply
+    // carries no micro-answer line.
+    expect(findingMicroAnswer(row({ component: "DESTINATION" }), [long])).toBeNull();
     // One sentence is taken from a multi-sentence summary, not all of it.
     expect(
       findingMicroAnswer(row({ component: "DESTINATION" }), ["First part. Second part."]),

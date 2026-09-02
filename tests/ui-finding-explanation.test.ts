@@ -87,30 +87,38 @@ describe("a finding explains itself in prose, not in filing cabinets", () => {
     expect(code).not.toContain("function Block(");
   });
 
-  it("TEST 1b: an established finding reads as two to four joined sentences", () => {
+  it("TEST 1b: an established finding leads with WHERE IT CAME FROM, not with its status", () => {
     const [row] = deriveQuestionFindings([QUESTION_FINDINGS[0]], COMPONENTS, {
       DESTINATION: ["OFFICIAL_DOCS"],
     });
     const sentences = findingExplanation(row);
     expect(sentences.length).toBeGreaterThanOrEqual(2);
-    expect(sentences.length).toBeLessThanOrEqual(4);
-    // It says what was established, then what that KIND of source cannot
-    // settle — which is where "documented" is kept from reading as
+    expect(sentences.length).toBeLessThanOrEqual(3);
+
+    // THE WHOLE POINT OF OPENING A ROW. The collapsed row already gave the
+    // answer and the badge already gave the strength, so an expansion that
+    // opened "The checked evidence establishes …" spent the reader's click
+    // restating both. Provenance is the thing they could not already know.
+    expect(sentences[0]).toBe("This comes from the project's own documentation.");
+    expect(sentences.join(" ")).not.toContain("The checked evidence establishes");
+
+    // Then the boundary — where "documented" is kept from reading as
     // "happening".
-    expect(sentences[0]).toContain("The checked evidence establishes");
-    expect(sentences.join(" ")).toContain("does not by itself establish that the documented thing is happening");
+    expect(sentences.join(" ")).toContain(
+      "Documentation alone does not establish that the documented thing is happening.",
+    );
     for (const s of sentences) expect(s).toMatch(/\.$/);
   });
 
-  it("TEST 1c: an unresolved finding leads with the persisted reason", () => {
+  it("TEST 1c: an unresolved finding is explained by its persisted reason alone", () => {
     const [, row] = deriveQuestionFindings(QUESTION_FINDINGS, COMPONENTS);
     const sentences = findingExplanation(row);
-    expect(sentences[0]).toContain("does not establish");
-    expect(sentences.join(" ")).toContain(
-      "The mechanism is described, but the checked evidence does not show it actually executing.",
-    );
-    // No caveat is attached where nothing was admitted to caveat.
-    expect(sentences.join(" ")).not.toContain("Official docs:");
+    // Nothing was admitted, so there is no provenance to state and no
+    // source class to caveat — the reason code IS the explanation.
+    expect(sentences).toEqual([
+      "The mechanism is described, but nothing checked shows it actually running.",
+    ]);
+    expect(sentences.join(" ")).not.toContain("This comes from");
   });
 
   it("TEST 2: a technical limitation stays its own explanation, and its own frame", () => {
@@ -126,12 +134,19 @@ describe("a finding explains itself in prose, not in filing cabinets", () => {
       ],
     );
     const sentences = findingExplanation(row);
-    expect(sentences.join(" ")).toContain("Required source access failed");
-    expect(sentences.join(" ")).toContain("not evidence for or against the project");
+    const text = sentences.join(" ");
+    // States the QUESTION's condition and whose limit it is — not a
+    // narration of the run's internal stages.
+    expect(text).toContain("unavailable during this research run");
+    expect(text).toContain("the question remains open");
+    expect(text).toContain("not evidence for or against the project");
+    // Process language a reader never asked about.
+    expect(text).not.toContain("could not complete");
+    expect(text).not.toContain("at this stage");
     // It must NOT borrow the evidence-gap sentence, which asserts that
     // checking happened — the whole point of the distinction.
-    expect(sentences.join(" ")).not.toContain("successfully checked");
-    expect(sentences.join(" ")).not.toContain("does not establish");
+    expect(text).not.toContain("sources checked here");
+    expect(text).not.toContain("does not establish");
 
     // And it renders in the limitation frame, not as ordinary prose.
     const html = render(
@@ -222,11 +237,23 @@ describe("proof is attached to the conclusion it proves", () => {
     const src = readFileSync(LADDER, "utf-8");
     expect(src).toContain("const [primary, ...rest] = items");
     expect(src).toContain('data-testid="toggle-supporting-sources"');
-    // The verbatim fragment leads each item; the model's paraphrase follows.
+
+    // PROVENANCE, THEN THE PASSAGE, THEN WHAT IT CANNOT SETTLE.
+    // The card opens by naming who said it and what kind of source they
+    // are, because a card that opened straight into a quotation looked
+    // like text this product had written about itself.
     const item = src.slice(src.indexOf("function EvidenceItem"));
-    expect(item.indexOf("{item.fragment}")).toBeLessThan(item.indexOf("{item.summary"));
+    expect(item.indexOf("Source\n")).toBeLessThan(item.indexOf("Relevant excerpt"));
+    expect(item.indexOf("Relevant excerpt")).toBeLessThan(item.indexOf("Why this source"));
+    expect(item.indexOf("Why this source")).toBeLessThan(item.indexOf("Source limit"));
     expect(item).toContain("<blockquote");
-    expect(item).toContain("Does not establish:");
+    expect(item).toContain("{item.fragment}");
+
+    // The model's paraphrase of the passage is NOT here: it is the same
+    // sentence the collapsed row already showed, and reading one fact
+    // three times on the way down is what made depth feel like padding.
+    expect(item).not.toContain("{item.summary}");
+    expect(item).not.toContain("Supports:");
   });
 });
 
@@ -338,7 +365,9 @@ describe("presentation only — no conclusion was strengthened or weakened", () 
       [{ component: "DESTINATION", status: "CONTRADICTED", coverage: "COMPLETED" }],
     );
     expect(contradicted.stateLabel).toBe("Evidence indicates otherwise");
-    expect(findingExplanation(contradicted).join(" ")).toContain("indicates otherwise");
+    // Still a statement about what the SOURCES show, never a bare
+    // assertion of the negative.
+    expect(findingExplanation(contradicted).join(" ")).toContain("the sources point the other way");
   });
 
   it("TEST 14: no model call and no research call was added", () => {

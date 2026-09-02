@@ -118,11 +118,11 @@ describe("the unresolved block names the fact, not the process", () => {
       ],
     );
     const text = findingExplanation(blocked).join(" ");
-    expect(text).toContain("Required source access failed");
+    expect(text).toContain("unavailable during this research run");
     expect(text).toContain("not evidence for or against the project");
     // It must never borrow the evidence-gap sentence, which asserts that
     // checking actually happened.
-    expect(text).not.toContain("successfully checked");
+    expect(text).not.toContain("sources checked here");
 
     // And a genuine gap stays a statement about the evidence.
     const [gap] = deriveQuestionFindings(
@@ -137,9 +137,11 @@ describe("the unresolved block names the fact, not the process", () => {
       ],
     );
     const gapText = findingExplanation(gap).join(" ");
-    expect(gapText).toContain("does not establish");
-    expect(gapText).not.toContain("Required source access failed");
-    expect(gapText).not.toContain("limit of the research run");
+    // A genuine gap is explained by its persisted reason code, and says
+    // nothing about research coverage.
+    expect(gapText).toContain("nothing checked shows it actually running");
+    expect(gapText).not.toContain("unavailable during this research run");
+    expect(gapText).not.toContain("research coverage");
   });
 });
 
@@ -156,8 +158,11 @@ describe("the normal result shows what the answer rests on, and nothing else", (
 
   it("TEST 6: it shows only the count of sources used as evidence", () => {
     const meta = code.slice(code.indexOf('data-testid="answer-metadata"'));
-    expect(meta.slice(0, 260)).toContain("{usedDocs}");
-    expect(meta.slice(0, 260)).toContain("used as evidence");
+    expect(meta.slice(0, 400)).toContain("{usedDocs}");
+    // ONE vocabulary for the whole chain: the footnote, the control that
+    // opens a finding's proof, and the card all say SOURCES.
+    expect(meta.slice(0, 400)).toContain("Sources ·");
+    expect(meta.slice(0, 400)).not.toContain("used as evidence");
     // Rendered only when there is something to report.
     expect(code).toContain("{usedDocs > 0 && (");
   });
