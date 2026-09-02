@@ -37,6 +37,10 @@ const productConfigSchema = z.object({
   // key, and loadProductConfig() must not throw for every caller because a
   // presentation feature is unconfigured.
   projection_model: z.string().min(1).default("claude-haiku-4-5"),
+  // The Full Research Audit projection. Same cheap role-approved model as
+  // the question projection, and charged at most once per job — only when
+  // a human actually opens the audit.
+  audit_model: z.string().min(1).default("claude-haiku-4-5"),
   // S10 (live-provider-enablement.md §10) — internal-alpha gate, SEPARATE
   // from research_enabled (the public/product gate, which MUST remain
   // false throughout S10 internal alpha). Live executor construction
@@ -96,6 +100,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   query_proposer_model: "claude-haiku-4-5",
   evidence_extractor_model: "claude-haiku-4-5",
   projection_model: "claude-haiku-4-5",
+  audit_model: "claude-haiku-4-5",
   internal_alpha_enabled: false,
   phased_research_enabled: false,
   ari_core_price_stars: 2999,

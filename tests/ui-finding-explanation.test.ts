@@ -262,33 +262,34 @@ describe("proof is attached to the conclusion it proves", () => {
 /* ------------------------------------------------------------------ */
 
 describe("the normal result carries no document list", () => {
-  it("TEST 7: EvidenceSection renders only inside the full audit", () => {
+  it("TEST 7: no document pile renders on the result at any depth", () => {
     const page = readFileSync(PAGE, "utf-8");
-    const auditAt = page.indexOf("Full research audit");
-    const sectionAt = page.indexOf("<EvidenceSection");
-    expect(auditAt).toBeGreaterThan(-1);
-    expect(sectionAt).toBeGreaterThan(-1);
-    // The only EvidenceSection on the page is below the audit summary.
-    expect(sectionAt).toBeGreaterThan(auditAt);
-    expect((page.match(/<EvidenceSection/g) ?? [])).toHaveLength(1);
-    // And the answer panel no longer offers a route into a document pile.
+    expect(page.indexOf('data-testid="audit-entry"')).toBeGreaterThan(-1);
+    // Stronger than before. The document inventory used to live inside
+    // this page's own audit block; the audit is now a separate surface,
+    // so no EvidenceSection renders here at all.
+    expect(page).not.toContain("<EvidenceSection");
+    // And the answer panel still offers no route into a document pile.
     expect(page).not.toContain('data-testid="answer-view-evidence"');
     expect(page).not.toContain("View evidence");
   });
 
   it("TEST 8: the full audit still holds the complete inventory", () => {
-    const page = readFileSync(PAGE, "utf-8");
-    const audit = page.slice(page.indexOf("Full research audit"));
-    // Used, refused and merely-read all still reach it, with counts.
-    for (const prop of ["admittedDocs", "excludedDocs", "otherDocs", "readCount", "usedCount"]) {
-      expect(audit, prop).toContain(prop);
-    }
-    // The complete Pattern component view is there too.
-    expect(audit).toContain('data-testid="audit-full-ladder"');
-    // And the section itself still separates refused from used.
-    const section = readFileSync("src/client/components/evidence-section.tsx", "utf-8");
-    expect(section).toContain("Sources ATLAS checked but did not use");
-    expect(section).toContain("Other material read");
+    // Same guarantee, better home. Used, refused and merely-read material
+    // all still reach the audit — now as a register keyed by canonical
+    // document, with the engine's own exclusion reason attached, instead
+    // of four role-bucketed document lists inside the result page.
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(audit).toContain("Sources used");
+    expect(audit).toContain("Checked but not used");
+    expect(audit).toContain('data-testid="audit-sources-used"');
+    expect(audit).toContain('data-testid="audit-sources-not-used"');
+    // Every canonical component is still accounted for, in coverage.
+    expect(audit).toContain('data-testid="audit-coverage"');
+    // And the split between used and not-used is derived, not assumed.
+    const model = readFileSync("src/client/audit-model.ts", "utf-8");
+    expect(model).toContain("export function auditSourceRegister");
+    expect(model).toContain("checkedNotUsed");
   });
 });
 

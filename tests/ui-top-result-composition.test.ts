@@ -179,15 +179,14 @@ describe("the normal result shows what the answer rests on, and nothing else", (
   });
 
   it("TEST 7: the full audit keeps the complete accounting", () => {
-    const audit = code.slice(code.indexOf("Full research audit"));
-    for (const prop of ["readCount={readDocs}", "usedCount={usedDocs}", "excludedDocs", "otherDocs"]) {
-      expect(audit, prop).toContain(prop);
-    }
-    // The section itself still separates refused from merely read.
-    const section = readFileSync("src/client/components/evidence-section.tsx", "utf-8");
-    expect(section).toContain("Sources ATLAS checked but did not use");
-    expect(section).toContain("Other material read");
-    expect(section).toContain("read and not used");
+    // The accounting moved to the audit surface, which is where a
+    // professional needs it — as a register with reasons rather than four
+    // role-bucketed document lists inside the result.
+    expect(code).toContain('data-testid="audit-entry"');
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(audit).toContain("Sources used");
+    expect(audit).toContain("Checked but not used");
+    expect(audit).toContain("Read during research; no research point relied on it.");
   });
 });
 
@@ -246,7 +245,16 @@ describe("presentation only", () => {
     const journal = JSON.parse(
       readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8"),
     ) as { entries: { idx: number; tag: string }[] };
+    // A presentation round may ADD its own derived table; it may never
+    // alter an engine-owned one. So this guard is no longer "0040 is
+    // still newest" — the Full Research Audit legitimately added 0041 —
+    // but the invariant it protected, which is stronger and durable: no
+    // migration touches a canonical research table.
     const newest = journal.entries[journal.entries.length - 1];
-    expect(newest.tag).toBe("0040_question_projection");
+    const sql = readFileSync(`src/server/db/migrations/${newest.tag}.sql`, "utf-8");
+    expect(sql).not.toMatch(
+      /ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/,
+    );
+    expect(sql).not.toMatch(/DROP (TABLE|COLUMN)/i);
   });
 });

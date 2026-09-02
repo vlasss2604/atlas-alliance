@@ -526,8 +526,16 @@ describe("V2 — what the default screen does and does not carry", () => {
     const src = readFileSync(RESULT_PAGE, "utf-8");
     // Deep sections start closed, and proof now reaches a reader through
     // the finding it proves rather than through a page-level control.
-    expect(src).toContain("useState(false)");
+    // The page-level evidence disclosure is gone entirely — proof reaches
+    // a reader through the finding it proves, and the source ACCOUNTING
+    // moved to the audit. What remains closed by default is the audit
+    // itself, which is not even requested until it is opened.
+    // The audit is now its own route, so this page holds no audit state
+    // at all — the strongest form of "costs nothing until asked for".
+    expect(src).not.toContain("prepareAudit");
+    expect(src).toContain('data-testid="audit-entry"');
     expect(src).toContain("evidenceByComponent={evidenceByComponent}");
+    expect(src).not.toContain("<EvidenceSection");
     // The old screen rendered the component grid, the gaps panel and the
     // reality ladder as three more equal-weight sections. They are gone,
     // and so is the general evidence wall that replaced them.
@@ -552,15 +560,16 @@ describe("V2 — what the default screen does and does not carry", () => {
     expect(section).not.toMatch(/otherDocs\.reduce\(/);
     expect(section).not.toMatch(/admittedDocs\.reduce\(/);
 
-    // And the page passes the same two values it renders in the answer.
+    // The page no longer renders that section at all: the read/used
+    // accounting moved to the audit, where it is a register keyed by
+    // canonical document. The one-document-one-source rule survives the
+    // move and is asserted where it now lives.
     const page = readFileSync(RESULT_PAGE, "utf-8");
-    expect(page).toContain("readCount={readDocs}");
-    expect(page).toContain("usedCount={usedDocs}");
-    // `readDocs` is distinct DOCUMENTS, not evidence rows — one document
-    // that yielded six facts is one source, never six.
-    expect(page).toContain(
-      "const readDocs = groupEvidenceByDocument(detail.evidence.map((e) => toItem(e))).length",
-    );
+    expect(page).not.toContain("<EvidenceSection");
+    expect(page).toContain("const usedDocs = admittedDocs.reduce(");
+    const model = readFileSync("src/client/audit-model.ts", "utf-8");
+    expect(model).toContain("function documentKeyOf");
+    expect(model).toContain("byDocument");
   });
 
   it("TEST 14: evidence provenance is still built from persisted links only", () => {
@@ -568,8 +577,12 @@ describe("V2 — what the default screen does and does not carry", () => {
     // Roles come from S8 citations and S5 component sets, never from text.
     expect(src).toContain("proof?.citations");
     expect(src).toContain("detail.finding.supporting");
-    expect(src).toContain("detail.finding.excluded");
-    expect(src).toContain('l.role === "EXCLUDED"');
+    // Excluded rows are no longer derived on this page — the audit reads
+    // them from the canonical component results instead. Still persisted
+    // links, never text.
+    expect(src).not.toContain("detail.finding.excluded");
+    const model = readFileSync("src/client/audit-model.ts", "utf-8");
+    expect(model).toContain("c.excludedEvidence");
     // The source classes behind a row come from persisted evidence links.
     expect(src).toContain("sourceClassesByComponent");
     expect(src).toContain('if (link.role === "EXCLUDED") continue');

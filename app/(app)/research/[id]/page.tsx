@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 
 import { api, type ResearchJobDetail } from "@/src/client/api";
@@ -8,7 +9,6 @@ import { useApp } from "@/src/client/app-context";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
 import { DeveloperDetails } from "@/src/client/components/developer-details";
 import { type EvidenceRole } from "@/src/client/components/evidence-document-card";
-import { EvidenceSection } from "@/src/client/components/evidence-section";
 import { ResearchProgress } from "@/src/client/components/research-progress";
 import { ResultLadder } from "@/src/client/components/result-ladder";
 import { OutcomeBadge } from "@/src/client/components/verdict-badge";
@@ -59,8 +59,6 @@ export default function ResearchDetailPage() {
   const { refresh } = useApp();
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [evidenceOpen, setEvidenceOpen] = useState(false);
-  const evidenceRef = useRef<HTMLElement | null>(null);
 
   // Re-read the whole detail. Used when the job reaches a terminal state,
   // because the Proof only exists once the job has finished.
@@ -194,40 +192,16 @@ export default function ResearchDetailPage() {
     data: toItem(e),
     role: "CONTRADICTING" as const,
   }));
-  const excluded = detail.finding.excluded.map((e) => ({
-    data: { ...toItem(e), exclusionReason: e.exclusionReason },
-    role: "EXCLUDED" as const,
-  }));
   const admitted = [...used, ...supporting, ...contradicting];
 
-  // OTHER MATERIAL THIS RESEARCH READ — deliberately a SEPARATE list.
-  //
-  // The finding above stays claim-scoped: evidence belonging to a component
-  // the claim does not rest on must never appear beneath it. But a research
-  // that read sources and bound none of them to its claim should not look
-  // like a research that read nothing, so the rest is listed separately,
-  // plainly labelled and never attributed to the result.
-  //
-  // Each row's role comes from its PERSISTED component links, in a fixed
-  // precedence, never from the text: a row any component excluded is shown
-  // as excluded even if another component merely read it.
-  const shownIds = new Set([...admitted, ...excluded].map((e) => e.data.id));
-  const other = detail.evidence
-    .filter((e) => !shownIds.has(e.id))
-    .map((e) => {
-      const excludedLink = e.links.find((l) => l.role === "EXCLUDED");
-      const role: EvidenceRole = excludedLink
-        ? "EXCLUDED"
-        : e.links.some((l) => l.role === "CONTRADICTING")
-          ? "CONTRADICTING"
-          : e.links.some((l) => l.role === "SUPPORTING")
-            ? "SUPPORTING"
-            : "READ";
-      return {
-        data: { ...toItem(e), exclusionReason: excludedLink?.exclusionReason ?? null },
-        role,
-      };
-    });
+  // OTHER MATERIAL THIS RESEARCH READ is no longer listed on the result.
+  // It was never part of the answer, and the audit now accounts for it
+  // properly — as a register of what was checked and not used, with the
+  // reason each was refused.
+  // The job-wide "read but not shown here" grouping went with this
+  // page's old audit block. The audit now derives that same set itself,
+  // from the same canonical rows, and presents it as a ledger with
+  // reasons rather than a fourth document list.
 
   // ONE ACQUIRED DOCUMENT, ONE CARD — per role, so an excluded document can
   // never be folded together with an admitted one.
@@ -237,11 +211,10 @@ export default function ResearchDetailPage() {
     role: role as EvidenceRole,
     groups: byRole(admitted, role),
   }));
-  const excludedDocs = groupEvidenceByDocument(excluded.map((e) => e.data));
-  const otherDocs = (["READ", "SUPPORTING", "CONTRADICTING", "EXCLUDED"] as const).map((role) => ({
-    role: role as EvidenceRole,
-    groups: byRole(other, role),
-  }));
+  // The excluded and merely-read groupings that used to feed this page's
+  // own audit block are gone with it. That accounting now lives in the
+  // audit's Source Register, where "checked but not used" is a ledger with
+  // reasons rather than a second document list under the result.
 
   // WHICH KINDS OF SOURCE ACTUALLY BACK EACH ROW.
   //
@@ -282,6 +255,7 @@ export default function ResearchDetailPage() {
   // the acquisition rows this job actually owns, so the card can offer the
   // snapshot action only where opening it would show something.
   const snapshotIds = new Set(detail.snapshotEvidenceIds);
+
   for (const e of detail.evidence) {
     for (const link of e.links) {
       if (link.role === "EXCLUDED") continue;
@@ -305,7 +279,7 @@ export default function ResearchDetailPage() {
   // work actually done, never higher. Under-claiming is the safe direction:
   // this is a footnote about effort, not a measure of authority, and source
   // COUNT is never evidence of anything.
-  const readDocs = groupEvidenceByDocument(detail.evidence.map((e) => toItem(e))).length;
+
   const usedDocs = admittedDocs.reduce((n, d) => n + d.groups.length, 0);
 
   const ladder = deriveResultLadder(components, sourceClassesByComponent);
@@ -534,42 +508,32 @@ export default function ResearchDetailPage() {
         // marker so this entry point matches the chevrons used everywhere
         // else in the product instead of looking like a leftover form
         // control.
-        <details className="group panel px-5 py-4" data-testid="progress-slot-finished">
-          <summary className="flex cursor-pointer select-none list-none items-center gap-2.5 text-[0.8rem] text-[var(--atlas-text-dim)] [&::-webkit-details-marker]:hidden">
-            <ChevronIcon className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
+        // THE AUDIT IS A DIFFERENT SURFACE, ON ITS OWN SCREEN.
+        //
+        // This used to re-render the SAME ResultLadder the reader had just
+        // finished, with a document list under it — which gave a
+        // professional nothing they did not already have. It is now a
+        // link to a dedicated audit view that projects the same canonical
+        // truth differently: coverage, evidence relationships, source
+        // accounting including what was NOT used, conflicts, limitations
+        // and a technical trace.
+        //
+        // NOTHING IS PREPARED BY RENDERING THIS PAGE. No audit request of
+        // any kind is made here; following the link is the explicit
+        // request, and the server generates at most one projection per job.
+        <div className="flex flex-col gap-4" data-testid="progress-slot-finished">
+          <Link
+            href={`/research/${jobId}/audit`}
+            className="panel flex w-full items-center gap-2.5 px-5 py-4 text-[0.8rem] text-[var(--atlas-text-dim)] transition-colors hover:text-[var(--atlas-text)]/85"
+            data-testid="audit-entry"
+          >
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+              <path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
             Full research audit
-          </summary>
-          <div className="mt-4 flex flex-col gap-4">
-            {questionRows.length > 0 && (
-              <div data-testid="audit-full-ladder">
-                <ResultLadder
-                  components={components}
-                  jobId={jobId}
-                  sourceClassesByComponent={sourceClassesByComponent}
-                  evidenceByComponent={evidenceByComponent}
-                  supportingSummariesByComponent={supportingSummariesByComponent}
-                />
-              </div>
-            )}
-            {/* THE COMPLETE SOURCE INVENTORY LIVES HERE, AND ONLY HERE.
-                Used, refused and merely-read, with every exclusion reason
-                intact. On the normal result a source appears only under
-                the finding it supports; this is where an expert checks
-                what was read and not used, which is the part a chat
-                answer structurally cannot show. */}
-            <EvidenceSection
-              ref={evidenceRef}
-              admittedDocs={admittedDocs}
-              excludedDocs={excludedDocs}
-              otherDocs={otherDocs}
-              readCount={readDocs}
-              usedCount={usedDocs}
-              open={evidenceOpen}
-              onToggle={() => setEvidenceOpen((v) => !v)}
-            />
-            <ResearchProgress job={job} />
-          </div>
-        </details>
+          </Link>
+          <ResearchProgress job={job} />
+        </div>
       )}
 
       {/* ---- engine internals, behind an explicit opt-in ------------- */}
@@ -589,19 +553,6 @@ function ClockIcon() {
   );
 }
 
-function ChevronIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className={className}>
-      <path
-        d="m6 3 5 5-5 5"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
 
 function edgeColor(tone: string): string {
   switch (tone) {

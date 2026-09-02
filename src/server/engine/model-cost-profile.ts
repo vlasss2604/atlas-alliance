@@ -63,7 +63,7 @@ export interface ModelCostProfile {
 // profile here like any other role, so its ceiling is approved in the same
 // version-controlled place and its actual cost is computed by the same
 // arithmetic. Exempt from the budget is not exempt from the books.
-export type ModelRole = "QUERY_PROPOSER" | "EVIDENCE_EXTRACTOR" | "PROJECTION";
+export type ModelRole = "QUERY_PROPOSER" | "EVIDENCE_EXTRACTOR" | "PROJECTION" | "AUDIT";
 
 export class ModelCostProfileMissingError extends Error {
   constructor(
@@ -119,6 +119,22 @@ const PRODUCTION_MODEL_COST_PROFILES: Record<string, ModelCostProfile> = {
     outputPriceMicroUsdPerToken: 5,
     maxInputTokens: 4_000,
     maxOutputTokens: 512,
+    priceVersion: "anthropic-2026-08",
+  },
+  // AUDIT is the FOURTH role, and like PROJECTION it runs only after
+  // research — it can never widen, extend or influence a research job.
+  // Its input is larger than PROJECTION's because it also lists the run's
+  // sources by class, but it is still identifiers, statuses and counts:
+  // no document, no fragment, no full url, no provider response. 8k in /
+  // 1k out bounds one call at 8_000×1 + 1_024×5 = 13_120 micro-USD —
+  // about 1.3 US cents, and it is charged at most ONCE per job, only if a
+  // human actually opens the audit.
+  [catalogueKey("AUDIT", "claude-haiku-4-5")]: {
+    modelId: "claude-haiku-4-5",
+    inputPriceMicroUsdPerToken: 1,
+    outputPriceMicroUsdPerToken: 5,
+    maxInputTokens: 8_000,
+    maxOutputTokens: 1_024,
     priceVersion: "anthropic-2026-08",
   },
 };

@@ -563,14 +563,23 @@ describe("projection — the question shapes the default screen", () => {
   });
 
   it("TEST 20c: the full audit still carries every component", () => {
+    // The audit used to re-render this page's ResultLadder without the
+    // projection, so that every canonical component appeared somewhere.
+    // It is now a separate surface, and completeness is guaranteed there
+    // instead — by code rather than by a second copy of the result.
     const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");
-    expect(page).toContain("Full research audit");
-    expect(page).toContain('data-testid="audit-full-ladder"');
-    // The audit ladder is passed the components WITHOUT questionFindings,
-    // so it renders the Pattern's own complete grouping.
-    const audit = page.slice(page.indexOf('data-testid="audit-full-ladder"'));
-    expect(audit.slice(0, 400)).toContain("<ResultLadder");
-    expect(audit.slice(0, 400)).not.toContain("questionFindings");
+    // The entry lives on the page; the label itself now lives in the
+    // audit component that the entry opens.
+    expect(page).toContain('data-testid="audit-entry"');
+    expect(page).toContain("/audit`}");
+    expect(page).not.toContain('data-testid="audit-full-ladder"');
+    // One ladder on this page: the question-driven one.
+    expect(page.split("<ResultLadder").length - 1).toBe(1);
+    // The audit's coverage section iterates every canonical component,
+    // under its own label, with no projection able to drop one.
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(audit).toContain("content.scope");
+    expect(audit).toContain("scope.map");
   });
 
   it("TEST 20d: the stated boundary prefers a hard stop over a partial one", () => {

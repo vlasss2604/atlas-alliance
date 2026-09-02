@@ -200,20 +200,21 @@ describe("UI — answer first", () => {
     const answerAt = src.indexOf('data-testid="answer-panel"');
     const ladderAt = src.indexOf("<ResultLadder");
     const auditAt = src.indexOf('data-testid="progress-slot-finished"');
-    const evidenceAt = src.indexOf("<EvidenceSection");
     const devAt = src.indexOf("<DeveloperDetails");
-    for (const at of [answerAt, ladderAt, auditAt, evidenceAt, devAt]) {
+    for (const at of [answerAt, ladderAt, auditAt, devAt]) {
       expect(at).toBeGreaterThan(-1);
     }
     // Answer → the findings → the full audit → engine internals.
     expect(answerAt).toBeLessThan(ladderAt);
     expect(ladderAt).toBeLessThan(auditAt);
     expect(auditAt).toBeLessThan(devAt);
-    // The document inventory is INSIDE the audit now, not a section of the
-    // normal result: proof reaches a reader through the finding it proves,
-    // so a general source list has no place above this point.
-    expect(evidenceAt).toBeGreaterThan(auditAt);
-    expect(evidenceAt).toBeLessThan(devAt);
+    // The document inventory has left this page entirely. It used to sit
+    // inside the result's own audit block; the audit is now a separate
+    // surface that accounts for sources as a register, so no general
+    // source list belongs on the result at any depth.
+    expect(src).not.toContain("<EvidenceSection");
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(audit).toContain("audit-source-register");
   });
 
   it("TEST 3b: the answer is plain language, and never claims more than the evidence", () => {
@@ -368,8 +369,14 @@ describe("UI — live research state", () => {
     expect(liveAt).toBeLessThan(answerAt);
     // Once finished it is history: below the evidence, and collapsed.
     expect(finishedAt).toBeGreaterThan(evidenceAt);
-    const finishedBlock = src.slice(finishedAt - 200, finishedAt + 200);
-    expect(finishedBlock).toContain("<details");
+    // Once finished it is history. The slot is no longer a <details> of
+    // its own because it now holds the audit ENTRY — a control that
+    // prepares a separate surface on demand — with the progress log
+    // beneath it. What matters is unchanged: nothing here is expanded,
+    // and the audit costs nothing until it is asked for.
+    const finishedBlock = src.slice(finishedAt, finishedAt + 900);
+    expect(finishedBlock).toContain('data-testid="audit-entry"');
+    expect(finishedBlock).toContain("<ResearchProgress");
     expect(finishedBlock).not.toMatch(/<details[^>]*\sopen/);
 
     // A terminal job renders no active stage at all.
@@ -642,14 +649,21 @@ describe("UI — evidence is grouped by document", () => {
     expect(html).not.toContain(">Supporting<");
 
     // And the evidence section renders them under their own heading, never
-    // merged into the supporting grid. That section now lives at Level 3,
-    // closed by default, so the heading is asserted where it is written.
-    const src = readFileSync("src/client/components/evidence-section.tsx", "utf-8");
-    expect(src).toContain('data-testid="excluded-evidence"');
-    expect(src).toContain("Sources ATLAS checked but did not use");
-    expect(readFileSync(RESULT_PAGE, "utf-8")).toContain(
-      'e.links.find((l) => l.role === "EXCLUDED")',
-    );
+    // merged into the supporting grid. That accounting has MOVED: it is
+    // now the audit's Source Register, where "checked but not used" is a
+    // ledger carrying the engine's own exclusion reason rather than a
+    // second document list under the result. The invariant is the same
+    // and the separation is stronger — excluded material is on a
+    // different surface entirely.
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(audit).toContain("Checked but not used");
+    expect(audit).toContain('data-testid="audit-sources-not-used"');
+    expect(audit).toContain('data-testid="audit-not-used-reason"');
+    // And the exclusion role is still derived from PERSISTED links, in the
+    // audit model rather than on the page.
+    const model = readFileSync("src/client/audit-model.ts", "utf-8");
+    expect(model).toContain("c.excludedEvidence");
+    expect(model).toContain('"EXCLUDED", x.reason');
   });
 });
 

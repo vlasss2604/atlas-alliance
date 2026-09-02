@@ -436,3 +436,13 @@ export const traceBudgetAxis = pgEnum("trace_budget_axis", [
   "sourceOpens",
   "modelCostMicro",
 ]);
+
+// FULL RESEARCH AUDIT PROJECTION — the same three terminal states the
+// question projection uses, for the same reason: a failure must occupy the
+// (job, version) slot exactly as a success does, so opening the audit again
+// reads a persisted failure instead of burning another model call.
+export const auditProjectionStatus = pgEnum("audit_projection_status", [
+  "VALID",
+  "FAILED_VALIDATION",
+  "FAILED_MODEL",
+]);

@@ -424,6 +424,16 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
     const journal = JSON.parse(
       readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8"),
     ) as { entries: { tag: string }[] };
-    expect(journal.entries[journal.entries.length - 1].tag).toBe("0040_question_projection");
+    // A presentation round may ADD its own derived table; it may never
+    // alter an engine-owned one. So this guard is no longer "0040 is
+    // still newest" — the Full Research Audit legitimately added 0041 —
+    // but the invariant it protected, which is stronger and durable: no
+    // migration touches a canonical research table.
+    const newest = journal.entries[journal.entries.length - 1];
+    const sql = readFileSync(`src/server/db/migrations/${newest.tag}.sql`, "utf-8");
+    expect(sql).not.toMatch(
+      /ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/,
+    );
+    expect(sql).not.toMatch(/DROP (TABLE|COLUMN)/i);
   });
 });

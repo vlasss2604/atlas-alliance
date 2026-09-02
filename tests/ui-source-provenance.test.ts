@@ -266,7 +266,17 @@ describe("presentation only", () => {
     const journal = JSON.parse(
       readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8"),
     ) as { entries: { tag: string }[] };
-    expect(journal.entries[journal.entries.length - 1].tag).toBe("0040_question_projection");
+    // A presentation round may ADD its own derived table; it may never
+    // alter an engine-owned one. So this is no longer "0040 is still
+    // newest" — the Full Research Audit legitimately added 0041 — but the
+    // invariant it protected, which is stronger: no migration touches a
+    // canonical research table.
+    const newest = journal.entries[journal.entries.length - 1];
+    const sql = readFileSync(`src/server/db/migrations/${newest.tag}.sql`, "utf-8");
+    expect(sql).not.toMatch(
+      /ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/,
+    );
+    expect(sql).not.toMatch(/DROP (TABLE|COLUMN)/i);
     // The projection added one already-persisted column to a read. It did
     // not touch admission, authority or the evidence link.
     const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");

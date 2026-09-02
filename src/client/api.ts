@@ -268,6 +268,24 @@ export interface SourceSnapshotView {
   fullLength: number;
 }
 
+// THE AUDIT PROJECTION, AND NOTE WHAT IS ABSENT.
+//
+// An order, short human labels for canonical component references, and two
+// or three sentences of connective copy. NO status, NO count, NO evidence
+// id, NO reason code — every fact the audit shows is assembled from the
+// canonical rows in the detail payload, so this artifact cannot contradict
+// research and a FAILED one costs the audit its arrangement, not its
+// substance.
+export interface AuditProjectionView {
+  status: "VALID" | "FAILED_VALIDATION" | "FAILED_MODEL";
+  content: {
+    summary: string;
+    sectionOrder: string[];
+    scopeLabels: { patternStep: number; component: string; label: string }[];
+  };
+  createdAt: string;
+}
+
 export interface ResearchJobDetail {
   job: {
     id: string;
@@ -411,6 +429,23 @@ export const api = {
     requestChecked<{ snapshot: SourceSnapshotView }>(
       `/api/research-jobs/${jobId}/snapshots/${evidenceId}`,
       { method: "GET" },
+    ),
+  // FULL RESEARCH AUDIT — read, and prepare.
+  //
+  // `getAudit` never generates: opening a Result costs nothing because the
+  // Result only ever reads. `prepareAudit` is reachable only from an
+  // explicit click, generates at most once per job, and persists its
+  // outcome — including failure, so a failed audit is never retried on a
+  // later page load.
+  getAudit: (id: string) =>
+    requestChecked<{ audit: AuditProjectionView | null }>(
+      `/api/research-jobs/${id}/audit`,
+      { method: "GET" },
+    ),
+  prepareAudit: (id: string) =>
+    requestChecked<{ audit: AuditProjectionView | null }>(
+      `/api/research-jobs/${id}/audit`,
+      { method: "POST" },
     ),
   markRead: (id: string) =>
     request<{ read: true }>(`/api/research-jobs/${id}/read`, {

@@ -9,7 +9,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-import { questionProjectionStatus } from "./enums";
+import { auditProjectionStatus, questionProjectionStatus } from "./enums";
 import { researchJobs } from "./research";
 
 // QUESTION-DRIVEN PROOF PROJECTION — a DERIVED PRESENTATION ARTIFACT.
@@ -82,5 +82,62 @@ export const researchQuestionProjections = pgTable(
       t.projectionVersion,
     ),
     index("ix_research_question_projections_job").on(t.researchJobId),
+  ],
+);
+
+// FULL RESEARCH AUDIT PROJECTION — a second DERIVED PRESENTATION artifact,
+// and deliberately its own table rather than a status on the one above.
+//
+// The two projections answer different questions and have different
+// lifecycles. A question projection is generated once, after research,
+// for every Proof. An audit is generated only if a human ever asks for
+// one — most Proofs will never have a row here at all — so folding it into
+// the question projection's row would mean either generating an audit
+// nobody asked for or leaving a half-populated row behind.
+//
+// The canon rule is unchanged and is what matters most: this is NOT
+// allowed inside `proofs`, `research_claim_support`,
+// `research_component_results` or any other engine-owned artifact. Those
+// carry a replay contract — delete the rows, re-run from the same inputs,
+// reproduce the same result — and anything involving a model call cannot
+// honour it.
+//
+// WHAT `content` MAY CONTAIN: an ORDER, short human LABELS for canonical
+// component references, and two or three sentences of connective copy.
+// No status, no count, no evidence id, no reason code — the audit's every
+// fact is assembled at render time from canonical rows, so a stale or
+// failed projection costs the audit its arrangement and none of its
+// substance.
+export const researchAuditProjections = pgTable(
+  "research_audit_projections",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    researchJobId: uuid("research_job_id")
+      .notNull()
+      .references(() => researchJobs.id, { onDelete: "cascade" }),
+    // Bumped by a human when the audit contract changes — the only thing
+    // that authorises a fresh model call for a job that already has one.
+    auditVersion: integer("audit_version").notNull(),
+    status: auditProjectionStatus("status").notNull(),
+    content: jsonb("content").notNull().default(sql`'{}'::jsonb`),
+    // Model id, real token usage and the cost computed from the approved
+    // catalogue, plus a closed failure code. AUDIT ONLY — never read back
+    // as research input, never carrying provider text.
+    modelMeta: jsonb("model_meta"),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    // ONE ROW PER (job, audit version). A terminal failure occupies the
+    // slot exactly as a success does, so re-opening a failed audit reads
+    // the failure rather than retrying the model.
+    uniqueIndex("uq_research_audit_projections_job_version").on(
+      t.researchJobId,
+      t.auditVersion,
+    ),
+    index("ix_research_audit_projections_job").on(t.researchJobId),
   ],
 );
