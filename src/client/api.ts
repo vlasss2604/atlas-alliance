@@ -169,6 +169,7 @@ export interface ResearchEvidenceView {
   dataAsOf: string | null;
   publishedAt: string | null;
   retrievedUrl: string;
+  fetchedAt: string;
   sourceTitle: string | null;
   sourcePublisher: string | null;
   sourceType: string;
@@ -217,6 +218,7 @@ export interface ProofCitationView {
   entityBinding: string | null;
   publishedAt: string | null;
   retrievedUrl: string;
+  fetchedAt: string;
   source: { title: string | null; publisher: string | null; sourceType: string };
 }
 

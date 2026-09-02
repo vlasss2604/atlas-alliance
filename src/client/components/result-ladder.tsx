@@ -5,9 +5,10 @@ import { useState } from "react";
 import {
   deriveQuestionFindings,
   deriveResultLadder,
-  documentName,
   findingExplanation,
   findingMicroAnswer,
+  retrievedOn,
+  retrievedResource,
   sourceClassCaveat,
   sourceClassLabel,
   type EvidenceItemLike,
@@ -372,24 +373,41 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
   // is what the extractor recorded about THIS passage. The specific one
   // wins where it exists.
   const limit = item.doesNotProve ?? caveat?.cannot ?? null;
+  const domain = domainOf(item.retrievedUrl);
+  // A real page title when one was captured; otherwise the publisher, which
+  // is the strongest identity that actually exists. Never the filename.
+  const title = item.sourceTitle?.trim() || domain;
+  const resource = retrievedResource(item.retrievedUrl);
+  const retrievedDate = retrievedOn(item.fetchedAt);
 
   return (
     <div
       className="rounded-xl border border-[var(--hairline)] bg-[rgba(255,255,255,0.022)] p-3.5"
       data-testid={`finding-evidence-${item.id}`}
     >
-      {/* PROVENANCE FIRST — WHO SAID IT, AND WHAT KIND OF THING THEY ARE.
-          A card that opened straight into a quotation looked like text
-          this product had written about itself. Name, publisher and class
-          are what let a reader answer "how do I know you did not write
-          this?" before reading a word of the passage. */}
+      {/* PROVENANCE FIRST — WHO PUBLISHED IT, AND WHAT KIND OF THING IT IS.
+          A card that opened straight into a quotation looked like text this
+          product had written about itself. Publisher and class are what let
+          a reader answer "how do I know you did not write this?" before
+          reading a word of the passage.
+
+          THE HEADLINE IS THE PUBLISHER, NOT THE FILENAME. `ray-buybacks.md`
+          told a reader nothing except that they were looking at a file, and
+          `sources.title` is null on every row this engine has produced so
+          far — so the strongest identity actually available is the domain
+          that served it. When a real title does exist it takes the line and
+          the domain drops beside the class. Nothing is invented in either
+          case: no page title is guessed, and no prettier url is derived. */}
       <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
         Source
       </p>
-      <p className="mt-1 truncate text-[0.85rem] font-medium text-[var(--atlas-text)]">
-        {item.sourceTitle ?? documentName(item.retrievedUrl, null)}
+      <p
+        className="mt-1 truncate text-[0.85rem] font-medium text-[var(--atlas-text)]"
+        data-testid="source-identity"
+      >
+        {title}
       </p>
-      <p className="mt-1 flex flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--atlas-text-dim)]">
+      <p className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[0.72rem] text-[var(--atlas-text-dim)]">
         <span
           className="rounded-md border px-1.5 py-0.5 font-medium uppercase tracking-wider"
           style={sourceClassChipStyle(item.sourceClass)}
@@ -397,8 +415,29 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
         >
           {sourceClassLabel(item.sourceClass)}
         </span>
-        <span className="truncate">{domainOf(item.retrievedUrl)}</span>
+        {title !== domain && <span className="truncate">{domain}</span>}
       </p>
+
+      {/* WHAT WAS ACTUALLY READ, AND WHEN — quietly, below the identity.
+          The engine often fetches the machine-readable form of a page
+          because it parses cleanly. That is a good research decision and a
+          baffling thing to meet unexplained, so the card says plainly that
+          this is a machine-readable document rather than leaving a reader
+          to wonder why "Open source" led to raw markdown.
+
+          The retrieval date is a real persisted fact (`evidence.fetched_at`)
+          and one of the few things a fabricated card could not carry. */}
+      {(resource.filename || retrievedDate) && (
+        <p
+          className="mt-1.5 text-[0.7rem] text-[var(--atlas-text-dim)]"
+          data-testid="retrieved-resource"
+        >
+          {resource.machineReadable && "Machine-readable document"}
+          {resource.machineReadable && resource.filename && " · "}
+          {resource.filename}
+          {retrievedDate && ` · retrieved ${retrievedDate}`}
+        </p>
+      )}
 
       {/* AN EXCERPT, CALLED AN EXCERPT. This is the passage the extractor
           took, not the document — saying "source excerpt" is the honest
@@ -438,13 +477,21 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
         </>
       )}
 
+      {/* THE DESTINATION IS THE RESOURCE THAT WAS ACTUALLY READ.
+          There is no second, human-facing url in the data: `sources.url`
+          equals `evidence.retrieved_url` on every row. Sending a reader to
+          a guessed address — the same path minus `.md` — would be a
+          fabricated provenance claim dressed as a convenience, so the link
+          goes exactly where the excerpt came from and the line above says
+          what kind of document that is. */}
       <a
         href={item.retrievedUrl}
         target="_blank"
         rel="noopener noreferrer"
         className="mt-3 inline-flex items-center gap-1.5 text-[0.75rem] font-medium text-[var(--atlas-cyan)] hover:underline"
+        data-testid="open-source"
       >
-        Open original
+        Open source
         <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
           <path
             d="M4 2h6v6M10 2 3 9"

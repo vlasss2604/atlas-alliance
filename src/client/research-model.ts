@@ -664,7 +664,55 @@ export interface EvidenceItemLike {
   officiality: string | null;
   retrievedUrl: string;
   sourceTitle: string | null;
+  // When this exact resource was fetched. Persisted on every Evidence row
+  // (`evidence.fetched_at`, NOT NULL) and now projected, because "read on
+  // 1 Sep 2026" is a verifiable fact about the retrieval and one of the
+  // few things that distinguishes a real source record from text a
+  // product wrote about itself.
+  fetchedAt?: string | null;
   exclusionReason?: string | null;
+}
+
+// WHAT WAS ACTUALLY FETCHED, DESCRIBED HONESTLY.
+//
+// A reader who opens a source and meets raw markdown reasonably asks what
+// they are looking at. The engine often retrieves the machine-readable
+// form of a page because it is cleaner and more reliable to parse — that
+// is a good research decision and a confusing thing to show without
+// explanation.
+//
+// This does NOT invent a prettier destination. It reads one fact about
+// the url that was really requested — its file extension — and lets the
+// card say so. Guessing that `x.md` has a human twin at `x` would be
+// exactly the brittle derivation that turns a provenance claim into a
+// fabrication, so it is not attempted anywhere.
+const MACHINE_READABLE_EXTENSIONS = /\.(md|markdown|json|txt|xml|csv|ya?ml)$/i;
+
+export interface RetrievedResource {
+  filename: string | null;
+  machineReadable: boolean;
+}
+
+export function retrievedResource(url: string): RetrievedResource {
+  try {
+    const parsed = new URL(url);
+    const last = parsed.pathname.split("/").filter(Boolean).pop() ?? null;
+    return {
+      filename: last,
+      machineReadable: last !== null && MACHINE_READABLE_EXTENSIONS.test(last),
+    };
+  } catch {
+    return { filename: null, machineReadable: false };
+  }
+}
+
+// A retrieval date, not a timestamp. The hour a fetch happened is audit
+// detail; the day is what makes "this was read, and recently" legible.
+export function retrievedOn(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return null;
+  return at.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export interface DocumentGroup<T extends EvidenceItemLike> {

@@ -185,6 +185,7 @@ export async function GET(
         dataAsOf: evidence.dataAsOf,
         publishedAt: evidence.publishedAt,
         retrievedUrl: evidence.retrievedUrl,
+        fetchedAt: evidence.fetchedAt,
         sourceTitle: sources.title,
         sourcePublisher: sources.publisher,
         sourceType: sources.sourceType,

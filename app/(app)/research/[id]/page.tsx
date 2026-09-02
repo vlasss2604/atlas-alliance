@@ -181,6 +181,7 @@ export default function ResearchDetailPage() {
         sourceClass: c.sourceClass,
         officiality: c.officiality,
         retrievedUrl: c.retrievedUrl,
+        fetchedAt: c.fetchedAt,
         sourceTitle: c.source.title,
       },
       role: "USED",
@@ -621,6 +622,7 @@ function toItem(e: {
   sourceClass: string | null;
   officiality: string | null;
   retrievedUrl: string;
+  fetchedAt: string;
   sourceTitle: string | null;
 }): EvidenceItemLike {
   return {
@@ -632,6 +634,7 @@ function toItem(e: {
     sourceClass: e.sourceClass,
     officiality: e.officiality,
     retrievedUrl: e.retrievedUrl,
+    fetchedAt: e.fetchedAt,
     sourceTitle: e.sourceTitle,
   };
 }

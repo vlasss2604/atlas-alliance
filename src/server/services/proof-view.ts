@@ -66,6 +66,7 @@ export interface ProofCitationView {
   entityBinding: string | null;
   publishedAt: string | null;
   retrievedUrl: string;
+  fetchedAt: string;
   source: {
     title: string | null;
     publisher: string | null;
@@ -171,6 +172,7 @@ export async function loadProofForJob(
       entityBinding: evidence.entityBinding,
       publishedAt: evidence.publishedAt,
       retrievedUrl: evidence.retrievedUrl,
+      fetchedAt: evidence.fetchedAt,
       sourceTitle: sources.title,
       sourcePublisher: sources.publisher,
       sourceType: sources.sourceType,
@@ -205,6 +207,7 @@ export async function loadProofForJob(
       entityBinding: c.entityBinding,
       publishedAt: iso(c.publishedAt),
       retrievedUrl: c.retrievedUrl,
+      fetchedAt: c.fetchedAt.toISOString(),
       source: {
         title: c.sourceTitle,
         publisher: c.sourcePublisher,

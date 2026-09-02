@@ -171,7 +171,7 @@ describe("a source card proves it is a source", () => {
     expect(card).toContain("domainOf(item.retrievedUrl)"); // where it lives
     expect(card).toContain("{item.fragment}");             // what it said
     expect(card).toContain("caveat.can");                  // why it matters
-    expect(card).toContain("Open original");               // where to verify
+    expect(card).toContain("Open source");                 // where to verify
     expect(card).toContain("item.retrievedUrl");
     expect(card).toContain('target="_blank"');
   });
