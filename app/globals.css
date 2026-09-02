@@ -565,20 +565,29 @@ body {
   padding-left: 0.5rem;
   padding-right: 0.5rem;
   border-bottom: 1px solid var(--hairline);
+  border-left: 2px solid transparent;
   border-radius: 0.75rem;
-  transition: background 140ms ease;
+  transition:
+    background 140ms ease,
+    border-left-color 140ms ease;
 }
 .ladder-item:last-child {
   border-bottom: none;
 }
 .ladder-item:hover {
-  background: rgba(255, 255, 255, 0.02);
+  background: rgba(255, 255, 255, 0.025);
 }
 /* The open row is the one the reader is working on, so it holds a
-   visible seat while it is open rather than merely pushing content. */
+   visible seat while it is open rather than merely pushing content.
+   The left accent — the row's own state colour, passed in as
+   --row-accent — is what makes the explanation and proof beneath it
+   read as belonging to THIS finding: header and expansion share one
+   coloured spine instead of the expansion looking like a separate
+   block that happened to land under it. */
 .ladder-item-open {
-  background: rgba(255, 255, 255, 0.035);
+  background: rgba(255, 255, 255, 0.045);
   border-bottom-color: transparent;
+  border-left-color: var(--row-accent, var(--hairline-strong));
 }
 
 /* ---------------------------------------------------------------- *

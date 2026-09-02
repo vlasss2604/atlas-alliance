@@ -183,6 +183,13 @@ function LadderRow({
   return (
     <div
       className={`ladder-item ${open ? "ladder-item-open" : ""}`}
+      // The row's own tone colour, read by .ladder-item-open's left
+      // accent — the same colour the status text and icon already use,
+      // so the accent is a restatement of an existing signal, not a new
+      // one. Present on every row, not only the open one: CSS only draws
+      // it once the row is open, so nothing renders differently while
+      // collapsed.
+      style={{ "--row-accent": stateColor(row.state).color } as React.CSSProperties}
       data-testid="ladder-row"
       data-component={row.component}
       data-state={row.state}
@@ -193,16 +200,22 @@ function LadderRow({
         type="button"
         onClick={onToggle}
         aria-expanded={open}
-        className="flex w-full items-center gap-3 py-3 text-left"
+        className="flex w-full items-center gap-3 py-3.5 text-left"
       >
         <StateIcon state={row.state} />
         <span className="min-w-0 flex-1">
           <span className="flex items-baseline gap-3">
-            <span className="min-w-0 flex-1 text-[0.92rem] text-[var(--atlas-text)]">
+            <span className="min-w-0 flex-1 text-[0.92rem] font-medium leading-snug text-[var(--atlas-text)]">
               {row.label}
             </span>
+            {/* A STATUS MARKER, not a second sentence — set apart from the
+                question above it by weight and case (the same treatment
+                every verdict badge in the product already uses), so
+                strength and substance stay visually distinct even before
+                the micro-answer line is read. The word itself is
+                untouched; only its presentation changes. */}
             <span
-              className="shrink-0 text-[0.72rem]"
+              className="shrink-0 text-[0.68rem] font-semibold uppercase tracking-[0.05em]"
               style={stateColor(row.state)}
               data-testid="ladder-state"
             >
@@ -312,10 +325,11 @@ function FindingEvidence({
         onClick={onToggle}
         aria-expanded={open}
         data-testid="toggle-finding-evidence"
-        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--hairline)] px-2.5 py-1 text-[0.75rem] text-[var(--atlas-cyan)] hover:border-[var(--hairline-strong)]"
+        className="inline-flex items-center gap-1.5 rounded-lg border border-[var(--hairline)] bg-[rgba(34,211,238,0.045)] px-2.5 py-1.5 text-[0.75rem] font-medium text-[var(--atlas-cyan)] transition-colors hover:border-[var(--hairline-strong)] hover:bg-[rgba(34,211,238,0.08)]"
       >
+        <ProofIcon />
         {open ? "Hide proof" : "Show proof"}
-        <span className="text-[var(--atlas-text-dim)]">
+        <span className="font-normal text-[var(--atlas-text-dim)]">
           · {items.length} {items.length === 1 ? "source" : "sources"}
         </span>
       </button>
@@ -340,17 +354,22 @@ function FindingEvidence({
   );
 }
 
+// Deliberately lighter than the finding it supports — a thin hairline, a
+// near-transparent fill, and (per the brief) a fragment coloured a shade
+// under full text brightness. A conclusion is read first; its proof is
+// read on request, and the card should look like the second thing, not
+// compete with the first.
 function EvidenceItem({ item }: { item: EvidenceItemLike }) {
   return (
     <div
-      className="rounded-xl border border-[var(--hairline)] bg-[rgba(255,255,255,0.02)] p-3"
+      className="rounded-xl border border-[var(--hairline)] bg-[rgba(255,255,255,0.022)] p-3.5"
       data-testid={`finding-evidence-${item.id}`}
     >
-      <div className="flex flex-wrap items-center gap-2 text-[0.72rem] text-[var(--atlas-text-dim)]">
-        <span className="rounded-md border border-[var(--hairline)] px-1.5 py-0.5 uppercase tracking-wider">
+      <div className="flex flex-wrap items-center gap-2 text-[0.7rem] text-[var(--atlas-text-dim)]">
+        <span className="rounded-md border border-[var(--hairline)] bg-[rgba(255,255,255,0.03)] px-1.5 py-0.5 font-medium uppercase tracking-wider">
           {sourceClassLabel(item.sourceClass)}
         </span>
-        <span className="truncate text-[var(--atlas-text)]">
+        <span className="truncate text-[var(--atlas-text)]/90">
           {item.sourceTitle ?? domainOf(item.retrievedUrl)}
         </span>
       </div>
@@ -358,18 +377,18 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
       {/* THE SOURCE'S OWN WORDS FIRST. The fragment is the only thing on
           this screen checked against the fetched document rather than
           generated, so it is the reason to believe any of the rest. */}
-      <blockquote className="mt-2.5 border-l-2 border-[rgba(45,212,191,0.4)] pl-3 text-[0.84rem] leading-relaxed text-[var(--atlas-text)]">
+      <blockquote className="mt-2.5 border-l-2 border-[rgba(45,212,191,0.4)] pl-3 text-[0.84rem] leading-relaxed text-[var(--atlas-text)]/92">
         {item.fragment}
       </blockquote>
 
       {item.summary && (
         <p className="mt-2.5 text-[0.8rem] leading-relaxed text-[var(--atlas-text-dim)]">
-          <span className="text-[var(--atlas-text)]">Supports:</span> {item.summary}
+          <span className="font-medium text-[var(--atlas-text)]">Supports:</span> {item.summary}
         </p>
       )}
       {item.doesNotProve && (
         <p className="mt-1.5 text-[0.8rem] leading-relaxed text-[var(--atlas-text-dim)]">
-          <span className="text-[var(--atlas-text)]">Does not establish:</span>{" "}
+          <span className="font-medium text-[var(--atlas-text)]">Does not establish:</span>{" "}
           {item.doesNotProve}
         </p>
       )}
@@ -378,7 +397,7 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
         href={item.retrievedUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="mt-2.5 inline-flex items-center gap-1.5 text-[0.75rem] text-[var(--atlas-cyan)] hover:underline"
+        className="mt-3 inline-flex items-center gap-1.5 text-[0.75rem] font-medium text-[var(--atlas-cyan)] hover:underline"
       >
         Open original
         <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
@@ -392,6 +411,24 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
         </svg>
       </a>
     </div>
+  );
+}
+
+// A small shield-check — "proof", not "document". The evidence card below
+// already has its own document identity (source-class chip); this icon
+// belongs to the CONTROL that reveals it, so it reads as "verify this"
+// rather than duplicating the document glyph used elsewhere in the audit.
+function ProofIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden className="shrink-0">
+      <path
+        d="M6 1.4 10 2.9v2.7c0 2.3-1.6 4.1-4 4.9-2.4-.8-4-2.6-4-4.9V2.9L6 1.4Z"
+        stroke="currentColor"
+        strokeWidth="1.15"
+        strokeLinejoin="round"
+      />
+      <path d="M4.3 6.1 5.5 7.3 7.8 4.8" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 

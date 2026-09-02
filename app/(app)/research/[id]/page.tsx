@@ -422,7 +422,8 @@ export default function ResearchDetailPage() {
                 {CONFIDENCE_LABELS[proof.confidence.band] ?? proof.confidence.band} confidence
               </span>
             )}
-            <span className="ml-auto text-[0.72rem] text-[var(--atlas-text-dim)]">
+            <span className="ml-auto flex items-center gap-1.5 text-[0.72rem] text-[var(--atlas-text-dim)]">
+              <ClockIcon />
               {relativeAge(job.finishedAt)}
             </span>
           </div>
@@ -447,14 +448,20 @@ export default function ResearchDetailPage() {
               and did not establish something, versus a research run that
               was blocked from checking at all. */}
           {boundary && (
+            // A quiet callout, not a divider-and-text block. A flat
+            // border-top read as one more paragraph of the answer; a soft
+            // amber wash — restrained enough that it is not the red/alarm
+            // tone this product reserves for a positive contradiction —
+            // gives the one thing most worth a reader's attention its own
+            // visual weight without dramatising it.
             <div
-              className="mt-5 border-t border-[var(--hairline)] pt-4"
+              className="mt-5 rounded-xl border border-[rgba(251,191,36,0.16)] bg-[rgba(251,191,36,0.04)] p-4"
               data-testid="answer-boundary"
             >
               <p className="eyebrow" style={{ color: "#fcd34d" }}>
                 {boundary.coverage === "BLOCKED" ? "Research limitation" : "Still unresolved"}
               </p>
-              <p className="mt-1.5 text-[0.9rem] leading-snug text-[var(--atlas-text)]">
+              <p className="mt-1.5 text-[0.9rem] font-medium leading-snug text-[var(--atlas-text)]">
                 {boundary.label}
               </p>
               <p className="mt-1.5 text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]">
@@ -508,8 +515,15 @@ export default function ResearchDetailPage() {
        * the same function, under the Pattern's own grouping.
        */}
       {finished && (
-        <details className="panel px-5 py-4" data-testid="progress-slot-finished">
-          <summary className="cursor-pointer select-none text-[0.8rem] text-[var(--atlas-text-dim)]">
+        // `group` + `group-open:` is native <details> state driving a CSS
+        // rotation — no JS state added, the disclosure itself is untouched.
+        // The custom chevron replaces the browser's default triangle
+        // marker so this entry point matches the chevrons used everywhere
+        // else in the product instead of looking like a leftover form
+        // control.
+        <details className="group panel px-5 py-4" data-testid="progress-slot-finished">
+          <summary className="flex cursor-pointer select-none list-none items-center gap-2.5 text-[0.8rem] text-[var(--atlas-text-dim)] [&::-webkit-details-marker]:hidden">
+            <ChevronIcon className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
             Full research audit
           </summary>
           <div className="mt-4 flex flex-col gap-4">
@@ -519,7 +533,7 @@ export default function ResearchDetailPage() {
                   components={components}
                   sourceClassesByComponent={sourceClassesByComponent}
                   evidenceByComponent={evidenceByComponent}
-          supportingSummariesByComponent={supportingSummariesByComponent}
+                  supportingSummariesByComponent={supportingSummariesByComponent}
                 />
               </div>
             )}
@@ -547,6 +561,31 @@ export default function ResearchDetailPage() {
       {/* ---- engine internals, behind an explicit opt-in ------------- */}
       <DeveloperDetails detail={detail} />
     </main>
+  );
+}
+
+// Same glyph recent-proof-card.tsx already uses next to a timestamp — one
+// icon for "this is an age", reused rather than re-invented here.
+function ClockIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden className="shrink-0">
+      <circle cx="6" cy="6" r="4.6" stroke="currentColor" strokeWidth="1.1" />
+      <path d="M6 3.4V6l1.8 1.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function ChevronIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className={className}>
+      <path
+        d="m6 3 5 5-5 5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 
