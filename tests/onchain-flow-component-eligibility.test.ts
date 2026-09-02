@@ -174,6 +174,7 @@ function asRow(fact: ExtractedFact): EvidenceRow {
     sourceClass: "ONCHAIN_VERIFIABLE",
     officiality: "CONFIRMED",
     entityBinding: "CONFIRMED",
+    onchainFactKind: null,
     fetchedAt: NOW,
     publishedAt: null,
     extractionUnitKey: `unit-${id}`,

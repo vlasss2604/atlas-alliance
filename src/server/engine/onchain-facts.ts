@@ -108,6 +108,63 @@ export const ONCHAIN_DOES_NOT_PROVE = {
     "Linking this burn to a buyback mechanism requires separate admitted evidence.",
 } as const;
 
+// ---- the fact KIND: closed, code-owned, model-unreachable -------------
+//
+// WHY THIS EXISTS AT ALL. Every sentence in ONCHAIN_DOES_NOT_PROVE above
+// states a real semantic boundary — a transfer is not a burn, a balance is
+// not a history, a supply level is not a supply change — and until now all
+// of them were PROSE ON A ROW that no code could read. Reconciliation
+// therefore could not tell a burn from a balance, and NET_EFFECT could be
+// established by either.
+//
+// The kind is known here, at synthesis, and was discarded one line later.
+// Persisting it is what turns those sentences into rules a machine can
+// enforce.
+//
+// IT CANNOT BE FORGED. This vocabulary is reachable only from this file's
+// own synthesis, which runs on a validated RPC artifact and bypasses the
+// model entirely. It is deliberately NOT a field on `ExtractedFact` — the
+// model's output type — so no extraction, no lexical classifier and no
+// document can ever produce one. `SynthesizedFact` below is the only
+// carrier, and `persistOnchainArtifactAndFacts` is the only writer.
+export const ONCHAIN_FACT_KINDS = [
+  "TOKEN_SUPPLY",
+  "ACCOUNT_INFO",
+  "ACCOUNT_TOKEN_RELATION",
+  "ACCOUNT_TOKEN_RELATION_FOREIGN",
+  "TOKEN_ACCOUNT_BALANCE",
+  "TOKEN_ACCOUNTS_BY_OWNER",
+  "SIGNATURES_FOR_ADDRESS",
+  "TRANSACTION_DETAIL",
+  "NATIVE_TRANSFER",
+  "TOKEN_TRANSFER",
+  "BURN",
+  "RECIPROCAL_ASSET_FLOW",
+  "DECODED_EXCHANGE",
+] as const;
+
+export type OnchainFactKind = (typeof ONCHAIN_FACT_KINDS)[number];
+
+// THE ONE KIND THAT IS A SUPPLY-REDUCING EVENT.
+//
+// A single named set rather than a check scattered across callers, because
+// the whole value of this round is that exactly one on-chain observation
+// destroys tokens and every other one does not. BURN is a GROSS reduction
+// event: it says the stated amount of the stated mint was destroyed, and
+// it says nothing about what funded it or what else happened to supply in
+// the same interval — see ONCHAIN_DOES_NOT_PROVE.BURN.
+export const GROSS_SUPPLY_REDUCTION_FACT_KINDS: readonly OnchainFactKind[] = ["BURN"];
+
+export function isGrossSupplyReductionFact(kind: string | null | undefined): boolean {
+  return kind !== null && kind !== undefined
+    ? (GROSS_SUPPLY_REDUCTION_FACT_KINDS as readonly string[]).includes(kind)
+    : false;
+}
+
+// A deterministic fact plus the kind it was synthesized as. Separate from
+// ExtractedFact so the model's shape is untouched and cannot carry a kind.
+export type SynthesizedFact = ExtractedFact & { onchainFactKind: OnchainFactKind };
+
 // A fact is only worth synthesizing when the component it is offered for
 // can actually be established by ONCHAIN_VERIFIABLE — that check belongs
 // to the Pattern and is applied by the caller, not duplicated here.
@@ -116,16 +173,23 @@ export interface SynthesisTarget {
   component: string;
 }
 
+// `kind` is REQUIRED and positioned before the prose deliberately: every
+// call site already knew which ONCHAIN_DOES_NOT_PROVE entry it was
+// quoting, so the kind was always available and merely unrecorded. Making
+// it a required parameter means a new fact cannot be added without
+// declaring what it is.
 function fact(
   target: SynthesisTarget,
+  kind: OnchainFactKind,
   statement: string,
   supportFragment: string,
   doesNotProve: string,
   opts: { mechanismState?: string | null; relationship?: ExtractedFact["relationship"] } = {},
-): ExtractedFact {
+): SynthesizedFact {
   return {
     step: target.step,
     component: target.component,
+    onchainFactKind: kind,
     statement,
     supportFragment,
     mechanismState: opts.mechanismState ?? null,
@@ -178,7 +242,7 @@ export function formatTokenAmount(amountRaw: string, decimals: number): string {
 export function synthesizeOnchainFacts(
   artifact: OnchainArtifact,
   target: SynthesisTarget,
-): ExtractedFact[] {
+): SynthesizedFact[] {
   const r = artifact.result;
   const slot = artifact.provenance.slot;
 
@@ -187,6 +251,7 @@ export function synthesizeOnchainFacts(
       return [
         fact(
           target,
+          "TOKEN_SUPPLY",
           `On-chain total supply of token ${r.mint} is ${formatTokenAmount(r.amountRaw, r.decimals)} ` +
             `(raw ${r.amountRaw}, ${r.decimals} decimals) as observed at slot ${slot}.`,
           fragmentFor(artifact, ["mint", "amountRaw", "decimals"]),
@@ -207,9 +272,10 @@ export function synthesizeOnchainFacts(
     // relationship, in either direction.
     case "ACCOUNT_INFO": {
       if (!r.exists) return []; // absence is not a fact
-      const facts: ExtractedFact[] = [
+      const facts: SynthesizedFact[] = [
         fact(
           target,
+          "ACCOUNT_INFO",
           `Account ${r.address} exists on-chain and is owned by program ${r.ownerProgram ?? "unknown"} ` +
             `as observed at slot ${slot}.`,
           fragmentFor(artifact, ["address", "exists", "ownerProgram"]),
@@ -238,6 +304,7 @@ export function synthesizeOnchainFacts(
         facts.push(
           fact(
             target,
+            isAnchorMint ? "ACCOUNT_TOKEN_RELATION" : "ACCOUNT_TOKEN_RELATION_FOREIGN",
             isAnchorMint
               ? `Account ${r.address} is an SPL token account for mint ${parsed.mint}, this project's ` +
                   `confirmed mint, held under program ${r.ownerProgram ?? "unknown"}${ownerClause}, ` +
@@ -263,6 +330,7 @@ export function synthesizeOnchainFacts(
       return [
         fact(
           target,
+          "TOKEN_ACCOUNT_BALANCE",
           `Token account ${r.account} holds ${formatTokenAmount(r.amountRaw, r.decimals)} ` +
             `(raw ${r.amountRaw}, ${r.decimals} decimals) as observed at slot ${slot}.`,
           fragmentFor(artifact, ["account", "amountRaw", "decimals"]),
@@ -280,6 +348,7 @@ export function synthesizeOnchainFacts(
       return r.accounts.map((a, index) =>
         fact(
           target,
+          "TOKEN_ACCOUNTS_BY_OWNER",
           `Address ${r.owner} owns SPL token account ${a.account} for mint ${r.mint} with balance ` +
             `${formatTokenAmount(a.amountRaw, a.decimals)} (raw ${a.amountRaw}, ${a.decimals} decimals) ` +
             `as observed at slot ${slot}.`,
@@ -298,6 +367,7 @@ export function synthesizeOnchainFacts(
       return [
         fact(
           target,
+          "SIGNATURES_FOR_ADDRESS",
           `Address ${r.address} has ${r.signatures.length} on-chain transaction(s) in the observed window, ` +
             `most recent at slot ${r.signatures[0].slot}.`,
           fragmentFor(artifact, ["address", "signatures"]),
@@ -309,7 +379,7 @@ export function synthesizeOnchainFacts(
     case "TRANSACTION_DETAIL": {
       // A failed transaction executed nothing.
       if (!r.succeeded) return [];
-      const facts: ExtractedFact[] = [];
+      const facts: SynthesizedFact[] = [];
 
       // ONE artifact, MULTIPLE facts — the provenance model exists
       // precisely so several burn instructions in one transaction share a
@@ -318,6 +388,7 @@ export function synthesizeOnchainFacts(
         facts.push(
           fact(
             target,
+            "BURN",
             `Transaction ${r.signature} (slot ${r.slot}) executed an SPL Token ${b.instructionType} instruction ` +
               `destroying ${b.decimals === null ? b.amountRaw : formatTokenAmount(b.amountRaw, b.decimals)} ` +
               `of mint ${b.mint} from token account ${b.sourceAccount}.`,
@@ -388,6 +459,7 @@ export function synthesizeOnchainFacts(
         facts.push(
           fact(
             target,
+            "NATIVE_TRANSFER",
             via === undefined
               ? `Transaction ${flow.signature} (slot ${flow.slot}) transferred ${flow.outbound.amountRaw} lamports ` +
                   `of native SOL from address ${flow.participant} to token account ${flow.outbound.to}, which the ` +
@@ -409,6 +481,7 @@ export function synthesizeOnchainFacts(
         facts.push(
           fact(
             target,
+            "TOKEN_TRANSFER",
             `Transaction ${flow.signature} (slot ${flow.slot}) transferred ` +
               `${flow.inbound.decimals === null ? flow.inbound.amountRaw : formatTokenAmount(flow.inbound.amountRaw, flow.inbound.decimals)} ` +
               `of mint ${flow.inbound.mint} from token account ${flow.inbound.from}, owned by ${flow.counterparty}, ` +
@@ -422,6 +495,7 @@ export function synthesizeOnchainFacts(
         facts.push(
           fact(
             target,
+            "RECIPROCAL_ASSET_FLOW",
             `The same successful transaction ${flow.signature} (slot ${flow.slot}) contains both movements: ` +
               `native SOL from ${flow.participant} ` +
               `${via === undefined ? "toward an account owned by" : "into an account it owns itself, from which a further transfer reached an account owned by"} ` +
@@ -460,6 +534,7 @@ export function synthesizeOnchainFacts(
         facts.push(
           fact(
             target,
+            "DECODED_EXCHANGE",
             `Transaction ${exchange.signature} (slot ${exchange.slot}) deterministically executes an asset ` +
               `exchange within outer instruction ${exchange.invocationIndex}: address ${exchange.participant} ` +
               `paid ${exchange.paid.amountRaw} raw units of mint ${exchange.paid.mint} from token account ` +

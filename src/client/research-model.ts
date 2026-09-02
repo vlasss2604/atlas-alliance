@@ -1010,6 +1010,15 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
   CONFLICTING_STATE: "The sources disagree about the current state.",
   TOKEN_STATE_UNQUALIFIED:
     "Token state is mentioned, but not precisely enough to settle the effect in question.",
+  // B1 — the two supply-qualification codes. An unrecognised code renders
+  // as nothing at all (see reasonExplanation below), so a new canonical
+  // reason without copy would be a silent gap on the Result and the audit.
+  // Both sentences describe the RECORD and never the project: neither says
+  // supply did not fall, only that this research did not establish it.
+  SUPPLY_REDUCTION_NOT_ESTABLISHED:
+    "Nothing checked here shows tokens being destroyed — a purchase, a holding or a transfer moves tokens without reducing supply.",
+  NET_SUPPLY_CHANGE_NOT_ESTABLISHED:
+    "Tokens were destroyed, but nothing checked shows the total supply is lower overall — what else was issued or unlocked over the same period was not observed.",
 };
 
 // The FIRST recognised code wins. `reasonCodes` arrives in the order S5

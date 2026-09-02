@@ -81,6 +81,19 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // applies normally.
   ALL_EVIDENCE_EXCLUDED: null,
   MISSING_EXECUTION_EVIDENCE: CONFIDENCE_BANDS.LIMITED,
+  // B1 — both are MISSING STRUCTURE, not weak authority, so both sit with
+  // the other missing-structure caps rather than with INSUFFICIENT_AUTHORITY.
+  //
+  // SUPPLY_REDUCTION_NOT_ESTABLISHED: no typed gross reduction exists at
+  // all. A buyback, a holding, a transfer or a supply reading was offered
+  // for a supply claim, and none of them is one.
+  SUPPLY_REDUCTION_NOT_ESTABLISHED: CONFIDENCE_BANDS.LIMITED,
+  // NET_SUPPLY_CHANGE_NOT_ESTABLISHED: a burn IS deterministically
+  // established, and the net question still is not — nothing observed what
+  // else happened to supply over the same interval. A Proof resting on
+  // this must never read as confident about net deflation, which is
+  // exactly what an uncapped path would allow.
+  NET_SUPPLY_CHANGE_NOT_ESTABLISHED: CONFIDENCE_BANDS.LIMITED,
   MISSING_CURRENT_STATE: CONFIDENCE_BANDS.LIMITED,
   CONFLICTING_STATE: CONFIDENCE_BANDS.LIMITED,
   // D-074. The best establishing row is CLAIMED, so the finding rests on

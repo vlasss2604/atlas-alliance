@@ -271,10 +271,20 @@ describe("presentation only", () => {
     // migration touches a canonical research table.
     const newest = journal.entries[journal.entries.length - 1];
     const sql = readFileSync(`src/server/db/migrations/${newest.tag}.sql`, "utf-8");
-    expect(sql).not.toMatch(
-      /ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/,
-    );
-    expect(sql).not.toMatch(/DROP (TABLE|COLUMN)/i);
+    // A round may ADD to a canonical table — B1 added a nullable
+    // evidence.onchain_fact_kind under owner approval — but nothing may
+    // DESTROY or REDEFINE one. That is the invariant this guard was
+    // really protecting, and it is the durable form of it: additive
+    // columns are safe by construction, retypes and drops are not.
+    expect(sql).not.toMatch(/DROP (TABLE|COLUMN|TYPE)/i);
+    expect(sql).not.toMatch(/ALTER COLUMN/i);
+    expect(sql).not.toMatch(/SET NOT NULL/i);
+    expect(sql).not.toMatch(/RENAME/i);
+    // Any ALTER TABLE on a canonical table must be an ADD COLUMN.
+    for (const stmt of sql.split("--> statement-breakpoint")) {
+      if (!/ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/.test(stmt)) continue;
+      expect(stmt).toMatch(/ADD COLUMN/i);
+    }
   });
 
   it("TEST 13: the collapsed row renders the micro-answer beside its badge", () => {

@@ -682,6 +682,14 @@ export async function persistOnchainArtifactAndFacts(input: {
         proofId: null,
         sourceId,
         onchainArtifactId: artifactId,
+        // THE ONLY WRITER OF THIS COLUMN, ANYWHERE.
+        //
+        // `fact.onchainFactKind` exists only on SynthesizedFact, which only
+        // deterministic chain synthesis produces. A model-extracted fact
+        // has no such field to offer, so no document, prompt or classifier
+        // can reach this value — the guarantee is structural, not a rule
+        // this insert is trusted to follow.
+        onchainFactKind: fact.onchainFactKind,
         patternStep: fact.step,
         component: fact.component,
         relationship: fact.relationship,

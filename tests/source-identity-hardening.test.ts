@@ -162,6 +162,7 @@ function onchainRow(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
     sourceClass: "ONCHAIN_VERIFIABLE",
     officiality: "CLAIMED",
     entityBinding: "UNVERIFIED",
+    onchainFactKind: null,
     fetchedAt: new Date(),
     publishedAt: new Date(),
     extractionUnitKey: "unit-1",

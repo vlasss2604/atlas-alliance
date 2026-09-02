@@ -201,6 +201,7 @@ function asRow(fact: ReturnType<typeof synthesizeOnchainFacts>[number]): Evidenc
     sourceClass: "ONCHAIN_VERIFIABLE",
     officiality: "CLAIMED",
     entityBinding: "CONFIRMED",
+    onchainFactKind: fact.onchainFactKind,
     fetchedAt: RETRIEVED_AT,
     publishedAt: fact.publishedAt,
     extractionUnitKey: `unit-${rowSeq}`,

@@ -418,7 +418,13 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
     // The finding's own lists come from S8's citation binding and S5's
     // claim-scoped component sets.
     expect(code).toContain("detail.finding.supporting");
-    expect(code).toContain("detail.finding.excluded");
+    // The result page no longer derives the finding's EXCLUDED list: that
+    // accounting moved to the audit's source register, where refused
+    // material is a ledger with reasons rather than a document list under
+    // the answer. The invariant this test protects is unchanged and is
+    // asserted below — the finding is built from claim-scoped sources and
+    // never from the job-wide evidence array.
+    expect(code).not.toContain("detail.finding.excluded");
     expect(code).toContain("proof?.citations");
     // `admitted` IS the finding grid. It is composed only of those sources —
     // the job-wide array is not among them.

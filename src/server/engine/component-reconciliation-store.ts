@@ -102,6 +102,7 @@ async function loadEvidenceRows(
     sourceClass: r.sourceClass,
     officiality: r.officiality,
     entityBinding: r.entityBinding,
+    onchainFactKind: r.onchainFactKind,
     fetchedAt: r.fetchedAt,
     publishedAt: r.publishedAt,
     extractionUnitKey: r.extractionUnitKey,

@@ -446,3 +446,26 @@ export const auditProjectionStatus = pgEnum("audit_projection_status", [
   "FAILED_VALIDATION",
   "FAILED_MODEL",
 ]);
+
+// B1 — the DETERMINISTIC on-chain fact kind (onchain-facts.ts). A closed,
+// code-owned vocabulary, written ONLY by deterministic chain synthesis and
+// never by a model, a lexical classifier or a document. It is a pgEnum
+// rather than free text — unlike `mechanism_state`, which is model prose
+// normalized at read time — precisely because this one is the basis of a
+// supply-semantics DECISION: a value outside the vocabulary must be
+// impossible at the database level, not merely unexpected.
+export const onchainFactKind = pgEnum("onchain_fact_kind", [
+  "TOKEN_SUPPLY",
+  "ACCOUNT_INFO",
+  "ACCOUNT_TOKEN_RELATION",
+  "ACCOUNT_TOKEN_RELATION_FOREIGN",
+  "TOKEN_ACCOUNT_BALANCE",
+  "TOKEN_ACCOUNTS_BY_OWNER",
+  "SIGNATURES_FOR_ADDRESS",
+  "TRANSACTION_DETAIL",
+  "NATIVE_TRANSFER",
+  "TOKEN_TRANSFER",
+  "BURN",
+  "RECIPROCAL_ASSET_FLOW",
+  "DECODED_EXCHANGE",
+]);

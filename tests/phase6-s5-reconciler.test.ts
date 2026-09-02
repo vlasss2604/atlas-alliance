@@ -67,6 +67,8 @@ function row(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
     // that wants to exercise D-134's own exclusion path overrides
     // entityBinding explicitly (spread below always wins).
     entityBinding: sourceClass === "ONCHAIN_VERIFIABLE" ? "CONFIRMED" : null,
+    // B1: documentary by default; a supply test overrides it explicitly.
+    onchainFactKind: null,
     fetchedAt: NOW,
     publishedAt: NOW,
     extractionUnitKey: `unit-${id}`,

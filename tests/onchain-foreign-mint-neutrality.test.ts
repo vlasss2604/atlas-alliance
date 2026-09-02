@@ -129,6 +129,7 @@ function asEvidenceRow(fact: ExtractedFact): EvidenceRow {
     // D-134: an on-chain row must also be bound to this project. The
     // artifact's anchor IS the project's confirmed identity here.
     entityBinding: "CONFIRMED",
+    onchainFactKind: null,
     fetchedAt: NOW,
     publishedAt: null,
     extractionUnitKey: `unit-${id}`,

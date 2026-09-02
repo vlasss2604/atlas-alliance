@@ -56,6 +56,11 @@ const ENGINE_REASON_CODES = [
   "STATE_NOT_FULLY_LIVE",
   "CONFLICTING_STATE",
   "TOKEN_STATE_UNQUALIFIED",
+  // B1 — NET_EFFECT supply qualification. Listed here deliberately:
+  // this guard exists so a new engine reason cannot reach a reader with
+  // no copy, and updating the list is the moment that decision is made.
+  "SUPPLY_REDUCTION_NOT_ESTABLISHED",
+  "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",
 ];
 
 describe("V2 — every persisted reason code has human copy", () => {

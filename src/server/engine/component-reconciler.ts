@@ -1,3 +1,7 @@
+import {
+  isGrossSupplyReductionFact,
+  type OnchainFactKind,
+} from "./onchain-facts";
 import type { EvidenceSourceClass } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import { normalizeMechanismState, type MechanismState } from "../domain/mechanism-state";
@@ -59,7 +63,27 @@ export type ResultReasonCode =
   | "INDIRECT_ONLY"
   | "STATE_NOT_FULLY_LIVE"
   | "CONFLICTING_STATE"
-  | "TOKEN_STATE_UNQUALIFIED";
+  | "TOKEN_STATE_UNQUALIFIED"
+  // B1 — supply qualification for NET_EFFECT. Two codes, deliberately, for
+  // two genuinely different states of the record.
+  //
+  // SUPPLY_REDUCTION_NOT_ESTABLISHED: nothing among the establishing
+  // evidence is a typed gross supply-reduction event. A documented
+  // buyback, an observed purchase, a holding balance, a transfer and a
+  // point-in-time supply level all land here — they are the four things
+  // this product must never let become "supply was reduced". CLEARABLE
+  // TODAY: one deterministic BURN clears it.
+  //
+  // NET_SUPPLY_CHANGE_NOT_ESTABLISHED: a gross reduction IS established,
+  // and net supply change across an interval is still not. A burn destroys
+  // tokens; it does not establish that total supply is lower than before,
+  // because nothing here has observed what else happened to supply in the
+  // same window. CLEARABLE BY the supply-delta capability (two observations
+  // of total supply at different slots), which is deliberately NOT in this
+  // round — so in B1 this caps NET_EFFECT at PARTIALLY_SUPPORTED, and that
+  // ceiling is the honest state of the engine rather than a defect.
+  | "SUPPLY_REDUCTION_NOT_ESTABLISHED"
+  | "NET_SUPPLY_CHANGE_NOT_ESTABLISHED";
 
 // §11.1 — the row shape S5 reads. A deliberately narrow projection of
 // `evidence` (proof.ts) — only what this file's rules actually use.
@@ -80,10 +104,32 @@ export interface EvidenceRow {
   // D-134 — Axis C, independent of sourceClass/officiality. null when the
   // axis does not apply (any class other than ONCHAIN_VERIFIABLE).
   entityBinding: "CONFIRMED" | "UNVERIFIED" | null;
+  // B1 — the DETERMINISTIC on-chain fact kind, or null for every row that
+  // is not a deterministic chain observation (documentary, data-provider,
+  // model-extracted). Null is read as absence of typed supply semantics,
+  // never as permission.
+  onchainFactKind: OnchainFactKind | null;
   fetchedAt: Date;
   publishedAt: Date | null;
   extractionUnitKey: string | null;
   contentHash: string;
+}
+
+// WHICH COMPONENT CARRIES A SUPPLY CLAIM.
+//
+// One named predicate rather than a bare string test scattered through the
+// decision, so the rule is greppable and has exactly one home. Branching on
+// a COMPONENT name is the file's established convention (EXECUTION_EVIDENCE
+// and CURRENT_STATE already select their own reason codes the same way);
+// branching on a project never is, and nothing here can.
+//
+// NET_EFFECT is the only component whose evidenceGoal asks whether supply
+// "actually changed as a result". DESTINATION describes where value lands —
+// including whether the destination retires it — but it does not claim a
+// supply outcome, so it is deliberately NOT gated here. Widening this set
+// is a Pattern-semantics decision, not an implementation liberty.
+export function requiresSupplyEffectQualification(component: string): boolean {
+  return component === "NET_EFFECT";
 }
 
 // §11.1 — Pattern/CORE data (D-095), never invented in this file.
@@ -727,6 +773,34 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     const requiredNormalized = normalizeForLexicalMatch(requirements.requiredTokenState);
     const matchesRequired = [...tokenStateMentions].some((m) => normalizeForLexicalMatch(m) === requiredNormalized);
     if (!matchesRequired) reasonCodes.push("TOKEN_STATE_UNQUALIFIED");
+  }
+
+  // §B1 — SUPPLY QUALIFICATION. Source class is not permission.
+  //
+  // Before this, NET_EFFECT reached SUPPORTED whenever an admissible class
+  // (ONCHAIN_VERIFIABLE, OFFICIAL_REPORT, DATA_PROVIDER) offered a
+  // SUPPORTS/DIRECT row — with nothing whatever checking that the row was
+  // ABOUT a supply reduction. A holding balance, a token transfer, a
+  // single supply reading or a data provider's sentence each satisfied it.
+  // That is the whole false positive: "tokens were bought" silently
+  // becoming "supply was reduced".
+  //
+  // The qualification is typed, not lexical. `onchainFactKind` is written
+  // only by deterministic chain synthesis, so this decision rests on what
+  // the chain observation IS, never on what any text says about it. A row
+  // with no kind (documentary, data-provider, model-extracted) carries no
+  // typed supply semantics and therefore cannot qualify — it may still be
+  // establishing evidence and still appear as support, it simply cannot
+  // carry this component past the gate on its own.
+  if (requiresSupplyEffectQualification(item.component)) {
+    const grossReduction = establishing.some((r) => isGrossSupplyReductionFact(r.onchainFactKind));
+    reasonCodes.push(
+      grossReduction
+        ? // A burn happened. What did NOT happen is an observation of
+          // supply before and after, so net deflation stays unestablished.
+          "NET_SUPPLY_CHANGE_NOT_ESTABLISHED"
+        : "SUPPLY_REDUCTION_NOT_ESTABLISHED",
+    );
   }
 
   const supportingRows = [...establishing].sort(compareDeterministic);

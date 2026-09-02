@@ -16,6 +16,7 @@ import { projects, topics } from "./catalog";
 import {
   evidenceDirectness,
   evidenceEntityBinding,
+  onchainFactKind,
   evidenceLocatorShape,
   evidenceOfficiality,
   evidenceRelationship,
@@ -180,6 +181,20 @@ export const evidence = pgTable(
     // completeness CHECK below, since most evidence legitimately has no
     // on-chain identity to bind against.
     entityBinding: evidenceEntityBinding("entity_binding"),
+    // B1 — WHAT KIND of deterministic on-chain observation this row is.
+    //
+    // Written ONLY by deterministic chain synthesis (onchain-facts.ts ->
+    // persistOnchainArtifactAndFacts). NULL for every documentary,
+    // data-provider and model-extracted row, which is not a gap: those
+    // rows genuinely carry no typed on-chain semantics, and reconciliation
+    // must treat their absence as absence rather than guess.
+    //
+    // This is what makes ONCHAIN_DOES_NOT_PROVE enforceable. Those
+    // sentences — a transfer is a movement never a destruction, a balance
+    // is a position never a history, a supply level is not a supply change
+    // — were prose no code could read. With the kind persisted, S5 can
+    // refuse to let a balance or a transfer establish a supply reduction.
+    onchainFactKind: onchainFactKind("onchain_fact_kind"),
     // Structured on-chain V1 (AMENDMENT B) — the retrieval artifact this
     // deterministic fact was derived from. NULL for every ordinary
     // fetched-document evidence row (the overwhelming majority), and for
