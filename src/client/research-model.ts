@@ -670,6 +670,13 @@ export interface EvidenceItemLike {
   // few things that distinguishes a real source record from text a
   // product wrote about itself.
   fetchedAt?: string | null;
+  // Whether ATLAS still holds the document this excerpt came out of. It is
+  // a fact about storage, not about the source: true only when acquisition
+  // persisted the retrieved text and that row is still joined to this job.
+  // False means the capture predates the feature or was never kept — and
+  // the card then offers no snapshot action at all, rather than a link
+  // that goes nowhere.
+  hasSnapshot?: boolean;
   exclusionReason?: string | null;
 }
 

@@ -239,6 +239,28 @@ export interface ProofView {
   createdAt: string;
 }
 
+// ATLAS SOURCE SNAPSHOT — the document acquisition actually stored, plus
+// the provenance that makes it checkable. `content` is TEXT in every case:
+// a markdown resource kept verbatim, an HTML page reduced to its text by
+// the transport before it was ever persisted. There is no stored markup,
+// so there is nothing here that could execute.
+export interface SourceSnapshotView {
+  evidenceId: string;
+  retrievedUrl: string;
+  finalUrl: string;
+  httpStatus: number;
+  contentType: string;
+  representation: "MARKDOWN_SOURCE" | "EXTRACTED_TEXT" | "TEXT";
+  byteLength: number;
+  contentHash: string;
+  textSha256: string;
+  capturedAt: string;
+  renderMode: string;
+  content: string;
+  truncated: boolean;
+  fullLength: number;
+}
+
 export interface ResearchJobDetail {
   job: {
     id: string;
@@ -325,7 +347,12 @@ export interface ResearchJobDetail {
     // reconciler cannot make, because it only ever sees Evidence rows.
     coverage: ComponentCoverage;
   }[];
+  // Whether an ATLAS Source Snapshot exists for this row — the capture
+  // the acquisition path already stored. A boolean, never the capture:
+  // content is fetched on demand from /snapshots/[evidenceId].
+  snapshotEvidenceIds: string[];
   evidence: (ResearchEvidenceView & {
+    hasSnapshot: boolean;
     links: {
       patternStep: number;
       component: string;
@@ -370,6 +397,14 @@ export const api = {
     requestChecked<ResearchJobDetail>(`/api/research-jobs/${id}`, {
       method: "GET",
     }),
+  // ON DEMAND, AND ONLY ON DEMAND. A capture runs to tens of kilobytes;
+  // a reader who opens no source downloads none. This reads a document
+  // acquisition already stored — it never triggers a fetch of its own.
+  getSourceSnapshot: (jobId: string, evidenceId: string) =>
+    requestChecked<{ snapshot: SourceSnapshotView }>(
+      `/api/research-jobs/${jobId}/snapshots/${evidenceId}`,
+      { method: "GET" },
+    ),
   markRead: (id: string) =>
     request<{ read: true }>(`/api/research-jobs/${id}/read`, {
       method: "POST",

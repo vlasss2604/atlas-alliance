@@ -181,10 +181,19 @@ describe("a source card proves it is a source", () => {
     // imply the reader is looking at the original page. They are not.
     expect(card).toContain("Relevant excerpt");
     expect(card).toContain("<blockquote");
-    // And nothing fabricates a preview of the page itself.
+    // And nothing fabricates a preview of the page itself. Scanned over
+    // the RENDER rather than the comments: the Source Snapshot round
+    // added a comment saying its icon is "not a preview of the live
+    // site", and a ban that a denial trips is measuring documentation
+    // instead of what a reader sees. What must not exist is the thing
+    // itself — an embedded page, or a captured picture of one.
+    const rendered = card
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
     for (const fake of ["<iframe", "screenshot", "preview", "thumbnail"]) {
-      expect(card.toLowerCase(), fake).not.toContain(fake);
+      expect(rendered.toLowerCase(), fake).not.toContain(fake);
     }
+    expect(rendered).not.toMatch(/<embed|<object|background-image|<img\b/i);
   });
 
   it("TEST 9: source classes are visually distinguishable, and never ranked", () => {

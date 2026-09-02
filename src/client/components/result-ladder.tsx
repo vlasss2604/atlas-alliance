@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 
 import {
   deriveQuestionFindings,
@@ -39,12 +40,17 @@ import {
 // passed in.
 export function ResultLadder({
   components,
+  jobId,
   sourceClassesByComponent,
   evidenceByComponent,
   supportingSummariesByComponent,
   questionFindings,
 }: {
   components: LadderComponentInput[];
+  // Needed only to address the snapshot route. The evidence model carries
+  // whether a capture EXISTS; the job is what makes it reachable, and it
+  // stays a prop so this component never reads routing state itself.
+  jobId?: string | null;
   sourceClassesByComponent?: Record<string, string[]>;
   // Canonical evidence per component, already resolved from persisted
   // links. A finding renders ONLY its own component's entry — this
@@ -82,6 +88,7 @@ export function ResultLadder({
 
   const rowProps = (row: ResultRow) => ({
     row,
+    jobId: jobId ?? null,
     open: openRows.has(row.component),
     onToggle: () => toggle(row.component),
     evidence: evidenceByComponent?.[row.component] ?? [],
@@ -162,6 +169,7 @@ export function ResultLadder({
 
 function LadderRow({
   row,
+  jobId,
   open,
   onToggle,
   evidence,
@@ -169,6 +177,7 @@ function LadderRow({
   isBoundary,
 }: {
   row: ResultRow;
+  jobId: string | null;
   open: boolean;
   onToggle: () => void;
   evidence: EvidenceItemLike[];
@@ -293,6 +302,7 @@ function LadderRow({
           {evidence.length > 0 && (
             <FindingEvidence
               items={evidence}
+              jobId={jobId}
               open={proofOpen}
               onToggle={() => setProofOpen((v) => !v)}
             />
@@ -313,10 +323,12 @@ function LadderRow({
 // reader wants ONE thing to read, and the option of more.
 function FindingEvidence({
   items,
+  jobId,
   open,
   onToggle,
 }: {
   items: EvidenceItemLike[];
+  jobId: string | null;
   open: boolean;
   onToggle: () => void;
 }) {
@@ -344,7 +356,7 @@ function FindingEvidence({
 
       {open && (
         <div className="mt-3 flex flex-col gap-3" data-testid="finding-evidence-open">
-          <EvidenceItem item={primary} />
+          <EvidenceItem item={primary} jobId={jobId} />
           {rest.length > 0 && !restOpen && (
             <button
               type="button"
@@ -355,7 +367,8 @@ function FindingEvidence({
               + {rest.length} more {rest.length === 1 ? "source" : "sources"}
             </button>
           )}
-          {restOpen && rest.map((item) => <EvidenceItem key={item.id} item={item} />)}
+          {restOpen &&
+            rest.map((item) => <EvidenceItem key={item.id} item={item} jobId={jobId} />)}
         </div>
       )}
     </div>
@@ -367,7 +380,7 @@ function FindingEvidence({
 // under full text brightness. A conclusion is read first; its proof is
 // read on request, and the card should look like the second thing, not
 // compete with the first.
-function EvidenceItem({ item }: { item: EvidenceItemLike }) {
+function EvidenceItem({ item, jobId }: { item: EvidenceItemLike; jobId: string | null }) {
   const caveat = sourceClassCaveat(item.sourceClass);
   // The source-class limit is generic to the KIND of source; doesNotProve
   // is what the extractor recorded about THIS passage. The specific one
@@ -477,32 +490,72 @@ function EvidenceItem({ item }: { item: EvidenceItemLike }) {
         </>
       )}
 
-      {/* THE DESTINATION IS THE RESOURCE THAT WAS ACTUALLY READ.
-          There is no second, human-facing url in the data: `sources.url`
-          equals `evidence.retrieved_url` on every row. Sending a reader to
-          a guessed address — the same path minus `.md` — would be a
-          fabricated provenance claim dressed as a convenience, so the link
-          goes exactly where the excerpt came from and the line above says
-          what kind of document that is. */}
-      <a
-        href={item.retrievedUrl}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="mt-3 inline-flex items-center gap-1.5 text-[0.75rem] font-medium text-[var(--atlas-cyan)] hover:underline"
-        data-testid="open-source"
-      >
-        Open source
-        <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
-          <path
-            d="M4 2h6v6M10 2 3 9"
-            stroke="currentColor"
-            strokeWidth="1.3"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </a>
+      {/* TWO DESTINATIONS, AND THEY ANSWER DIFFERENT QUESTIONS.
+          "What did you read?" is answered by the snapshot — the document
+          as it was received at research time, which is the only version
+          that can actually account for this excerpt. "Is it still true?"
+          is answered by the live original, which may have changed since
+          and is the reader's to judge.
+
+          The original link is unchanged: there is no second, human-facing
+          url in the data (`sources.url` equals `evidence.retrieved_url` on
+          every row), and sending a reader to a guessed address — the same
+          path minus `.md` — would be a fabricated provenance claim dressed
+          as a convenience. It goes exactly where the excerpt came from.
+
+          THE SNAPSHOT ACTION APPEARS ONLY WHERE A CAPTURE EXISTS. Not
+          disabled, not greyed: absent. A button that leads to "nothing
+          stored" would spend a reader's trust to tell them nothing, and
+          the honest signal is simply that this card offers one route and
+          another card offers two. */}
+      <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
+        {item.hasSnapshot && jobId && (
+          <Link
+            href={`/research/${jobId}/source/${item.id}`}
+            className="inline-flex items-center gap-1.5 text-[0.75rem] font-medium text-[var(--atlas-cyan)] hover:underline"
+            data-testid="view-source-snapshot"
+          >
+            <SnapshotIcon />
+            View source snapshot
+          </Link>
+        )}
+        <a
+          href={item.retrievedUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 text-[0.75rem] font-medium text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)] hover:underline"
+          data-testid="open-source"
+        >
+          Open original
+          <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
+            <path
+              d="M4 2h6v6M10 2 3 9"
+              stroke="currentColor"
+              strokeWidth="1.3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </a>
+      </div>
     </div>
+  );
+}
+
+// A page with a corner turned down — a kept copy of a document, which is
+// what a snapshot is. Deliberately not an eye or a magnifier: this is not
+// a preview of the live site.
+function SnapshotIcon() {
+  return (
+    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden>
+      <path
+        d="M2.5 1.5h4L9.5 4.5v6h-7z M6.5 1.5v3h3"
+        stroke="currentColor"
+        strokeWidth="1.1"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
   );
 }
 

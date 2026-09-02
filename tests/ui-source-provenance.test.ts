@@ -166,10 +166,21 @@ describe("the excerpt is external material, and says so", () => {
     expect(card).toContain("Relevant excerpt");
     expect(card).toContain("<blockquote");
     expect(card).toContain("{item.fragment}");
-    // And nothing fakes the original page.
+    // And nothing fakes the original page. The scan runs over the RENDER,
+    // not the comments: the Source Snapshot round added a comment saying
+    // the snapshot icon is "not a preview of the live site", and a
+    // vocabulary ban that a denial trips is measuring documentation
+    // rather than what reaches a reader. The invariant itself is
+    // untouched — no embedded page, no captured image of one.
     for (const fake of ["<iframe", "screenshot", "preview", "thumbnail", "favicon", "<img"]) {
-      expect(card.toLowerCase(), fake).not.toContain(fake);
+      expect(cardCode.toLowerCase(), fake).not.toContain(fake);
     }
+    // Stronger than the word ban it replaces: no route to a rendered page
+    // exists anywhere on this surface, by any spelling.
+    const rendered = readFileSync(LADDER, "utf-8")
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/^\s*\/\/.*$/gm, "");
+    expect(rendered).not.toMatch(/<iframe|<embed|<object|background-image|srcSet|<img\b/i);
   });
 
   it("TEST 10: the card explains the source's role and its limit, in that order", () => {
@@ -181,7 +192,15 @@ describe("the excerpt is external material, and says so", () => {
     );
     expect(card.indexOf("Relevant excerpt")).toBeLessThan(card.indexOf("Why this source"));
     expect(card.indexOf("Why this source")).toBeLessThan(card.indexOf("Source limit"));
-    expect(card.indexOf("Source limit")).toBeLessThan(card.indexOf("Open source"));
+    // The card still ends in its ACTIONS, after everything that explains
+    // the source. What changed is that there are now two of them, so the
+    // assertion names the block rather than the one label it used to end
+    // on — and pins the order inside it. "What did you read?" (the
+    // capture, which is the only version that can account for this
+    // excerpt) comes before "is it still true?" (the live page, which may
+    // have moved on).
+    expect(card.indexOf("Source limit")).toBeLessThan(card.indexOf("View source snapshot"));
+    expect(card.indexOf("View source snapshot")).toBeLessThan(card.indexOf("Open original"));
     // Suitability comes from the class, the limit prefers the per-passage
     // record where the extractor left one.
     expect(card).toContain("caveat.can");
@@ -223,7 +242,14 @@ describe("presentation only", () => {
       .filter((l) => !l.trim().startsWith("//"))
       .join("\n");
     expect(code).toContain('{open ? "Hide sources" : "Sources"}');
-    expect(code).toContain("Open source");
+    // The destination label is now "Open original". It was "Open source",
+    // which collided with the "Sources" disclosure directly above it —
+    // one word doing two jobs in one journey. The two destinations are
+    // named for what they answer, and neither reuses the disclosure's
+    // word.
+    expect(code).toContain("Open original");
+    expect(code).toContain("View source snapshot");
+    expect(code).not.toContain("Open source");
     for (const stray of ["Show proof", "View evidence", "Verify", "Present proof"]) {
       expect(code, stray).not.toContain(stray);
     }

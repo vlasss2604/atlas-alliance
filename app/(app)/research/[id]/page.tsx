@@ -278,6 +278,10 @@ export default function ResearchDetailPage() {
   // of ours about which reads best.
   const supportingSummariesByComponent: Record<string, string[]> = {};
   const admittedById = new Map(admitted.map((e) => [e.data.id, e.data]));
+  // WHICH SOURCES ATLAS STILL HOLDS A COPY OF. Resolved server-side from
+  // the acquisition rows this job actually owns, so the card can offer the
+  // snapshot action only where opening it would show something.
+  const snapshotIds = new Set(detail.snapshotEvidenceIds);
   for (const e of detail.evidence) {
     for (const link of e.links) {
       if (link.role === "EXCLUDED") continue;
@@ -285,7 +289,8 @@ export default function ResearchDetailPage() {
       if (list.some((x) => x.id === e.id)) continue;
       // Prefer the claim-scoped copy where one exists: it carries S8's
       // citation binding rather than the job-wide projection of the row.
-      list.push(admittedById.get(e.id) ?? toItem(e));
+      const item = admittedById.get(e.id) ?? toItem(e);
+      list.push({ ...item, hasSnapshot: snapshotIds.has(e.id) });
       if (link.role === "SUPPORTING" && e.summary) {
         (supportingSummariesByComponent[link.component] ??= []).push(e.summary);
       }
@@ -502,6 +507,7 @@ export default function ResearchDetailPage() {
       {finished && (
         <ResultLadder
           components={components}
+          jobId={jobId}
           sourceClassesByComponent={sourceClassesByComponent}
           evidenceByComponent={evidenceByComponent}
           supportingSummariesByComponent={supportingSummariesByComponent}
@@ -538,6 +544,7 @@ export default function ResearchDetailPage() {
               <div data-testid="audit-full-ladder">
                 <ResultLadder
                   components={components}
+                  jobId={jobId}
                   sourceClassesByComponent={sourceClassesByComponent}
                   evidenceByComponent={evidenceByComponent}
                   supportingSummariesByComponent={supportingSummariesByComponent}

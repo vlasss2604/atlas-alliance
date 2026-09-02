@@ -764,6 +764,7 @@ const detailFixture = {
       excludedEvidence: [],
     },
   ],
+  snapshotEvidenceIds: [],
   evidence: [],
 };
 

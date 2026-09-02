@@ -24,6 +24,7 @@ import {
 } from "@/src/server/engine/question-projection";
 import { getDb } from "@/src/server/runtime";
 import { loadProofForJob } from "@/src/server/services/proof-view";
+import { evidenceIdsWithSnapshot } from "@/src/server/services/source-snapshot";
 
 // Owner Manual Alpha App Test (D-123) — result-detail read. Same
 // ownership rule as every other /api/research-jobs/[id]/* route
@@ -453,6 +454,16 @@ export async function GET(
         ? resolveProjectionFindings(projectionRow.findings, components)
         : null;
 
+    // WHICH SOURCES CAN BE INSPECTED AS CAPTURED.
+    //
+    // A boolean per Evidence row, never the capture itself: a document runs
+    // to tens of kilobytes and a reader who opens no source should not
+    // download one. The content is served on demand by
+    // /snapshots/[evidenceId]. This is what lets the card offer "view
+    // source snapshot" only where it actually leads somewhere — a document
+    // acquired before capture existed simply has no action.
+    const snapshotIds = await evidenceIdsWithSnapshot(db, id);
+
     return Response.json({
       job,
       proof,
@@ -467,7 +478,11 @@ export async function GET(
       evidence: evidenceRows.map((e) => ({
         ...e,
         links: linksByEvidenceId.get(e.id) ?? [],
+        hasSnapshot: snapshotIds.has(e.id),
       })),
+      // The Proof's own citations are Evidence rows too, so the same set
+      // answers for them without a second query.
+      snapshotEvidenceIds: [...snapshotIds],
     });
   } catch (e) {
     return errorResponse(e);
