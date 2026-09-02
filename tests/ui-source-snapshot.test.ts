@@ -8,6 +8,7 @@ import { SnapshotDocumentView } from "../src/client/components/snapshot-document
 import {
   inlineText,
   MAX_BLOCK_DEPTH,
+  preservesStructure,
   MAX_INLINE_DEPTH,
   parseInline,
   parseSnapshotDocument,
@@ -103,6 +104,97 @@ describe("source snapshot — the capture is described honestly", () => {
     // must say so rather than letting the hash look like it covers the
     // visible text.
     expect(page).toMatch(/hashes above cover/i);
+  });
+});
+
+/* ---------------------------------------------------------------- *
+ * THE CARD IS AN IDENTITY, AND THE TRANSPORT RECORD IS STILL THERE
+ * ---------------------------------------------------------------- */
+
+describe("source snapshot — the provenance card reads as an identity", () => {
+  it("the identity leads: publisher, kind, date, then what this copy is", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    const at = (needle: string) => page.indexOf(needle);
+    // Eyebrow, then the domain as the headline, then the badge and the
+    // capture date, then the note, then the way out to the live page.
+    expect(at("ATLAS source snapshot")).toBeLessThan(at("{domain}"));
+    expect(at("{domain}")).toBeLessThan(at("snapshot-source-class"));
+    expect(at("snapshot-source-class")).toBeLessThan(at("snapshot-captured"));
+    expect(at("snapshot-captured")).toBeLessThan(at("snapshot-representation-note"));
+    expect(at("snapshot-representation-note")).toBeLessThan(at("snapshot-open-original"));
+    // And the transport record comes after all of it.
+    expect(at("snapshot-open-original")).toBeLessThan(at("snapshot-technical"));
+  });
+
+  it("no provenance field was dropped on the way behind the disclosure", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    // Every field the card carried before the polish is still rendered.
+    for (const label of [
+      "Captured",
+      "Type",
+      "Response",
+      "Size",
+      "Retrieved from",
+      "Landed on",
+      "Content hash",
+      "Text hash",
+    ]) {
+      expect(page, label).toContain(`label="${label}"`);
+    }
+    // The values are the persisted ones, not prettier versions of them.
+    expect(page).toContain("snapshot.contentHash");
+    expect(page).toContain("snapshot.textSha256");
+    expect(page).toContain("snapshot.retrievedUrl");
+    expect(page).toContain("snapshot.httpStatus");
+    expect(page).toContain("snapshot.byteLength");
+    expect(page).toContain("snapshot.contentType");
+  });
+
+  it("the technical rows stay a readable key/value grid, not centred decoration", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    const details = page.slice(page.indexOf('data-testid="snapshot-technical"'));
+    const grid = details.slice(details.indexOf("<dl"), details.indexOf("</dl>"));
+    // Centred metadata is decoration; this is the part that has to be read
+    // precisely, so the grid is explicitly left-aligned inside a centred card.
+    expect(grid).toContain("text-left");
+    expect(grid).toContain("sm:grid-cols-2");
+    expect(grid).not.toContain("text-center");
+    // Closed by default — a native <details> with no `open` attribute.
+    expect(details.slice(0, 200)).not.toMatch(/\bopen\b/);
+  });
+
+  it("the source-type badge is a KIND marker from persisted classification", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    // It comes from the engine's own `evidence.source_class`, through the
+    // shared label map — never a judgement this page makes, and never a
+    // second vocabulary for something the result card already names.
+    expect(page).toContain("sourceClassLabel(snapshot.sourceClass)");
+    expect(page).toContain("{snapshot.sourceClass && (");
+    // No score, no rank, no ordering language reaches the card. Scanned
+    // over the RENDER: the badge's own comment says it is "never a
+    // score", and a ban a denial trips measures documentation instead of
+    // what a reader sees.
+    const rendered = codeOf(PAGE);
+    const header = rendered.slice(
+      rendered.indexOf('data-testid="snapshot-header"'),
+      rendered.indexOf('data-testid="snapshot-content"'),
+    );
+    for (const scoreish of ["score", "rating", "rank", "trust", "quality"]) {
+      expect(header.toLowerCase(), scoreish).not.toContain(scoreish);
+    }
+  });
+
+  it("the class is projected from the persisted column, not invented here", () => {
+    const service = readFileSync(SERVICE, "utf-8");
+    // Read in the query that already loads the Evidence row: one more
+    // column on one existing read, no second query and no new table.
+    expect(service).toContain("sourceClass: evidence.sourceClass");
+    expect(service).toContain("sourceClass: row.sourceClass");
+    expect(service).toContain("sourceClass: string | null");
+    // Nullable, because legacy Evidence honestly carries no class. The
+    // card then shows no badge rather than guessing one.
+    const page = readFileSync(PAGE, "utf-8");
+    expect(page).not.toMatch(/sourceClass\s*\?\?\s*["']/);
   });
 });
 
@@ -378,6 +470,94 @@ describe("source snapshot — typesetting adds no content", () => {
     // ATLAS's own typography, never an imitation of the source's site.
     expect(view).not.toMatch(/raydium/i);
     expect(view).not.toMatch(/logo|favicon|<img/i);
+  });
+});
+
+/* ---------------------------------------------------------------- *
+ * TWO KINDS OF CAPTURE, TWO WAYS TO READ ONE
+ * ---------------------------------------------------------------- */
+
+describe("source snapshot — a flattened capture is not a document", () => {
+  it("structure is decided by what was stored, never by how the text looks", () => {
+    // Markdown kept its own structure. An HTML page was flattened to text
+    // by the transport before it was persisted, so there is none to show.
+    expect(preservesStructure("MARKDOWN_SOURCE")).toBe(true);
+    expect(preservesStructure("EXTRACTED_TEXT")).toBe(false);
+    // A plain-text or JSON capture never carried structure either, so it
+    // reads the same way rather than being parsed on a hunch.
+    expect(preservesStructure("TEXT")).toBe(false);
+    expect(preservesStructure(representationOf("text/html; charset=utf-8"))).toBe(false);
+    expect(preservesStructure(representationOf("text/markdown"))).toBe(true);
+  });
+
+  it("no structure is ever reconstructed from flattened text", () => {
+    // The tempting fix, permanently barred. Reading a heading out of
+    // extracted prose would invent a structure ATLAS did not preserve and
+    // show the invention as the source's own.
+    const blocks = doc("Fees\n\n84% to LPs\n\n## not a heading\n\n| a | b |", false);
+    expect(blocks.every((b) => b.kind === "paragraph")).toBe(true);
+    const out = html("## not a heading\n\n- not a list", false);
+    expect(out).not.toContain("<h2");
+    expect(out).not.toContain("<h3");
+    expect(out).not.toContain("<ul");
+    expect(out).not.toContain("<table");
+    // The markers stay visible, because they are characters the capture
+    // really contains.
+    expect(out).toContain("## not a heading");
+    expect(out).toContain("- not a list");
+  });
+
+  it("a flattened capture leads with the cited passage, not the wall", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    const at = (needle: string) => page.indexOf(needle);
+    // It says what it is, shows the excerpt, and only then offers the
+    // whole capture.
+    expect(page).toContain("Extracted text snapshot");
+    // JSX wraps prose across lines, so the sentence is matched against a
+    // whitespace-normalised copy rather than the raw source layout.
+    const prose = page.replace(/\s+/g, " ");
+    expect(prose).toContain("This is the text representation ATLAS captured from the page.");
+    expect(prose).toContain(
+      "The original page structure was not preserved in this snapshot.",
+    );
+    expect(at("snapshot-flat-note")).toBeLessThan(at("snapshot-excerpt"));
+    expect(at("snapshot-excerpt")).toBeLessThan(at("Show full captured text"));
+    // The excerpt is this Evidence row's own fragment — the words the
+    // finding quoted, never a passage chosen here.
+    expect(page).toContain("{snapshot.fragment}");
+    expect(page).toContain("Relevant excerpt");
+  });
+
+  it("the whole capture is kept, reachable and unmodified — just not default", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    const flat = page.slice(page.indexOf('data-testid="snapshot-flat-note"'));
+    // Behind a control, rendered verbatim, and never truncated or
+    // rewritten on its way to the screen.
+    expect(flat).toContain("Show full captured text");
+    expect(flat).toContain("Hide full captured text");
+    expect(flat).toContain("{snapshot.content}");
+    expect(flat).toContain('data-testid="snapshot-raw"');
+    // The reader is told how much there is before choosing to open it.
+    expect(flat).toContain("snapshot.fullLength.toLocaleString()");
+  });
+
+  it("the structured reader is untouched and still the default for markdown", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    const structured = page.slice(
+      page.indexOf("{structured ? ("),
+      page.indexOf('data-testid="snapshot-flat-note"'),
+    );
+    // Same document view, still the default for a structured capture.
+    expect(structured).toContain("<SnapshotDocumentView");
+    // Its opt-in exact text is unchanged, and offered only on this branch
+    // — the flat branch has its own "full captured text" control instead.
+    expect(page).toContain("Show exact captured text");
+    expect(page).toContain("Show as document");
+    expect(page).toContain("{structured && (");
+    // And the branch is chosen by the stored representation, not by size,
+    // not by sniffing the text.
+    expect(page).toContain("preservesStructure(snapshot.representation)");
+    expect(page).not.toMatch(/content\.length\s*[<>]/);
   });
 });
 

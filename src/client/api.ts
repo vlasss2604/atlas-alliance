@@ -247,6 +247,13 @@ export interface ProofView {
 export interface SourceSnapshotView {
   evidenceId: string;
   retrievedUrl: string;
+  // The engine's own classification of the source, projected from
+  // `evidence.source_class`. Null on legacy Evidence, which shows no badge
+  // rather than an invented one.
+  sourceClass: string | null;
+  // The passage this Evidence row cited, from `evidence.fragment`. A
+  // flattened capture leads with it instead of with its own wall of text.
+  fragment: string;
   finalUrl: string;
   httpStatus: number;
   contentType: string;

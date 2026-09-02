@@ -49,6 +49,19 @@ export interface SourceSnapshotView {
   // The url Evidence was retrieved from, and where the transport landed if
   // a redirect moved it. Never a prettier address than the one used.
   retrievedUrl: string;
+  // What KIND of source this is, from `evidence.source_class` — the
+  // engine's own classification, not a judgement this view makes. It is
+  // the strongest identity the data actually carries here: `sources.title`
+  // and `sources.publisher` are null on every row, so the card's headline
+  // stays the domain and this says what sort of document it is. Nullable
+  // because legacy (contract version 1) Evidence honestly has no value,
+  // and the card then shows no badge rather than guessing one.
+  sourceClass: string | null;
+  // The passage this Evidence row actually cited, verbatim from
+  // `evidence.fragment`. It is what a flattened capture leads with: the
+  // research quoted a paragraph, and burying that paragraph inside tens
+  // of thousands of characters of flattened page serves nobody.
+  fragment: string;
   finalUrl: string;
   httpStatus: number;
   contentType: string;
@@ -74,6 +87,11 @@ export function representationOf(contentType: string): SnapshotRepresentation {
   if (type.includes("html")) return "EXTRACTED_TEXT";
   return "TEXT";
 }
+
+// Whether that representation kept the document's STRUCTURE is decided by
+// `preservesStructure` in `src/client/snapshot-document.ts` — it lives
+// there because only the reader asks the question, and this module must
+// not be imported into a client bundle.
 
 function snapshotMatch(retrievedUrls: string[], jobId: string) {
   return and(
@@ -133,7 +151,11 @@ export async function loadSourceSnapshot(
   ownerUserId: string,
 ): Promise<SourceSnapshotView | null> {
   const [row] = await db
-    .select({ retrievedUrl: evidence.retrievedUrl })
+    .select({
+      retrievedUrl: evidence.retrievedUrl,
+      sourceClass: evidence.sourceClass,
+      fragment: evidence.fragment,
+    })
     .from(evidence)
     .innerJoin(researchJobs, eq(evidence.researchJobId, researchJobs.id))
     .where(
@@ -173,6 +195,8 @@ export async function loadSourceSnapshot(
   return {
     evidenceId,
     retrievedUrl: row.retrievedUrl,
+    sourceClass: row.sourceClass,
+    fragment: row.fragment,
     finalUrl: doc.finalUrl,
     httpStatus: doc.httpStatus,
     contentType: doc.contentType,
