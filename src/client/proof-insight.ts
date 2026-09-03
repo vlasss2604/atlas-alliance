@@ -104,10 +104,19 @@ interface Row {
   reasonCodes: readonly string[];
 }
 
-const ESTABLISHED_STATES: ReadonlySet<ReaderState> = new Set<ReaderState>([
-  "ESTABLISHED",
-  "ESTABLISHED_WITH_LIMITS",
-]);
+// UNQUALIFIED, DELIBERATELY. Every sentence this module can produce asserts
+// the established half plainly — "Governance approved", "Execution is
+// confirmed", "observed executing" — so a component carrying a standing
+// limitation must not satisfy it. A diagnostic run surfaced exactly this:
+// an EXECUTION_EVIDENCE row that was PARTIALLY_SUPPORTED because its only
+// source could not settle the claim still produced "Execution is confirmed",
+// which is a stronger statement than the research made.
+//
+// ESTABLISHED_WITH_LIMITS is therefore NOT established for this purpose. The
+// alternative — a second, hedged sentence per rule — would double the copy
+// table to say something a reader cannot act on, and hedged copy beside a
+// Proof is worse than silence.
+const ESTABLISHED_STATES: ReadonlySet<ReaderState> = new Set<ReaderState>(["ESTABLISHED"]);
 
 // "Not established" is read ONLY from a row that exists. A component with no
 // persisted result was never assessed, and saying its execution "is not

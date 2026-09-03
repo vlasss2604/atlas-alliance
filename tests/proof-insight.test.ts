@@ -716,3 +716,67 @@ describe("insight — every rule's copy holds the line", () => {
     }
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* AN ESTABLISHED HALF MUST BE UNQUALIFIED                             */
+/* ------------------------------------------------------------------ */
+
+describe("insight — a standing limitation is not 'confirmed'", () => {
+  // Found by the Insight quality diagnostic: an execution row that is only
+  // PARTIALLY_SUPPORTED (its one source cannot settle the claim) produced
+  // "Execution is confirmed", which is stronger than the research made.
+  const executionQualified = {
+    component: "EXECUTION_EVIDENCE",
+    status: "PARTIALLY_SUPPORTED",
+    reasonCodes: ["INSUFFICIENT_AUTHORITY"],
+    supportingEvidenceIds: [BURN],
+  };
+
+  it("TEST 35: a qualified execution never asserts a confirmed destination", () => {
+    expect(
+      insightFor(
+        [documented, executionQualified, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("TREASURY")],
+      ).type,
+    ).toBe("NONE");
+    // The identical state with execution fully established still fires, so
+    // this narrows exactly one thing and nothing else.
+    expect(
+      insightFor(
+        [documented, executing, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("TREASURY")],
+      ).type,
+    ).toBe("INSIGHT");
+  });
+
+  it("TEST 35b: a qualified execution never asserts it is observed executing", () => {
+    expect(insightFor([documented, executionQualified, recipientMissing]).type).toBe("NONE");
+    expect(insightFor([documented, executing, recipientMissing]).type).toBe("INSIGHT");
+  });
+
+  it("TEST 35c: a qualified approval never asserts governance approved it", () => {
+    const approvalQualified = {
+      component: "GOVERNANCE_BASIS",
+      status: "PARTIALLY_SUPPORTED",
+      reasonCodes: ["INSUFFICIENT_AUTHORITY"],
+      supportingEvidenceIds: ["ev-gov"],
+    };
+    const insight = insightFor([approvalQualified, documented, executionMissing]);
+    // Documentation is unqualified here, so the gap is still stated — in the
+    // words that are true of it, never governance's.
+    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(insight.text).toBe(
+      "The mechanism is documented, but ATLAS has not established that it is executing.",
+    );
+    // With both qualified, nothing is asserted at all.
+    expect(
+      insightFor([
+        approvalQualified,
+        { ...documented, status: "PARTIALLY_SUPPORTED", reasonCodes: ["INDIRECT_ONLY"] },
+        executionMissing,
+      ]).type,
+    ).toBe("NONE");
+  });
+});
