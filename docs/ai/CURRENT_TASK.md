@@ -2,70 +2,62 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — on-chain source-open reservation V1
+## NONE — locator provenance boundary V1
 
-Offline round. No live HTTP, no RPC, no model call, no Proof. Cloud-safe
-focused tests only.
+Offline round. No live HTTP, no RPC, no model call, no Proof, no schema
+change. Cloud-safe focused tests only.
 
 ### What changed
 
-`sourceOpens` is one axis shared by documentary opens, renders and bounded
-RPC reads, and nothing decided the ORDER in which it could be claimed. The
-phased architecture fixes that order structurally — FETCHING runs to
-completion before EXTRACTING, and only EXTRACTING can reach a chain — so
-documentary acquisition spent the whole axis and every planned on-chain
-intent was refused `SOURCE_OPEN_BUDGET_EXHAUSTED`.
+`admittedLocatorsForJob` resolved the project FROM the job and then returned
+CONFIRMED documentary locators from **any** job of that project, with no
+freshness bound, no revalidation, no revocation act, and `{value, shape}`
+only — so a fresh Proof could plan account-level reads against a historical
+address and could not say it had done so.
 
-One new module, `src/server/engine/onchain-source-open-reserve.ts`, holds a
-small bounded FLOOR inside the EXISTING ceiling. It is not a second ledger:
-it computes a LOWER CEILING that documentary reservations pass to the same
-`reserveJobBudget`, while on-chain reservations keep passing the full one.
+One predicate changed. The boundary is now the job:
 
-- **Floor** = `MAX_ONCHAIN_INTENTS_PER_ATTEMPT` (2), capped at half the
-  job's ceiling. `reserved + documentaryCeiling === maxSourceOpens`, always.
-- **Activates** only where outstanding plan work yields an on-chain intent,
-  decided by `selectOnchainIntents` itself — Pattern establishing classes,
-  confirmed identity, supported chain, component→intent map. No project.
-- **Releases** when nothing outstanding admits it, when the context is known
-  not to reach a chain (`DOCUMENTARY_ONLY`, `ONCHAIN_RETRIEVER_NOT_CONFIGURED`),
-  and — in the executor — when no component is left pending. An UNKNOWN
-  capability never releases it.
-- **No locator still means no floor** for account-kind components: the
-  predicate inherits that gate rather than restating it.
+```
+eq(researchJobs.id, jobId)          // was: eq(researchJobs.projectId, …)
+```
 
-Applied at both documentary spend sites: `runFetchPhase` (once per pass,
-threaded to every strategy) and `s4-executor`'s fetch loop, both renders and
-its `openAllowance`.
+- **Nothing else was relaxed**: `literallyPresent`, `validationResult =
+  CONFIRMED`, `officiality = CONFIRMED`, the documentary source classes,
+  `sources.health != 'BROKEN'`, the shape validator, the cap of 8.
+- **Cross-project is now impossible by construction** — a job has one
+  project — rather than by a predicate that would imply the project still
+  means something here.
+- **Provenance**: the return type is a new `AdmittedLocator` carrying
+  `evidenceId`, `sourceId`, `researchJobId`. `ConfirmedLocator` is unchanged,
+  so no existing producer or consumer moved. Dedup ties break on the
+  evidence id, so the surviving attribution is deterministic.
 
-### Unchanged
+### Identity is NOT a documentary locator
 
-Total ceilings, `reserveJobBudget`, the DB schema, the trace vocabulary, the
-Pattern, NET_EFFECT semantics, evidence admission, source authority, model
-prompts and provider configuration. The four boundaries stay four things:
-no subject / capability disabled / RPC failure / bounded budget limitation —
-and none is evidence that a mechanism is absent.
+Confirmed project identity keeps its existing semantics: `eligibleSubjects`
+still returns the anchor from identity alone, so `TOKEN_SUPPLY` on
+NET_EFFECT / CURRENT_STATE / SOURCE_OF_VALUE is planned with no locator
+anywhere. Only account-kind intents wait for a locator admitted in this job.
 
-### OPEN OWNER DECISION — `admittedLocatorsForJob` is project-scoped
+### The accepted cost
 
-Deliberately NOT changed this round, and not renamed.
+EXECUTION_EVIDENCE is step 4, DESTINATION is step 6. A fresh job reaches the
+account-kind components before the one that documents an account, so on a
+first run those components legitimately have no subject. That is a visible
+acquisition boundary and an honest INSUFFICIENT_EVIDENCE — never a fallback
+to a previous job, a standalone observation, a project heuristic, an address
+parsed from text, or a model guess.
 
-`admittedLocatorsForJob(db, jobId)` resolves the project FROM the job, then
-selects every CONFIRMED, literally-present locator on CONFIRMED evidence of
-**any job of that project** (`documentary-locator-store.ts:271`). The name
-says job; the contract is project.
+### Interaction with the source-open floor (232b9ac)
 
-- **Freshness**: none. No age bound, no re-verification. The only liveness
-  signal is `sources.health != 'BROKEN'`; a locator whose document changed
-  or was retracted stays admissible while its source row looks healthy.
-- **Revocation**: only by lowering `evidence.officiality`, the locator's
-  `validationResult`, or marking the source BROKEN. There is no locator-level
-  revocation act.
-- **Selection**: sorted by address, capped at 8. A locator from an old job
-  can crowd out one established in this run purely alphabetically.
-- **Provenance**: the returned shape is `{value, shape}` — the justifying
-  evidence id and its job are dropped, and `onchain_artifacts` records only
-  the acquiring job. **A Proof therefore cannot today distinguish a locator
-  reused from earlier project research from one established in this run.**
+Unchanged and re-verified. The floor still activates for a fresh job with a
+confirmed identity, because anchor-addressable components still yield
+intents. An account-kind component earns the floor only once this job has
+admitted a locator — the floor inherits the locator gate rather than
+restating it.
 
-Owner decision needed: keep project-scoped reuse (and add provenance +
-freshness), or narrow the contract to the job. Analysis only this round.
+### Deferred, explicitly
+
+Historical locator reuse may return only through an explicit Research Memory
+design carrying provenance, freshness, revalidation, revocation and
+transparent historical reuse. Not built, not stubbed, not scheduled here.

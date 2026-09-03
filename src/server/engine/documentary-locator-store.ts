@@ -42,6 +42,21 @@ export interface ConfirmedLocator {
   shape: LocatorShape;
 }
 
+// WHAT AN ADMITTED LOCATOR CARRIES BACK.
+//
+// `ConfirmedLocator` is the validator's verdict about a string and stays
+// exactly that — every existing producer and consumer of it is unchanged.
+// An ADMITTED locator is a different claim: this job may address this
+// account, BECAUSE of this Evidence row, read from this source, in this
+// job. Those three ids are what makes the subject attributable, and the
+// only reason they can be stated flatly is that the boundary is now the
+// job — there is no historical case left to distinguish.
+export interface AdmittedLocator extends ConfirmedLocator {
+  evidenceId: string;
+  sourceId: string;
+  researchJobId: string;
+}
+
 export interface RejectedLocator {
   // The proposal, kept for tracing. Never written to the locator table.
   claimed: string;
@@ -218,22 +233,35 @@ export async function locatorsForEvidence(
 // filled it, so the only subject a normal research job could address was
 // the project's own mint. This is the query that fills it.
 //
-// SCOPED TO THE PROJECT, NOT THE JOB. Job scoping looked safer and was
-// unusable: EXECUTION_EVIDENCE is step 4 and DESTINATION is step 6, so the
-// component that needs a documented account runs two steps before the one
-// that admits it, and a fresh job reached the on-chain path with nothing to
-// address. A document stating where a project sends its tokens does not
-// stop being true because a different job read it.
+// SCOPED TO THE JOB. An earlier round scoped this to the PROJECT, so a
+// fresh job silently consumed an address a previous job had established.
+// That is reuse of a research conclusion, and it was made without the
+// things reuse requires: no freshness bound, no revalidation, no
+// revocation act, and — because the returned value carried no provenance —
+// no way for a Proof to say whether an address was established in THIS run
+// or inherited from an old one. A fresh Proof could plan account-level
+// reads against a historical locator while presenting as if it had found
+// it. Until an explicit Research Memory design supplies provenance,
+// freshness, revalidation, revocation and transparent historical reuse,
+// the honest boundary is the job.
 //
-// The project boundary is the SAME deterministic boundary the rest of the
-// engine uses: a locator is reachable only through an Evidence row whose
-// research job belongs to this job's project_id. Never a ticker, never a
-// name, never a domain — an address admitted while researching another
-// project is unreachable here, and a job with no project is refused
-// outright rather than falling back to "all locators".
+// The ordering cost is REAL and is accepted deliberately: EXECUTION_EVIDENCE
+// is pattern step 4 and DESTINATION is step 6, so a fresh job reaches the
+// account-kind components before the component that documents an account.
+// The outcome is then no subject, which is an ordinary acquisition boundary
+// and an honest INSUFFICIENT_EVIDENCE — never a fallback, and never a claim
+// that a mechanism is absent.
 //
-// SAME PROJECT IS NOT ENOUGH AUTHORITY. Reuse additionally requires that
-// the originating fact was itself admissible documentary evidence:
+// CONFIRMED PROJECT IDENTITY IS A DIFFERENT THING AND IS UNTOUCHED. A
+// canonical mint/address stored as confirmed identity keeps its existing
+// semantics and still supplies the anchor for token-level reads
+// (`eligibleSubjects` in onchain-acquisition.ts). Identity is a stored fact
+// about what the project IS; a documentary locator is a research
+// conclusion about where a mechanism runs. Only the second is bounded here.
+//
+// THE SAME JOB IS NOT ENOUGH AUTHORITY. Admission additionally requires
+// that the originating fact was itself admissible documentary evidence,
+// and not one of these bars is relaxed by the narrower boundary:
 //
 //   * validation_result = CONFIRMED and literally_present = true — the
 //     deterministic validator's own verdict, restated here so the
@@ -254,14 +282,16 @@ export async function locatorsForEvidence(
 // the child rows are complete and reading both would return historical
 // rows twice.
 //
-// NOTHING IS COPIED. The historical Evidence row is read, never rewritten,
-// never duplicated into this job — the new job addresses the same account
-// through the original fact's provenance, which is why a reused locator
-// can still be traced to the document that stated it.
+// NOTHING IS COPIED AND NOTHING IS ADOPTED. The Evidence row is read, never
+// rewritten; no standalone observation, no owner-script artifact, no model
+// proposal and no address parsed out of arbitrary text can reach this
+// result — the ONLY path in is a validated locator row on this job's own
+// admitted Evidence.
 //
-// THIS IS NOT RESEARCH MEMORY. No lesson, no confidence, no reuse policy
-// and no learning writeback: it is one exact identifier, still attached to
-// the document that stated it, still validated the same way.
+// THIS IS NOT RESEARCH MEMORY, and narrowing the boundary is what keeps
+// that true: no lesson, no confidence, no reuse policy, no freshness
+// window and no learning writeback. One exact identifier, still attached to
+// the document THIS job read, still validated the same way.
 const ADMISSIBLE_LOCATOR_SOURCE_CLASSES = [
   "OFFICIAL_DOCS",
   "GOVERNANCE",
@@ -272,34 +302,34 @@ export async function admittedLocatorsForJob(
   db: Database | Transaction,
   jobId: string,
   limit = MAX_ADMITTED_LOCATORS_PER_JOB,
-): Promise<ConfirmedLocator[]> {
+): Promise<AdmittedLocator[]> {
   if (typeof jobId !== "string" || jobId.length === 0) return [];
-
-  // The project boundary is resolved from the JOB, never passed in — a
-  // caller cannot widen the scope by handing over a different project.
-  const [job] = await db
-    .select({ projectId: researchJobs.projectId })
-    .from(researchJobs)
-    .where(eq(researchJobs.id, jobId));
-  // No job, or a job with no project, has no project boundary to enforce.
-  // Fail closed rather than returning every locator ever admitted.
-  if (!job?.projectId) return [];
 
   const rows = await db
     .select({
       value: evidenceDocumentaryLocators.value,
       shape: evidenceDocumentaryLocators.shape,
       ordinal: evidenceDocumentaryLocators.ordinal,
+      evidenceId: evidence.id,
+      sourceId: sources.id,
+      researchJobId: researchJobs.id,
     })
     .from(evidenceDocumentaryLocators)
     .innerJoin(evidence, eq(evidence.id, evidenceDocumentaryLocators.evidenceId))
     // INNER joins throughout: an Evidence row whose job or source no longer
-    // resolves drops out instead of being reused on trust.
+    // resolves drops out instead of being addressed on trust.
     .innerJoin(researchJobs, eq(researchJobs.id, evidence.researchJobId))
     .innerJoin(sources, eq(sources.id, evidence.sourceId))
     .where(
       and(
-        eq(researchJobs.projectId, job.projectId),
+        // THE BOUNDARY. Stated on the Evidence row's own job, so it is the
+        // narrowest possible predicate: this job's own admitted Evidence,
+        // and nothing else. A project-scoped variant of this line is what
+        // let a fresh Proof inherit an old run's address. Cross-project is
+        // then impossible by construction — a job has exactly one project —
+        // rather than by a second predicate that would imply the project
+        // still means something here.
+        eq(researchJobs.id, jobId),
         eq(evidenceDocumentaryLocators.literallyPresent, true),
         eq(evidenceDocumentaryLocators.validationResult, "CONFIRMED"),
         eq(evidence.officiality, "CONFIRMED"),
@@ -309,15 +339,28 @@ export async function admittedLocatorsForJob(
     );
 
   // Deterministic order, and one entry per distinct address: the same
-  // account documented by two facts is one subject, not two reads.
+  // account documented by two facts is one subject, not two reads. The
+  // FIRST row for an address wins, so the surviving provenance is a real
+  // Evidence row that established it, chosen the same way every time.
   const seen = new Set<string>();
-  const out: ConfirmedLocator[] = [];
-  for (const r of [...rows].sort((a, b) =>
-    a.value === b.value ? a.ordinal - b.ordinal : a.value.localeCompare(b.value),
-  )) {
+  const out: AdmittedLocator[] = [];
+  for (const r of [...rows].sort((a, b) => {
+    if (a.value !== b.value) return a.value.localeCompare(b.value);
+    if (a.ordinal !== b.ordinal) return a.ordinal - b.ordinal;
+    // Two Evidence rows can document the same account at the same ordinal.
+    // Once provenance is returned, "which one" stops being cosmetic, so the
+    // tie is broken on the evidence id rather than left to row order.
+    return a.evidenceId.localeCompare(b.evidenceId);
+  })) {
     if (seen.has(r.value)) continue;
     seen.add(r.value);
-    out.push({ value: r.value, shape: r.shape as LocatorShape });
+    out.push({
+      value: r.value,
+      shape: r.shape as LocatorShape,
+      evidenceId: r.evidenceId,
+      sourceId: r.sourceId,
+      researchJobId: r.researchJobId,
+    });
     if (out.length >= limit) break;
   }
   return out;

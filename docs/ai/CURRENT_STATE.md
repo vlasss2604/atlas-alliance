@@ -27,6 +27,49 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## A FRESH JOB NO LONGER INHERITS AN OLD RUN'S ADDRESS
+
+`admittedLocatorsForJob` was scoped to the PROJECT, so a fresh research job
+silently consumed a documentary locator a previous job had established, and
+the returned value carried no provenance — a fresh Proof could plan
+account-level reads against a historical address while presenting as if it
+had found it in this run. That is reuse of a research conclusion without any
+of the things reuse requires.
+
+**The boundary is now the job**: `eq(researchJobs.id, jobId)` on the Evidence
+row's own job. Cross-project is impossible by construction rather than by a
+second predicate. Every other bar is unchanged and none was relaxed —
+`literallyPresent`, `validationResult = CONFIRMED`, `officiality = CONFIRMED`,
+the documentary source classes, `sources.health != 'BROKEN'`, the shape
+validator and the per-job cap of 8.
+
+**`AdmittedLocator` now carries provenance** — `evidenceId`, `sourceId`,
+`researchJobId` beside `value`/`shape`. `ConfirmedLocator` (the validator's
+verdict about a string) is unchanged, so no producer or consumer of it moved.
+Deduplication ties are broken on the evidence id, so which Evidence row
+survives as the attribution is deterministic.
+
+**Confirmed project identity is a different thing and is untouched.** A
+canonical mint/address stored as confirmed identity still supplies the anchor,
+so token-level reads (`TOKEN_SUPPLY` on `NET_EFFECT`, `CURRENT_STATE`,
+`SOURCE_OF_VALUE`) are planned from identity alone with no locator anywhere.
+Identity is a stored fact about what the project IS; a documentary locator is
+a research conclusion about where a mechanism runs. Only the second is bounded.
+
+**The ordering cost is real and accepted.** EXECUTION_EVIDENCE is pattern step
+4 and DESTINATION is step 6, so a fresh job reaches the account-kind
+components before the one that documents an account. The outcome is then no
+subject — an ordinary acquisition boundary and an honest
+INSUFFICIENT_EVIDENCE. There is no fallback: not a previous job, not a
+standalone owner-script observation or its derived subjects, not a project
+heuristic, not an address parsed out of text, not a model proposal. The only
+path in is a validated locator row on THIS job's own admitted Evidence.
+
+**This is not Research Memory, and narrowing the boundary is what keeps that
+true.** Historical reuse may return only through an explicit future design
+carrying provenance, freshness, revalidation, revocation and transparent
+historical reuse.
+
 ## DOCUMENTARY ACQUISITION CAN NO LONGER STARVE THE CHAIN
 
 `sourceOpens` is ONE axis paying for documentary opens, renders and bounded
