@@ -57,7 +57,6 @@ export type InsightLens =
 export type InsightRelation =
   | "MEASURED_CONTRADICTION"
   | "DESTINATION_HELD"
-  | "HOLDER_VALUE_NOT_ESTABLISHED"
   | "MEASURED_WITHOUT_ATTRIBUTION";
 
 export type ProofInsight =
@@ -288,7 +287,6 @@ export function deriveProofInsight(input: ProofInsightInput): ProofInsight {
 
     const execution = byComponent.get("EXECUTION_EVIDENCE");
     const destination = byComponent.get("DESTINATION");
-    const recipient = byComponent.get("RECIPIENT");
     const netEffect = byComponent.get("NET_EFFECT");
 
     const candidates: Candidate[] = [];
@@ -354,21 +352,23 @@ export function deriveProofInsight(input: ProofInsightInput): ProofInsight {
       });
     }
 
-    // ---- 4. VALUE DESTINATION: the value does not reach holders ------
+    // ---- 4. RETIRED: the value does not reach holders ----------------
     //
-    // The mechanism runs, and who ultimately receives the value it moves was
-    // checked and not established. Not a claim that nobody receives it.
-    if (isEstablished(execution) && isNotEstablished(recipient)) {
-      candidates.push({
-        rank: 4,
-        relation: "HOLDER_VALUE_NOT_ESTABLISHED",
-        lens: "VALUE_DESTINATION",
-        text: "The mechanism is observed executing, but ATLAS has not established that the value it moves reaches token holders.",
-        components: [execution!.component, recipient!.component],
-        supportingEvidenceIds: execution!.meaning.supportingEvidenceIds,
-        contradictingEvidenceIds: [],
-      });
-    }
+    // "The mechanism is observed executing, but ATLAS has not established
+    // that the value it moves reaches token holders" was the second rule
+    // retired for the same reason as the first, and by the same measurement.
+    // It scored as a strong Insight only while the Direct Answer was
+    // omitting established execution; once the answer began listing it, both
+    // halves of this join sat in adjacent sentences above — "Established: …
+    // that the mechanism has actually executed | Not established: who
+    // ultimately receives it" — and the Insight was reading them back.
+    //
+    // The lesson generalises and is why no replacement was written: a rule
+    // that pairs one ESTABLISHED component with one NOT-ESTABLISHED
+    // component is describing the answer's own two lists, not a
+    // relationship between them. What survives below pairs an established
+    // component with a STRUCTURED ATTRIBUTE the answer never carries (where
+    // the value lands), or joins two sides of evidence inside one component.
 
     // ---- 5. GROSS VS NET: measured, with no attribution --------------
     //

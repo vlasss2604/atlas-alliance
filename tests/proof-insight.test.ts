@@ -533,14 +533,29 @@ describe("insight — value destination", () => {
     ).toBe("NONE");
   });
 
-  it("TEST 28: execution established with no established recipient", () => {
-    const insight = insightFor([documented, executing, recipientMissing]);
-    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
-    expect(insight.relation).toBe("HOLDER_VALUE_NOT_ESTABLISHED");
-    expect(insight.text).toBe(
-      "The mechanism is observed executing, but ATLAS has not established that the value it moves reaches token holders.",
-    );
-    expect(insight.supportingEvidenceIds).toEqual([BURN]);
+  it("TEST 28: an unestablished recipient is left to the Answer", () => {
+    // Retired for the same reason as the execution gap, and measured the
+    // same way: once the Answer began listing established execution, both
+    // halves of this join sat in adjacent sentences above it.
+    expect(insightFor([documented, executing, recipientMissing]).type).toBe("NONE");
+    const answer = researchAnswer({
+      verdict: "PARTIALLY_SUPPORTED",
+      projectName: "Example Protocol",
+      components: [documented, executing, recipientMissing] as never,
+    }).join(" ");
+    expect(answer).toContain("that the mechanism has actually executed");
+    expect(answer).toContain("Not established: who ultimately receives it");
+  });
+
+  it("TEST 28b: no surviving rule pairs one established with one unestablished component", () => {
+    // The generalised lesson, asserted rather than trusted: that shape
+    // describes the Answer's own two lists. What survives pairs an
+    // established component with a structured attribute the Answer never
+    // carries, or joins two sides of evidence inside one component.
+    const src = readFileSync(SOURCE, "utf-8");
+    expect(src).not.toContain('"HOLDER_VALUE_NOT_ESTABLISHED"');
+    expect(src).not.toContain('"EXECUTION_GAP"');
+    expect(src).toContain("RETIRED: the value does not reach holders");
   });
 });
 
@@ -642,7 +657,6 @@ describe("insight — every rule's copy holds the line", () => {
     insightFor([documented, executing, destinationEstablished, netEffectMissing], [], [
       flowWithDestination("BUYBACK_HOLD"),
     ]),
-    insightFor([documented, executing, recipientMissing]),
     insightFor([documented, contradictedRow]),
     insightFor([documented, notAttributedRow]),
   ]
@@ -650,11 +664,11 @@ describe("insight — every rule's copy holds the line", () => {
     .map((i) => i.text);
 
   it("TEST 32: every sentence the module can produce is distinct", () => {
-    expect(everySentence).toHaveLength(5);
-    // All five differ: the two held-destination texts name their own
+    expect(everySentence).toHaveLength(4);
+    // All four differ: the two held-destination texts name their own
     // destination, and the two supply texts are keyed by different reason
     // codes.
-    expect(new Set(everySentence).size).toBe(5);
+    expect(new Set(everySentence).size).toBe(4);
   });
 
   it("TEST 33: no advice, no judgement, no accusation, no causal overclaim", () => {
@@ -746,9 +760,21 @@ describe("insight — a standing limitation is not 'confirmed'", () => {
     ).toBe("INSIGHT");
   });
 
-  it("TEST 35b: a qualified execution never asserts it is observed executing", () => {
-    expect(insightFor([documented, executionQualified, recipientMissing]).type).toBe("NONE");
-    expect(insightFor([documented, executing, recipientMissing]).type).toBe("INSIGHT");
+  it("TEST 35b: a qualified execution never asserts a held destination", () => {
+    expect(
+      insightFor(
+        [documented, executionQualified, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("BUYBACK_HOLD")],
+      ).type,
+    ).toBe("NONE");
+    expect(
+      insightFor(
+        [documented, executing, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("BUYBACK_HOLD")],
+      ).type,
+    ).toBe("INSIGHT");
   });
 
   it("TEST 35c: a qualified execution keeps its qualification everywhere", () => {
