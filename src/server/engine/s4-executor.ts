@@ -52,6 +52,7 @@ import {
   planQueries,
 } from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
+import { resolveOnchainSourceOpenReserve } from "./onchain-source-open-reserve";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
 import type { LocatorRejection } from "./documentary-locator";
 import {
@@ -943,8 +944,18 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // retriever resolution and every call are skipped together, so "no
       // RPC" holds because the code cannot reach one — not because the
       // database happens to hold no admitted locators today.
+      //
+      // Whether the deterministic on-chain path can act AT ALL in this
+      // process. Set only from what this attempt actually observed — an
+      // owner documentary-only instruction, or no retriever installed
+      // here. It is the release condition for the source-open floor
+      // below: protecting capacity for a path that cannot run would waste
+      // it, and wasting it is the same starvation seen from the other
+      // side. Never inferred from a project, a chain or an address.
+      let onchainAcquisitionUnavailable = false;
       if (deps.chainAcquisition === "DOCUMENTARY_ONLY") {
         observations.add("ONCHAIN_DISABLED_DOCUMENTARY_ONLY");
+        onchainAcquisitionUnavailable = true;
       } else {
         const admittedLocators = await admittedLocatorsForJob(deps.db, ctx.jobId);
         const onchainOutcome = await runStructuredOnchainAcquisition({
@@ -975,6 +986,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         });
         spent.sourceOpens += onchainOutcome.sourceOpensSpent;
         for (const code of onchainOutcome.observations) observations.add(code);
+        if (onchainOutcome.observations.includes("ONCHAIN_RETRIEVER_NOT_CONFIGURED")) {
+          onchainAcquisitionUnavailable = true;
+        }
         if (onchainOutcome.evidenceIds.length > 0) {
           // Establishing on-chain evidence was obtained deterministically.
           // Returning here conserves the search/model budget for components
@@ -1479,10 +1493,33 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // including an intent-required one — was starved. Same contract as
       // above: a proposal cap only, floored at 1, full cap for the last
       // pending component so reserveJobBudget can still refuse and throw.
+      //
+      // ON-CHAIN FLOOR. The same axis pays for documentary opens and for
+      // bounded deterministic chain reads, and the components whose chain
+      // work is STILL OUTSTANDING are the ones a documentary spend here
+      // can starve — this component's own on-chain branch already ran,
+      // above, before a single document was opened. So the floor is sized
+      // from `ctx.pendingComponents` and released the moment nothing
+      // outstanding admits ONCHAIN_VERIFIABLE, this process cannot reach a
+      // chain, or this is the last component in the queue. It lowers the
+      // CEILING documentary reservations use; `maxSourceOpens` itself, the
+      // ledger, and the on-chain path's own full-ceiling reservations are
+      // all unchanged.
+      const onchainReserve = await resolveOnchainSourceOpenReserve(deps.db, {
+        jobId: ctx.jobId,
+        projectId: deps.project.id,
+        outstandingComponents: ctx.pendingComponents ?? [],
+        maxSourceOpens: ctx.budget.maxSourceOpens,
+        onchainAcquisitionUnavailable,
+      });
+      const documentaryMaxSourceOpens = onchainReserve.documentaryCeiling;
+      if (onchainReserve.reserved > 0) {
+        observations.add("SOURCE_OPENS_RESERVED_FOR_ONCHAIN");
+      }
       const openAllowance = Math.max(
         1,
         componentSearchAllowance({
-          maxSearchQueries: ctx.budget.maxSourceOpens,
+          maxSearchQueries: documentaryMaxSourceOpens,
           alreadyReserved: await currentSourceOpensReserved(deps.db, ctx.jobId),
           workQueueSize: ctx.workQueueSize ?? 1,
           remainingComponents: ctx.remainingComponents ?? 1,
@@ -1550,7 +1587,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       for (const url of orderedCandidates) {
         if (opensAttempted >= openAllowance) break;
         const reserved = fetchMetered
-          ? await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, ctx.budget.maxSourceOpens)
+          ? await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, documentaryMaxSourceOpens)
           : true;
         if (!reserved) {
           // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
@@ -1646,7 +1683,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               ctx.jobId,
               "sourceOpens",
               1,
-              ctx.budget.maxSourceOpens,
+              documentaryMaxSourceOpens,
             );
             if (refusalReserved) {
               spent.sourceOpens += 1;
@@ -1709,7 +1746,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             ctx.jobId,
             "sourceOpens",
             1,
-            ctx.budget.maxSourceOpens,
+            documentaryMaxSourceOpens,
           );
           if (renderReserved) {
             spent.sourceOpens += 1;

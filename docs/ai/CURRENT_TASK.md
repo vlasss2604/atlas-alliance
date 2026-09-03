@@ -2,69 +2,70 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — D-146 Slice 2: production isolated renderer enablement
+## NONE — on-chain source-open reservation V1
 
-Offline round. No live HTTP, no RPC, no model call, no browser launched,
-no Proof, and the owner probe deliberately NOT run.
+Offline round. No live HTTP, no RPC, no model call, no Proof. Cloud-safe
+focused tests only.
 
 ### What changed
 
-`ISOLATED_RENDER` is a real capability of the FETCH worker. One module,
-`src/server/jobs/renderer-capability.ts`, decides on two declarations —
-the `FETCH` role and `RENDERED_DOCS_ENABLED=1` — and nothing else. Not VPN
-state, not DNS, not a reachability probe, not a hostname, not a project.
+`sourceOpens` is one axis shared by documentary opens, renders and bounded
+RPC reads, and nothing decided the ORDER in which it could be claimed. The
+phased architecture fixes that order structurally — FETCHING runs to
+completion before EXTRACTING, and only EXTRACTING can reach a chain — so
+documentary acquisition spent the whole axis and every planned on-chain
+intent was refused `SOURCE_OPEN_BUDGET_EXHAUSTED`.
 
-- **FETCH only.** SEARCH_EXTRACT never starts a browser, flag or no flag.
-- **Self-test first, install second, both before any queue is served.**
-- **Declared but broken = startup fails**, with the self-test's own closed
-  reason. No quiet degraded mode. The self-test opens no source, writes no
-  trace, reserves no sourceOpen.
-- **Teardown exactly once**, renderer removed first, guarded against a
-  second signal.
+One new module, `src/server/engine/onchain-source-open-reserve.ts`, holds a
+small bounded FLOOR inside the EXISTING ceiling. It is not a second ledger:
+it computes a LOWER CEILING that documentary reservations pass to the same
+`reserveJobBudget`, while on-chain reservations keep passing the full one.
 
-### The Slice 1 regression the owner predicted
+- **Floor** = `MAX_ONCHAIN_INTENTS_PER_ATTEMPT` (2), capped at half the
+  job's ceiling. `reserved + documentaryCeiling === maxSourceOpens`, always.
+- **Activates** only where outstanding plan work yields an on-chain intent,
+  decided by `selectOnchainIntents` itself — Pattern establishing classes,
+  confirmed identity, supported chain, component→intent map. No project.
+- **Releases** when nothing outstanding admits it, when the context is known
+  not to reach a chain (`DOCUMENTARY_ONLY`, `ONCHAIN_RETRIEVER_NOT_CONFIGURED`),
+  and — in the executor — when no component is left pending. An UNKNOWN
+  capability never releases it.
+- **No locator still means no floor** for account-kind components: the
+  predicate inherits that gate rather than restating it.
 
-Real, and fixed generically. Slice 1 planned a URL's chain only from a
-failure seen live, so a redelivery reported the URL exhausted while a
-never-attempted strategy was still owed to it. The ledger now carries
-`failureDiagnosticsByUrl` (same `FETCH_FAILED` rows, closed D-143
-vocabulary only) and `acquireOneUrl` rebuilds the plan from persisted
-failure CLASSES before its first attempt. Nothing already tried is tried
-again — the same chain simply continues into a strategy that has never
-run. A reconstructed `HTTP_ERROR` earns nothing, because the status is not
-persisted and a category cannot tell 403 from 404.
+Applied at both documentary spend sites: `runFetchPhase` (once per pass,
+threaded to every strategy) and `s4-executor`'s fetch loop, both renders and
+its `openAllowance`.
 
 ### Unchanged
 
-Four renders per job, two fallbacks per URL, one sourceOpen reserved
-before every real render inside the same 24-open envelope, security stops
-that never reach the renderer, the confirmed-route gate, the closed trace
-vocabulary, and transport ≠ authority.
+Total ceilings, `reserveJobBudget`, the DB schema, the trace vocabulary, the
+Pattern, NET_EFFECT semantics, evidence admission, source authority, model
+prompts and provider configuration. The four boundaries stay four things:
+no subject / capability disabled / RPC failure / bounded budget limitation —
+and none is evidence that a mechanism is absent.
 
-### Prepared, NOT run
+### OPEN OWNER DECISION — `admittedLocatorsForJob` is project-scoped
 
-```
-npm run probe:renderer -- <https url> <projectSlug>
-```
+Deliberately NOT changed this round, and not renamed.
 
-Generic; same production installer, same route gate; one render, zero
-retries; writes nothing; bounded output only (success/failure, final URL,
-observed status if any, sizes, duration, closed failure category).
+`admittedLocatorsForJob(db, jobId)` resolves the project FROM the job, then
+selects every CONFIRMED, literally-present locator on CONFIRMED evidence of
+**any job of that project** (`documentary-locator-store.ts:271`). The name
+says job; the contract is project.
 
-### Deferred, explicitly
+- **Freshness**: none. No age bound, no re-verification. The only liveness
+  signal is `sources.health != 'BROKEN'`; a locator whose document changed
+  or was retracted stays admissible while its source row looks healthy.
+- **Revocation**: only by lowering `evidence.officiality`, the locator's
+  `validationResult`, or marking the source BROKEN. There is no locator-level
+  revocation act.
+- **Selection**: sorted by address, capped at 8. A locator from an old job
+  can crowd out one established in this run purely alphabetically.
+- **Provenance**: the returned shape is `{value, shape}` — the justifying
+  evidence id and its job are dropped, and `onchain_artifacts` records only
+  the acquiring job. **A Proof therefore cannot today distinguish a locator
+  reused from earlier project research from one established in this run.**
 
-- **D-146 Slice 3** — environmental-class cross-delivery SAME-STRATEGY
-  retry semantics. Every later attempt is LIVE and charges another source
-  open; replay stays free; full SSRF revalidation; no environment identity.
-- Still deferred: unconfirmed-host rendering, cross-URL alternate
-  representations, mirrors/archives, project-specific adapters.
-
-### Standing boundaries
-
-- Capability is declared, never discovered.
-- A declared capability that cannot start fails the process, loudly.
-- Only the role that acquires documents may start a browser.
-- A security refusal never earns a fallback, whatever is installed.
-- A strategy is never run twice for one url; a never-run one is never
-  skipped just because a delivery boundary fell between them.
-- Strategy is provenance, never authority.
+Owner decision needed: keep project-scoped reuse (and add provenance +
+freshness), or narrow the contract to the job. Analysis only this round.

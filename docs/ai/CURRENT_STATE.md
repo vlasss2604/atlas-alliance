@@ -27,6 +27,59 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## DOCUMENTARY ACQUISITION CAN NO LONGER STARVE THE CHAIN
+
+`sourceOpens` is ONE axis paying for documentary opens, renders and bounded
+RPC reads alike, and nothing decided the order in which it could be claimed.
+The phased shape fixes that order structurally — FETCHING runs to completion
+before EXTRACTING, and only EXTRACTING can reach a chain — so documentary
+acquisition spent the axis and every planned on-chain intent was refused
+`SOURCE_OPEN_BUDGET_EXHAUSTED`. **That is a false-negative risk, not a
+scheduling inefficiency: an absent mechanism and an unaffordable observation
+of one are different findings.**
+
+`onchain-source-open-reserve.ts` holds a small bounded FLOOR **inside the
+existing ceiling**. It is deliberately NOT a second ledger — there is still
+exactly one counter, moved only by `reserveJobBudget`. The module computes a
+LOWER CEILING that documentary reservations pass to that same primitive,
+while on-chain reservations keep passing the full one, so:
+
+```
+reserved + documentaryCeiling === maxSourceOpens      (always)
+```
+
+No total grows, no path gains capacity, and nothing is withdrawn into a pool
+that could be lost — units the chain path does not spend simply stay in the
+one counter.
+
+**The floor is `MAX_ONCHAIN_INTENTS_PER_ATTEMPT` (2), capped at half the
+job's ceiling.** It activates only where OUTSTANDING plan work yields an
+on-chain intent, and that question is answered by `selectOnchainIntents`
+itself — the Pattern's establishing classes, the confirmed identity, the
+supported chain and the component→intent map. The module owns no such
+knowledge, so **no locator still means no floor** for account-kind
+components, exactly as it means no RPC call.
+
+**Release is deterministic**: nothing outstanding admits on-chain work, the
+context is KNOWN not to reach a chain (`DOCUMENTARY_ONLY`, or
+`ONCHAIN_RETRIEVER_NOT_CONFIGURED` observed in this attempt), or no component
+is left pending. An UNKNOWN capability never releases it — the FETCH role
+cannot see EXTRACTING's retriever and must not spend capacity that role will
+need. Residual, bounded and accepted: a phased job in a deployment with no
+chain capability leaves up to 2 opens unspent, because the phase that could
+release them cannot observe the absence.
+
+Applied at both documentary spend sites: `runFetchPhase` (computed once per
+pass, threaded to first fetch, content negotiation, render fallback and
+render upgrade) and `s4-executor`'s fetch loop, both renders, and its
+`openAllowance` division.
+
+Untouched: the DB schema, `reserveJobBudget`, the trace vocabulary, the
+Pattern, evidence admission and source authority. The four boundaries remain
+four different things — no subject / capability disabled / RPC failure /
+bounded budget limitation — and none of them is evidence that a mechanism is
+absent.
+
 ## A KNOWN SOURCE NO LONGER DEPENDS ON SEARCH REDISCOVERING IT (D-148)
 
 Acquisition targets came only from search discovery. So a project could

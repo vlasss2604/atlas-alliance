@@ -44,6 +44,7 @@ import {
 } from "./providers/rendered-docs-fetcher";
 import type { ComponentWorkItem } from "./contract-view";
 import { reserveJobBudget } from "./budget-reservation";
+import { resolveOnchainSourceOpenReserve } from "./onchain-source-open-reserve";
 import { ContentFetchError } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import type { QueryProposer } from "./providers/query-proposer";
@@ -118,6 +119,12 @@ export interface FetchPhaseResult {
   failedUrls: string[];
   // Urls refused before any transport call (lossy ref, unparseable).
   refusedUrls: string[];
+  // ON-CHAIN RESERVATION, as this pass actually applied it. The job's own
+  // maxSourceOpens is NOT changed and is not reported here — this is the
+  // ceiling documentary reservations were made against, plus how many
+  // units of the same ceiling were withheld from them.
+  onchainReservedSourceOpens: number;
+  documentarySourceOpenCeiling: number;
 }
 
 // PHASE 1 — SEARCHING (model-side environment).
@@ -693,7 +700,31 @@ export async function runFetchPhase(input: {
   projectId: string;
   contentFetcher: ContentFetcher;
   maxSourceOpens: number;
+  // Declared by a caller that KNOWS this job's on-chain path cannot act.
+  // The FETCH role deliberately does not install a retriever and therefore
+  // cannot observe the EXTRACTING role's capability, so it never asserts
+  // this itself — an unknown capability must not release capacity that a
+  // process which HAS it is going to need.
+  onchainAcquisitionUnavailable?: boolean;
 }): Promise<FetchPhaseResult> {
+  // THE STARVATION FIX, at the only place documentary acquisition spends
+  // this axis in the phased architecture. The FETCH phase runs to
+  // completion BEFORE the deterministic on-chain path exists, so without a
+  // floor it can — and on the live run did — leave every planned chain
+  // intent unaffordable. Computed ONCE per pass, from the boundary
+  // contract's own outstanding work queue, and applied by lowering the
+  // CEILING documentary reservations are made against. The job's
+  // maxSourceOpens is untouched, the ledger is untouched, and the reserve
+  // is not withdrawn from anything: unspent units stay in the one counter.
+  const reserve = await resolveOnchainSourceOpenReserve(input.db, {
+    jobId: input.jobId,
+    projectId: input.projectId,
+    outstandingComponents: (await neededWorkItems(input.db, input.jobId)).map(
+      (i) => i.component,
+    ),
+    maxSourceOpens: input.maxSourceOpens,
+    onchainAcquisitionUnavailable: input.onchainAcquisitionUnavailable,
+  });
   const out: FetchPhaseResult = {
     sealedDocumentIds: [],
     skippedUrls: [],
@@ -701,7 +732,13 @@ export async function runFetchPhase(input: {
     refusedUrls: [],
     exhaustedUrls: [],
     strategyAttempts: [],
+    onchainReservedSourceOpens: reserve.reserved,
+    documentarySourceOpenCeiling: reserve.documentaryCeiling,
   };
+  // Every documentary reservation below — first fetch, content
+  // negotiation, render fallback and render upgrade alike — reserves
+  // against THIS ceiling, so no documentary path can reach the floor.
+  const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };
   const targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
 
   for (const url of targets) {
@@ -717,7 +754,7 @@ export async function runFetchPhase(input: {
       continue;
     }
 
-    const outcome = await acquireOneUrl(input, url, out);
+    const outcome = await acquireOneUrl(documentaryInput, url, out);
     if (outcome === "BUDGET_EXHAUSTED") break;
   }
   return out;
