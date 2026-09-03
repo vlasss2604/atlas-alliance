@@ -11,6 +11,8 @@
 // persisted data cannot answer a question, the answer is "could not verify"
 // — which is a research outcome, not an application error.
 
+import { deriveReaderMeaning, type ReaderMeaning } from "./reader-meaning";
+
 export type JobState =
   | "QUEUED"
   | "RUNNING"
@@ -1152,6 +1154,16 @@ export interface ResultRow {
   // Distinct admitted source classes behind this row, for the caveats about
   // what those sources cannot settle. Empty where nothing was admitted.
   sourceClasses: string[];
+  // WHAT A PERSON TAKES AWAY FROM THIS ROW, in one closed reader state and
+  // one sentence — derived in reader-meaning.ts from `rawStatus`,
+  // `reasonCodes` and the canonical evidence sets, and from nothing else.
+  //
+  // It sits ABOVE `state`/`stateLabel` rather than replacing them: the badge
+  // says how firmly the finding is held, this says what was found. A row
+  // where ATLAS measured a supply decrease and a row where it could not
+  // measure anything are both "Partly established" and are not the same
+  // finding, which is the difference this field carries.
+  readerMeaning: ReaderMeaning;
 }
 
 export interface ResultLadderView {
@@ -1288,6 +1300,9 @@ function buildRow(
   def: { component: string; label: string },
   byComponent: Map<string, LadderComponentInput>,
   classesByComponent: Record<string, readonly string[]> | undefined,
+  // The Proof's own research cutoff, passed straight through. Null where the
+  // caller has none — this module never substitutes a clock for it.
+  asOf: string | null = null,
 ): ResultRow {
   const row = byComponent.get(def.component) ?? null;
   const rawStatus = row?.status ?? null;
@@ -1346,6 +1361,20 @@ function buildRow(
     refusedCount,
     checkedSummary,
     sourceClasses: [...(classesByComponent?.[def.component] ?? [])],
+    // CANONICAL IN, CANONICAL OUT. The status and reason codes handed over
+    // are the persisted ones, the evidence ids are copied verbatim from the
+    // component row, and `detail` is the reason-code sentence this function
+    // already derived — so the reader layer owns no second copy of it and
+    // cannot drift from the one the audit renders.
+    readerMeaning: deriveReaderMeaning({
+      status: rawStatus,
+      reasonCodes: row?.reasonCodes,
+      supportingEvidenceIds: row?.supportingEvidenceIds,
+      contradictingEvidenceIds: row?.contradictingEvidenceIds,
+      subject: phrase,
+      detail: reason,
+      asOf,
+    }),
   };
 }
 
@@ -1384,6 +1413,26 @@ export function findingMicroAnswer(
   // limitation must never read as a finding about the project.
   if (row.coverage === "BLOCKED") {
     return `${capitalise(phrase)} could not be checked in this research run.`;
+  }
+
+  // A MEASUREMENT IS THE ANSWER, SO IT LEADS.
+  //
+  // These two readings are the only ones where the badge beside this line is
+  // actively misleading on its own. "Partly established" over an admitted
+  // summary hides that ATLAS measured a real supply decrease; "Evidence
+  // indicates otherwise" over "the sources point the other way" reads as if
+  // the observed event itself were in doubt, when what the measurement
+  // contradicts is a net reduction and nothing else.
+  //
+  // The sentence is the reader projection's own headline — a closed
+  // template over canonical state, not a summary chosen from evidence — so
+  // it says the same thing every run and cannot answer a question the
+  // component did not ask. Every other row keeps the copy it had.
+  if (
+    row.readerMeaning.state === "MEASURED_NOT_ATTRIBUTED" ||
+    row.readerMeaning.state === "CONTRADICTED_BY_MEASUREMENT"
+  ) {
+    return row.readerMeaning.headline;
   }
 
   switch (row.state) {
@@ -1539,6 +1588,7 @@ export function deriveQuestionFindings(
   }[],
   components: readonly LadderComponentInput[],
   classesByComponent?: Record<string, readonly string[]>,
+  asOf: string | null = null,
 ): ResultRow[] {
   const byComponent = new Map(components.map((c) => [c.component, c]));
   return findings
@@ -1550,6 +1600,7 @@ export function deriveQuestionFindings(
         { component: f.component, label: safeClaimLabel(f.component, f.label) },
         byComponent,
         classesByComponent,
+        asOf,
       ),
     )
     .filter((r) => r.state !== "NOT_ASSESSED");
@@ -1564,11 +1615,12 @@ export function deriveQuestionFindings(
 export function deriveResultLadder(
   components: readonly LadderComponentInput[],
   classesByComponent?: Record<string, readonly string[]>,
+  asOf: string | null = null,
 ): ResultLadderView {
   const byComponent = new Map(components.map((c) => [c.component, c]));
   const build = (defs: readonly { component: string; label: string }[]) =>
     defs
-      .map((d) => buildRow(d, byComponent, classesByComponent))
+      .map((d) => buildRow(d, byComponent, classesByComponent, asOf))
       .filter((r) => r.state !== "NOT_ASSESSED");
 
   const mechanism = build(MECHANISM_ROWS);

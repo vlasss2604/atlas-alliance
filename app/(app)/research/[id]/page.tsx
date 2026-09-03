@@ -282,7 +282,11 @@ export default function ResearchDetailPage() {
 
   const usedDocs = admittedDocs.reduce((n, d) => n + d.groups.length, 0);
 
-  const ladder = deriveResultLadder(components, sourceClassesByComponent);
+  // THE CUTOFF THE READING SPEAKS FOR, from the Proof and nowhere else.
+  // Null while a run has no Proof yet: a reader meaning without an "as of"
+  // is honest; one carrying today's date would not be.
+  const asOf = detail.proof?.researchCutoff ?? null;
+  const ladder = deriveResultLadder(components, sourceClassesByComponent, asOf);
   // WHERE THE EVIDENCE STOPS, ON THE QUESTION'S OWN TERMS.
   //
   // With a projection, the boundary is the first thing the QUESTION asked
@@ -291,7 +295,7 @@ export default function ResearchDetailPage() {
   // ladder's own conservative boundary, which is only drawn where an
   // established run exists to end.
   const questionRows = detail.questionFindings
-    ? deriveQuestionFindings(detail.questionFindings, components, sourceClassesByComponent)
+    ? deriveQuestionFindings(detail.questionFindings, components, sourceClassesByComponent, asOf)
     : [];
   // A row established by NOTHING is a harder stop than one established in
   // part, so it is preferred even when the projection ordered a partial
@@ -486,6 +490,7 @@ export default function ResearchDetailPage() {
           evidenceByComponent={evidenceByComponent}
           supportingSummariesByComponent={supportingSummariesByComponent}
           questionFindings={detail.questionFindings}
+          asOf={asOf}
         />
       )}
 

@@ -45,6 +45,7 @@ export function ResultLadder({
   evidenceByComponent,
   supportingSummariesByComponent,
   questionFindings,
+  asOf,
 }: {
   components: LadderComponentInput[];
   // Needed only to address the snapshot route. The evidence model carries
@@ -68,6 +69,9 @@ export function ResultLadder({
         supportingComponents: string[];
       }[]
     | null;
+  // The Proof's research cutoff, carried into every row's reader meaning.
+  // A prop, so this component never reads a clock of its own.
+  asOf?: string | null;
 }) {
   // INDEPENDENT, NOT AN ACCORDION. A Set, so each finding's state is its
   // own: opening B leaves A open, and closing A leaves B untouched.
@@ -80,10 +84,10 @@ export function ResultLadder({
       return next;
     });
 
-  const view = deriveResultLadder(components, sourceClassesByComponent);
+  const view = deriveResultLadder(components, sourceClassesByComponent, asOf ?? null);
   const question =
     questionFindings && questionFindings.length > 0
-      ? deriveQuestionFindings(questionFindings, components, sourceClassesByComponent)
+      ? deriveQuestionFindings(questionFindings, components, sourceClassesByComponent, asOf ?? null)
       : [];
 
   const rowProps = (row: ResultRow) => ({
