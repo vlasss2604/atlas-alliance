@@ -2,7 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
-import { deriveQuestionFindings, findingExplanation } from "../src/client/research-model";
+import {
+  componentUnresolvedLabel,
+  deriveQuestionFindings,
+  findingExplanation,
+} from "../src/client/research-model";
 
 // THE TOP OF THE RESULT, AS ONE OBJECT.
 //
@@ -95,9 +99,30 @@ describe("the unresolved block names the fact, not the process", () => {
 
   it("TEST 3b: it names the unresolved thing and why", () => {
     const block = code.slice(code.indexOf('data-testid="answer-boundary"'));
-    // The unresolved finding's own label, then its canonical explanation.
-    expect(block).toContain("{boundary.label}");
+    // The unresolved finding, named as OPEN rather than as a claim, then its
+    // canonical explanation. "It is currently active" is the right wording
+    // beside a badge that grades it and the wrong wording under a heading
+    // that has already said the question is unresolved.
+    expect(block).toContain("componentUnresolvedLabel(boundary.component, boundary.label)");
     expect(block).toContain("findingExplanation(boundary)");
+  });
+
+  it("TEST 3c: the unresolved label never reads as a settled statement", () => {
+    // Every component the block can name, in the form it will be rendered.
+    for (const [component, expected] of [
+      ["CURRENT_STATE", "Whether the mechanism is currently active"],
+      ["EXECUTION_EVIDENCE", "Whether the mechanism has actually executed"],
+      ["NET_EFFECT", "A durable effect on token supply"],
+      ["DESTINATION", "Where the value ends up"],
+    ] as const) {
+      expect(componentUnresolvedLabel(component, "It is currently active")).toBe(expected);
+    }
+    // A component with no ordinary-words phrase keeps the claim label rather
+    // than falling through to an internal name.
+    expect(componentUnresolvedLabel("SOME_FUTURE_COMPONENT", "A claim label")).toBe(
+      "A claim label",
+    );
+    expect(componentUnresolvedLabel(null, "A claim label")).toBe("A claim label");
   });
 
   it("TEST 4: an evidence gap and a research limitation are labelled differently", () => {

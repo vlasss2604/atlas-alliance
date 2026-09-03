@@ -1295,6 +1295,33 @@ export function componentClaimLabel(component: string | null | undefined): strin
   return CLAIM_LABELS[component] ?? componentLabel(component);
 }
 
+// THE SAME FINDING, NAMED AS AN OPEN QUESTION RATHER THAN AS A CLAIM.
+//
+// A claim label is written to be EVALUATED — "It is currently active" sits
+// beside a badge that grades it, and reads correctly there. Under a heading
+// that already says "Still unresolved" the identical words read as an
+// assertion the research made, which is the opposite of what the block says.
+//
+// `COMPONENT_PHRASES` is already the object-of-a-sentence form of every
+// component, written for exactly this symmetry ("ATLAS verified …" / "ATLAS
+// could not verify …"), so "It is currently active" becomes "Whether the
+// mechanism is currently active" — the thing that is open, named as open.
+// Nothing new is written: this is the vocabulary the answer and the
+// micro-answer already use.
+//
+// FALLS BACK to the claim label for a component with no phrase, which keeps
+// the block from ever rendering an internal name. It also drops a
+// model-written projection label here, which is the safe direction: the
+// unresolved block should say what is unresolved in canonical words.
+export function componentUnresolvedLabel(
+  component: string | null | undefined,
+  fallbackLabel: string,
+): string {
+  const phrase = component ? COMPONENT_PHRASES[component] : undefined;
+  if (!phrase) return fallbackLabel;
+  return phrase.length > 0 ? phrase[0].toUpperCase() + phrase.slice(1) : fallbackLabel;
+}
+
 // THE SEMANTIC ENVELOPE OF A CANONICAL COMPONENT.
 //
 // A projection label is model-written presentation, and presentation may

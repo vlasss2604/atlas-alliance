@@ -19,6 +19,7 @@ import {
   findingExplanation,
   groupEvidenceByDocument,
   isTerminal,
+  componentUnresolvedLabel,
   jobOutcome,
   researchAnswer,
   relativeAge,
@@ -446,7 +447,7 @@ export default function ResearchDetailPage() {
                 {boundary.coverage === "BLOCKED" ? "Research limitation" : "Still unresolved"}
               </p>
               <p className="mt-1.5 text-[0.9rem] font-medium leading-snug text-[var(--atlas-text)]">
-                {boundary.label}
+                {componentUnresolvedLabel(boundary.component, boundary.label)}
               </p>
               <p className="mt-1.5 text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]">
                 {findingExplanation(boundary).join(" ")}
