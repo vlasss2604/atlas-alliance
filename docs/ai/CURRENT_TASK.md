@@ -2,62 +2,66 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — locator provenance boundary V1
+## NONE — dynamic on-chain reactivation V1 + production fact applicability
 
-Offline round. No live HTTP, no RPC, no model call, no Proof, no schema
-change. Cloud-safe focused tests only.
+Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
+Cloud-safe focused tests only.
 
-### What changed
+### PART A — the applicability map was unreachable in production
 
-`admittedLocatorsForJob` resolved the project FROM the job and then returned
-CONFIRMED documentary locators from **any** job of that project, with no
-freshness bound, no revalidation, no revocation act, and `{value, shape}`
-only — so a fresh Proof could plan account-level reads against a historical
-address and could not say it had done so.
+`onchainFactAppliesToComponent` was right; `loadEvidenceRows` was scoped to
+`(job, step, component)`, so a BURN filed at EXECUTION_EVIDENCE was never
+offered to NET_EFFECT. The loader now selects a union of the component's own
+Evidence plus this job's Evidence whose persisted `onchain_fact_kind` the
+closed map declares relevant, with the job predicate outside the union. The
+kind list is derived from the same map (`applicableFactKindsForComponent`),
+never restated. Documentary rows carry a NULL kind and cannot cross. The map
+is still exactly `BURN -> NET_EFFECT`.
 
-One predicate changed. The boundary is now the job:
+### PART B — one bounded reactivation, after the controller
 
-```
-eq(researchJobs.id, jobId)          // was: eq(researchJobs.projectId, …)
-```
+`onchain-reactivation.ts`, called from `run-job.ts` between
+`runResearchController` and `reconcileOutstandingComponents`.
 
-- **Nothing else was relaxed**: `literallyPresent`, `validationResult =
-  CONFIRMED`, `officiality = CONFIRMED`, the documentary source classes,
-  `sources.health != 'BROKEN'`, the shape validator, the cap of 8.
-- **Cross-project is now impossible by construction** — a job has one
-  project — rather than by a predicate that would imply the project still
-  means something here.
-- **Provenance**: the return type is a new `AdmittedLocator` carrying
-  `evidenceId`, `sourceId`, `researchJobId`. `ConfirmedLocator` is unchanged,
-  so no existing producer or consumer moved. Dedup ties break on the
-  evidence id, so the surviving attribution is deterministic.
+Eligible iff: a terminal attempt exists; no on-chain operation was ever
+issued for `(job, component)`; and `selectOnchainIntents` now returns an
+intent with the locators THIS job has admitted by now. The unit is only
+`runStructuredOnchainAcquisition` — no attempt row, no query, no search, no
+fetch, no render, no model call.
 
-### Identity is NOT a documentary locator
+One-shot is derived from trace (`FETCH_ATTEMPTED` /
+`CANDIDATE_SKIPPED_BUDGET` with a canonical on-chain `target_ref`), written
+before the call, so a failure consumes the opportunity and a redelivery
+repeats nothing. No schema field was added for it.
 
-Confirmed project identity keeps its existing semantics: `eligibleSubjects`
-still returns the anchor from identity alone, so `TOKEN_SUPPLY` on
-NET_EFFECT / CURRENT_STATE / SOURCE_OF_VALUE is planned with no locator
-anywhere. Only account-kind intents wait for a locator admitted in this job.
+### PART C — the floor is one authorised chain deep
 
-### The accepted cost
+`ONCHAIN_RESERVED_SOURCE_OPENS = 1 + MAX_PROMOTION_DEPTH` (4), derived from
+the promotion rules, capped at half the ceiling, inside an unchanged total
+(24 for INTERNAL_ALPHA_V1). Capacity is held while any work-queue component
+admits on-chain acquisition and has not had its opportunity — `pendingComponents`
+emptiness is no longer a release condition, and a component with no locator
+YET keeps the floor because the read it unblocks is what the floor is for.
 
-EXECUTION_EVIDENCE is step 4, DESTINATION is step 6. A fresh job reaches the
-account-kind components before the one that documents an account, so on a
-first run those components legitimately have no subject. That is a visible
-acquisition boundary and an honest INSUFFICIENT_EVIDENCE — never a fallback
-to a previous job, a standalone observation, a project heuristic, an address
-parsed from text, or a model guess.
+### PART D — the chain proved offline
 
-### Interaction with the source-open floor (232b9ac)
+late locator → ACCOUNT_INFO → TOKEN_ACCOUNTS_BY_OWNER → SIGNATURES_FOR_ADDRESS
+→ TRANSACTION_DETAIL → one BURN Evidence row at EXECUTION_EVIDENCE →
+NET_EFFECT reads it through typed applicability →
+`SUPPLY_REDUCTION_NOT_ESTABLISHED` clears, `NET_SUPPLY_CHANGE_NOT_ESTABLISHED`
+remains, status `PARTIALLY_SUPPORTED`, never `SUPPORTED`.
 
-Unchanged and re-verified. The floor still activates for a fresh job with a
-confirmed identity, because anchor-addressable components still yield
-intents. An account-kind component earns the floor only once this job has
-admitted a locator — the floor inherits the locator gate rather than
-restating it.
+### Accepted limitation
 
-### Deferred, explicitly
+A reactivated acquisition is indistinguishable in the audit from an ordinary
+on-chain one (same operation types, same reason codes, null attempt id).
+Labelling it needs a new trace enum value, i.e. a migration — deliberately
+not done.
 
-Historical locator reuse may return only through an explicit Research Memory
-design carrying provenance, freshness, revalidation, revocation and
-transparent historical reuse. Not built, not stubbed, not scheduled here.
+### Standing boundaries
+
+- Applicability grants visibility, never admission.
+- Reactivation is newly-unblocked work, never a retry.
+- A failure consumes the opportunity; there is no free retry in V1.
+- Every RPC still spends one unit of the one canonical sourceOpens ledger.
+- No Pattern change, no Research Memory, no historical locator reuse.

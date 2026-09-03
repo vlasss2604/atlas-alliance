@@ -1495,20 +1495,20 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // pending component so reserveJobBudget can still refuse and throw.
       //
       // ON-CHAIN FLOOR. The same axis pays for documentary opens and for
-      // bounded deterministic chain reads, and the components whose chain
-      // work is STILL OUTSTANDING are the ones a documentary spend here
-      // can starve — this component's own on-chain branch already ran,
-      // above, before a single document was opened. So the floor is sized
-      // from `ctx.pendingComponents` and released the moment nothing
-      // outstanding admits ONCHAIN_VERIFIABLE, this process cannot reach a
-      // chain, or this is the last component in the queue. It lowers the
-      // CEILING documentary reservations use; `maxSourceOpens` itself, the
-      // ledger, and the on-chain path's own full-ceiling reservations are
-      // all unchanged.
+      // bounded deterministic chain reads, so a documentary spend here can
+      // starve a chain read this job has not made yet. The floor is sized
+      // job-wide — every work-queue component that admits deterministic
+      // on-chain acquisition and has not yet had its one bounded
+      // opportunity — NOT from `ctx.pendingComponents`. Pending-emptiness
+      // is not a release condition: a component whose subject arrives late
+      // is revisited once after the controller, so the last component in
+      // the queue must not be able to spend the capacity that revisit
+      // needs. It lowers the CEILING documentary reservations use;
+      // `maxSourceOpens` itself, the ledger, and the on-chain path's own
+      // full-ceiling reservations are all unchanged.
       const onchainReserve = await resolveOnchainSourceOpenReserve(deps.db, {
         jobId: ctx.jobId,
         projectId: deps.project.id,
-        outstandingComponents: ctx.pendingComponents ?? [],
         maxSourceOpens: ctx.budget.maxSourceOpens,
         onchainAcquisitionUnavailable,
       });

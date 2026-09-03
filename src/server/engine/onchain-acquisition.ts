@@ -121,6 +121,36 @@ const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
   FLOW_PATH: ["ACCOUNT_INFO"],
 };
 
+// MAY this component ever reach a chain, given the Pattern and the
+// project's identity — WITHOUT asking whether a subject exists yet?
+//
+// Deliberately separate from `selectOnchainIntents`, because two different
+// questions were being answered by one function and only one of them is
+// about subjects:
+//
+//   CAPACITY  "could this component still need a bounded chain read in this
+//             job?"  — a locator it does not have YET must not answer no,
+//             or the budget protecting that read is released before the
+//             read becomes possible.
+//   ACTION    "may a call be issued right now?" — that one REQUIRES a
+//             subject, and `selectOnchainIntents` still answers it.
+//
+// Everything except the subject step is shared, and shared by CALL rather
+// than by restatement: `selectOnchainIntents` consults this first, so the
+// Pattern gate, the identity gate, the supported-chain gate and the
+// component -> intent map can never drift between the two answers.
+export function componentAdmitsOnchainAcquisition(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): boolean {
+  // The Pattern decides admissibility; acquisition never overrides it.
+  if (!input.establishingClasses.includes("ONCHAIN_VERIFIABLE")) return false;
+  if (!input.identity?.tokenAddress) return false;
+  if (input.identity.chain !== "solana") return false; // v1: Solana only
+  return (INTENTS_BY_COMPONENT[input.component] ?? []).length > 0;
+}
+
 export function selectOnchainIntents(input: {
   component: string;
   establishingClasses: readonly EvidenceSourceClass[];
@@ -128,14 +158,10 @@ export function selectOnchainIntents(input: {
   locators?: readonly MechanismLocator[];
   maxIntents: number;
 }): OnchainIntent[] {
-  // The Pattern decides admissibility; acquisition never overrides it.
-  if (!input.establishingClasses.includes("ONCHAIN_VERIFIABLE")) return [];
-  if (!input.identity?.tokenAddress) return [];
-  if (input.identity.chain !== "solana") return []; // v1: Solana only
+  if (!componentAdmitsOnchainAcquisition(input)) return [];
   const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
-  if (kinds.length === 0) return [];
 
-  const subjects = eligibleSubjects(input.identity, input.locators ?? []);
+  const subjects = eligibleSubjects(input.identity!, input.locators ?? []);
   const intents: OnchainIntent[] = [];
   for (const kind of kinds) {
     // STRUCTURAL GATE, not a convention. An intent that may only be
@@ -153,7 +179,7 @@ export function selectOnchainIntents(input: {
         kind,
         chain: "solana",
         network: "mainnet",
-        projectAnchor: input.identity.tokenAddress,
+        projectAnchor: input.identity!.tokenAddress!,
         subjectKind: subjectKindOf(kind),
         subject: s.subject,
       });

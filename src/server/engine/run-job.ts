@@ -8,6 +8,7 @@ import type { ControllerRunResult, WorkExecutor } from "./controller";
 import { MissingActivePatternError } from "./active-pattern";
 import { loadJobContractView } from "./job-contract-view";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
+import { runOnchainReactivationPass } from "./onchain-reactivation";
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 import { buildAndPersistProof } from "./proof-store";
@@ -70,7 +71,7 @@ export async function runS4ResearchJob(
   // Lifted verbatim into job-contract-view.ts (D-136) so the search
   // phase derives the SAME work queue this controller run will walk.
   // Identical reads, identical order, identical failure messages.
-  const { view } = await loadJobContractView(db, jobId);
+  const { job, view } = await loadJobContractView(db, jobId);
 
   let result: ControllerRunResult;
   try {
@@ -142,6 +143,33 @@ export async function runS4ResearchJob(
     }
     throw e;
   }
+
+  // DYNAMIC SUBJECT REACTIVATION — one bounded on-chain opportunity for a
+  // component whose deterministic subject arrived AFTER it ran.
+  //
+  // Placed here, and only here, for two reasons that are both about
+  // ordering. It runs AFTER the controller because that is the earliest
+  // moment every locator this job will admit actually exists; and BEFORE
+  // the S5 sweep below because that sweep is a derived projection over
+  // persisted Evidence — so a component reactivated now is re-reconciled
+  // from its new on-chain rows automatically, with no special case, and
+  // NET_EFFECT then reads the applicable typed fact through the ordinary
+  // applicability route. Nothing downstream needs to know this pass exists.
+  //
+  // Deliberately NOT on the BudgetExhaustedError path above: that job's
+  // axis is spent, so a pass there could only spend components' one
+  // opportunity on reservations that are certain to be refused.
+  //
+  // It creates no attempt, calls no model, runs no search and fetches no
+  // document (see the module comment), and it cannot fail the job:
+  // acquisition-level outcomes are recorded as observations and trace, the
+  // same way the executor's own on-chain branch records them.
+  await runOnchainReactivationPass(db, {
+    jobId,
+    projectId: job.projectId,
+    workQueue: view.workQueue,
+    maxSourceOpens: view.researchBudget.maxSourceOpens,
+  });
 
   // HIGH-2: cover every workQueue component whose S4 attempt is already
   // terminal, not just the ones this call's own inner loop attempted —

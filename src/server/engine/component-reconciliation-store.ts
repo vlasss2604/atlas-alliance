@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray, or } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchAttempts, researchComponentResults, researchJobs, researchPatterns, researchPlans } from "../db/schema";
@@ -8,6 +8,7 @@ import { parseContract } from "../memory/contract";
 import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
 import type { ComponentWorkItem } from "./contract-view";
 import { reconcileComponent, type ComponentReconciliationResult, type EvidenceRow } from "./component-reconciler";
+import { applicableFactKindsForComponent } from "./onchain-facts";
 
 // Phase 6, S5 — persistence boundary (phase-6-s5-plan.md §11.3, §17). This
 // is the ONLY module that touches the DB for reconciliation: it loads
@@ -68,23 +69,68 @@ async function loadActivePatternContentForJob(db: Database | Transaction, jobId:
   return patternContentSchema.parse(pattern.content);
 }
 
+// WHAT THE RECONCILER IS ALLOWED TO SEE.
+//
+// THE DEFECT THIS CLOSES. `onchainFactAppliesToComponent` was correct and
+// unreachable: the reconciler asked it per row, but this loader selected
+// rows by (job, step, component) alone, so the one row the rule exists for
+// — a BURN filed at EXECUTION_EVIDENCE, because a transaction is reachable
+// only through that component's promotion chain — was never among the rows
+// NET_EFFECT was asked about. The rule passed its unit tests (which hand
+// the row to the pure function directly) and could not fire in production.
+//
+// The query is therefore a union of exactly two things, and the job
+// predicate is OUTSIDE the union so neither branch can leave this job:
+//
+//   A. this component's own Evidence — unchanged, ordinary semantics;
+//   B. Evidence of this job carrying a persisted `onchain_fact_kind` the
+//      closed applicability map declares relevant to THIS component.
+//
+// (B) IS DELIBERATELY NARROW, IN THREE INDEPENDENT WAYS.
+//
+//   * It is keyed on `onchain_fact_kind`, which ONLY deterministic chain
+//     synthesis ever writes (onchain-acquisition.ts says so at the single
+//     insert that sets it). Documentary, model-extracted, OFFICIAL_DOCS,
+//     DATA_PROVIDER and SOCIAL rows carry NULL there, and NULL matches no
+//     entry in an IN list — so documentary visibility cannot widen through
+//     this route even by accident.
+//   * The kind list comes from `applicableFactKindsForComponent`, derived
+//     from the same closed map the reconciler consults, so an
+//     ONCHAIN_VERIFIABLE row whose kind is not mapped to this component —
+//     TOKEN_TRANSFER, TOKEN_ACCOUNT_BALANCE, TOKEN_ACCOUNTS_BY_OWNER — is
+//     not selected at all. A component with no mapped kind gets branch (A)
+//     verbatim, i.e. exactly today's behaviour.
+//   * Selection is not admission. Every row loaded here still faces
+//     `onchainFactAppliesToComponent` in the pure reconciler, then job
+//     scope, class admissibility, entity binding, directness, relationship,
+//     freshness, supersession and dedup — unchanged.
+//
+// NOTHING IS COPIED. One Evidence row, one id, one artifact, one source,
+// one provenance chain, read by a second component. No row is written, no
+// count grows, and the row keeps its own step and component.
 async function loadEvidenceRows(
   db: Database | Transaction,
   jobId: string,
   step: number,
   component: string,
 ): Promise<EvidenceRow[]> {
-  // Scoped by (job, step, component) at the SQL level — the pure
-  // function's own WRONG_COMPONENT/WRONG_PROJECT checks are defense in
-  // depth on top of this, not the primary scoping mechanism.
+  const ownComponent = and(
+    eq(evidence.patternStep, step),
+    eq(evidence.component, component),
+  );
+  const crossKinds = applicableFactKindsForComponent(component);
   const rows = await db
     .select()
     .from(evidence)
     .where(
       and(
+        // The job boundary is never inside the union: another job's BURN
+        // is unreachable through applicability, exactly as it is through
+        // every other path.
         eq(evidence.researchJobId, jobId),
-        eq(evidence.patternStep, step),
-        eq(evidence.component, component),
+        crossKinds.length > 0
+          ? or(ownComponent, inArray(evidence.onchainFactKind, [...crossKinds]))
+          : ownComponent,
       ),
     );
   return rows.map((r) => ({

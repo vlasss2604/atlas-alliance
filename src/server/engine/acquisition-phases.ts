@@ -719,9 +719,6 @@ export async function runFetchPhase(input: {
   const reserve = await resolveOnchainSourceOpenReserve(input.db, {
     jobId: input.jobId,
     projectId: input.projectId,
-    outstandingComponents: (await neededWorkItems(input.db, input.jobId)).map(
-      (i) => i.component,
-    ),
     maxSourceOpens: input.maxSourceOpens,
     onchainAcquisitionUnavailable: input.onchainAcquisitionUnavailable,
   });

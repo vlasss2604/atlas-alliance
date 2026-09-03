@@ -27,6 +27,91 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## A TYPED CHAIN FACT NOW ACTUALLY REACHES THE COMPONENT IT BEARS ON
+
+`onchainFactAppliesToComponent` was correct and **unreachable**. The
+reconciler asked it per row, but `loadEvidenceRows` selected by
+`(job, step, component)` alone — so the one row the map exists for, a BURN
+filed at EXECUTION_EVIDENCE (the only component granted
+`SIGNATURE_TO_TRANSACTION`), was never among the rows NET_EFFECT was asked
+about. The rule passed its unit tests, which hand the row to the pure
+function directly, and could not fire in a live run.
+
+The loader now selects a union: **(A)** this component's own Evidence,
+unchanged, plus **(B)** Evidence of this job whose persisted
+`onchain_fact_kind` the closed map declares relevant to this component. The
+job predicate sits OUTSIDE the union, so another job's BURN is unreachable.
+The kind list comes from `applicableFactKindsForComponent`, derived from
+`APPLICABLE_COMPONENTS_BY_KIND` rather than restated, so the two directions
+of the map can never disagree.
+
+**Documentary visibility did not widen.** `onchain_fact_kind` is NULL on
+every model-extracted, documentary, DATA_PROVIDER and SOCIAL row, and NULL
+matches no entry in an IN list. An ONCHAIN_VERIFIABLE row with a null kind,
+a TOKEN_TRANSFER, a TOKEN_ACCOUNT_BALANCE and a TOKEN_ACCOUNTS_BY_OWNER are
+all still invisible across a component boundary. Selection is not admission:
+every loaded row still faces the map again in the reconciler, then job scope,
+class admissibility, entity binding, directness, relationship, freshness and
+dedup. The map is still exactly `BURN -> NET_EFFECT`.
+
+**Nothing is copied.** One Evidence row, one id, one artifact, one source,
+one provenance chain, read by a second component.
+
+## RESEARCH CAN LEARN FROM WHAT IT ACQUIRED AN HOUR EARLIER IN ITS OWN RUN
+
+Acquisition order is fixed; subject availability is not. A component's
+structured on-chain branch runs at the TOP of its attempt (s4-executor stage
+0b) and a documentary locator is admitted at the BOTTOM (stage 4), possibly
+by a much later component. On the seeded Pattern that leaves FLOW_PATH (2),
+EXECUTION_EVIDENCE (4), DESTINATION and RECIPIENT (6) reaching their chain
+branch with no subject, while the address that unblocks them is admitted by
+the same job minutes later. The controller walks its queue once and never
+revisits, so the subject died unused.
+
+`onchain-reactivation.ts` adds **one bounded opportunity per component per
+job**, run in `run-job.ts` between the controller and the S5 sweep.
+
+- **Not a retry.** The licence is narrow: new Evidence admitted in THIS job
+  created a subject that did not exist before. A failed RPC, a refused
+  budget and an exhausted promotion chain are none of those, and none is
+  revisited.
+- **Not an attempt.** No `research_attempts` row, so `reservedRecoverySteps`
+  is untouched and each component keeps one canonical outcome.
+- **Not a repeat of paid work.** The module imports no QueryProposer, no
+  SearchGateway, no ContentFetcher and no EvidenceExtractor — structurally,
+  not by discipline.
+- **One-shot without a schema change.** The ledger is derived from trace:
+  a component whose `(job, component)` already carries an on-chain
+  `FETCH_ATTEMPTED` or `CANDIDATE_SKIPPED_BUDGET` row is refused. The row is
+  written BEFORE the call, so a failure consumes the opportunity exactly as
+  a success does, and a redelivered EXTRACTING phase repeats nothing.
+- **Placed before the S5 sweep on purpose**: reconciliation is a derived
+  projection, so a reactivated component is re-derived from its new rows
+  with no special case, and NET_EFFECT then reads the BURN through the
+  ordinary applicability route. Deliberately NOT on the
+  `BudgetExhaustedError` path, where it could only spend opportunities on
+  reservations certain to be refused.
+
+**The floor is now one authorised chain deep**: `1 + MAX_PROMOTION_DEPTH`
+(4), derived from the promotion rules rather than chosen, still capped at
+half the ceiling, still inside the unchanged total
+(`INTERNAL_ALPHA_V1.maxSourceOpens` is still 24). Protecting fewer than a
+full chain buys a chain that can start and cannot finish.
+
+**The release rule changed**: capacity is held while any work-queue
+component both admits deterministic on-chain acquisition AND has not yet had
+its one opportunity — never released merely because `pendingComponents` is
+empty. The controller finishing is not the end of deterministic research.
+Capacity is now held for a component that has no locator YET, because the
+read that locator unblocks is exactly what the floor exists to pay for;
+whether a call may be ISSUED still requires a subject, and
+`selectOnchainIntents` still decides that.
+
+**Trace observability limitation, accepted:** a reactivated acquisition is
+indistinguishable in the audit from an ordinary on-chain one — same
+operation types, same reason codes, `research_attempt_id` null. Labelling it
+would need a new `trace_operation_type` value, i.e. a migration.
+
 ## A FRESH JOB NO LONGER INHERITS AN OLD RUN'S ADDRESS
 
 `admittedLocatorsForJob` was scoped to the PROJECT, so a fresh research job

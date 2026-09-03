@@ -230,6 +230,30 @@ export function applicableComponentsForFactKind(kind: OnchainFactKind): readonly
   return APPLICABLE_COMPONENTS_BY_KIND[kind] ?? [];
 }
 
+// THE SAME MAP, READ THE OTHER WAY: which typed kinds may a component READ
+// from outside its own (step, component)?
+//
+// It exists because the map was only half-connected in production. The
+// reconciler asked `onchainFactAppliesToComponent` per row, correctly — but
+// the STORE that feeds it selected rows by (job, step, component) alone, so
+// a BURN filed at EXECUTION_EVIDENCE was never among the rows NET_EFFECT
+// was asked about. The rule was right and unreachable. A loader needs the
+// question in this direction to build its query, and DERIVING it from
+// `APPLICABLE_COMPONENTS_BY_KIND` rather than writing a second table is
+// what keeps one authority: widening the map widens both directions at
+// once, and the two can never disagree.
+//
+// Returns kinds only. It grants a loader permission to SELECT a row, never
+// permission to admit it — `onchainFactAppliesToComponent` still decides
+// that per row, and every ordinary guard still applies afterwards.
+export function applicableFactKindsForComponent(component: string): readonly OnchainFactKind[] {
+  const out: OnchainFactKind[] = [];
+  for (const [kind, components] of Object.entries(APPLICABLE_COMPONENTS_BY_KIND)) {
+    if (components?.includes(component)) out.push(kind as OnchainFactKind);
+  }
+  return out;
+}
+
 // A deterministic fact plus the kind it was synthesized as. Separate from
 // ExtractedFact so the model's shape is untouched and cannot carry a kind.
 export type SynthesizedFact = ExtractedFact & { onchainFactKind: OnchainFactKind };

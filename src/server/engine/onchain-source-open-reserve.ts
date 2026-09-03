@@ -1,13 +1,13 @@
 import type { Database, Transaction } from "../db/client";
 import type { ConfirmedProjectIdentity } from "../domain/project-identity";
 import type { EvidenceSourceClass } from "./providers/types";
+import { researchTraceEvents } from "../db/schema";
+import { and, eq, inArray } from "drizzle-orm";
 import { loadAcquisitionPlan } from "./acquisition-plan";
-import { admittedLocatorsForJob } from "./documentary-locator-store";
-import {
-  MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
-  selectOnchainIntents,
-  type MechanismLocator,
-} from "./onchain-acquisition";
+import { loadJobContractView } from "./job-contract-view";
+import { componentAdmitsOnchainAcquisition } from "./onchain-acquisition";
+import { parseCanonicalOnchainUri } from "./onchain-uri";
+import { MAX_PROMOTION_DEPTH } from "./onchain-subject-promotion";
 
 // ON-CHAIN SOURCE-OPEN RESERVATION.
 //
@@ -54,11 +54,19 @@ import {
 // identifier and no chain-specific heuristic appears in this file or can
 // influence what it decides.
 
-// The floor: ONE bounded on-chain attempt's base intents, and nothing
-// beyond that. Derived from the acquisition bound rather than restated, so
-// the protected capacity can never drift from what one attempt may
-// actually issue — and so the floor stays small by construction.
-export const ONCHAIN_RESERVED_SOURCE_OPENS = MAX_ONCHAIN_INTENTS_PER_ATTEMPT;
+// The floor: ONE authorised deterministic chain, end to end.
+//
+// Derived, never chosen: a chain starts at a classified subject (depth 0)
+// and may be promoted MAX_PROMOTION_DEPTH times, so the deepest route the
+// promotion rules currently authorise costs 1 + MAX_PROMOTION_DEPTH bounded
+// reads. Protecting fewer than that protects a chain that can start and
+// cannot finish, which buys an inconclusive artifact instead of an answer.
+//
+// It is not a budget for any particular finding. The depth is whatever
+// `onchain-subject-promotion.ts` authorises; if a rule is ever removed the
+// floor shrinks with it, and no project, asset or mechanism appears in the
+// derivation.
+export const ONCHAIN_RESERVED_SOURCE_OPENS = 1 + MAX_PROMOTION_DEPTH;
 
 export interface OnchainSourceOpenReserve {
   // Does outstanding plan work admit deterministic on-chain acquisition?
@@ -124,76 +132,123 @@ export interface OnchainPlanComponent {
   establishingClasses: readonly EvidenceSourceClass[];
 }
 
-// Does ANY of the outstanding components yield a deterministic on-chain
-// intent right now? Asked through `selectOnchainIntents` itself, so this
-// module owns no opinion about which components, chains or subjects
-// qualify — it inherits every existing gate, including the one that makes
-// an account-kind intent unreachable while no locator has been admitted.
-// No locator therefore means no floor for locator-dependent work, which is
-// the same fail-closed direction acquisition already takes.
+// Could ANY of these components still need a bounded chain read in this
+// job? Asked through `componentAdmitsOnchainAcquisition`, so this module
+// owns no opinion about which components, chains or identities qualify.
+//
+// DELIBERATELY NOT "does a subject exist right now". A locator can be
+// admitted by documentary extraction LATER in the same job, and the whole
+// reason this floor exists is to keep the read that locator unblocks
+// affordable when it arrives. Releasing capacity because a subject has not
+// appeared yet would defeat the protection at exactly the moment it is
+// needed. Whether a call may actually be ISSUED still requires a subject,
+// and `selectOnchainIntents` still decides that — no call is ever made
+// because capacity was held.
 export function planHasActionableOnchainWork(input: {
   identity: ConfirmedProjectIdentity | null;
   components: readonly OnchainPlanComponent[];
-  locators?: readonly MechanismLocator[];
 }): boolean {
-  for (const c of input.components) {
-    const intents = selectOnchainIntents({
+  return input.components.some((c) =>
+    componentAdmitsOnchainAcquisition({
       component: c.component,
       establishingClasses: c.establishingClasses,
       identity: input.identity,
-      locators: input.locators ?? [],
-      maxIntents: 1,
-    });
-    if (intents.length > 0) return true;
-  }
-  return false;
+    }),
+  );
 }
 
-// The database-backed resolution, for callers that hold only component
-// NAMES. Reads the same authorities acquisition itself reads — the ACTIVE
-// Pattern's component requirements (`loadAcquisitionPlan`) and the job's
-// admitted locators — and writes nothing, reserves nothing, calls no
-// provider.
+// THE ONE-SHOT LEDGER, DERIVED FROM TRACE RATHER THAN STORED.
 //
-// DEGRADE, NEVER THROW. A budget floor is a scheduling protection; it must
-// never be able to fail a job that would otherwise run. Anything unreadable
-// yields NO floor, which is exactly the behaviour that existed before this
-// module — the safe direction is always "documentary keeps what it had".
+// Which components have already HAD their bounded on-chain opportunity in
+// this job? A trace row is written immediately BEFORE every real chain
+// operation (FETCH_ATTEMPTED) and whenever one was refused by the budget
+// (CANDIDATE_SKIPPED_BUDGET), each carrying the component it was for. So
+// the answer already exists in rows the engine writes anyway, with no new
+// column, no new enum value and no migration.
+//
+// It is written before the call, which is what makes it a genuine one-shot:
+// an RPC that fails still leaves the marker, so a failure consumes the
+// opportunity exactly as a success does. That is the intended discipline —
+// this is not a retry mechanism.
+//
+// A canonical on-chain URI is recognised by the canonical parser, never by
+// a string prefix, so a documentary FETCH_ATTEMPTED can never be counted.
+export async function onchainOpportunityConsumedComponents(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      component: researchTraceEvents.component,
+      targetRef: researchTraceEvents.targetRef,
+    })
+    .from(researchTraceEvents)
+    .where(
+      and(
+        eq(researchTraceEvents.researchJobId, jobId),
+        inArray(researchTraceEvents.operationType, [
+          "FETCH_ATTEMPTED",
+          "CANDIDATE_SKIPPED_BUDGET",
+        ]),
+      ),
+    );
+  const out = new Set<string>();
+  for (const r of rows) {
+    if (!r.component || !r.targetRef) continue;
+    if (parseCanonicalOnchainUri(r.targetRef) === null) continue;
+    out.add(r.component);
+  }
+  return out;
+}
+
+// The database-backed resolution. Reads the same authorities acquisition
+// itself reads — the job's own work queue, the ACTIVE Pattern's component
+// requirements, the confirmed identity, and the trace that records which
+// components have already had their opportunity — and writes nothing,
+// reserves nothing, calls no provider.
+//
+// THE RELEASE CONDITION, STATED ONCE. Capacity is held while ANY work-queue
+// component both admits deterministic on-chain acquisition AND has not yet
+// had its one bounded opportunity. It is released when that set is empty —
+// which is the smallest deterministic statement of "no current-job chain
+// work can still happen". Note what is NOT a release condition: the
+// controller finishing. A component whose subject arrives late is revisited
+// once AFTER the controller, so pending-component emptiness says nothing
+// about whether deterministic research is over.
+//
+// DEGRADE, NEVER THROW. A budget floor is a scheduling protection and must
+// never fail a job that would otherwise run. Anything unreadable yields NO
+// floor — exactly the behaviour that existed before this module.
 export async function resolveOnchainSourceOpenReserve(
   db: Database | Transaction,
   input: {
     jobId: string;
     projectId: string | null;
-    // Components whose work is still OUTSTANDING. A component that has
-    // already had its on-chain opportunity needs no floor, so an empty
-    // list releases the reserve — that is the release rule, not a special
-    // case of it.
-    outstandingComponents: readonly string[];
     maxSourceOpens: number;
     onchainAcquisitionUnavailable?: boolean;
   },
 ): Promise<OnchainSourceOpenReserve> {
   try {
-    if (input.outstandingComponents.length === 0) {
+    const { view } = await loadJobContractView(db, input.jobId);
+    const consumed = await onchainOpportunityConsumedComponents(db, input.jobId);
+    const candidates = view.workQueue.filter((i) => !consumed.has(i.component));
+    if (candidates.length === 0) {
       return computeOnchainSourceOpenReserve({
         maxSourceOpens: input.maxSourceOpens,
         onchainWorkPlanned: false,
       });
     }
-    const locators: MechanismLocator[] = (
-      await admittedLocatorsForJob(db, input.jobId)
-    ).map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const }));
 
     let identity: ConfirmedProjectIdentity | null = null;
     const components: OnchainPlanComponent[] = [];
-    for (const component of input.outstandingComponents) {
-      const plan = await loadAcquisitionPlan(db, input.jobId, component, input.projectId);
+    for (const item of candidates) {
+      const plan = await loadAcquisitionPlan(db, input.jobId, item.component, input.projectId);
       identity = plan.confirmedIdentity ?? identity;
-      components.push({ component, establishingClasses: plan.establishingClasses });
+      components.push({ component: item.component, establishingClasses: plan.establishingClasses });
     }
     return computeOnchainSourceOpenReserve({
       maxSourceOpens: input.maxSourceOpens,
-      onchainWorkPlanned: planHasActionableOnchainWork({ identity, components, locators }),
+      onchainWorkPlanned: planHasActionableOnchainWork({ identity, components }),
       onchainAcquisitionUnavailable: input.onchainAcquisitionUnavailable,
     });
   } catch {

@@ -6,15 +6,17 @@ import {
   projects,
   researchJobs,
   researchTraceEvents,
-  sources,
   topics,
   users,
 } from "../src/server/db/schema";
 import { INTERNAL_ALPHA_V1 } from "../src/server/config/product";
 import {
-  MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
   runStructuredOnchainAcquisition,
+  selectOnchainIntents,
 } from "../src/server/engine/onchain-acquisition";
+import { MAX_PROMOTION_DEPTH } from "../src/server/engine/onchain-subject-promotion";
+import { loadJobContractView } from "../src/server/engine/job-contract-view";
+import { buildCanonicalOnchainUri as canonicalUri } from "../src/server/engine/onchain-uri";
 import {
   ONCHAIN_RESERVED_SOURCE_OPENS,
   computeOnchainSourceOpenReserve,
@@ -24,7 +26,7 @@ import {
 import { runFetchPhase } from "../src/server/engine/acquisition-phases";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
-import { admittedLocatorsForJob, persistFactLocators } from "../src/server/engine/documentary-locator-store";
+import { admittedLocatorsForJob } from "../src/server/engine/documentary-locator-store";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
 import { recordTraceEvent } from "../src/server/engine/trace-store";
 import { readJobBudgetReserved } from "../src/server/engine/budget-reservation";
@@ -119,8 +121,12 @@ describe("2/4/6. an actionable on-chain plan receives bounded protected capacity
     }
   });
 
-  it("6. the floor is bounded by one attempt's intents AND by half the ceiling", () => {
-    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(MAX_ONCHAIN_INTENTS_PER_ATTEMPT);
+  it("6/11. the floor is ONE authorised chain deep, and never more than half the ceiling", () => {
+    // Derived from the promotion rules, not chosen: a subject is classified
+    // once and may be promoted MAX_PROMOTION_DEPTH times, so the deepest
+    // authorised route costs 1 + MAX_PROMOTION_DEPTH bounded reads.
+    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(1 + MAX_PROMOTION_DEPTH);
+    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(4);
     for (let max = 0; max <= 64; max++) {
       const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, onchainWorkPlanned: true });
       expect(r.reserved).toBeLessThanOrEqual(ONCHAIN_RESERVED_SOURCE_OPENS);
@@ -154,7 +160,7 @@ describe("9. unused reserved capacity is handled deterministically", () => {
   });
 });
 
-describe("2/8. what counts as actionable on-chain work is Pattern semantics only", () => {
+describe("2/8. capacity is Pattern semantics; ACTION still needs a subject", () => {
   it("a component that does not admit ONCHAIN_VERIFIABLE earns no floor", () => {
     expect(
       planHasActionableOnchainWork({ identity: IDENTITY, components: [DOCUMENTARY_COMPONENT] }),
@@ -167,17 +173,37 @@ describe("2/8. what counts as actionable on-chain work is Pattern semantics only
     ).toBe(true);
   });
 
-  it("8. NO LOCATOR MEANS NO ARBITRARY RPC CALL — and therefore no floor", () => {
+  it("a component that still LACKS a locator keeps the floor — the read it unblocks is the point", () => {
+    // CHANGED DELIBERATELY. Capacity and action are different questions.
+    // A locator can be admitted later in the SAME job, and the reactivation
+    // that consumes it must still be affordable — releasing here would
+    // defeat the protection at exactly the moment it becomes needed.
     expect(
       planHasActionableOnchainWork({ identity: IDENTITY, components: [ACCOUNT_COMPONENT] }),
-    ).toBe(false);
-    expect(
-      planHasActionableOnchainWork({
-        identity: IDENTITY,
-        components: [ACCOUNT_COMPONENT],
-        locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
-      }),
     ).toBe(true);
+  });
+
+  it("8. holding capacity issues NO call — no locator still means no subject", () => {
+    // The action question is unchanged and is answered by the same
+    // authority acquisition uses.
+    expect(
+      selectOnchainIntents({
+        component: ACCOUNT_COMPONENT.component,
+        establishingClasses: ACCOUNT_COMPONENT.establishingClasses,
+        identity: IDENTITY,
+        locators: [],
+        maxIntents: 4,
+      }),
+    ).toEqual([]);
+    expect(
+      selectOnchainIntents({
+        component: ACCOUNT_COMPONENT.component,
+        establishingClasses: ACCOUNT_COMPONENT.establishingClasses,
+        identity: IDENTITY,
+        locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+        maxIntents: 4,
+      }).map((i) => i.subject),
+    ).toEqual([WALLET]);
   });
 
   it("no confirmed identity, or an unsupported chain, earns no floor", () => {
@@ -366,6 +392,35 @@ function fixtureFetcher(calls: { urls: string[] }) {
   };
 }
 
+// Marks a component's one bounded on-chain opportunity as consumed, the
+// way acquisition itself marks it: the trace row written immediately before
+// a real chain operation.
+async function consumeOpportunity(
+  jobId: string,
+  step: number,
+  component: string,
+  subject: string,
+): Promise<void> {
+  await recordTraceEvent(ctx.db, {
+    researchJobId: jobId,
+    operationType: "FETCH_ATTEMPTED",
+    providerKind: "FETCH",
+    patternStep: step,
+    component,
+    targetRef: canonicalUri({
+      kind: "ACCOUNT_INFO",
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: MINT,
+      subjectKind: "account",
+      subject,
+    }),
+    status: "OK",
+    budgetAxis: "sourceOpens",
+    budgetAmount: 1,
+  });
+}
+
 async function reservedSourceOpens(jobId: string): Promise<number> {
   const row = await readJobBudgetReserved(ctx.db, jobId);
   return row!.sourceOpens;
@@ -477,11 +532,15 @@ describe("3/10. documentary fetches cannot consume the protected on-chain capaci
     expect(await reservedSourceOpens(jobId)).toBe(MAX - ONCHAIN_RESERVED_SOURCE_OPENS + 1);
   }, 120_000);
 
-  it("6. the chain path is still bounded by the same total ceiling", async () => {
+  it("7. the chain path is still bounded by the same total ceiling", async () => {
     const project = await makeProject(true);
     const jobId = await makeJob(project.id, project.slug);
     await seedCandidates(jobId, 12);
-    const MAX = 4;
+    const MAX = 8;
+    const RESERVE = computeOnchainSourceOpenReserve({
+      maxSourceOpens: MAX,
+      onchainWorkPlanned: true,
+    }).reserved;
     await runFetchPhase({
       db: ctx.db,
       jobId,
@@ -489,11 +548,10 @@ describe("3/10. documentary fetches cannot consume the protected on-chain capaci
       contentFetcher: fixtureFetcher({ urls: [] }),
       maxSourceOpens: MAX,
     });
-    expect(await reservedSourceOpens(jobId)).toBe(MAX - ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(await reservedSourceOpens(jobId)).toBe(MAX - RESERVE);
 
-    // Two protected units exist, and one anchor intent uses one of them.
-    await runOnchain(jobId, MAX);
-    await runOnchain(jobId, MAX);
+    // The protected units exist, and each anchor intent uses exactly one.
+    for (let i = 0; i < RESERVE; i++) await runOnchain(jobId, MAX);
     expect(await reservedSourceOpens(jobId)).toBe(MAX);
 
     // 12. Beyond the ceiling there is no capacity at all — and the refusal
@@ -552,56 +610,49 @@ describe("9. a floor that protects nothing is released, not wasted", () => {
     expect(await reservedSourceOpens(jobId)).toBe(MAX);
   }, 120_000);
 
-  it("no OUTSTANDING component means no floor — the reserve is scoped to work still to do", async () => {
+  it("6/13. the floor is NOT released because the controller finished", async () => {
     const project = await makeProject(true);
+    const jobId = await makeJob(project.id, project.slug);
+    // No component has had its on-chain opportunity yet, so capacity is
+    // held for the whole job — there is no "pending components" input to
+    // release it, by design.
+    const held = await resolveOnchainSourceOpenReserve(ctx.db, {
+      jobId,
+      projectId: project.id,
+      maxSourceOpens: 24,
+    });
+    expect(held.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(held.documentaryCeiling).toBe(24 - ONCHAIN_RESERVED_SOURCE_OPENS);
+  }, 120_000);
+
+  it("13. it IS released once every on-chain-capable component has had its opportunity", async () => {
+    const project = await makeProject(true);
+    const jobId = await makeJob(project.id, project.slug);
+    const { view } = await loadJobContractView(ctx.db, jobId);
+    // Mark every work-queue component's opportunity as consumed, the way
+    // acquisition itself marks it: one on-chain FETCH_ATTEMPTED trace row.
+    for (const item of view.workQueue) {
+      await consumeOpportunity(jobId, item.step, item.component, WALLET);
+    }
+    const released = await resolveOnchainSourceOpenReserve(ctx.db, {
+      jobId,
+      projectId: project.id,
+      maxSourceOpens: 24,
+    });
+    expect(released.reserved).toBe(0);
+    expect(released.documentaryCeiling).toBe(24);
+  }, 120_000);
+
+  it("a job with no confirmed identity holds nothing", async () => {
+    const project = await makeProject(false);
     const jobId = await makeJob(project.id, project.slug);
     const none = await resolveOnchainSourceOpenReserve(ctx.db, {
       jobId,
       projectId: project.id,
-      outstandingComponents: [],
       maxSourceOpens: 24,
     });
     expect(none.reserved).toBe(0);
     expect(none.documentaryCeiling).toBe(24);
-
-    const some = await resolveOnchainSourceOpenReserve(ctx.db, {
-      jobId,
-      projectId: project.id,
-      outstandingComponents: ["NET_EFFECT"],
-      maxSourceOpens: 24,
-    });
-    expect(some.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
-
-    // A purely documentary outstanding component protects nothing.
-    const documentary = await resolveOnchainSourceOpenReserve(ctx.db, {
-      jobId,
-      projectId: project.id,
-      outstandingComponents: ["GOVERNANCE_BASIS"],
-      maxSourceOpens: 24,
-    });
-    expect(documentary.reserved).toBe(0);
-  }, 120_000);
-
-  it("8. an outstanding component that needs a locator gets no floor until one is admitted", async () => {
-    const project = await makeProject(true);
-    const jobId = await makeJob(project.id, project.slug);
-    const before = await resolveOnchainSourceOpenReserve(ctx.db, {
-      jobId,
-      projectId: project.id,
-      outstandingComponents: ["EXECUTION_EVIDENCE"],
-      maxSourceOpens: 24,
-    });
-    expect(before.reserved).toBe(0);
-
-    await admitLocator(jobId, WALLET);
-
-    const after = await resolveOnchainSourceOpenReserve(ctx.db, {
-      jobId,
-      projectId: project.id,
-      outstandingComponents: ["EXECUTION_EVIDENCE"],
-      maxSourceOpens: 24,
-    });
-    expect(after.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
   }, 120_000);
 });
 
@@ -682,25 +733,38 @@ async function runExecutorAttempt(
   return { fetched, result };
 }
 
-describe("3/9/11. the executor applies and releases the same floor", () => {
-  it("an outstanding on-chain component narrows what the documentary loop may open", async () => {
+describe("3/6/13. the executor applies the job-wide floor and releases it only correctly", () => {
+  it("an on-chain-capable job narrows what the documentary loop may open", async () => {
     const project = await makeProject(true);
     const jobId = await makeJob(project.id, project.slug);
     const withFloor = await runExecutorAttempt(project, jobId, {
       pendingComponents: ["NET_EFFECT"],
     });
-    // Ceiling 8 - 2 reserved = 6, divided by the SAME existing fair-share
-    // rule across 2 remaining components -> 3.
-    expect(withFloor.fetched.length).toBe(3);
-    expect(await reservedSourceOpens(jobId)).toBe(3);
+    // Ceiling 8 - 4 reserved = 4, divided by the SAME existing fair-share
+    // rule across 2 remaining components -> 2.
+    expect(withFloor.fetched.length).toBe(2);
+    expect(await reservedSourceOpens(jobId)).toBe(2);
     expect(withFloor.result.reason).toContain("SOURCE_OPENS_RESERVED_FOR_ONCHAIN");
   }, 120_000);
 
-  it("11. with nothing on-chain outstanding, the documentary loop keeps its ordinary share", async () => {
+  it("6/13. an EMPTY pendingComponents list does NOT release the floor", async () => {
+    // THE REGRESSION THIS PINS. The controller finishing is not the end of
+    // deterministic research: a component whose subject arrives late is
+    // revisited once afterwards, and the last component in the queue must
+    // not be able to spend the capacity that revisit needs.
     const project = await makeProject(true);
     const jobId = await makeJob(project.id, project.slug);
+    const last = await runExecutorAttempt(project, jobId, { pendingComponents: [] });
+    expect(last.fetched.length).toBe(2);
+    expect(await reservedSourceOpens(jobId)).toBe(2);
+    expect(last.result.reason).toContain("SOURCE_OPENS_RESERVED_FOR_ONCHAIN");
+  }, 120_000);
+
+  it("11. a job with no confirmed identity keeps the ordinary full ceiling", async () => {
+    const project = await makeProject(false);
+    const jobId = await makeJob(project.id, project.slug);
     const noFloor = await runExecutorAttempt(project, jobId, {
-      pendingComponents: ["GOVERNANCE_BASIS"],
+      pendingComponents: ["NET_EFFECT"],
     });
     // No floor: the full ceiling of 8, same fair-share rule -> 4.
     expect(noFloor.fetched.length).toBe(4);
@@ -708,7 +772,7 @@ describe("3/9/11. the executor applies and releases the same floor", () => {
     expect(noFloor.result.reason ?? "").not.toContain("SOURCE_OPENS_RESERVED_FOR_ONCHAIN");
   }, 120_000);
 
-  it("9. an owner documentary-only instruction releases the floor entirely", async () => {
+  it("an owner documentary-only instruction releases the floor entirely", async () => {
     const project = await makeProject(true);
     const jobId = await makeJob(project.id, project.slug);
     const released = await runExecutorAttempt(project, jobId, {
@@ -756,40 +820,6 @@ describe("3(task)/12. failure semantics stay distinct", () => {
     expect(ev).toHaveLength(0);
   }, 120_000);
 });
-
-// An admitted documentary locator, written exactly as the executor writes
-// one — the only thing that may turn an account-kind intent actionable.
-async function admitLocator(jobId: string, address: string): Promise<void> {
-  const [source] = await ctx.db
-    .insert(sources)
-    .values({
-      url: `https://${DOMAIN}${PREFIX}/${uniq("p")}`,
-      urlHash: uniq("uh"),
-      sourceType: "OFFICIAL_DOCS",
-      health: "OK",
-    })
-    .returning();
-  const [row] = await ctx.db
-    .insert(evidence)
-    .values({
-      sourceId: source.id,
-      researchJobId: jobId,
-      relationship: "SUPPORTS",
-      fragment: `the mechanism sends tokens to ${address}`,
-      summary: "documented account",
-      retrievedUrl: source.url,
-      contentHash: uniq("ch"),
-      fetchedAt: new Date(),
-      evidenceContractVersion: 2,
-      patternStep: 3,
-      component: "MECHANISM_SPEC",
-      directness: "DIRECT",
-      sourceClass: "OFFICIAL_DOCS",
-      officiality: "CONFIRMED",
-    })
-    .returning();
-  await persistFactLocators(ctx.db, row.id, [{ value: address, shape: "ADDRESS_LIKE" }]);
-}
 
 // A last structural guard: the trace still carries the on-chain spend on
 // the SAME axis as documentary acquisition — one ledger, one vocabulary.
