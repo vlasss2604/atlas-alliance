@@ -11,7 +11,11 @@ import {
   selectOnchainIntents,
   type MechanismLocator,
 } from "./onchain-acquisition";
-import { onchainOpportunityConsumedComponents } from "./onchain-source-open-reserve";
+import {
+  deterministicCeilingForComponent,
+  onchainOpportunityConsumedComponents,
+  resolveOnchainSourceOpenReserve,
+} from "./onchain-source-open-reserve";
 import type { OnchainRetriever } from "./providers/onchain-retriever";
 import { recordTraceEvent } from "./trace-store";
 
@@ -168,6 +172,18 @@ export async function runOnchainReactivationPass(
       continue;
     }
 
+    // RESOLVED PER COMPONENT, not once for the pass. Every component this
+    // loop reactivates consumes its opportunity, which shrinks what is still
+    // protected — so a later component in the same pass must be measured
+    // against the state this one left behind, never against a snapshot taken
+    // before it ran. The job's ceiling is unchanged; this only decides how
+    // much of it THIS component may reach.
+    const reserve = await resolveOnchainSourceOpenReserve(db, {
+      jobId: input.jobId,
+      projectId: input.projectId,
+      maxSourceOpens: input.maxSourceOpens,
+    });
+
     const outcome = await runStructuredOnchainAcquisition({
       db,
       jobId: input.jobId,
@@ -180,7 +196,7 @@ export async function runOnchainReactivationPass(
         confirmedIdentity: plan.confirmedIdentity,
       },
       locators,
-      maxSourceOpens: input.maxSourceOpens,
+      maxSourceOpens: deterministicCeilingForComponent(reserve, item.component),
       ...(input.retriever === undefined ? {} : { retriever: input.retriever }),
       recordTrace: async (event) =>
         recordTraceEvent(db, {

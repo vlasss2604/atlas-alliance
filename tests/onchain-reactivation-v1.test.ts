@@ -490,8 +490,13 @@ describe("8/9/10/11/12. bounds the pass cannot exceed", () => {
     await admitLocatorFact(jobId, WALLET);
     const { outcome } = await runPass(jobId, projectId, { maxSourceOpens: 2 });
     const r = outcome.reactivated.find((x) => x.component === "EXECUTION_EVIDENCE");
-    expect(r?.sourceOpensSpent).toBe(2);
-    expect(await reservedSourceOpens(jobId)).toBe(2);
+    // V2: a reactivated chain no longer passes the RAW job ceiling. On a
+    // two-open job the contract's guaranteed anchor-level read keeps one
+    // unit, so this chain may reach exactly one — which is the same
+    // protection, applied in the other direction. The ledger is still the
+    // one canonical counter and the refusal is still at a ceiling.
+    expect(r?.sourceOpensSpent).toBe(1);
+    expect(await reservedSourceOpens(jobId)).toBe(1);
     expect(r?.observations).toContain("ONCHAIN_SOURCE_OPEN_BUDGET_EXHAUSTED");
     // A bounded research limitation, and no evidence invented for it.
     const traced = await ctx.db

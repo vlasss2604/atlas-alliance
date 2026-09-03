@@ -52,7 +52,10 @@ import {
   planQueries,
 } from "./acquisition-ledger";
 import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
-import { resolveOnchainSourceOpenReserve } from "./onchain-source-open-reserve";
+import {
+  deterministicCeilingForComponent,
+  resolveOnchainSourceOpenReserve,
+} from "./onchain-source-open-reserve";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
 import type { LocatorRejection } from "./documentary-locator";
 import {
@@ -958,6 +961,20 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         onchainAcquisitionUnavailable = true;
       } else {
         const admittedLocators = await admittedLocatorsForJob(deps.db, ctx.jobId);
+        // THE CEILING A DETERMINISTIC READ PASSES IS NOT THE JOB CEILING.
+        //
+        // It used to be, and that is precisely how the promotion chain was
+        // starved: three anchor-level TOKEN_SUPPLY reads, each allowed the
+        // full ceiling, consumed capacity a reachable four-deep chain had
+        // been promised. This component may now spend its OWN protected
+        // allocation plus whatever is genuinely spare, and not one unit of
+        // another component's protection. The job's maxSourceOpens is
+        // untouched and every reservation is still bounded by it.
+        const deterministicReserve = await resolveOnchainSourceOpenReserve(deps.db, {
+          jobId: ctx.jobId,
+          projectId: deps.project.id,
+          maxSourceOpens: ctx.budget.maxSourceOpens,
+        });
         const onchainOutcome = await runStructuredOnchainAcquisition({
           db: deps.db,
           jobId: ctx.jobId,
@@ -968,7 +985,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             address: l.value,
             origin: "ADMITTED_EVIDENCE_SOURCE" as const,
           })),
-          maxSourceOpens: ctx.budget.maxSourceOpens,
+          maxSourceOpens: deterministicCeilingForComponent(deterministicReserve, item.component),
           recordTrace: async (event) =>
             recordTraceEvent(deps.db, {
               researchJobId: ctx.jobId,

@@ -151,6 +151,58 @@ export function componentAdmitsOnchainAcquisition(input: {
   return (INTENTS_BY_COMPONENT[input.component] ?? []).length > 0;
 }
 
+// WHAT THIS COMPONENT WILL COST THE LEDGER, asked without a subject.
+//
+// Two different demands, because they are protected differently and become
+// reachable at different moments:
+//
+//   ANCHOR-LEVEL reads address the project's own confirmed identity, which
+//   exists from the first moment the job has one. They are therefore
+//   GUARANTEED: if the component is in the work queue and admits chain
+//   acquisition, these reads WILL be issued and WILL spend the ledger.
+//
+//   ACCOUNT-LEVEL reads address a documentary locator, which may not exist
+//   yet — that is the whole reason the floor exists. They are the START of
+//   a promotion chain, and what they cost end to end is the chain's own
+//   authorised depth, not a flat number.
+//
+// Both are answered through `componentAdmitsOnchainAcquisition`, so the
+// Pattern gate, the identity gate and the supported-chain gate stay in one
+// place and cannot drift.
+export function anchorBaseReadDemand(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): number {
+  if (!componentAdmitsOnchainAcquisition(input)) return 0;
+  const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
+  let anchorKinds = 0;
+  for (const kind of kinds) {
+    if (PROMOTION_ONLY_INTENTS.has(kind)) continue;
+    if (subjectKindOf(kind) === "token") anchorKinds += 1;
+  }
+  // One anchor exists, so one intent per anchor-level kind — bounded by the
+  // same per-attempt cap the executor's own loop is bounded by.
+  return Math.min(anchorKinds, MAX_ONCHAIN_INTENTS_PER_ATTEMPT);
+}
+
+// Does this component start a chain at an account-level subject? True
+// WITHOUT a locator, deliberately: a locator admitted later in this same
+// job is exactly the case the reservation exists to keep affordable.
+export function componentStartsAccountChain(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): boolean {
+  if (!componentAdmitsOnchainAcquisition(input)) return false;
+  const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
+  for (const kind of kinds) {
+    if (PROMOTION_ONLY_INTENTS.has(kind)) continue;
+    if (subjectKindOf(kind) === "account") return true;
+  }
+  return false;
+}
+
 export function selectOnchainIntents(input: {
   component: string;
   establishingClasses: readonly EvidenceSourceClass[];

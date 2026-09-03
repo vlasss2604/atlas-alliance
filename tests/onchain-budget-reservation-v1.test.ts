@@ -20,6 +20,7 @@ import { buildCanonicalOnchainUri as canonicalUri } from "../src/server/engine/o
 import {
   ONCHAIN_RESERVED_SOURCE_OPENS,
   computeOnchainSourceOpenReserve,
+  planDeterministicDemand,
   planHasActionableOnchainWork,
   resolveOnchainSourceOpenReserve,
 } from "../src/server/engine/onchain-source-open-reserve";
@@ -88,6 +89,16 @@ const DOCUMENTARY_COMPONENT = {
   establishingClasses: ["OFFICIAL_DOCS", "GOVERNANCE"] as const,
 };
 
+// V2: the reservation is computed from the contract's own remaining
+// deterministic demand rather than from one flat number, so the pure
+// arithmetic is now asked with demands. Derived through the same production
+// planner, never handwritten, so a test cannot assert a shape the runtime
+// would not produce.
+const chainDemands = planDeterministicDemand({
+  identity: IDENTITY,
+  components: [ACCOUNT_COMPONENT],
+});
+
 // ---------------------------------------------------------------------
 // The arithmetic, with no database at all.
 // ---------------------------------------------------------------------
@@ -95,7 +106,7 @@ const DOCUMENTARY_COMPONENT = {
 describe("1/4. documentary-only research keeps the ordinary budget", () => {
   it("no actionable on-chain work reserves nothing and leaves the ceiling whole", () => {
     for (const max of [1, 4, 12, 24, 60]) {
-      const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, onchainWorkPlanned: false });
+      const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, demands: [] });
       expect(r.reserved).toBe(0);
       expect(r.documentaryCeiling).toBe(max);
       expect(r.released).toBe("NO_ACTIONABLE_ONCHAIN_WORK");
@@ -105,7 +116,7 @@ describe("1/4. documentary-only research keeps the ordinary budget", () => {
 
 describe("2/4/6. an actionable on-chain plan receives bounded protected capacity", () => {
   it("reserves a small fixed floor and never raises the total", () => {
-    const r = computeOnchainSourceOpenReserve({ maxSourceOpens: 24, onchainWorkPlanned: true });
+    const r = computeOnchainSourceOpenReserve({ maxSourceOpens: 24, demands: chainDemands });
     expect(r.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
     expect(r.documentaryCeiling).toBe(24 - ONCHAIN_RESERVED_SOURCE_OPENS);
     expect(r.maxSourceOpens).toBe(24);
@@ -114,7 +125,10 @@ describe("2/4/6. an actionable on-chain plan receives bounded protected capacity
   it("4. reserved + documentary ceiling is ALWAYS exactly the unchanged ceiling", () => {
     for (let max = 0; max <= 64; max++) {
       for (const planned of [true, false]) {
-        const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, onchainWorkPlanned: planned });
+        const r = computeOnchainSourceOpenReserve({
+          maxSourceOpens: max,
+          demands: planned ? chainDemands : [],
+        });
         expect(r.reserved + r.documentaryCeiling).toBe(max);
         expect(r.documentaryCeiling).toBeLessThanOrEqual(max);
       }
@@ -128,7 +142,7 @@ describe("2/4/6. an actionable on-chain plan receives bounded protected capacity
     expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(1 + MAX_PROMOTION_DEPTH);
     expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(4);
     for (let max = 0; max <= 64; max++) {
-      const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, onchainWorkPlanned: true });
+      const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, demands: chainDemands });
       expect(r.reserved).toBeLessThanOrEqual(ONCHAIN_RESERVED_SOURCE_OPENS);
       expect(r.reserved).toBeLessThanOrEqual(Math.floor(max / 2));
     }
@@ -139,7 +153,7 @@ describe("9. unused reserved capacity is handled deterministically", () => {
   it("a context that cannot reach a chain releases the floor", () => {
     const r = computeOnchainSourceOpenReserve({
       maxSourceOpens: 24,
-      onchainWorkPlanned: true,
+      demands: chainDemands,
       onchainAcquisitionUnavailable: true,
     });
     expect(r.reserved).toBe(0);
@@ -148,12 +162,12 @@ describe("9. unused reserved capacity is handled deterministically", () => {
   });
 
   it("an UNKNOWN capability never releases it — only a known-absent one does", () => {
-    const unknown = computeOnchainSourceOpenReserve({ maxSourceOpens: 24, onchainWorkPlanned: true });
+    const unknown = computeOnchainSourceOpenReserve({ maxSourceOpens: 24, demands: chainDemands });
     expect(unknown.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
     expect(unknown.released).toBeNull();
     const present = computeOnchainSourceOpenReserve({
       maxSourceOpens: 24,
-      onchainWorkPlanned: true,
+      demands: chainDemands,
       onchainAcquisitionUnavailable: false,
     });
     expect(present.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
@@ -265,9 +279,14 @@ describe("7. the rule is generic research capability, never a project", () => {
     const documentaryReservations = src.match(/documentaryMaxSourceOpens/g) ?? [];
     // The allowance, the fetch, the refusal render and the upgrade render.
     expect(documentaryReservations.length).toBeGreaterThanOrEqual(5);
-    // The chain path keeps the FULL ceiling — the floor is protection, not
-    // a second, smaller budget for on-chain work.
-    expect(src).toContain("maxSourceOpens: ctx.budget.maxSourceOpens,");
+    // V2: the chain path no longer keeps the RAW job ceiling either. That
+    // expectation encoded the other half of the bug — three anchor-level
+    // reads allowed the full ceiling could consume capacity a reachable
+    // promotion chain had been promised. It now passes a ceiling that
+    // excludes every OTHER component's protected units.
+    expect(src).toContain(
+      "maxSourceOpens: deterministicCeilingForComponent(deterministicReserve, item.component),",
+    );
   });
 
   it("3. every documentary source-open in the fetch phase uses the capped ceiling", async () => {
@@ -539,7 +558,7 @@ describe("3/10. documentary fetches cannot consume the protected on-chain capaci
     const MAX = 8;
     const RESERVE = computeOnchainSourceOpenReserve({
       maxSourceOpens: MAX,
-      onchainWorkPlanned: true,
+      demands: chainDemands,
     }).reserved;
     await runFetchPhase({
       db: ctx.db,
@@ -621,8 +640,16 @@ describe("9. a floor that protects nothing is released, not wasted", () => {
       projectId: project.id,
       maxSourceOpens: 24,
     });
-    expect(held.reserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
-    expect(held.documentaryCeiling).toBe(24 - ONCHAIN_RESERVED_SOURCE_OPENS);
+    // V2, AND THE WHOLE POINT OF IT. The old expectation here was the flat
+    // `1 + MAX_PROMOTION_DEPTH`, and that number encoded the bug: the same
+    // ledger also pays for the seeded Pattern's three guaranteed anchor-level
+    // reads, so a chain promised four units could be left with one. The
+    // reservation is now the contract's actual remaining demand.
+    expect(held.baseReserved).toBe(3);
+    expect(held.promotionReserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(held.reserved).toBe(3 + ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(held.documentaryCeiling).toBe(24 - (3 + ONCHAIN_RESERVED_SOURCE_OPENS));
+    expect(held.documentaryCeiling).toBe(17);
   }, 120_000);
 
   it("13. it IS released once every on-chain-capable component has had its opportunity", async () => {
