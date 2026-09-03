@@ -25,6 +25,7 @@ import {
   relativeAge,
   type EvidenceItemLike,
 } from "@/src/client/research-model";
+import { deriveProofInsight } from "@/src/client/proof-insight";
 import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 
 // THE RESEARCH SCREEN — one page for a running job and a finished result.
@@ -164,6 +165,13 @@ export default function ResearchDetailPage() {
     projectName: job.projectName,
     components,
   });
+  // ONE OPTIONAL SECOND MEANING, AFTER THE ANSWER AND NEVER INSTEAD OF IT.
+  //
+  // Derived from the same canonical component rows the answer read, and
+  // handed the answer's own sentences so it can stay silent rather than say
+  // one of them twice. NONE is the normal outcome and renders nothing at
+  // all — there is no empty state, because silence here is not news.
+  const insight = deriveProofInsight({ components, answerSentences: answer });
 
   // Evidence roles come from PERSISTED relationships only — S8's citation
   // binding first, then S5's component sets. An excluded row is labelled
@@ -451,6 +459,23 @@ export default function ResearchDetailPage() {
               </p>
               <p className="mt-1.5 text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]">
                 {findingExplanation(boundary).join(" ")}
+              </p>
+            </div>
+          )}
+
+          {/* ONE THING WORTH SEPARATING FROM THE ANSWER.
+              Secondary by construction: it renders after the answer and
+              after what remains unresolved, in dimmer type, with no tint
+              and no border of its own — an aside, never a warning. It is
+              absent far more often than it is present, and when the
+              derivation finds no second meaning nothing is drawn here at
+              all: a placeholder line would be a block that exists only to
+              say it has nothing to say. */}
+          {insight.type === "INSIGHT" && (
+            <div className="mt-5 border-t border-[var(--atlas-border)] pt-4" data-testid="proof-insight">
+              <p className="eyebrow eyebrow-violet">Insight</p>
+              <p className="mt-1.5 text-[0.9rem] leading-relaxed text-[var(--atlas-text-dim)]">
+                {insight.text}
               </p>
             </div>
           )}

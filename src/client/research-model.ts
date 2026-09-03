@@ -1313,11 +1313,30 @@ export function componentClaimLabel(component: string | null | undefined): strin
 // the block from ever rendering an internal name. It also drops a
 // model-written projection label here, which is the safe direction: the
 // unresolved block should say what is unresolved in canonical words.
+//
+// WHERE A COMPONENT HAS ITS OWN UNRESOLVED SENTENCE, that sentence wins.
+// "Whether the mechanism is currently active" names the open question and
+// stops; "Current activity is not independently confirmed" names it AND says
+// what is missing, in the same breath and in fewer words. That is worth a
+// per-component line where one exists — and where none does, the phrase form
+// below is the honest general answer rather than an invented sentence.
+//
+// Closed and small on purpose. This is presentation copy, not a second
+// vocabulary for research meaning: every entry must be true of the component
+// whenever the block renders, under either heading, for any reason code that
+// can leave it unresolved.
+const COMPONENT_UNRESOLVED_LABELS: Record<string, string> = {
+  CURRENT_STATE: "Current activity is not independently confirmed.",
+};
+
 export function componentUnresolvedLabel(
   component: string | null | undefined,
   fallbackLabel: string,
 ): string {
-  const phrase = component ? COMPONENT_PHRASES[component] : undefined;
+  if (!component) return fallbackLabel;
+  const own = COMPONENT_UNRESOLVED_LABELS[component];
+  if (own) return own;
+  const phrase = COMPONENT_PHRASES[component];
   if (!phrase) return fallbackLabel;
   return phrase.length > 0 ? phrase[0].toUpperCase() + phrase.slice(1) : fallbackLabel;
 }

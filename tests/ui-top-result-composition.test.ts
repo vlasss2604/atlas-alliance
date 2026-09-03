@@ -110,7 +110,9 @@ describe("the unresolved block names the fact, not the process", () => {
   it("TEST 3c: the unresolved label never reads as a settled statement", () => {
     // Every component the block can name, in the form it will be rendered.
     for (const [component, expected] of [
-      ["CURRENT_STATE", "Whether the mechanism is currently active"],
+      // A component with its own unresolved sentence uses it: it names the
+      // open question and what is missing at the same time.
+      ["CURRENT_STATE", "Current activity is not independently confirmed."],
       ["EXECUTION_EVIDENCE", "Whether the mechanism has actually executed"],
       ["NET_EFFECT", "A durable effect on token supply"],
       ["DESTINATION", "Where the value ends up"],
