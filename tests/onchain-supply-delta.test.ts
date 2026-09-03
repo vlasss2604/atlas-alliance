@@ -495,12 +495,22 @@ describe("the primitive is not reachable from production, and claims nothing", (
       "onchain-supply-candidate-store",
       "onchain-post-event-supply",
       "onchain-supply-delta-store",
+      "onchain-burn-spanning-supply-interval",
+      "onchain-supply-delta-materialization",
     ];
     // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
     // post-event completion. Every other member is still reachable only from
     // inside, and the pure arithmetic has no production caller at all.
+    // Two orchestrators are wired, and only these two: the optional
+    // post-event completion and the delta materialization. Every other member
+    // stays reachable only from inside.
     const ENTRY_POINT = "src/server/engine/run-job.ts";
+    const ENTRY_MODULES = ["onchain-post-event-supply", "onchain-supply-delta-materialization"];
     const isMember = (f: string) => CLUSTER.some((m) => f.endsWith(`${m}.ts`));
+    // Matched on the closing quote of the import specifier, so a longer
+    // member name (…-store, …-materialization) is never mistaken for the
+    // shorter one it contains.
+    const references = (code: string, m: string) => code.includes(`${m}"`);
 
     const outsideImporters: string[] = [];
     for (const f of files) {
@@ -510,13 +520,14 @@ describe("the primitive is not reachable from production, and claims nothing", (
         .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
         .join("\n");
       if (f === ENTRY_POINT) {
-        // The one permitted door, and only to the orchestrator.
+        // The permitted doors, and only those: run-job may reach the two
+        // orchestrators and nothing else in the cluster.
         for (const m of CLUSTER) {
-          if (m !== "onchain-post-event-supply" && code.includes(m)) outsideImporters.push(f);
+          if (!ENTRY_MODULES.includes(m) && references(code, m)) outsideImporters.push(f);
         }
         continue;
       }
-      if (CLUSTER.some((m) => code.includes(m))) outsideImporters.push(f);
+      if (CLUSTER.some((m) => references(code, m))) outsideImporters.push(f);
     }
     // Acquisition, persistence, Evidence and NET_EFFECT applicability are all
     // later, separately approved decisions.

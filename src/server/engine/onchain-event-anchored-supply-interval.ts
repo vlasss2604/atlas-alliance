@@ -348,13 +348,24 @@ export function filterTemporalSupplyEligibility(input: {
   return { eligible, excluded };
 }
 
-// SELECTION, as its own step. The greatest eligible slot strictly before the
-// event — the narrowest interval that still contains it.
+// SELECTION, as its own step. The eligible observation NEAREST the event on
+// the side the caller is choosing: the greatest slot strictly before it, or —
+// for a caller closing the interval from the other end — the smallest slot
+// strictly after it. Either way the narrowest interval that still contains
+// the event, and either way the same ambiguity rule.
+//
+// The boundary is a parameter rather than a second function because the only
+// thing that differs is which extreme is taken: the tie-break at that extreme,
+// and the refusal when two readings of one slot disagree, must not exist in
+// two places that could drift apart. GREATEST is the default, so every
+// existing caller is unchanged.
 export function selectEventAnchoredSupplyObservation(
   eligible: readonly { candidate: PersistedObservation; slot: number; index: number }[],
+  boundary: "GREATEST" | "SMALLEST" = "GREATEST",
 ): { selected: PersistedObservation } | { ambiguous: true } | null {
   if (eligible.length === 0) return null;
-  const greatest = Math.max(...eligible.map((e) => e.slot));
+  const slots = eligible.map((e) => e.slot);
+  const greatest = boundary === "GREATEST" ? Math.max(...slots) : Math.min(...slots);
   const atGreatest = eligible.filter((e) => e.slot === greatest);
   if (atGreatest.length > 1) {
     // Two observations at one chain position. If they report the same value

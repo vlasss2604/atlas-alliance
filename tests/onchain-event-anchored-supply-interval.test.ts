@@ -578,10 +578,15 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
       "onchain-supply-candidate-store",
       "onchain-post-event-supply",
       "onchain-supply-delta-store",
+      "onchain-burn-spanning-supply-interval",
+      "onchain-supply-delta-materialization",
     ];
     // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
     // post-event completion. Every other member is still reachable only from
     // inside, and the pure arithmetic has no production caller at all.
+    // run-job is the only file outside the cluster that may reach into it,
+    // and only through the two wired orchestrators — which the cluster-wide
+    // guard in onchain-supply-delta.test.ts checks name by name.
     const ENTRY_POINT = "src/server/engine/run-job.ts";
     const importers: string[] = [];
     for (const f of files) {

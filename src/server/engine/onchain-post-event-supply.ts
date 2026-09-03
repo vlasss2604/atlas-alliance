@@ -186,12 +186,16 @@ export async function runPostEventSupplyCompletion(
   });
   if (events.length === 0) return none;
 
-  const observations = await loadCurrentJobSupplyObservations(db, {
-    currentResearchJobId: input.jobId,
-    projectAnchor: anchor,
-    chain: "solana",
-    network: "mainnet",
-  });
+  // The row ids the loader also returns are the delta materializer's need,
+  // not this stage's: the gate judges observations, never rows.
+  const observations = (
+    await loadCurrentJobSupplyObservations(db, {
+      currentResearchJobId: input.jobId,
+      projectAnchor: anchor,
+      chain: "solana",
+      network: "mainnet",
+    })
+  ).map((o) => o.observation);
 
   // The coverage bound, computed by the same pure planner the gate uses, so
   // the historical query and the gate cannot disagree about where "before
@@ -204,13 +208,15 @@ export async function runPostEventSupplyCompletion(
   });
   if (watermark.eventSlot === null) return none;
 
-  const historicalCandidates = await loadHistoricalSupplyCandidates(db, {
-    currentResearchJobId: input.jobId,
-    projectAnchor: anchor,
-    chain: "solana",
-    network: "mainnet",
-    beforeSlot: watermark.eventSlot,
-  });
+  const historicalCandidates = (
+    await loadHistoricalSupplyCandidates(db, {
+      currentResearchJobId: input.jobId,
+      projectAnchor: anchor,
+      chain: "solana",
+      network: "mainnet",
+      beforeSlot: watermark.eventSlot,
+    })
+  ).map((o) => o.observation);
 
   const gate = gateCurrentProofSupplyAcquisition({
     currentResearchJobId: input.jobId,

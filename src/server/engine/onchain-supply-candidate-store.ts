@@ -50,6 +50,16 @@ import type { AnchorBurnEvent } from "./onchain-event-anchored-supply-interval";
 // research history cannot turn one gate decision into an unbounded read.
 export const MAX_HISTORICAL_SUPPLY_CANDIDATES = 200;
 
+// A retrieved observation, with the row id it came from. The id is what a
+// writer needs to record provenance edges; the observation is what the pure
+// layer judges. Kept together so nothing has to re-query to pair them, and
+// deliberately NOT folded into PersistedObservation — that type is the pure
+// layer's, and a database key has no place in it.
+export interface LoadedSupplyObservation {
+  onchainArtifactId: string;
+  observation: PersistedObservation;
+}
+
 export interface HistoricalSupplyCandidateQuery {
   // The Research asking. Its own readings are never t0.
   currentResearchJobId: string;
@@ -87,7 +97,7 @@ function readSupplyResult(
 export async function loadHistoricalSupplyCandidates(
   db: Database | Transaction,
   query: HistoricalSupplyCandidateQuery,
-): Promise<PersistedObservation[]> {
+): Promise<LoadedSupplyObservation[]> {
   const canonicalUri = buildCanonicalOnchainUri({
     kind: "TOKEN_SUPPLY",
     chain: query.chain,
@@ -112,53 +122,45 @@ export async function loadHistoricalSupplyCandidates(
     .orderBy(desc(onchainArtifacts.slot))
     .limit(Math.max(1, query.limit ?? MAX_HISTORICAL_SUPPLY_CANDIDATES));
 
-  const out: PersistedObservation[] = [];
+  const out: LoadedSupplyObservation[] = [];
   for (const row of rows) {
-    const result = readSupplyResult(row.normalizedResult);
-    if (result === null) continue;
-    const intent = {
-      kind: "TOKEN_SUPPLY" as const,
-      chain: row.chain as OnchainChain,
-      network: row.network as OnchainNetwork,
-      projectAnchor: row.projectAnchor,
-      subjectKind: "token" as const,
-      subject: row.subject,
-    };
-    const supply = { kind: "TOKEN_SUPPLY" as const, ...result };
-    out.push({
-      // The row is what the retriever path wrote; rebuilding the in-process
-      // artifact from it is transport, not trust. Every rule that decides
-      // whether it may be used still runs afterwards, over this object.
+    const loaded = toSupplyObservation(row);
+    if (loaded !== null) out.push(loaded);
+  }
+  return out;
+}
+
+// The row is what the retriever path wrote; rebuilding the in-process
+// artifact from it is transport, not trust. Every rule that decides whether it
+// may be used still runs afterwards, over this object. A row whose stored
+// result is not a well-formed total-supply reading cannot be rebuilt at all,
+// so it is not returned.
+function toSupplyObservation(row: ArtifactRow): LoadedSupplyObservation | null {
+  const result = readSupplyResult(row.normalizedResult);
+  if (result === null) return null;
+  if (row.researchJobId === null) return null;
+  const supply = { kind: "TOKEN_SUPPLY" as const, ...result };
+  return {
+    onchainArtifactId: row.id,
+    observation: {
       artifact: brandOnchainArtifact({
-        intent,
-        canonicalUri: row.canonicalUri,
-        result: supply,
-        normalizedText: JSON.stringify(supply),
-        provenance: {
-          chain: intent.chain,
-          network: intent.network,
+        intent: {
+          kind: "TOKEN_SUPPLY",
+          chain: row.chain as OnchainChain,
+          network: row.network as OnchainNetwork,
           projectAnchor: row.projectAnchor,
           subjectKind: "token",
           subject: row.subject,
-          slot: row.slot,
-          blockTime: row.blockTime === null ? null : Math.floor(row.blockTime.getTime() / 1000),
-          blockHash: row.blockHash,
-          finality: row.finality === "finalized" ? "finalized" : "confirmed",
-          retrievalMethod: "RPC",
-          providerId: row.providerId,
-          providerMethod: row.providerMethod,
-          requestParams: row.requestParams as Record<string, string | number | boolean>,
-          transactionSignature: row.transactionSignature,
-          retrievedAt: row.retrievedAt,
-          rawResponseHash: row.rawResponseHash,
-          artifactHash: row.artifactHash,
         },
+        canonicalUri: row.canonicalUri,
+        result: supply,
+        normalizedText: JSON.stringify(supply),
+        provenance: provenanceOf(row),
       }),
       originKind: "RESEARCH_JOB",
       researchJobId: row.researchJobId,
-    });
-  }
-  return out;
+    },
+  };
 }
 
 // ---- the rest of the current-Research context -------------------------
@@ -202,7 +204,7 @@ export async function loadCurrentJobSupplyObservations(
     chain: OnchainChain;
     network: OnchainNetwork;
   },
-): Promise<PersistedObservation[]> {
+): Promise<LoadedSupplyObservation[]> {
   const canonicalUri = buildCanonicalOnchainUri({
     kind: "TOKEN_SUPPLY",
     chain: query.chain,
@@ -223,29 +225,10 @@ export async function loadCurrentJobSupplyObservations(
     )
     .orderBy(desc(onchainArtifacts.slot));
 
-  const out: PersistedObservation[] = [];
+  const out: LoadedSupplyObservation[] = [];
   for (const row of rows) {
-    const result = readSupplyResult(row.normalizedResult);
-    if (result === null) continue;
-    const supply = { kind: "TOKEN_SUPPLY" as const, ...result };
-    out.push({
-      artifact: brandOnchainArtifact({
-        intent: {
-          kind: "TOKEN_SUPPLY",
-          chain: row.chain as OnchainChain,
-          network: row.network as OnchainNetwork,
-          projectAnchor: row.projectAnchor,
-          subjectKind: "token",
-          subject: row.subject,
-        },
-        canonicalUri: row.canonicalUri,
-        result: supply,
-        normalizedText: JSON.stringify(supply),
-        provenance: provenanceOf(row),
-      }),
-      originKind: "RESEARCH_JOB",
-      researchJobId: row.researchJobId,
-    });
+    const loaded = toSupplyObservation(row);
+    if (loaded !== null) out.push(loaded);
   }
   return out;
 }

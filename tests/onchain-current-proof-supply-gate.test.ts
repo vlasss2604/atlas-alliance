@@ -699,10 +699,15 @@ describe("15/16/17/18. boundaries", () => {
       "onchain-supply-candidate-store",
       "onchain-post-event-supply",
       "onchain-supply-delta-store",
+      "onchain-burn-spanning-supply-interval",
+      "onchain-supply-delta-materialization",
     ];
     // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
     // post-event completion. Every other member is still reachable only from
     // inside, and the pure arithmetic has no production caller at all.
+    // run-job is the only file outside the cluster that may reach into it,
+    // and only through the two wired orchestrators — which the cluster-wide
+    // guard in onchain-supply-delta.test.ts checks name by name.
     const ENTRY_POINT = "src/server/engine/run-job.ts";
     const outsideImporters: string[] = [];
     for (const f of files) {
@@ -841,11 +846,18 @@ describe("PART 4. the candidate loader retrieves, and decides nothing", () => {
       beforeSlot: EVENT_SLOT,
     });
 
-    expect(loaded.map((o) => o.artifact.provenance.slot).sort((a, b) => a - b)).toEqual([100, 300]);
+    // The loader now returns each row's id alongside the observation — a
+    // delta writer needs the id to record provenance edges, and the pure
+    // layer still judges only the observation.
+    const observations = loaded.map((o) => o.observation);
+    expect(observations.map((o) => o.artifact.provenance.slot).sort((a, b) => a - b)).toEqual([
+      100, 300,
+    ]);
     for (const o of loaded) {
-      expect(o.originKind).toBe("RESEARCH_JOB");
-      expect(o.researchJobId).not.toBe(currentJob);
-      expect(o.artifact.result.kind).toBe("TOKEN_SUPPLY");
+      expect(o.onchainArtifactId.length).toBeGreaterThan(0);
+      expect(o.observation.originKind).toBe("RESEARCH_JOB");
+      expect(o.observation.researchJobId).not.toBe(currentJob);
+      expect(o.observation.artifact.result.kind).toBe("TOKEN_SUPPLY");
     }
 
     // And what it returned feeds the gate unchanged — the loader made no
@@ -867,7 +879,7 @@ describe("PART 4. the candidate loader retrieves, and decides nothing", () => {
           researchJobId: currentJob,
         },
       ],
-      historicalCandidates: loaded,
+      historicalCandidates: observations,
     });
     expect(g.decision).toBe("POST_EVENT_SUPPLY_REQUIRED");
     expect(g.eligibleHistoricalCandidates).toBe(2);

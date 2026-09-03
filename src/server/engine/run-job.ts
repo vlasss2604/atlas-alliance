@@ -10,6 +10,7 @@ import { loadJobContractView } from "./job-contract-view";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
 import { runOnchainReactivationPass } from "./onchain-reactivation";
 import { runPostEventSupplyCompletion } from "./onchain-post-event-supply";
+import { runSupplyDeltaMaterialization } from "./onchain-supply-delta-materialization";
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 import { buildAndPersistProof } from "./proof-store";
@@ -198,6 +199,27 @@ export async function runS4ResearchJob(
     projectId: job.projectId,
     maxSourceOpens: view.researchBudget.maxSourceOpens,
   });
+
+  // SUPPLY DELTA MATERIALIZATION — the exact change this job can already
+  // prove, filed as Evidence.
+  //
+  // LAST OF THE DETERMINISTIC STAGES, and the only one that acquires nothing.
+  // It runs AFTER the completion above because the reading that closes the
+  // interval is frequently the one that pass just acquired, and BEFORE the S5
+  // sweep so the Evidence it writes is visible to ordinary later processing
+  // with no special case.
+  //
+  // It consumes only rows this job already paid for: the burns it
+  // established, the readings it and earlier Research took. No RPC, no
+  // search, no fetch, no model call, no attempt row and no budget — the
+  // module imports no provider, and there is no seam for one. If the reading
+  // it needs is absent, no delta is materialized, and that is a limit on what
+  // this Research observed rather than a statement that supply did not
+  // change.
+  //
+  // It changes no verdict: TOTAL_SUPPLY_DELTA has no applicability entry and
+  // the row is filed CONTEXT, which reconciliation never counts.
+  await runSupplyDeltaMaterialization(db, { jobId, projectId: job.projectId });
 
   // HIGH-2: cover every workQueue component whose S4 attempt is already
   // terminal, not just the ones this call's own inner loop attempted —
