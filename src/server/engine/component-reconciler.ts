@@ -1,8 +1,5 @@
-import {
-  isGrossSupplyReductionFact,
-  onchainFactAppliesToComponent,
-  type OnchainFactKind,
-} from "./onchain-facts";
+import { onchainFactAppliesToComponent, type OnchainFactKind } from "./onchain-facts";
+import { evaluateNetSupplyEffect, type NetSupplyEffect } from "./net-supply-effect";
 import type { EvidenceSourceClass } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import { normalizeMechanismState, type MechanismState } from "../domain/mechanism-state";
@@ -91,7 +88,26 @@ export type ResultReasonCode =
   // round — so in B1 this caps NET_EFFECT at PARTIALLY_SUPPORTED, and that
   // ceiling is the honest state of the engine rather than a defect.
   | "SUPPLY_REDUCTION_NOT_ESTABLISHED"
-  | "NET_SUPPLY_CHANGE_NOT_ESTABLISHED";
+  | "NET_SUPPLY_CHANGE_NOT_ESTABLISHED"
+  // B2 — the three states a MEASURED interval adds to the two above.
+  //
+  // NET_SUPPLY_CHANGE_NOT_ATTRIBUTED: a burn is established AND total supply
+  // decreased across an interval containing it. What is now established is
+  // the MEASUREMENT; what is still missing is ATTRIBUTION — the delta is the
+  // net of everything that happened in the interval, and nothing shows the
+  // researched mechanism caused any part of it. This REPLACES
+  // NET_SUPPLY_CHANGE_NOT_ESTABLISHED rather than clearing it: the component
+  // stays PARTIALLY_SUPPORTED, because clearing every code is what reaches
+  // SUPPORTED, and SUPPORTED here would assert the causal claim.
+  | "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"
+  // NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL: a burn is established and total
+  // supply did NOT decrease over the interval containing it. Aggregate
+  // issuance offset or exceeded aggregate burning there. It contradicts a NET
+  // REDUCTION claim and contradicts nothing about the burn.
+  | "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"
+  // CONFLICTING_SUPPLY_DELTA: two measured intervals disagree about the
+  // direction. Never averaged, never resolved in the favourable direction.
+  | "CONFLICTING_SUPPLY_DELTA";
 
 // §11.1 — the row shape S5 reads. A deliberately narrow projection of
 // `evidence` (proof.ts) — only what this file's rules actually use.
@@ -680,6 +696,28 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     }
   }
 
+  // B2 — THE TYPED SUPPLY EFFECT, computed here because it decides two
+  // things that the generic machinery below cannot.
+  //
+  // Generic contradiction (Step 6) fires on incompatible mechanism STATE. A
+  // supply delta carries no state, so it can never take part in it — and the
+  // conflict it does express, "a burn occurred and total supply did not fall
+  // over the interval containing it", is arithmetic rather than disagreement
+  // between sources. It therefore needs its own typed evaluation, asked of
+  // the same pools the generic rules use and gated on the same eligibility.
+  //
+  // It is computed BEFORE the deferred disposition below because a delta that
+  // bears this contradiction must not be swept away as merely non-supporting.
+  const supplyEffect: NetSupplyEffect | null = requiresSupplyEffectQualification(item.component)
+    ? evaluateNetSupplyEffect({
+        establishing: [...fullEstablishing, ...partialEstablishing],
+        contradictionCapable,
+      })
+    : null;
+  const supplyContradictingIds = new Set(
+    supplyEffect?.kind === "MEASURED_NOT_REDUCED" ? supplyEffect.deltaEvidenceIds : [],
+  );
+
   // MEDIUM-2 fix, continued: finalize the deferred CONTRADICTS disposition
   // now that contradictingSet is known. A CONTRADICTS row that ended up
   // actively bearing the conflict is NEVER also recorded as excluded — the
@@ -690,9 +728,12 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // before (P4a/P7's honest INSUFFICIENT_EVIDENCE outcome).
   for (const row of contradictionCapable) {
     if (row.relationship !== "CONTRADICTS") continue;
-    if (!contradictingSet.has(row.id)) {
-      excluded.set(row.id, "RELATIONSHIP_NOT_SUPPORTING");
-    }
+    if (contradictingSet.has(row.id)) continue;
+    // A delta bearing the typed supply contradiction is actively
+    // contradiction-bearing too, so it is never also recorded as excluded —
+    // the three output sets stay disjoint on this path as on the other.
+    if (supplyContradictingIds.has(row.id)) continue;
+    excluded.set(row.id, "RELATIONSHIP_NOT_SUPPORTING");
   }
 
   const excludedEvidence = [...excluded.entries()]
@@ -720,6 +761,47 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       reasonCodes: ["CONFLICTING_STATE"],
       supportingEvidenceIds: [],
       contradictingEvidenceIds: contradictingRows.map((r) => r.id),
+      excludedEvidence,
+      currentState: null,
+      temporalBasis: null,
+      tokenStateMentions: [...tokenStateMentions].sort(),
+      requiresFreshEvidence: true,
+    };
+  }
+
+  // B2 — CONTRADICTED BY MEASUREMENT, not by disagreement.
+  //
+  // A burn is established AND total supply did not decrease across an
+  // interval containing it. Nobody disagrees about anything here: two exact
+  // observations and one subtraction say that aggregate issuance offset or
+  // exceeded aggregate burning over that interval. What is contradicted is a
+  // NET REDUCTION claim — never the burn, which stays established and stays
+  // in the supporting set so the record still says a gross destruction
+  // occurred. That is also why this path, unlike the state-conflict path
+  // above, keeps its supporting evidence: the two sides are answers to
+  // different questions rather than to the same one.
+  //
+  // The burn gate lives inside evaluateNetSupplyEffect, so this outcome is
+  // unreachable without a typed gross reduction among the establishing rows —
+  // and therefore `establishing` below is non-empty by construction.
+  if (supplyEffect?.kind === "MEASURED_NOT_REDUCED") {
+    const supportingRows = [...fullEstablishing, ...partialEstablishing].sort(compareDeterministic);
+    const tokenStateMentions = new Set<string>();
+    for (const row of supportingRows) {
+      for (const m of detectTokenStateMentions(
+        `${row.fragment} ${row.summary ?? ""}`,
+        requirements.requiredTokenState,
+      )) {
+        tokenStateMentions.add(m);
+      }
+    }
+    return {
+      step: item.step,
+      component: item.component,
+      status: "CONTRADICTED",
+      reasonCodes: ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"],
+      supportingEvidenceIds: supportingRows.map((r) => r.id),
+      contradictingEvidenceIds: [...supplyEffect.deltaEvidenceIds],
       excludedEvidence,
       currentState: null,
       temporalBasis: null,
@@ -818,14 +900,31 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // typed supply semantics and therefore cannot qualify — it may still be
   // establishing evidence and still appear as support, it simply cannot
   // carry this component past the gate on its own.
-  if (requiresSupplyEffectQualification(item.component)) {
-    const grossReduction = establishing.some((r) => isGrossSupplyReductionFact(r.onchainFactKind));
-    reasonCodes.push(
-      grossReduction
-        ? // A burn happened. What did NOT happen is an observation of
-          // supply before and after, so net deflation stays unestablished.
-          "NET_SUPPLY_CHANGE_NOT_ESTABLISHED"
-        : "SUPPLY_REDUCTION_NOT_ESTABLISHED",
+  //
+  // B2 EXTENDS THIS, AND NEVER CLEARS IT. A measured interval can change
+  // WHICH limitation applies; it can never remove the last one, because an
+  // empty reasonCodes list is what reaches SUPPORTED, and SUPPORTED here
+  // would assert that the researched mechanism caused a supply change. A
+  // measured decrease is the strongest outcome available and it is still a
+  // limitation: measured, unattributed.
+  //
+  // UNSHIFTED, not pushed. `reasonExplanation` renders the FIRST recognised
+  // code, and its own contract says "S5 writes the specific code first". For
+  // a component whose entire question is the supply effect, this IS the
+  // specific code — an authority or directness caveat is the general one.
+  if (supplyEffect !== null) {
+    reasonCodes.unshift(
+      supplyEffect.kind === "NO_GROSS_REDUCTION"
+        ? "SUPPLY_REDUCTION_NOT_ESTABLISHED"
+        : supplyEffect.kind === "MEASURED_DECREASE"
+          ? // Supply fell across an interval containing the burn. The
+            // measurement is established; the cause is not observed at all.
+            "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"
+          : supplyEffect.kind === "CONFLICTING_INTERVALS"
+            ? "CONFLICTING_SUPPLY_DELTA"
+            : // A burn happened. What did NOT happen is an observation of
+              // supply before and after, so net deflation stays unestablished.
+              "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",
     );
   }
 

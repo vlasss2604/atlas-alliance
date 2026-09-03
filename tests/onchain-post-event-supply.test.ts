@@ -73,7 +73,10 @@ function nextMint(): string {
     tag = "123456789"[n % 9] + tag;
     n = Math.floor(n / 9);
   } while (n > 0);
-  return `Mint${tag}`.padEnd(44, "1");
+  // Padded with a character the tag itself can never contain: padding with
+  // "1" made "Mint2" + 39 ones and "Mint21" + 38 ones the SAME address, so
+  // two fixtures silently shared a mint and each other's observations.
+  return `Mint${tag}`.padEnd(44, "z");
 }
 
 interface Fixture {

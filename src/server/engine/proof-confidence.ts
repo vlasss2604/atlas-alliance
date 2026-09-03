@@ -94,6 +94,24 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // this must never read as confident about net deflation, which is
   // exactly what an uncapped path would allow.
   NET_SUPPLY_CHANGE_NOT_ESTABLISHED: CONFIDENCE_BANDS.LIMITED,
+  // B2 — a measured interval changes WHAT is missing, never that something
+  // is. All three stay at the missing-structure band rather than moving up
+  // with the authority caveats.
+  //
+  // NET_SUPPLY_CHANGE_NOT_ATTRIBUTED: the net change IS measured now, and the
+  // thing the claim actually needs — that this mechanism caused it — is still
+  // entirely unobserved. Capping this ABOVE the not-established case would
+  // let "we measured a fall" read as confidence about a mechanism, which is
+  // the exact false positive B1 and B2 exist to prevent.
+  NET_SUPPLY_CHANGE_NOT_ATTRIBUTED: CONFIDENCE_BANDS.LIMITED,
+  // NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL: it accompanies a CONTRADICTED
+  // component, so the structural COMPONENT_CONTRADICTED cap normally binds
+  // first. The entry exists because a cap must never be absent, and it is
+  // LIMITED for the same reason as its neighbours.
+  NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL: CONFIDENCE_BANDS.LIMITED,
+  // CONFLICTING_SUPPLY_DELTA: the record contradicts itself about the
+  // measurement. Nothing about that footing is strong.
+  CONFLICTING_SUPPLY_DELTA: CONFIDENCE_BANDS.LIMITED,
   MISSING_CURRENT_STATE: CONFIDENCE_BANDS.LIMITED,
   CONFLICTING_STATE: CONFIDENCE_BANDS.LIMITED,
   // D-074. The best establishing row is CLAIMED, so the finding rests on

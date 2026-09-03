@@ -328,12 +328,23 @@ export async function persistTotalSupplyDeltaEvidence(
       onchainFactKind: "TOTAL_SUPPLY_DELTA",
       patternStep: TOTAL_SUPPLY_DELTA_STEP,
       component: TOTAL_SUPPLY_DELTA_COMPONENT,
-      // A measurement whose DIRECTION varies is not a supporting argument for
-      // the component's question — filing an increase as SUPPORTS of net
-      // supply effect would be a directional claim the arithmetic does not
-      // make. CONTEXT is also the second, structural reason this row cannot
-      // reach a verdict yet.
-      relationship: "CONTEXT",
+      // THE DIRECTION IS THE RELATIONSHIP, and this is the only place it is
+      // decided — once, by the code that did the subtraction, never by a
+      // model and never by anything reading the fragment back.
+      //
+      // Honest because the row is scoped to step 7 / NET_EFFECT and to no
+      // other component: for the question "what was the net supply effect", a
+      // measured decrease is evidence in favour of a net decrease, and a
+      // measured increase or no change is evidence against one. Neither says
+      // anything about CAUSE — the relationship positions the measurement
+      // relative to the component's question, and `doesNotProve` states in
+      // the same row that no mechanism is attributed.
+      //
+      // It is what lets reconciliation read the direction from a typed field
+      // instead of parsing prose, and it is why a delta cannot silently
+      // establish anything: SUPPORTS still leaves a limitation code standing,
+      // and CONTRADICTS never contradicts that the burn happened.
+      relationship: delta.direction === "DECREASED" ? "SUPPORTS" : "CONTRADICTS",
       directness: "DIRECT",
       fragment: totalSupplyDeltaFragment(delta),
       summary: totalSupplyDeltaStatement(delta),
