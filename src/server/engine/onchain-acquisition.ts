@@ -112,7 +112,26 @@ const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
   // worth having only on a subject bound to this project, and which
   // subject that is cannot be known before classification.
   EXECUTION_EVIDENCE: ["ACCOUNT_INFO"],
-  SOURCE_OF_VALUE: ["TOKEN_SUPPLY"],
+  // SOURCE_OF_VALUE IS ABSENT, AND THE ABSENCE IS THE POINT.
+  //
+  // It mapped to TOKEN_SUPPLY, which is the one intent addressed to the
+  // ANCHOR rather than to a locator — so on any job with a confirmed
+  // identity it fired unconditionally, needing nothing to be discovered
+  // first. A live PUMP acceptance run made the consequence visible: with no
+  // documentary locator admitted, a total-supply level was the only chain
+  // read that could happen, and it arrived filed under this component.
+  //
+  // A supply LEVEL says how many tokens exist. This component asks where
+  // the economic value COMES FROM — fees, issuance, user payments. There is
+  // no reading on which the first answers the second, so the entry did not
+  // meet this map's own stated bar ("which intents could bear on a
+  // component"). Removing it also stops reserving protected on-chain budget
+  // for a read that cannot bear on the question.
+  //
+  // Nothing about NET_EFFECT or CURRENT_STATE changes: a supply level is
+  // the quantity NET_EFFECT is about (and the reconciler, not this map,
+  // refuses to let one level become a change), and a successful read proves
+  // the mint is live at a slot, which is current-state-bearing.
   // How value MOVES before it reaches anyone. Same start as the other
   // account-kind components: a raw window on an unclassified documentary
   // address is history that has not been shown to be about this project at

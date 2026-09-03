@@ -642,14 +642,22 @@ describe("9. a floor that protects nothing is released, not wasted", () => {
     });
     // V2, AND THE WHOLE POINT OF IT. The old expectation here was the flat
     // `1 + MAX_PROMOTION_DEPTH`, and that number encoded the bug: the same
-    // ledger also pays for the seeded Pattern's three guaranteed anchor-level
+    // ledger also pays for the seeded Pattern's guaranteed anchor-level
     // reads, so a chain promised four units could be left with one. The
     // reservation is now the contract's actual remaining demand.
-    expect(held.baseReserved).toBe(3);
+    //
+    // TWO, not three. The anchor-level reads are the components mapping a
+    // token-kind intent, which needs no locator and therefore always
+    // happens: NET_EFFECT and CURRENT_STATE. SOURCE_OF_VALUE was the third
+    // until its TOKEN_SUPPLY mapping was removed — a supply level cannot
+    // bear on where value comes from — so the ledger no longer holds a
+    // protected open for a read that cannot answer the question, and the
+    // documentary ceiling gains that unit.
+    expect(held.baseReserved).toBe(2);
     expect(held.promotionReserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
-    expect(held.reserved).toBe(3 + ONCHAIN_RESERVED_SOURCE_OPENS);
-    expect(held.documentaryCeiling).toBe(24 - (3 + ONCHAIN_RESERVED_SOURCE_OPENS));
-    expect(held.documentaryCeiling).toBe(17);
+    expect(held.reserved).toBe(2 + ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(held.documentaryCeiling).toBe(24 - (2 + ONCHAIN_RESERVED_SOURCE_OPENS));
+    expect(held.documentaryCeiling).toBe(18);
   }, 120_000);
 
   it("13. it IS released once every on-chain-capable component has had its opportunity", async () => {
