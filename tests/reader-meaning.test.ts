@@ -149,7 +149,7 @@ describe("reader meaning — the B2 supply matrix", () => {
     // The positive knowledge leads, the open question follows — never a bare
     // limitation, and never a claim that supply did not fall.
     expect(m.headline).toBe(
-      "Tokens were destroyed, but the net change in total supply was not established.",
+      "Burn was confirmed, but the net change in total supply was not established.",
     );
     expect(m.headline).not.toContain("did not decrease");
     expect(m.headline).not.toContain("increase");
@@ -159,7 +159,7 @@ describe("reader meaning — the B2 supply matrix", () => {
     const m = deriveReaderMeaning(caseB);
     expect(m.state).toBe("MEASURED_NOT_ATTRIBUTED");
     expect(m.headline).toBe(
-      "Total supply decreased over the measured period, but the decrease is not attributed to this mechanism.",
+      "Burn was confirmed and total supply decreased over the measured period, but the decrease is not attributed to this mechanism.",
     );
   });
 
@@ -185,7 +185,7 @@ describe("reader meaning — the B2 supply matrix", () => {
     const m = deriveReaderMeaning(caseC);
     expect(m.state).toBe("CONTRADICTED_BY_MEASUREMENT");
     expect(m.headline).toBe(
-      "Tokens were destroyed, but total supply did not decrease over the measured period.",
+      "Burn was confirmed, but total supply did not decrease over the measured period.",
     );
   });
 
@@ -247,7 +247,7 @@ describe("reader meaning — the B2 supply matrix", () => {
     // row. What is contradicted is the net reduction, and only that.
     expect(m.supportingEvidenceIds).toEqual([BURN_ID]);
     expect(m.contradictingEvidenceIds).toEqual([DELTA_ID]);
-    expect(m.headline).toContain("Tokens were destroyed");
+    expect(m.headline).toContain("Burn was confirmed");
   });
 
   it("TEST 7b: a conflict BETWEEN SOURCES is not a contradiction BY MEASUREMENT", () => {
@@ -626,7 +626,7 @@ describe("reader meaning — carried by the result contract", () => {
     expect(row.readerMeaning.state).toBe("CONTRADICTED_BY_MEASUREMENT");
     const micro = findingMicroAnswer(row, []);
     expect(micro).toBe(
-      "Tokens were destroyed, but total supply did not decrease over the measured period.",
+      "Burn was confirmed, but total supply did not decrease over the measured period.",
     );
     // The sentence it replaces said only that "the sources point the other
     // way", which reads as doubt about the burn itself.

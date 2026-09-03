@@ -148,15 +148,21 @@ const CONTRADICTED_BY_MEASUREMENT_CODE = "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL";
 // as the same contradiction. Saying "increased" would be inventing the half
 // of the measurement that did not reach here, so the honest form — "did not
 // decrease" — is the one that covers both.
+//
+// EACH SENTENCE OPENS WITH WHAT WAS ESTABLISHED. "Burn was confirmed, but …"
+// tells a reader the positive fact before the limitation on it; the same
+// sentence written limitation-first reads as a verdict against the project
+// when it is nothing of the kind. The clause order is the whole difference
+// and it costs no accuracy: both halves are the same two observations.
 const HEADLINE_BY_REASON_CODE: Record<string, string> = {
   SUPPLY_REDUCTION_NOT_ESTABLISHED:
     "Nothing checked here shows tokens being destroyed.",
   NET_SUPPLY_CHANGE_NOT_ESTABLISHED:
-    "Tokens were destroyed, but the net change in total supply was not established.",
+    "Burn was confirmed, but the net change in total supply was not established.",
   NET_SUPPLY_CHANGE_NOT_ATTRIBUTED:
-    "Total supply decreased over the measured period, but the decrease is not attributed to this mechanism.",
+    "Burn was confirmed and total supply decreased over the measured period, but the decrease is not attributed to this mechanism.",
   NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL:
-    "Tokens were destroyed, but total supply did not decrease over the measured period.",
+    "Burn was confirmed, but total supply did not decrease over the measured period.",
   CONFLICTING_SUPPLY_DELTA:
     "The supply measurements recorded for this period disagree, so neither was used.",
 };

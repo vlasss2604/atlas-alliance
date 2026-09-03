@@ -830,7 +830,11 @@ export interface AnswerInput {
   verdict: string | null;
   outcomeKind?: OutcomeKind;
   projectName: string | null;
-  components: { component: string; status: string }[];
+  // `reasonCodes` is OPTIONAL and read only through the reader-meaning
+  // projection below. The answer still cannot say anything a component row
+  // does not already say — it can now say the specific thing instead of the
+  // general one.
+  components: { component: string; status: string; reasonCodes?: readonly unknown[] }[];
 }
 
 // "and" for things that were established, "or" for things that were not:
@@ -904,9 +908,56 @@ export function researchAnswer(input: AnswerInput): string[] {
       break;
   }
 
-  // 2 — what was positively contradicted. Never omitted: it is the strongest
-  // thing a run can say, and it comes only from a CONTRADICTED row.
-  const contradicted = pick(input.components, "CONTRADICTED", UNVERIFIED_PRIORITY, 2);
+  // 2 — A MEASURED FINDING LEADS, IN ITS OWN WORDS.
+  //
+  // "On a durable effect on token supply, the evidence indicates otherwise"
+  // is accurate and tells a reader nothing: it names the component and the
+  // DIRECTION of the finding while withholding the finding itself. A person
+  // who asked whether burning reduces the supply has to scroll past it,
+  // through the ladder, to reach the sentence that answers them.
+  //
+  // Where the reader layer has already resolved a component to a
+  // MEASUREMENT — a decrease nothing attributes, or a supply that did not
+  // fall around a confirmed burn — that sentence IS the answer, and it opens
+  // with what was established rather than with what was not.
+  //
+  // NOT WRITTEN HERE. It is the SAME deterministic headline the finding
+  // shows further down the page, derived from the same canonical status and
+  // reason codes by the same function, so the top of the screen and the row
+  // it summarises cannot say two different things. There is no second
+  // interpretation of the result anywhere in this file.
+  const measuredComponents = new Set<string>();
+  const measured: string[] = [];
+  for (const component of UNVERIFIED_PRIORITY) {
+    const row = input.components.find((c) => c.component === component);
+    if (!row) continue;
+    const meaning = deriveReaderMeaning({
+      status: row.status,
+      reasonCodes: row.reasonCodes,
+      subject: COMPONENT_PHRASES[component] ?? null,
+    });
+    if (
+      meaning.state === "CONTRADICTED_BY_MEASUREMENT" ||
+      meaning.state === "MEASURED_NOT_ATTRIBUTED"
+    ) {
+      measured.push(meaning.headline);
+      measuredComponents.add(component);
+    }
+  }
+  // ONE measured sentence. A second would spend the whole first screen on
+  // qualifications before a single established fact reached the reader.
+  sentences.push(...measured.slice(0, 1));
+
+  // 2b — every OTHER contradiction keeps exactly the sentence it had. A
+  // conflict between sources is not a measurement and must not borrow a
+  // measurement's words; a component already spoken for above is not
+  // restated in the general form.
+  const contradicted = pick(
+    input.components.filter((c) => !measuredComponents.has(c.component)),
+    "CONTRADICTED",
+    UNVERIFIED_PRIORITY,
+    2,
+  );
   if (contradicted.length > 0) {
     sentences.push(`On ${joinPhrases(contradicted, "and")}, the evidence indicates otherwise.`);
   }
