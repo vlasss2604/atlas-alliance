@@ -178,6 +178,54 @@ export function isComparableSupplyObservation(observation: OnchainArtifact): boo
   return validateObservation(observation).ok;
 }
 
+// THE MEASURABLE THING TWO OBSERVATIONS MUST SHARE.
+//
+// Two readings are of the same quantity only when they name the same chain,
+// the same network, the same mint and the same unit scale. Anything else is
+// a different token, or the same token measured in different units, and
+// neither is an arithmetic problem that could be worked around.
+//
+// Extracted so a caller holding ONE observation — or none yet — can ask
+// whether a candidate belongs to the same measurement domain WITHOUT
+// inventing a second reading to compare it against. `deriveTotalSupplyDelta`
+// asks exactly this question through the same two functions, so there is one
+// rule set and nothing to drift from.
+export interface SupplyMeasurementDomain {
+  chain: string;
+  network: string;
+  mint: string;
+  decimals: number;
+}
+
+// The domain an observation belongs to, or null when it is not a usable
+// deterministic total-supply observation at all.
+export function supplyMeasurementDomain(
+  observation: OnchainArtifact,
+): SupplyMeasurementDomain | null {
+  const validated = validateObservation(observation);
+  if (!validated.ok) return null;
+  const o = validated.observation;
+  return {
+    chain: o.provenance.chain,
+    network: o.provenance.network,
+    mint: o.result.mint,
+    decimals: o.result.decimals,
+  };
+}
+
+// Which of the four agreements fails first, in the same fixed order the
+// derivation reports them, or null when they all hold.
+export function supplyMeasurementDomainMismatch(
+  a: SupplyMeasurementDomain,
+  b: SupplyMeasurementDomain,
+): "CHAIN_MISMATCH" | "NETWORK_MISMATCH" | "MINT_MISMATCH" | "DECIMALS_MISMATCH" | null {
+  if (a.chain !== b.chain) return "CHAIN_MISMATCH";
+  if (a.network !== b.network) return "NETWORK_MISMATCH";
+  if (a.mint !== b.mint) return "MINT_MISMATCH";
+  if (a.decimals !== b.decimals) return "DECIMALS_MISMATCH";
+  return null;
+}
+
 // Derives the exact total-supply change between two observations.
 //
 // `from` is the earlier reading and `to` the later one; the ordering is
@@ -196,21 +244,14 @@ export function deriveTotalSupplyDelta(
   const t1 = later.observation;
 
   // Both are valid total-supply observations. Now: are they of the SAME
-  // measurable thing? Each of these is a different token, or the same token
-  // measured in different units, and none of them is an arithmetic problem
-  // that could be worked around.
-  if (t0.provenance.chain !== t1.provenance.chain) {
-    return { comparable: false, reason: "CHAIN_MISMATCH" };
-  }
-  if (t0.provenance.network !== t1.provenance.network) {
-    return { comparable: false, reason: "NETWORK_MISMATCH" };
-  }
-  if (t0.result.mint !== t1.result.mint) {
-    return { comparable: false, reason: "MINT_MISMATCH" };
-  }
-  if (t0.result.decimals !== t1.result.decimals) {
-    return { comparable: false, reason: "DECIMALS_MISMATCH" };
-  }
+  // measurable thing? Asked through the shared domain comparison above, so
+  // a caller that must ask it WITHOUT a second reading asks the identical
+  // question rather than a copy of it.
+  const domainMismatch = supplyMeasurementDomainMismatch(
+    supplyMeasurementDomain(t0)!,
+    supplyMeasurementDomain(t1)!,
+  );
+  if (domainMismatch !== null) return { comparable: false, reason: domainMismatch };
   if (!(t1.provenance.slot > t0.provenance.slot)) {
     return { comparable: false, reason: "NON_INCREASING_SLOT" };
   }

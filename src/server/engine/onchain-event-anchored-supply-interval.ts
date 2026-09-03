@@ -1,6 +1,9 @@
 import {
   deriveTotalSupplyDelta,
   isComparableSupplyObservation,
+  supplyMeasurementDomain,
+  supplyMeasurementDomainMismatch,
+  type SupplyMeasurementDomain,
   type TotalSupplyDelta,
 } from "./onchain-supply-delta";
 import type {
@@ -243,13 +246,51 @@ function supplyRef(
   };
 }
 
+// The anchor event, as a flat reference. Exported so a caller that must
+// REPORT which event it anchored on — without selecting an interval — builds
+// it from the same fields rather than a copy of them. Returns null for
+// anything that is not a decoded burn at the named index.
+export function anchorBurnRef(
+  artifact: OnchainArtifact,
+  burnIndex: number,
+  researchJobId: string,
+): AnchorBurnRef | null {
+  if (!isTransaction(artifact)) return null;
+  const burn: BurnInstructionRef | undefined = artifact.result.burns[burnIndex];
+  if (!burn) return null;
+  return {
+    researchJobId,
+    signature: artifact.result.signature,
+    slot: artifact.provenance.slot,
+    mint: burn.mint,
+    sourceAccount: burn.sourceAccount,
+    amountRaw: burn.amountRaw,
+    decimals: burn.decimals,
+    instructionType: burn.instructionType,
+    canonicalUri: artifact.canonicalUri,
+    rawResponseHash: artifact.provenance.rawResponseHash,
+    artifactHash: artifact.provenance.artifactHash,
+  };
+}
+
 // ELIGIBILITY, as its own step. Returns the candidates that may take part
 // in THIS Research at all — never which one to use.
+//
+// TAKES A MEASUREMENT DOMAIN, NOT A t1. Eligibility asks whether a candidate
+// COULD legitimately serve as t0; that question has an answer before any
+// current observation exists, and a caller deciding whether to acquire one
+// needs it then. `domain` may therefore be null, meaning "the current
+// measurement domain is not established yet" — every other rule still
+// applies, and the domain agreement is simply not among them.
+//
+// Nothing is weakened for the selector: it always passes the domain of its
+// own t1, and its `t0.slot < event.slot < t1.slot` bounds already guarantee
+// the strictly-increasing slot that `deriveTotalSupplyDelta` would check.
 export function filterTemporalSupplyEligibility(input: {
   currentResearchJobId: string;
   currentProjectAnchor: string;
   eventSlot: number;
-  current: OnchainArtifact & { result: TokenSupplyResult };
+  domain: SupplyMeasurementDomain | null;
   historical: readonly PersistedObservation[];
 }): {
   eligible: { candidate: PersistedObservation; slot: number; index: number }[];
@@ -288,9 +329,16 @@ export function filterTemporalSupplyEligibility(input: {
       excluded.push({ index, reason: "NO_EVENT_CONTAINING_INTERVAL" });
       continue;
     }
-    // Comparability is B2a's question, asked through B2a. Same chain,
-    // network, mint, decimals, finalized, strictly increasing slot.
-    if (!deriveTotalSupplyDelta(artifact, input.current).comparable) {
+    // Comparability is B2a's question, asked through B2a: same chain,
+    // network, mint and unit scale. Skipped, never guessed, when the current
+    // domain is not established — a candidate is not disqualified by a
+    // comparison there is nothing to make.
+    const candidateDomain = supplyMeasurementDomain(artifact);
+    if (
+      input.domain !== null &&
+      (candidateDomain === null ||
+        supplyMeasurementDomainMismatch(candidateDomain, input.domain) !== null)
+    ) {
       excluded.push({ index, reason: "NO_COMPARABLE_HISTORICAL_OBSERVATION" });
       continue;
     }
@@ -392,7 +440,7 @@ export function selectEventAnchoredSupplyInterval(
     currentResearchJobId: input.currentResearchJobId,
     currentProjectAnchor: input.currentProjectAnchor,
     eventSlot,
-    current: t1,
+    domain: supplyMeasurementDomain(t1),
     historical: input.historical,
   });
 
@@ -438,19 +486,7 @@ export function selectEventAnchoredSupplyInterval(
       // reading must be able to say so.
       historical: supplyRef(t0, chosen.selected.researchJobId as string),
       current: supplyRef(t1, input.currentResearchJobId),
-      event: {
-        researchJobId: input.currentResearchJobId,
-        signature: eventArtifact.result.signature,
-        slot: eventSlot,
-        mint: burn.mint,
-        sourceAccount: burn.sourceAccount,
-        amountRaw: burn.amountRaw,
-        decimals: burn.decimals,
-        instructionType: burn.instructionType,
-        canonicalUri: eventArtifact.canonicalUri,
-        rawResponseHash: eventArtifact.provenance.rawResponseHash,
-        artifactHash: eventArtifact.provenance.artifactHash,
-      },
+      event: anchorBurnRef(eventArtifact, input.event.burnIndex, input.currentResearchJobId)!,
       delta: delta.delta,
       candidatesConsidered: input.historical.length,
       eligibleCandidates: eligible.length,

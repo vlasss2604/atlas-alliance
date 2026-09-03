@@ -567,6 +567,8 @@ describe("determinism and boundaries", () => {
       "onchain-supply-delta",
       "onchain-event-anchored-supply-interval",
       "onchain-post-event-supply-plan",
+      "onchain-current-proof-supply-gate",
+      "onchain-supply-candidate-store",
     ];
     const isMember = (f: string) => CLUSTER.some((m) => f.endsWith(`${m}.ts`));
     const outsideImporters: string[] = [];

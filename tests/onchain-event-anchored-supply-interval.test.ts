@@ -7,14 +7,16 @@ import {
   type EventAnchoredSupplyIntervalOutcome,
   type PersistedObservation,
 } from "../src/server/engine/onchain-event-anchored-supply-interval";
-import { deriveTotalSupplyDelta } from "../src/server/engine/onchain-supply-delta";
+import {
+  deriveTotalSupplyDelta,
+  supplyMeasurementDomain,
+} from "../src/server/engine/onchain-supply-delta";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
 import { brandOnchainArtifact } from "../src/server/engine/providers/onchain-types";
 import type {
   BurnInstructionRef,
   OnchainArtifact,
   OnchainIntent,
-  TokenSupplyResult,
 } from "../src/server/engine/providers/onchain-types";
 
 // EVENT-ANCHORED SUPPLY INTERVAL.
@@ -572,6 +574,8 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
       "onchain-supply-delta",
       "onchain-event-anchored-supply-interval",
       "onchain-post-event-supply-plan",
+      "onchain-current-proof-supply-gate",
+      "onchain-supply-candidate-store",
     ];
     const importers: string[] = [];
     for (const f of files) {
@@ -603,9 +607,11 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
       currentResearchJobId: CURRENT_JOB,
       currentProjectAnchor: MINT,
       eventSlot: 500,
-      current: supplyArtifact({ slot: 900, amountRaw: "990" }) as OnchainArtifact & {
-        result: TokenSupplyResult;
-      },
+      // Eligibility now takes the measurement DOMAIN rather than a t1: the
+      // question "could this serve as t0" has an answer before any current
+      // observation exists, which is what a caller deciding whether to
+      // acquire one needs. The rule set is unchanged and still B2a's.
+      domain: supplyMeasurementDomain(supplyArtifact({ slot: 900, amountRaw: "990" })),
       historical: [
         observation({ slot: 100, amountRaw: "5000" }),
         observation({ slot: 400, amountRaw: "1000" }),
