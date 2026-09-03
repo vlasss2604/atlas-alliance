@@ -446,34 +446,31 @@ describe("insight — how the Result renders it", () => {
 /* THE THREE LENSES — THE RULES ADDED IN INSIGHT SEARCH v1             */
 /* ------------------------------------------------------------------ */
 
-describe("insight — stated vs observed", () => {
-  it("TEST 26: approved but not executing yields an execution-gap Insight", () => {
-    const insight = insightFor([approved, documented, executionMissing]);
-    expect(insight.type).toBe("INSIGHT");
-    if (insight.type !== "INSIGHT") return;
-    expect(insight.relation).toBe("EXECUTION_GAP");
-    expect(insight.lens).toBe("STATED_VS_OBSERVED");
-    expect(insight.text).toBe(
-      "Governance approved the mechanism, but ATLAS has not established that it is executing.",
-    );
-    // Governance leads where both a decision and a description exist.
-    expect(insight.supportingEvidenceIds).toEqual(["ev-gov"]);
-    expect(insight.components).toEqual(["GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"]);
+describe("insight — the retired stated-vs-observed gap", () => {
+  // Measured redundant across the whole scenario matrix, before AND after
+  // the Direct Answer began listing established execution: the answer
+  // already carries both halves of the join in adjacent sentences.
+  it("TEST 26: approved but not executing yields NONE, not a restatement", () => {
+    expect(insightFor([approved, documented, executionMissing]).type).toBe("NONE");
+    expect(insightFor([documented, executionMissing]).type).toBe("NONE");
   });
 
-  it("TEST 26b: documentation alone still yields the gap, in its own words", () => {
-    const insight = insightFor([documented, executionMissing]);
-    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
-    expect(insight.text).toBe(
-      "The mechanism is documented, but ATLAS has not established that it is executing.",
-    );
-    expect(insight.supportingEvidenceIds).toEqual(["ev-doc"]);
+  it("TEST 26b: the Answer is what carries that finding now", () => {
+    const answer = researchAnswer({
+      verdict: "PARTIALLY_SUPPORTED",
+      projectName: "Example Protocol",
+      components: [approved, documented, executionMissing] as never,
+    });
+    const text = answer.join(" ");
+    expect(text).toContain("the governing decision behind the mechanism");
+    expect(text).toContain("Not established: whether the mechanism has actually executed");
   });
 
-  it("TEST 26c: a component that was never assessed is not an execution gap", () => {
-    // No EXECUTION_EVIDENCE row at all. "Not established" would report a gap
-    // this research never looked for.
-    expect(insightFor([approved, documented]).type).toBe("NONE");
+  it("TEST 26c: the lens survives the rule, and no relation names it", () => {
+    const src = readFileSync(SOURCE, "utf-8");
+    expect(src).toContain("STATED_VS_OBSERVED");
+    expect(src).toContain("NO RULE CURRENTLY QUALIFIES UNDER THIS LENS");
+    expect(src).not.toContain('"EXECUTION_GAP"');
   });
 });
 
@@ -601,12 +598,12 @@ describe("insight — materiality and the closed priority", () => {
     // And with the contradiction removed, the next rank takes over rather
     // than a lower one jumping the queue.
     const withoutContradiction = insightFor(
-      [approved, documented, executionMissing, recipientMissing],
+      [approved, documented, executing, destinationEstablished, netEffectMissing, recipientMissing],
       [],
       [flowWithDestination("TREASURY")],
     );
     if (withoutContradiction.type !== "INSIGHT") throw new Error("expected an Insight");
-    expect(withoutContradiction.relation).toBe("EXECUTION_GAP");
+    expect(withoutContradiction.relation).toBe("DESTINATION_HELD");
   });
 
   it("TEST 30b: order invariance holds across the whole rule set", () => {
@@ -639,8 +636,6 @@ describe("insight — materiality and the closed priority", () => {
 
 describe("insight — every rule's copy holds the line", () => {
   const everySentence = [
-    insightFor([approved, documented, executionMissing]),
-    insightFor([documented, executionMissing]),
     insightFor([documented, executing, destinationEstablished, netEffectMissing], [], [
       flowWithDestination("TREASURY"),
     ]),
@@ -654,12 +649,12 @@ describe("insight — every rule's copy holds the line", () => {
     .filter((i): i is Extract<ProofInsight, { type: "INSIGHT" }> => i.type === "INSIGHT")
     .map((i) => i.text);
 
-  it("TEST 32: all seven sentences exist and are distinct", () => {
-    expect(everySentence).toHaveLength(7);
-    // All seven differ: the two execution-gap texts name their own stated
-    // basis, the two held-destination texts name their own destination, and
-    // the two supply texts are keyed by different reason codes.
-    expect(new Set(everySentence).size).toBe(7);
+  it("TEST 32: every sentence the module can produce is distinct", () => {
+    expect(everySentence).toHaveLength(5);
+    // All five differ: the two held-destination texts name their own
+    // destination, and the two supply texts are keyed by different reason
+    // codes.
+    expect(new Set(everySentence).size).toBe(5);
   });
 
   it("TEST 33: no advice, no judgement, no accusation, no causal overclaim", () => {
@@ -756,27 +751,16 @@ describe("insight — a standing limitation is not 'confirmed'", () => {
     expect(insightFor([documented, executing, recipientMissing]).type).toBe("INSIGHT");
   });
 
-  it("TEST 35c: a qualified approval never asserts governance approved it", () => {
-    const approvalQualified = {
-      component: "GOVERNANCE_BASIS",
-      status: "PARTIALLY_SUPPORTED",
-      reasonCodes: ["INSUFFICIENT_AUTHORITY"],
-      supportingEvidenceIds: ["ev-gov"],
-    };
-    const insight = insightFor([approvalQualified, documented, executionMissing]);
-    // Documentation is unqualified here, so the gap is still stated — in the
-    // words that are true of it, never governance's.
-    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
-    expect(insight.text).toBe(
-      "The mechanism is documented, but ATLAS has not established that it is executing.",
-    );
-    // With both qualified, nothing is asserted at all.
+  it("TEST 35c: a qualified execution keeps its qualification everywhere", () => {
+    // The narrowing is a property of the rule set, not of one rule: no
+    // surviving rule accepts a qualified component as its established half,
+    // whatever else is present.
     expect(
-      insightFor([
-        approvalQualified,
-        { ...documented, status: "PARTIALLY_SUPPORTED", reasonCodes: ["INDIRECT_ONLY"] },
-        executionMissing,
-      ]).type,
+      insightFor(
+        [documented, approved, executionQualified, destinationEstablished, netEffectMissing, recipientMissing],
+        [],
+        [flowWithDestination("BUYBACK_HOLD")],
+      ).type,
     ).toBe("NONE");
   });
 });

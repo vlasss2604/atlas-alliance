@@ -278,3 +278,100 @@ describe("direct answer — structural boundaries", () => {
     expect(other).toEqual(answer);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* ESTABLISHED EXECUTION IS DECISION-RELEVANT, AND MUST REACH THE TOP  */
+/* ------------------------------------------------------------------ */
+
+describe("direct answer — established execution is not buried", () => {
+  const documented = { component: "MECHANISM_SPEC", status: "SUPPORTED" };
+  const approved = { component: "GOVERNANCE_BASIS", status: "SUPPORTED" };
+  const executes = { component: "EXECUTION_EVIDENCE", status: "SUPPORTED" };
+  const valueSource = { component: "SOURCE_OF_VALUE", status: "SUPPORTED" };
+  const destination = { component: "DESTINATION", status: "SUPPORTED" };
+  const recipient = { component: "RECIPIENT", status: "SUPPORTED" };
+
+  const answerOf = (components: unknown[]) =>
+    researchAnswer({
+      verdict: "PARTIALLY_SUPPORTED",
+      projectName: "Example Protocol",
+      components: components as never,
+    }).join(" ");
+
+  it("TEST 16: established execution reaches the answer, in settled words", () => {
+    // Before this, EXECUTION_EVIDENCE sat sixth in the verified priority and
+    // five documentary/value-shape findings displaced it inside a
+    // three-item budget: a run that had established the mechanism RUNS
+    // opened by describing its documentation and never mentioned it.
+    const text = answerOf([documented, approved, executes, valueSource, destination, recipient]);
+    expect(text).toContain("that the mechanism has actually executed");
+    // And it is stated as SETTLED, not as an open question. "Established:
+    // whether the mechanism has actually executed" says the question was
+    // answered without saying which way.
+    expect(text).not.toContain("Established: whether");
+    expect(text).not.toContain("and whether the mechanism has actually executed");
+  });
+
+  it("TEST 16b: documentary findings no longer displace it", () => {
+    // Every lower-priority finding present at once still cannot crowd it out.
+    const text = answerOf([documented, approved, executes, valueSource, destination, recipient]);
+    expect(text).not.toContain("where the value ends up");
+    expect(text).not.toContain("who ultimately receives it");
+    // The two findings that say what the mechanism IS still lead it: a
+    // reader needs those before the fact that it ran is usable.
+    expect(text.indexOf("what the project's own documentation specifies")).toBeLessThan(
+      text.indexOf("that the mechanism has actually executed"),
+    );
+  });
+
+  it("TEST 16c: a qualified execution is never listed as established", () => {
+    // PARTIALLY_SUPPORTED means a standing limitation — authority,
+    // directness, a state still being implemented. It is a finding; it is
+    // not a confirmed one, and the established list admits only SUPPORTED.
+    const text = answerOf([
+      documented,
+      approved,
+      {
+        component: "EXECUTION_EVIDENCE",
+        status: "PARTIALLY_SUPPORTED",
+        reasonCodes: ["INSUFFICIENT_AUTHORITY"],
+      },
+      valueSource,
+    ]);
+    expect(text).not.toContain("that the mechanism has actually executed");
+    expect(text).toContain("where the economic value comes from");
+  });
+
+  it("TEST 16d: an unresolved execution still reads as the open question", () => {
+    const text = answerOf([
+      documented,
+      approved,
+      { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["MISSING_EXECUTION_EVIDENCE"] },
+      valueSource,
+    ]);
+    expect(text).toContain("Not established: whether the mechanism has actually executed");
+    expect(text).not.toContain("that the mechanism has actually executed.");
+  });
+
+  it("TEST 16e: a measured finding still outranks everything in the answer", () => {
+    const answer = researchAnswer({
+      verdict: "PARTIALLY_SUPPORTED",
+      projectName: "Example Protocol",
+      components: [
+        documented,
+        approved,
+        executes,
+        {
+          component: "NET_EFFECT",
+          status: "CONTRADICTED",
+          reasonCodes: ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"],
+        },
+      ] as never,
+    });
+    expect(answer[0]).toBe(
+      "Burn was confirmed, but total supply did not decrease over the measured period.",
+    );
+    // And execution still appears, below it.
+    expect(answer.join(" ")).toContain("that the mechanism has actually executed");
+  });
+});

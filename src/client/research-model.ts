@@ -801,13 +801,27 @@ const COMPONENT_PHRASES: Record<string, string> = {
 // establish that something is SPECIFIED; execution, current state and net
 // effect establish that it HAPPENS. The second kind decides more, so it leads
 // the unverified list.
+//
+// AND IT DECIDES JUST AS MUCH WHEN IT IS PRESENT. That reasoning was applied
+// to the unverified list and not to this one, so EXECUTION_EVIDENCE sat sixth
+// here — outside the three-item budget behind five documentary and
+// value-shape findings. The effect, measured across an Insight-quality
+// diagnostic, was that a run which had established the mechanism actually
+// RUNS opened with "Established: what the project's own documentation
+// specifies …" and never mentioned it. Documentation displacing observed
+// execution is precisely the confusion this product exists to prevent.
+//
+// It is placed THIRD, not first. The two findings ahead of it say what the
+// mechanism IS, and a reader meeting a result needs that before they can use
+// the fact that it ran; third guarantees inclusion inside the budget without
+// making execution the lead of every answer. Nothing else moved.
 const VERIFIED_PRIORITY = [
   "MECHANISM_SPEC",
   "GOVERNANCE_BASIS",
+  "EXECUTION_EVIDENCE",
   "SOURCE_OF_VALUE",
   "DESTINATION",
   "RECIPIENT",
-  "EXECUTION_EVIDENCE",
   "CURRENT_STATE",
   "NET_EFFECT",
   "FLOW_PATH",
@@ -846,11 +860,36 @@ function joinPhrases(list: string[], conjunction = "and"): string {
   return `${list.slice(0, -1).join(", ")} ${conjunction} ${list[list.length - 1]}`;
 }
 
+// A COMPONENT WHOSE PHRASE IS A QUESTION NEEDS A SECOND FORM TO BE LISTED
+// AS SETTLED.
+//
+// `COMPONENT_PHRASES` is written to serve both halves of the answer, and for
+// most components one phrase does: "Not established: where the value ends up"
+// and "Established: where the value ends up" both read correctly. Two of them
+// are phrased as open questions, and those do not survive the swap —
+// "Established: whether the mechanism has actually executed" says the
+// QUESTION was settled without saying which way, which is exactly the
+// ambiguity a positive finding must not have.
+//
+// So those two carry a settled form as well. Closed, and it exists only
+// because moving execution into the budget above put these phrases on the
+// established side for the first time.
+const SETTLED_PHRASES: Record<string, string> = {
+  EXECUTION_EVIDENCE: "that the mechanism has actually executed",
+  CURRENT_STATE: "that the mechanism is currently active",
+};
+
+// SUPPORTED ONLY, AND THAT IS LOAD-BEARING FOR THE ESTABLISHED LIST. The
+// caller passes the exact status it wants, so a PARTIALLY_SUPPORTED row —
+// one carrying a standing limitation on authority, directness or state —
+// can never enter a sentence that begins "Established:". A qualified finding
+// is a finding; it is not a confirmed one.
 function pick(
   components: { component: string; status: string }[],
   status: string,
   priority: string[],
   limit: number,
+  settled = false,
 ): string[] {
   const have = new Set(
     components.filter((c) => c.status === status).map((c) => c.component),
@@ -858,7 +897,7 @@ function pick(
   return priority
     .filter((c) => have.has(c) && COMPONENT_PHRASES[c])
     .slice(0, limit)
-    .map((c) => COMPONENT_PHRASES[c]);
+    .map((c) => (settled ? (SETTLED_PHRASES[c] ?? COMPONENT_PHRASES[c]) : COMPONENT_PHRASES[c]));
 }
 
 // THE ANSWER, BUILT FROM PERSISTED RESULTS ONLY.
@@ -969,7 +1008,7 @@ export function researchAnswer(input: AnswerInput): string[] {
   // fact. The claim is identical and no weaker: this still describes what
   // the EVIDENCE reached, never what is true of the world, and it stays
   // accurate when the only source was documentation.
-  const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
+  const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3, true);
   if (verified.length > 0) {
     sentences.push(`Established: ${joinPhrases(verified)}.`);
   }

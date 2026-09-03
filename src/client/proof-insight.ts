@@ -33,6 +33,17 @@ import { deriveReaderMeaning, type ReaderMeaning, type ReaderState } from "./rea
 export type InsightLens =
   // Something is documented or approved, and the corresponding execution is
   // not established.
+  //
+  // NO RULE CURRENTLY QUALIFIES UNDER THIS LENS, and that is a finding
+  // rather than an omission. Its one rule was retired after the Direct
+  // Answer began listing established execution: the answer's own shape —
+  // "Established: … | Not established: whether the mechanism has actually
+  // executed" — already puts both halves of that join in front of the
+  // reader, in adjacent sentences. An Insight restating it took a block on
+  // the screen to say what had just been said. The lens stays in the
+  // vocabulary because the search concept is sound; it earns a rule again
+  // only if some future state carries the join without the answer showing
+  // both halves.
   | "STATED_VS_OBSERVED"
   // Value flow is established, and where it ultimately lands changes the
   // reading.
@@ -45,7 +56,6 @@ export type InsightLens =
 // NEVER rendered, because a reader has no use for the name of a rule.
 export type InsightRelation =
   | "MEASURED_CONTRADICTION"
-  | "EXECUTION_GAP"
   | "DESTINATION_HELD"
   | "HOLDER_VALUE_NOT_ESTABLISHED"
   | "MEASURED_WITHOUT_ATTRIBUTION";
@@ -276,8 +286,6 @@ export function deriveProofInsight(input: ProofInsightInput): ProofInsight {
       if (answerSentences.includes(normalise(row.meaning.headline))) spokenFor.add(row.component);
     }
 
-    const spec = byComponent.get("MECHANISM_SPEC");
-    const governance = byComponent.get("GOVERNANCE_BASIS");
     const execution = byComponent.get("EXECUTION_EVIDENCE");
     const destination = byComponent.get("DESTINATION");
     const recipient = byComponent.get("RECIPIENT");
@@ -305,36 +313,17 @@ export function deriveProofInsight(input: ProofInsightInput): ProofInsight {
       });
     }
 
-    // ---- 2. STATED VS OBSERVED: an execution gap ---------------------
+    // ---- 2. RETIRED: the stated-vs-observed execution gap ------------
     //
-    // Something the project states or a governing body approved, with no
-    // established execution of it. Governance leads where both exist: an
-    // approved decision is a stronger stated basis than a description, so
-    // the unexecuted gap is the more material one.
-    if (isNotEstablished(execution)) {
-      const stated = isEstablished(governance)
-        ? {
-            row: governance!,
-            text: "Governance approved the mechanism, but ATLAS has not established that it is executing.",
-          }
-        : isEstablished(spec)
-          ? {
-              row: spec!,
-              text: "The mechanism is documented, but ATLAS has not established that it is executing.",
-            }
-          : null;
-      if (stated) {
-        candidates.push({
-          rank: 2,
-          relation: "EXECUTION_GAP",
-          lens: "STATED_VS_OBSERVED",
-          text: stated.text,
-          components: [stated.row.component, execution!.component],
-          supportingEvidenceIds: stated.row.meaning.supportingEvidenceIds,
-          contradictingEvidenceIds: [],
-        });
-      }
-    }
+    // "Governance approved the mechanism, but ATLAS has not established
+    // that it is executing" was measured as redundant across the whole
+    // scenario matrix, before AND after the Direct Answer began listing
+    // established execution. The answer already reads "Established: … the
+    // governing decision behind the mechanism | Not established: whether
+    // the mechanism has actually executed" — two adjacent sentences
+    // carrying both halves. Joining them into a third cost a block and
+    // added nothing a reader did not have. Removed rather than reworded:
+    // there is no wording that makes a restatement into a second meaning.
 
     // ---- 3. VALUE DESTINATION: established, and held rather than removed
     //
