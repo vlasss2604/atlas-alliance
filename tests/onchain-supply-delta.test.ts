@@ -487,7 +487,11 @@ describe("the primitive is not reachable from production, and claims nothing", (
     // module, which is the point — but nothing OUTSIDE the cluster may reach
     // any member. Composition is not production reachability: a cluster with
     // no entry point is still wired to nothing.
-    const CLUSTER = ["onchain-supply-delta", "onchain-event-anchored-supply-interval"];
+    const CLUSTER = [
+      "onchain-supply-delta",
+      "onchain-event-anchored-supply-interval",
+      "onchain-post-event-supply-plan",
+    ];
     const isMember = (f: string) => CLUSTER.some((m) => f.endsWith(`${m}.ts`));
 
     const outsideImporters: string[] = [];

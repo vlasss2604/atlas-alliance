@@ -551,7 +551,7 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
     }
   });
 
-  it("20. nothing in src or scripts imports it — no production wiring", async () => {
+  it("20. only the closed B2 cluster imports it — no production wiring", async () => {
     const { readdir, readFile } = await import("node:fs/promises");
     async function walk(dir: string): Promise<string[]> {
       const entries = await readdir(dir, { withFileTypes: true });
@@ -564,11 +564,23 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
       return out;
     }
     const files = [...(await walk("src")), ...(await walk("scripts"))];
+    // B2 is a CLOSED CLUSTER of pure primitives: they may compose one
+    // another, and nothing outside may reach any member. Composition is not
+    // production reachability — a cluster with no entry point is still
+    // wired to nothing.
+    const CLUSTER = [
+      "onchain-supply-delta",
+      "onchain-event-anchored-supply-interval",
+      "onchain-post-event-supply-plan",
+    ];
     const importers: string[] = [];
     for (const f of files) {
-      if (f.endsWith("onchain-event-anchored-supply-interval.ts")) continue;
-      const src = await readFile(f, "utf-8");
-      if (src.includes("onchain-event-anchored-supply-interval")) importers.push(f);
+      if (CLUSTER.some((m) => f.endsWith(`${m}.ts`))) continue;
+      const code = (await readFile(f, "utf-8"))
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+        .join("\n");
+      if (code.includes("onchain-event-anchored-supply-interval")) importers.push(f);
     }
     expect(importers).toEqual([]);
   });
