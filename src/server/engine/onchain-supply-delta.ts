@@ -166,6 +166,18 @@ function validateObservation(
   return { ok: true, observation };
 }
 
+// Whether ONE artifact is a usable deterministic total-supply observation,
+// by exactly the rules a delta already requires of each of its inputs.
+//
+// Exposed so a caller holding a single observation can report "this reading
+// is not usable" specifically, instead of discovering it indirectly as
+// "nothing was comparable with it". It runs the SAME validator the
+// derivation runs — there is no second set of rules to drift from, and no
+// judgement here that the delta does not already make.
+export function isComparableSupplyObservation(observation: OnchainArtifact): boolean {
+  return validateObservation(observation).ok;
+}
+
 // Derives the exact total-supply change between two observations.
 //
 // `from` is the earlier reading and `to` the later one; the ordering is

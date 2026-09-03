@@ -468,7 +468,7 @@ describe("14/15. comparability is mathematical, not editorial", () => {
 // ---------------------------------------------------------------------
 
 describe("the primitive is not reachable from production, and claims nothing", () => {
-  it("nothing in src imports it", async () => {
+  it("it is reachable only from inside the closed cluster of pure B2 primitives", async () => {
     const { readdir, readFile } = await import("node:fs/promises");
     async function walk(dir: string): Promise<string[]> {
       const entries = await readdir(dir, { withFileTypes: true });
@@ -481,15 +481,27 @@ describe("the primitive is not reachable from production, and claims nothing", (
       return out;
     }
     const files = [...(await walk("src")), ...(await walk("scripts"))];
-    const importers: string[] = [];
+
+    // B2 is built as a CLOSED CLUSTER of pure primitives. They may compose
+    // one another — the interval selector recomputes its delta through this
+    // module, which is the point — but nothing OUTSIDE the cluster may reach
+    // any member. Composition is not production reachability: a cluster with
+    // no entry point is still wired to nothing.
+    const CLUSTER = ["onchain-supply-delta", "onchain-event-anchored-supply-interval"];
+    const isMember = (f: string) => CLUSTER.some((m) => f.endsWith(`${m}.ts`));
+
+    const outsideImporters: string[] = [];
     for (const f of files) {
-      if (f.endsWith("onchain-supply-delta.ts")) continue;
-      const src = await readFile(f, "utf-8");
-      if (src.includes("onchain-supply-delta")) importers.push(f);
+      if (isMember(f)) continue;
+      const code = (await readFile(f, "utf-8"))
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+        .join("\n");
+      if (CLUSTER.some((m) => code.includes(m))) outsideImporters.push(f);
     }
-    // B2a is the arithmetic alone. Acquisition, persistence, Evidence and
-    // NET_EFFECT applicability are all later, separately approved decisions.
-    expect(importers).toEqual([]);
+    // Acquisition, persistence, Evidence and NET_EFFECT applicability are all
+    // later, separately approved decisions.
+    expect(outsideImporters).toEqual([]);
   });
 
   it("it synthesizes no fact kind and states its own limits", async () => {

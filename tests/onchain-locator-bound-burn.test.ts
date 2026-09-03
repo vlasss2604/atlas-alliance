@@ -532,7 +532,12 @@ describe("15/16/17. structural only, pure, and reachable from nothing", () => {
     const importers: string[] = [];
     for (const f of files) {
       if (f.endsWith("onchain-locator-bound-burn.ts")) continue;
-      const src = await readFile(f, "utf-8");
+      // CODE LINES ONLY. Another module may name this one in a comment —
+      // describing a shared convention is not reaching for the capability.
+      const src = (await readFile(f, "utf-8"))
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+        .join("\n");
       if (src.includes("onchain-locator-bound-burn")) importers.push(f);
     }
     // Not reconciliation, not Evidence persistence, not applicability, not
