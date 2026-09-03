@@ -635,7 +635,11 @@ describe("15/16/17/18. boundaries", () => {
     const { readFile } = await import("node:fs/promises");
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");
     expect(facts).toContain('BURN: ["NET_EFFECT"]');
-    expect(facts).not.toContain("SUPPLY_DELTA");
+    // B2d2 changed exactly one thing about this guard: the kind now EXISTS.
+    // What must still be true — and is the thing that mattered — is that it
+    // grants nothing: no applicability entry, so nothing may read it across
+    // components.
+    expect(facts).not.toContain("TOTAL_SUPPLY_DELTA: [");
   });
 
   it("18. no Research Memory", async () => {
@@ -694,6 +698,7 @@ describe("15/16/17/18. boundaries", () => {
       "onchain-current-proof-supply-gate",
       "onchain-supply-candidate-store",
       "onchain-post-event-supply",
+      "onchain-supply-delta-store",
     ];
     // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
     // post-event completion. Every other member is still reachable only from
@@ -883,13 +888,22 @@ describe("PART 4. the candidate loader retrieves, and decides nothing", () => {
     expect(src).not.toContain("sql`");
   });
 
-  it("no schema change and no new index were introduced", async () => {
+  it("the loader needed no index and no change to onchain_artifacts", async () => {
     const { readdir, readFile } = await import("node:fs/promises");
-    const files = await readdir("src/server/db/migrations");
-    const numbered = files.filter((f) => f.endsWith(".sql")).sort();
-    expect(numbered[numbered.length - 1]).toBe("0043_onchain_observation_identity.sql");
+    const files = (await readdir("src/server/db/migrations"))
+      .filter((f) => f.endsWith(".sql"))
+      .sort();
+    // The candidate loader rides the index that already existed, and no
+    // migration since has touched the artifact table it reads. (0044 adds the
+    // delta's own provenance relation and does not alter this one.)
     const schema = await readFile("src/server/db/schema/engine.ts", "utf-8");
     expect(schema).toContain("ix_onchain_artifacts_uri");
     expect(schema).not.toContain("ix_onchain_artifacts_supply");
+    for (const f of files.filter((n) => n > "0043")) {
+      const sqlText = await readFile(`src/server/db/migrations/${f}`, "utf-8");
+      expect(sqlText, `${f} must not alter onchain_artifacts`).not.toContain(
+        'ALTER TABLE "onchain_artifacts"',
+      );
+    }
   });
 });

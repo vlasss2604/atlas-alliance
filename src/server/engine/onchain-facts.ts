@@ -106,6 +106,16 @@ export const ONCHAIN_DOES_NOT_PROVE = {
     "tokens; it does NOT prove the burned tokens came from a buyback; it does NOT prove that a broader buyback " +
     "policy exists; and it does NOT establish circulating-supply semantics beyond the observed on-chain effect. " +
     "Linking this burn to a buyback mechanism requires separate admitted evidence.",
+  // B2 — the arithmetic ceiling of an interval, stated as narrowly as the
+  // arithmetic itself. The number is exact and says nothing about cause.
+  TOTAL_SUPPLY_DELTA:
+    "This is the exact change in the token's on-chain total supply between two observed slots, computed from " +
+    "two deterministic total-supply readings. It does not establish WHY the supply changed, what was minted " +
+    "or burned inside the interval, or that any mechanism, buyback or policy caused any part of the change: " +
+    "the number is the NET of everything that happened between the two slots. It does not establish " +
+    "circulating supply, which is a definitional and economic concept rather than a chain value. A decrease " +
+    "is not proof of a burn, an increase is not proof of an issuance policy, and no change is not proof that " +
+    "nothing happened.",
 } as const;
 
 // ---- the fact KIND: closed, code-owned, model-unreachable -------------
@@ -141,6 +151,17 @@ export const ONCHAIN_FACT_KINDS = [
   "BURN",
   "RECIPROCAL_ASSET_FLOW",
   "DECODED_EXCHANGE",
+  // DERIVED FROM TWO ARTIFACTS, UNLIKE EVERY KIND ABOVE IT. Its provenance
+  // lives in evidence_onchain_artifact_inputs (FROM = t0, TO = t1), and the
+  // singular evidence.onchain_artifact_id is NULL for such a row precisely
+  // because no single artifact established it.
+  //
+  // ADDING IT GRANTS NOTHING. It is deliberately absent from
+  // GROSS_SUPPLY_REDUCTION_FACT_KINDS (a net change is not a destruction
+  // event) and from APPLICABLE_COMPONENTS_BY_KIND (nothing may read it
+  // across components yet). Whether a delta may ever qualify NET_EFFECT is
+  // a separate, unapproved decision.
+  "TOTAL_SUPPLY_DELTA",
 ] as const;
 
 export type OnchainFactKind = (typeof ONCHAIN_FACT_KINDS)[number];

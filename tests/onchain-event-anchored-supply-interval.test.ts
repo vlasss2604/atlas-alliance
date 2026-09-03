@@ -577,6 +577,7 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
       "onchain-current-proof-supply-gate",
       "onchain-supply-candidate-store",
       "onchain-post-event-supply",
+      "onchain-supply-delta-store",
     ];
     // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
     // post-event completion. Every other member is still reachable only from
@@ -598,7 +599,11 @@ describe("20/21. pure, unwired, and nothing to fall back on", () => {
   it("no fact kind, no applicability change, no project name", async () => {
     const { readFile } = await import("node:fs/promises");
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");
-    expect(facts).not.toContain("SUPPLY_DELTA");
+    // B2d2 changed exactly one thing about this guard: the kind now EXISTS.
+    // What must still be true — and is the thing that mattered — is that it
+    // grants nothing: no applicability entry, so nothing may read it across
+    // components.
+    expect(facts).not.toContain("TOTAL_SUPPLY_DELTA: [");
     expect(facts).toContain('BURN: ["NET_EFFECT"]');
     const lower = (
       await readFile("src/server/engine/onchain-event-anchored-supply-interval.ts", "utf-8")

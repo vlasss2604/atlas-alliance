@@ -947,7 +947,11 @@ describe("21..25. boundaries", () => {
     expect(code).toContain("persistOnchainArtifact(");
     const { readFile } = await import("node:fs/promises");
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");
-    expect(facts).not.toContain("SUPPLY_DELTA");
+    // B2d2 changed exactly one thing about this guard: the kind now EXISTS.
+    // What must still be true — and is the thing that mattered — is that it
+    // grants nothing: no applicability entry, so nothing may read it across
+    // components.
+    expect(facts).not.toContain("TOTAL_SUPPLY_DELTA: [");
   });
 
   it("24/25. BURN -> NET_EFFECT is still the only applicability pair", async () => {

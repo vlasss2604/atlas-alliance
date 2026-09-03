@@ -309,6 +309,13 @@
       "when": 1788202800000,
       "tag": "0043_onchain_observation_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788289200000,
+      "tag": "0044_total_supply_delta_provenance",
+      "breakpoints": true
     }
   ]
 }

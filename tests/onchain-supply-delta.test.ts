@@ -494,6 +494,7 @@ describe("the primitive is not reachable from production, and claims nothing", (
       "onchain-current-proof-supply-gate",
       "onchain-supply-candidate-store",
       "onchain-post-event-supply",
+      "onchain-supply-delta-store",
     ];
     // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
     // post-event completion. Every other member is still reachable only from
@@ -527,7 +528,11 @@ describe("the primitive is not reachable from production, and claims nothing", (
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");
     // Unchanged at HEAD: exactly one applicability pair, and no supply-delta
     // fact kind exists.
-    expect(facts).not.toContain("SUPPLY_DELTA");
+    // B2d2 changed exactly one thing about this guard: the kind now EXISTS.
+    // What must still be true — and is the thing that mattered — is that it
+    // grants nothing: no applicability entry, so nothing may read it across
+    // components.
+    expect(facts).not.toContain("TOTAL_SUPPLY_DELTA: [");
     expect(facts).toContain('BURN: ["NET_EFFECT"]');
 
     const src = await readFile("src/server/engine/onchain-supply-delta.ts", "utf-8");
