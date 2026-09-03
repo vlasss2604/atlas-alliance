@@ -629,13 +629,25 @@ export async function persistOnchainArtifact(input: {
     })
     // A standalone row's job id is NULL, and Postgres treats NULLs as
     // distinct — so the job-scoped arbiter constrains nothing there. The
-    // partial unique index on artifact_hash is what makes a standalone
-    // replay idempotent, and it is named explicitly for that mode.
+    // partial unique index is what makes a standalone replay idempotent,
+    // and it is named explicitly for that mode.
+    //
+    // SLOT IS PART OF THE ARBITER because it is part of the observation's
+    // identity: the same reading at a LATER chain position is a second
+    // observation, not a repeat of the first (see the index comments in
+    // schema/engine.ts). Without it, an unchanged value read again was
+    // silently dropped.
     .onConflictDoNothing(
       origin.kind === "RESEARCH_JOB"
-        ? { target: [onchainArtifacts.researchJobId, onchainArtifacts.artifactHash] }
+        ? {
+            target: [
+              onchainArtifacts.researchJobId,
+              onchainArtifacts.artifactHash,
+              onchainArtifacts.slot,
+            ],
+          }
         : {
-            target: onchainArtifacts.artifactHash,
+            target: [onchainArtifacts.artifactHash, onchainArtifacts.slot],
             where: sql`${onchainArtifacts.researchJobId} IS NULL`,
           },
     )
@@ -648,12 +660,18 @@ export async function persistOnchainArtifact(input: {
     // row with identical content — a different row, in a different mode,
     // silently returned as if it were this job's. The hash is a content
     // address, so identical content across modes is expected, not rare.
+    // MATCHES THE ARBITER EXACTLY, slot included. A lookup by hash alone
+    // would now match SEVERAL rows — the same value observed at different
+    // slots — and take whichever Postgres returned first, resolving this
+    // observation to a different one. The conflict target and the recovery
+    // read must describe the same identity or they disagree by design.
     const [existing] = await db
       .select({ id: onchainArtifacts.id })
       .from(onchainArtifacts)
       .where(
         and(
           eq(onchainArtifacts.artifactHash, p.artifactHash),
+          eq(onchainArtifacts.slot, p.slot),
           jobId === null
             ? isNull(onchainArtifacts.researchJobId)
             : eq(onchainArtifacts.researchJobId, jobId),
