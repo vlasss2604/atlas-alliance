@@ -46,8 +46,46 @@ const notAttributedRow = {
   contradictingEvidenceIds: [] as string[],
 };
 
-const insightFor = (rows: unknown[], answerSentences: string[] = []): ProofInsight =>
-  deriveProofInsight({ components: rows as never, answerSentences });
+const insightFor = (
+  rows: unknown[],
+  answerSentences: string[] = [],
+  flows: unknown[] = [],
+): ProofInsight =>
+  deriveProofInsight({ components: rows as never, answerSentences, flows });
+
+// S6 assembly, reduced to the one attribute this module reads.
+const flowWithDestination = (destinationKind: string, lifecycle = "CURRENT") => ({
+  lifecycle,
+  attributes: { destinationKind },
+});
+
+// A run where the mechanism is documented, approved and observed running.
+const documented = { component: "MECHANISM_SPEC", status: "SUPPORTED", supportingEvidenceIds: ["ev-doc"] };
+const approved = { component: "GOVERNANCE_BASIS", status: "SUPPORTED", supportingEvidenceIds: ["ev-gov"] };
+const executing = { component: "EXECUTION_EVIDENCE", status: "SUPPORTED", supportingEvidenceIds: [BURN] };
+const executionMissing = {
+  component: "EXECUTION_EVIDENCE",
+  status: "INSUFFICIENT_EVIDENCE",
+  reasonCodes: ["MISSING_EXECUTION_EVIDENCE"],
+  supportingEvidenceIds: [] as string[],
+};
+const destinationEstablished = {
+  component: "DESTINATION",
+  status: "SUPPORTED",
+  supportingEvidenceIds: ["ev-dest"],
+};
+const netEffectMissing = {
+  component: "NET_EFFECT",
+  status: "INSUFFICIENT_EVIDENCE",
+  reasonCodes: ["NO_EVIDENCE_FOUND"],
+  supportingEvidenceIds: [] as string[],
+};
+const recipientMissing = {
+  component: "RECIPIENT",
+  status: "INSUFFICIENT_EVIDENCE",
+  reasonCodes: ["NO_EVIDENCE_FOUND"],
+  supportingEvidenceIds: [] as string[],
+};
 
 /* ------------------------------------------------------------------ */
 /* 1-3. WHEN AN INSIGHT EXISTS, AND WHEN IT DOES NOT                   */
@@ -381,9 +419,10 @@ describe("insight — how the Result renders it", () => {
   const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");
 
   it("TEST 23: it is derived from the same canonical rows, and given the answer", () => {
-    expect(page).toContain(
-      "deriveProofInsight({ components, answerSentences: answer })",
-    );
+    expect(page).toContain("deriveProofInsight({");
+    expect(page).toContain("answerSentences: answer,");
+    // S6's assembly reaches it from the same response, or null.
+    expect(page).toContain("flows: detail.mechanism?.flows ?? null,");
   });
 
   it("TEST 24: it renders AFTER the answer, never before it", () => {
@@ -399,6 +438,281 @@ describe("insight — how the Result renders it", () => {
     expect(page).toContain('insight.type === "INSIGHT" &&');
     for (const phrase of ["No insight", "no insight", "No additional insight"]) {
       expect(page, phrase).not.toContain(phrase);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* THE THREE LENSES — THE RULES ADDED IN INSIGHT SEARCH v1             */
+/* ------------------------------------------------------------------ */
+
+describe("insight — stated vs observed", () => {
+  it("TEST 26: approved but not executing yields an execution-gap Insight", () => {
+    const insight = insightFor([approved, documented, executionMissing]);
+    expect(insight.type).toBe("INSIGHT");
+    if (insight.type !== "INSIGHT") return;
+    expect(insight.relation).toBe("EXECUTION_GAP");
+    expect(insight.lens).toBe("STATED_VS_OBSERVED");
+    expect(insight.text).toBe(
+      "Governance approved the mechanism, but ATLAS has not established that it is executing.",
+    );
+    // Governance leads where both a decision and a description exist.
+    expect(insight.supportingEvidenceIds).toEqual(["ev-gov"]);
+    expect(insight.components).toEqual(["GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"]);
+  });
+
+  it("TEST 26b: documentation alone still yields the gap, in its own words", () => {
+    const insight = insightFor([documented, executionMissing]);
+    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(insight.text).toBe(
+      "The mechanism is documented, but ATLAS has not established that it is executing.",
+    );
+    expect(insight.supportingEvidenceIds).toEqual(["ev-doc"]);
+  });
+
+  it("TEST 26c: a component that was never assessed is not an execution gap", () => {
+    // No EXECUTION_EVIDENCE row at all. "Not established" would report a gap
+    // this research never looked for.
+    expect(insightFor([approved, documented]).type).toBe("NONE");
+  });
+});
+
+describe("insight — value destination", () => {
+  it("TEST 27: execution plus a held destination plus no net reduction", () => {
+    const insight = insightFor(
+      [documented, executing, destinationEstablished, netEffectMissing],
+      [],
+      [flowWithDestination("TREASURY")],
+    );
+    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(insight.relation).toBe("DESTINATION_HELD");
+    expect(insight.lens).toBe("VALUE_DESTINATION");
+    expect(insight.text).toBe(
+      "Execution is confirmed, and the established destination is the treasury — permanent removal from supply is not established.",
+    );
+    expect(insight.supportingEvidenceIds).toEqual([BURN, "ev-dest"]);
+    // Documentation is not cited: this relationship does not rest on it.
+    expect(insight.supportingEvidenceIds).not.toContain("ev-doc");
+  });
+
+  it("TEST 27b: a held destination on its own establishes nothing", () => {
+    // Net effect established, so there is no gap between execution and
+    // removal to point at.
+    expect(
+      insightFor(
+        [documented, executing, destinationEstablished],
+        [],
+        [flowWithDestination("TREASURY")],
+      ).type,
+    ).toBe("NONE");
+    // A BURN destination is not a "held" destination.
+    expect(
+      insightFor(
+        [documented, executing, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("BURN")],
+      ).type,
+    ).toBe("NONE");
+  });
+
+  it("TEST 27c: a historical flow never drives a statement about now", () => {
+    expect(
+      insightFor(
+        [documented, executing, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("TREASURY", "HISTORICAL")],
+      ).type,
+    ).toBe("NONE");
+  });
+
+  it("TEST 27d: two current flows disagreeing yields no destination Insight", () => {
+    // Nothing here picks the more interesting destination.
+    expect(
+      insightFor(
+        [documented, executing, destinationEstablished, netEffectMissing],
+        [],
+        [flowWithDestination("TREASURY"), flowWithDestination("DISTRIBUTION")],
+      ).type,
+    ).toBe("NONE");
+  });
+
+  it("TEST 28: execution established with no established recipient", () => {
+    const insight = insightFor([documented, executing, recipientMissing]);
+    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(insight.relation).toBe("HOLDER_VALUE_NOT_ESTABLISHED");
+    expect(insight.text).toBe(
+      "The mechanism is observed executing, but ATLAS has not established that the value it moves reaches token holders.",
+    );
+    expect(insight.supportingEvidenceIds).toEqual([BURN]);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* MATERIALITY AND PRIORITY                                            */
+/* ------------------------------------------------------------------ */
+
+describe("insight — materiality and the closed priority", () => {
+  it("TEST 29: a single-component single-sided restatement is refused", () => {
+    // Everything established. There is no join to make.
+    expect(insightFor([documented, approved, executing]).type).toBe("NONE");
+    // One component short of established, on its own, is what the Answer
+    // already says — not a relationship.
+    expect(
+      insightFor([
+        {
+          component: "DURABILITY_BASIS",
+          status: "PARTIALLY_SUPPORTED",
+          reasonCodes: ["INSUFFICIENT_AUTHORITY"],
+          supportingEvidenceIds: ["ev-d"],
+        },
+      ]).type,
+    ).toBe("NONE");
+  });
+
+  it("TEST 29b: two unrelated components do not make a relationship", () => {
+    // Both established, nothing missing: no rule pairs them, and no rule
+    // exists that pairs components merely because there are two of them.
+    expect(insightFor([documented, destinationEstablished]).type).toBe("NONE");
+  });
+
+  it("TEST 29c: a candidate citing no canonical evidence is refused", () => {
+    // Approved with no evidence ids at all cannot ground a sentence.
+    expect(
+      insightFor([
+        { component: "GOVERNANCE_BASIS", status: "SUPPORTED", supportingEvidenceIds: [] },
+        executionMissing,
+      ]).type,
+    ).toBe("NONE");
+  });
+
+  it("TEST 30: the strongest candidate wins, deterministically", () => {
+    // All five rules eligible at once.
+    const rows = [
+      approved,
+      documented,
+      executing,
+      destinationEstablished,
+      recipientMissing,
+      contradictedRow,
+    ];
+    const insight = insightFor(rows, [], [flowWithDestination("TREASURY")]);
+    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(insight.relation).toBe("MEASURED_CONTRADICTION");
+    // And with the contradiction removed, the next rank takes over rather
+    // than a lower one jumping the queue.
+    const withoutContradiction = insightFor(
+      [approved, documented, executionMissing, recipientMissing],
+      [],
+      [flowWithDestination("TREASURY")],
+    );
+    if (withoutContradiction.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(withoutContradiction.relation).toBe("EXECUTION_GAP");
+  });
+
+  it("TEST 30b: order invariance holds across the whole rule set", () => {
+    const rows = [approved, documented, executing, recipientMissing, notAttributedRow];
+    const forward = insightFor(rows, [], [flowWithDestination("TREASURY")]);
+    const reversed = insightFor([...rows].reverse(), [], [flowWithDestination("TREASURY")]);
+    expect(reversed).toEqual(forward);
+  });
+
+  it("TEST 31: the B2 measured-decrease exception is preserved and documented", () => {
+    // One component, all evidence on the supporting side: it fails both
+    // limbs of the materiality gate and is deliberately kept.
+    const insight = insightFor([documented, notAttributedRow]);
+    if (insight.type !== "INSIGHT") throw new Error("expected an Insight");
+    expect(insight.relation).toBe("MEASURED_WITHOUT_ATTRIBUTION");
+    // Still fires when the Answer already led with that component.
+    const led = insightFor(
+      [documented, notAttributedRow],
+      ["Burn was confirmed and total supply decreased over the measured period, but the decrease is not attributed to this mechanism."],
+    );
+    expect(led.type).toBe("INSIGHT");
+    // The exception is stated in the source, not silently applied.
+    expect(readFileSync(SOURCE, "utf-8")).toContain("THE ONE DOCUMENTED EXCEPTION");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* LANGUAGE, ACROSS EVERY SENTENCE THE MODULE CAN PRODUCE              */
+/* ------------------------------------------------------------------ */
+
+describe("insight — every rule's copy holds the line", () => {
+  const everySentence = [
+    insightFor([approved, documented, executionMissing]),
+    insightFor([documented, executionMissing]),
+    insightFor([documented, executing, destinationEstablished, netEffectMissing], [], [
+      flowWithDestination("TREASURY"),
+    ]),
+    insightFor([documented, executing, destinationEstablished, netEffectMissing], [], [
+      flowWithDestination("BUYBACK_HOLD"),
+    ]),
+    insightFor([documented, executing, recipientMissing]),
+    insightFor([documented, contradictedRow]),
+    insightFor([documented, notAttributedRow]),
+  ]
+    .filter((i): i is Extract<ProofInsight, { type: "INSIGHT" }> => i.type === "INSIGHT")
+    .map((i) => i.text);
+
+  it("TEST 32: all seven sentences exist and are distinct", () => {
+    expect(everySentence).toHaveLength(7);
+    // All seven differ: the two execution-gap texts name their own stated
+    // basis, the two held-destination texts name their own destination, and
+    // the two supply texts are keyed by different reason codes.
+    expect(new Set(everySentence).size).toBe(7);
+  });
+
+  it("TEST 33: no advice, no judgement, no accusation, no causal overclaim", () => {
+    for (const text of everySentence) {
+      const lower = text.toLowerCase();
+      for (const forbidden of [
+        "bullish",
+        "bearish",
+        " buy",
+        "sell",
+        "price",
+        "risk",
+        "should",
+        "recommend",
+        "invest",
+        "scam",
+        "fake",
+        "lied",
+        "fraud",
+        "good project",
+        "bad project",
+        "failed",
+        "deflationary",
+        "inflationary",
+        "caused by",
+        "because of",
+        "due to",
+        "resulted in",
+        "led to",
+        "proves that",
+      ]) {
+        expect(lower, `${forbidden} in "${text}"`).not.toContain(forbidden);
+      }
+      expect(text).not.toMatch(/\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+\b/);
+      expect(text.length).toBeLessThanOrEqual(200);
+      expect(text).toMatch(/^[A-Z].*\.$/);
+    }
+  });
+
+  it("TEST 34: every rule reads only S6's classification, never prose", () => {
+    const src = readFileSync(SOURCE, "utf-8");
+    // The one flow attribute this module reads, and nothing textual.
+    expect(src).toContain("destinationKind");
+    // No field of an evidence row carrying prose is ever read, and no
+    // lexical test of any kind is performed here.
+    for (const forbidden of [
+      ".fragment",
+      ".summary",
+      "classify",
+      "toLowerCase().includes",
+      "PHRASES",
+    ]) {
+      expect(src, forbidden).not.toContain(forbidden);
     }
   });
 });

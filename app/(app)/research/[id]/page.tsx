@@ -171,7 +171,15 @@ export default function ResearchDetailPage() {
   // handed the answer's own sentences so it can stay silent rather than say
   // one of them twice. NONE is the normal outcome and renders nothing at
   // all — there is no empty state, because silence here is not news.
-  const insight = deriveProofInsight({ components, answerSentences: answer });
+  // S6's assembly is passed for ONE structured attribute — where an
+  // established current flow lands — and the module reads nothing else from
+  // it. `detail.mechanism` is null on a run that produced no assembly, which
+  // simply removes the two value-destination rules from consideration.
+  const insight = deriveProofInsight({
+    components,
+    flows: detail.mechanism?.flows ?? null,
+    answerSentences: answer,
+  });
 
   // Evidence roles come from PERSISTED relationships only — S8's citation
   // binding first, then S5's component sets. An excluded row is labelled
