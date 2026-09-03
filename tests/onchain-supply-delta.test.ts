@@ -493,7 +493,12 @@ describe("the primitive is not reachable from production, and claims nothing", (
       "onchain-post-event-supply-plan",
       "onchain-current-proof-supply-gate",
       "onchain-supply-candidate-store",
+      "onchain-post-event-supply",
     ];
+    // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
+    // post-event completion. Every other member is still reachable only from
+    // inside, and the pure arithmetic has no production caller at all.
+    const ENTRY_POINT = "src/server/engine/run-job.ts";
     const isMember = (f: string) => CLUSTER.some((m) => f.endsWith(`${m}.ts`));
 
     const outsideImporters: string[] = [];
@@ -503,6 +508,13 @@ describe("the primitive is not reachable from production, and claims nothing", (
         .split("\n")
         .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
         .join("\n");
+      if (f === ENTRY_POINT) {
+        // The one permitted door, and only to the orchestrator.
+        for (const m of CLUSTER) {
+          if (m !== "onchain-post-event-supply" && code.includes(m)) outsideImporters.push(f);
+        }
+        continue;
+      }
       if (CLUSTER.some((m) => code.includes(m))) outsideImporters.push(f);
     }
     // Acquisition, persistence, Evidence and NET_EFFECT applicability are all

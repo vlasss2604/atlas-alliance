@@ -1,11 +1,19 @@
-import { and, desc, eq, isNotNull, lt, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { onchainArtifacts } from "../db/schema";
+import { evidence, onchainArtifacts } from "../db/schema";
 import type { PersistedObservation } from "./onchain-event-anchored-supply-interval";
 import { buildCanonicalOnchainUri } from "./onchain-uri";
 import { brandOnchainArtifact } from "./providers/onchain-types";
-import type { OnchainChain, OnchainNetwork } from "./providers/onchain-types";
+import type {
+  BurnInstructionRef,
+  OnchainArtifact,
+  OnchainChain,
+  OnchainIntent,
+  OnchainNetwork,
+  TransactionDetailResult,
+} from "./providers/onchain-types";
+import type { AnchorBurnEvent } from "./onchain-event-anchored-supply-interval";
 
 // HISTORICAL t0 CANDIDATE RETRIEVAL — rows, never a winner.
 //
@@ -148,6 +156,186 @@ export async function loadHistoricalSupplyCandidates(
       }),
       originKind: "RESEARCH_JOB",
       researchJobId: row.researchJobId,
+    });
+  }
+  return out;
+}
+
+// ---- the rest of the current-Research context -------------------------
+//
+// Same discipline as the historical loader above: these retrieve ROWS the
+// pure layer then judges. Neither decides eligibility, neither selects an
+// anchor, and neither looks outside the current job.
+
+type ArtifactRow = typeof onchainArtifacts.$inferSelect;
+
+function provenanceOf(row: ArtifactRow): OnchainArtifact["provenance"] {
+  return {
+    chain: row.chain as OnchainChain,
+    network: row.network as OnchainNetwork,
+    projectAnchor: row.projectAnchor,
+    subjectKind: row.subjectKind as OnchainIntent["subjectKind"],
+    subject: row.subject,
+    slot: row.slot,
+    blockTime: row.blockTime === null ? null : Math.floor(row.blockTime.getTime() / 1000),
+    blockHash: row.blockHash,
+    finality: row.finality === "finalized" ? "finalized" : "confirmed",
+    retrievalMethod: "RPC",
+    providerId: row.providerId,
+    providerMethod: row.providerMethod,
+    requestParams: row.requestParams as Record<string, string | number | boolean>,
+    transactionSignature: row.transactionSignature,
+    retrievedAt: row.retrievedAt,
+    rawResponseHash: row.rawResponseHash,
+    artifactHash: row.artifactHash,
+  };
+}
+
+// THIS Research's own total-supply readings. The gate needs them to answer
+// "do I already hold one after the event" and to establish the measurement
+// domain; it decides both, this only fetches.
+export async function loadCurrentJobSupplyObservations(
+  db: Database | Transaction,
+  query: {
+    currentResearchJobId: string;
+    projectAnchor: string;
+    chain: OnchainChain;
+    network: OnchainNetwork;
+  },
+): Promise<PersistedObservation[]> {
+  const canonicalUri = buildCanonicalOnchainUri({
+    kind: "TOKEN_SUPPLY",
+    chain: query.chain,
+    network: query.network,
+    projectAnchor: query.projectAnchor,
+    subjectKind: "token",
+    subject: query.projectAnchor,
+  });
+  const rows = await db
+    .select()
+    .from(onchainArtifacts)
+    .where(
+      and(
+        eq(onchainArtifacts.canonicalUri, canonicalUri),
+        eq(onchainArtifacts.originKind, "RESEARCH_JOB"),
+        eq(onchainArtifacts.researchJobId, query.currentResearchJobId),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot));
+
+  const out: PersistedObservation[] = [];
+  for (const row of rows) {
+    const result = readSupplyResult(row.normalizedResult);
+    if (result === null) continue;
+    const supply = { kind: "TOKEN_SUPPLY" as const, ...result };
+    out.push({
+      artifact: brandOnchainArtifact({
+        intent: {
+          kind: "TOKEN_SUPPLY",
+          chain: row.chain as OnchainChain,
+          network: row.network as OnchainNetwork,
+          projectAnchor: row.projectAnchor,
+          subjectKind: "token",
+          subject: row.subject,
+        },
+        canonicalUri: row.canonicalUri,
+        result: supply,
+        normalizedText: JSON.stringify(supply),
+        provenance: provenanceOf(row),
+      }),
+      originKind: "RESEARCH_JOB",
+      researchJobId: row.researchJobId,
+    });
+  }
+  return out;
+}
+
+// Reconstruction hygiene for a transaction, exactly as for a supply row: a
+// stored result that cannot be turned back into the shape the pure layer
+// reads is skipped rather than repaired.
+function readTransactionResult(normalized: unknown): TransactionDetailResult | null {
+  if (typeof normalized !== "object" || normalized === null) return null;
+  const row = normalized as Record<string, unknown>;
+  if (row.kind !== "TRANSACTION_DETAIL") return null;
+  if (typeof row.signature !== "string" || row.signature.length === 0) return null;
+  if (!Number.isInteger(row.slot)) return null;
+  if (!Array.isArray(row.burns)) return null;
+  for (const burn of row.burns) {
+    if (typeof burn !== "object" || burn === null) return null;
+    const b = burn as Record<string, unknown>;
+    if (typeof b.mint !== "string" || b.mint.length === 0) return null;
+    if (typeof b.sourceAccount !== "string" || b.sourceAccount.length === 0) return null;
+    if (typeof b.amountRaw !== "string" || b.amountRaw.length === 0) return null;
+  }
+  return row as unknown as TransactionDetailResult;
+}
+
+// THE DETERMINISTIC EVENTS THIS RESEARCH ESTABLISHED.
+//
+// A transaction artifact of this job is not by itself an event: what makes
+// it one is that deterministic synthesis filed a BURN fact from it. So the
+// artifacts are narrowed to those an `evidence` row with
+// `onchain_fact_kind = 'BURN'` actually points at — "established by this
+// Research" read literally, from the row that establishes it.
+//
+// It emits ONE candidate per decoded burn of the ACTIVE mint, and ranks
+// none of them. Which event an interval is anchored on is the pure layer's
+// decision; which slot bounds acquisition coverage is the gate's.
+export async function loadCurrentJobBurnEvents(
+  db: Database | Transaction,
+  query: {
+    currentResearchJobId: string;
+    projectAnchor: string;
+  },
+): Promise<AnchorBurnEvent[]> {
+  const established = await db
+    .selectDistinct({ artifactId: evidence.onchainArtifactId })
+    .from(evidence)
+    .where(
+      and(
+        eq(evidence.researchJobId, query.currentResearchJobId),
+        eq(evidence.onchainFactKind, "BURN"),
+        isNotNull(evidence.onchainArtifactId),
+      ),
+    );
+  const artifactIds = established
+    .map((r) => r.artifactId)
+    .filter((id): id is string => id !== null);
+  if (artifactIds.length === 0) return [];
+
+  const rows = await db
+    .select()
+    .from(onchainArtifacts)
+    .where(
+      and(
+        inArray(onchainArtifacts.id, artifactIds),
+        eq(onchainArtifacts.researchJobId, query.currentResearchJobId),
+        eq(onchainArtifacts.projectAnchor, query.projectAnchor),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot));
+
+  const out: AnchorBurnEvent[] = [];
+  for (const row of rows) {
+    const result = readTransactionResult(row.normalizedResult);
+    if (result === null) continue;
+    const artifact = brandOnchainArtifact({
+      intent: {
+        kind: "TRANSACTION_DETAIL",
+        chain: row.chain as OnchainChain,
+        network: row.network as OnchainNetwork,
+        projectAnchor: row.projectAnchor,
+        subjectKind: "tx",
+        subject: row.subject,
+      },
+      canonicalUri: row.canonicalUri,
+      result,
+      normalizedText: JSON.stringify(result),
+      provenance: provenanceOf(row),
+    });
+    result.burns.forEach((burn: BurnInstructionRef, burnIndex: number) => {
+      if (burn.mint !== query.projectAnchor) return;
+      out.push({ artifact, burnIndex, researchJobId: row.researchJobId });
     });
   }
   return out;

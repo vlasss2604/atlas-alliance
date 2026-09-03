@@ -74,6 +74,37 @@ export type CurrentProofSupplyReason =
   // interval selector refuses it.
   | "EVERY_CURRENT_OBSERVATION_AT_OR_BEFORE_EVENT";
 
+// THE ACQUISITION WATERMARK — a coverage bound, never the Proof's event.
+//
+// When this Research established several deterministic burns, the greatest
+// of their slots answers exactly ONE operational question: "do we already
+// hold a supply observation strictly after everything this Research found?"
+// An observation after the greatest slot is after all of them, so one read
+// covers the whole set.
+//
+// IT IS NOT EVENT SELECTION. It does not make the latest burn the canonical
+// event of the Proof, does not attribute it to any mechanism, does not claim
+// it caused any supply change, and does not discard the earlier burns —
+// every one of them remains available to the interval selector, which makes
+// its own, separate choice about which event an interval is anchored on.
+// `observedAt` names the burn that happens to sit at the bound so a
+// diagnostic can be specific; naming it confers nothing.
+export interface PostEventAcquisitionWatermark {
+  slot: number;
+  // How many usable deterministic events this Research established. Reported
+  // so "one burn" and "the latest of nine" are never indistinguishable.
+  usableEvents: number;
+  observedAt: AnchorBurnRef;
+}
+
+export const ACQUISITION_WATERMARK_DOES_NOT_PROVE = [
+  "the greatest burn slot is NOT the canonical event of the Proof",
+  "it does NOT attribute the burn to any mechanism",
+  "it does NOT establish that the burn caused any supply change",
+  "earlier burns are NOT discarded — the interval selector still chooses among them",
+  "it bounds ACQUISITION COVERAGE only: one observation after it is after all of them",
+] as const;
+
 export interface CurrentProofSupplyGate {
   decision: CurrentProofSupplyDecision;
   reason: CurrentProofSupplyReason;
@@ -81,7 +112,8 @@ export interface CurrentProofSupplyGate {
   // WHICH project and WHICH event this answer was about.
   currentResearchJobId: string;
   projectAnchor: string;
-  event: AnchorBurnRef | null;
+  // THE ACQUISITION COVERAGE BOUND, AND NOTHING ELSE. See the type.
+  acquisitionWatermark: PostEventAcquisitionWatermark | null;
   // The domain the historical candidates were compared against, or null when
   // this Research holds no usable reading to establish one yet. Exposed
   // because it changes what eligibility could check.
@@ -120,6 +152,7 @@ export const CURRENT_PROOF_SUPPLY_GATE_DOES_NOT_PROVE = [
   "an eligible t0 EXISTING is not the same as that t0 being chosen",
   "NO_ACTION does NOT establish that supply was unchanged, or that no burn occurred",
   "no read is ever requested to build observation history for a future Research",
+  "the acquisition watermark is a coverage bound, never the Proof's chosen event",
 ] as const;
 
 function isSupply(
@@ -158,20 +191,22 @@ function currentMeasurementDomain(
 // Which of the offered events the answer is anchored on: the one at the
 // greatest usable slot the planner found, ties broken by signature so the
 // report cannot depend on input order.
-function anchoredEvent(
+function acquisitionWatermark(
   input: CurrentProofSupplyGateInput,
-  eventSlot: number,
-): AnchorBurnRef | null {
-  let best: AnchorBurnRef | null = null;
+  plan: PostEventSupplyPlan,
+): PostEventAcquisitionWatermark | null {
+  if (plan.eventSlot === null) return null;
+  let observedAt: AnchorBurnRef | null = null;
   for (const event of input.events) {
     if (event.researchJobId !== input.currentResearchJobId) continue;
-    if (event.artifact.provenance.slot !== eventSlot) continue;
+    if (event.artifact.provenance.slot !== plan.eventSlot) continue;
     const ref = anchorBurnRef(event.artifact, event.burnIndex, input.currentResearchJobId);
     if (ref === null) continue;
     if (ref.mint !== input.currentProjectAnchor) continue;
-    if (best === null || ref.signature < best.signature) best = ref;
+    if (observedAt === null || ref.signature < observedAt.signature) observedAt = ref;
   }
-  return best;
+  if (observedAt === null) return null;
+  return { slot: plan.eventSlot, usableEvents: plan.usableEvents, observedAt };
 }
 
 export function gateCurrentProofSupplyAcquisition(
@@ -198,14 +233,14 @@ export function gateCurrentProofSupplyAcquisition(
       ...base,
       decision: "NO_ACTION",
       reason: "NO_USABLE_EVENT",
-      event: null,
+      acquisitionWatermark: null,
       measurementDomain: null,
       eligibleHistoricalCandidates: 0,
       excludedHistorical: [],
     };
   }
 
-  const event = anchoredEvent(input, observation.eventSlot);
+  const watermark = acquisitionWatermark(input, observation);
   const measurementDomain = currentMeasurementDomain(input);
 
   // STEP 2 — could ANY prior Research's reading legitimately serve as t0?
@@ -222,7 +257,7 @@ export function gateCurrentProofSupplyAcquisition(
 
   const withEvidence = {
     ...base,
-    event,
+    acquisitionWatermark: watermark,
     measurementDomain,
     eligibleHistoricalCandidates: eligible.length,
     excludedHistorical: excluded,

@@ -3,6 +3,7 @@ import { eq } from "drizzle-orm";
 
 import { onchainArtifacts, projects, sources, topics, users } from "../src/server/db/schema";
 import {
+  ACQUISITION_WATERMARK_DOES_NOT_PROVE,
   CURRENT_PROOF_SUPPLY_GATE_DOES_NOT_PROVE,
   gateCurrentProofSupplyAcquisition,
   type CurrentProofSupplyGate,
@@ -427,7 +428,7 @@ describe("12/13/14. the anchor event", () => {
     });
     expect(g.decision).toBe("NO_ACTION");
     expect(g.reason).toBe("NO_USABLE_EVENT");
-    expect(g.event).toBeNull();
+    expect(g.acquisitionWatermark).toBeNull();
   });
 
   it("13. an event of another mint is refused", () => {
@@ -446,17 +447,41 @@ describe("12/13/14. the anchor event", () => {
     expect(g.measurementDomain).toBeNull();
   });
 
-  it("14. the result retains the job, the anchor, the event and the reason", () => {
+  it("16. the watermark is coverage only — it selects no Proof event", () => {
+    const g = gate({
+      events: [burnEvent({ slot: 200 }), burnEvent({ slot: 700, signature: OTHER_SIGNATURE })],
+      historical: [ELIGIBLE_T0()],
+    });
+    expect(g.acquisitionWatermark?.slot).toBe(700);
+    // Both burns remain established; the earlier one is not discarded, and
+    // nothing on the result names a canonical event or an attribution.
+    expect(g.acquisitionWatermark?.usableEvents).toBe(2);
+    const stated = ACQUISITION_WATERMARK_DOES_NOT_PROVE.join(" | ");
+    for (const phrase of [
+      "NOT the canonical event of the Proof",
+      "does NOT attribute the burn to any mechanism",
+      "earlier burns are NOT discarded",
+      "bounds ACQUISITION COVERAGE only",
+    ]) {
+      expect(stated).toContain(phrase);
+    }
+  });
+
+  it("14. the result retains the job, the anchor, the watermark and the reason", () => {
     const g = gate({ historical: [ELIGIBLE_T0()] });
     expect(g.currentResearchJobId).toBe(CURRENT_JOB);
     expect(g.projectAnchor).toBe(MINT);
-    expect(g.event).toMatchObject({
-      researchJobId: CURRENT_JOB,
-      signature: SIGNATURE,
+    expect(g.acquisitionWatermark).toMatchObject({
       slot: EVENT_SLOT,
-      mint: MINT,
-      sourceAccount: TOKEN_ACCOUNT,
-      instructionType: "BurnChecked",
+      usableEvents: 1,
+      observedAt: {
+        researchJobId: CURRENT_JOB,
+        signature: SIGNATURE,
+        slot: EVENT_SLOT,
+        mint: MINT,
+        sourceAccount: TOKEN_ACCOUNT,
+        instructionType: "BurnChecked",
+      },
     });
     expect(g.reason).toBe("EVERY_CURRENT_OBSERVATION_AT_OR_BEFORE_EVENT");
     expect(g.observation.eventSlot).toBe(EVENT_SLOT);
@@ -471,7 +496,8 @@ describe("12/13/14. the anchor event", () => {
       historical: [observation({ slot: 600, amountRaw: "4000" })],
       observations: [current({ slot: 650, amountRaw: "990" })],
     });
-    expect(g.event?.slot).toBe(700);
+    expect(g.acquisitionWatermark?.slot).toBe(700);
+    expect(g.acquisitionWatermark?.usableEvents).toBe(2);
     // 600 < 700, so the candidate is still eligible; 650 is not after 700.
     expect(g.decision).toBe("POST_EVENT_SUPPLY_REQUIRED");
   });
@@ -510,7 +536,7 @@ describe("12/13/14. the anchor event", () => {
     });
     expect(a.decision).toBe(b.decision);
     expect(a.reason).toBe(b.reason);
-    expect(a.event).toEqual(b.event);
+    expect(a.acquisitionWatermark).toEqual(b.acquisitionWatermark);
     expect(a.measurementDomain).toEqual(b.measurementDomain);
   });
 });
@@ -590,13 +616,22 @@ describe("15/16/17/18. boundaries", () => {
         "onchain-facts",
         "component-reconcil",
         "NET_EFFECT",
-        "onchainFactKind",
         "synthesizeOnchainFacts",
-        "evidence",
+        // Nothing here may WRITE Evidence, of any kind.
+        ".insert(evidence",
+        ".update(evidence",
+        "onchainFactKind:",
       ]) {
         expect(code, `${file} must not reference ${banned}`).not.toContain(banned);
       }
     }
+    // The gate is entirely Evidence-free; the store may only READ which
+    // artifact a BURN fact was filed from — that is what "established by
+    // this Research" means, and it is a select, never a write.
+    expect(await codeOf(GATE)).not.toContain("evidence");
+    const store = await codeOf(STORE);
+    expect(store).toContain('eq(evidence.onchainFactKind, "BURN")');
+    expect(store).not.toContain("SUPPLY_DELTA");
     const { readFile } = await import("node:fs/promises");
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");
     expect(facts).toContain('BURN: ["NET_EFFECT"]');
@@ -658,7 +693,12 @@ describe("15/16/17/18. boundaries", () => {
       "onchain-post-event-supply-plan",
       "onchain-current-proof-supply-gate",
       "onchain-supply-candidate-store",
+      "onchain-post-event-supply",
     ];
+    // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
+    // post-event completion. Every other member is still reachable only from
+    // inside, and the pure arithmetic has no production caller at all.
+    const ENTRY_POINT = "src/server/engine/run-job.ts";
     const outsideImporters: string[] = [];
     for (const f of files) {
       if (CLUSTER.some((m) => f.endsWith(`${m}.ts`))) continue;
@@ -666,6 +706,7 @@ describe("15/16/17/18. boundaries", () => {
         .split("\n")
         .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
         .join("\n");
+      if (f === ENTRY_POINT) continue;
       if (
         code.includes("onchain-current-proof-supply-gate") ||
         code.includes("onchain-supply-candidate-store")

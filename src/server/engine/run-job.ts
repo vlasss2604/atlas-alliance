@@ -9,6 +9,7 @@ import { MissingActivePatternError } from "./active-pattern";
 import { loadJobContractView } from "./job-contract-view";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
 import { runOnchainReactivationPass } from "./onchain-reactivation";
+import { runPostEventSupplyCompletion } from "./onchain-post-event-supply";
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 import { buildAndPersistProof } from "./proof-store";
@@ -168,6 +169,33 @@ export async function runS4ResearchJob(
     jobId,
     projectId: job.projectId,
     workQueue: view.workQueue,
+    maxSourceOpens: view.researchBudget.maxSourceOpens,
+  });
+
+  // POST-EVENT SUPPLY COMPLETION — one bounded reading, for a temporal gap
+  // the deterministic events of this job just exposed.
+  //
+  // Placed here, and only here, for reasons that are all about ordering. It
+  // runs AFTER the reactivation pass because the burn that creates the gap is
+  // frequently established BY that pass, and because it must not compete with
+  // it: reactivation's protected chain is what discovers the burn, and this
+  // optional read holds no reservation of its own. It runs BEFORE the S5
+  // sweep so the observation it persists is visible to ordinary later
+  // processing with no special case.
+  //
+  // It is NOT folded into the reactivation pass. Their licences differ: that
+  // one revisits a component whose subject arrived late, this one closes a
+  // temporal gap that belongs to no component at all — which is also why its
+  // trace carries no component and cannot consume any component's one
+  // bounded opportunity.
+  //
+  // It creates no attempt, calls no model, runs no search, fetches no
+  // document and writes no Evidence, and it cannot fail the job: every
+  // outcome, budget refusal and provider failure included, is returned and
+  // traced rather than thrown.
+  await runPostEventSupplyCompletion(db, {
+    jobId,
+    projectId: job.projectId,
     maxSourceOpens: view.researchBudget.maxSourceOpens,
   });
 

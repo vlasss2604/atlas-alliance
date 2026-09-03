@@ -569,7 +569,12 @@ describe("determinism and boundaries", () => {
       "onchain-post-event-supply-plan",
       "onchain-current-proof-supply-gate",
       "onchain-supply-candidate-store",
+      "onchain-post-event-supply",
     ];
+    // B2c3 opened exactly ONE door into the cluster: run-job.ts calls the
+    // post-event completion. Every other member is still reachable only from
+    // inside, and the pure arithmetic has no production caller at all.
+    const ENTRY_POINT = "src/server/engine/run-job.ts";
     const isMember = (f: string) => CLUSTER.some((m) => f.endsWith(`${m}.ts`));
     const outsideImporters: string[] = [];
     for (const f of files) {
@@ -578,6 +583,7 @@ describe("determinism and boundaries", () => {
         .split("\n")
         .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
         .join("\n");
+      if (f === ENTRY_POINT) continue;
       if (code.includes("onchain-post-event-supply-plan")) outsideImporters.push(f);
     }
     expect(outsideImporters).toEqual([]);
