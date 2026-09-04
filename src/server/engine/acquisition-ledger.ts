@@ -2,7 +2,7 @@ import { eq, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { researchTraceEvents } from "../db/schema";
-import { canonicalTargetRef, isLossyTargetRef } from "./trace-store";
+import { canonicalTargetRef, diagnosticCodeHead, isLossyTargetRef } from "./trace-store";
 
 // ACQUISITION MINIMUM SAFE V1 (B) — job-scoped acquisition memory.
 //
@@ -280,7 +280,12 @@ export async function loadAcquisitionLedger(
           const list = failureDiagnosticsByUrl.get(ref) ?? [];
           list.push({
             providerName: row.providerName ?? null,
-            diagnosticCode: row.diagnosticCode ?? null,
+            // THE STAGE ONLY. A stored code may carry a human-facing
+            // sub-code (e.g. NAVIGATION_FAILED:NAVIGATION_TIMEOUT); the
+            // planner must see exactly what it saw before that existed,
+            // so the stage is recovered here, once, at the single point
+            // where persisted failures enter the ledger.
+            diagnosticCode: diagnosticCodeHead(row.diagnosticCode ?? null),
           });
           failureDiagnosticsByUrl.set(ref, list);
           break;
