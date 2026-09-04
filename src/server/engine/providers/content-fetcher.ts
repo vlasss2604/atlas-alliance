@@ -353,6 +353,35 @@ export function isBlockedIp(ip: string): boolean {
 // parser: the only goal is that a model never sees raw <script> content
 // or hidden text as if it were visible page content (§16). The original
 // bytes are still hashed/returned separately for snapshot purposes.
+// THE ONE CHARACTER POSTGRES CANNOT STORE, REPLACED AND NOT DELETED.
+//
+// U+0000 is rejected outright by `text` (22021, "invalid byte sequence for
+// encoding UTF8: 0x00") and by `jsonb` (22P05, "unsupported Unicode escape
+// sequence"). It is not a formatting choice: no column in this database can
+// hold it, so a document carrying one is either normalised here or cannot be
+// persisted at all.
+//
+// FOUND LIVE. An external page carried a raw NUL through the fetch path. The
+// write that rejected it threw, the throw escaped the FETCH phase into
+// pg-boss, and pg-boss then failed to persist its OWN failure output on the
+// same character — leaving the queue item active and the Research RUNNING
+// with no terminal state. One byte in one document stalled a job
+// permanently.
+//
+// REPLACED WITH U+FFFD, never dropped. Deleting the character would join the
+// text on either side of it into a word neither source wrote; the
+// replacement character is the standard marker for exactly this — a
+// position that held something unrepresentable — and it keeps the document
+// the same length, so `staticTextLength` and every offset stay true.
+//
+// U+0000 AND NOTHING ELSE. The incident proves this one character unsafe.
+// Every other C0 control is storable, appears legitimately in real
+// documents, and is not touched here: widening this to a range would be
+// altering Evidence text on no evidence at all.
+export function replaceNullCharacters(text: string): string {
+  return text.includes("\u0000") ? text.replace(/\u0000/g, "\uFFFD") : text;
+}
+
 export function normalizeHtmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")

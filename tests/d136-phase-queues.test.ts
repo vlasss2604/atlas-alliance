@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+
 import { eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -11,9 +14,11 @@ import {
   researchComponentResults,
   researchJobs,
   researchMechanismAssembly,
+  researchTraceEvents,
   topics,
   users,
 } from "../src/server/db/schema";
+import { replaceNullCharacters } from "../src/server/engine/providers/content-fetcher";
 import {
   prepareExtractionReplayFetcher,
   prepareExtractionReplayProposer,
@@ -43,7 +48,7 @@ import {
   type ResearchQueuePayload,
 } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
-import { handleResearchJobTask } from "../src/server/jobs/worker";
+import { handleResearchJobTask, PhaseCapabilityMissingError } from "../src/server/jobs/worker";
 import {
   loadWorkerCapabilities,
   parseWorkerCapabilities,
@@ -316,6 +321,135 @@ async function runAllPhases(
   );
   return { search, fetch, extract, counters, fetchCalls };
 }
+
+describe("NUL RELIABILITY — one unstorable character must not strand a job", () => {
+  // FOUND LIVE. An external page carried a raw U+0000 through the FETCH
+  // path. The write that rejected it threw, the throw escaped the phase
+  // into pg-boss, and pg-boss could not persist its OWN failure output on
+  // the same character — so the queue item stayed active with no output and
+  // the Research stayed RUNNING with no terminal state.
+
+  const NUL = String.fromCharCode(0);
+
+  it("A. a NUL in document text becomes U+FFFD, keeping the text on both sides", () => {
+    const out = replaceNullCharacters("before" + NUL + "after");
+    expect(out).toBe("before\uFFFDafter");
+    // Replaced, not deleted: dropping it would join two words neither
+    // source wrote, and would shift every offset after it.
+    expect(out).not.toContain(NUL);
+    expect(out).toHaveLength("before".length + 1 + "after".length);
+  });
+
+  it("B. ordinary Unicode is returned byte for byte", () => {
+    for (const sample of [
+      "华尔街 Wall Street",
+      "emoji 👨‍👩‍👧‍👦 and 🚀",
+      "combining: e\u0301 a\u0300 n\u0303",
+      "rtl: \u200fمرحبا\u200e and back",
+      "nbsp\u00a0zwj\u200djoiner\ufeffbom",
+      "",
+    ]) {
+      expect(replaceNullCharacters(sample), sample).toBe(sample);
+    }
+  });
+
+  it("G. no other control character is touched — only U+0000 was proved unsafe", () => {
+    // Every other C0 control is storable in Postgres, appears in real
+    // documents, and is deliberately left alone. Widening this to a range
+    // would be altering Evidence text on no evidence at all.
+    for (let code = 1; code <= 0x1f; code++) {
+      const s = "a" + String.fromCharCode(code) + "b";
+      expect(replaceNullCharacters(s), "U+" + code.toString(16)).toBe(s);
+    }
+    expect(replaceNullCharacters("a\u007fb")).toBe("a\u007fb");
+  });
+
+  it("C. a document carrying a NUL seals, and its stored text matches its stored hash", async () => {
+    const project = await makeClassifiedProject();
+    const jobId = await makePhasedJob(project.id);
+    await beginAcquisitionPhases(ctx.db, ctx.boss, jobId);
+    await handleSearchingPhase(roleCtx(ROLE_A), jobId, SEARCH_PROVIDERS());
+
+    const result = await handleFetchingPhase(roleCtx(ROLE_B), jobId, {
+      name: "nul-transport",
+      async fetch(url: string) {
+        const base = fixtureDoc(url);
+        return { ...base, normalizedText: "华尔街" + NUL + "tail" };
+      },
+    });
+    expect(result.ran).toBe(true);
+
+    const [row] = await ctx.db
+      .select()
+      .from(acquiredDocuments)
+      .where(eq(acquiredDocuments.acquiringJobId, jobId));
+    expect(row).toBeTruthy();
+    expect(row.normalizedText).toBe("华尔街\uFFFDtail");
+    // The seal describes what is stored: textSha256 is computed from the
+    // same post-normalisation string the column holds.
+    expect(row.textSha256).toBe(
+      "sha256:" + createHash("sha256").update(row.normalizedText, "utf8").digest("hex"),
+    );
+  });
+
+  it("D+E+F. an unexpected throw carrying a NUL ends the job instead of escaping", async () => {
+    const project = await makeClassifiedProject();
+    const jobId = await makePhasedJob(project.id);
+    await beginAcquisitionPhases(ctx.db, ctx.boss, jobId);
+    await handleSearchingPhase(roleCtx(ROLE_A), jobId, SEARCH_PROVIDERS());
+
+    // A throw from INSIDE contentFetcher.fetch is already handled — that is
+    // the ordinary FETCH_FAILED path. The failure this boundary exists for
+    // comes from the seal, after the transport succeeded, where no catch
+    // stood. Reproduced with an unstorable finalUrl: a text column rejects
+    // it exactly as normalized_text rejected the live document, and unlike
+    // document text it is not sanitised, so the throw is genuine.
+    const result = await handleFetchingPhase(roleCtx(ROLE_B), jobId, {
+      name: "unsealable-transport",
+      async fetch(url: string) {
+        const base = fixtureDoc(url);
+        return { ...base, finalUrl: base.finalUrl + NUL };
+      },
+    });
+    // D — it does not escape. Before the fix this threw straight through to
+    // the pg-boss callback, which then could not persist its own failure.
+    expect(result.ran).toBe(false);
+
+    // E — the job is terminal, not RUNNING.
+    const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+    expect(job.state).toBe("FAILED");
+
+    // F — recorded honestly as OUR failure, with a code-owned value that no
+    // column can reject. TECHNICAL FAILURE != PROJECT REALITY.
+    expect(job.terminationReason).toBe("SYSTEM_OR_PROVIDER_FAILURE");
+    expect(job.errorCode).toBe("FETCH_PHASE_FAILED");
+    expect(job.errorCode).not.toContain(NUL);
+
+    // Nothing was invented: no document sealed, and no FETCH_OK claimed.
+    const docs = await ctx.db
+      .select()
+      .from(acquiredDocuments)
+      .where(eq(acquiredDocuments.acquiringJobId, jobId));
+    expect(docs).toEqual([]);
+    const ok = await ctx.db
+      .select()
+      .from(researchTraceEvents)
+      .where(eq(researchTraceEvents.researchJobId, jobId));
+    expect(ok.filter((r) => r.operationType === "FETCH_OK")).toEqual([]);
+  });
+
+  it("D. the queue callback can therefore only ever receive a code-owned value", () => {
+    // Why no separate queue sanitizer is needed. The FETCHING callback is
+    // one line: it awaits the dispatcher and passes the result to
+    // throwIfCapabilityRefusal, which throws exactly one code-owned error
+    // type. With the phase owning its own throws, no external string has a
+    // path into what pg-boss serialises.
+    const src = readFileSync("src/server/jobs/worker.ts", "utf-8");
+    const cb = src.slice(src.indexOf("RESEARCH_FETCH_QUEUE, async"));
+    expect(cb.slice(0, 200)).toContain("throwIfCapabilityRefusal(await dispatchFetchQueueMessage");
+    expect(new PhaseCapabilityMissingError("FETCHING").message).not.toContain(NUL);
+  });
+});
 
 describe("D-136 §1 — migration, phase contract and capability vocabulary (items 1, 2, 3, 8, 13)", () => {
   it("1. the phase column is additive: historical rows read as NULL and stay runnable", async () => {
