@@ -634,9 +634,25 @@ const MAX_RENDER_ATTEMPTS_PER_JOB = 4;
 // the one thing a fallback must never become.
 //
 // Deterministic refusals (a malformed url, an unsupported scheme, a
-// redirect loop, an oversized body, a 404 or a 5xx) end the chain too:
-// the server or the policy already answered, and asking again through a
-// different pipe cannot change the answer.
+// redirect loop, a 404 or a 5xx) end the chain too: the server or the
+// policy already answered, and asking again through a different pipe
+// cannot change the answer.
+//
+// AN OVERSIZED BODY WAS IN THAT LIST AND DOES NOT BELONG THERE. The
+// reasoning above holds for a class whose answer is fixed however it is
+// asked; TOO_LARGE is not one. It is a property of the REPRESENTATION
+// this request asked for, not of the resource: the origin was mid-reply
+// with a document it was willing to serve, and our own cap ended the
+// read. A different representation of the same resource is a different
+// number of bytes, so asking for one is not asking the same question
+// again. That is exactly the case UNSUPPORTED_CONTENT_TYPE below already
+// makes, and TOO_LARGE is its sibling — "this fetcher cannot READ what
+// was offered" and "this fetcher cannot ACCEPT what was offered" differ
+// in the verb and nothing else.
+//
+// Found live: a human-registered, human-classified OFFICIAL_DOCS page was
+// permanently unreachable because its HTML bundle exceeds the cap, with
+// no second attempt of any kind. No limit moves to fix it.
 //
 // What remains is the honest middle: a connection that broke mid-message
 // or timed out (the class where a complete document demonstrably exists
@@ -659,6 +675,24 @@ export function plannedFallbacks(
     // This fetcher cannot read what was offered; ask for a representation
     // it can. A browser would face the same allowlist, so no render.
     case "UNSUPPORTED_CONTENT_TYPE":
+      return ["CONTENT_NEGOTIATION"];
+    // This fetcher cannot ACCEPT what was offered; ask for a
+    // representation small enough to accept, under the very same cap.
+    //
+    // NEGOTIATION ONLY, AND DELIBERATELY NO RENDER. A render of an
+    // oversized page produces the same document or a larger one, and its
+    // output faces the identical cap at seal — the renderer exists for
+    // pages carrying too LITTLE static text, which is the opposite
+    // failure. Spending the expensive path on the one class least likely
+    // to benefit is not a fallback, it is hope.
+    //
+    // Bounded by construction: a text representation that is also
+    // oversized raises TOO_LARGE again, the strategy is already in the
+    // plan so it cannot be re-added, and MAX_FALLBACK_ATTEMPTS_PER_URL
+    // caps the chain regardless. No cap is raised, no new strategy
+    // exists, and every address, redirect and authority check is the one
+    // the first attempt already passed.
+    case "TOO_LARGE":
       return ["CONTENT_NEGOTIATION"];
     // The server answered, and the answer decides. Only the canonical
     // refusal statuses admit the renderer.
