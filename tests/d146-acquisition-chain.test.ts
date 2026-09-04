@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -409,8 +411,11 @@ describe("D-146 §C — a security refusal ends the chain", () => {
   it("C. a fallback can never be an SSRF bypass — the policy itself says so", () => {
     expect(plannedFallbacks("BLOCKED_ADDRESS", null)).toEqual([]);
     expect(plannedFallbacks("REDIRECT_TARGET_BLOCKED", null)).toEqual([]);
-    // Deterministic refusals end the chain too.
-    for (const d of ["INVALID_URL", "UNSUPPORTED_PROTOCOL", "TOO_MANY_REDIRECTS", "TOO_LARGE", "DNS_RESOLUTION_FAILED"]) {
+    // Deterministic refusals end the chain too. TOO_LARGE was in this
+    // list and is deliberately no longer: it describes the representation
+    // that was asked for, not the resource, so a different representation
+    // is a different question (see §N).
+    for (const d of ["INVALID_URL", "UNSUPPORTED_PROTOCOL", "TOO_MANY_REDIRECTS", "DNS_RESOLUTION_FAILED"]) {
       expect(plannedFallbacks(d, null), d).toEqual([]);
     }
     // Untyped failure: fail closed.
@@ -456,6 +461,134 @@ describe("D-146 §D — the canonical refusal policy is preserved", () => {
     } finally {
       __setRenderedDocsFetcher(null);
     }
+  });
+});
+
+describe("D-146 §N — an oversized body is a representation problem, not a verdict", () => {
+  // FOUND LIVE. A human-registered, human-classified OFFICIAL_DOCS page was
+  // selected as a SOURCE_RESOURCE, attempted, and refused by our own byte
+  // cap with diagnostic TOO_LARGE — then nothing else was tried, because
+  // TOO_LARGE was classified with the refusals no transport can change.
+  // It is not one of those: the origin was mid-reply with a document it was
+  // willing to serve.
+
+  it("N1. TOO_LARGE plans CONTENT_NEGOTIATION, and only that", () => {
+    expect(plannedFallbacks("TOO_LARGE", null)).toEqual(["CONTENT_NEGOTIATION"]);
+  });
+
+  it("N2. TOO_LARGE never plans a render, at any status", () => {
+    // A render of an oversized page yields the same document or a larger
+    // one, and its output meets the identical cap at seal. The renderer is
+    // for pages carrying too LITTLE static text — the opposite failure.
+    for (const status of [null, 200, 403, 429, 404, 500]) {
+      expect(plannedFallbacks("TOO_LARGE", status), String(status)).not.toContain(
+        "ISOLATED_RENDER",
+      );
+    }
+  });
+
+  it("N3. the security stops are untouched by this widening", () => {
+    // The one thing a fallback must never become. Asserted here as well as
+    // in §C so a future edit to this case cannot quietly reach them.
+    expect(plannedFallbacks("BLOCKED_ADDRESS", null)).toEqual([]);
+    expect(plannedFallbacks("REDIRECT_TARGET_BLOCKED", null)).toEqual([]);
+  });
+
+  it("N4. an oversized HTML body then a readable text representation seals one document", async () => {
+    const { project, jobId } = await seedTargets();
+    const calls = { n: 0, prefs: [] as string[], urls: [] as string[] };
+    const result = await fetchPhase(
+      project,
+      jobId,
+      scriptedFetcher({
+        onDefault: () => {
+          throw new ContentFetchError("TOO_LARGE", "response exceeded 2000000 bytes", TARGET);
+        },
+        onText: () => doc(TARGET, { contentType: "text/markdown" }),
+        calls,
+      }),
+    );
+
+    // The SAME url, asked for differently — never a new url, never a wider
+    // limit.
+    expect(new Set(calls.urls)).toEqual(new Set([TARGET]));
+    expect(calls.prefs).toEqual(["DEFAULT", "TEXT_REPRESENTATION"]);
+    expect(result.strategyAttempts).toEqual([
+      { url: TARGET, strategy: "DIRECT_HTTP" },
+      { url: TARGET, strategy: "CONTENT_NEGOTIATION" },
+    ]);
+    expect(result.sealedDocumentIds).toHaveLength(1);
+
+    const rows = await sealed(jobId);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].acquisitionStrategy).toBe("CONTENT_NEGOTIATION");
+    expect(rows[0].renderMode).toBe("STATIC");
+
+    // The failure is still recorded as what it was.
+    const trace = await attemptRows(jobId);
+    const failed = trace.filter((r) => r.op === "FETCH_FAILED");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].diagnostic).toBe("TOO_LARGE");
+    expect(failed[0].reason).toBe("PROVIDER_ERROR");
+  });
+
+  it("N5. oversized on BOTH representations ends the chain — no third attempt, no render", async () => {
+    const { project, jobId } = await seedTargets({ confirmDocs: true });
+    const renders = { n: 0, urls: [] as string[] };
+    __setRenderedDocsFetcher(fixtureRenderer(renders));
+    try {
+      const calls = { n: 0, prefs: [] as string[], urls: [] as string[] };
+      const result = await fetchPhase(
+        project,
+        jobId,
+        scriptedFetcher({
+          onDefault: () => {
+            throw new ContentFetchError("TOO_LARGE", "response exceeded 2000000 bytes", TARGET);
+          },
+          onText: () => {
+            throw new ContentFetchError("TOO_LARGE", "response exceeded 2000000 bytes", TARGET);
+          },
+          calls,
+        }),
+      );
+
+      // Exactly two transport calls. The strategy is already in the plan, so
+      // the second failure cannot re-add it, and nothing escalates.
+      expect(calls.n).toBe(2);
+      expect(renders.n).toBe(0);
+      expect(result.strategyAttempts.map((a) => a.strategy)).toEqual([
+        "DIRECT_HTTP",
+        "CONTENT_NEGOTIATION",
+      ]);
+      expect(result.sealedDocumentIds).toEqual([]);
+    } finally {
+      __setRenderedDocsFetcher(null);
+    }
+  });
+
+  it("N6. the retry spends exactly one more source open, on the ordinary ledger", async () => {
+    const { project, jobId } = await seedTargets();
+    const before = await sourceOpens(jobId);
+    await fetchPhase(
+      project,
+      jobId,
+      scriptedFetcher({
+        onDefault: () => {
+          throw new ContentFetchError("TOO_LARGE", "response exceeded 2000000 bytes", TARGET);
+        },
+        onText: () => doc(TARGET, { contentType: "text/markdown" }),
+      }),
+    );
+    // Two attempts, two opens — no strategy is free and none is exempt from
+    // the single budget authority.
+    expect(await sourceOpens(jobId)).toBe(before + 2);
+  });
+
+  it("N7. no byte limit moved to make any of this work", () => {
+    // The whole point: the retry passes through the identical cap. If a
+    // future change raises this instead of negotiating, it fails here.
+    const src = readFileSync("src/server/engine/providers/content-fetcher.ts", "utf-8");
+    expect(src).toContain("const DEFAULT_MAX_BYTES = 2_000_000;");
   });
 });
 
