@@ -618,6 +618,17 @@ const STRATEGY_PROVIDER: Record<AcquisitionStrategy, string> = {
   ISOLATED_RENDER: "isolated-render",
 };
 
+// The inverse of the map above, derived from it rather than restated, so
+// the two cannot drift. Used to read a persisted attempt's strategy back
+// out of the provider name the trace recorded it under.
+const PROVIDER_STRATEGY = new Map<string, AcquisitionStrategy>(
+  (Object.keys(STRATEGY_PROVIDER) as AcquisitionStrategy[]).map((s) => [STRATEGY_PROVIDER[s], s]),
+);
+
+function strategyOfProvider(providerName: string | null): AcquisitionStrategy | null {
+  return providerName === null ? null : PROVIDER_STRATEGY.get(providerName) ?? null;
+}
+
 // At most two strategies beyond the first for one url (owner-ratified).
 const MAX_FALLBACK_ATTEMPTS_PER_URL = 2;
 // A job-level ceiling on real renders, counted from persisted trace so a
@@ -662,6 +673,14 @@ const MAX_RENDER_ATTEMPTS_PER_JOB = 4;
 export function plannedFallbacks(
   diagnostic: string | null,
   httpStatus: number | null,
+  // WHICH STRATEGY PRODUCED THIS FAILURE. Null when it is not known —
+  // which is the fail-closed reading: a transition that requires a
+  // specific predecessor is not licensed by an unattributed failure.
+  //
+  // Defaulted so every existing caller and contract test keeps its exact
+  // meaning: with no strategy named, TOO_LARGE still buys negotiation and
+  // nothing more.
+  failedStrategy: AcquisitionStrategy | null = null,
 ): AcquisitionStrategy[] {
   switch (diagnostic) {
     // SECURITY STOP. Never anything after these.
@@ -679,21 +698,42 @@ export function plannedFallbacks(
     // This fetcher cannot ACCEPT what was offered; ask for a
     // representation small enough to accept, under the very same cap.
     //
-    // NEGOTIATION ONLY, AND DELIBERATELY NO RENDER. A render of an
-    // oversized page produces the same document or a larger one, and its
-    // output faces the identical cap at seal — the renderer exists for
-    // pages carrying too LITTLE static text, which is the opposite
-    // failure. Spending the expensive path on the one class least likely
-    // to benefit is not a fallback, it is hope.
+    // AND THEN, IF THAT IS ALSO TOO LARGE, THE RENDERED REPRESENTATION.
     //
-    // Bounded by construction: a text representation that is also
-    // oversized raises TOO_LARGE again, the strategy is already in the
-    // plan so it cannot be re-added, and MAX_FALLBACK_ATTEMPTS_PER_URL
-    // caps the chain regardless. No cap is raised, no new strategy
-    // exists, and every address, redirect and authority check is the one
-    // the first attempt already passed.
+    // The earlier reasoning here — "a render produces the same document
+    // or a larger one, and its output faces the identical cap at seal" —
+    // was refuted by measurement, and it was wrong about WHICH quantity
+    // each cap measures. The transport cap is on RESPONSE BYTES: 2 MB of
+    // html raises TOO_LARGE while the stream is still being consumed. The
+    // seal cap is on NORMALIZED TEXT CHARACTERS, and the renderer bounds
+    // its own text independently (maxRenderedTextLength, plus a
+    // separately bounded link appendix). Rendering is precisely the step
+    // that converts the oversized quantity into the bounded one, so a
+    // page too large to transport can be small enough to seal. A live
+    // probe read one such confirmed OFFICIAL_DOCS page — 2,080,298 html
+    // bytes — successfully, while acquisition had already given up.
+    //
+    // THE TRANSITION IS EARNED, NOT ASSUMED. A first TOO_LARGE still buys
+    // only negotiation: asking the origin for a smaller textual
+    // representation is cheaper than a browser and often enough. Only
+    // when that NEGOTIATED representation is ALSO oversized has the
+    // origin effectively said no textual representation of this document
+    // exists under the cap — and at that point the browser's own rendered
+    // text is the one remaining bounded representation. That is a generic
+    // statement about representations, not about any host.
+    //
+    // Bounded by construction, exactly as before: each strategy is added
+    // to the plan at most once, strategyAlreadyAttempted refuses a repeat
+    // across deliveries, MAX_RENDER_ATTEMPTS_PER_JOB caps renders job-
+    // wide, and MAX_FALLBACK_ATTEMPTS_PER_URL caps this chain at two
+    // fallbacks — which this transition exactly fills and cannot exceed.
+    // No cap is raised, no new strategy or provider exists, and the
+    // render still has to pass every renderer eligibility gate on its own
+    // terms (see the ISOLATED_RENDER branch below).
     case "TOO_LARGE":
-      return ["CONTENT_NEGOTIATION"];
+      return failedStrategy === "CONTENT_NEGOTIATION"
+        ? ["ISOLATED_RENDER"]
+        : ["CONTENT_NEGOTIATION"];
     // The server answered, and the answer decides. Only the canonical
     // refusal statuses admit the renderer.
     case "HTTP_ERROR":
@@ -838,9 +878,18 @@ async function acquireOneUrl(
   // cannot distinguish 403 from 404.
   {
     const priorLedger = await loadAcquisitionLedger(input.db, input.jobId);
-    for (const diagnostic of persistedFailureDiagnostics(url, priorLedger)) {
+    for (const failure of persistedFailureDiagnostics(url, priorLedger)) {
       if (plan.length > MAX_FALLBACK_ATTEMPTS_PER_URL) break;
-      for (const next of plannedFallbacks(diagnostic, null)) {
+      // The provider name on the row IS the strategy identity (D-146), so
+      // a transition that depends on WHICH strategy failed continues
+      // across a delivery boundary on the same terms it would have been
+      // decided live. An unrecognised or absent provider yields null,
+      // which those transitions read as not-licensed.
+      for (const next of plannedFallbacks(
+        failure.diagnosticCode,
+        null,
+        strategyOfProvider(failure.providerName),
+      )) {
         if (!plan.includes(next)) plan.push(next);
       }
     }
@@ -952,7 +1001,7 @@ async function acquireOneUrl(
       // Plan the rest of the chain from the failure class, once, and only
       // as far as the per-url bound allows.
       if (attempted <= MAX_FALLBACK_ATTEMPTS_PER_URL) {
-        for (const next of plannedFallbacks(lastDiagnostic, lastHttpStatus)) {
+        for (const next of plannedFallbacks(lastDiagnostic, lastHttpStatus, strategy)) {
           if (!plan.includes(next)) plan.push(next);
         }
       }
