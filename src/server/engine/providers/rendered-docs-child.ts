@@ -33,6 +33,9 @@ export interface ChildRenderRequest {
   // OPT-IN record recovery needles. Absent means the recovery never
   // runs. Bounded by the recovery itself, not by the caller.
   recoverNeedles?: string[];
+  // OPT-IN OWNER INSPECTION DIAGNOSTICS. Absent means off, so a request
+  // that predates this field renders and fails exactly as before.
+  inspectionDiagnostics?: boolean;
 }
 
 // THE SELF-TEST REQUEST. A different message, not a render with a flag:
@@ -57,7 +60,18 @@ export type ChildRenderResponse =
   // present only for HTTP_ERROR and comes from Playwright's navigation
   // Response. Both are typed loosely because this is the wire: the parent
   // re-checks them rather than believing the type.
-  | { ok: false; reason: string; detail?: string; httpStatus?: number; navigationDetail?: string };
+  // `inspection` is present only when the PARENT asked for owner
+  // inspection diagnostics, and the parent re-sanitizes it field by field
+  // on arrival — and drops it outright if it did not ask. Typed as
+  // `unknown` because this is the wire.
+  | {
+      ok: false;
+      reason: string;
+      detail?: string;
+      httpStatus?: number;
+      navigationDetail?: string;
+      inspection?: unknown;
+    };
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
@@ -118,6 +132,7 @@ export async function runChild(): Promise<void> {
         Array.isArray(request.recoverNeedles) && request.recoverNeedles.length > 0
           ? { needles: request.recoverNeedles }
           : undefined,
+      inspectionDiagnostics: request.inspectionDiagnostics === true,
     });
     const document = await fetcher.render(request.url, {
       confirmedHost: request.confirmedHost,
@@ -134,6 +149,10 @@ export async function runChild(): Promise<void> {
       if (e.diagnostic !== null) response.detail = e.diagnostic;
       if (e.httpStatus !== null) response.httpStatus = e.httpStatus;
       if (e.navigationDiagnostic !== null) response.navigationDetail = e.navigationDiagnostic;
+      // Only ever populated when the parent asked: the adapter builds it
+      // solely under its own opt-in flag, which the parent set. The parent
+      // still re-checks its own flag before reading this key.
+      if (e.inspection !== null) response.inspection = e.inspection;
     } else {
       response = { ok: false, reason: "RENDER_FAILED" };
     }

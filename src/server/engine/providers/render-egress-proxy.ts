@@ -203,3 +203,77 @@ export async function startEgressProxy(policy: EgressPolicy): Promise<EgressProx
       }),
   };
 }
+
+// ---- OPERATOR INSPECTION DIAGNOSTICS (opt-in, never production) -------
+//
+// The summary above is counts, and that is the right answer for an
+// evidentiary render: a denied `host:port` is exactly the material this
+// boundary keeps out of logs and trace.
+//
+// OWNER INSPECTION is a different situation, and conflating the two is
+// what produced the observability gap. Inspection is a local, human-driven,
+// non-evidentiary act performed on a URL the operator typed, against a
+// host a human already confirmed for the project and which is already
+// printed to that operator's own terminal by the entrypoint. "1 denied /
+// 1 allowed" cannot say WHICH host was refused, so it cannot separate a
+// third-party CDN the page pulled from the confirmed host itself — and
+// those call for opposite next actions.
+//
+// So this is a SECOND, WIDER description, reachable only when a caller
+// explicitly asks for it, and still deliberately narrow:
+//   * host and port, rebuilt through parseConnectTarget — never the raw
+//     `target` string, never the resolved `address`, which is the field
+//     that could name a private destination;
+//   * the closed denial reason, or nothing;
+//   * a hard cap, so a page that fires hundreds of requests cannot turn a
+//     diagnostic into a dump.
+//
+// WHAT IT STRUCTURALLY CANNOT SAY: whether a denied CONNECT was the
+// main-frame navigation or a subresource. The proxy sees `host:port`
+// before the tunnel exists and nothing else — there is no frame, no
+// resource type and no request on this boundary. That attribution is
+// available only from the browser-side route handler, and is reported
+// separately by it.
+export interface EgressDecisionDescription {
+  host: string | null;
+  port: number | null;
+  allowed: boolean;
+  reason: EgressDenialReason | null;
+}
+
+export const MAX_DESCRIBED_EGRESS_DECISIONS = 20;
+
+// Hostnames and bracket-stripped IPv6 literals. Anything else is dropped
+// to null rather than passed through: a value that failed this test is not
+// a host, and printing it would be printing whatever the browser sent.
+const SAFE_HOST_PATTERN = /^[a-z0-9._:-]{1,253}$/;
+
+export function describeEgressDecisions(
+  decisions: readonly { target?: unknown; allowed: boolean; reason?: string }[],
+): { decisions: EgressDecisionDescription[]; truncated: boolean } {
+  const out: EgressDecisionDescription[] = [];
+  for (const d of decisions) {
+    if (out.length >= MAX_DESCRIBED_EGRESS_DECISIONS) {
+      return { decisions: out, truncated: true };
+    }
+    // REBUILT, never copied. The raw target is parsed by the same pure
+    // function the policy uses and only its two structured parts survive,
+    // so a record carrying extra fields yields a description that has
+    // nowhere to put them.
+    const parsed =
+      typeof d.target === "string" ? parseConnectTarget(d.target) : null;
+    const host = parsed ? parsed.host.toLowerCase() : null;
+    const reason = d.reason;
+    out.push({
+      host: host !== null && SAFE_HOST_PATTERN.test(host) ? host : null,
+      port: parsed ? parsed.port : null,
+      allowed: d.allowed === true,
+      reason:
+        typeof reason === "string" &&
+        (EGRESS_DENIAL_REASONS as readonly string[]).includes(reason)
+          ? (reason as EgressDenialReason)
+          : null,
+    });
+  }
+  return { decisions: out, truncated: false };
+}

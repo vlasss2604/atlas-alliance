@@ -3,6 +3,7 @@ import * as path from "node:path";
 
 import { isHttpStatusCode } from "./content-fetcher";
 import {
+  describeEgressDecisions,
   startEgressProxy,
   summarizeEgressDenials,
   type EgressDenialSummary,
@@ -17,7 +18,9 @@ import {
   isNavigationDiagnostic,
   isRenderedDocsFailureReason,
   RenderedDocsError,
+  sanitizeInspectionDiagnostics,
   type BrowserLaunchDiagnostic,
+  type InspectionRenderDiagnostics,
   type ConfirmedDocsRoute,
   type RenderedDocsFailureReason,
   type RenderedDocsFetcher,
@@ -63,6 +66,18 @@ export interface IsolatedRendererDeps {
   // OPT-IN record-recovery needles, forwarded to the child. Empty or
   // absent means the recovery never runs.
   recoverNeedles?: readonly string[];
+  // OPT-IN OWNER INSPECTION DIAGNOSTICS.
+  //
+  // THE LOAD-BEARING GATE. It is read twice: once to tell the child to
+  // collect, and once — independently — before this parent will read the
+  // `inspection` key off the child's envelope or describe its own proxy
+  // log. A child that volunteers the field to a supervisor that did not
+  // ask has it dropped, so an evidentiary render cannot acquire one by
+  // anything the child does.
+  //
+  // It changes nothing about what is rendered, allowed, blocked, retried
+  // or returned. Failure DESCRIPTION only.
+  inspectionDiagnostics?: boolean;
 }
 
 const CHILD_SCRIPT = path.join(__dirname, "rendered-docs-child.ts");
@@ -142,7 +157,7 @@ async function defaultSpawn(args: {
 // Validates the child's output before it is allowed to become a document.
 // The child is a separate, browser-hosting process; its output is treated
 // as untrusted input like any other.
-function parseChildDocument(stdout: string): RenderedDocument {
+function parseChildDocument(stdout: string, inspectionDiagnostics: boolean): RenderedDocument {
   let parsed: ChildRenderResponse;
   try {
     parsed = JSON.parse(stdout) as ChildRenderResponse;
@@ -174,12 +189,21 @@ function parseChildDocument(stdout: string): RenderedDocument {
       const detail = (parsed as { detail?: unknown }).detail;
       const status = (parsed as { httpStatus?: unknown }).httpStatus;
       const navDetail = (parsed as { navigationDetail?: unknown }).navigationDetail;
+      // OWNER INSPECTION ONLY. The key is not even READ unless this
+      // supervisor was constructed for inspection, so a child cannot
+      // attach one to an evidentiary render's failure; and when it is
+      // read, it is rebuilt field by field rather than adopted.
+      const inspection = inspectionDiagnostics
+        ? sanitizeInspectionDiagnostics((parsed as { inspection?: unknown }).inspection)
+        : null;
       throw new RenderedDocsError(
         reported,
         "isolated",
         isBrowserLaunchDiagnostic(detail) ? detail : null,
         isHttpStatusCode(status) ? status : null,
         isNavigationDiagnostic(navDetail) ? navDetail : null,
+        null,
+        inspection,
       );
     }
     throw new RenderedDocsError("CHILD_OUTPUT_MALFORMED", "isolated");
@@ -216,6 +240,7 @@ export function createIsolatedRenderedDocsFetcher(
   const parentEnv = deps.parentEnv ?? process.env;
   const observeNetwork = deps.observeNetwork === true;
   const recoverNeedles = [...(deps.recoverNeedles ?? [])];
+  const inspectionDiagnostics = deps.inspectionDiagnostics === true;
 
   return {
     name: "isolated-playwright-chromium",
@@ -247,6 +272,7 @@ export function createIsolatedRenderedDocsFetcher(
           proxyPort: proxy.port,
           observeNetwork,
           recoverNeedles,
+          inspectionDiagnostics,
         };
 
         // EXACTLY ONE child render request. No loop, no retry — a failed
@@ -287,7 +313,7 @@ export function createIsolatedRenderedDocsFetcher(
         // classify anything — whatever stdout holds is not to be trusted
         // as a reason.
         if (code !== 0) throw new RenderedDocsError("CHILD_EXIT_NONZERO", "isolated");
-        return parseChildDocument(stdout);
+        return parseChildDocument(stdout, inspectionDiagnostics);
       } catch (e) {
         // THE PROXY'S OWN VERDICT, attached here because this is where its
         // log lives — the proxy is a parent-side boundary, so the browser's
@@ -300,7 +326,32 @@ export function createIsolatedRenderedDocsFetcher(
         // raw `host:port` per entry, and that is precisely what this
         // boundary exists to keep out of a diagnostic.
         const denials = proxy === null ? null : summarizeEgressDenials(proxy.decisions);
-        if (e instanceof RenderedDocsError) throw e.withProxyDenials(denials);
+        // OWNER INSPECTION ONLY, and null on every production render.
+        //
+        // The two halves are joined HERE because they live in two
+        // different processes: the browser's own report and our
+        // browser-side blocks came back on the child's envelope, and the
+        // proxy log exists only in this parent. `requestedUrl` is
+        // overwritten with the value THIS process owns rather than the one
+        // the child echoed back.
+        const inspection: InspectionRenderDiagnostics | null = !inspectionDiagnostics
+          ? null
+          : sanitizeInspectionDiagnostics({
+              ...(e instanceof RenderedDocsError && e.inspection !== null ? e.inspection : {}),
+              requestedUrl: url,
+              ...(proxy === null
+                ? { egressDecisions: [], egressDecisionsTruncated: false }
+                : (() => {
+                    const d = describeEgressDecisions(proxy.decisions);
+                    return { egressDecisions: d.decisions, egressDecisionsTruncated: d.truncated };
+                  })()),
+            });
+        if (e instanceof RenderedDocsError) {
+          const withDenials = e.withProxyDenials(denials);
+          throw inspection === null
+            ? withDenials
+            : withDenials.withInspectionDiagnostics(inspection);
+        }
         throw new RenderedDocsError(
           "RENDER_FAILED",
           "isolated",
@@ -308,6 +359,7 @@ export function createIsolatedRenderedDocsFetcher(
           null,
           null,
           denials,
+          inspection,
         );
       } finally {
         if (timer) clearTimeout(timer);

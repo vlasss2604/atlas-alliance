@@ -24,7 +24,11 @@ import {
   RenderedDocsError,
   classifyBrowserLaunchFailure,
   classifyNavigationFailure,
+  extractNetError,
+  normalizeErrorName,
+  MAX_INSPECTION_BLOCKED_REQUESTS,
   type ConfirmedDocsRoute,
+  type InspectionBlockedRequest,
   type RenderedDocsFetcher,
   type RenderedDocument,
   type RenderLimits,
@@ -101,6 +105,14 @@ export interface PlaywrightRenderDeps {
   // already captured. Parse only — no second navigation, no execution,
   // no request. Absent means the recovery never runs.
   recoverRecords?: { needles: readonly string[] };
+  // OPT-IN OWNER INSPECTION DIAGNOSTICS. Off by default, so an ordinary
+  // evidentiary render collects nothing and its failures carry exactly
+  // what they carried before.
+  //
+  // It changes NOTHING about what is rendered, allowed, blocked or
+  // returned — every gate above and below runs identically. It only
+  // decides whether a FAILURE is described to the operator who invoked it.
+  inspectionDiagnostics?: boolean;
 }
 
 // EXPORTED so the offline self-test launches through the SAME call, with
@@ -197,6 +209,13 @@ export function createPlaywrightRenderedDocsFetcher(
       // A holder, because the route handler closes over it before the page
       // exists.
       const pageHolder: { page: PageLike | null } = { page: null };
+      // OWNER INSPECTION ONLY. All three stay empty/null unless the caller
+      // opted in, so nothing is collected on an evidentiary render.
+      const inspect = deps.inspectionDiagnostics === true;
+      const inspectionBlocked: InspectionBlockedRequest[] = [];
+      let inspectionBlockedTruncated = false;
+      let navigationErrorName: string | null = null;
+      let navigationNetError: string | null = null;
 
       // Starting the browser is its own stage. A missing playwright
       // module, an absent Chromium binary or a refused launch says
@@ -257,6 +276,24 @@ export function createPlaywrightRenderedDocsFetcher(
               pageHolder.page?.mainFrame !== undefined &&
               request.frame() === pageHolder.page.mainFrame();
             if (isNav && sameFrame) blockedMainFrameNavigation = true;
+            // OWNER INSPECTION: the SAME three facts already computed
+            // above, kept rather than discarded. This is the only layer
+            // that can answer main-frame-versus-subresource — the egress
+            // proxy sees `host:port` at CONNECT and has no frame at all.
+            // The url is reduced to its ORIGIN by the sanitizer; the path
+            // of a refused third-party request is not needed to name it.
+            if (inspect) {
+              if (inspectionBlocked.length < MAX_INSPECTION_BLOCKED_REQUESTS) {
+                inspectionBlocked.push({
+                  origin: requestUrl,
+                  resourceType: request.resourceType(),
+                  navigationRequest: isNav,
+                  mainFrame: sameFrame,
+                });
+              } else {
+                inspectionBlockedTruncated = true;
+              }
+            }
             await r.abort("blockedbyclient");
             return;
           }
@@ -369,6 +406,17 @@ export function createPlaywrightRenderedDocsFetcher(
           });
         } catch (e) {
           if (e instanceof RenderedDocsError) throw e;
+          // OWNER INSPECTION: the browser's own report, normalized at the
+          // one seam that still holds it. `classifyNavigationFailure`
+          // deliberately refuses to parse the message into a closed code,
+          // and that is unchanged — this keeps the error CLASS and
+          // Chromium's own `net::ERR_*` token beside it, so
+          // UNCLASSIFIED_NAVIGATION_ERROR stops being the end of the
+          // investigation. The message itself is never kept.
+          if (inspect) {
+            navigationErrorName = normalizeErrorName(e);
+            navigationNetError = extractNetError(e);
+          }
           throw new RenderedDocsError(
             "NAVIGATION_FAILED",
             name,
@@ -544,9 +592,47 @@ export function createPlaywrightRenderedDocsFetcher(
           embeddedRecords,
         };
       } catch (e) {
-        if (e instanceof RenderedDocsError) throw e;
+        // ONE SEAM for every render-stage failure after the browser came
+        // up — navigation, containment, status, readiness, limits. Each
+        // one is already classified above and NONE of that changes here;
+        // only the operator's description is attached, and only when the
+        // caller asked for it.
+        const inspection = inspect
+          ? {
+              // The parent overwrites this with the value it owns; set
+              // here so a directly-constructed adapter still reports it.
+              requestedUrl: url,
+              // Where the page actually was. `about:blank` means the
+              // navigation never committed, which is a different finding
+              // from having landed somewhere unexpected.
+              finalUrl: (() => {
+                try {
+                  return pageHolder.page?.url() ?? null;
+                } catch {
+                  return null;
+                }
+              })(),
+              navigationErrorName,
+              navigationNetError,
+              blockedRequests: inspectionBlocked,
+              blockedRequestsTruncated: inspectionBlockedTruncated,
+              egressDecisions: [],
+              egressDecisionsTruncated: false,
+            }
+          : null;
+        if (e instanceof RenderedDocsError) {
+          throw inspection === null ? e : e.withInspectionDiagnostics(inspection);
+        }
         // Never echo page content or a URL out of the renderer.
-        throw new RenderedDocsError("RENDER_FAILED", name);
+        throw new RenderedDocsError(
+          "RENDER_FAILED",
+          name,
+          null,
+          null,
+          null,
+          null,
+          inspection,
+        );
       } finally {
         // Torn down after EVERY render, success or failure.
         await context?.close().catch(() => {});
