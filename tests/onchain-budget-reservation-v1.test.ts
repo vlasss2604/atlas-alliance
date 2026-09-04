@@ -277,7 +277,7 @@ describe("7. the rule is generic research capability, never a project", () => {
     // capped input; nothing in the chain reads the raw job ceiling again.
     expect(src).toContain("const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };");
     expect(src).toContain("acquireOneUrl(documentaryInput, url, out)");
-    const reservations = src.match(/"sourceOpens",\n\s+1,\n\s+input\.maxSourceOpens,/g) ?? [];
+    const reservations = src.match(/"sourceOpens",\r?\n\s+1,\r?\n\s+input\.maxSourceOpens,/g) ?? [];
     expect(reservations.length).toBe(3); // fetch, render fallback, render upgrade
   });
 
