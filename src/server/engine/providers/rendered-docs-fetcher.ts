@@ -1,6 +1,8 @@
 import { isHttpStatusCode } from "./content-fetcher";
 import {
   EGRESS_DENIAL_REASONS,
+  MAX_DESCRIBED_EGRESS_DECISIONS,
+  type EgressDecisionDescription,
   type EgressDenialReason,
   type EgressDenialSummary,
 } from "./render-egress-proxy";
@@ -367,6 +369,209 @@ export function classifyBrowserLaunchFailure(e: unknown): BrowserLaunchDiagnosti
   return "UNKNOWN_BROWSER_LAUNCH_FAILURE";
 }
 
+// ---- OWNER INSPECTION DIAGNOSTICS -------------------------------------
+//
+// THE OBSERVABILITY GAP THIS CLOSES. Every field above is a closed code
+// -owned code, and that is correct for an evidentiary render: a renderer
+// error must never echo a URL, a host or a provider message into logs or
+// trace. Applied to OWNER INSPECTION it produced a dead end — a live
+// window came back with `NAVIGATION_FAILED:UNCLASSIFIED_NAVIGATION_ERROR`
+// and `1 denied, 1 allowed`, which cannot say which host was refused,
+// whether the refusal was the page itself or a third-party subresource,
+// where the navigation ended up, or what the browser actually reported.
+// Three separate hypotheses stayed alive that one observation should have
+// separated.
+//
+// Inspection is a different act from evidence acquisition: local, manual,
+// non-evidentiary, performed by the owner on a URL they typed, against a
+// host a human already confirmed and which the entrypoint already prints
+// back to that same terminal. So a WIDER description is admissible here —
+// and only here.
+//
+// STRICTLY OPT-IN, AND OFF BY DEFAULT AT EVERY LAYER. The renderer
+// collects nothing unless asked, the child emits nothing unless asked,
+// and — the load-bearing part — the PARENT DISCARDS the field unless the
+// parent itself asked for it. A child cannot attach one to an ordinary
+// evidentiary render's failure, because the parent that did not request
+// diagnostics never reads the key.
+//
+// STILL BOUNDED, NEVER A DUMP:
+//   * no page body, no html, no rendered text — this file has no access
+//     to any of them on a failure path;
+//   * no headers and no cookies — never read here at all;
+//   * URLs reduced to origin + path, so query strings and fragments (the
+//     parts that carry tokens) are dropped by construction;
+//   * the browser's message reduced to Chromium's own `net::ERR_*` code
+//     via a code-owned pattern — the message itself is never stored,
+//     forwarded or re-thrown, exactly as the launch classifier treats it;
+//   * hard caps on both lists.
+
+// Chromium's transport error vocabulary. Matched by a code-owned pattern
+// and returned as the MATCHED TOKEN ONLY — never the surrounding message,
+// which carries a call log and the requested url. This is the one piece of
+// information that separates a tunnel failure from a reset, a TLS refusal
+// or an empty response, and it exists nowhere else in the system.
+const NET_ERROR_PATTERN = /net::ERR_[A-Z0-9_]{1,64}/;
+
+// An error CLASS name, not a message: Playwright's `TimeoutError`,
+// node's `Error`. Constrained to an identifier shape so an exotic value
+// cannot smuggle text through this field.
+const ERROR_NAME_PATTERN = /^[A-Za-z][A-Za-z0-9_]{0,63}$/;
+
+export const MAX_INSPECTION_BLOCKED_REQUESTS = 20;
+
+// A request our OWN browser-side route handler aborted.
+//
+// This is the layer — and the only layer — that can answer
+// main-frame-versus-subresource: it holds the request, its resource type
+// and its frame. The egress proxy cannot: it sees `host:port` at CONNECT
+// and has no notion of a frame at all.
+//
+// `navigationRequest` and `mainFrame` are OBSERVED, never inferred. A
+// driver that does not expose `isNavigationRequest`/`frame` yields false
+// for both, which reads as "not shown to be", not as "shown not to be".
+export interface InspectionBlockedRequest {
+  // Origin only — scheme://host[:port]. The path of a blocked
+  // third-party request is not needed to name it and is not kept.
+  origin: string | null;
+  resourceType: string | null;
+  navigationRequest: boolean;
+  mainFrame: boolean;
+}
+
+export interface InspectionRenderDiagnostics {
+  // What the operator asked to open. Supplied by the PARENT, which owns
+  // the value, rather than believed from the child.
+  requestedUrl: string | null;
+  // Where the page actually was when the failure was raised. `about:blank`
+  // means the navigation never committed — itself a finding, and a
+  // different one from having landed somewhere unexpected.
+  finalUrl: string | null;
+  // The browser's own report, normalized: an error class name and
+  // Chromium's `net::ERR_*` code. Both null when the failure was not a
+  // navigation throw.
+  navigationErrorName: string | null;
+  navigationNetError: string | null;
+  // OUR containment's browser-side refusals, with frame attribution.
+  blockedRequests: InspectionBlockedRequest[];
+  blockedRequestsTruncated: boolean;
+  // OUR containment's network-side decisions, with host and port. Frame
+  // attribution is structurally unavailable at this boundary.
+  egressDecisions: EgressDecisionDescription[];
+  egressDecisionsTruncated: boolean;
+}
+
+// URLs are reduced to origin + path. Query and fragment are the parts that
+// carry tokens and identifiers, and neither is needed to say where a
+// navigation went, so both are dropped rather than trusted to be harmless.
+export function sanitizeInspectionUrl(v: unknown): string | null {
+  if (typeof v !== "string" || v.length === 0 || v.length > 2_000) return null;
+  // The url a browser reports when a navigation never committed. It has no
+  // origin, and it is the single most informative value on this field.
+  if (v === "about:blank") return "about:blank";
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    return `${u.origin}${u.pathname}`.slice(0, 300);
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeOrigin(v: unknown): string | null {
+  if (typeof v !== "string" || v.length === 0 || v.length > 2_000) return null;
+  try {
+    const u = new URL(v);
+    if (u.protocol !== "https:" && u.protocol !== "http:") return null;
+    return u.origin.slice(0, 300);
+  } catch {
+    return null;
+  }
+}
+
+// Playwright's resource types are lowercase words. Anything else is
+// dropped rather than printed.
+function sanitizeResourceType(v: unknown): string | null {
+  return typeof v === "string" && /^[a-z]{1,32}$/.test(v) ? v : null;
+}
+
+// The one place a provider-controlled message is read for navigation, and
+// nothing but Chromium's own code token ever comes back out. The input is
+// never stored, never returned and never re-thrown — the same discipline
+// classifyBrowserLaunchFailure applies to launch messages.
+export function extractNetError(e: unknown): string | null {
+  const text = e instanceof Error ? e.message : typeof e === "string" ? e : "";
+  const m = NET_ERROR_PATTERN.exec(text);
+  return m ? m[0] : null;
+}
+
+export function normalizeErrorName(e: unknown): string | null {
+  const name = e instanceof Error ? e.name : "";
+  return ERROR_NAME_PATTERN.test(name) ? name : null;
+}
+
+// REBUILT field by field, exactly as sanitizeProxyDenials is, so a value
+// arriving across the process boundary with extra keys yields a structure
+// that has nowhere to put them.
+export function sanitizeInspectionDiagnostics(
+  v: unknown,
+): InspectionRenderDiagnostics | null {
+  if (v === null || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  const rawBlocked = Array.isArray(o.blockedRequests) ? o.blockedRequests : [];
+  const blockedRequests: InspectionBlockedRequest[] = rawBlocked
+    .slice(0, MAX_INSPECTION_BLOCKED_REQUESTS)
+    .map((r) => {
+      const b = (r ?? {}) as Record<string, unknown>;
+      return {
+        origin: sanitizeOrigin(b.origin),
+        resourceType: sanitizeResourceType(b.resourceType),
+        navigationRequest: b.navigationRequest === true,
+        mainFrame: b.mainFrame === true,
+      };
+    });
+  const rawEgress = Array.isArray(o.egressDecisions) ? o.egressDecisions : [];
+  const egressDecisions: EgressDecisionDescription[] = rawEgress
+    .slice(0, MAX_DESCRIBED_EGRESS_DECISIONS)
+    .map((r) => {
+      const d = (r ?? {}) as Record<string, unknown>;
+      const host = typeof d.host === "string" ? d.host : null;
+      const port = d.port;
+      const reason = d.reason;
+      return {
+        host: host !== null && /^[a-z0-9._:-]{1,253}$/.test(host) ? host : null,
+        port:
+          typeof port === "number" && Number.isInteger(port) && port > 0 && port <= 65_535
+            ? port
+            : null,
+        allowed: d.allowed === true,
+        reason:
+          typeof reason === "string" &&
+          (EGRESS_DENIAL_REASONS as readonly string[]).includes(reason)
+            ? (reason as EgressDenialReason)
+            : null,
+      };
+    });
+  const netError = o.navigationNetError;
+  const errName = o.navigationErrorName;
+  return {
+    requestedUrl: sanitizeInspectionUrl(o.requestedUrl),
+    finalUrl: sanitizeInspectionUrl(o.finalUrl),
+    navigationErrorName:
+      typeof errName === "string" && ERROR_NAME_PATTERN.test(errName) ? errName : null,
+    navigationNetError:
+      typeof netError === "string" && /^net::ERR_[A-Z0-9_]{1,64}$/.test(netError)
+        ? netError
+        : null,
+    blockedRequests,
+    blockedRequestsTruncated:
+      o.blockedRequestsTruncated === true || rawBlocked.length > MAX_INSPECTION_BLOCKED_REQUESTS,
+    egressDecisions,
+    egressDecisionsTruncated:
+      o.egressDecisionsTruncated === true || rawEgress.length > MAX_DESCRIBED_EGRESS_DECISIONS,
+  };
+}
+
 // REBUILT, never adopted. The summary is re-derived key by key from the
 // closed reason list and coerced to non-negative integers, so an object
 // arriving with a `target`, a hostname or any other extra field yields a
@@ -418,6 +623,17 @@ export class RenderedDocsError extends Error {
   // cannot attach an object with extra fields.
   readonly proxyDenials: EgressDenialSummary | null;
 
+  // OWNER INSPECTION ONLY, and null on every other render.
+  //
+  // Null is the default and the production value: the isolated supervisor
+  // discards whatever the child said about this unless the supervisor
+  // itself asked for diagnostics. An evidentiary render therefore carries
+  // exactly what it carried before — a reason code and counts.
+  //
+  // Rebuilt through the sanitizer rather than trusted, so a caller cannot
+  // attach an object with extra fields.
+  readonly inspection: InspectionRenderDiagnostics | null;
+
   constructor(
     public readonly reason: RenderedDocsFailureReason,
     public readonly rendererName = "unknown",
@@ -425,6 +641,7 @@ export class RenderedDocsError extends Error {
     httpStatus: number | null = null,
     navigationDiagnostic: NavigationDiagnostic | null = null,
     proxyDenials: EgressDenialSummary | null = null,
+    inspection: InspectionRenderDiagnostics | null = null,
   ) {
     super(`rendered docs retrieval failed (${reason}) via ${rendererName}`);
     this.name = "RenderedDocsError";
@@ -436,6 +653,7 @@ export class RenderedDocsError extends Error {
       ? navigationDiagnostic
       : null;
     this.proxyDenials = sanitizeProxyDenials(proxyDenials);
+    this.inspection = sanitizeInspectionDiagnostics(inspection);
   }
 
   // Attaches the proxy's counts to an already-classified failure. The
@@ -450,6 +668,25 @@ export class RenderedDocsError extends Error {
       this.httpStatus,
       this.navigationDiagnostic,
       summary,
+      this.inspection,
+    );
+  }
+
+  // Attaches OWNER INSPECTION diagnostics, same discipline: the
+  // classification above is copied verbatim and only this field changes.
+  // Called by the isolated supervisor, and only when that supervisor was
+  // explicitly constructed for inspection.
+  withInspectionDiagnostics(
+    inspection: InspectionRenderDiagnostics | null,
+  ): RenderedDocsError {
+    return new RenderedDocsError(
+      this.reason,
+      this.rendererName,
+      this.diagnostic,
+      this.httpStatus,
+      this.navigationDiagnostic,
+      this.proxyDenials,
+      inspection,
     );
   }
 }

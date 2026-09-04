@@ -72,7 +72,20 @@ async function main(): Promise<void> {
   }
 
   console.log("--- NON-EVIDENTIARY inspection render (one navigation) ---");
-  const doc = await createIsolatedRenderedDocsFetcher().render(url, {
+  // OWNER INSPECTION DIAGNOSTICS, opt-in and requested here only.
+  //
+  // It changes NOTHING about the render: the same isolated boundary, the
+  // same deny-by-default proxy pinned to the same confirmed host, the same
+  // single navigation, the same limits, the same zero retry. It only
+  // decides whether a FAILURE is described to the operator standing at
+  // this terminal — who typed the url above and is already reading the
+  // confirmed host printed above it.
+  //
+  // Production acquisition never sets this flag, so an evidentiary render
+  // continues to fail with a reason code and counts and nothing else.
+  const doc = await createIsolatedRenderedDocsFetcher({
+    inspectionDiagnostics: true,
+  }).render(url, {
     confirmedHost: eligible.confirmedHost,
     matchedPathPrefix: eligible.matchedPathPrefix,
   });
@@ -140,6 +153,69 @@ main().catch((e) => {
     if (p.deniedCount === 0) {
       console.error("  -> no proxy denial was recorded; the failure was not a containment refusal.");
     }
+  }
+
+  // THE OPERATOR'S DESCRIPTION. Present only because this entrypoint asked
+  // for it, and structurally absent from every production render.
+  //
+  // Counts alone could not separate "the confirmed host itself was
+  // refused" from "a third-party asset was refused while the page loaded
+  // fine", nor say where the navigation ended up, nor report what the
+  // browser actually said. Each line below answers exactly one of those.
+  const d = e.inspection;
+  if (d === null) {
+    console.error("inspection:       (not collected)");
+  } else {
+    console.error("--- inspection diagnostics (bounded; no page content) ---");
+    // URLs are reduced to origin + path before they get here: query
+    // strings and fragments are dropped by construction, not by choice.
+    console.error("requestedUrl:     " + String(d.requestedUrl));
+    console.error("finalUrl:         " + String(d.finalUrl));
+    if (d.finalUrl === "about:blank") {
+      console.error("  -> the navigation never committed; nothing was loaded.");
+    }
+    // The browser's own verdict: an error CLASS and Chromium's own
+    // net::ERR_* code. The message itself is never carried.
+    console.error("navErrorName:     " + String(d.navigationErrorName));
+    console.error("navNetError:      " + String(d.navigationNetError));
+    console.error(
+      "blockedRequests:  " +
+        d.blockedRequests.length +
+        (d.blockedRequestsTruncated ? " (truncated)" : ""),
+    );
+    for (const b of d.blockedRequests) {
+      console.error(
+        "  " +
+          String(b.origin) +
+          "  [" +
+          String(b.resourceType) +
+          "]" +
+          (b.navigationRequest ? " navigation" : " subresource") +
+          (b.mainFrame ? " main-frame" : ""),
+      );
+    }
+    console.error(
+      "egressDecisions:  " +
+        d.egressDecisions.length +
+        (d.egressDecisionsTruncated ? " (truncated)" : ""),
+    );
+    for (const x of d.egressDecisions) {
+      console.error(
+        "  " +
+          (x.allowed ? "ALLOW" : "DENY ") +
+          "  " +
+          String(x.host) +
+          ":" +
+          String(x.port) +
+          (x.reason === null ? "" : "  " + x.reason),
+      );
+    }
+    // Stated rather than left to be assumed: the proxy filters CONNECT,
+    // where a frame does not exist yet. Only the rows above it, recorded
+    // by the browser-side handler, carry frame attribution.
+    console.error(
+      "  -> egress rows are CONNECT decisions; frame attribution is unavailable at that boundary.",
+    );
   }
   process.exit(1);
 });

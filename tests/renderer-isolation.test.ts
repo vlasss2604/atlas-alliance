@@ -259,9 +259,15 @@ describe("process supervision — fail closed", () => {
     // arrives through it, so adding a field must be a deliberate, reviewed
     // act rather than a side effect. observeNetwork was added under owner
     // authorization for passive observation and is a plain boolean.
+    // inspectionDiagnostics was added for the owner inspection entrypoint
+    // and is likewise a plain boolean: it tells the child whether to
+    // DESCRIBE a failure, and nothing about it changes what the child
+    // renders, allows, blocks or returns. It carries no value the child
+    // did not already have.
     expect(Object.keys(seen!).sort()).toEqual(
       [
         "confirmedHost",
+        "inspectionDiagnostics",
         "limits",
         "matchedPathPrefix",
         "observeNetwork",
@@ -271,11 +277,16 @@ describe("process supervision — fail closed", () => {
       ].sort(),
     );
     expect(JSON.stringify(seen)).not.toContain("SECRET");
-    // Both opt-ins default OFF: an ordinary render tells the child to
-    // observe nothing and to recover nothing.
-    const request = seen as unknown as { observeNetwork: boolean; recoverNeedles: string[] };
+    // All three opt-ins default OFF: an ordinary render tells the child to
+    // observe nothing, recover nothing and describe nothing.
+    const request = seen as unknown as {
+      observeNetwork: boolean;
+      recoverNeedles: string[];
+      inspectionDiagnostics: boolean;
+    };
     expect(request.observeNetwork).toBe(false);
     expect(request.recoverNeedles).toEqual([]);
+    expect(request.inspectionDiagnostics).toBe(false);
   });
 
   it("the child is spawned with the scrubbed environment", async () => {
