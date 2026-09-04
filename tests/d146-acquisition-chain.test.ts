@@ -472,18 +472,25 @@ describe("D-146 §N — an oversized body is a representation problem, not a ver
   // It is not one of those: the origin was mid-reply with a document it was
   // willing to serve.
 
-  it("N1. TOO_LARGE plans CONTENT_NEGOTIATION, and only that", () => {
+  it("N1. the FIRST TOO_LARGE plans CONTENT_NEGOTIATION, and only that", () => {
+    // Unattributed, and after the direct fetch: the cheap question first.
     expect(plannedFallbacks("TOO_LARGE", null)).toEqual(["CONTENT_NEGOTIATION"]);
+    expect(plannedFallbacks("TOO_LARGE", null, "DIRECT_HTTP")).toEqual(["CONTENT_NEGOTIATION"]);
   });
 
-  it("N2. TOO_LARGE never plans a render, at any status", () => {
-    // A render of an oversized page yields the same document or a larger
-    // one, and its output meets the identical cap at seal. The renderer is
-    // for pages carrying too LITTLE static text — the opposite failure.
+  it("N2. TOO_LARGE never plans a render on the FIRST failure, at any status", () => {
+    // Narrowed by §P, not weakened: negotiation is still the only thing a
+    // first oversized body buys. What changed is that a SECOND oversized
+    // body — the negotiated representation also being too large — is a
+    // different statement, and §P owns it.
     for (const status of [null, 200, 403, 429, 404, 500]) {
       expect(plannedFallbacks("TOO_LARGE", status), String(status)).not.toContain(
         "ISOLATED_RENDER",
       );
+      expect(
+        plannedFallbacks("TOO_LARGE", status, "DIRECT_HTTP"),
+        String(status),
+      ).not.toContain("ISOLATED_RENDER");
     }
   });
 
@@ -532,8 +539,13 @@ describe("D-146 §N — an oversized body is a representation problem, not a ver
     expect(failed[0].reason).toBe("PROVIDER_ERROR");
   });
 
-  it("N5. oversized on BOTH representations ends the chain — no third attempt, no render", async () => {
-    const { project, jobId } = await seedTargets({ confirmDocs: true });
+  it("N5. oversized on BOTH representations makes exactly two TRANSPORT calls", async () => {
+    // The transport half of the old N5, which is unchanged: neither
+    // strategy is ever repeated, and no third transport attempt exists.
+    // What follows the second failure is §P's subject, and this test
+    // deliberately denies the render its route so the transport bound is
+    // measured on its own.
+    const { project, jobId } = await seedTargets();
     const renders = { n: 0, urls: [] as string[] };
     __setRenderedDocsFetcher(fixtureRenderer(renders));
     try {
@@ -552,9 +564,10 @@ describe("D-146 §N — an oversized body is a representation problem, not a ver
         }),
       );
 
-      // Exactly two transport calls. The strategy is already in the plan, so
-      // the second failure cannot re-add it, and nothing escalates.
       expect(calls.n).toBe(2);
+      expect(calls.prefs).toEqual(["DEFAULT", "TEXT_REPRESENTATION"]);
+      // Not an OFFICIAL_DOCS route, so the render is planned and then
+      // refused by the shared route gate.
       expect(renders.n).toBe(0);
       expect(result.strategyAttempts.map((a) => a.strategy)).toEqual([
         "DIRECT_HTTP",
@@ -589,6 +602,290 @@ describe("D-146 §N — an oversized body is a representation problem, not a ver
     // future change raises this instead of negotiating, it fails here.
     const src = readFileSync("src/server/engine/providers/content-fetcher.ts", "utf-8");
     expect(src).toContain("const DEFAULT_MAX_BYTES = 2_000_000;");
+  });
+});
+
+describe("D-146 §P — when no textual representation fits, the rendered one is the last resort", () => {
+  // FOUND LIVE, AND MEASURED. A CONFIRMED / OFFICIAL_DOCS page failed
+  // acquisition twice — DIRECT_HTTP TOO_LARGE, then CONTENT_NEGOTIATION
+  // TOO_LARGE — while a production-equivalent renderer probe read the same
+  // url successfully: 2,080,298 html bytes, 3,289 ms. The probe persisted
+  // nothing, so the document was readable and unreachable at the same time.
+  //
+  // The reasoning that closed the chain was wrong about WHICH quantity
+  // each cap measures. The transport cap is on RESPONSE BYTES; the seal
+  // cap is on NORMALIZED TEXT CHARACTERS; the renderer bounds its own text
+  // separately. Rendering is the step that converts the oversized quantity
+  // into the bounded one.
+
+  it("P1. the SECOND oversized representation — and only that — plans the render", () => {
+    // The transition is earned by the predecessor, not by the class alone.
+    expect(plannedFallbacks("TOO_LARGE", null, "CONTENT_NEGOTIATION")).toEqual([
+      "ISOLATED_RENDER",
+    ]);
+    // Everything else about TOO_LARGE is unchanged.
+    expect(plannedFallbacks("TOO_LARGE", null, "DIRECT_HTTP")).toEqual(["CONTENT_NEGOTIATION"]);
+    expect(plannedFallbacks("TOO_LARGE", null, null)).toEqual(["CONTENT_NEGOTIATION"]);
+    // And it does not depend on a status, which this class never carries.
+    for (const status of [null, 200, 403, 404, 500]) {
+      expect(plannedFallbacks("TOO_LARGE", status, "CONTENT_NEGOTIATION"), String(status)).toEqual(
+        ["ISOLATED_RENDER"],
+      );
+    }
+  });
+
+  it("P2. no OTHER failure class changed meaning when a strategy is named", () => {
+    // The predecessor is read by exactly one case. Every other transition
+    // must answer identically however it is asked.
+    const strategies = [null, "DIRECT_HTTP", "CONTENT_NEGOTIATION", "ISOLATED_RENDER"] as const;
+    const classes = [
+      "BLOCKED_ADDRESS",
+      "REDIRECT_TARGET_BLOCKED",
+      "NETWORK_ERROR",
+      "TIMEOUT",
+      "UNSUPPORTED_CONTENT_TYPE",
+      "INVALID_URL",
+      "UNSUPPORTED_PROTOCOL",
+      "TOO_MANY_REDIRECTS",
+      "DNS_RESOLUTION_FAILED",
+      "HTTP_ERROR",
+      null,
+    ];
+    for (const d of classes) {
+      for (const status of [null, 403, 404]) {
+        const base = plannedFallbacks(d, status);
+        for (const st of strategies) {
+          expect(plannedFallbacks(d, status, st), `${d}/${status}/${st}`).toEqual(base);
+        }
+      }
+    }
+  });
+
+  it("P3. DIRECT_HTTP TOO_LARGE -> CONTENT_NEGOTIATION TOO_LARGE -> ISOLATED_RENDER seals", async () => {
+    const { project, jobId } = await seedTargets({ confirmDocs: true });
+    const renders = { n: 0, urls: [] as string[] };
+    __setRenderedDocsFetcher(fixtureRenderer(renders));
+    try {
+      const calls = { n: 0, prefs: [] as string[], urls: [] as string[] };
+      const result = await fetchPhase(
+        project,
+        jobId,
+        scriptedFetcher({
+          onDefault: () => {
+            throw new ContentFetchError("TOO_LARGE", "response exceeded 2000000 bytes", TARGET);
+          },
+          onText: () => {
+            throw new ContentFetchError("TOO_LARGE", "response exceeded 2000000 bytes", TARGET);
+          },
+          calls,
+        }),
+      );
+
+      // The exact transition, in order, on the SAME url.
+      expect(result.strategyAttempts.map((a) => a.strategy)).toEqual([
+        "DIRECT_HTTP",
+        "CONTENT_NEGOTIATION",
+        "ISOLATED_RENDER",
+      ]);
+      expect(new Set([...calls.urls, ...renders.urls])).toEqual(new Set([TARGET]));
+      expect(calls.n).toBe(2);
+      expect(renders.n).toBe(1);
+      expect(result.sealedDocumentIds).toHaveLength(1);
+
+      // THE SEALING PATH IS THE ORDINARY ONE. The rendered document is
+      // persisted through persistAcquiredDocument like every other, so its
+      // text carries a textSha256 and is available to locator extraction.
+      const rows = await sealed(jobId);
+      expect(rows).toHaveLength(1);
+      expect(rows[0].acquisitionStrategy).toBe("ISOLATED_RENDER");
+      expect(rows[0].renderMode).toBe("RENDERED");
+      expect(rows[0].admission).toBe("PRODUCT_ACQUISITION");
+      expect(rows[0].textSha256).toMatch(/^sha256:[0-9a-f]{64}$/);
+      expect(rows[0].normalizedText.length).toBeGreaterThan(0);
+      // Authority is RECORDED from the route, never granted by transport.
+      expect(rows[0].authority).toMatchObject({
+        officiality: "CONFIRMED",
+        routeClass: "OFFICIAL_DOCS",
+      });
+    } finally {
+      __setRenderedDocsFetcher(null);
+    }
+  });
+
+  it("P4. the render is NOT attempted when the route is not eligible", async () => {
+    // Same two failures, same class, same everything — except the route
+    // was never classified OFFICIAL_DOCS. The chain plans the render and
+    // the shared route gate refuses it, so no browser is reached and no
+    // source open is spent on it.
+    const { project, jobId } = await seedTargets();
+    const renders = { n: 0, urls: [] as string[] };
+    __setRenderedDocsFetcher(fixtureRenderer(renders));
+    try {
+      const before = await sourceOpens(jobId);
+      const result = await fetchPhase(
+        project,
+        jobId,
+        scriptedFetcher({
+          onDefault: () => {
+            throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+          },
+          onText: () => {
+            throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+          },
+        }),
+      );
+      expect(renders.n).toBe(0);
+      expect(result.sealedDocumentIds).toEqual([]);
+      expect(result.strategyAttempts.map((a) => a.strategy)).toEqual([
+        "DIRECT_HTTP",
+        "CONTENT_NEGOTIATION",
+      ]);
+      // An ineligible render costs nothing: the gate runs before the
+      // reservation.
+      expect(await sourceOpens(jobId)).toBe(before + 2);
+    } finally {
+      __setRenderedDocsFetcher(null);
+    }
+  });
+
+  it("P5. the render is NOT attempted when the renderer is not installed", async () => {
+    const { project, jobId } = await seedTargets({ confirmDocs: true });
+    // No __setRenderedDocsFetcher: the capability gate answers no.
+    __setRenderedDocsFetcher(null);
+    const result = await fetchPhase(
+      project,
+      jobId,
+      scriptedFetcher({
+        onDefault: () => {
+          throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+        },
+        onText: () => {
+          throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+        },
+      }),
+    );
+    expect(result.strategyAttempts.map((a) => a.strategy)).toEqual([
+      "DIRECT_HTTP",
+      "CONTENT_NEGOTIATION",
+    ]);
+    expect(result.sealedDocumentIds).toEqual([]);
+  });
+
+  it("P6. unrelated failure classes still never reach the renderer this way", async () => {
+    // A security stop and a deterministic refusal, on the SAME eligible
+    // route that P3 renders on. Only TOO_LARGE-after-negotiation opens
+    // this door.
+    for (const reason of ["BLOCKED_ADDRESS", "INVALID_URL", "TOO_MANY_REDIRECTS"] as const) {
+      const { project, jobId } = await seedTargets({ confirmDocs: true });
+      const renders = { n: 0, urls: [] as string[] };
+      __setRenderedDocsFetcher(fixtureRenderer(renders));
+      try {
+        const result = await fetchPhase(
+          project,
+          jobId,
+          scriptedFetcher({
+            onDefault: () => {
+              throw new ContentFetchError(reason, "refused", TARGET);
+            },
+          }),
+        );
+        expect(renders.n, reason).toBe(0);
+        expect(result.strategyAttempts.map((a) => a.strategy), reason).toEqual(["DIRECT_HTTP"]);
+      } finally {
+        __setRenderedDocsFetcher(null);
+      }
+    }
+  });
+
+  it("P7. EXACTLY ONE rendered fallback — a re-delivery adds no second render", async () => {
+    const { project, jobId } = await seedTargets({ confirmDocs: true });
+    const renders = { n: 0, urls: [] as string[] };
+    __setRenderedDocsFetcher(fixtureRenderer(renders));
+    try {
+      const oversized = () => ({
+        onDefault: () => {
+          throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+        },
+        onText: () => {
+          throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+        },
+      });
+      const first = await fetchPhase(project, jobId, scriptedFetcher(oversized()));
+      expect(renders.n).toBe(1);
+      expect(first.sealedDocumentIds).toHaveLength(1);
+
+      // The SAME job runs the phase again — the redelivery case. Every
+      // strategy is already attempted in the persisted ledger, so nothing
+      // is repeated and the renderer is not entered a second time.
+      const second = await fetchPhase(project, jobId, scriptedFetcher(oversized()));
+      expect(renders.n).toBe(1);
+      expect(second.strategyAttempts).toEqual([]);
+      expect(second.sealedDocumentIds).toEqual([]);
+      expect(await sealed(jobId)).toHaveLength(1);
+    } finally {
+      __setRenderedDocsFetcher(null);
+    }
+  });
+
+  it("P8. the chain CONTINUES across a delivery boundary, from persisted history alone", async () => {
+    // The first delivery has no renderer installed, so it stops after two
+    // oversized representations. The second delivery has one — and must
+    // reach the render from the persisted FETCH_FAILED rows alone, with no
+    // live failure to learn from and nothing repeated.
+    const { project, jobId } = await seedTargets({ confirmDocs: true });
+    __setRenderedDocsFetcher(null);
+    const oversized = () => ({
+      onDefault: () => {
+        throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+      },
+      onText: () => {
+        throw new ContentFetchError("TOO_LARGE", "too large", TARGET);
+      },
+    });
+    const first = await fetchPhase(project, jobId, scriptedFetcher(oversized()));
+    expect(first.strategyAttempts.map((a) => a.strategy)).toEqual([
+      "DIRECT_HTTP",
+      "CONTENT_NEGOTIATION",
+    ]);
+    expect(first.sealedDocumentIds).toEqual([]);
+
+    const renders = { n: 0, urls: [] as string[] };
+    __setRenderedDocsFetcher(fixtureRenderer(renders));
+    try {
+      const calls = { n: 0, prefs: [] as string[], urls: [] as string[] };
+      const second = await fetchPhase(project, jobId, scriptedFetcher({ ...oversized(), calls }));
+      // Nothing already attempted is attempted again.
+      expect(calls.n).toBe(0);
+      expect(renders.n).toBe(1);
+      expect(second.strategyAttempts.map((a) => a.strategy)).toEqual(["ISOLATED_RENDER"]);
+      expect(second.sealedDocumentIds).toHaveLength(1);
+    } finally {
+      __setRenderedDocsFetcher(null);
+    }
+  });
+
+  it("P9. still no byte limit moved, and no new strategy or provider exists", () => {
+    const src = readFileSync("src/server/engine/providers/content-fetcher.ts", "utf-8");
+    expect(src).toContain("const DEFAULT_MAX_BYTES = 2_000_000;");
+    // The chain is still exactly three code-owned strategies.
+    expect([...ACQUISITION_STRATEGIES].sort()).toEqual(
+      ["CONTENT_NEGOTIATION", "DIRECT_HTTP", "ISOLATED_RENDER"].sort(),
+    );
+    // And the per-url bound the transition exactly fills is unchanged.
+    const phases = readFileSync("src/server/engine/acquisition-phases.ts", "utf-8");
+    expect(phases).toContain("const MAX_FALLBACK_ATTEMPTS_PER_URL = 2;");
+  });
+
+  it("P10. no host, project or url is named by the rule", () => {
+    const phases = readFileSync("src/server/engine/acquisition-phases.ts", "utf-8");
+    const rule = phases.slice(
+      phases.indexOf("export function plannedFallbacks"),
+      phases.indexOf("const RENDER_ON_REFUSAL_STATUS_SET"),
+    );
+    expect(rule.length).toBeGreaterThan(0);
+    for (const banned of ["pump", "http://", "https://", ".fun", ".com", ".io", "projectId", "slug"]) {
+      expect(rule.toLowerCase(), banned).not.toContain(banned);
+    }
   });
 });
 

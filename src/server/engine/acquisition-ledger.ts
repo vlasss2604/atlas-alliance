@@ -117,7 +117,25 @@ export interface AcquisitionLedger {
   //
   // Only the closed diagnostic vocabulary is ever stored here (D-143), so
   // this carries no message, no address and no host-specific text.
-  failureDiagnosticsByUrl: ReadonlyMap<string, readonly string[]>;
+  failureDiagnosticsByUrl: ReadonlyMap<string, readonly PersistedFailure[]>;
+}
+
+// ONE PERSISTED FAILURE, as the planner needs to read it.
+//
+// The diagnostic alone is not enough to continue a chain across
+// deliveries: some fallback transitions depend on WHICH strategy the
+// failure came from, not only on the class. A representation that is too
+// large licenses asking for a different representation the first time and
+// something else the second, and those are the same diagnostic. The
+// provider name is already on the row (D-146: the provider name IS the
+// strategy identity) and was simply being discarded here.
+//
+// Both fields stay nullable. An unnamed provider or an untyped diagnostic
+// is recorded as null and read as null, which is the fail-closed
+// direction: neither licenses a fallback that a named one would.
+export interface PersistedFailure {
+  providerName: string | null;
+  diagnosticCode: string | null;
 }
 
 export const EMPTY_LEDGER: AcquisitionLedger = {
@@ -168,7 +186,7 @@ export async function loadAcquisitionLedger(
     const sourceResourcesByComponent = new Map<string, string[]>();
     const strategiesAttempted = new Map<string, Set<string>>();
     const attemptsByProvider = new Map<string, number>();
-    const failureDiagnosticsByUrl = new Map<string, string[]>();
+    const failureDiagnosticsByUrl = new Map<string, PersistedFailure[]>();
 
     // CANDIDATE_RETURNED rows are written by the executor immediately
     // after the SEARCH_EXECUTED row for the query that produced them, in
@@ -260,7 +278,10 @@ export async function loadAcquisitionLedger(
           // null that way.
           if (!ref) break;
           const list = failureDiagnosticsByUrl.get(ref) ?? [];
-          list.push(row.diagnosticCode ?? "");
+          list.push({
+            providerName: row.providerName ?? null,
+            diagnosticCode: row.diagnosticCode ?? null,
+          });
           failureDiagnosticsByUrl.set(ref, list);
           break;
         }
@@ -417,9 +438,8 @@ export function providerAttemptCount(providerName: string, ledger: AcquisitionLe
 export function persistedFailureDiagnostics(
   url: string,
   ledger: AcquisitionLedger,
-): readonly (string | null)[] {
-  const raw = ledger.failureDiagnosticsByUrl.get(canonicalTargetRef(url)) ?? [];
-  return raw.map((d) => (d === "" ? null : d));
+): readonly PersistedFailure[] {
+  return ledger.failureDiagnosticsByUrl.get(canonicalTargetRef(url)) ?? [];
 }
 
 // True when this URL is already known to be unfetchable in this job, so
