@@ -1,0 +1,64 @@
+-- B2b1 — AN OBSERVATION IS NOT THE SAME THING AS ITS NORMALIZED VALUE.
+--
+-- THE DEFECT.
+--
+-- `onchain_artifacts.artifact_hash` is sha256 of the CANONICAL NORMALIZED
+-- RESULT, and identity was that hash alone. So two genuinely different
+-- chain observations collapsed into one row whenever they happened to
+-- report equal values:
+--
+--   slot 100: supply 1,000
+--   slot 200: supply 1,000        <- silently dropped
+--
+-- "Total supply did not move between these two chain positions" is a
+-- finding, and the record could not hold it. Absence of change became
+-- indistinguishable from absence of data.
+--
+-- IT IS NOT A SUPPLY-SPECIFIC DEFECT. The slot of an observation arrives in
+-- one of two places depending on the intent kind. For TOKEN_SUPPLY,
+-- ACCOUNT_INFO, TOKEN_ACCOUNT_BALANCE and TOKEN_ACCOUNTS_BY_OWNER it comes
+-- from the RPC CONTEXT and never enters the normalized result, so an
+-- unchanged reading at a later slot hashes identically. For
+-- SIGNATURES_FOR_ADDRESS and TRANSACTION_DETAIL the slot is part of the
+-- result body, so those two were never affected — and adding slot to the
+-- index is a no-op for them, because a differing slot already implied a
+-- differing hash.
+--
+-- WHAT IDENTITY BECOMES.
+--
+--   an observation = WHAT CAME BACK (artifact_hash)
+--                  + WHERE ON THE CHAIN it was read (slot)
+--                  , scoped by origin mode
+--
+-- ARTIFACT_HASH IS NOT REDEFINED. It keeps its existing, separate meaning —
+-- a content address of the normalized result — and chain position is added
+-- BESIDE it rather than folded into it. A content hash and an observation
+-- identity are two concepts, and merging them would break the first to fix
+-- the second: every existing row's hash stays exactly what it was, so no
+-- provenance is rewritten and no historical value changes.
+--
+-- RETRIEVED_AT IS DELIBERATELY NOT PART OF IDENTITY. The same reading at
+-- the same slot is the same observation however many times it is fetched;
+-- a retry one second later is not a new economically meaningful
+-- observation. Exact-retry idempotency is preserved precisely because the
+-- discriminator is chain position, not wall-clock time.
+--
+-- PROVIDER IDENTITY IS DELIBERATELY NOT DECIDED HERE. Whether two
+-- independent providers reporting the same value at the same slot are one
+-- observation or two corroborating ones is a real semantic question, and it
+-- is currently unreachable: the endpoint allowlist admits exactly one
+-- provider per (chain, network), so no deployment can produce the case. If
+-- it is ever answered "two", adding provider_id is another widening of this
+-- same index and is equally safe.
+--
+-- BACKWARD SAFETY.
+--
+-- Both indexes are WIDENED — a column is added to each key. A widened
+-- unique index can only ever permit more rows than the narrower one it
+-- replaces, so every existing row necessarily still satisfies it. Nothing
+-- is deleted, nothing is merged, nothing is backfilled, no row's columns
+-- change, and no historical observation becomes invalid or unreadable.
+DROP INDEX IF EXISTS "uq_onchain_artifacts_job_artifact";--> statement-breakpoint
+DROP INDEX IF EXISTS "uq_onchain_artifacts_standalone_hash";--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_onchain_artifacts_job_observation" ON "onchain_artifacts" ("research_job_id","artifact_hash","slot");--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_onchain_artifacts_standalone_observation" ON "onchain_artifacts" ("artifact_hash","slot") WHERE "research_job_id" IS NULL;

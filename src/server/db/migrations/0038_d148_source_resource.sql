@@ -1,0 +1,17 @@
+-- D-148 — SOURCE_RESOURCE: an exact, human-approved, fetchable source url.
+--
+-- Deliberately a SEPARATE memory kind from SOURCE_ROUTE, because the two
+-- answer different questions and conflating them is the defect this closes:
+--
+--   SOURCE_ROUTE     "what authority does content under this PREFIX carry?"
+--   SOURCE_RESOURCE  "which exact URL has a human approved as worth fetching?"
+--
+-- A route prefix may legitimately be a whole documentation tree (an ACTIVE
+-- classified `/docs` route exists in this database today), so a prefix is
+-- not a fetchable resource and must never be treated as one. A resource
+-- carries no authority of its own: its class is resolved at acquisition
+-- time by the ordinary route resolver, every time.
+--
+-- Additive only: one new enum value. No table, no column, no backfill, and
+-- no existing row changes meaning.
+ALTER TYPE "public"."project_memory_kind" ADD VALUE 'SOURCE_RESOURCE';

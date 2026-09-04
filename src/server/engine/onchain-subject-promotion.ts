@@ -1,0 +1,382 @@
+import type {
+  OnchainArtifact,
+  OnchainIntent,
+  OnchainIntentKind,
+} from "./providers/onchain-types";
+
+// BOUNDED SUBJECT PROMOTION — one confirmed observation may earn ONE next
+// research step.
+//
+// The owner scripts proved a real research path by hand: a documented
+// account leads to the token accounts it owns, a token account leads to
+// one bounded window of its signatures, one signature leads to one
+// transaction, and the transaction either contains a burn or does not.
+// Every hop in that chain was a human typing the next subject on a command
+// line. This module is that reasoning, written down.
+//
+// IT IS NOT AN AGENT. There is no recursion, no search, no goal and no
+// retry. It is a pure function from ONE artifact to AT MOST a small list of
+// next intents, driven by a caller's loop that carries a depth counter and
+// a hard ceiling. Given the same artifact it returns the same intents, and
+// given an artifact it has no rule for it returns nothing.
+//
+// IT CANNOT SEEK AN OUTCOME. Nothing here inspects whether a burn was
+// found, whether a claim is closer to supported, or whether the research
+// is "going well". A transaction that contains no burn promotes exactly
+// what a transaction containing one promotes: nothing. Ending empty-handed
+// is a result, and INSUFFICIENT_EVIDENCE is a valid one.
+//
+// NO PAGINATION, EVER. The one rule that could page — signatures — reads a
+// single window and then promotes a transaction, not another window. There
+// is no cursor field anywhere in this file, and a test asserts the words
+// are absent from the source.
+//
+// NO COUNTERPARTY CHASING. A transaction names many accounts: senders,
+// pools, fee recipients, programs. None of them is promoted. The only
+// addresses that ever become subjects are ones the project's OWN
+// documented account or its own token accounts led to.
+
+// The deepest chain V1 permits. Depth is the depth of the SUBJECT an
+// intent addresses:
+//
+//   depth 0  the documentary locator itself, classified by ACCOUNT_INFO
+//   depth 1  that same locator, asked which token accounts it owns
+//            (or, when the locator IS our mint's token account, skipped)
+//   depth 2  a signature observed on the token account
+//   depth 3  the transaction behind that signature   <- terminal
+//
+// Four levels, and the fourth promotes nothing — by terminality, checked
+// before this ceiling, so the honest reason is recorded rather than
+// whichever limit happened to bite first. A rule wanting depth 4 would
+// have to be written, reviewed and given a reason.
+export const MAX_PROMOTION_DEPTH = 3;
+
+// How many promoted operations one attempt may perform, over and above the
+// base intents. NOT a budget: every promoted call still reserves its own
+// sourceOpen against the job's existing ceiling and is refused when the
+// ceiling is reached. This is a second, stricter bound so that a job with
+// a generous budget still cannot spend it all on one component's chain.
+export const MAX_PROMOTED_INTENTS_PER_ATTEMPT = 3;
+
+export type PromotionRule =
+  | "ACCOUNT_TO_TOKEN_ACCOUNTS"
+  | "TOKEN_ACCOUNT_TO_SIGNATURES"
+  | "SIGNATURE_TO_TRANSACTION";
+
+export interface PromotedSubject {
+  subject: string;
+  subjectKind: OnchainIntent["subjectKind"];
+  intentKind: OnchainIntentKind;
+  // The observation this came out of. A promoted subject without a parent
+  // is unrepresentable.
+  parentSubject: string;
+  chain: string;
+  network: string;
+  projectAnchor: string;
+  depth: number;
+  rule: PromotionRule;
+  // Which component's research justified the step. Promotion is never
+  // "because we could" — it is always for a component that needs it.
+  originComponent: string;
+}
+
+// The intents a promoted subject may be used for, keyed by the rule that
+// produced it. Pure data: a rule cannot smuggle in an intent kind that is
+// not written here.
+const INTENT_FOR_RULE: Record<PromotionRule, OnchainIntentKind> = {
+  ACCOUNT_TO_TOKEN_ACCOUNTS: "TOKEN_ACCOUNTS_BY_OWNER",
+  TOKEN_ACCOUNT_TO_SIGNATURES: "SIGNATURES_FOR_ADDRESS",
+  SIGNATURE_TO_TRANSACTION: "TRANSACTION_DETAIL",
+};
+
+// Which components may follow which rule, and why.
+//
+// DESTINATION / RECIPIENT ask where value LANDS, so discovering the token
+// accounts a documented account owns is directly on-topic; a wallet that
+// holds no token account for the project's mint is itself an answer.
+//
+// EXECUTION_EVIDENCE asks whether a mechanism actually RAN, which is the
+// only question a transaction can answer — so it is the only component
+// permitted to reach a signature window or a transaction. Every other
+// component stops at discovery.
+const RULES_BY_COMPONENT: Record<string, readonly PromotionRule[]> = {
+  DESTINATION: ["ACCOUNT_TO_TOKEN_ACCOUNTS"],
+  RECIPIENT: ["ACCOUNT_TO_TOKEN_ACCOUNTS"],
+  // FLOW_PATH traces how value moves, so it legitimately needs history —
+  // but history OF WHAT. An ordinary account becomes eligible only through
+  // the deterministic bridge that already exists: the token accounts it
+  // owns FOR THE CONFIRMED MINT. That makes the window mint-bound instead
+  // of a raw scan of whatever else the wallet does.
+  //
+  // It stops at the window. Reading one transaction in full is
+  // EXECUTION_EVIDENCE's question — whether a mechanism RAN — and granting
+  // it here would be inventing a need the pattern has not stated.
+  FLOW_PATH: ["ACCOUNT_TO_TOKEN_ACCOUNTS", "TOKEN_ACCOUNT_TO_SIGNATURES"],
+  EXECUTION_EVIDENCE: [
+    "ACCOUNT_TO_TOKEN_ACCOUNTS",
+    "TOKEN_ACCOUNT_TO_SIGNATURES",
+    "SIGNATURE_TO_TRANSACTION",
+  ],
+};
+
+export function componentAllowsRule(component: string, rule: PromotionRule): boolean {
+  return (RULES_BY_COMPONENT[component] ?? []).includes(rule);
+}
+
+// HOW MANY PROMOTED READS THIS COMPONENT'S DEEPEST AUTHORISED CHAIN COSTS.
+//
+// Derived from the rules themselves, never chosen: the rules for a
+// component are the sequential hops it may take, one bounded read each, and
+// the two hard ceilings above cut the answer down if a component is ever
+// given more rules than the loop would run. A component with no rules costs
+// nothing, because it has no chain to protect.
+//
+// Exported so the source-open reservation can protect a chain by its ACTUAL
+// authorised depth instead of assuming every component needs the deepest
+// one. DESTINATION's single hop is not EXECUTION_EVIDENCE's three, and
+// reserving as if it were is over-reservation taken straight out of
+// documentary acquisition.
+export function promotedReadsForComponent(component: string): number {
+  const rules = RULES_BY_COMPONENT[component] ?? [];
+  return Math.min(rules.length, MAX_PROMOTED_INTENTS_PER_ATTEMPT, MAX_PROMOTION_DEPTH);
+}
+
+// Intent kinds that may ONLY be reached by promotion. A transaction cannot
+// be a base intent because a base subject is an address and a transaction
+// subject is a signature — there is nowhere for one to come from except an
+// observation that produced it.
+export const PROMOTION_ONLY_INTENTS: ReadonlySet<OnchainIntentKind> = new Set([
+  // A transaction subject is a SIGNATURE, and nothing but an observation
+  // can produce one.
+  "TRANSACTION_DETAIL",
+  // Owner discovery is only meaningful once ACCOUNT_INFO has established
+  // that the subject is NOT itself a token account. As a base intent it
+  // ran before that was known; as a promotion-only intent it cannot.
+  "TOKEN_ACCOUNTS_BY_OWNER",
+  // History is only meaningful on a subject bound to this project. As a
+  // base intent it read whatever a documentary address happened to do;
+  // reached by promotion it is always a token account for the confirmed
+  // mint.
+  "SIGNATURES_FOR_ADDRESS",
+]);
+
+export interface PromotionInput {
+  artifact: OnchainArtifact;
+  // The entity-binding outcome for that artifact. An unbound observation
+  // promotes nothing — a read that is not confirmed to be ABOUT this
+  // project cannot hand this project a new subject.
+  bindingConfirmed: boolean;
+  // Depth of the observation being promoted FROM. The children are at
+  // depth + 1.
+  depth: number;
+  component: string;
+  // Subjects already visited in this attempt, so a chain cannot revisit
+  // its own parent or loop between two accounts.
+  visited: ReadonlySet<string>;
+}
+
+export type PromotionRefusal =
+  | "BINDING_NOT_CONFIRMED"
+  | "DEPTH_LIMIT"
+  | "TERMINAL_OBSERVATION"
+  | "NO_ELIGIBLE_SUBJECT"
+  | "COMPONENT_NOT_PERMITTED"
+  // Known to BE a token account, but which mint could not be established.
+  // Deliberately distinct from NO_ELIGIBLE_SUBJECT: this is not "there was
+  // nothing to promote", it is "we could not tell, so we stopped".
+  | "RELATIONSHIP_UNRESOLVED";
+
+export interface PromotionOutcome {
+  promoted: PromotedSubject[];
+  // Why nothing was promoted. Present only when `promoted` is empty, and
+  // never a failure — most refusals are the system working.
+  refusal: PromotionRefusal | null;
+}
+
+// DETERMINISTIC SIGNATURE SELECTION.
+//
+// Exactly one signature from a window, chosen by a rule that cannot be
+// steered: the most recent SUCCESSFUL one, ties broken by comparing the
+// signature strings. A failed transaction is skipped because it changed
+// nothing on chain, not because it is inconvenient.
+//
+// The memo is deliberately NOT consulted. A memo is arbitrary text the
+// sender chose, and selecting by it would let anyone who can write a memo
+// decide what ATLAS reads.
+function selectOneSignature(
+  signatures: readonly { signature: string; slot: number; err: boolean }[],
+): string | null {
+  let best: { signature: string; slot: number } | null = null;
+  for (const s of signatures) {
+    if (s.err) continue;
+    if (
+      best === null ||
+      s.slot > best.slot ||
+      (s.slot === best.slot && s.signature < best.signature)
+    ) {
+      best = { signature: s.signature, slot: s.slot };
+    }
+  }
+  return best?.signature ?? null;
+}
+
+// The one rule per observation kind. Returns the subjects a confirmed
+// observation earns, or a refusal saying why it earned none.
+export function promoteFromObservation(input: PromotionInput): PromotionOutcome {
+  const none = (refusal: PromotionRefusal): PromotionOutcome => ({ promoted: [], refusal });
+
+  if (!input.bindingConfirmed) return none("BINDING_NOT_CONFIRMED");
+
+  const result = input.artifact.result;
+
+  // TERMINALITY IS CHECKED BEFORE DEPTH, and the order is the point.
+  // A transaction promotes nothing because a transaction is where a chain
+  // ENDS — not because a counter ran out. Reporting DEPTH_LIMIT for one
+  // would name the wrong reason for the right behaviour, and a reader of
+  // the trace would think a deeper ceiling might have carried the research
+  // further. It would not.
+  if (result.kind === "TRANSACTION_DETAIL") return none("TERMINAL_OBSERVATION");
+
+  if (input.depth >= MAX_PROMOTION_DEPTH) return none("DEPTH_LIMIT");
+  const p = input.artifact.provenance;
+  const childDepth = input.depth + 1;
+
+  const build = (
+    subject: string,
+    rule: PromotionRule,
+    parentSubject: string,
+  ): PromotedSubject => ({
+    subject,
+    intentKind: INTENT_FOR_RULE[rule],
+    subjectKind: INTENT_FOR_RULE[rule] === "TRANSACTION_DETAIL" ? "tx" : "account",
+    parentSubject,
+    chain: p.chain,
+    network: p.network,
+    projectAnchor: p.projectAnchor,
+    depth: childDepth,
+    rule,
+    originComponent: input.component,
+  });
+
+  switch (result.kind) {
+    // A documented address is one of FOUR things, and the difference
+    // decides what — if anything — is worth asking next.
+    //
+    // getAccountInfo already requests jsonParsed encoding, so this ONE
+    // observation carries both the program owner and, when there is one,
+    // the parsed token-account identity.
+    //
+    // THE FOURTH CASE IS THE ONE THAT MATTERS. An account the SPL Token
+    // program owns whose mint we could not parse is a token account whose
+    // mint is UNKNOWN. Treating that as an ordinary wallet and asking which
+    // token accounts it owns would convert a failure to establish identity
+    // into positive evidence of non-token status — and would spend a
+    // bounded call on a question that has no meaningful answer.
+    case "ACCOUNT_INFO": {
+      if (!result.exists) return none("NO_ELIGIBLE_SUBJECT");
+
+      switch (result.tokenAccountRelation) {
+        // (D) Known to be a token account, mint not established. STOP.
+        case "TOKEN_PROGRAM_OWNED_UNRESOLVED":
+          return none("RELATIONSHIP_UNRESOLVED");
+
+        // (B/C) A token account whose mint we know.
+        case "TOKEN_ACCOUNT_PARSED": {
+          const parsed = result.tokenAccount;
+          // Defence in depth: the relation and the payload must agree, and
+          // a disagreement is unresolved rather than either answer.
+          if (parsed === null) return none("RELATIONSHIP_UNRESOLVED");
+          // (C) Another project's token account that this document happens
+          // to name. Reading its history would be researching a stranger.
+          if (parsed.mint !== p.projectAnchor) return none("NO_ELIGIBLE_SUBJECT");
+          if (!componentAllowsRule(input.component, "TOKEN_ACCOUNT_TO_SIGNATURES")) {
+            return none("COMPONENT_NOT_PERMITTED");
+          }
+          if (input.visited.has(`SIGNATURES_FOR_ADDRESS::${result.address}`)) {
+            return none("NO_ELIGIBLE_SUBJECT");
+          }
+          // (B) Bound to this project's mint by the observation itself.
+          return {
+            promoted: [build(result.address, "TOKEN_ACCOUNT_TO_SIGNATURES", result.address)],
+            refusal: null,
+          };
+        }
+
+        // (A) Established as NOT a token account, so asking which token
+        // accounts it owns is a well-formed question. An answer of none is
+        // itself a finding.
+        case "NOT_TOKEN_PROGRAM_OWNED": {
+          if (!componentAllowsRule(input.component, "ACCOUNT_TO_TOKEN_ACCOUNTS")) {
+            return none("COMPONENT_NOT_PERMITTED");
+          }
+          if (input.visited.has(`TOKEN_ACCOUNTS_BY_OWNER::${result.address}`)) {
+            return none("NO_ELIGIBLE_SUBJECT");
+          }
+          return {
+            promoted: [build(result.address, "ACCOUNT_TO_TOKEN_ACCOUNTS", result.address)],
+            refusal: null,
+          };
+        }
+
+        // An unrecognised relation is not a licence to guess.
+        default:
+          return none("RELATIONSHIP_UNRESOLVED");
+      }
+    }
+
+    case "TOKEN_ACCOUNTS_BY_OWNER": {
+      if (!componentAllowsRule(input.component, "TOKEN_ACCOUNT_TO_SIGNATURES")) {
+        return none("COMPONENT_NOT_PERMITTED");
+      }
+      const eligible = result.accounts
+        .filter((a) => a.owner === result.owner && a.mint === result.mint)
+        .map((a) => a.account)
+        .filter((a) => !input.visited.has(`SIGNATURES_FOR_ADDRESS::${a}`))
+        .sort();
+      if (eligible.length === 0) return none("NO_ELIGIBLE_SUBJECT");
+      // ONE account per observation. A wallet holding several token
+      // accounts for one mint does not license several signature windows.
+      return {
+        promoted: [build(eligible[0], "TOKEN_ACCOUNT_TO_SIGNATURES", result.owner)],
+        refusal: null,
+      };
+    }
+
+    // ONE window in, ONE transaction out. Never another window.
+    case "SIGNATURES_FOR_ADDRESS": {
+      if (!componentAllowsRule(input.component, "SIGNATURE_TO_TRANSACTION")) {
+        return none("COMPONENT_NOT_PERMITTED");
+      }
+      const chosen = selectOneSignature(result.signatures);
+      if (chosen === null) return none("NO_ELIGIBLE_SUBJECT");
+      if (input.visited.has(`TRANSACTION_DETAIL::${chosen}`)) return none("NO_ELIGIBLE_SUBJECT");
+      return {
+        promoted: [build(chosen, "SIGNATURE_TO_TRANSACTION", result.address)],
+        refusal: null,
+      };
+    }
+
+    // TRANSACTION_DETAIL never reaches this switch — it returned above,
+    // before the depth ceiling, so that a terminal chain reports why it
+    // truly ended. "Keep looking until you find a burn" is not written
+    // anywhere, and the early return is where that is enforced.
+    //
+    // Any other observation kind promotes nothing. An unrecognised kind is
+    // not a licence to guess.
+    default:
+      return none("TERMINAL_OBSERVATION");
+  }
+}
+
+// The intent a promoted subject turns into. Separated from the rule so a
+// caller cannot construct an intent for a promoted subject by hand.
+export function intentForPromotedSubject(s: PromotedSubject): OnchainIntent {
+  return {
+    kind: s.intentKind,
+    chain: s.chain as OnchainIntent["chain"],
+    network: s.network as OnchainIntent["network"],
+    projectAnchor: s.projectAnchor,
+    subjectKind: s.subjectKind,
+    subject: s.subject,
+  };
+}

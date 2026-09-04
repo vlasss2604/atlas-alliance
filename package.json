@@ -4,23 +4,50 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:proxied": "tsx scripts/dev-launch.ts dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:seed": "tsx scripts/seed.ts",
+    "worker:dev": "tsx src/server/jobs/worker.ts",
+    "worker:search-extract": "tsx scripts/dev-launch.ts search-extract",
+    "worker:fetch": "tsx scripts/dev-launch.ts fetch",
+    "admin:verify-proof": "tsx scripts/verify-proof.ts",
+    "admin:promote-memory": "tsx scripts/promote-memory.ts",
+    "alpha:run": "tsx scripts/alpha-run.ts",
+    "alpha:inspect": "tsx scripts/alpha-inspect.ts",
+    "eval:memory": "tsx scripts/eval-memory.ts",
+    "test": "vitest run",
+    "smoke:interpreter": "tsx scripts/smoke-interpreter.ts",
+    "test:e2e": "playwright test",
+    "probe:renderer": "tsx scripts/renderer-probe.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.120.0",
+    "drizzle-orm": "^0.45.2",
     "next": "16.2.12",
+    "pg": "^8.23.0",
+    "pg-boss": "^12.27.0",
+    "playwright": "^1.62.1",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^9",
     "eslint-config-next": "16.2.12",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "tsx": "^4.23.12",
+    "typescript": "^5",
+    "vitest": "^4.1.11"
   }
 }

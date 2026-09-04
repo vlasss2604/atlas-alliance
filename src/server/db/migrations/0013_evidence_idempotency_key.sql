@@ -1,0 +1,2 @@
+ALTER TABLE "evidence" ADD COLUMN "extraction_unit_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_evidence_extraction_unit_key" ON "evidence" USING btree ("extraction_unit_key") WHERE "evidence"."extraction_unit_key" IS NOT NULL;

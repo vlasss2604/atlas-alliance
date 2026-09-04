@@ -1,0 +1,1536 @@
+import { asc, eq } from "drizzle-orm";
+
+import type { Database, Transaction } from "../db/client";
+import { acquiredDocuments, researchTraceEvents } from "../db/schema";
+import {
+  loadAcquisitionLedger,
+  persistedFailureDiagnostics,
+  componentScopeKey,
+  planQueries,
+  providerAttemptCount,
+  strategyAlreadyAttempted,
+} from "./acquisition-ledger";
+import { loadAcquisitionPlan } from "./acquisition-plan";
+import { loadJobContractView } from "./job-contract-view";
+import { loadEligibleSourceResourcesWithCoverage } from "../memory/source-resource";
+import { componentSearchAllowance } from "./budget-fairness";
+import {
+  calculateActualCostMicro,
+  calculateMaxAuthorizedCostMicro,
+  loadModelCostProfile,
+} from "./model-cost-profile";
+import type { ModelCostProfile } from "./model-cost-profile";
+import { loadProductConfig } from "../config/product";
+import { researchJobs } from "../db/schema";
+import {
+  persistAcquiredDocument,
+  replayContentFetcher,
+  textSha256,
+  type AcquisitionStrategy,
+} from "./acquired-documents";
+import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
+import {
+  evaluateRefusalRenderEligibility,
+  evaluateRenderEligibility,
+  RENDER_ON_REFUSAL_STATUSES,
+  routeEligibility,
+} from "./rendered-docs-policy";
+import {
+  RenderedDocsError,
+  isRenderedDocsFailureReason,
+  renderedDocsAvailable,
+  renderedDocsEnabled,
+  renderContainmentCounts,
+  resolveRenderedDocsFetcher,
+  type RenderedDocsFailureReason,
+} from "./providers/rendered-docs-fetcher";
+import type { ContentFetchFailureReason } from "./providers/content-fetcher";
+import type { RenderNavigationDiagnosticCode } from "./trace-store";
+import type { ComponentWorkItem } from "./contract-view";
+import { reserveJobBudget } from "./budget-reservation";
+import { resolveOnchainSourceOpenReserve } from "./onchain-source-open-reserve";
+import { ContentFetchError } from "./providers/content-fetcher";
+import type { ContentFetcher } from "./providers/content-fetcher";
+import type { QueryProposer } from "./providers/query-proposer";
+import type { SearchGateway } from "./providers/search-gateway";
+import { isReplayProvider } from "./providers/types";
+import type { ComponentTarget, FetchedDocument, ModelUsage } from "./providers/types";
+import { resolveSourceRoute } from "./source-authority";
+import { canonicalTargetRef, isLossyTargetRef, recordTraceEvent } from "./trace-store";
+
+// D-136 — NETWORK-CAPABILITY PHASES.
+//
+// The environment cannot run search, source fetch and model extraction
+// together: search and the model provider need one network, direct
+// first-party fetch needs another. So a job crosses environments in three
+// phases, each running exactly ONE live capability and REPLAYING the
+// persisted outputs of the phases before it. That is D-128's own
+// record-and-replay pattern, generalised from the fetcher to every
+// capability.
+//
+// WHAT THIS MODULE IS NOT. It is not a second controller and not a second
+// work queue. It composes existing LEAF primitives — planQueries,
+// loadAcquisitionLedger, reserveJobBudget, recordTraceEvent,
+// persistAcquiredDocument, resolveSourceRoute — and owns no attempt
+// lifecycle, no component scheduling, no stop condition and no
+// projection. The controller still runs exactly once, in EXTRACTING, and
+// S5-S9 are untouched.
+//
+// WHY PHASES ARE NOT ATTEMPTS. controller.ts charges any second execution
+// of a component key against reservedRecoverySteps, which is 1 for a whole
+// job. If a phase were an attempt, the first component would exhaust the
+// recovery pool. These functions therefore run OUTSIDE the controller and
+// write NO research_attempts rows at all — the same way
+// runMemoryPlanningStage already sits outside it.
+//
+// NO NETWORK IDENTITY IN THE DOMAIN. Nothing here names a VPN, a provider
+// brand or a route; a phase names a CAPABILITY. Which process can reach
+// what is a deployment fact, asserted by a boundary test.
+
+export interface SearchPhaseResult {
+  // D-140 — components that received a fair-share allowance of zero, so
+  // no proposer call was made and no query was generated for them. This
+  // is bounded coverage, not a failure: the axis is genuinely spent.
+  budgetRefusedComponents: string[];
+  // Components whose proposer call could not be authorized against the
+  // job's model budget. Also no call, also no queries.
+  modelRefusedComponents: string[];
+  // Real proposer calls made in this pass, and what they were authorized
+  // to cost. One reservation per real call, never a flat estimate.
+  proposerCalls: number;
+  proposerReservedMicro: number;
+  // Canonical queries for which a real search call was made in this pass.
+  executedQueries: string[];
+  // Distinct candidate urls discovered in this pass (already lossy-safe,
+  // because they come back through the ledger's own reader).
+  candidateUrls: string[];
+  // Queries skipped because this job already searched them.
+  dedupedQueries: string[];
+  // Queries the search-query budget refused.
+  budgetRefusedQueries: string[];
+}
+
+export interface FetchPhaseResult {
+  sealedDocumentIds: string[];
+  // D-146 — urls whose every eligible strategy had already been attempted
+  // in an earlier delivery, so this pass performed no external call.
+  exhaustedUrls: string[];
+  // Every real external strategy invocation this pass made, in order.
+  strategyAttempts: Array<{ url: string; strategy: AcquisitionStrategy }>;
+  // Urls skipped because the ledger already knows them dead or fetched.
+  skippedUrls: string[];
+  // Urls whose fetch was attempted and failed in this pass.
+  failedUrls: string[];
+  // Urls refused before any transport call (lossy ref, unparseable).
+  refusedUrls: string[];
+  // ON-CHAIN RESERVATION, as this pass actually applied it. The job's own
+  // maxSourceOpens is NOT changed and is not reported here — this is the
+  // ceiling documentary reservations were made against, plus how many
+  // units of the same ceiling were withheld from them.
+  onchainReservedSourceOpens: number;
+  documentarySourceOpenCeiling: number;
+}
+
+// PHASE 1 — SEARCHING (model-side environment).
+//
+// Proposes queries and searches, and persists nothing but TRACE. The
+// candidate handoff to the fetch phase is the trace record itself
+// (QUERY_PROPOSED / SEARCH_EXECUTED / CANDIDATE_RETURNED), read back
+// through loadAcquisitionLedger — the same typed reader the executor
+// already trusts for job-scoped acquisition memory, which switches on a
+// closed set of operation types and drops lossy refs fail-closed. No new
+// table, and no second parser.
+//
+// Writes NO Evidence, NO acquired document and NO attempt.
+export async function runSearchPhase(input: {
+  db: Database | Transaction;
+  jobId: string;
+  items: readonly ComponentWorkItem[];
+  target: (item: ComponentWorkItem) => ComponentTarget;
+  queryProposer: QueryProposer;
+  searchGateway: SearchGateway;
+  maxSearchQueries: number;
+  maxResultsPerQuery: number;
+  // The per-component upper bound. D-140 makes this a CAP, not a quota:
+  // the fair share decides how much of it a component may actually use.
+  maxQueriesPerComponent: number;
+  // D-140 — the job's own model ceiling. The proposer is a real model
+  // call and is charged to the SAME envelope every other model call uses.
+  // There is no phase budget.
+  maxModelCostMicro: number;
+  // The project whose Pattern data decides which components this job's
+  // intent requires. Null degrades to "nothing required", never to a
+  // guess (loadAcquisitionPlan's own contract).
+  projectId: string | null;
+  // Test/operational seam, same discipline as S4ExecutorDeps: when absent
+  // the production catalogue is used via the model named in product
+  // config. Never used to widen anything.
+  queryProposerCostProfile?: ModelCostProfile;
+  // Supplied by a caller that resolved the proposer with a usage
+  // callback, so the audit row can carry real token counts. Absent for a
+  // fixture proposer, exactly as in the executor.
+  readProposerUsage?: () => ModelUsage | null | undefined;
+}): Promise<SearchPhaseResult> {
+  const out: SearchPhaseResult = {
+    budgetRefusedComponents: [],
+    modelRefusedComponents: [],
+    proposerCalls: 0,
+    proposerReservedMicro: 0,
+    executedQueries: [],
+    candidateUrls: [],
+    dedupedQueries: [],
+    budgetRefusedQueries: [],
+  };
+  const seenCandidates = new Set<string>();
+
+  // The cost profile for this job's proposer role — the production
+  // catalogue by default, resolved exactly as s4-executor resolves it.
+  const proposerProfile =
+    input.queryProposerCostProfile ??
+    loadModelCostProfile("QUERY_PROPOSER", (await loadProductConfig(input.db)).query_proposer_model);
+  const proposerCostMicro = calculateMaxAuthorizedCostMicro(proposerProfile);
+
+  for (const [index, item] of input.items.entries()) {
+    const target = input.target(item);
+
+    // D-140 — FAIR SHARE BEFORE GENERATION.
+    //
+    // The bug this closes: the phase walked the work queue in Pattern
+    // order taking maxQueriesPerComponent each until the axis was gone.
+    // On the first real run that gave the first 6 of 10 components 2
+    // searches each and the last 4 — including the components the
+    // question was actually about — zero. That is precisely the defect
+    // D-130 was written to prevent for the single-process executor, so
+    // the answer is its allocator, unchanged, not a second one.
+    //
+    // Everything the allocator needs is read the same way the executor
+    // reads it: the live reserved counter (never a stale snapshot), the
+    // components still pending AFTER this one, and whether the job's
+    // intent requires this component per the Pattern's own data.
+    const plan = await loadAcquisitionPlan(input.db, input.jobId, item.component, input.projectId);
+    const othersPending = input.items.slice(index + 1);
+    const allowance = componentSearchAllowance({
+      maxSearchQueries: input.maxSearchQueries,
+      alreadyReserved: await currentSearchQueriesReserved(input.db, input.jobId),
+      workQueueSize: input.items.length,
+      remainingComponents: input.items.length - index,
+      isIntentRequired: plan.intentRequired.has(item.component),
+      hardCapPerAttempt: input.maxQueriesPerComponent,
+      intentRequiredPending: othersPending.filter((c) => plan.intentRequired.has(c.component)).length,
+    });
+
+    if (allowance <= 0) {
+      // The axis is genuinely spent. Do NOT call the proposer: a live
+      // model call producing queries that can never be searched is money
+      // spent on nothing, and the QUERY_PROPOSED rows it would write
+      // would claim a generation the job could not use. Bounded coverage
+      // is the honest outcome (D-130), not universal coverage.
+      out.budgetRefusedComponents.push(item.component);
+      await recordTraceEvent(input.db, {
+        researchJobId: input.jobId,
+        operationType: "MODEL_CALL_SKIPPED",
+        providerKind: "QUERY_PROPOSE",
+        patternStep: item.step,
+        component: item.component,
+        status: "SKIPPED",
+        reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
+        budgetAxis: "searchQueries",
+        budgetAmount: 0,
+      });
+      continue;
+    }
+
+    // D-140 — a real proposer call is real external model consumption and
+    // is charged to the job's ONE model envelope, before the call, the
+    // same way s4-executor charges its own. D-137 keeps the other half of
+    // this true: the REPLAY proposer in EXTRACTING declares itself and is
+    // charged nothing, so a phased job pays for this generation exactly
+    // once.
+    const metered = !isReplayProvider(input.queryProposer);
+    if (metered) {
+      const reserved = await reserveJobBudget(
+        input.db,
+        input.jobId,
+        "modelCostMicro",
+        proposerCostMicro,
+        input.maxModelCostMicro,
+      );
+      if (!reserved) {
+        out.modelRefusedComponents.push(item.component);
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "MODEL_CALL_SKIPPED",
+          providerKind: "QUERY_PROPOSE",
+          patternStep: item.step,
+          component: item.component,
+          status: "SKIPPED",
+          reasonCode: "MODEL_COST_BUDGET_EXHAUSTED",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: proposerCostMicro,
+        });
+        continue;
+      }
+      out.proposerCalls += 1;
+      out.proposerReservedMicro += proposerCostMicro;
+    }
+
+    const proposed = await input.queryProposer.proposeQueries({
+      target,
+      hint: item.component,
+      // Never generate more than this component may actually search.
+      maxQueries: allowance,
+    });
+
+    // The audit row for the real call: what it was authorized to cost and,
+    // when the caller wired a usage callback, what it actually used.
+    const usage = input.readProposerUsage?.() ?? null;
+    await recordTraceEvent(input.db, {
+      researchJobId: input.jobId,
+      operationType: "MODEL_CALL_ATTEMPTED",
+      providerKind: "QUERY_PROPOSE",
+      providerName: input.queryProposer.name,
+      patternStep: item.step,
+      component: item.component,
+      status: "OK",
+      reasonCode: usage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
+      budgetAxis: "modelCostMicro",
+      budgetAmount: metered ? proposerCostMicro : 0,
+      actualInputTokens: usage?.inputTokens ?? null,
+      actualOutputTokens: usage?.outputTokens ?? null,
+      actualCostMicro:
+        usage && !usage.unsupportedBillingUsage ? calculateActualCostMicro(proposerProfile, usage) : null,
+    });
+
+    for (const q of proposed) {
+      await recordTraceEvent(input.db, {
+        researchJobId: input.jobId,
+        operationType: "QUERY_PROPOSED",
+        providerKind: "QUERY_PROPOSE",
+        providerName: input.queryProposer.name,
+        patternStep: item.step,
+        component: item.component,
+        targetRef: q,
+        status: "OK",
+      });
+    }
+
+    // Job-scoped dedup, read fresh per component so a query executed for
+    // an earlier component in THIS pass is not paid for twice.
+    const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+    // D-152 — scoped to the component, so "already searched" means "already
+    // searched by THIS component". The SEARCH phase always talks to a live,
+    // metered gateway, so the second branch below preserves its budget
+    // behaviour exactly: a query another component already paid for is still
+    // never paid for twice.
+    for (const entry of planQueries(proposed, ledger, {
+      step: item.step,
+      component: item.component,
+    })) {
+      if (!entry.needsSearch) {
+        out.dedupedQueries.push(entry.query);
+        // A deduped query still contributes what THIS component found.
+        for (const url of entry.knownCandidates) {
+          if (!seenCandidates.has(url)) {
+            seenCandidates.add(url);
+            out.candidateUrls.push(url);
+          }
+        }
+        continue;
+      }
+      if (entry.alreadyPaid) {
+        // Paid for by another component. The urls are still worth acquiring
+        // — acquisition is job-wide — but they are NOT recorded as this
+        // component's discovery, so they cannot become its extraction corpus.
+        out.dedupedQueries.push(entry.query);
+        for (const url of entry.jobWideCandidates) {
+          if (!seenCandidates.has(url)) {
+            seenCandidates.add(url);
+            out.candidateUrls.push(url);
+          }
+        }
+        continue;
+      }
+      const reserved = await reserveJobBudget(
+        input.db,
+        input.jobId,
+        "searchQueries",
+        1,
+        input.maxSearchQueries,
+      );
+      if (!reserved) {
+        out.budgetRefusedQueries.push(entry.query);
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "SEARCH_EXECUTED",
+          providerKind: "SEARCH",
+          providerName: input.searchGateway.name,
+          patternStep: item.step,
+          component: item.component,
+          targetRef: entry.query,
+          status: "SKIPPED",
+          reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
+          budgetAxis: "searchQueries",
+          budgetAmount: 1,
+        });
+        continue;
+      }
+      let candidates: { url: string }[] = [];
+      let failed = false;
+      try {
+        candidates = await input.searchGateway.search(entry.query, target, {
+          maxResults: input.maxResultsPerQuery,
+        });
+      } catch {
+        failed = true;
+      }
+      await recordTraceEvent(input.db, {
+        researchJobId: input.jobId,
+        operationType: "SEARCH_EXECUTED",
+        providerKind: "SEARCH",
+        providerName: input.searchGateway.name,
+        patternStep: item.step,
+        component: item.component,
+        targetRef: entry.query,
+        status: failed ? "FAILED" : "OK",
+        reasonCode: failed ? "PROVIDER_ERROR" : "NONE",
+        budgetAxis: "searchQueries",
+        budgetAmount: 1,
+      });
+      if (failed) continue;
+      out.executedQueries.push(entry.query);
+      for (const c of candidates) {
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "CANDIDATE_RETURNED",
+          providerKind: "SEARCH",
+          patternStep: item.step,
+          component: item.component,
+          targetRef: c.url,
+          status: "OK",
+        });
+        if (!seenCandidates.has(c.url)) {
+          seenCandidates.add(c.url);
+          out.candidateUrls.push(c.url);
+        }
+      }
+    }
+  }
+  return out;
+}
+
+// The live reserved counter for the search axis. Same read the executor
+// makes before its own allowance calculation — a stale snapshot would let
+// two components believe the same units are still free.
+async function currentSearchQueriesReserved(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<number> {
+  const [row] = await db
+    .select({ reserved: researchJobs.searchQueriesReserved })
+    .from(researchJobs)
+    .where(eq(researchJobs.id, jobId));
+  return row?.reserved ?? 0;
+}
+
+// The candidate handoff, read back through the ledger's own typed reader.
+// Exported so the fetch phase and its tests ask the SAME rule rather than
+// a copy: only CANDIDATE_RETURNED rows contribute, lossy refs are already
+// excluded by loadAcquisitionLedger, and urls this job already proved
+// dead or already fetched are dropped here.
+// D-148 — WHAT THIS RESEARCH STILL NEEDS, as component names.
+//
+// The boundary contract's own work queue: the components the planner did
+// NOT mark satisfied from memory. Using it rather than the whole pattern is
+// what keeps a seeded resource question-bounded — a project's curated
+// sources are eligible because they serve something this job is actually
+// missing, not merely because they exist.
+//
+// Degrade-never-throw, exactly like the ledger it sits beside: acquisition
+// memory is an optimisation and must never fail a job that would otherwise
+// run. No readable contract, no seeds.
+async function neededWorkItems(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<Array<{ step: number; component: string }>> {
+  try {
+    const { view } = await loadJobContractView(db, jobId);
+    // The step travels with the component because provenance must record
+    // BOTH: the extraction replay is keyed by (step, component), and the
+    // canonical mapping between them belongs to the ACTIVE pattern the
+    // contract was built from — never to a second lookup that could drift.
+    return view.workQueue.map((item) => ({ step: item.step, component: item.component }));
+  } catch {
+    return [];
+  }
+}
+
+// D-150 — WHY A COMPONENT MAY READ A DOCUMENT NO SEARCH RETURNED.
+//
+// A seeded resource has no search provenance, and the extraction replay
+// builds each component's corpus from search provenance. Without this, a
+// seeded document is fetched, sealed with full authority, and then shown to
+// nobody — which is exactly what happened on the first live run.
+//
+// So the association is PERSISTED AT SELECTION TIME, once, as a fact about
+// this run: this url was admitted for these components of this job. It is
+// written before the url is returned as a target, so a document can never
+// be acquired for a component that cannot later read it.
+//
+// It is deliberately NOT a CANDIDATE_RETURNED row. That event means "a
+// search returned this", and forging it would make the extraction map work
+// by corrupting search provenance — the trace would no longer be able to
+// tell a discovered candidate from a curated one.
+//
+// Idempotent across redelivery: what is already recorded is not recorded
+// again, so a phase that runs twice does not double the trace.
+async function recordSeedProvenance(
+  db: Database | Transaction,
+  jobId: string,
+  url: string,
+  components: readonly string[],
+  workItems: ReadonlyArray<{ step: number; component: string }>,
+  already: ReadonlySet<string>,
+): Promise<void> {
+  const canonical = canonicalTargetRef(url);
+  for (const item of workItems) {
+    // Only components this resource was APPROVED to serve, intersected
+    // with what this job still needs. Never the resource's whole coverage,
+    // and never a component outside the job's boundary.
+    if (!components.includes(item.component)) continue;
+    if (already.has(`${item.step}:${item.component}:${canonical}`)) continue;
+    await recordTraceEvent(db, {
+      researchJobId: jobId,
+      operationType: "SOURCE_RESOURCE_SELECTED",
+      providerKind: "FETCH",
+      // Names the provenance channel, so search and curated targets stay
+      // distinguishable in the trace by more than the operation alone.
+      providerName: "source-resource",
+      patternStep: item.step,
+      component: item.component,
+      targetRef: url,
+      status: "OK",
+    });
+  }
+}
+
+// What this job has ALREADY recorded, so redelivery is quiet.
+async function existingSeedProvenance(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<Set<string>> {
+  const rows = await db
+    .select({
+      patternStep: researchTraceEvents.patternStep,
+      component: researchTraceEvents.component,
+      targetRef: researchTraceEvents.targetRef,
+    })
+    .from(researchTraceEvents)
+    .where(eq(researchTraceEvents.researchJobId, jobId));
+  const out = new Set<string>();
+  for (const row of rows) {
+    if (row.patternStep === null || row.component === null || !row.targetRef) continue;
+    out.add(`${row.patternStep}:${row.component}:${canonicalTargetRef(row.targetRef)}`);
+  }
+  return out;
+}
+
+export async function loadFetchTargets(
+  db: Database | Transaction,
+  jobId: string,
+  projectId?: string | null,
+): Promise<string[]> {
+  const ledger = await loadAcquisitionLedger(db, jobId);
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  // D-148 — HUMAN-APPROVED RESOURCES GO FIRST.
+  //
+  // Search discovery is not the only thing ATLAS knows. Where a human has
+  // already approved an exact url as worth fetching for this project, and
+  // that url STILL resolves through an ACTIVE classified route, it should
+  // not depend on a search engine rediscovering it — which is exactly what
+  // failed: search returned an unclassified sibling path, the classified
+  // resource was never fetched, and every fact from that document was
+  // correctly admitted at the weakest source class there is.
+  //
+  // (Named that way on purpose: a D-141 boundary test asserts this module
+  // contains no source-class token at all, and it is right to — deciding
+  // what a document is worth is the authority layer's job, never the
+  // planner's. This code only causes a url to be researched.)
+  //
+  // Order is the whole of the priority rule: seeds enter the SAME bounded
+  // list before search candidates, so wherever the existing ceilings cut,
+  // they cut the unclassified tail first. Relevance is not overridden —
+  // eligibility already required the resource to serve a component this
+  // job still needs.
+  //
+  // Seeds spend the ordinary source-open budget like any other target. No
+  // ceiling moves because a project has curated sources.
+  if (projectId) {
+    const workItems = await neededWorkItems(db, jobId);
+    const needed = new Set(workItems.map((item) => item.component));
+    const seeds = await loadEligibleSourceResourcesWithCoverage(db, projectId, needed);
+    const already = seeds.length > 0 ? await existingSeedProvenance(db, jobId) : new Set<string>();
+    for (const seed of seeds) {
+      const canonical = canonicalTargetRef(seed.canonicalUrl);
+      if (seen.has(canonical)) continue;
+      seen.add(canonical);
+      // D-150 — provenance is written even when the url is already
+      // acquired: a redelivery must still be able to tell extraction which
+      // components this document was selected for.
+      await recordSeedProvenance(
+        db,
+        jobId,
+        seed.canonicalUrl,
+        seed.componentKeys,
+        workItems,
+        already,
+      );
+      if (ledger.fetchedUrls.has(canonical)) continue;
+      out.push(seed.canonicalUrl);
+    }
+  }
+
+  for (const urls of ledger.candidatesByQuery.values()) {
+    for (const url of urls) {
+      const canonical = canonicalTargetRef(url);
+      // Dedup is canonical and shared with the seeds above, so a url known
+      // both ways is one target and one budget spend, never two.
+      if (seen.has(canonical)) continue;
+      seen.add(canonical);
+      // D-146 — a url leaves the target list when it has been ACQUIRED,
+      // not when one strategy failed on it. Which strategies remain
+      // eligible is decided per url by the chain, from persisted trace,
+      // so a failed strategy is still never repeated.
+      if (ledger.fetchedUrls.has(canonical)) continue;
+      out.push(url);
+    }
+  }
+  return out;
+}
+
+// D-146 — THE BOUNDED ACQUISITION CHAIN.
+//
+// Provider names are the strategy identity everywhere: in the trace row
+// that records the attempt, in the ledger that remembers which strategies
+// a url has already had, and in the job-level render ceiling. DIRECT_HTTP
+// keeps the transport's own name so every pre-D-146 row still reads as
+// the strategy it was.
+const STRATEGY_PROVIDER: Record<AcquisitionStrategy, string> = {
+  DIRECT_HTTP: "safe-http",
+  CONTENT_NEGOTIATION: "content-negotiation",
+  ISOLATED_RENDER: "isolated-render",
+};
+
+// The inverse of the map above, derived from it rather than restated, so
+// the two cannot drift. Used to read a persisted attempt's strategy back
+// out of the provider name the trace recorded it under.
+const PROVIDER_STRATEGY = new Map<string, AcquisitionStrategy>(
+  (Object.keys(STRATEGY_PROVIDER) as AcquisitionStrategy[]).map((s) => [STRATEGY_PROVIDER[s], s]),
+);
+
+function strategyOfProvider(providerName: string | null): AcquisitionStrategy | null {
+  return providerName === null ? null : PROVIDER_STRATEGY.get(providerName) ?? null;
+}
+
+// At most two strategies beyond the first for one url (owner-ratified).
+const MAX_FALLBACK_ATTEMPTS_PER_URL = 2;
+// A job-level ceiling on real renders, counted from persisted trace so a
+// redelivery cannot reset it. This is a POLICY ceiling only — the
+// sourceOpens reservation remains the single budget authority.
+const MAX_RENDER_ATTEMPTS_PER_JOB = 4;
+
+// WHICH FAILURES JUSTIFY WHICH FALLBACK.
+//
+// A fallback is justified by the failure CLASS, never by hope. The two
+// security refusals terminate the chain outright: every strategy shares
+// the same address classifier, so another transport could only "succeed"
+// by weakening the boundary the first one correctly enforced — that is
+// the one thing a fallback must never become.
+//
+// Deterministic refusals (a malformed url, an unsupported scheme, a
+// redirect loop, a 404 or a 5xx) end the chain too: the server or the
+// policy already answered, and asking again through a different pipe
+// cannot change the answer.
+//
+// AN OVERSIZED BODY WAS IN THAT LIST AND DOES NOT BELONG THERE. The
+// reasoning above holds for a class whose answer is fixed however it is
+// asked; TOO_LARGE is not one. It is a property of the REPRESENTATION
+// this request asked for, not of the resource: the origin was mid-reply
+// with a document it was willing to serve, and our own cap ended the
+// read. A different representation of the same resource is a different
+// number of bytes, so asking for one is not asking the same question
+// again. That is exactly the case UNSUPPORTED_CONTENT_TYPE below already
+// makes, and TOO_LARGE is its sibling — "this fetcher cannot READ what
+// was offered" and "this fetcher cannot ACCEPT what was offered" differ
+// in the verb and nothing else.
+//
+// Found live: a human-registered, human-classified OFFICIAL_DOCS page was
+// permanently unreachable because its HTML bundle exceeds the cap, with
+// no second attempt of any kind. No limit moves to fix it.
+//
+// What remains is the honest middle: a connection that broke mid-message
+// or timed out (the class where a complete document demonstrably exists
+// but this transport could not finish it), a representation this fetcher
+// cannot read, and the refusal statuses the canonical render-on-refusal
+// policy already recognises.
+export function plannedFallbacks(
+  diagnostic: string | null,
+  httpStatus: number | null,
+  // WHICH STRATEGY PRODUCED THIS FAILURE. Null when it is not known —
+  // which is the fail-closed reading: a transition that requires a
+  // specific predecessor is not licensed by an unattributed failure.
+  //
+  // Defaulted so every existing caller and contract test keeps its exact
+  // meaning: with no strategy named, TOO_LARGE still buys negotiation and
+  // nothing more.
+  failedStrategy: AcquisitionStrategy | null = null,
+): AcquisitionStrategy[] {
+  switch (diagnostic) {
+    // SECURITY STOP. Never anything after these.
+    case "BLOCKED_ADDRESS":
+    case "REDIRECT_TARGET_BLOCKED":
+      return [];
+    // The transport could not finish a message the origin was sending.
+    case "NETWORK_ERROR":
+    case "TIMEOUT":
+      return ["CONTENT_NEGOTIATION", "ISOLATED_RENDER"];
+    // This fetcher cannot read what was offered; ask for a representation
+    // it can. A browser would face the same allowlist, so no render.
+    case "UNSUPPORTED_CONTENT_TYPE":
+      return ["CONTENT_NEGOTIATION"];
+    // This fetcher cannot ACCEPT what was offered; ask for a
+    // representation small enough to accept, under the very same cap.
+    //
+    // AND THEN, IF THAT IS ALSO TOO LARGE, THE RENDERED REPRESENTATION.
+    //
+    // The earlier reasoning here — "a render produces the same document
+    // or a larger one, and its output faces the identical cap at seal" —
+    // was refuted by measurement, and it was wrong about WHICH quantity
+    // each cap measures. The transport cap is on RESPONSE BYTES: 2 MB of
+    // html raises TOO_LARGE while the stream is still being consumed. The
+    // seal cap is on NORMALIZED TEXT CHARACTERS, and the renderer bounds
+    // its own text independently (maxRenderedTextLength, plus a
+    // separately bounded link appendix). Rendering is precisely the step
+    // that converts the oversized quantity into the bounded one, so a
+    // page too large to transport can be small enough to seal. A live
+    // probe read one such confirmed OFFICIAL_DOCS page — 2,080,298 html
+    // bytes — successfully, while acquisition had already given up.
+    //
+    // THE TRANSITION IS EARNED, NOT ASSUMED. A first TOO_LARGE still buys
+    // only negotiation: asking the origin for a smaller textual
+    // representation is cheaper than a browser and often enough. Only
+    // when that NEGOTIATED representation is ALSO oversized has the
+    // origin effectively said no textual representation of this document
+    // exists under the cap — and at that point the browser's own rendered
+    // text is the one remaining bounded representation. That is a generic
+    // statement about representations, not about any host.
+    //
+    // Bounded by construction, exactly as before: each strategy is added
+    // to the plan at most once, strategyAlreadyAttempted refuses a repeat
+    // across deliveries, MAX_RENDER_ATTEMPTS_PER_JOB caps renders job-
+    // wide, and MAX_FALLBACK_ATTEMPTS_PER_URL caps this chain at two
+    // fallbacks — which this transition exactly fills and cannot exceed.
+    // No cap is raised, no new strategy or provider exists, and the
+    // render still has to pass every renderer eligibility gate on its own
+    // terms (see the ISOLATED_RENDER branch below).
+    case "TOO_LARGE":
+      return failedStrategy === "CONTENT_NEGOTIATION"
+        ? ["ISOLATED_RENDER"]
+        : ["CONTENT_NEGOTIATION"];
+    // The server answered, and the answer decides. Only the canonical
+    // refusal statuses admit the renderer.
+    case "HTTP_ERROR":
+      return httpStatus !== null && RENDER_ON_REFUSAL_STATUS_SET.has(httpStatus)
+        ? ["ISOLATED_RENDER"]
+        : [];
+    // Deterministic policy refusals, resolver failure, and anything
+    // untyped: fail closed with no fallback. (Environmental classes may
+    // earn a later re-attempt under D-146 Slice 3; that is a separate
+    // decision and is deliberately not implemented here.)
+    default:
+      return [];
+  }
+}
+
+// Read from the canonical policy module rather than restated here.
+const RENDER_ON_REFUSAL_STATUS_SET = RENDER_ON_REFUSAL_STATUSES;
+
+// PHASE 2 — FETCHING (source-side environment).
+//
+// Consumes ONLY the persisted candidate handoff and seals each document
+// under PRODUCT_ACQUISITION. Makes no model call, runs no search, writes
+// no Evidence and no attempt.
+//
+// D-146: each url is acquired through a BOUNDED CHAIN of at most three
+// code-owned strategies, stopping at the first complete document. The
+// phased path thereby gains the recovery abilities the single-process
+// executor already had — Stage-0 embedded-payload recovery, render on
+// refusal, render on an SPA shell — by reusing those exact primitives,
+// plus one new representation preference on the same transport.
+//
+// What the chain never does: accept an incomplete document, continue past
+// a security refusal, invent a url the search phase did not find, or let
+// a successful transport promote authority.
+export async function runFetchPhase(input: {
+  db: Database;
+  jobId: string;
+  projectId: string;
+  contentFetcher: ContentFetcher;
+  maxSourceOpens: number;
+  // Declared by a caller that KNOWS this job's on-chain path cannot act.
+  // The FETCH role deliberately does not install a retriever and therefore
+  // cannot observe the EXTRACTING role's capability, so it never asserts
+  // this itself — an unknown capability must not release capacity that a
+  // process which HAS it is going to need.
+  onchainAcquisitionUnavailable?: boolean;
+}): Promise<FetchPhaseResult> {
+  // THE STARVATION FIX, at the only place documentary acquisition spends
+  // this axis in the phased architecture. The FETCH phase runs to
+  // completion BEFORE the deterministic on-chain path exists, so without a
+  // floor it can — and on the live run did — leave every planned chain
+  // intent unaffordable. Computed ONCE per pass, from the boundary
+  // contract's own outstanding work queue, and applied by lowering the
+  // CEILING documentary reservations are made against. The job's
+  // maxSourceOpens is untouched, the ledger is untouched, and the reserve
+  // is not withdrawn from anything: unspent units stay in the one counter.
+  const reserve = await resolveOnchainSourceOpenReserve(input.db, {
+    jobId: input.jobId,
+    projectId: input.projectId,
+    maxSourceOpens: input.maxSourceOpens,
+    onchainAcquisitionUnavailable: input.onchainAcquisitionUnavailable,
+  });
+  const out: FetchPhaseResult = {
+    sealedDocumentIds: [],
+    skippedUrls: [],
+    failedUrls: [],
+    refusedUrls: [],
+    exhaustedUrls: [],
+    strategyAttempts: [],
+    onchainReservedSourceOpens: reserve.reserved,
+    documentarySourceOpenCeiling: reserve.documentaryCeiling,
+  };
+  // Every documentary reservation below — first fetch, content
+  // negotiation, render fallback and render upgrade alike — reserves
+  // against THIS ceiling, so no documentary path can reach the floor.
+  const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };
+  const targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
+
+  for (const url of targets) {
+    // Fail closed before any transport call.
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:") {
+        out.refusedUrls.push(url);
+        continue;
+      }
+    } catch {
+      out.refusedUrls.push(url);
+      continue;
+    }
+
+    const outcome = await acquireOneUrl(documentaryInput, url, out);
+    if (outcome === "BUDGET_EXHAUSTED") break;
+  }
+  return out;
+}
+
+type UrlOutcome = "SEALED" | "FAILED" | "EXHAUSTED" | "BUDGET_EXHAUSTED";
+
+// One url, one bounded chain. Returns how the url ended, so the caller can
+// stop the whole phase when the job's source-open axis is spent.
+async function acquireOneUrl(
+  input: {
+    db: Database;
+    jobId: string;
+    projectId: string;
+    contentFetcher: ContentFetcher;
+    maxSourceOpens: number;
+  },
+  url: string,
+  out: FetchPhaseResult,
+): Promise<UrlOutcome> {
+  // The route is resolved BEFORE any transport call because two decisions
+  // depend on it up front: whether Stage-0 recovery may be requested on
+  // the very same fetch, and whether the renderer is even eligible. It is
+  // re-resolved on the document's finalUrl at seal time — a redirect must
+  // not let a pre-fetch decision speak for where the transport landed.
+  const preFetchRoute = await resolveSourceRoute(input.db, input.projectId, url);
+  const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
+  const rendererEnabled = renderedDocsEnabled() && renderedDocsAvailable();
+
+  const plan: AcquisitionStrategy[] = ["DIRECT_HTTP"];
+
+  // D-146 Slice 2 — REBUILD THE PLAN FROM WHAT IS PERSISTED, before the
+  // first attempt of this delivery.
+  //
+  // The chain is per url, not per delivery. A delivery that finds
+  // DIRECT_HTTP and CONTENT_NEGOTIATION already attempted has no live
+  // failure to learn from, so without this the plan would never grow past
+  // its first entry and the url would be reported exhausted while a
+  // strategy that has NEVER been attempted was still owed to it. That is
+  // not a retry: nothing already tried is tried again. It is the same
+  // chain, continuing.
+  //
+  // Only the persisted CLASS is consulted, and it decides exactly what a
+  // live failure of that class would have decided. The HTTP status is not
+  // persisted (D-143 stores the category alone, deliberately), so a
+  // reconstructed HTTP_ERROR is planned with a null status — which
+  // plannedFallbacks answers with no fallback. That is the fail-closed
+  // direction: a refusal-status render is earned inside the delivery that
+  // saw the refusal, and never inferred afterwards from a class that
+  // cannot distinguish 403 from 404.
+  {
+    const priorLedger = await loadAcquisitionLedger(input.db, input.jobId);
+    for (const failure of persistedFailureDiagnostics(url, priorLedger)) {
+      if (plan.length > MAX_FALLBACK_ATTEMPTS_PER_URL) break;
+      // The provider name on the row IS the strategy identity (D-146), so
+      // a transition that depends on WHICH strategy failed continues
+      // across a delivery boundary on the same terms it would have been
+      // decided live. An unrecognised or absent provider yields null,
+      // which those transitions read as not-licensed.
+      for (const next of plannedFallbacks(
+        failure.diagnosticCode,
+        null,
+        strategyOfProvider(failure.providerName),
+      )) {
+        if (!plan.includes(next)) plan.push(next);
+      }
+    }
+  }
+
+  let attempted = 0;
+  let lastDiagnostic: string | null = null;
+  // Per url, never module state: two urls — or two jobs sharing a
+  // process — must never be able to read each other's last failure.
+  let lastHttpStatus: number | null = null;
+
+  for (let i = 0; i < plan.length; i++) {
+    const strategy = plan[i];
+    const providerName = STRATEGY_PROVIDER[strategy];
+
+    // Ledger is re-read per attempt: another delivery may have run this
+    // exact strategy for this url already, and a strategy is never run
+    // twice for one url.
+    const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+    if (strategyAlreadyAttempted(url, providerName, ledger)) continue;
+
+    if (strategy === "ISOLATED_RENDER") {
+      if (!rendererEnabled) continue;
+      if (providerAttemptCount(providerName, ledger) >= MAX_RENDER_ATTEMPTS_PER_JOB) continue;
+      // Which question to ask depends on HOW the chain got here, and both
+      // questions are the canonical ones.
+      //
+      // After an HTTP refusal there IS a status, and the existing
+      // render-on-refusal policy owns which statuses qualify — that
+      // policy is preserved exactly. After a transport failure there is
+      // no status at all: the message never completed. Asking the refusal
+      // policy there would always answer NOT_A_RENDERABLE_REFUSAL and the
+      // renderer could never finish a document the origin was genuinely
+      // sending — so that case asks the shared ROUTE gate instead, which
+      // is the same https + CONFIRMED + OFFICIAL_DOCS + matched-prefix
+      // test both existing policies are built on. No third notion of
+      // renderability is introduced, and the route bar is not lowered.
+      const eligibility =
+        lastHttpStatus !== null
+          ? evaluateRefusalRenderEligibility({
+              url,
+              route: preFetchRoute,
+              rendererEnabled,
+              httpStatus: lastHttpStatus,
+            })
+          : routeEligibility(url, preFetchRoute, rendererEnabled);
+      if (!eligibility.eligible) continue;
+      const rendered = await attemptRender(input, url, eligibility, out);
+      if (rendered === "BUDGET_EXHAUSTED") return "BUDGET_EXHAUSTED";
+      if (rendered === "SEALED") return "SEALED";
+      attempted += 1;
+      continue;
+    }
+
+    const reserved = await reserveJobBudget(
+      input.db,
+      input.jobId,
+      "sourceOpens",
+      1,
+      input.maxSourceOpens,
+    );
+    if (!reserved) {
+      out.skippedUrls.push(url);
+      return "BUDGET_EXHAUSTED";
+    }
+
+    await recordTraceEvent(input.db, {
+      researchJobId: input.jobId,
+      operationType: "FETCH_ATTEMPTED",
+      providerKind: "FETCH",
+      providerName,
+      targetRef: url,
+      status: "OK",
+      budgetAxis: "sourceOpens",
+      budgetAmount: 1,
+    });
+    out.strategyAttempts.push({ url, strategy });
+    attempted += 1;
+
+    let doc: FetchedDocument;
+    try {
+      doc = await input.contentFetcher.fetch(url, {
+        // Stage-0 is NOT a strategy and takes no reservation of its own:
+        // it is deterministic processing of the very response this fetch
+        // is already making, requested on the same call, exactly as the
+        // single-process executor requests it.
+        ...(recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : {}),
+        ...(strategy === "CONTENT_NEGOTIATION"
+          ? { acceptPreference: "TEXT_REPRESENTATION" as const }
+          : {}),
+      });
+    } catch (e) {
+      // D-143 — canonical reason stays PROVIDER_ERROR; the provider's own
+      // categorical code survives beside it.
+      const typed = e instanceof ContentFetchError ? e : null;
+      lastDiagnostic = typed?.reason ?? null;
+      lastHttpStatus = typed?.httpStatus ?? null;
+      await recordTraceEvent(input.db, {
+        researchJobId: input.jobId,
+        operationType: "FETCH_FAILED",
+        providerKind: "FETCH",
+        providerName,
+        targetRef: url,
+        status: "FAILED",
+        reasonCode: "PROVIDER_ERROR",
+        diagnosticCode: typed ? typed.reason : null,
+      });
+
+      // Plan the rest of the chain from the failure class, once, and only
+      // as far as the per-url bound allows.
+      if (attempted <= MAX_FALLBACK_ATTEMPTS_PER_URL) {
+        for (const next of plannedFallbacks(lastDiagnostic, lastHttpStatus, strategy)) {
+          if (!plan.includes(next)) plan.push(next);
+        }
+      }
+      continue;
+    }
+
+    const sealed = await sealDocument(input, url, doc, strategy, out, preFetchRoute, rendererEnabled);
+    if (sealed === "BUDGET_EXHAUSTED") return "BUDGET_EXHAUSTED";
+    if (sealed === "SEALED") return "SEALED";
+    // A refused seal is a failure for this url; no other strategy can fix
+    // a document the seal store itself rejected.
+    return "FAILED";
+  }
+
+  if (attempted === 0) {
+    // Every strategy this url is owed has now been attempted at some
+    // point in this job's life. Exhausted is a statement about the URL's
+    // whole chain, never about one delivery's share of it.
+    out.exhaustedUrls.push(url);
+    return "EXHAUSTED";
+  }
+  out.failedUrls.push(url);
+  return "FAILED";
+}
+
+// Seals a complete document, after giving the canonical render-upgrade
+// policy its say: a static response that is a substantial HTML shell with
+// almost no text is exactly what the renderer exists to finish, and that
+// judgement is the existing shared one, not a second detector.
+async function sealDocument(
+  input: {
+    db: Database;
+    jobId: string;
+    projectId: string;
+    maxSourceOpens: number;
+  },
+  url: string,
+  doc: FetchedDocument,
+  strategy: AcquisitionStrategy,
+  out: FetchPhaseResult,
+  preFetchRoute: Awaited<ReturnType<typeof resolveSourceRoute>>,
+  rendererEnabled: boolean,
+): Promise<UrlOutcome> {
+  let finalDoc = doc;
+  let finalStrategy = strategy;
+
+  const upgrade = evaluateRenderEligibility({
+    url: doc.finalUrl,
+    route: preFetchRoute,
+    staticHtmlBytes: doc.byteLength,
+    staticTextLength: doc.staticTextLength ?? doc.normalizedText.length,
+    rendererEnabled,
+  });
+  if (upgrade.eligible) {
+    const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+    const providerName = STRATEGY_PROVIDER.ISOLATED_RENDER;
+    if (
+      providerAttemptCount(providerName, ledger) < MAX_RENDER_ATTEMPTS_PER_JOB &&
+      !strategyAlreadyAttempted(doc.finalUrl, providerName, ledger)
+    ) {
+      const reserved = await reserveJobBudget(
+        input.db,
+        input.jobId,
+        "sourceOpens",
+        1,
+        input.maxSourceOpens,
+      );
+      if (reserved) {
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "FETCH_ATTEMPTED",
+          providerKind: "FETCH",
+          providerName,
+          targetRef: doc.finalUrl,
+          status: "OK",
+          budgetAxis: "sourceOpens",
+          budgetAmount: 1,
+        });
+        out.strategyAttempts.push({ url: doc.finalUrl, strategy: "ISOLATED_RENDER" });
+        try {
+          const rendered = await resolveRenderedDocsFetcher().render(doc.finalUrl, {
+            confirmedHost: upgrade.confirmedHost,
+            matchedPathPrefix: upgrade.matchedPathPrefix,
+          });
+          rendered.staticTextLength = doc.staticTextLength ?? doc.normalizedText.length;
+          finalDoc = rendered;
+          finalStrategy = "ISOLATED_RENDER";
+        } catch (e) {
+          // Fail closed, exactly as the executor does: a failed render is
+          // never evidence and never fails the acquisition — the complete
+          // static document stands.
+          await recordRenderFailure(input, doc.finalUrl, e);
+        }
+      }
+    }
+  }
+
+  // Authority is RESOLVED and recorded, never granted — and never by the
+  // strategy that happened to succeed.
+  const route = await resolveSourceRoute(input.db, input.projectId, finalDoc.finalUrl);
+  const stored = await persistAcquiredDocument(input.db, {
+    projectId: input.projectId,
+    acquiringJobId: input.jobId,
+    doc: finalDoc,
+    route,
+    renderMode: finalStrategy === "ISOLATED_RENDER" ? "RENDERED" : "STATIC",
+    acquisitionStrategy: finalStrategy,
+    admission: "PRODUCT_ACQUISITION",
+  });
+  if (!stored.ok) {
+    out.failedUrls.push(url);
+    return "FAILED";
+  }
+  out.sealedDocumentIds.push(stored.id);
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_OK",
+    providerKind: "FETCH",
+    providerName: STRATEGY_PROVIDER[finalStrategy],
+    targetRef: url,
+    status: "OK",
+  });
+  return "SEALED";
+}
+
+// The renderer as a FALLBACK strategy (after a transport or refusal
+// failure), as opposed to the upgrade path above.
+async function attemptRender(
+  input: {
+    db: Database;
+    jobId: string;
+    projectId: string;
+    maxSourceOpens: number;
+  },
+  url: string,
+  eligibility: { eligible: true; confirmedHost: string; matchedPathPrefix: string },
+  out: FetchPhaseResult,
+): Promise<UrlOutcome> {
+  const providerName = STRATEGY_PROVIDER.ISOLATED_RENDER;
+  const reserved = await reserveJobBudget(
+    input.db,
+    input.jobId,
+    "sourceOpens",
+    1,
+    input.maxSourceOpens,
+  );
+  if (!reserved) {
+    out.skippedUrls.push(url);
+    return "BUDGET_EXHAUSTED";
+  }
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_ATTEMPTED",
+    providerKind: "FETCH",
+    providerName,
+    targetRef: url,
+    status: "OK",
+    budgetAxis: "sourceOpens",
+    budgetAmount: 1,
+  });
+  out.strategyAttempts.push({ url, strategy: "ISOLATED_RENDER" });
+
+  let rendered: FetchedDocument;
+  try {
+    rendered = await resolveRenderedDocsFetcher().render(url, {
+      confirmedHost: eligibility.confirmedHost,
+      matchedPathPrefix: eligibility.matchedPathPrefix,
+    });
+  } catch (e) {
+    await recordRenderFailure(input, url, e);
+    return "FAILED";
+  }
+
+  const route = await resolveSourceRoute(input.db, input.projectId, rendered.finalUrl);
+  const stored = await persistAcquiredDocument(input.db, {
+    projectId: input.projectId,
+    acquiringJobId: input.jobId,
+    doc: rendered,
+    route,
+    renderMode: "RENDERED",
+    acquisitionStrategy: "ISOLATED_RENDER",
+    admission: "PRODUCT_ACQUISITION",
+  });
+  if (!stored.ok) {
+    out.failedUrls.push(url);
+    return "FAILED";
+  }
+  out.sealedDocumentIds.push(stored.id);
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_OK",
+    providerKind: "FETCH",
+    providerName,
+    targetRef: url,
+    status: "OK",
+  });
+  return "SEALED";
+}
+
+// A render failure records the RENDERER's own closed category — never a
+// fetch reason that would be false, and never a message.
+//
+// AND, WHERE THE RENDERER CLASSIFIED ONE, THE NAVIGATION SUB-CODE.
+//
+// NAVIGATION_FAILED names the stage. The renderer had already decided
+// WHICH kind — NAVIGATION_TIMEOUT, BLOCKED_BY_ROUTE_POLICY or
+// UNCLASSIFIED_NAVIGATION_ERROR — and this function wrote only the stage,
+// so the three collapsed into one word in the only record production
+// keeps. A live worker render that failed and a standalone probe of the
+// same page that succeeded were then impossible to tell apart, and the
+// bit that separates them existed in memory at this very line.
+//
+// Both halves are members of closed, code-owned sets, and the composite
+// is itself an enumerated member of the column's closed set (see
+// trace-store.ts). Nothing here is derived from a browser message, a
+// host, an address or a page.
+function renderDiagnosticCode(
+  e: unknown,
+): ContentFetchFailureReason | RenderedDocsFailureReason | RenderNavigationDiagnosticCode | null {
+  if (!(e instanceof RenderedDocsError) || !isRenderedDocsFailureReason(e.reason)) return null;
+  if (e.reason !== "NAVIGATION_FAILED" || e.navigationDiagnostic === null) return e.reason;
+  return `NAVIGATION_FAILED:${e.navigationDiagnostic}`;
+}
+
+async function recordRenderFailure(
+  input: { db: Database; jobId: string },
+  url: string,
+  e: unknown,
+): Promise<void> {
+  const diagnosticCode = renderDiagnosticCode(e);
+  // THE CONTAINMENT COUNTS, to the operator's console.
+  //
+  // They belong beside the stage above and there is no column that can
+  // honestly hold them: research_trace_events has no numeric field that
+  // is not already a budget or a model-cost figure, and putting counts in
+  // one of those would corrupt an existing audit sum to save a migration.
+  // So they go to the one existing operator surface that needs no schema
+  // — the worker's own log — while the trace keeps the closed code.
+  //
+  // Formatted by the renderer, which owns that vocabulary; this module is
+  // forbidden from naming a containment mechanism and asks only for a
+  // bounded string. The url is deliberately NOT logged: targetRef on the
+  // row above already carries the bounded reference, and this line is
+  // about our own boundary rather than about the page.
+  const counts = renderContainmentCounts(e);
+  if (counts !== null) console.warn("[render] containment:", counts);
+  await recordTraceEvent(input.db, {
+    researchJobId: input.jobId,
+    operationType: "FETCH_FAILED",
+    providerKind: "FETCH",
+    providerName: STRATEGY_PROVIDER.ISOLATED_RENDER,
+    targetRef: url,
+    status: "FAILED",
+    reasonCode: "PROVIDER_ERROR",
+    diagnosticCode,
+  });
+}
+
+// PHASE 3 INPUT — the replay providers.
+//
+// Each replays one earlier phase's persisted output, and each REFUSES
+// anything it was not given: the extraction environment cannot reach a
+// source host, so an accidental live fetch must fail loudly rather than
+// silently succeed somewhere it should not.
+
+// Replays this job's own sealed documents. Generalises D-128's
+// single-document replayContentFetcher to a set, reusing it per document
+// so the "serves exactly this url, errors on anything else" rule is the
+// same one, not a second copy.
+export async function prepareExtractionReplayFetcher(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<{ fetcher: ContentFetcher; documentCount: number }> {
+  const rows = await db
+    .select()
+    .from(acquiredDocuments)
+    .where(eq(acquiredDocuments.acquiringJobId, jobId));
+
+  const byUrl = new Map<string, ContentFetcher>();
+  let admitted = 0;
+  for (const row of rows) {
+    // D-146 — the SAME tamper seal the strict resume path verifies. The
+    // phased replay previously served persisted text without recomputing
+    // it, so the two Stage-B entry points disagreed about whether a
+    // sealed document had to still hash to what was sealed. A mismatch
+    // fails closed by omission: the document is simply not in the replay
+    // set, and the fetcher's existing refusal covers any request for it.
+    // Altered content is never repaired and never re-sealed.
+    if (textSha256(row.normalizedText) !== row.textSha256) continue;
+    admitted += 1;
+    const doc: FetchedDocument = {
+      finalUrl: row.finalUrl,
+      requestedUrl: row.url,
+      httpStatus: row.httpStatus,
+      // Same narrowing loadAcquiredDocumentForResume already applies to
+      // this column — one rule, not a second one.
+      contentType: row.contentType as FetchedDocument["contentType"],
+      normalizedText: row.normalizedText,
+      contentHash: row.contentHash,
+      fetchedAt: row.acquiredAt,
+      byteLength: row.byteLength,
+      staticTextLength: row.staticTextLength ?? undefined,
+    };
+    const one = replayContentFetcher(doc);
+    byUrl.set(canonicalTargetRef(row.url), one);
+    byUrl.set(canonicalTargetRef(row.finalUrl), one);
+  }
+
+  return {
+    // Admitted documents only: a row refused by the tamper seal is not
+    // part of the replay set and must not be counted as one.
+    documentCount: admitted,
+    fetcher: {
+      name: "acquired-document-replay",
+      // D-137: every document here was fetched and charged by the FETCH
+      // phase. Replaying it performs no external open.
+      metering: "REPLAY" as const,
+      async fetch(url: string): Promise<FetchedDocument> {
+        const one = byUrl.get(canonicalTargetRef(url));
+        if (!one) {
+          // Fail closed. This is the guarantee that the extraction phase
+          // performs no external fetch: a url outside the sealed set has
+          // no replay and is never passed to a transport.
+          throw new Error(`no sealed document for url in this job: ${url}`);
+        }
+        return one.fetch(url);
+      },
+    },
+  };
+}
+
+// Replays what this job already discovered FOR THIS COMPONENT.
+//
+// D-141 — the defect this closes, measured on a real run:
+//
+// The SEARCHING phase asks the proposer for queries and searches them as
+// given. The executor does not: buildTargetedQueries (D-129/D-133)
+// REPLACES a component's model queries with targeted ones — a
+// site:<confirmed-domain> form, or a site:<explorer> <tokenAddress>
+// locator. So the two halves of a phased job speak different query
+// vocabularies BY DESIGN.
+//
+// A replay keyed only on the query string therefore answers "I have
+// nothing" for a string the SEARCH phase never ran, even when the job's
+// own trace holds candidates that phase discovered for exactly this
+// component. On the real run every generic query returned 5 candidates
+// and every targeted query returned 0, so nine of ten components entered
+// extraction with an empty candidate list and reported
+// NO_SEARCH_CANDIDATES — while 60 discovered URLs sat in the trace,
+// including documents that had been fetched and sealed. The only
+// component that produced Evidence was the one whose targeting failed to
+// rewrite anything, so its generic query still matched the ledger.
+//
+// The replay is therefore keyed the way the corpus was actually
+// discovered: CANDIDATE_RETURNED rows carry patternStep and component, so
+// the gateway can answer for the component being researched. Exact-query
+// matches still come first, so a query the phase really did run replays
+// byte-for-byte; the component's own corpus fills the rest.
+//
+// This invents nothing. It admits no URL this job did not discover, for a
+// component it did not discover it for; it changes no authority, no
+// admissibility and no budget; every downstream check runs unchanged. It
+// only stops the extraction phase from being blind to its own findings.
+export async function prepareExtractionReplaySearch(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<SearchGateway> {
+  const ledger = await loadAcquisitionLedger(db, jobId);
+
+  // The per-component corpus, from the same closed event types the ledger
+  // reads. Lossy refs are excluded here exactly as the ledger excludes
+  // them: a redacted or truncated ref is not a fetchable URL.
+  //
+  // Ordered by the trace's own monotonic per-job `sequence`, so the corpus
+  // this function serves is a deterministic function of the job's history
+  // and not of physical row order — the same reconstruction discipline
+  // acquisition-ledger.ts already applies.
+  const rows = await db
+    .select({
+      operationType: researchTraceEvents.operationType,
+      patternStep: researchTraceEvents.patternStep,
+      component: researchTraceEvents.component,
+      targetRef: researchTraceEvents.targetRef,
+    })
+    .from(researchTraceEvents)
+    .where(eq(researchTraceEvents.researchJobId, jobId))
+    .orderBy(asc(researchTraceEvents.sequence));
+
+  // D-150 — A COMPONENT'S CORPUS HAS TWO PROVENANCES, AND BOTH ARE
+  // PERSISTED FACTS ABOUT THIS RUN.
+  //
+  // What search found for this component, and what a human-approved
+  // resource was admitted for. The union is taken from the job's own trace
+  // and from nowhere else: current project memory is deliberately NOT
+  // consulted here. Selection happened at a moment in time, and a resource
+  // that has since been superseded, re-scoped or withdrawn must not
+  // retroactively change what this run was entitled to read. The chain runs
+  // forward only — memory at planning time, provenance on the run, then
+  // replay — never backwards from today's memory.
+  //
+  // The two events stay distinct in the trace, so search analytics is not
+  // contaminated by curated targets; only the corpus is merged.
+  //
+  // D-151 — THE TWO PROVENANCES ARE KEPT APART, BECAUSE THEY RANK
+  // DIFFERENTLY.
+  //
+  // D-150 made a curated resource VISIBLE to its component. It did not
+  // make it SURVIVE: merged into one list it landed after every search
+  // candidate, and the per-query search-result cap then cut it. In the
+  // first live run that happened in all five seeded slots — the documents
+  // were selected first, opened first, sealed with full authority, and
+  // then shown to no component at all, because they were always at index
+  // >= the cap.
+  //
+  // A resource is not a search result and must not be ranked as one: a
+  // human approved it FOR this component, which is why acquisition serves
+  // it first. Extraction now honours the same priority instead of
+  // inverting it. This is an ORDERING rule only — it grants no authority,
+  // admits no url this job did not persist provenance for, changes no
+  // class, no admissibility and no budget.
+  const seedByComponent = new Map<string, string[]>();
+  const searchByComponent = new Map<string, string[]>();
+  for (const row of rows) {
+    const isSearchProvenance = row.operationType === "CANDIDATE_RETURNED";
+    const isSeedProvenance = row.operationType === "SOURCE_RESOURCE_SELECTED";
+    if (!isSearchProvenance && !isSeedProvenance) continue;
+    if (row.patternStep === null || row.component === null || !row.targetRef) continue;
+    if (isLossyTargetRef(row.targetRef)) continue;
+    // Keyed by (step, component): provenance recorded for one component
+    // never reaches another, in either direction.
+    const key = `${row.patternStep}:${row.component}`;
+    const target = isSeedProvenance ? seedByComponent : searchByComponent;
+    const list = target.get(key) ?? [];
+    if (!list.includes(row.targetRef)) list.push(row.targetRef);
+    target.set(key, list);
+  }
+
+  return {
+    name: "search-replay",
+    // D-137: these candidates were discovered and charged by the SEARCH
+    // phase. Replaying them performs no external search.
+    metering: "REPLAY" as const,
+    async search(query, target, opts) {
+      const key = `${target.step}:${target.component}`;
+      // D-151 — approved resources for THIS component, ahead of anything a
+      // search returned. Bounded by what acquisition already bounded: the
+      // per-job seed cap limits how many resources can be selected at all,
+      // and provenance limits each one to the components it was approved
+      // to serve, so this prefix cannot grow to crowd out the corpus.
+      const seeds = seedByComponent.get(key) ?? [];
+      // D-152 — the exact-query list is scoped to THIS component too.
+      //
+      // It used to be `ledger.candidatesByQuery`, which is job-wide: a query
+      // string proposed by several components returned the first component's
+      // findings to all of them. That put another component's urls at the
+      // front of this component's corpus — ahead of everything except the
+      // seeds, and inside the same cap — so the fix in planQueries alone
+      // would have routed a component here only to hand it the same foreign
+      // list. Both halves of the identity have to hold, or neither does.
+      const exactKey = componentScopeKey(
+        target.step,
+        target.component,
+        canonicalTargetRef(query),
+      );
+      const exact =
+        exactKey === null ? [] : (ledger.candidatesByQueryComponent.get(exactKey) ?? []);
+      const forComponent = searchByComponent.get(key) ?? [];
+      const seen = new Set<string>();
+      const urls: string[] = [];
+      // Approved resources first, then exact-query candidates — a faithful
+      // replay of a query the phase really ran — then the rest of this
+      // component's search corpus. A url reached by both provenances is
+      // ONE entry, taken at its earliest position: the same canonical
+      // dedup as everywhere else, so nothing is served twice and no seat
+      // is spent twice.
+      for (const url of [...seeds, ...exact, ...forComponent]) {
+        const canonical = canonicalTargetRef(url);
+        if (seen.has(canonical)) continue;
+        seen.add(canonical);
+        urls.push(url);
+      }
+      // The cap itself is UNCHANGED. What changes is which entries are
+      // worth the seats: a displaced search candidate is the intended
+      // trade against an approved authoritative document.
+      return urls.slice(0, opts.maxResults).map((url) => ({ url, title: null, snippet: null }));
+    },
+  };
+}
+
+// Replays the search phase's proposed queries per component, so the
+// extraction phase does not re-propose (a model call) to rediscover them.
+export async function prepareExtractionReplayProposer(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<QueryProposer> {
+  const { researchTraceEvents } = await import("../db/schema");
+  const rows = await db
+    .select({
+      operationType: researchTraceEvents.operationType,
+      patternStep: researchTraceEvents.patternStep,
+      component: researchTraceEvents.component,
+      targetRef: researchTraceEvents.targetRef,
+    })
+    .from(researchTraceEvents)
+    .where(eq(researchTraceEvents.researchJobId, jobId));
+
+  const byKey = new Map<string, string[]>();
+  for (const row of rows) {
+    // Closed event type only — never an arbitrary trace string.
+    if (row.operationType !== "QUERY_PROPOSED") continue;
+    if (row.patternStep === null || row.component === null || !row.targetRef) continue;
+    const key = `${row.patternStep}:${row.component}`;
+    const list = byKey.get(key) ?? [];
+    if (!list.includes(row.targetRef)) list.push(row.targetRef);
+    byKey.set(key, list);
+  }
+
+  return {
+    name: "query-replay",
+    // D-137: these queries were proposed by a real model call in the
+    // SEARCH phase and charged there. Replaying them makes no model call.
+    metering: "REPLAY" as const,
+    async proposeQueries(input) {
+      const key = `${input.target.step}:${input.target.component}`;
+      return (byKey.get(key) ?? []).slice(0, input.maxQueries);
+    },
+  };
+}
