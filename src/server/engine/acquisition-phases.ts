@@ -40,8 +40,12 @@ import {
   isRenderedDocsFailureReason,
   renderedDocsAvailable,
   renderedDocsEnabled,
+  renderContainmentCounts,
   resolveRenderedDocsFetcher,
+  type RenderedDocsFailureReason,
 } from "./providers/rendered-docs-fetcher";
+import type { ContentFetchFailureReason } from "./providers/content-fetcher";
+import type { RenderNavigationDiagnosticCode } from "./trace-store";
 import type { ComponentWorkItem } from "./contract-view";
 import { reserveJobBudget } from "./budget-reservation";
 import { resolveOnchainSourceOpenReserve } from "./onchain-source-open-reserve";
@@ -1203,13 +1207,51 @@ async function attemptRender(
 
 // A render failure records the RENDERER's own closed category — never a
 // fetch reason that would be false, and never a message.
+//
+// AND, WHERE THE RENDERER CLASSIFIED ONE, THE NAVIGATION SUB-CODE.
+//
+// NAVIGATION_FAILED names the stage. The renderer had already decided
+// WHICH kind — NAVIGATION_TIMEOUT, BLOCKED_BY_ROUTE_POLICY or
+// UNCLASSIFIED_NAVIGATION_ERROR — and this function wrote only the stage,
+// so the three collapsed into one word in the only record production
+// keeps. A live worker render that failed and a standalone probe of the
+// same page that succeeded were then impossible to tell apart, and the
+// bit that separates them existed in memory at this very line.
+//
+// Both halves are members of closed, code-owned sets, and the composite
+// is itself an enumerated member of the column's closed set (see
+// trace-store.ts). Nothing here is derived from a browser message, a
+// host, an address or a page.
+function renderDiagnosticCode(
+  e: unknown,
+): ContentFetchFailureReason | RenderedDocsFailureReason | RenderNavigationDiagnosticCode | null {
+  if (!(e instanceof RenderedDocsError) || !isRenderedDocsFailureReason(e.reason)) return null;
+  if (e.reason !== "NAVIGATION_FAILED" || e.navigationDiagnostic === null) return e.reason;
+  return `NAVIGATION_FAILED:${e.navigationDiagnostic}`;
+}
+
 async function recordRenderFailure(
   input: { db: Database; jobId: string },
   url: string,
   e: unknown,
 ): Promise<void> {
-  const diagnosticCode =
-    e instanceof RenderedDocsError && isRenderedDocsFailureReason(e.reason) ? e.reason : null;
+  const diagnosticCode = renderDiagnosticCode(e);
+  // THE CONTAINMENT COUNTS, to the operator's console.
+  //
+  // They belong beside the stage above and there is no column that can
+  // honestly hold them: research_trace_events has no numeric field that
+  // is not already a budget or a model-cost figure, and putting counts in
+  // one of those would corrupt an existing audit sum to save a migration.
+  // So they go to the one existing operator surface that needs no schema
+  // — the worker's own log — while the trace keeps the closed code.
+  //
+  // Formatted by the renderer, which owns that vocabulary; this module is
+  // forbidden from naming a containment mechanism and asks only for a
+  // bounded string. The url is deliberately NOT logged: targetRef on the
+  // row above already carries the bounded reference, and this line is
+  // about our own boundary rather than about the page.
+  const counts = renderContainmentCounts(e);
+  if (counts !== null) console.warn("[render] containment:", counts);
   await recordTraceEvent(input.db, {
     researchJobId: input.jobId,
     operationType: "FETCH_FAILED",

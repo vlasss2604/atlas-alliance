@@ -691,6 +691,33 @@ export class RenderedDocsError extends Error {
   }
 }
 
+// THE EGRESS BOUNDARY'S OWN COUNTS, rendered for an operator's console.
+//
+// It lives HERE, beside the error that carries them, and not in the
+// acquisition chain: the phase module is forbidden by boundary test from
+// naming any network product or containment mechanism at all, and that
+// rule is correct — deployment topology must not leak into domain code.
+// The chain asks a question in its own vocabulary and gets back a string
+// or nothing.
+//
+// STRUCTURALLY COUNTS ONLY. EgressDenialSummary has no field that can
+// hold a target, a host, a port or a resolved address, and this function
+// reads no other part of the error — not the message, not the url, not
+// the stack. Null when no boundary was ever opened, which is a different
+// observation from one that was opened and stayed silent.
+export function renderContainmentCounts(e: unknown): string | null {
+  if (!(e instanceof RenderedDocsError) || e.proxyDenials === null) return null;
+  const p = e.proxyDenials;
+  const fired = Object.entries(p.denials)
+    .filter(([, n]) => n > 0)
+    .map(([reason, n]) => `${reason}=${n}`)
+    .join(",");
+  return (
+    `denied=${p.deniedCount} allowed=${p.allowedCount} ` +
+    `classes=${p.distinctDenialClasses} ${fired === "" ? "(none)" : fired}`
+  );
+}
+
 export interface RenderedDocsFetcher {
   readonly name: string;
   readonly version: string;

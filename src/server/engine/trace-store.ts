@@ -7,6 +7,7 @@ import {
   type ContentFetchFailureReason,
 } from "./providers/content-fetcher";
 import {
+  NAVIGATION_DIAGNOSTICS,
   RENDERED_DOCS_FAILURE_REASONS,
   type RenderedDocsFailureReason,
 } from "./providers/rendered-docs-fetcher";
@@ -43,7 +44,11 @@ export interface TraceEventInput {
   // closed set so a caller cannot pass a raw message: the compiler refuses
   // anything that is not one of the provider's own literals, and the
   // writer re-checks membership at runtime.
-  diagnosticCode?: ContentFetchFailureReason | RenderedDocsFailureReason | null;
+  diagnosticCode?:
+    | ContentFetchFailureReason
+    | RenderedDocsFailureReason
+    | RenderNavigationDiagnosticCode
+    | null;
   // S10 (live-provider-enablement.md §7) — AUDIT ONLY. See engine.ts's
   // column comments and model-cost-profile.ts's calculateActualCostMicro.
   actualInputTokens?: number | null;
@@ -172,14 +177,58 @@ export class TracePersistenceError extends Error {
 // value here was invented for the diagnostic, and a render failure
 // records the renderer's own reason rather than a fetch reason that would
 // be false.
+// THE NAVIGATION SUB-CODE, AS ENUMERATED MEMBERS OF THE SAME CLOSED SET.
+//
+// NAVIGATION_FAILED names the STAGE that failed. The renderer already
+// classifies WHICH kind — a timeout, our own containment aborting the
+// main-frame navigation, or an unclassified transport error — into its own
+// closed set, and production then threw that away: `recordRenderFailure`
+// wrote `e.reason` and nothing else, so a live worker render and a
+// standalone probe of the same page were indistinguishable in the record.
+// Three materially different next actions collapsed into one word.
+//
+// THE CLOSED-SET DISCIPLINE IS PRESERVED, NOT RELAXED. This does not make
+// the column accept a composite; it ENUMERATES the composites, all three
+// of them, as ordinary members. `safeDiagnosticCode` still admits a value
+// only by membership in a finite, code-authored, runtime-enumerable set,
+// so nothing derived from a provider message, a host or a browser error
+// can pass — exactly as before, and for the same reason.
+//
+// The `STAGE:KIND` spelling is the one the owner inspection entrypoint
+// already prints, so the two operator surfaces name a failure identically.
+export const RENDER_NAVIGATION_DIAGNOSTIC_CODES = NAVIGATION_DIAGNOSTICS.map(
+  (d) => `NAVIGATION_FAILED:${d}` as const,
+);
+
+export type RenderNavigationDiagnosticCode =
+  (typeof RENDER_NAVIGATION_DIAGNOSTIC_CODES)[number];
+
 const DIAGNOSTIC_CODES: ReadonlySet<string> = new Set<string>([
   ...CONTENT_FETCH_FAILURE_REASONS,
   ...RENDERED_DOCS_FAILURE_REASONS,
+  ...RENDER_NAVIGATION_DIAGNOSTIC_CODES,
 ]);
 
 function safeDiagnosticCode(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
   return DIAGNOSTIC_CODES.has(value) ? value : null;
+}
+
+// THE STAGE, RECOVERED FROM A STORED CODE.
+//
+// Every consumer that DECIDES something from a persisted diagnostic reads
+// the stage, never the sub-code: the sub-code exists to be read by a
+// human, and letting it reach a planner would make three variants of one
+// class behave differently for no stated reason. Applied by the ledger
+// before the fallback planner ever sees a value, so the engine's behaviour
+// is bit-identical to what it was when only the stage was stored.
+//
+// A code with no separator is its own stage, so every historical row and
+// every other failure class passes through unchanged.
+export function diagnosticCodeHead(code: string | null): string | null {
+  if (code === null) return null;
+  const i = code.indexOf(":");
+  return i === -1 ? code : code.slice(0, i);
 }
 
 export async function recordTraceEvent(db: Database | Transaction, input: TraceEventInput): Promise<void> {
