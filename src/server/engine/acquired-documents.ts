@@ -4,7 +4,7 @@ import { and, eq, isNull } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { acquiredDocuments } from "../db/schema";
-import { ContentFetchError } from "./providers/content-fetcher";
+import { ContentFetchError, replaceNullCharacters } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import type { ContentType, FetchedDocument } from "./providers/types";
 import type { ResolvedSourceRoute } from "./source-authority";
@@ -117,6 +117,24 @@ export async function persistAcquiredDocument(
   if (input.doc.normalizedText.length > MAX_PERSISTED_TEXT_CHARS) {
     return { ok: false, refusal: "TEXT_TOO_LARGE", detail: "normalized text exceeds the transport bound" };
   }
+  // THE ONE CHARACTER THIS DATABASE CANNOT HOLD, HANDLED WHERE EVERY
+  // DOCUMENT CONVERGES.
+  //
+  // Applied here rather than inside one transport because this function is
+  // the single door: the bounded http fetcher, the isolated renderer and
+  // the extraction replay fetcher all arrive at it, and a NUL from any of
+  // them is equally unstorable. Sanitising one transport would have left
+  // the other two able to strand a job exactly as the live incident did.
+  //
+  // BEFORE THE HASH, so the seal stays true. `textSha256` below is computed
+  // from this same normalised string, which is the string the column
+  // holds — verifyAcquiredDocument re-derives it from the stored text and
+  // must keep matching. `contentHash` is untouched: it hashes the raw
+  // bytes and remains an honest record of what the origin actually sent.
+  //
+  // The replacement is 1:1, so `staticTextLength` and every offset computed
+  // upstream stay correct.
+  const normalizedText = replaceNullCharacters(input.doc.normalizedText);
   const admission: AcquisitionAdmission = input.admission ?? "OWNER_STRICT";
   // The authority GATE applies to OWNER_STRICT only. Under
   // PRODUCT_ACQUISITION the same authority is still resolved and recorded
@@ -144,9 +162,9 @@ export async function persistAcquiredDocument(
       contentType: input.doc.contentType,
       byteLength: input.doc.byteLength,
       staticTextLength: input.doc.staticTextLength ?? input.doc.normalizedText.length,
-      normalizedText: input.doc.normalizedText,
+      normalizedText,
       contentHash: input.doc.contentHash,
-      textSha256: textSha256(input.doc.normalizedText),
+      textSha256: textSha256(normalizedText),
       renderMode: input.renderMode,
       // D-146 provenance. Both are audit fields: neither is ever read by
       // an authority, admissibility or reconciliation decision.

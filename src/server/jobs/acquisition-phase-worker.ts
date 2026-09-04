@@ -298,13 +298,53 @@ export async function handleFetchingPhase(
   const job = admitted.job;
   const project = await loadProject(ctx.db, job);
 
-  const fetch = await runFetchPhase({
-    db: ctx.db,
-    jobId,
-    projectId: project.id,
-    contentFetcher,
-    maxSourceOpens: budgetOf(job).maxSourceOpens,
-  });
+  let fetch: Awaited<ReturnType<typeof runFetchPhase>>;
+  try {
+    fetch = await runFetchPhase({
+      db: ctx.db,
+      jobId,
+      projectId: project.id,
+      contentFetcher,
+      maxSourceOpens: budgetOf(job).maxSourceOpens,
+    });
+  } catch (e) {
+    // AN UNEXPECTED FAILURE HERE ENDS THE JOB, IT DOES NOT ESCAPE.
+    //
+    // This phase seals documents, and sealing writes external text to the
+    // database. A rejected write throws, and before this catch existed the
+    // throw travelled out of the phase, out of the dispatcher and into
+    // pg-boss — which then could not persist its OWN failure output,
+    // because the value it was serialising carried the very character the
+    // first write was rejected for. The queue item stayed active with no
+    // output and the Research stayed RUNNING forever: the mechanism that
+    // should have recorded the failure was the mechanism that failed.
+    //
+    // The EXTRACTING phase below already owns its throws. This is the same
+    // discipline, and the terminal write is the one
+    // `assertPhaseLiveAdmitted` already uses for a phase that cannot
+    // proceed — no new failure architecture, no new refusal value.
+    //
+    // THE ERROR CODE IS A CONSTANT, not `e.name`. Everything persisted from
+    // here has to be storable unconditionally, or this catch acquires the
+    // failure mode it exists to remove. The classification detail is
+    // logged, where no column can reject it.
+    console.error("[worker] phase FETCHING failed unexpectedly", e);
+    await finishPhasedJob(
+      ctx.db,
+      jobId,
+      {
+        state: "FAILED",
+        // TECHNICAL FAILURE != PROJECT REALITY. This says the run broke,
+        // and says nothing whatever about the project — no component is
+        // resolved, no FETCH_OK is written, and no Evidence is invented.
+        terminationReason: "SYSTEM_OR_PROVIDER_FAILURE",
+        errorCode: "FETCH_PHASE_FAILED",
+      },
+      job.entitlementAtStart,
+      "phase FETCHING: unexpected failure",
+    );
+    return { ran: false, refusal: "JOB_NOT_RUNNABLE" };
+  }
 
   const advanced = await advancePhaseAndEnqueue(ctx.db, ctx.boss, jobId, "FETCHING", "EXTRACTING");
   return { ran: true, phase: "FETCHING", advancedTo: advanced ? "EXTRACTING" : null, fetch };
