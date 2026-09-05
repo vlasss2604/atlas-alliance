@@ -10,9 +10,10 @@ import {
   providerAttemptCount,
   strategyAlreadyAttempted,
 } from "./acquisition-ledger";
-import { loadAcquisitionPlan } from "./acquisition-plan";
+import { componentsAdmittingClass, loadAcquisitionPlan } from "./acquisition-plan";
 import { loadJobContractView } from "./job-contract-view";
 import { loadEligibleSourceResourcesWithCoverage } from "../memory/source-resource";
+import { deriveSourceType, resolveSourceClass } from "./source-authority";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
   calculateActualCostMicro,
@@ -575,6 +576,36 @@ export async function loadFetchTargets(
       const canonical = canonicalTargetRef(seed.canonicalUrl);
       if (seen.has(canonical)) continue;
       seen.add(canonical);
+      // D-156 — WHO MAY READ THIS DOCUMENT IS DECIDED BY ADMISSIBILITY,
+      // NOT ONLY BY THE LIST A HUMAN TYPED.
+      //
+      // The registered componentKeys are kept, so nothing a human approved
+      // is withdrawn. What is ADDED is every component this job still needs
+      // whose Pattern admits this resource s resolved class — the same
+      // Pattern data S5 will consult again, per Evidence row, when it
+      // decides what was actually established.
+      //
+      // This grants no authority and admits no Evidence. It only lets a
+      // component that COULD be established by this class inspect the
+      // document with its OWN evidenceGoal, instead of the document being
+      // acquired at full authority and shown to components that
+      // structurally cannot use it. Extraction stays per (step, component),
+      // so nothing is cloned between components.
+      //
+      // Class is the resolver s answer, carried from the eligibility check
+      // that already required it to be non-null; this module never decides
+      // it.
+      const admitting = await componentsAdmittingClass(
+        db,
+        jobId,
+        resolveSourceClass(
+          seed.canonicalUrl,
+          deriveSourceType(seed.canonicalUrl),
+          seed.routeClass,
+        ),
+        [...needed],
+      );
+      const routedComponents = [...new Set([...seed.componentKeys, ...admitting])];
       // D-150 — provenance is written even when the url is already
       // acquired: a redelivery must still be able to tell extraction which
       // components this document was selected for.
@@ -582,7 +613,7 @@ export async function loadFetchTargets(
         db,
         jobId,
         seed.canonicalUrl,
-        seed.componentKeys,
+        routedComponents,
         workItems,
         already,
       );

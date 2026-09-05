@@ -275,7 +275,12 @@ describe("D-154 — an approved resource wins an equal-rank tie at the final ope
     const jobId = await makeJob(project.id);
     const items = await workItems(jobId);
     const recipient = items.find((i) => i.component === "RECIPIENT");
-    const destination = items.find((i) => i.component === "DESTINATION");
+    // D-156 — the probe component must be one that CANNOT admit this
+    // resource s class, otherwise admissibility routing legitimately hands
+    // it the resource too and this test can no longer tell
+    // component-scoped PRIORITY apart from class-driven ROUTING.
+    // EXECUTION_EVIDENCE admits only ONCHAIN_VERIFIABLE / OFFICIAL_REPORT.
+    const destination = items.find((i) => i.component === "EXECUTION_EVIDENCE");
     expect(recipient && destination).toBeTruthy();
 
     const resource = `https://${project.host}/docs/for-recipient.md`;
@@ -287,7 +292,7 @@ describe("D-154 — an approved resource wins an equal-rank tie at the final ope
     expect(
       approvedResourcesForComponent(ledger, recipient!.step, recipient!.component).size,
     ).toBe(1);
-    // ...and carries no priority at all for DESTINATION.
+    // ...and carries no priority at all for a component that cannot admit it.
     const forDestination = approvedResourcesForComponent(
       ledger,
       destination!.step,

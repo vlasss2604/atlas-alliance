@@ -118,6 +118,17 @@ async function makeJob(projectId: string): Promise<string> {
   return job.id;
 }
 
+// D-156 — the canonical component that does NOT admit OFFICIAL_DOCS.
+// Routing is admissibility-driven, so "another component" is only a
+// meaningful isolation probe when that component structurally cannot be
+// established by this resource s class. EXECUTION_EVIDENCE admits only
+// ONCHAIN_VERIFIABLE and OFFICIAL_REPORT.
+function nonAdmitting(items: ComponentWorkItem[]): ComponentWorkItem {
+  const item = items.find((i) => i.component === "EXECUTION_EVIDENCE");
+  if (!item) throw new Error("fixture pattern has no EXECUTION_EVIDENCE work item");
+  return item;
+}
+
 async function workItems(jobId: string): Promise<ComponentWorkItem[]> {
   const { view } = await loadJobContractView(ctx.db, jobId);
   return view.workQueue;
@@ -252,16 +263,19 @@ describe("D-151 — an approved resource outranks search candidates at extractio
   it("TEST 3: another component's resource does not leak in, even under the cap", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project.id);
-    const [c1, c2] = await workItems(jobId);
+    const [c1] = await workItems(jobId);
 
     const mine = `https://${project.host}/docs/for-c1.md`;
     await register(project.slug, mine, [c1.component]);
     await loadFetchTargets(ctx.db, jobId, project.id);
 
-    // (5) Priority is per (step, component), never project-wide.
+    // (5) Priority is per (step, component), never project-wide. D-156 —
+    // probed against a component that cannot admit this class, which is
+    // the isolation that still holds once routing follows admissibility.
+    const blocked = nonAdmitting(await workItems(jobId));
     expect(await served(jobId, c1)).toContain(mine);
-    expect(await served(jobId, c2)).not.toContain(mine);
-    expect(await served(jobId, c2)).toHaveLength(0);
+    expect(await served(jobId, blocked)).not.toContain(mine);
+    expect(await served(jobId, blocked)).toHaveLength(0);
   });
 
   it("TEST 4: with no resource, search-only behaviour is byte-identical", async () => {
@@ -350,9 +364,16 @@ describe("D-151 — an approved resource outranks search candidates at extractio
       .from(researchTraceEvents)
       .where(eq(researchTraceEvents.researchJobId, jobId));
     const prov = rows.filter((r) => r.ref === url && r.op === "SOURCE_RESOURCE_SELECTED");
-    // One row per (component) the resource was approved to serve IN THIS
-    // job — the boundary intersection, not the whole coverage.
-    expect(prov.map((r) => r.component).sort()).toEqual([c1.component, c2.component].sort());
+    // One row per routed component, never duplicated, and — the invariant
+    // this test exists for — NEVER a component outside this job s work
+    // queue, however the resource was registered. D-156 widened the routed
+    // set to every needed component whose Pattern admits the class, so the
+    // job boundary is asserted directly rather than via an exact pair.
+    const provComponents = prov.map((r) => r.component);
+    expect(new Set(provComponents).size).toBe(provComponents.length);
+    expect(provComponents).toContain(c1.component);
+    expect(provComponents).toContain(c2.component);
+    for (const outsider of outside) expect(provComponents).not.toContain(outsider);
     expect(new Set(prov.map((r) => r.providerName))).toEqual(new Set(["source-resource"]));
     // And search provenance is still never forged for a curated url.
     expect(rows.filter((r) => r.ref === url && r.op === "CANDIDATE_RETURNED")).toHaveLength(0);

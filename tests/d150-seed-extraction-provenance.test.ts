@@ -118,6 +118,19 @@ async function workItems(jobId: string): Promise<ComponentWorkItem[]> {
   return view.workQueue;
 }
 
+// D-156 — the canonical component that does NOT admit OFFICIAL_DOCS.
+//
+// Routing is admissibility-driven, so "another component" is only a
+// meaningful isolation probe when that component structurally cannot be
+// established by this resource s class. EXECUTION_EVIDENCE admits only
+// ONCHAIN_VERIFIABLE and OFFICIAL_REPORT, which is exactly why a project s
+// own docs page must never arrive there.
+function nonAdmitting(items: ComponentWorkItem[]): ComponentWorkItem {
+  const item = items.find((i) => i.component === "EXECUTION_EVIDENCE");
+  if (!item) throw new Error("fixture pattern has no EXECUTION_EVIDENCE work item");
+  return item;
+}
+
 async function register(slug: string, url: string, components: string[]) {
   const r = await registerSourceResource(ctx.db, { projectSlug: slug, url, componentKeys: components }, vocabulary);
   if (!r.ok) throw new Error("register failed: " + r.refusal + " " + r.detail);
@@ -251,9 +264,17 @@ describe("D-150 — seeded documents reach their approved components", () => {
     expect(await corpusFor(jobId, c1)).toContain(url);
     expect(await corpusFor(jobId, c2)).toContain(url);
 
-    // One url, two component associations — the provenance is per pair.
+    // One url, one association PER COMPONENT — the provenance is per pair
+    // and never duplicated. D-156 widened WHICH components are routed to
+    // (every needed component whose Pattern admits the resolved class), so
+    // the count is no longer the registered pair; the per-pair uniqueness
+    // this test exists to protect is asserted directly instead.
     const prov = await provenanceRows(jobId);
-    expect(prov.filter((r) => r.targetRef === url)).toHaveLength(2);
+    const forUrl = prov.filter((r) => r.targetRef === url);
+    const components = forUrl.map((r) => r.component);
+    expect(new Set(components).size).toBe(components.length);
+    expect(components).toContain(c1.component);
+    expect(components).toContain(c2.component);
 
     // And one real acquisition spends exactly one source open.
     const calls = { urls: [] as string[] };
@@ -268,17 +289,21 @@ describe("D-150 — seeded documents reach their approved components", () => {
     expect(await sourceOpens(jobId)).toBe(1);
   });
 
-  it("TEST 3: no component leakage", async () => {
+  it("TEST 3: no leakage into a component that cannot admit the class", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project.id);
     const items = await workItems(jobId);
-    const [c1, c2] = items;
+    const c1 = items[0];
+    // D-156 — the isolation that still holds. A component whose
+    // establishingClasses exclude this resource s class is never routed
+    // into, however the resource was registered.
+    const blocked = nonAdmitting(items);
     const url = `https://${project.host}/docs/only-c1.md`;
     await register(project.slug, url, [c1.component]);
 
     await loadFetchTargets(ctx.db, jobId, project.id);
     expect(await corpusFor(jobId, c1)).toContain(url);
-    expect(await corpusFor(jobId, c2)).not.toContain(url);
+    expect(await corpusFor(jobId, blocked)).not.toContain(url);
   });
 
   it("TEST 4: provenance is intersected with the job boundary", async () => {

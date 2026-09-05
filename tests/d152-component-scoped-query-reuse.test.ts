@@ -116,6 +116,17 @@ async function makeJob(projectId: string): Promise<string> {
   return job.id;
 }
 
+// D-156 — the canonical component that does NOT admit OFFICIAL_DOCS.
+// Routing is admissibility-driven, so "another component" is only a
+// meaningful isolation probe when that component structurally cannot be
+// established by this resource s class. EXECUTION_EVIDENCE admits only
+// ONCHAIN_VERIFIABLE and OFFICIAL_REPORT.
+function nonAdmitting(items: ComponentWorkItem[]): ComponentWorkItem {
+  const item = items.find((i) => i.component === "EXECUTION_EVIDENCE");
+  if (!item) throw new Error("fixture pattern has no EXECUTION_EVIDENCE work item");
+  return item;
+}
+
 async function workItems(jobId: string): Promise<ComponentWorkItem[]> {
   const { view } = await loadJobContractView(ctx.db, jobId);
   return view.workQueue;
@@ -271,7 +282,13 @@ describe("D-152 — query reuse is scoped to the component that did the work", (
   it("TEST 2 + 3: an approved resource survives on the reused-query path, first", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project.id);
-    const [c1, c2] = await workItems(jobId);
+    const allItems = await workItems(jobId);
+    const c2 = allItems[1];
+    // D-156 — the query-reuse invariant is about SEARCH candidates, so the
+    // saturating component is one that cannot admit the resource s class.
+    // Otherwise admissibility routing legitimately hands it the resource
+    // too and the two rules become impossible to test apart.
+    const c1 = nonAdmitting(allItems);
 
     // c1 saturates the shared query with more candidates than the cap.
     const c1Urls = Array.from({ length: MAX_RESULTS + 1 }, (_, i) => `https://a.test/${i + 1}`);

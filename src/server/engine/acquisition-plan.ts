@@ -191,3 +191,70 @@ export async function loadAcquisitionPlan(
     return EMPTY_PLAN;
   }
 }
+
+// D-156 — WHICH OF THESE COMPONENTS COULD THIS SOURCE CLASS ESTABLISH?
+//
+// The defect this closes: a human-approved resource was routed ONLY to the
+// componentKeys a human typed at registration. Those keys are a curation
+// hint, not an authority statement, and nothing checked them against the
+// Pattern. A CONFIRMED OFFICIAL_DOCS page was therefore bound to
+// EXECUTION_EVIDENCE — a component whose establishingClasses do not admit
+// OFFICIAL_DOCS at all, so every row extracted for it was excluded as
+// CLASS_NOT_ADMISSIBLE — while the components that DO admit OFFICIAL_DOCS,
+// and whose evidenceGoal the same document answers, were never shown it.
+//
+// ROUTING IS NOT ESTABLISHMENT. This answers only "may this component be
+// SHOWN this document", so the document reaches each component's own
+// extraction with that component's own evidenceGoal. Whether anything
+// extracted then ESTABLISHES the component stays entirely with S5's
+// establishingClasses check, which is untouched and is asked again there
+// per Evidence row. A component that cannot be established by this class
+// still cannot be, however it was routed.
+//
+// It reads the SAME Pattern data S5 reads, through the same
+// componentRequirementsFor accessor, so the two cannot drift into
+// disagreeing about which classes a component admits.
+//
+// Degrade-never-throw, like everything else in this module: an unreadable
+// pattern, an unconfigured component or a missing topic yields no
+// expansion rather than failing a job that would otherwise have run.
+export async function componentsAdmittingClass(
+  db: Database | Transaction,
+  jobId: string,
+  sourceClass: EvidenceSourceClass,
+  candidates: readonly string[],
+): Promise<string[]> {
+  if (candidates.length === 0) return [];
+  try {
+    const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+    if (!job?.topicId) return [];
+    const version = await loadActivePatternVersion(db, job.topicId);
+    if (version === null) return [];
+    const [patternRow] = await db
+      .select({ content: researchPatterns.content })
+      .from(researchPatterns)
+      .where(eq(researchPatterns.topicId, job.topicId))
+      .orderBy(desc(researchPatterns.version))
+      .limit(1);
+    if (!patternRow) return [];
+    const parsed = patternContentSchema.safeParse(patternRow.content);
+    if (!parsed.success) return [];
+
+    const out: string[] = [];
+    for (const component of candidates) {
+      let admits = false;
+      try {
+        admits = componentRequirementsFor(parsed.data, component).establishingClasses.includes(
+          sourceClass,
+        );
+      } catch {
+        // Component not configured in this Pattern — not expanded into.
+        admits = false;
+      }
+      if (admits && !out.includes(component)) out.push(component);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}

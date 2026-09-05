@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { projectMemoryItems, projects } from "../db/schema";
-import { resolveSourceRoute } from "../engine/source-authority";
+import { resolveSourceRoute, type RouteClass } from "../engine/source-authority";
 import { promoteProjectMemoryItem } from "./lifecycle";
 
 // D-148 — SOURCE_RESOURCE: THE EXACT URL A HUMAN APPROVED AS WORTH FETCHING.
@@ -261,12 +261,26 @@ export async function registerSourceResource(
 // components the human approved it for, so it can persist WHY this run
 // selected it. Nothing else changes — coverage is read from the same row
 // that was already being filtered on.
+// D-156 — the resolver ALREADY answered "what authority does this url
+// carry", and this function already refused every resource without a
+// routeClass. It then dropped the answer on the floor, so the only thing
+// downstream could route by was the human list of componentKeys.
+//
+// Returning it changes no eligibility rule and grants no authority: it is
+// the resolver s answer, carried instead of recomputed. Deciding what a
+// component may be established BY remains entirely the reconciler s.
+export interface EligibleSourceResource extends SourceResourceContent {
+  // The ACTIVE route s own class, exactly as resolveSourceRoute stated it.
+  // Non-null by construction: a null routeClass fails eligibility below.
+  routeClass: RouteClass;
+}
+
 export async function loadEligibleSourceResourcesWithCoverage(
   db: Database | Transaction,
   projectId: string,
   neededComponents: ReadonlySet<string>,
   limit: number = MAX_SOURCE_RESOURCE_SEEDS,
-): Promise<SourceResourceContent[]> {
+): Promise<EligibleSourceResource[]> {
   if (limit <= 0 || neededComponents.size === 0) return [];
 
   const rows = await db
@@ -286,7 +300,7 @@ export async function loadEligibleSourceResourcesWithCoverage(
     return at === bt ? a.id.localeCompare(b.id) : at - bt;
   });
 
-  const out: SourceResourceContent[] = [];
+  const out: EligibleSourceResource[] = [];
   for (const row of ordered) {
     if (out.length >= limit) break;
     const content = readSourceResourceContent(row.content);
@@ -296,7 +310,7 @@ export async function loadEligibleSourceResourcesWithCoverage(
     const resolved = await resolveSourceRoute(db, projectId, content.canonicalUrl);
     if (resolved.officiality !== "CONFIRMED" || resolved.routeClass === null) continue;
 
-    out.push(content);
+    out.push({ ...content, routeClass: resolved.routeClass });
   }
   return out;
 }
