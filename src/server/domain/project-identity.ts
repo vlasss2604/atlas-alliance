@@ -85,6 +85,35 @@ export const projectIdentityContentSchema = z
     // Informational only — never used for matching. The catalog's own
     // projects.ticker stays the display authority.
     ticker: z.string().min(1).max(32).optional(),
+    // D-158 PHASE 1 — WHICH ON-CHAIN PROGRAM IS WHICH NAMED ACTIVITY.
+    //
+    // A project's documentation names its activities in prose ("bonding
+    // curve", "PumpSwap"). On-chain, an activity exists only as a program.
+    // Nothing in ATLAS could previously hold that correspondence, so an
+    // attributed invocation could never be tied to the activity a document
+    // names.
+    //
+    // HUMAN-CONFIRMED, exactly like tokenAddress and like SOURCE_ROUTE.
+    // This record is written only through the confirmation path; no
+    // extraction output, no document and no model can add or alter an
+    // entry. `activity` is a free label because it is only ever DISPLAYED
+    // and compared to itself — matching is on the programId, which is the
+    // globally unique half.
+    //
+    // Optional and bounded. A project with no confirmed programs simply has
+    // none, and an absent list is never read as "no such program exists on
+    // chain".
+    programs: z
+      .array(
+        z
+          .object({
+            activity: z.string().min(1).max(64),
+            programId: z.string().min(1).max(120),
+          })
+          .strict(),
+      )
+      .max(16)
+      .optional(),
   })
   .strict();
 
@@ -98,10 +127,23 @@ export function addressShapeMatchesChain(chain: SupportedChain, address: string)
   return EVM_ADDRESS.test(address);
 }
 
+export interface ConfirmedProgram {
+  activity: string;
+  programId: string;
+}
+
 export interface ConfirmedProjectIdentity {
   chain: SupportedChain;
   tokenAddress: string | null;
   ticker: string | null;
+  // OPTIONAL, AND THE DIFFERENCE MATTERS — the same distinction
+  // rawInstructions draws. parseProjectIdentity ALWAYS sets it, so an
+  // identity that came from a stored record carries [] when a human
+  // confirmed no programs. Absent belongs only to an identity assembled
+  // by hand in a script or fixture, which has made no statement about
+  // programs at all. A consumer must read absent as "not stated", never
+  // as "none exist on chain".
+  programs?: ConfirmedProgram[];
 }
 
 // Parses a stored PROJECT_IDENTITY content blob. Returns null for
@@ -112,9 +154,19 @@ export interface ConfirmedProjectIdentity {
 export function parseProjectIdentity(content: unknown): ConfirmedProjectIdentity | null {
   const parsed = projectIdentityContentSchema.safeParse(content);
   if (!parsed.success) return null;
-  const { chain, tokenAddress, ticker } = parsed.data;
+  const { chain, tokenAddress, ticker, programs } = parsed.data;
   if (tokenAddress && !addressShapeMatchesChain(chain, tokenAddress)) return null;
-  return { chain, tokenAddress: tokenAddress ?? null, ticker: ticker ?? null };
+  // A program id that is not a valid address ON THIS CHAIN makes the whole
+  // record unusable, exactly as a mismatched tokenAddress does. Dropping
+  // only the bad entry would leave a record that looks fully confirmed
+  // while quietly having lost part of what a human approved.
+  if (programs?.some((e) => !addressShapeMatchesChain(chain, e.programId))) return null;
+  return {
+    chain,
+    tokenAddress: tokenAddress ?? null,
+    ticker: ticker ?? null,
+    programs: programs ? programs.map((e) => ({ ...e })) : [],
+  };
 }
 
 // The explorer hosts ATLAS may address for a confirmed identity. Empty

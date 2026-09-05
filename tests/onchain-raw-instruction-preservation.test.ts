@@ -320,9 +320,25 @@ describe("6. nothing here assigns meaning", () => {
   it("the preserved record carries no type, name or semantics field", async () => {
     const r = await read(payload());
     const kept = (r.rawInstructions ?? [])[0];
+    // D-158 added stackHeight — a POSITION field, like inner /
+    // instructionIndex / parentIndex beside it. It says where in the CPI
+    // stack the instruction ran, never what it did.
     expect(Object.keys(kept).sort()).toEqual(
-      ["accounts", "data", "inner", "instructionIndex", "parentIndex", "programId"].sort(),
+      [
+        "accounts",
+        "data",
+        "inner",
+        "instructionIndex",
+        "parentIndex",
+        "programId",
+        "stackHeight",
+      ].sort(),
     );
+    // The invariant this test exists for, asserted directly rather than
+    // only through the exact key list: no key here may name a meaning.
+    for (const forbidden of ["type", "name", "semantics", "kind", "method", "purpose"]) {
+      expect(Object.keys(kept)).not.toContain(forbidden);
+    }
   });
 
   it("no burn, transfer or any decoded semantics is invented from an opaque blob", async () => {

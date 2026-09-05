@@ -1,5 +1,4 @@
-import { createHash } from "node:crypto";
-
+import { discriminator } from "./onchain-instruction-registry";
 import { resolveOwnership, type ResolvedOwner } from "./onchain-transaction-flow";
 import type { TransactionDetailResult } from "./providers/onchain-types";
 
@@ -32,9 +31,11 @@ import type { TransactionDetailResult } from "./providers/onchain-types";
 // implements any published policy, not that it was a market-wide purchase.
 // Those are separate bridges and this module cannot see them.
 
-function discriminator(preimage: string): Buffer {
-  return createHash("sha256").update(preimage).digest().subarray(0, 8);
-}
+// DERIVATION LIVES IN onchain-instruction-registry.ts NOW. Imported, not
+// re-declared: one sha256("global:<method>") rule in the codebase means the
+// registry and this decoder cannot drift into disagreeing about what a
+// method name hashes to. Behaviour here is unchanged — same function, same
+// call sites, same constants.
 
 // The venue instruction this module can read. Program-specific by
 // necessity — a discriminator only means anything under the program that

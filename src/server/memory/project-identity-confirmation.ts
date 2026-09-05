@@ -42,11 +42,23 @@ export type IdentityConfirmationRefusal =
   | "EMPTY_TOKEN"
   | "TOKEN_SHAPE_MISMATCH"
   | "TICKER_TOO_LONG"
+  // D-158 — a confirmed activity->program entry that is unusable. Refused
+  // whole rather than partially admitted: a half-accepted program list
+  // would look confirmed while missing what the human actually approved.
+  | "EMPTY_PROGRAM_ACTIVITY"
+  | "EMPTY_PROGRAM_ID"
+  | "PROGRAM_SHAPE_MISMATCH"
+  | "DUPLICATE_PROGRAM_ACTIVITY"
+  | "TOO_MANY_PROGRAMS"
   | "REJECTED_BY_SCHEMA"
   // One ACTIVE identity already exists. Never superseded automatically —
   // see the note on the guard below for why even an identical one is
   // refused rather than duplicated.
   | "ACTIVE_IDENTITY_EXISTS";
+
+// Bounded on purpose. A project's revenue-bearing programs are a short
+// list; an unbounded one would be a contract registry, which this is not.
+export const MAX_CONFIRMED_PROGRAMS = 16;
 
 export interface IdentityConfirmationInput {
   projectSlug: string;
@@ -56,6 +68,12 @@ export interface IdentityConfirmationInput {
   // incomplete one.
   tokenAddress?: string;
   ticker?: string;
+  // D-158 — human-confirmed activity -> on-chain program mapping. The ONLY
+  // way an entry reaches the record: this function is called from the
+  // owner confirmation path, and no extraction output, document or model
+  // can invoke it. Absent means the human confirmed no programs, which is
+  // a legitimate identity, not an incomplete one.
+  programs?: { activity: string; programId: string }[];
 }
 
 export type IdentityConfirmationResult =
@@ -69,7 +87,12 @@ export type IdentityConfirmationResult =
       ok: true;
       itemId: string;
       projectId: string;
-      content: { chain: SupportedChain; tokenAddress?: string; ticker?: string };
+      content: {
+      chain: SupportedChain;
+      tokenAddress?: string;
+      ticker?: string;
+      programs?: { activity: string; programId: string }[];
+    };
       resolved: ConfirmedProjectIdentity | null;
     };
 
@@ -82,7 +105,12 @@ function isSupportedChain(v: string): v is SupportedChain {
 export function validateIdentityInput(
   input: IdentityConfirmationInput,
 ):
-  | { ok: true; content: { chain: SupportedChain; tokenAddress?: string; ticker?: string } }
+  | { ok: true; content: {
+      chain: SupportedChain;
+      tokenAddress?: string;
+      ticker?: string;
+      programs?: { activity: string; programId: string }[];
+    } }
   | { ok: false; refusal: IdentityConfirmationRefusal; detail: string } {
   const chain = input.chain.trim().toLowerCase();
   if (!isSupportedChain(chain)) {
@@ -93,7 +121,12 @@ export function validateIdentityInput(
     };
   }
 
-  const content: { chain: SupportedChain; tokenAddress?: string; ticker?: string } = { chain };
+  const content: {
+      chain: SupportedChain;
+      tokenAddress?: string;
+      ticker?: string;
+      programs?: { activity: string; programId: string }[];
+    } = { chain };
 
   if (input.tokenAddress !== undefined) {
     const token = input.tokenAddress.trim();
@@ -112,6 +145,59 @@ export function validateIdentityInput(
       };
     }
     content.tokenAddress = token;
+  }
+
+  if (input.programs !== undefined) {
+    if (input.programs.length > MAX_CONFIRMED_PROGRAMS) {
+      return {
+        ok: false,
+        refusal: "TOO_MANY_PROGRAMS",
+        detail: `at most ${MAX_CONFIRMED_PROGRAMS} programs may be confirmed at once`,
+      };
+    }
+    const entries: { activity: string; programId: string }[] = [];
+    const seen = new Set();
+    for (const raw of input.programs) {
+      const activity = raw.activity.trim();
+      if (activity.length === 0 || activity.length > 64) {
+        return {
+          ok: false,
+          refusal: "EMPTY_PROGRAM_ACTIVITY",
+          detail: "each program activity must be 1..64 characters",
+        };
+      }
+      const programId = raw.programId.trim();
+      if (programId.length === 0) {
+        return {
+          ok: false,
+          refusal: "EMPTY_PROGRAM_ID",
+          detail: `program for activity "${activity}" was given but is empty`,
+        };
+      }
+      // THE SAME CHECK tokenAddress GETS, and for the same reason: an
+      // address that cannot belong to this chain is not a program on it.
+      if (!addressShapeMatchesChain(chain, programId)) {
+        return {
+          ok: false,
+          refusal: "PROGRAM_SHAPE_MISMATCH",
+          detail: `program id for activity "${activity}" is not a valid ${chain} address`,
+        };
+      }
+      // One program per activity label. Two entries claiming the same
+      // activity would make "which program is PumpSwap" ambiguous, and a
+      // silent last-wins would decide it invisibly.
+      const key = activity.toLowerCase();
+      if (seen.has(key)) {
+        return {
+          ok: false,
+          refusal: "DUPLICATE_PROGRAM_ACTIVITY",
+          detail: `activity "${activity}" was given more than once`,
+        };
+      }
+      seen.add(key);
+      entries.push({ activity, programId });
+    }
+    if (entries.length > 0) content.programs = entries;
   }
 
   if (input.ticker !== undefined) {

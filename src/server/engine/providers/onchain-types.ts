@@ -228,6 +228,22 @@ export interface BurnInstructionRef {
   // not carry them, and must not be made to look as though it did.
   instructionIndex?: number;
   parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
 }
 
 // ONE parsed SPL Token instruction, of a kind this adapter recognises.
@@ -267,6 +283,22 @@ export interface TokenInstructionRef {
   // not carry them, and must not be made to look as though it did.
   instructionIndex?: number;
   parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
 }
 
 // A token balance as the RPC reported it, before or after execution.
@@ -464,6 +496,22 @@ export interface AccountLifecycleRef {
   // not carry them, and must not be made to look as though it did.
   instructionIndex?: number;
   parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
 }
 
 // AN INSTRUCTION THIS ADAPTER CANNOT READ, KEPT ANYWAY.
@@ -509,4 +557,20 @@ export interface RawInstructionRef {
   // not carry them, and must not be made to look as though it did.
   instructionIndex?: number;
   parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
 }

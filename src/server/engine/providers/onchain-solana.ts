@@ -252,6 +252,10 @@ const tokenAccountsByOwnerSchema = contextual(
 // decoded now or only preserved for later.
 const parsedInstructionSchema = z.object({
   programId: z.string().optional(),
+  // The node reports CPI depth on inner instructions (1 for top-level on
+  // nodes that report it at all). Accepted where present and carried
+  // through untouched; never synthesised when the node omits it.
+  stackHeight: z.number().int().min(1).nullable().optional(),
   parsed: z
     .object({
       type: z.string().optional(),
@@ -336,6 +340,9 @@ interface InstructionPosition {
   inner: boolean;
   instructionIndex: number;
   parentIndex: number | null;
+  // Null when the node did not report it. Distinct from "1": a missing
+  // depth is unknown, not top-level.
+  stackHeight: number | null;
 }
 
 // The SPL Token instruction types this adapter recognises. A closed set:
@@ -618,9 +625,22 @@ function decodeBurnInstruction(
 function positionOf(pos: InstructionPosition | undefined): {
   instructionIndex?: number;
   parentIndex?: number | null;
+  stackHeight?: number | null;
 } {
   if (pos === undefined) return {};
-  return { instructionIndex: pos.instructionIndex, parentIndex: pos.parentIndex };
+  return {
+    instructionIndex: pos.instructionIndex,
+    parentIndex: pos.parentIndex,
+    stackHeight: pos.stackHeight,
+  };
+}
+
+// The node own depth, or null. Read through the same schema every other
+// field goes through, so a malformed value yields null rather than a cast.
+function stackHeightOf(raw: unknown): number | null {
+  const parsed = parsedInstructionSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  return parsed.data.stackHeight ?? null;
 }
 
 // PRESERVATION, NOT DECODING.
@@ -660,6 +680,7 @@ function decodeRawInstruction(
     inner: pos.inner,
     instructionIndex: pos.instructionIndex,
     parentIndex: pos.parentIndex,
+    stackHeight: pos.stackHeight,
   };
 }
 
@@ -864,7 +885,15 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
           .slice(0, MAX_TX_INSTRUCTIONS)
           .map((ix, i) => ({
             raw: ix,
-            pos: { inner: false, instructionIndex: i, parentIndex: null },
+            pos: {
+              inner: false,
+              instructionIndex: i,
+              parentIndex: null,
+              // A top-level instruction is depth 1 by definition. The
+              // node value is preferred where present so a disagreement
+              // is never papered over by our own assumption.
+              stackHeight: stackHeightOf(ix) ?? 1,
+            },
           }));
       const innerPositioned: { raw: unknown; pos: InstructionPosition }[] = [];
       for (const group of parsed.meta?.innerInstructions ?? []) {
@@ -874,7 +903,14 @@ function normalize(intent: OnchainIntent, raw: unknown): { result: OnchainResult
         group.instructions.forEach((ix, i) => {
           innerPositioned.push({
             raw: ix,
-            pos: { inner: true, instructionIndex: i, parentIndex },
+            pos: {
+              inner: true,
+              instructionIndex: i,
+              parentIndex,
+              // Never defaulted. An inner instruction whose depth the node
+              // omitted stays unknown, and attribution refuses it.
+              stackHeight: stackHeightOf(ix),
+            },
           });
         });
       }
