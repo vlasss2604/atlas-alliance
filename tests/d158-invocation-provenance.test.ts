@@ -434,6 +434,49 @@ describe("D-158 §5 — confirmed identity is the only route to a program mappin
     ).toBeNull();
   });
 
+  it("D-158 PHASE 2: a confirmed activity may carry human-confirmed aliases", () => {
+    // Aliases exist so a literal activity binding can survive a document
+    // that spells the activity differently. They are stored exactly as
+    // given and nothing derives them.
+    const id = parseProjectIdentity({
+      chain: "solana",
+      tokenAddress: MINT,
+      programs: [{ activity: "PumpSwap", programId: RAYDIUM_CLMM, aliases: ["Pump AMM"] }],
+    });
+    expect(id).not.toBeNull();
+    expect(id!.programs).toEqual([
+      { activity: "PumpSwap", programId: RAYDIUM_CLMM, aliases: ["Pump AMM"] },
+    ]);
+  });
+
+  it("aliases are optional, and their absence is not an empty list", () => {
+    const id = parseProjectIdentity({
+      chain: "solana",
+      tokenAddress: MINT,
+      programs: [{ activity: "PumpSwap", programId: RAYDIUM_CLMM }],
+    });
+    expect(id!.programs![0].aliases).toBeUndefined();
+  });
+
+  it("an alias of the wrong shape makes the whole record unusable", () => {
+    // Same rule the rest of the contract follows: a record that is partly
+    // wrong confers no identity, rather than a quietly trimmed one.
+    expect(
+      parseProjectIdentity({
+        chain: "solana",
+        tokenAddress: MINT,
+        programs: [{ activity: "PumpSwap", programId: RAYDIUM_CLMM, aliases: [""] }],
+      }),
+    ).toBeNull();
+    expect(
+      parseProjectIdentity({
+        chain: "solana",
+        tokenAddress: MINT,
+        programs: [{ activity: "PumpSwap", programId: RAYDIUM_CLMM, aliases: "Pump AMM" }],
+      }),
+    ).toBeNull();
+  });
+
   it("an unknown extra field is still rejected by the strict contract", () => {
     expect(
       parseProjectIdentity({ chain: "solana", tokenAddress: MINT, invented: true }),
@@ -442,21 +485,33 @@ describe("D-158 §5 — confirmed identity is the only route to a program mappin
 });
 
 describe("D-158 §6 — this phase creates observations, not conclusions", () => {
-  it("TEST 12: no reducer, Pattern or component code consumes the provenance capability", async () => {
+  it("TEST 12: the derivation stays out of the modules that decide meaning", async () => {
     const fs = await import("node:fs/promises");
-    // The capability must be reachable from nothing that decides a status.
+    // D-158 PHASE 2 SUPERSEDES THE PHASE 1 FORM OF THIS TEST. Phase 1
+    // asserted the capability was consumed by nothing at all, which was
+    // true while it was inert. Phase 2 deliberately connects it: on-chain
+    // synthesis derives it, and the reducer reads the persisted metadata
+    // through a structural obligation.
+    //
+    // What must STILL hold, and is what this test now protects: the
+    // modules that assign MEANING never call the derivation themselves.
+    // The reducer reads a persisted, machine-owned column; it does not
+    // reach back into raw RPC artifacts, which would be a second and
+    // hidden proof path beside Evidence.
     for (const file of [
       "src/server/engine/component-reconciler.ts",
       "src/server/domain/pattern.ts",
-      "src/server/engine/onchain-facts.ts",
       "src/server/engine/claim-evaluator.ts",
       "src/server/engine/mechanism-assembler.ts",
     ]) {
       const src = await fs.readFile(file, "utf-8");
-      expect(src).not.toContain("onchain-invocation-provenance");
-      expect(src).not.toContain("deriveTransferProvenance");
-      expect(src).not.toContain("attributeCaller");
+      expect(src, file).not.toContain("deriveTransferProvenance");
+      expect(src, file).not.toContain("attributeCaller");
+      expect(src, file).not.toContain("inflowsTo");
     }
+    // The one module that DOES derive it is the deterministic synthesis.
+    const facts = await fs.readFile("src/server/engine/onchain-facts.ts", "utf-8");
+    expect(facts).toContain("deriveTransferProvenance");
   });
 
   it("no synthesized fact kind was added for this capability", async () => {

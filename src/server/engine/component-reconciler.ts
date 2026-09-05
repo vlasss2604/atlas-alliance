@@ -3,6 +3,9 @@ import {
   onchainFactAppliesToComponent,
   type OnchainFactKind,
 } from "./onchain-facts";
+import type { ConfirmedProjectIdentity } from "../domain/project-identity";
+import type { EvidenceProvenanceMetadata } from "./onchain-invocation-provenance";
+import { evaluateStructuralObligations } from "./structural-obligation";
 import type { EvidenceSourceClass } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import { normalizeMechanismState, type MechanismState } from "../domain/mechanism-state";
@@ -61,6 +64,10 @@ export type ResultReasonCode =
   | "MISSING_CURRENT_STATE"
   | "STALE_CURRENT_STATE"
   | "INSUFFICIENT_AUTHORITY"
+  // D-158 PHASE 2 — a REQUIRED structural obligation is unmet. Machine
+  // readable, and it names the boundary rather than the row: the component
+  // has documentary support and lacks machine-owned causal provenance.
+  | "MECHANICAL_PROVENANCE_NOT_ESTABLISHED"
   | "INDIRECT_ONLY"
   | "STATE_NOT_FULLY_LIVE"
   | "CONFLICTING_STATE"
@@ -117,6 +124,16 @@ export interface EvidenceRow {
   // model-extracted). Null is read as absence of typed supply semantics,
   // never as permission.
   onchainFactKind: OnchainFactKind | null;
+  // D-158 PHASE 2 — machine-owned invocation provenance, null on every row
+  // that is not a deterministic chain observation of an attributable
+  // transfer. Read ONLY by structural obligations, never by the ordinary
+  // establishment path.
+  // Optional so a row built before this field existed, or by a fixture
+  // that makes no statement about provenance, stays valid. Absent and null
+  // are read identically HERE — both mean "no machine-owned provenance" —
+  // because an obligation requiring provenance is unmet either way, and no
+  // reading of absence can be permissive.
+  onchainProvenance?: EvidenceProvenanceMetadata | null;
   fetchedAt: Date;
   publishedAt: Date | null;
   extractionUnitKey: string | null;
@@ -149,6 +166,8 @@ export interface ComponentRequirements {
   freshnessClass: "LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE";
   tokenStateSensitive: boolean;
   requiredTokenState: string | null;
+  // D-158 PHASE 2 — absent/empty preserves pre-obligation behaviour exactly.
+  structuralObligations?: readonly string[];
 }
 
 export interface ComponentReconciliationInput {
@@ -160,6 +179,10 @@ export interface ComponentReconciliationInput {
   item: Pick<ComponentWorkItem, "step" | "component">;
   requirements: ComponentRequirements;
   evidence: EvidenceRow[];
+  // D-158 PHASE 2 — code-owned context for structural obligations. Absent
+  // is treated as "no confirmed identity", which makes an identity-
+  // dependent obligation unmet rather than skipped.
+  confirmedIdentity?: ConfirmedProjectIdentity | null;
   now: Date;
   freshnessPolicyDays: Record<"LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE", number>;
 }
@@ -852,6 +875,69 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       currentState = v.normalizedState;
       temporalBasis = v.temporalBasis ? { basisField: v.temporalBasis.basisField, at: v.temporalBasis.at.toISOString() } : null;
     }
+  }
+
+  // D-158 PHASE 2 — STRUCTURAL OBLIGATIONS.
+  //
+  // Evaluated only on the path where establishing evidence exists, so a
+  // component with none stays INSUFFICIENT_EVIDENCE (returned far above)
+  // rather than being reported as "partially supported, obligation unmet"
+  // when there is nothing to partially support.
+  //
+  // SUBTRACTIVE ONLY. An unmet obligation pushes a reason code and the
+  // existing line below turns that into PARTIALLY_SUPPORTED. A MET
+  // obligation adds nothing — it cannot create support, raise authority,
+  // change a class, or rescue a row the ordinary rules excluded.
+  //
+  // Reads a deliberately narrow view of each row: the code-owned axes
+  // only. Nothing model-authored is passed in, which is why a mislabelled
+  // documentary row cannot satisfy one.
+  //
+  // THE POOL IS NOT `establishing`, AND THAT IS THE POINT.
+  //
+  // An obligation is a required MACHINE-OWNED CONDITION over the persisted
+  // Evidence pool, not an ordinary establishing relationship. The two
+  // answer different questions: establishment asks whether a row may SPEAK
+  // FOR the component, an obligation asks whether the machine-owned record
+  // shows a required structural fact.
+  //
+  // Reading only `establishing` conflated them, and the cost was concrete:
+  // a deterministic chain observation is emitted as CONTEXT because
+  // movement is not a mechanism — a correct rule, unchanged here — so the
+  // one row that CARRIES machine-owned provenance was never looked at, and
+  // the obligation could not be satisfied by any real transaction. The
+  // alternative fixes were to call movement SUPPORTS or to raise on-chain
+  // officiality, both of which weaken a semantics that is right.
+  //
+  // The pool is therefore every row that survived the HARD scope
+  // exclusions — right job, right component — with the obligation's own
+  // machine-owned conditions as the only further filter. Ordinary support
+  // is untouched: nothing below re-reads this set, a row that satisfies an
+  // obligation does not become SUPPORTS, does not enter `establishing`,
+  // never becomes `bestEstablishing`, and so cannot move authority.
+  //
+  // Each row also carries THIS reducer's own verdict on it — whether the
+  // ordinary rules made it establishing — and its literal retrieved
+  // passage. An obligation may need to know that the support it is
+  // qualifying is the support that actually carries the component, and may
+  // search that passage for names a human confirmed. It still cannot read
+  // `statement`, `summary` or any other prose the model wrote, and the
+  // flag is READ-ONLY in the other direction: an obligation is told what
+  // establishes, and can never make something establish.
+  const establishingIds = new Set(establishing.map((r) => r.id));
+  for (const unmet of evaluateStructuralObligations(
+    requirements.structuralObligations,
+    survivingAfterHard.map((r) => ({
+      sourceClass: r.sourceClass,
+      officiality: r.officiality,
+      entityBinding: r.entityBinding,
+      onchainProvenance: r.onchainProvenance ?? null,
+      establishesComponent: establishingIds.has(r.id),
+      supportFragment: r.fragment ?? null,
+    })),
+    { confirmedIdentity: input.confirmedIdentity ?? null },
+  )) {
+    reasonCodes.push(unmet.reason);
   }
 
   const status: ComponentReconciliationStatus = reasonCodes.length > 0 ? "PARTIALLY_SUPPORTED" : "SUPPORTED";

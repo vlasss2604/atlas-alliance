@@ -238,7 +238,12 @@ describe("decoding is not interpretation", () => {
       }),
     );
     expect(r.burns).toEqual([]);
-    expect(synthesizeOnchainFacts(
+    // D-158 PHASE 2 — an attributable transfer now also yields a
+    // TOKEN_TRANSFER/NATIVE_TRANSFER fact carrying its invocation
+    // provenance. The invariant this test exists for is unchanged and is
+    // now asserted directly: NO BURN FACT is created from a transfer,
+    // however the destination is named.
+    const synthesized = synthesizeOnchainFacts(
       await adapterWith(
         tx({
           instructions: [
@@ -247,7 +252,11 @@ describe("decoding is not interpretation", () => {
         }),
       ).retrieve(intent),
       { step: 6, component: "DESTINATION" },
-    )).toEqual([]);
+    );
+    expect(synthesized.filter((f) => f.onchainFactKind === "BURN")).toEqual([]);
+    for (const f of synthesized) {
+      expect(f.relationship).toBe("CONTEXT");
+    }
   });
 
   it("a genuine Burn IS reported, with its exact amount", async () => {

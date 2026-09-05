@@ -302,6 +302,13 @@
       "when": 1788116400000,
       "tag": "0042_onchain_fact_kind",
       "breakpoints": true
+    },
+    {
+      "idx": 43,
+      "version": "7",
+      "when": 1788289200000,
+      "tag": "0043_evidence_onchain_provenance",
+      "breakpoints": true
     }
   ]
 }

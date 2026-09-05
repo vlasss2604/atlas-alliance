@@ -81,6 +81,11 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // applies normally.
   ALL_EVIDENCE_EXCLUDED: null,
   MISSING_EXECUTION_EVIDENCE: CONFIDENCE_BANDS.LIMITED,
+  // D-158 PHASE 2 — MISSING STRUCTURE, like the two B1 codes below rather
+  // than like weak authority. The component has documentary support and
+  // lacks machine-owned causal provenance, so what is absent is a proof
+  // step, not a stronger source for one already taken.
+  MECHANICAL_PROVENANCE_NOT_ESTABLISHED: CONFIDENCE_BANDS.LIMITED,
   // B1 — both are MISSING STRUCTURE, not weak authority, so both sit with
   // the other missing-structure caps rather than with INSUFFICIENT_AUTHORITY.
   //

@@ -461,7 +461,16 @@ describe("SPL burn decoding", () => {
     ).retrieve(burnIntent);
     const r = artifact.result as { kind: "TRANSACTION_DETAIL"; burns: unknown[] };
     expect(r.burns).toEqual([]);
-    expect(synthesizeOnchainFacts(artifact, { step: 7, component: "NET_EFFECT" })).toEqual([]);
+    // D-158 PHASE 2 — an attributable transfer now also yields a
+    // TOKEN_TRANSFER/NATIVE_TRANSFER fact carrying its invocation
+    // provenance. The invariant this test exists for is unchanged and is
+    // now asserted directly: NO BURN FACT is created from a transfer,
+    // however the destination is named.
+    const synthesized = synthesizeOnchainFacts(artifact, { step: 7, component: "NET_EFFECT" });
+    expect(synthesized.filter((f) => f.onchainFactKind === "BURN")).toEqual([]);
+    for (const f of synthesized) {
+      expect(f.relationship).toBe("CONTEXT");
+    }
   });
 
   it("a burn instruction from a non-SPL program is not a burn", async () => {

@@ -735,6 +735,11 @@ export async function persistOnchainArtifactAndFacts(input: {
         // can reach this value — the guarantee is structural, not a rule
         // this insert is trusted to follow.
         onchainFactKind: fact.onchainFactKind,
+        // D-158 PHASE 2 — machine-owned invocation provenance, present only
+        // on a fact derived from an attributable transfer. Sourced from the
+        // synthesized fact, which derived it from node-reported CPI
+        // structure; there is no path from model output to this column.
+        onchainProvenance: fact.onchainProvenance ?? null,
         patternStep: fact.step,
         component: fact.component,
         relationship: fact.relationship,

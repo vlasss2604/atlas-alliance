@@ -93,6 +93,17 @@ const componentRequirementsEntrySchema = z.object({
   // infers it. null = equality not established by Pattern data (the
   // common case for Pattern v1, which is not query-specific).
   requiredTokenState: z.string().min(1).nullable(),
+  // D-158 PHASE 2 — REQUIRED structural obligations for this component.
+  //
+  // Absent or empty means the component behaves exactly as it did before
+  // obligations existed: admissible class + polarity + directness + the
+  // §6 gates, and nothing further. That is the backward-compatibility
+  // contract, and every component but SOURCE_OF_VALUE relies on it in
+  // Pattern v1.
+  //
+  // Each id names a code-owned predicate over MACHINE-OWNED Evidence
+  // fields. A component cannot reach SUPPORTED while one is unmet.
+  structuralObligations: z.array(z.string().min(1)).max(4).optional(),
   // ACQUISITION MINIMUM SAFE V1 (A) — the evidential PROPOSITION this
   // component must resolve, in one human-authored sentence.
   //
@@ -335,6 +346,19 @@ export const PATTERN_V1_CONTENT: PatternContent = {
   // invented here.
   componentRequirements: {
     SOURCE_OF_VALUE: {
+      // D-158 PHASE 2 — THE ONE COMPONENT CARRYING A CAUSAL OBLIGATION.
+      //
+      // Its evidenceGoal asks for the economic activity that PRODUCES the
+      // cash flow, and a live run established it from four documentary
+      // sentences about how revenue is ALLOCATED. Class, polarity and
+      // directness cannot separate those two propositions; a machine-owned
+      // provenance requirement can.
+      //
+      // establishingClasses is UNCHANGED — documentary evidence is still
+      // admitted, and still says what the project claims its source is.
+      // What it can no longer do is carry the component to full support on
+      // its own.
+      structuralObligations: ["SOV.MECHANICAL_PROVENANCE"],
       establishingClasses: ["OFFICIAL_DOCS", "GOVERNANCE", "ONCHAIN_VERIFIABLE"],
       requiresCurrentState: false,
       requiresLiveMechanismState: false,

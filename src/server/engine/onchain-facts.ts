@@ -1,3 +1,8 @@
+import {
+  deriveTransferProvenance,
+  toEvidenceProvenance,
+  type EvidenceProvenanceMetadata,
+} from "./onchain-invocation-provenance";
 import type { ExtractedFact } from "./providers/types";
 import type { OnchainArtifact } from "./providers/onchain-types";
 import {
@@ -256,7 +261,14 @@ export function applicableFactKindsForComponent(component: string): readonly Onc
 
 // A deterministic fact plus the kind it was synthesized as. Separate from
 // ExtractedFact so the model's shape is untouched and cannot carry a kind.
-export type SynthesizedFact = ExtractedFact & { onchainFactKind: OnchainFactKind };
+export type SynthesizedFact = ExtractedFact & {
+  onchainFactKind: OnchainFactKind;
+  // D-158 PHASE 2 — present only on a fact derived from an ATTRIBUTABLE
+  // transfer. Absent everywhere else, including on facts about the same
+  // transaction, because absence of attribution is not attribution to
+  // nobody.
+  onchainProvenance?: EvidenceProvenanceMetadata;
+};
 
 // A fact is only worth synthesizing when the component it is offered for
 // can actually be established by ONCHAIN_VERIFIABLE — that check belongs
@@ -642,6 +654,78 @@ export function synthesizeOnchainFacts(
             { relationship: "CONTEXT" },
           ),
         );
+      }
+
+      // D-158 PHASE 2 — ATTRIBUTED TRANSFERS, WITH THEIR PROVENANCE.
+      //
+      // Reuses the EXISTING TOKEN_TRANSFER / NATIVE_TRANSFER kinds rather
+      // than introducing one: these are the same kind of observation the
+      // reciprocal-flow path already emits, differing only in carrying the
+      // invoking program alongside the movement.
+      //
+      // ONLY ATTRIBUTABLE ONES. A transfer whose caller the CPI structure
+      // does not prove produces no fact here — the refusal is a gap in what
+      // can be shown, and manufacturing a provenance-less row would invite
+      // exactly the co-occurrence reading this work exists to remove.
+      //
+      // relationship CONTEXT, like every other transfer fact: a movement is
+      // never self-establishing. What makes it usable is a structural
+      // obligation reading its machine-owned metadata, not its prose.
+      //
+      // DEDUPED BY MOVEMENT IDENTITY, not by serialized text. The
+      // reciprocal-flow path above already reports its two legs, and the
+      // same movement described twice — once with provenance, once without
+      // — would read as two transfers where the chain shows one.
+      //
+      // A movement is identified by where it landed, how much, and of what.
+      // That is what makes two descriptions the same event.
+      const movementKey = (
+        to: string | null,
+        amountRaw: string | null,
+        mint: string | null,
+      ): string => `${to ?? "?"}|${amountRaw ?? "?"}|${mint ?? "NATIVE_SOL"}`;
+      const covered = new Set<string>();
+      for (const flow of deriveReciprocalAssetFlows(r, artifact.provenance.projectAnchor)) {
+        for (const leg of [flow.outbound, flow.inbound]) {
+          covered.add(movementKey(leg.to, leg.amountRaw, leg.mint));
+          if (leg.via) {
+            covered.add(
+              movementKey(leg.via.onward.to, leg.via.onward.amountRaw, leg.via.onward.mint),
+            );
+            covered.add(movementKey(leg.via.account, leg.amountRaw, leg.mint));
+          }
+        }
+      }
+      for (const transfer of deriveTransferProvenance(r)) {
+        if (transfer.attribution === null) continue;
+        const provenance = toEvidenceProvenance(transfer);
+        const key = movementKey(transfer.destination, transfer.amountRaw, provenance.mint);
+        if (covered.has(key)) continue;
+        covered.add(key);
+        const fragment = JSON.stringify({
+          signature: transfer.signature,
+          slot: transfer.slot,
+          provenance,
+        });
+        const native = transfer.asset.kind === "NATIVE_SOL";
+        facts.push({
+          ...fact(
+            target,
+            native ? "NATIVE_TRANSFER" : "TOKEN_TRANSFER",
+            `Transaction ${transfer.signature} (slot ${transfer.slot}) moved ` +
+              `${transfer.amountRaw ?? "an unstated amount"} ` +
+              `${native ? "lamports of native SOL" : `raw units of mint ${provenance.mint ?? "unstated"}`} ` +
+              `into ${transfer.destination ?? "an unstated account"}, in an instruction invoked by program ` +
+              `${transfer.attribution.callerProgramId ?? "the transaction signer"}` +
+              `${transfer.callerMethod === null ? "" : ` whose method decodes as ${transfer.callerMethod}`}.`,
+            fragment,
+            native
+              ? ONCHAIN_DOES_NOT_PROVE.NATIVE_TRANSFER
+              : ONCHAIN_DOES_NOT_PROVE.TOKEN_TRANSFER,
+            { relationship: "CONTEXT" },
+          ),
+          onchainProvenance: provenance,
+        });
       }
 
       return facts;

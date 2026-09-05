@@ -227,6 +227,13 @@ export const evidence = pgTable(
     publishedAt: timestamp("published_at", { withTimezone: true }),
     // Мост к кандидату памяти без повторного разбора (§6.2); nullable —
     // не каждое Evidence метит claim заранее известного словаря.
+    // D-158 PHASE 2 — machine-owned invocation provenance for a
+    // deterministic on-chain observation. NULL on every documentary,
+    // data-provider and model-extracted row, and null is never read as
+    // permissive: an obligation that requires provenance is unmet without
+    // it. Written only by the on-chain synthesis path; no extraction
+    // output can reach this column.
+    onchainProvenance: jsonb("onchain_provenance"),
     claimKey: text("claim_key"),
     // Канонический словарь (D-044): LOW_CHANGE/MEDIUM_CHANGE/HIGH_CHANGE —
     // приведено миграцией 0006 с прежнего текстового CHECK ('LOW'/'MEDIUM'/

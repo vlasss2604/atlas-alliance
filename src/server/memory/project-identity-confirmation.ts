@@ -50,6 +50,9 @@ export type IdentityConfirmationRefusal =
   | "PROGRAM_SHAPE_MISMATCH"
   | "DUPLICATE_PROGRAM_ACTIVITY"
   | "TOO_MANY_PROGRAMS"
+  | "EMPTY_PROGRAM_ALIAS"
+  | "TOO_MANY_PROGRAM_ALIASES"
+  | "DUPLICATE_PROGRAM_ALIAS"
   | "REJECTED_BY_SCHEMA"
   // One ACTIVE identity already exists. Never superseded automatically —
   // see the note on the guard below for why even an identical one is
@@ -59,6 +62,11 @@ export type IdentityConfirmationRefusal =
 // Bounded on purpose. A project's revenue-bearing programs are a short
 // list; an unbounded one would be a contract registry, which this is not.
 export const MAX_CONFIRMED_PROGRAMS = 16;
+
+// D-158 PHASE 2 — aliases are a small human convenience, not a dictionary.
+// A handful of names a human vouched for; anything longer is a sign the
+// activity itself is wrong rather than under-named.
+export const MAX_PROGRAM_ALIASES = 8;
 
 export interface IdentityConfirmationInput {
   projectSlug: string;
@@ -73,7 +81,7 @@ export interface IdentityConfirmationInput {
   // owner confirmation path, and no extraction output, document or model
   // can invoke it. Absent means the human confirmed no programs, which is
   // a legitimate identity, not an incomplete one.
-  programs?: { activity: string; programId: string }[];
+  programs?: { activity: string; programId: string; aliases?: string[] }[];
 }
 
 export type IdentityConfirmationResult =
@@ -91,7 +99,7 @@ export type IdentityConfirmationResult =
       chain: SupportedChain;
       tokenAddress?: string;
       ticker?: string;
-      programs?: { activity: string; programId: string }[];
+      programs?: { activity: string; programId: string; aliases?: string[] }[];
     };
       resolved: ConfirmedProjectIdentity | null;
     };
@@ -109,7 +117,7 @@ export function validateIdentityInput(
       chain: SupportedChain;
       tokenAddress?: string;
       ticker?: string;
-      programs?: { activity: string; programId: string }[];
+      programs?: { activity: string; programId: string; aliases?: string[] }[];
     } }
   | { ok: false; refusal: IdentityConfirmationRefusal; detail: string } {
   const chain = input.chain.trim().toLowerCase();
@@ -125,7 +133,7 @@ export function validateIdentityInput(
       chain: SupportedChain;
       tokenAddress?: string;
       ticker?: string;
-      programs?: { activity: string; programId: string }[];
+      programs?: { activity: string; programId: string; aliases?: string[] }[];
     } = { chain };
 
   if (input.tokenAddress !== undefined) {
@@ -155,7 +163,7 @@ export function validateIdentityInput(
         detail: `at most ${MAX_CONFIRMED_PROGRAMS} programs may be confirmed at once`,
       };
     }
-    const entries: { activity: string; programId: string }[] = [];
+    const entries: { activity: string; programId: string; aliases?: string[] }[] = [];
     const seen = new Set();
     for (const raw of input.programs) {
       const activity = raw.activity.trim();
@@ -195,7 +203,53 @@ export function validateIdentityInput(
         };
       }
       seen.add(key);
-      entries.push({ activity, programId });
+
+      // ALIASES — other names for the SAME activity, each one a human
+      // statement. Validated exactly as the activity is, and never
+      // generated: nothing in this codebase derives an alias, and no model
+      // output reaches this input.
+      let aliases: string[] | undefined;
+      if (raw.aliases !== undefined) {
+        if (raw.aliases.length > MAX_PROGRAM_ALIASES) {
+          return {
+            ok: false,
+            refusal: "TOO_MANY_PROGRAM_ALIASES",
+            detail: `activity "${activity}" may carry at most ${MAX_PROGRAM_ALIASES} aliases`,
+          };
+        }
+        const cleaned: string[] = [];
+        // Collision is checked against every name already accepted for
+        // ANY activity, the activity labels included. Two activities that
+        // answer to one name would make the binding ambiguous in exactly
+        // the way one activity with two programs would.
+        for (const rawAlias of raw.aliases) {
+          const alias = rawAlias.trim();
+          if (alias.length === 0 || alias.length > 64) {
+            return {
+              ok: false,
+              refusal: "EMPTY_PROGRAM_ALIAS",
+              detail: `each alias for activity "${activity}" must be 1..64 characters`,
+            };
+          }
+          const aliasKey = alias.toLowerCase();
+          if (seen.has(aliasKey)) {
+            return {
+              ok: false,
+              refusal: "DUPLICATE_PROGRAM_ALIAS",
+              detail: `name "${alias}" is already used by another activity or alias`,
+            };
+          }
+          seen.add(aliasKey);
+          cleaned.push(alias);
+        }
+        if (cleaned.length > 0) aliases = cleaned;
+      }
+
+      entries.push(
+        aliases === undefined
+          ? { activity, programId }
+          : { activity, programId, aliases },
+      );
     }
     if (entries.length > 0) content.programs = entries;
   }

@@ -109,6 +109,17 @@ export const projectIdentityContentSchema = z
           .object({
             activity: z.string().min(1).max(64),
             programId: z.string().min(1).max(120),
+            // D-158 PHASE 2 — OTHER NAMES A HUMAN HAS CONFIRMED FOR THIS
+            // SAME ACTIVITY. Documents do not spell an activity the way an
+            // operator does: a project's own docs may say "the bonding
+            // curve", "curve trading" and "Pump AMM" for things a human
+            // knows are one activity. Code cannot decide that, and an LLM
+            // deciding it would put the activity binding back in the
+            // model's hands.
+            //
+            // So an alias is a HUMAN STATEMENT, entered the same way the
+            // activity itself is, bounded and small. Absent is normal.
+            aliases: z.array(z.string().min(1).max(64)).max(8).optional(),
           })
           .strict(),
       )
@@ -130,6 +141,9 @@ export function addressShapeMatchesChain(chain: SupportedChain, address: string)
 export interface ConfirmedProgram {
   activity: string;
   programId: string;
+  // Human-confirmed alternative names for the SAME activity. Optional and
+  // minimal; nothing derives them, and no model may add one.
+  aliases?: string[];
 }
 
 export interface ConfirmedProjectIdentity {

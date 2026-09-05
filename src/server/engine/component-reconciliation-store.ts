@@ -1,6 +1,10 @@
 import { and, desc, eq, inArray, or } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
+import {
+  resolveConfirmedIdentity,
+  type ConfirmedProjectIdentity,
+} from "../domain/project-identity";
 import { evidence, researchAttempts, researchComponentResults, researchJobs, researchPatterns, researchPlans } from "../db/schema";
 import { loadProductConfig } from "../config/product";
 import { componentRequirementsFor, patternContentSchema } from "../domain/pattern";
@@ -149,6 +153,10 @@ async function loadEvidenceRows(
     officiality: r.officiality,
     entityBinding: r.entityBinding,
     onchainFactKind: r.onchainFactKind,
+    // D-158 PHASE 2 — read verbatim from the column the on-chain synthesis
+    // wrote. Never re-derived here, and never defaulted to anything but
+    // null: this store does not decide provenance, it carries it.
+    onchainProvenance: (r.onchainProvenance ?? null) as EvidenceRow["onchainProvenance"],
     fetchedAt: r.fetchedAt,
     publishedAt: r.publishedAt,
     extractionUnitKey: r.extractionUnitKey,
@@ -221,16 +229,32 @@ async function persistResult(
 // (HIGH-4): a Pattern selection failure is a configuration failure, not
 // an evidentiary outcome, and must not produce a derived-projection row
 // that looks like one.
+// D-158 PHASE 2 — the project's human-confirmed identity for this job, or
+// null. Degrade-never-throw is deliberately NOT used: a failure to read it
+// would otherwise look like "no programs confirmed" and silently make an
+// obligation unmet for the wrong reason. It throws, and reconciliation
+// fails loudly, exactly as a missing Pattern does.
+async function loadConfirmedIdentityForJob(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<ConfirmedProjectIdentity | null> {
+  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job) throw new Error(`research job not found: ${jobId}`);
+  if (!job.projectId) return null;
+  return resolveConfirmedIdentity(db, job.projectId);
+}
+
 export async function reconcileAndPersistComponent(
   db: Database | Transaction,
   jobId: string,
   item: Pick<ComponentWorkItem, "step" | "component">,
   now: Date,
 ): Promise<ComponentReconciliationResult> {
-  const [pattern, config, evidenceRows] = await Promise.all([
+  const [pattern, config, evidenceRows, confirmedIdentity] = await Promise.all([
     loadActivePatternContentForJob(db, jobId),
     loadProductConfig(db),
     loadEvidenceRows(db, jobId, item.step, item.component),
+    loadConfirmedIdentityForJob(db, jobId),
   ]);
   const requirements = { component: item.component, ...componentRequirementsFor(pattern, item.component) };
   const result = reconcileComponent({
@@ -238,6 +262,10 @@ export async function reconcileAndPersistComponent(
     item,
     requirements,
     evidence: evidenceRows,
+    // Absent identity is passed through as null rather than omitted: an
+    // identity-dependent obligation must then be UNMET, which is a
+    // different and stronger statement than "not evaluated".
+    confirmedIdentity,
     now,
     freshnessPolicyDays: config.memory_stale_after_days,
   });

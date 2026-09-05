@@ -34,6 +34,60 @@ import { createDatabase } from "../src/server/db/client";
 import { SUPPORTED_CHAINS } from "../src/server/domain/project-identity";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
 
+// D-158 PHASE 2 — REPEATABLE, unlike every other flag. A project has
+// several revenue-bearing programs, and parseArgs below keeps one value per
+// name, so collecting these separately is what stops a second --program
+// from silently replacing the first.
+//
+// Shape: --program=<activity>:<programId>. The activity label may not
+// contain ":", which is checked rather than assumed, because an activity
+// like "swap:v2" would otherwise split into a wrong pair.
+function parsePrograms(argv: string[]): { activity: string; programId: string; aliases?: string[] }[] {
+  const out: { activity: string; programId: string; aliases?: string[] }[] = [];
+  for (const arg of argv) {
+    const m = /^--program=(.*)$/.exec(arg);
+    if (!m) continue;
+    const raw = m[1];
+    const sep = raw.indexOf(":");
+    if (sep <= 0 || sep === raw.length - 1) {
+      console.error(
+        `[confirm-identity] refusing: --program=${raw} is not <activity>:<programId>.`,
+      );
+      process.exit(1);
+    }
+    out.push({ activity: raw.slice(0, sep).trim(), programId: raw.slice(sep + 1).trim() });
+  }
+  return out;
+}
+
+// D-158 PHASE 2 — OTHER NAMES THE SAME ACTIVITY GOES BY IN DOCUMENTS.
+//
+// Also repeatable, and also a human statement. It exists because the
+// activity binding is a LITERAL search of a document's own words, and a
+// project's docs will not always spell an activity the way an operator
+// does. Nothing derives an alias and no model may propose one; if a
+// document says it differently, a human says so here.
+//
+// Shape: --program-alias=<activity>:<alias>, where <activity> must be
+// one already given with --program.
+function parseProgramAliases(argv: string[]): { activity: string; alias: string }[] {
+  const out: { activity: string; alias: string }[] = [];
+  for (const arg of argv) {
+    const m = /^--program-alias=(.*)$/.exec(arg);
+    if (!m) continue;
+    const rawValue = m[1];
+    const sep = rawValue.indexOf(":");
+    if (sep <= 0 || sep === rawValue.length - 1) {
+      console.error(
+        `[confirm-identity] refusing: --program-alias=${rawValue} is not <activity>:<alias>.`,
+      );
+      process.exit(1);
+    }
+    out.push({ activity: rawValue.slice(0, sep).trim(), alias: rawValue.slice(sep + 1).trim() });
+  }
+  return out;
+}
+
 function parseArgs(argv: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   for (const arg of argv) {
@@ -45,7 +99,7 @@ function parseArgs(argv: string[]): Record<string, string> {
 
 function usage(): never {
   console.error(
-    "usage: npx tsx scripts/confirm-project-identity.ts --project=<slug> --chain=<chain> [--token=<address>] [--ticker=<TICKER>] --actor=<name>",
+    "usage: npx tsx scripts/confirm-project-identity.ts --project=<slug> --chain=<chain> [--token=<address>] [--ticker=<TICKER>] [--program=<activity>:<programId> ...] [--program-alias=<activity>:<alias> ...] --actor=<name>",
   );
   console.error("");
   console.error("chains: " + SUPPORTED_CHAINS.join(", "));
@@ -53,6 +107,16 @@ function usage(): never {
   console.error("States which entity a project IS. It discovers nothing and queries nothing.");
   console.error("A token address is optional: a project may be confirmed on a chain before");
   console.error("its token is. There is no --network option; the contract has no such field.");
+  console.error("");
+  console.error("--program states WHICH on-chain program is a named activity of this project,");
+  console.error("and may be repeated. It is a human statement, exactly like --token: this tool");
+  console.error("verifies the address SHAPE for the chain and nothing else. It does not query");
+  console.error("the chain, does not read an IDL, and cannot tell you what a program does.");
+  console.error("");
+  console.error("--program-alias states another name the SAME activity goes by in this");
+  console.error("project's own documents, and may be repeated. The activity binding is a");
+  console.error("literal search of a document's words, so a name that never appears in them");
+  console.error("binds nothing. Nothing here guesses a synonym.");
   process.exit(1);
 }
 
@@ -69,6 +133,21 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
+  const programs = parsePrograms(process.argv.slice(2));
+  // Aliases are attached to the activity they name. An alias for an
+  // activity that was not confirmed in this same invocation is refused
+  // rather than dropped: silently ignoring it would leave the operator
+  // believing a name was confirmed when it was not.
+  for (const { activity, alias } of parseProgramAliases(process.argv.slice(2))) {
+    const target = programs.find((e) => e.activity.toLowerCase() === activity.toLowerCase());
+    if (target === undefined) {
+      console.error(
+        `[confirm-identity] refusing: --program-alias names activity "${activity}", which no --program declares.`,
+      );
+      process.exit(1);
+    }
+    target.aliases = [...(target.aliases ?? []), alias];
+  }
   const projectSlug = args.project;
   const chain = args.chain;
   const actor = args.actor;
@@ -81,6 +160,17 @@ async function main(): Promise<void> {
     console.log("chain:            " + chain);
     console.log("token:            " + (args.token ?? "(none — chain-only identity)"));
     console.log("ticker:           " + (args.ticker ?? "(none)"));
+    console.log(
+      "programs:         " +
+        (programs.length === 0
+          ? "(none)"
+          : programs
+              .map(
+                (e) =>
+                  `${e.activity} -> ${e.programId}${e.aliases === undefined ? "" : ` (aka ${e.aliases.join(", ")})`}`,
+              )
+              .join(", ")),
+    );
     // Printed for the operator's own record. It is NOT persisted:
     // project_memory_items has no actor column, deliberately — unlike
     // research_memory, which carries promoted_by. The durable audit trail
@@ -93,6 +183,7 @@ async function main(): Promise<void> {
       chain,
       ...(args.token === undefined ? {} : { tokenAddress: args.token }),
       ...(args.ticker === undefined ? {} : { ticker: args.ticker }),
+      ...(programs.length === 0 ? {} : { programs }),
     });
 
     if (!result.ok) {

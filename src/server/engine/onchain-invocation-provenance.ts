@@ -237,6 +237,19 @@ export interface TransferProvenance {
   // to share the transaction. A method that ran elsewhere in the
   // transaction cannot reach this field.
   callerMethod: string | null;
+  // The INVOKING instruction's own account list, in the order the program
+  // was handed it. Read off the same instruction as callerMethod, so the
+  // two always describe one invocation.
+  //
+  // WHY IT IS KEPT. A method name says which routine ran; it does not say
+  // which of the routine's accounts received value. That ordinal is the
+  // only deterministic, program-owned way to tell a protocol's own vault
+  // from a referral account paid by the same instruction. Order is never
+  // sorted or normalised — the position IS the meaning.
+  //
+  // Null when the invoking instruction was not preserved raw, and null is
+  // never permissive: an unknown leg is an unmet obligation.
+  callerAccounts: string[] | null;
 }
 
 function tokenTransferAsset(ix: TokenInstructionRef): TransferAsset {
@@ -282,10 +295,12 @@ function movements(result: TransactionDetailResult): {
 // parsed instruction carries no data to decode, which is why a decoded
 // method is available only for programs the node did not itself parse —
 // precisely the third-party programs a registry entry is for.
-function methodOfCaller(
+// ONE lookup, so the decoded method and the account list can never come
+// from two different instructions.
+function callerInstruction(
   result: TransactionDetailResult,
   attribution: CallerAttribution,
-): string | null {
+): RawInstructionRef | null {
   if (attribution.callerProgramId === null) return null;
   const raws = result.rawInstructions ?? [];
   const caller = raws.find((r: RawInstructionRef) => {
@@ -299,12 +314,7 @@ function methodOfCaller(
       (r.stackHeight ?? null) === attribution.stackHeight - 1
     );
   });
-  if (caller === undefined) return null;
-  return decodeKnownMethod({
-    chain: "solana",
-    programId: caller.programId,
-    data: caller.data,
-  });
+  return caller ?? null;
 }
 
 // Every value movement in the transaction, each with whatever provenance
@@ -317,6 +327,7 @@ export function deriveTransferProvenance(
   return movements(result).map((m) => {
     const outcome = attributeCaller(result, m.positioned);
     const attribution = outcome.attributed ? outcome.attribution : null;
+    const caller = attribution === null ? null : callerInstruction(result, attribution);
     return {
       signature: result.signature,
       slot: result.slot,
@@ -326,7 +337,15 @@ export function deriveTransferProvenance(
       amountRaw: m.amountRaw,
       attribution,
       refusal: outcome.attributed ? null : outcome.refusal,
-      callerMethod: attribution ? methodOfCaller(result, attribution) : null,
+      callerMethod:
+        caller === null
+          ? null
+          : decodeKnownMethod({
+              chain: "solana",
+              programId: caller.programId,
+              data: caller.data,
+            }),
+      callerAccounts: caller === null ? null : [...caller.accounts],
     };
   });
 }
@@ -339,6 +358,70 @@ export function inflowsTo(
   account: string,
 ): TransferProvenance[] {
   return deriveTransferProvenance(result).filter((t) => t.destination === account);
+}
+
+// D-158 PHASE 2 — THE MINIMUM SHAPE AN OBLIGATION EVALUATOR NEEDS.
+//
+// Persisted alongside a synthesized on-chain Evidence row, so the reducer
+// evaluates a proof obligation over EVIDENCE and never reaches back into
+// raw RPC artifacts. A second proof path beside Evidence would be a hidden
+// one, and Evidence is where provenance must be auditable.
+//
+// EVERY FIELD IS MACHINE-OWNED. Each is copied from an attribution this
+// module derived from node-reported CPI structure, or from the decoded
+// instruction itself. The human-readable statement is NOT the authority
+// here — this metadata is.
+//
+// WRITTEN BY EXACTLY ONE PATH: the deterministic on-chain synthesis. It is
+// absent on every documentary, data-provider and model-extracted row, and
+// no extraction output can produce one.
+export interface EvidenceProvenanceMetadata {
+  // Null when a caller could not be proven; `refusal` then says why. An
+  // obligation must treat null as unmet, never as permissive.
+  callerProgramId: string | null;
+  // The registry's decoded method for the invoking instruction, or null.
+  // The ROLE this method may play is deliberately NOT stored: it is
+  // resolved at evaluation time from the code-owned registry, so a change
+  // of approval never requires rewriting historical Evidence.
+  callerMethod: string | null;
+  // The invoking instruction's account list, in program order. Stored
+  // because it is an OBSERVATION — what the chain reported — while which
+  // POSITION means "protocol value receipt" is a code-owned registry
+  // decision resolved at evaluation time, exactly like the role.
+  callerAccounts: string[] | null;
+  executingProgramId: string | null;
+  invocationIndex: number | null;
+  stackHeight: number | null;
+  refusal: CallerAttributionRefusal | null;
+  // The movement itself.
+  destination: string | null;
+  assetKind: "TOKEN" | "NATIVE_SOL";
+  mint: string | null;
+  amountRaw: string | null;
+  signature: string;
+  slot: number;
+}
+
+// Projects a derived TransferProvenance into the persisted shape. Copying
+// rather than storing the object whole keeps the persisted contract
+// explicit and stops an internal field from leaking into Evidence by
+// accident.
+export function toEvidenceProvenance(t: TransferProvenance): EvidenceProvenanceMetadata {
+  return {
+    callerProgramId: t.attribution?.callerProgramId ?? null,
+    callerMethod: t.callerMethod,
+    callerAccounts: t.callerAccounts === null ? null : [...t.callerAccounts],
+    executingProgramId: t.attribution?.executingProgramId ?? null,
+    invocationIndex: t.attribution?.invocationIndex ?? null,
+    stackHeight: t.attribution?.stackHeight ?? null,
+    refusal: t.refusal,
+    destination: t.destination,
+    assetKind: t.asset.kind,
+    mint: t.asset.kind === "TOKEN" ? t.asset.mint : null,
+    amountRaw: t.amountRaw,
+    signature: t.signature,
+    slot: t.slot,
+  };
 }
 
 // WHAT AN ATTRIBUTED TRANSFER DOES NOT PROVE. Stated once, in code, so a

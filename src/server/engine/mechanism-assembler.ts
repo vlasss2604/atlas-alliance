@@ -102,12 +102,18 @@ export interface FlowAttributes {
 // §12 — exactly the S5 reason codes that can qualify a PARTIALLY_SUPPORTED
 // element. Not a new vocabulary.
 export type NodeQualification =
+  // D-158 PHASE 2 — a REQUIRED structural obligation is unmet. A genuine
+  // basis for partial support: the component has admissible documentary
+  // evidence and lacks machine-owned causal provenance, which is a stated
+  // limitation of the node rather than an unexplained downgrade.
+  | "MECHANICAL_PROVENANCE_NOT_ESTABLISHED"
   | "INSUFFICIENT_AUTHORITY"
   | "INDIRECT_ONLY"
   | "STATE_NOT_FULLY_LIVE"
   | "TOKEN_STATE_UNQUALIFIED";
 
 const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
+  "MECHANICAL_PROVENANCE_NOT_ESTABLISHED",
   "INSUFFICIENT_AUTHORITY",
   "INDIRECT_ONLY",
   "STATE_NOT_FULLY_LIVE",

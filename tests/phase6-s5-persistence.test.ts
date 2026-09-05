@@ -124,7 +124,13 @@ describe("Фаза 6, S5 — персистенция (research_component_result
     const evId = await insertEvidence(jobId, sourceId);
 
     const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 1, component: "SOURCE_OF_VALUE" }, NOW);
-    expect(result.status).toBe("SUPPORTED");
+    // D-158 PHASE 2 — SOURCE_OF_VALUE now carries a REQUIRED structural
+    // obligation, so OFFICIAL_DOCS evidence alone establishes it only
+    // PARTIALLY. What this test is about is unchanged and still asserted:
+    // the real seeded matrix produces exactly one row, and the documentary
+    // Evidence is still ADMITTED as supporting.
+    expect(result.status).toBe("PARTIALLY_SUPPORTED");
+    expect(result.reasonCodes).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
     expect(result.supportingEvidenceIds).toEqual([evId]);
 
     const [row] = await ctx.db
@@ -138,7 +144,7 @@ describe("Фаза 6, S5 — персистенция (research_component_result
         ),
       );
     expect(row).toBeDefined();
-    expect(row.status).toBe("SUPPORTED");
+    expect(row.status).toBe("PARTIALLY_SUPPORTED");
     expect(row.supportingEvidenceIds).toEqual([evId]);
     expect(row.requiresFreshEvidence).toBe(false);
   });
@@ -301,12 +307,18 @@ describe("Фаза 6, S5 — персистенция (research_component_result
     // `status === "SUPPORTED"` (a real, plausible defect shape — e.g. "only
     // promote memory once a component is fully established") cannot hide
     // behind a test that only exercises the partial path.
-    const evId = await insertEvidence(jobId, sourceId);
+    //
+    // D-158 PHASE 2 — this needs SOME component that documentary evidence
+    // can still carry all the way to SUPPORTED, and SOURCE_OF_VALUE is no
+    // longer one. FLOW_PATH (step 2) admits OFFICIAL_DOCS and carries no
+    // structural obligation, so the teeth this test exists for are intact:
+    // the outcome below really is SUPPORTED.
+    const evId = await insertEvidence(jobId, sourceId, { patternStep: 2, component: "FLOW_PATH" });
 
     const [evidenceBefore] = await ctx.db.select().from(evidence).where(eq(evidence.id, evId));
     const memoryCountBefore = (await ctx.db.select().from(projectMemoryItems).where(eq(projectMemoryItems.projectId, projectId))).length;
 
-    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 1, component: "SOURCE_OF_VALUE" }, NOW);
+    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 2, component: "FLOW_PATH" }, NOW);
     expect(result.status).toBe("SUPPORTED");
 
     const [evidenceAfter] = await ctx.db.select().from(evidence).where(eq(evidence.id, evId));
@@ -381,7 +393,13 @@ describe("Фаза 6, S5 — интеграция с контроллером (�
         ),
       );
     expect(row).toBeDefined();
-    expect(row.status).toBe("SUPPORTED");
+    // D-158 PHASE 2 — what this test proves is that the controller ran
+    // reconcile after a SUCCEEDED attempt and persisted its result. The row
+    // exists and carries the Evidence the executor produced; SOURCE_OF_VALUE
+    // now stops at PARTIALLY_SUPPORTED without machine-owned provenance.
+    expect(row.status).toBe("PARTIALLY_SUPPORTED");
+    expect(Array.isArray(row.supportingEvidenceIds)).toBe(true);
+    expect(row.supportingEvidenceIds).not.toEqual([]);
   });
 
   it("контроллер вызывает reconcile даже после FAILED attempt — отсутствие новых Evidence остаётся честным INSUFFICIENT_EVIDENCE (D-084)", async () => {

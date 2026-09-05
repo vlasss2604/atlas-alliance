@@ -126,7 +126,13 @@ describe("HIGH-1: S5 встроен в канонический production-пу�
     const rows = await s5RowsFor(jobId);
     expect(rows.length).toBeGreaterThan(0);
     const sourceOfValue = rows.find((r) => r.patternStep === 1 && r.component === "SOURCE_OF_VALUE");
-    expect(sourceOfValue?.status).toBe("SUPPORTED");
+    // D-158 PHASE 2 — SOURCE_OF_VALUE now carries a REQUIRED structural
+    // obligation, so OFFICIAL_DOCS evidence alone establishes it only
+    // PARTIALLY. What this test is about is unchanged and still asserted:
+    // that the S5 row exists and was produced by this path.
+    expect(sourceOfValue).toBeDefined();
+    expect(sourceOfValue?.status).toBe("PARTIALLY_SUPPORTED");
+    expect(sourceOfValue?.reasonCodes).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
   });
 });
 
@@ -166,7 +172,11 @@ describe("HIGH-2/§12: матрица crash/resume", () => {
     const rows = await s5RowsFor(jobId);
     const sourceOfValue = rows.find((r) => r.patternStep === 1 && r.component === "SOURCE_OF_VALUE");
     expect(sourceOfValue).toBeDefined();
-    expect(sourceOfValue?.status).toBe("SUPPORTED");
+    // D-158 PHASE 2 — SOURCE_OF_VALUE now carries a REQUIRED structural
+    // obligation, so OFFICIAL_DOCS evidence alone establishes it only
+    // PARTIALLY. What this test is about is unchanged and still asserted:
+    // that the S5 row exists and was produced by this path.
+    expect(sourceOfValue?.status).toBe("PARTIALLY_SUPPORTED");
     // The whole point: the controller never re-attempts an
     // already-SUCCEEDED component (succeededKeys filters it out, exactly
     // as before this fix) — S5 catches up via the sweep, not via a new
@@ -256,7 +266,14 @@ describe("HIGH-4: S5 выбирает ACTIVE-версию Pattern, а не пе�
     // Baseline: v1 (the job's own frozen contract.patternVersion) already
     // establishes SOURCE_OF_VALUE via OFFICIAL_DOCS.
     const before = await reconcileAndPersistComponent(ctx.db, jobId, { step: 1, component: "SOURCE_OF_VALUE" }, NOW);
-    expect(before.status).toBe("SUPPORTED");
+    // D-158 PHASE 2 — SOURCE_OF_VALUE now carries a REQUIRED structural
+    // obligation, so OFFICIAL_DOCS evidence alone establishes it only
+    // PARTIALLY. What this test is about is unchanged and still asserted:
+    // that the S5 row exists and was produced by this path.
+    // The discriminator below is v1-vs-v2, not this status: what matters is
+    // that OFFICIAL_DOCS was ADMITTED here and is excluded under v2.
+    expect(before.status).toBe("PARTIALLY_SUPPORTED");
+    expect(before.supportingEvidenceIds.length).toBeGreaterThan(0);
 
     // This job's contract is frozen to v1 — cross-checking against a
     // DIFFERENT active version must hard-fail (HIGH-4's version
@@ -336,7 +353,12 @@ describe("HIGH-4: S5 выбирает ACTIVE-версию Pattern, а не пе�
     await insertEvidence(job.id, sourceId, { patternStep: 1, component: "SOURCE_OF_VALUE" });
 
     const result = await reconcileAndPersistComponent(ctx.db, job.id, { step: 1, component: "SOURCE_OF_VALUE" }, NOW);
-    expect(result.status).toBe("SUPPORTED");
+    // D-158 PHASE 2 — SOURCE_OF_VALUE now carries a REQUIRED structural
+    // obligation, so OFFICIAL_DOCS evidence alone establishes it only
+    // PARTIALLY. What this test is about is unchanged and still asserted:
+    // that the S5 row exists and was produced by this path.
+    expect(result.status).toBe("PARTIALLY_SUPPORTED");
+    expect(result.supportingEvidenceIds.length).toBeGreaterThan(0);
   });
 
   it("детерминизм: несколько версий Pattern вставлены в ОБРАТНОМ физическом порядке -> тот же результат выбора ACTIVE-версии", async () => {
