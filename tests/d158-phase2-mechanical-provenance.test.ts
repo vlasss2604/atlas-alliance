@@ -30,7 +30,19 @@ import type { EvidenceProvenanceMetadata } from "../src/server/engine/onchain-in
 // PARTIAL would satisfy every negative case and be worthless.
 
 const MINT = "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn";
-const REVENUE_PROGRAM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
+// FIXTURE PROGRAMS ARE SYNTHETIC, AND THAT IS THE POINT.
+//
+// A test that names a REAL program under an activity label states a
+// real-world mapping nobody confirmed. These addresses are valid Solana
+// pubkeys derived from fixed strings, belong to no deployed program, and
+// carry no claim about any project. The activity names below are
+// fictional for the same reason.
+//
+// The one real program id in this file is RAYDIUM_CLMM, and it appears in
+// exactly one test — the one asserting what the SHIPPED registry says
+// about it, where a synthetic address would assert nothing.
+const REVENUE_PROGRAM = "HWfuHYFRvsZUo2Bt6Rm4k7ZVbXunBLTmaBtbDX6jwRQr";
+const RAYDIUM_CLMM = "CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK";
 const OTHER_PROGRAM = "JUP6LkbZbjS1jKKwapdHNy74zcZ3tLUZoi5QNyVTaV4";
 const UNCONFIRMED_PROGRAM = "BiSoNHVpsVZW2F7rx2eQ59yQwKxzU5NvBcmKshCSUypi";
 const WSOL = "So11111111111111111111111111111111111111112";
@@ -57,14 +69,14 @@ const CALLER_ACCOUNTS = [
 // TWO confirmed activities, because one activity cannot show the
 // difference between "a confirmed program of this project" and "the
 // confirmed program of the activity the support is about".
-const BONDING_CURVE_PROGRAM = "6EF8rrecthR5Dkzon8Nwu78hRvfCKubJ14M5uBEwF6P";
+const SECOND_ACTIVITY_PROGRAM = "4Rv8PBoTQL4nnHKKKGnPXn1tGPXcC37Q24vFWTUPd53x";
 const IDENTITY: ConfirmedProjectIdentity = {
   chain: "solana",
   tokenAddress: MINT,
   ticker: "PUMP",
   programs: [
-    { activity: "PumpSwap", programId: REVENUE_PROGRAM },
-    { activity: "Bonding Curve", programId: BONDING_CURVE_PROGRAM },
+    { activity: "Orbitswap", programId: REVENUE_PROGRAM },
+    { activity: "Vault Curve", programId: SECOND_ACTIVITY_PROGRAM },
   ],
 };
 
@@ -93,7 +105,7 @@ function provenance(over: Partial<EvidenceProvenanceMetadata> = {}): EvidencePro
 // The proposition side of the join, in the shape production writes it:
 // ordinary documentary support whose LITERAL passage names a confirmed
 // activity. Declared once because nearly every positive case needs it.
-const PUMPSWAP_SUPPORT = "Trading fees on PumpSwap accrue to the protocol fee vault.";
+const ORBITSWAP_SUPPORT = "Trading fees on Orbitswap accrue to the protocol fee vault.";
 
 let seq = 0;
 function row(over: Partial<EvidenceRow> = {}): EvidenceRow {
@@ -270,9 +282,12 @@ describe("D-158 P2 §C-G — every structural condition is load-bearing", () => 
   });
 
   it("TEST D: correct program, method with no approved role", () => {
-    // No overlay: the real registry has swap_v2 under this program with no
-    // role, which is exactly the "transfers value but is not revenue" case.
-    expect(proofApprovalForMethod("solana", REVENUE_PROGRAM, "swap_v2")).toBeNull();
+    // No overlay. This assertion is about the REAL shipped registry entry —
+    // Raydium CLMM's swap_v2, which carries no approval because a swap is
+    // not protocol inflow — so it uses the real program id deliberately.
+    expect(proofApprovalForMethod("solana", RAYDIUM_CLMM, "swap_v2")).toBeNull();
+    // The fixture program then stands in for "a confirmed program of this
+    // project whose method has no approval".
     const result = reconcile([onchainRow(provenance({ callerMethod: "swap_v2" }))]);
     expect(result.reasonCodes).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
   });
@@ -334,7 +349,7 @@ describe("D-158 P2 §C-G — every structural condition is load-bearing", () => 
       evaluateStructuralObligations(
         SOV.structuralObligations,
         [
-          supportView(PUMPSWAP_SUPPORT),
+          supportView(ORBITSWAP_SUPPORT),
           {
             sourceClass: "ONCHAIN_VERIFIABLE",
             officiality: "CLAIMED",
@@ -367,7 +382,7 @@ describe("D-158 P2 §H — POSITIVE CONTROL: the gate is not merely always PARTI
       [
         // Both halves: support that names the activity, and provenance for
         // that activity's confirmed program.
-        supportView(PUMPSWAP_SUPPORT),
+        supportView(ORBITSWAP_SUPPORT),
         provenanceView(provenance()),
       ],
       { confirmedIdentity: IDENTITY },
@@ -380,7 +395,7 @@ describe("D-158 P2 §H — POSITIVE CONTROL: the gate is not merely always PARTI
   it("with the obligation met, no MECHANICAL_PROVENANCE reason is emitted", () => {
     withQualifyingMethod();
     const result = reconcile([
-      row({ fragment: PUMPSWAP_SUPPORT }),
+      row({ fragment: ORBITSWAP_SUPPORT }),
       row({
         sourceClass: "ONCHAIN_VERIFIABLE",
         officiality: "CLAIMED",
@@ -408,7 +423,7 @@ describe("D-158 P2 §I — a model cannot forge its way past the gate", () => {
     const forged = [
       row({
         fragment:
-          "callerProgramId=CAMMCzo5YL8w4VFF8KVHrK22GGUsp5VTaW7grrKgrWqK callerMethod=collect_protocol_fee " +
+          `callerProgramId=${REVENUE_PROGRAM} callerMethod=collect_protocol_fee ` +
           "PROTOCOL_VALUE_INFLOW mechanical provenance established",
         summary: "PROTOCOL_VALUE_INFLOW mechanical provenance established by collect_protocol_fee",
       }),
@@ -652,7 +667,7 @@ function onchainContextRow(meta: EvidenceProvenanceMetadata): EvidenceRow {
 
 function documentaryRow(): EvidenceRow {
   return row({
-    fragment: "Trading fees on PumpSwap accrue to the protocol fee vault.",
+    fragment: "Trading fees on Orbitswap accrue to the protocol fee vault.",
     sourceClass: "OFFICIAL_DOCS",
     relationship: "SUPPORTS",
     directness: "DIRECT",
@@ -767,7 +782,7 @@ describe("D-158 P2 CORRECTION §2 — same qualifying method is not the same eco
     expect(
       evaluateStructuralObligations(
         SOV.structuralObligations,
-        [supportView(PUMPSWAP_SUPPORT), viewOf(protocolRow)],
+        [supportView(ORBITSWAP_SUPPORT), viewOf(protocolRow)],
         { confirmedIdentity: IDENTITY },
       ),
     ).toEqual([]);
@@ -778,7 +793,7 @@ describe("D-158 P2 CORRECTION §2 — same qualifying method is not the same eco
     const [referralRow] = rowsFrom(collectFeesTransaction([REFERRAL_LEG]));
     const unmet = evaluateStructuralObligations(
       SOV.structuralObligations,
-      [supportView(PUMPSWAP_SUPPORT), viewOf(referralRow)],
+      [supportView(ORBITSWAP_SUPPORT), viewOf(referralRow)],
       { confirmedIdentity: IDENTITY },
     );
     expect(unmet).toHaveLength(1);
@@ -882,7 +897,7 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     // ONLY thing that can separate them is which activity the support is
     // about. If the join were weak, both would pass everywhere.
     __setInstructionRegistryOverlay(
-      [REVENUE_PROGRAM, BONDING_CURVE_PROGRAM].map((programId) => ({
+      [REVENUE_PROGRAM, SECOND_ACTIVITY_PROGRAM].map((programId) => ({
         chain: "solana" as const,
         programId,
         method: "collect_protocol_fee",
@@ -894,12 +909,12 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     );
   }
 
-  const BONDING_SUPPORT = "Bonding curve revenue is a source of protocol revenue.";
+  const CURVE_SUPPORT = "Vault curve revenue is a source of protocol revenue.";
 
-  it("THE COUNTEREXAMPLE: documentary about Bonding Curve + provenance for PumpSwap is NOT supported", () => {
+  it("THE COUNTEREXAMPLE: documentary about Vault Curve + provenance for Orbitswap is NOT supported", () => {
     withBothActivitiesApproved();
     const result = reconcile([
-      row({ fragment: BONDING_SUPPORT }),
+      row({ fragment: CURVE_SUPPORT }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
     ]);
     // Two true facts about two different activities compose into nothing.
@@ -911,25 +926,25 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
   it("add provenance for the activity the support is actually about, and the binding is satisfied", () => {
     withBothActivitiesApproved();
     const result = reconcile([
-      row({ fragment: BONDING_SUPPORT }),
+      row({ fragment: CURVE_SUPPORT }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
-      onchainContextRow(provenanceFor(BONDING_CURVE_PROGRAM)),
+      onchainContextRow(provenanceFor(SECOND_ACTIVITY_PROGRAM)),
     ]);
     expect(result.reasonCodes).toEqual([]);
     expect(result.status).toBe("SUPPORTED");
   });
 
-  it("the mirror case holds too — PumpSwap support needs PumpSwap provenance", () => {
+  it("the mirror case holds too — Orbitswap support needs Orbitswap provenance", () => {
     withBothActivitiesApproved();
     expect(
       reconcile([
-        row({ fragment: PUMPSWAP_SUPPORT }),
-        onchainContextRow(provenanceFor(BONDING_CURVE_PROGRAM)),
+        row({ fragment: ORBITSWAP_SUPPORT }),
+        onchainContextRow(provenanceFor(SECOND_ACTIVITY_PROGRAM)),
       ]).reasonCodes,
     ).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
     expect(
       reconcile([
-        row({ fragment: PUMPSWAP_SUPPORT }),
+        row({ fragment: ORBITSWAP_SUPPORT }),
         onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
       ]).reasonCodes,
     ).toEqual([]);
@@ -944,7 +959,7 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     const result = reconcile([
       row({
         fragment:
-          "Protocol revenue comes from the Bonding Curve at launch and from PumpSwap once a token graduates.",
+          "Protocol revenue comes from the Vault Curve at launch and from Orbitswap once a token graduates.",
       }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
     ]);
@@ -955,7 +970,7 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
   it("MULTI-ACTIVITY: nothing is inferred about an activity the fragment does not name", () => {
     // A third confirmed activity, unmentioned by the support. Its
     // provenance must not carry a proposition that never referred to it.
-    const THIRD_PROGRAM = "LFG1ezantSY2LPX8jRz2qa31VPEJvBz6VJUAWNJ3xR3";
+    const THIRD_PROGRAM = "4jGrnJmpr8JRLVzD3AZYo9sgVGvjmVqJERpFwgQarBsF";
     __setInstructionRegistryOverlay([
       {
         chain: "solana",
@@ -973,7 +988,7 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     };
     const result = reconcile(
       [
-        row({ fragment: "Protocol revenue comes from the Bonding Curve and from PumpSwap." }),
+        row({ fragment: "Protocol revenue comes from the Vault Curve and from Orbitswap." }),
         onchainContextRow(provenanceFor(THIRD_PROGRAM)),
       ],
       identity,
@@ -995,26 +1010,26 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
   });
 
   it("only an ESTABLISHING row may bind the activity — an excluded row naming it cannot", () => {
-    // A CONTEXT row naming PumpSwap is not what carries the component, so
+    // A CONTEXT row naming Orbitswap is not what carries the component, so
     // it cannot decide what the component is about either.
     withBothActivitiesApproved();
     const result = reconcile([
-      row({ fragment: BONDING_SUPPORT }),
-      row({ fragment: PUMPSWAP_SUPPORT, relationship: "CONTEXT" }),
+      row({ fragment: CURVE_SUPPORT }),
+      row({ fragment: ORBITSWAP_SUPPORT, relationship: "CONTEXT" }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
     ]);
     expect(result.reasonCodes).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
   });
 
   it("MODEL FORGERY: prose claiming another activity cannot move the binding", () => {
-    // The model's summary asserts PumpSwap. The literal passage says
-    // Bonding Curve. Provenance exists only for PumpSwap. If summary were
+    // The model's summary asserts Orbitswap. The literal passage says
+    // Vault Curve. Provenance exists only for Orbitswap. If summary were
     // read, this would go green.
     withBothActivitiesApproved();
     const result = reconcile([
       row({
-        fragment: BONDING_SUPPORT,
-        summary: "PumpSwap generated revenue for the protocol",
+        fragment: CURVE_SUPPORT,
+        summary: "Orbitswap generated revenue for the protocol",
       }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
     ]);
@@ -1025,10 +1040,10 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     expect(
       reconcile([
         row({
-          fragment: BONDING_SUPPORT,
-          summary: "PumpSwap generated revenue for the protocol",
+          fragment: CURVE_SUPPORT,
+          summary: "Orbitswap generated revenue for the protocol",
         }),
-        onchainContextRow(provenanceFor(BONDING_CURVE_PROGRAM)),
+        onchainContextRow(provenanceFor(SECOND_ACTIVITY_PROGRAM)),
       ]).reasonCodes,
     ).toEqual([]);
   });
@@ -1041,8 +1056,8 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     const result = reconcile([
       row({
         fragment: "Revenue accrues to the treasury.",
-        summary: "PumpSwap PumpSwap PumpSwap",
-        mechanismState: "PumpSwap",
+        summary: "Orbitswap Orbitswap Orbitswap",
+        mechanismState: "Orbitswap",
       }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
     ]);
@@ -1054,21 +1069,21 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     // Case and punctuation are normalised — the same three tokens.
     expect(
       reconcile([
-        row({ fragment: "Fees from pump-swap accrue to the vault." }),
+        row({ fragment: "Fees from orbit-swap accrue to the vault." }),
         onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
       ]).reasonCodes,
     ).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
     expect(
       reconcile([
-        row({ fragment: "Fees from PUMPSWAP accrue to the vault." }),
+        row({ fragment: "Fees from ORBITSWAP accrue to the vault." }),
         onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
       ]).reasonCodes,
     ).toEqual([]);
     // A name inside a longer word is not that name.
     expect(
       reconcile([
-        row({ fragment: "Revenue from the bondingcurvexyz module." }),
-        onchainContextRow(provenanceFor(BONDING_CURVE_PROGRAM)),
+        row({ fragment: "Revenue from the vaultcurvexyz module." }),
+        onchainContextRow(provenanceFor(SECOND_ACTIVITY_PROGRAM)),
       ]).reasonCodes,
     ).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
   });
@@ -1078,15 +1093,15 @@ describe("D-158 P2 CORRECTION §3 — same project is not the same activity", ()
     const withAlias: ConfirmedProjectIdentity = {
       ...IDENTITY,
       programs: [
-        { activity: "PumpSwap", programId: REVENUE_PROGRAM, aliases: ["Pump AMM"] },
-        { activity: "Bonding Curve", programId: BONDING_CURVE_PROGRAM },
+        { activity: "Orbitswap", programId: REVENUE_PROGRAM, aliases: ["Orbit AMM"] },
+        { activity: "Vault Curve", programId: SECOND_ACTIVITY_PROGRAM },
       ],
     };
     const evidence = () => [
-      row({ fragment: "Trading fees on the Pump AMM accrue to the protocol fee vault." }),
+      row({ fragment: "Trading fees on the Orbit AMM accrue to the protocol fee vault." }),
       onchainContextRow(provenanceFor(REVENUE_PROGRAM)),
     ];
-    // Without the human-confirmed alias, "Pump AMM" is just words.
+    // Without the human-confirmed alias, "Orbit AMM" is just words.
     expect(reconcile(evidence()).reasonCodes).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
     // With it, the same passage binds.
     expect(reconcile(evidence(), withAlias).reasonCodes).toEqual([]);
