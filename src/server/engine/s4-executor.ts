@@ -1516,17 +1516,49 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       if (onchainReserve.reserved > 0) {
         observations.add("SOURCE_OPENS_RESERVED_FOR_ONCHAIN");
       }
-      const openAllowance = Math.max(
-        1,
-        componentSearchAllowance({
-          maxSearchQueries: documentaryMaxSourceOpens,
-          alreadyReserved: await currentSourceOpensReserved(deps.db, ctx.jobId),
-          workQueueSize: ctx.workQueueSize ?? 1,
-          remainingComponents: ctx.remainingComponents ?? 1,
-          isIntentRequired: plan.intentRequired.has(item.component),
-          hardCapPerAttempt: MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT,
-        }),
-      );
+      // D-137: a replay fetcher serves documents this job (or the owner
+      // path that sealed them) already opened and already paid for. It is
+      // network-impossible by construction, so charging a source open for
+      // it would meter an external action that cannot occur.
+      const fetchMetered = !isReplayProvider(contentFetcher);
+      // RC-8 — AN UNMETERED PHASE MUST NOT BE RATIONED BY THE METERED AXIS.
+      //
+      // THE DEFECT THIS CLOSES, measured on the frozen panel: in 4 of 4
+      // Raydium jobs an official page was selected for seven components,
+      // fetched OK, sealed with full authority — and then never extracted,
+      // with no error anywhere, because nothing failed. It was simply never
+      // opened.
+      //
+      // The allowance below divides what is LEFT of the source-open ledger.
+      // By the time the EXTRACTING phase replays documents, the FETCHING
+      // phase has already spent nearly all of it (20 of 24 in the observed
+      // run), so remainingBudget collapses, the per-component fair share
+      // floors at 1, and extraction opens exactly ONE candidate per
+      // component and breaks. Every other document this job already
+      // fetched and paid for stays unread — the more authoritative sources
+      // acquisition found, the more it threw away.
+      //
+      // `fetchMetered` is already false here, because charging a source
+      // open for a network-impossible read would meter an external action
+      // that cannot occur (D-137). The identical reasoning governs
+      // RATIONING: an axis that bounds external opens has nothing to say
+      // about a read that performs none. The per-attempt hard cap still
+      // applies, and extraction is still bounded by the axis that actually
+      // pays for it — modelCostMicro — which reserves per extraction call
+      // and is untouched here.
+      const openAllowance = fetchMetered
+        ? Math.max(
+            1,
+            componentSearchAllowance({
+              maxSearchQueries: documentaryMaxSourceOpens,
+              alreadyReserved: await currentSourceOpensReserved(deps.db, ctx.jobId),
+              workQueueSize: ctx.workQueueSize ?? 1,
+              remainingComponents: ctx.remainingComponents ?? 1,
+              isIntentRequired: plan.intentRequired.has(item.component),
+              hardCapPerAttempt: MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT,
+            }),
+          )
+        : MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT;
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
@@ -1579,11 +1611,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         observations.add("SKIPPED_KNOWN_DEAD_URL");
         return false;
       });
-      // D-137: a replay fetcher serves documents this job (or the owner
-      // path that sealed them) already opened and already paid for. It is
-      // network-impossible by construction, so charging a source open for
-      // it would meter an external action that cannot occur.
-      const fetchMetered = !isReplayProvider(contentFetcher);
       for (const url of orderedCandidates) {
         if (opensAttempted >= openAllowance) break;
         const reserved = fetchMetered
