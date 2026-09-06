@@ -208,15 +208,14 @@ async function callModel(
 // Резолюция проекта — детерминированный серверный код по каталогу
 // (projects.slug/name/ticker + project_aliases), без учёта регистра
 // и знаков. Модель не может «заявить» проект в scope.
-export async function resolveProjectSlug(
-  db: Database,
-  freeText: string | null,
-): Promise<{ slug: string | null; adjustment: ServerAdjustment; candidates: string[] }> {
-  const miss = { slug: null, adjustment: "PROJECT_UNRESOLVED" as const, candidates: [] };
-  if (!freeText?.trim()) return miss;
-  const key = looseKey(freeText);
-  if (!key) return miss;
+type Resolution = { slug: string | null; adjustment: ServerAdjustment; candidates: string[] };
 
+const RESOLUTION_MISS: Resolution = { slug: null, adjustment: "PROJECT_UNRESOLVED", candidates: [] };
+
+// One catalog lookup for one normalised key. Extracted verbatim from the
+// single lookup this function has always performed, so the qualified form
+// below asks the SAME question rather than a second, drifting copy of it.
+async function lookupByLooseKey(db: Database, key: string): Promise<Resolution> {
   const rows = (
     await db.execute(sql`
       SELECT DISTINCT p.slug FROM projects p
@@ -237,13 +236,59 @@ export async function resolveProjectSlug(
   // за пользователя; спрашиваем, какой именно, и НАЗЫВАЕМ варианты,
   // иначе уточнение не может привести ни к какому ответу.
   if (rows.length > 1) {
-    return {
-      slug: null,
-      adjustment: "PROJECT_AMBIGUOUS",
-      candidates: rows.map((r) => r.slug),
-    };
+    return { slug: null, adjustment: "PROJECT_AMBIGUOUS", candidates: rows.map((r) => r.slug) };
   }
-  return miss;
+  return RESOLUTION_MISS;
+}
+
+// RC-4 — «NAME (TICKER)» IS ONE NAME FOR ONE PROJECT, NOT AN UNKNOWN WORD.
+//
+// THE DEFECT THIS CLOSES, measured on the frozen panel. looseKey deletes
+// every non-alphanumeric character, so «Raydium (RAY)» normalises to
+// «raydiumray» — a key no slug, name, ticker or alias can ever equal. The
+// most ordinary way to name an asset was therefore unresolvable for EVERY
+// project in the catalog, not just the one that exposed it: «Pump.fun
+// (PUMP)» fails identically today, though both halves resolve on their own.
+//
+// Tried ONLY after the whole string has already missed, so nothing that
+// resolves today changes in any way. Both halves are then resolved through
+// the same catalog lookup, and they must not disagree: two halves naming
+// two different projects is exactly the ambiguity the server refuses to
+// decide, so it stays a refusal with both candidates named. No new
+// identity is asserted — a half resolves only if the catalog already
+// resolved it, which is why an unknown ticker stays unknown.
+const QUALIFIED_NAME = /^(.*\S)\s*\(([^()]+)\)$/;
+
+async function resolveQualifiedName(db: Database, freeText: string): Promise<Resolution> {
+  const match = QUALIFIED_NAME.exec(freeText.trim());
+  if (!match) return RESOLUTION_MISS;
+  const [baseKey, qualifierKey] = [looseKey(match[1]), looseKey(match[2])];
+  if (!baseKey || !qualifierKey) return RESOLUTION_MISS;
+
+  const base = await lookupByLooseKey(db, baseKey);
+  const qualifier = await lookupByLooseKey(db, qualifierKey);
+  // An ambiguous half is already a refusal on its own terms; carry it out
+  // rather than letting the other half quietly decide for the user.
+  if (base.adjustment === "PROJECT_AMBIGUOUS") return base;
+  if (qualifier.adjustment === "PROJECT_AMBIGUOUS") return qualifier;
+  if (base.slug && qualifier.slug && base.slug !== qualifier.slug) {
+    return { slug: null, adjustment: "PROJECT_AMBIGUOUS", candidates: [base.slug, qualifier.slug] };
+  }
+  const slug = base.slug ?? qualifier.slug;
+  return slug ? { slug, adjustment: "NONE", candidates: [slug] } : RESOLUTION_MISS;
+}
+
+export async function resolveProjectSlug(
+  db: Database,
+  freeText: string | null,
+): Promise<Resolution> {
+  if (!freeText?.trim()) return RESOLUTION_MISS;
+  const key = looseKey(freeText);
+  if (!key) return RESOLUTION_MISS;
+
+  const direct = await lookupByLooseKey(db, key);
+  if (direct.slug !== null || direct.adjustment === "PROJECT_AMBIGUOUS") return direct;
+  return resolveQualifiedName(db, freeText);
 }
 
 // Резолюция ВСЕХ названных сущностей (основная + related_entities).
