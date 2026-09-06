@@ -22,14 +22,15 @@ export class MissingActivePatternError extends Error {
 // (phase-6-plan.md §19 S4, final S0-S3 review note on frozen Phase 5
 // LOW-2).
 //
-// Phase 5's loadActivePattern() (src/server/memory/plan-job.ts) does NOT
-// filter on status='ACTIVE' — a known, explicitly-deferred Phase 5 debt
-// item (LOW-2). It is FROZEN: S4 must not silently change it. This is a
-// separate, additive function for the one thing S4 actually needs —
-// resolving activePatternVersion to feed buildContractView()'s explicit
-// cross-check — and it filters on status='ACTIVE' itself, so S4's own
-// correctness does not depend on Phase 5's deferred fix. It does not
-// call, wrap, or modify loadActivePattern() in any way.
+// This is the ONE place the ACTIVE predicate lives. It was written when
+// Phase 5's plan-time read did NOT filter on status='ACTIVE' (the LOW-2
+// debt), so S4's correctness would not depend on that deferred fix.
+//
+// That debt is now paid: plan-job.ts resolves the version through THIS
+// function and then reads its content keyed by that version, exactly as
+// S5, S6 and S7 do. Every planning-time and run-time Pattern read now
+// shares this one ACTIVE boundary — no caller carries a second notion of
+// which Pattern is active.
 //
 // research_patterns has a partial unique index enforcing at most one
 // ACTIVE row per topic (uq_research_patterns_one_active), so "the active

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { loadProductConfig } from "../config/product";
@@ -22,15 +22,38 @@ export interface MemoryPlanningResult {
   memoryStatus: "NOT_USED" | "USED" | "USED_AND_REVERIFIED";
 }
 
-async function loadActivePattern(
+// PLAN-TIME PATTERN READ — ONE ACTIVE ROW, CONTENT AND VERSION TOGETHER.
+//
+// THE LATENT TRAP THIS CLOSES (the RC-1 class, second site). This read
+// used to select by topic alone: no status filter, no ORDER BY. On a topic
+// carrying a RETIRED v1 beside an ACTIVE v2 it returned whichever row the
+// heap happened to yield first, so planning could take its `steps` and
+// `requiredComponents` from a RETIRED Pattern while freezing the ACTIVE
+// version number into the contract — two different Patterns for one job,
+// with nothing anywhere to notice. It was inert only while every version
+// carried identical steps; the first semantic version that changes either
+// field turns it into planning against the wrong Pattern, silently.
+//
+// Selecting BY the already-resolved ACTIVE version is the same two-step
+// S5, S6 and S7 already use (component-reconciliation-store.ts,
+// mechanism-assembly-store.ts, claim-support-store.ts): resolve the ACTIVE
+// version through the canonical resolver, then read the row keyed by it.
+// Content and version therefore always come from ONE row, and that row is
+// always the ACTIVE one — DRAFT and RETIRED can satisfy neither.
+async function loadActivePatternContent(
   db: Database | Transaction,
   topicId: string,
+  version: number,
 ): Promise<PatternContent> {
   const [row] = await db
     .select()
     .from(researchPatterns)
-    .where(eq(researchPatterns.topicId, topicId));
-  if (!row) throw new Error(`no research_patterns row for topic ${topicId}`);
+    .where(and(eq(researchPatterns.topicId, topicId), eq(researchPatterns.version, version)));
+  if (!row) {
+    throw new Error(
+      `ACTIVE research_patterns row for topic ${topicId} version ${version} vanished between lookup and read`,
+    );
+  }
   // zod-контракт на content (§5.2) — искажённый Pattern не должен молча
   // пройти в планировщик.
   return patternContentSchema.parse(row.content);
@@ -45,16 +68,18 @@ export async function runMemoryPlanningStage(
   if (!job.projectId) throw new Error(`research job has no projectId: ${jobId}`);
 
   const config = await loadProductConfig(db);
-  const pattern = await loadActivePattern(db, job.topicId);
-  // FREEZE WHAT IS ACTIVE, NOT A LITERAL. The same sanctioned resolver
-  // S4-S7 use, so plan time and run time cannot disagree about which
-  // Pattern version this job belongs to.
+  // FREEZE WHAT IS ACTIVE, NOT A LITERAL, AND READ THE SAME ROW. The
+  // canonical ACTIVE resolver S4-S7 use decides the version; the content
+  // is then read keyed by that version, so plan time and run time cannot
+  // disagree about which Pattern this job belongs to, and the content can
+  // never come from a DRAFT or RETIRED row.
   const patternVersion = await loadActivePatternVersion(db, job.topicId);
   if (patternVersion === null) {
     throw new MissingActivePatternError(
       `no ACTIVE research_patterns row for topic ${job.topicId} — refusing to plan without a confirmed active Pattern version`,
     );
   }
+  const pattern = await loadActivePatternContent(db, job.topicId, patternVersion);
   const statementQuery = (job.normalizedTask as { task?: string } | null)?.task;
 
   const startedAt = Date.now();
