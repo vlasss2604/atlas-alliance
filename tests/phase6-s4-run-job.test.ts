@@ -198,24 +198,35 @@ describe("Фаза 6, S4 — LOW-1: без ACTIVE Pattern research не идёт
       .insert(topics)
       .values({ slug: uniq("t_low1_no_active"), name: "LOW-1 no active pattern", isActive: false })
       .returning();
-    // Валидный по схеме content (переиспользуем content реального ACTIVE
-    // Pattern'а как шаблон) — иначе Phase 5 loadActivePattern() упадёт
-    // раньше, чем мы дойдём до проверяемого S4-инварианта. Оба ряда
-    // сознательно НЕ ACTIVE — единственное, что здесь проверяется.
+    // ACTIVE НА МОМЕНТ ПЛАНИРОВАНИЯ. Планирование теперь резолвит
+    // замораживаемую версию тем же ACTIVE-фильтром, что и S4-S7,
+    // поэтому без ACTIVE-строки оно откажет само и до проверяемого
+    // S4-инварианта дело не дойдёт. Content — реальный ACTIVE Pattern как шаблон.
     await ctx.db.insert(researchPatterns).values({
       topicId: topic.id,
       version: 1,
-      status: "DRAFT",
-      content: referenceRow.content,
-    });
-    await ctx.db.insert(researchPatterns).values({
-      topicId: topic.id,
-      version: 2,
-      status: "RETIRED",
+      status: "ACTIVE",
       content: referenceRow.content,
     });
 
     const jobId = await makePlannedJobForTopic(topic.id);
+
+    // ...И ТОЛЬКО ИСТОРИЧЕСКИЕ (не ACTIVE) ВЕРСИИ НА МОМЕНТ ИСПОЛНЕНИЯ —
+    // проверяемое состояние то же, что и раньше, но достигнутое законным
+    // путём: Pattern сняли с ACTIVE ПОСЛЕ того, как job был запланирован.
+    // Это и есть настоящая гонка, ради которой проверка существует, и она
+    // детерминирована: никакого времени, только порядок двух вызовов.
+    await ctx.db
+      .update(researchPatterns)
+      .set({ status: "RETIRED" })
+      .where(eq(researchPatterns.topicId, topic.id));
+    await ctx.db.insert(researchPatterns).values({
+      topicId: topic.id,
+      version: 2,
+      status: "DRAFT",
+      content: referenceRow.content,
+    });
+
     const executor: WorkExecutor = { async execute() { return { status: "SUCCEEDED" }; } };
     await expect(runS4ResearchJob(ctx.db, jobId, executor, NOW)).rejects.toThrow(MissingActivePatternError);
   });

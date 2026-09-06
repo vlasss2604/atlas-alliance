@@ -13,7 +13,7 @@ import {
   users,
 } from "../src/server/db/schema";
 import { createNonLiveS4WorkExecutor } from "../src/server/engine/non-live-executor";
-import { runS4ResearchJob } from "../src/server/engine/run-job";
+import { MissingActivePatternError, runS4ResearchJob } from "../src/server/engine/run-job";
 import { handleResearchJobTask, mapEngineOutcome } from "../src/server/jobs/worker";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
@@ -142,27 +142,40 @@ describe("First Real Run Stage 1 — full fake-provider job reaches S7 through t
 });
 
 describe("First Real Run Stage 1 — execution failure never masquerades as an evidentiary conclusion", () => {
-  it("engine-level MissingActivePatternError (topic has no ACTIVE pattern at execution time) -> FAILED, technical reason preserved, no research_claim_support row", async () => {
+  it("planning-stage MissingActivePatternError (topic has no ACTIVE pattern) -> FAILED, technical reason preserved, no research_claim_support row", async () => {
+    // WHY THIS MOVED A STAGE. It used to depend on an inconsistency:
     // Phase 5's loadActivePattern (plan-job.ts) does NOT filter on
-    // status='ACTIVE' (documented LOW-2 debt, active-pattern.ts) — a
-    // DRAFT-only pattern still lets planning succeed. Phase 6's
-    // loadActivePatternVersion DOES filter on status='ACTIVE' — the
-    // engine step then genuinely throws MissingActivePatternError. This
-    // reproduces a real, already-existing system-inconsistency failure
-    // mode without any test-only bypass of worker.ts's own logic.
+    // status='ACTIVE' (LOW-2 debt), so a DRAFT-only Pattern let PLANNING
+    // succeed and only the engine refused. Planning now resolves the
+    // version it freezes through the same ACTIVE-filtered resolver S4-S7
+    // use, so the refusal happens one stage earlier and the inconsistency
+    // is gone. The boundary under test is unchanged, and it is the whole
+    // point of this suite: a configuration failure must never be recorded
+    // as an evidentiary conclusion.
     const activeTopic = await activeTopicId();
     const [activePattern] = await ctx.db.select().from(researchPatterns).where(eq(researchPatterns.topicId, activeTopic));
     const [topic] = await ctx.db.insert(topics).values({ slug: uniq("frr_no_active"), name: "No active pattern (Stage 1 test)", isActive: false }).returning();
     await ctx.db.insert(researchPatterns).values({ topicId: topic.id, version: 1, status: "DRAFT", content: activePattern.content });
     const project = await makeProject();
-    const jobId = await queueJob(project.id, topic.id, coreEntitlement());
 
+    // THE PRECISE CAUSE, STILL PROVEN — at the layer that now raises it.
+    // worker.ts collapses ANY planning exception into one stage-level code
+    // (it sets errorCode and terminationReason to the same literal), so the
+    // job row alone can no longer name the class. Asserting it here keeps
+    // that coverage rather than losing it to the stage move.
+    const causeJobId = await queueJob(project.id, topic.id, coreEntitlement());
+    await expect(runMemoryPlanningStage(ctx.db, causeJobId)).rejects.toThrow(MissingActivePatternError);
+
+    const jobId = await queueJob(project.id, topic.id, coreEntitlement());
     await handleResearchJobTask(ctx.db, jobId);
 
     const after = await jobRow(jobId);
     expect(after.state).toBe("FAILED");
-    expect(after.terminationReason).toBe("SYSTEM_OR_PROVIDER_FAILURE");
-    expect(after.errorCode).toBe("MissingActivePatternError");
+    // EXACT AND DETERMINISTIC, never a wildcard: worker.ts sets both fields
+    // to this one literal for every planning failure, so this still refuses
+    // to accept "some failure code" or an arbitrary one.
+    expect(after.terminationReason).toBe("MEMORY_PLANNING_FAILED");
+    expect(after.errorCode).toBe("MEMORY_PLANNING_FAILED");
     // Never converted into an evidentiary conclusion.
     expect(after.errorCode).not.toBe("INSUFFICIENT_EVIDENCE");
     expect(after.errorCode).not.toBe("NOT_SUPPORTED");
