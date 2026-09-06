@@ -113,6 +113,16 @@ export const ONCHAIN_DOES_NOT_PROVE = {
     "Linking this burn to a buyback mechanism requires separate admitted evidence.",
 } as const;
 
+// A BURN OF A TOKEN THAT IS NOT THIS PROJECT'S IS NOT THIS PROJECT'S
+// SUPPLY EVENT, and the sentence has to say so rather than leave a reader
+// to notice the mint.
+const FOREIGN_MINT_BURN_DOES_NOT_PROVE =
+  "This is a genuine SPL Token burn instruction executed on-chain, but the mint destroyed is NOT this " +
+  "project's confirmed mint. It says nothing whatever about this project's supply: no amount of this " +
+  "project's token stopped existing, no buyback of this project's token is evidenced, and the fact that " +
+  "the burn shares a transaction with this project's activity does not make it this project's event. " +
+  "It is recorded because the instruction really executed, and offered as context only.";
+
 // ---- the fact KIND: closed, code-owned, model-unreachable -------------
 //
 // WHY THIS EXISTS AT ALL. Every sentence in ONCHAIN_DOES_NOT_PROVE above
@@ -489,19 +499,63 @@ export function synthesizeOnchainFacts(
       // ONE artifact, MULTIPLE facts — the provenance model exists
       // precisely so several burn instructions in one transaction share a
       // single stored retrieval.
+      //
+      // WHOSE TOKEN WAS DESTROYED IS PART OF WHAT A BURN MEANS.
+      //
+      // BURN is the one kind APPLICABLE_COMPONENTS_BY_KIND declares
+      // relevant to NET_EFFECT, and §B1 qualifies a gross supply reduction
+      // on that kind alone. Neither asks which mint burned, and until now
+      // neither had to: a transaction was reachable only through the
+      // signature history of a token account for the confirmed mint, so a
+      // burn found inside one was the project's by construction.
+      //
+      // That containment is an accident of the acquisition chain, not a
+      // property of the fact. The moment a transaction can be reached for
+      // any other reason, a burn of an unrelated token sitting in the same
+      // transaction would arrive as SUPPORTS, be read by NET_EFFECT, and
+      // satisfy a supply reduction for a project whose token never moved —
+      // the exact false positive §B1 exists to make impossible.
+      //
+      // So the mint is compared HERE, where both sides are machine-owned:
+      // the burned mint is decoded from the instruction, and the anchor is
+      // the artifact's own provenance. No model output is consulted, and
+      // no statement, summary or component label can reach this decision.
+      //
+      // FAIL CLOSED. A missing or empty anchor is not permission to assume
+      // the burn is ours; without a usable anchor there is nothing to
+      // compare, and an unprovable claim of ownership must read as foreign.
+      const burnAnchor = artifact.provenance.projectAnchor;
+      const anchorUsable = typeof burnAnchor === "string" && burnAnchor.length > 0;
       for (const [index, b] of r.burns.entries()) {
+        const isAnchorMint = anchorUsable && b.mint === burnAnchor;
+        const amount = b.decimals === null ? b.amountRaw : formatTokenAmount(b.amountRaw, b.decimals);
         facts.push(
           fact(
             target,
+            // THE KIND IS UNCHANGED. It is still a burn, and calling it
+            // something else would hide a real observation. What changes
+            // is what it is offered AS.
             "BURN",
-            `Transaction ${r.signature} (slot ${r.slot}) executed an SPL Token ${b.instructionType} instruction ` +
-              `destroying ${b.decimals === null ? b.amountRaw : formatTokenAmount(b.amountRaw, b.decimals)} ` +
-              `of mint ${b.mint} from token account ${b.sourceAccount}.`,
+            isAnchorMint
+              ? `Transaction ${r.signature} (slot ${r.slot}) executed an SPL Token ${b.instructionType} instruction ` +
+                  `destroying ${amount} of mint ${b.mint} from token account ${b.sourceAccount}.`
+              : `Transaction ${r.signature} (slot ${r.slot}) executed an SPL Token ${b.instructionType} instruction ` +
+                  `destroying ${amount} of mint ${b.mint} from token account ${b.sourceAccount}. That mint is NOT ` +
+                  `this project's confirmed mint ${anchorUsable ? burnAnchor : "(none confirmed)"}, so this destroys ` +
+                  `none of this project's supply.`,
             JSON.stringify({ signature: r.signature, slot: r.slot, burn: r.burns[index] }),
-            ONCHAIN_DOES_NOT_PROVE.BURN,
-            // A confirmed on-chain execution is the mechanism running, which
-            // is what EXECUTION_EVIDENCE's live-state gate asks for.
-            { mechanismState: "LIVE" },
+            isAnchorMint ? ONCHAIN_DOES_NOT_PROVE.BURN : FOREIGN_MINT_BURN_DOES_NOT_PROVE,
+            isAnchorMint
+              ? // A confirmed on-chain execution is the mechanism running, which
+                // is what EXECUTION_EVIDENCE's live-state gate asks for.
+                { mechanismState: "LIVE" }
+              : // CONTEXT is inert in reconciliation: it establishes nothing,
+                // so it can never reach §B1's establishing set however the
+                // applicability map later evolves. And no mechanismState —
+                // a stranger's burn executing is not THIS project's
+                // mechanism running, and saying LIVE would assert exactly
+                // that about a project whose token did not move.
+                { relationship: "CONTEXT" },
           ),
         );
       }
