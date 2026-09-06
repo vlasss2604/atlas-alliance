@@ -36,6 +36,7 @@ export function __failNextCalls(n: number): void {
 // Каноническое имя → написания, которые встречаются в вопросах.
 const KNOWN_ASSETS: Record<string, string[]> = {
   "Pump.fun": ["pump\\.fun", "pumpfun", "pump fun", "pump_fun"],
+  Raydium: ["raydium"],
   Hyperliquid: ["hyperliquid"],
   Uniswap: ["uniswap"],
   Aave: ["aave"],
