@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { projects } from "../src/server/db/schema";
+import { eq } from "drizzle-orm";
+
+import { projectAliases, projects } from "../src/server/db/schema";
 import { resolveProjectSlug } from "../src/server/interpreter/interpret";
 import { setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 
@@ -23,9 +25,15 @@ import { setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 //                                 resolve — so it is the same data gap.
 //
 // The normalisation defect was never Raydium-specific: "Pump.fun (PUMP)"
-// failed identically, though both halves resolve on their own. These tests
-// pin the fix and pin the two refusals that remain correct without the
-// missing catalog data.
+// failed identically, though both halves resolve on their own.
+//
+// The data gap is now closed by an owner-approved ALIAS, not by a ticker:
+// projects.ticker stays null for Raydium, so the catalog still asserts no
+// token identity. An alias says one thing only — people call this known
+// project by this string. Collisions cannot appear silently: the alias
+// index is globally unique, so one alias cannot belong to two projects,
+// and an alias colliding with another project's name or ticker resolves to
+// PROJECT_AMBIGUOUS rather than being chosen for the user.
 
 describe("RC-4 — project/entity resolution", () => {
   let ctx: TestContext;
@@ -98,25 +106,69 @@ describe("RC-4 — project/entity resolution", () => {
     });
   });
 
+  describe("the owner-approved alias, and what it must not loosen", () => {
+    it("'RAY' resolves through the alias, and the catalog still asserts no ticker", async () => {
+      expect((await resolveProjectSlug(ctx.db, "RAY")).slug).toBe("raydium");
+      const [row] = await ctx.db.select().from(projects).where(eq(projects.slug, "raydium"));
+      // The decision the alias deliberately did NOT overturn.
+      expect(row.ticker).toBeNull();
+    });
+
+    it.each(["ray", "  RAY  ", "Ray"])("the alias is matched without case or spacing: %j", async (text) => {
+      expect((await resolveProjectSlug(ctx.db, text)).slug).toBe("raydium");
+    });
+
+    it("an alias colliding with another project's name is ambiguous, never silently chosen", async () => {
+      const token = `ZZ${uniq("t").replace(/[^a-z0-9]/gi, "")}`;
+      const [owner] = await ctx.db
+        .insert(projects)
+        .values({ slug: uniq("alias_owner_"), name: `Alias Owner ${token}`, status: "ACTIVE_CORE" })
+        .returning();
+      await ctx.db.insert(projectAliases).values({ projectId: owner.id, alias: token });
+      // A different project that simply IS called that.
+      await ctx.db.insert(projects).values({ slug: uniq("namesake_"), name: token, status: "ACTIVE_CORE" });
+
+      const r = await resolveProjectSlug(ctx.db, token);
+      expect(r.slug).toBeNull();
+      expect(r.adjustment).toBe("PROJECT_AMBIGUOUS");
+      expect(r.candidates).toHaveLength(2);
+    });
+
+    it("one alias cannot belong to two projects — the database refuses it", async () => {
+      const token = `ZZ${uniq("u").replace(/[^a-z0-9]/gi, "")}`;
+      const [a] = await ctx.db
+        .insert(projects)
+        .values({ slug: uniq("dup_a_"), name: `Dup A ${token}`, status: "ACTIVE_CORE" })
+        .returning();
+      const [b] = await ctx.db
+        .insert(projects)
+        .values({ slug: uniq("dup_b_"), name: `Dup B ${token}`, status: "ACTIVE_CORE" })
+        .returning();
+      await ctx.db.insert(projectAliases).values({ projectId: a.id, alias: token });
+      await expect(
+        ctx.db.insert(projectAliases).values({ projectId: b.id, alias: token.toLowerCase() }),
+      ).rejects.toThrow();
+    });
+  });
+
   describe("the panel's four refusal shapes, reproduced from the persisted interpreter output", () => {
-    // Exactly the project_or_asset strings the real interpreter produced,
-    // read off the stored interpretations — no model call involved.
-    it("A6-Q2 'Raydium (RAY)' now resolves", async () => {
+    // Exactly the project_or_asset / related_entities strings the real
+    // interpreter produced, read off the stored interpretations — no model
+    // call involved. All four now pass entity resolution.
+    it("A6-Q2 'Raydium (RAY)' resolves — the normalisation fix", async () => {
       expect((await resolveProjectSlug(ctx.db, "Raydium (RAY)")).slug).toBe("raydium");
     });
 
-    it("A6-Q3 'RAY' stays unresolved — the catalog carries no ticker for Raydium", async () => {
-      const r = await resolveProjectSlug(ctx.db, "RAY");
-      expect(r.slug).toBeNull();
-      expect(r.adjustment).toBe("PROJECT_UNRESOLVED");
+    it("A6-Q3 'RAY' resolves — the alias", async () => {
+      expect((await resolveProjectSlug(ctx.db, "RAY")).slug).toBe("raydium");
     });
 
-    it("A4-Q2 / A5-Q1: the primary resolves, the related ticker does not", async () => {
-      // The related-entity veto is not the defect: it refused because "RAY"
-      // genuinely did not resolve. Both halves are pinned so the day a
-      // ticker is added, this test states what changes.
+    it("A4-Q2 / A5-Q1: primary AND related entity both resolve to the same project", async () => {
+      // The related-entity veto was never the defect — it refused because
+      // "RAY" genuinely did not resolve. Now both halves land on one
+      // project, so the veto has nothing to refuse and does not fire.
       expect((await resolveProjectSlug(ctx.db, "Raydium")).slug).toBe("raydium");
-      expect((await resolveProjectSlug(ctx.db, "RAY")).slug).toBeNull();
+      expect((await resolveProjectSlug(ctx.db, "RAY")).slug).toBe("raydium");
     });
   });
 });

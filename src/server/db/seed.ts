@@ -1,7 +1,7 @@
 import { eq, sql } from "drizzle-orm";
 
 import type { Database } from "./client";
-import { productConfig, projects, researchPatterns, topics } from "./schema";
+import { productConfig, projectAliases, projects, researchPatterns, topics } from "./schema";
 import { DEFAULT_PRODUCT_CONFIG } from "../config/product";
 import { PATTERN_V1_CONTENT } from "../domain/pattern";
 
@@ -43,6 +43,32 @@ export async function seed(db: Database): Promise<void> {
       .insert(projects)
       .values({ ...p, status: "ACTIVE_CORE", publishedAt: sql`now()` })
       .onConflictDoNothing({ target: projects.slug });
+  }
+
+  // RC-4 — ПОДТВЕРЖДЁННЫЕ ВЛАДЕЛЬЦЕМ АЛЬТЕРНАТИВНЫЕ НАПИСАНИЯ.
+  //
+  // Алиас — ЭТО НЕ утверждение идентичности токена. Поле projects.ticker
+  // намеренно остаётся незаданным там, где владелец его не задавал, и
+  // это решение здесь не переопределяется. Алиас говорит ровно одно:
+  // «этой строкой люди называют вот этот уже известный проект».
+  //
+  // Зачем: на замороженной панели 3 из 9 вопросов по Raydium не дошли до
+  // исследования: «Raydium» резолвился, а «RAY» не был связан ни с чем.
+  // Отказ был честным — ATLAS не угадывает, — но сам вопрос был обычным.
+  //
+  // Коллизия не может возникнуть молча: uq_project_aliases_alias_lower —
+  // глобальный уникальный индекс, поэтому один алиас не может
+  // принадлежать двум проектам, а совпадение алиаса с именем или
+  // тикером другого проекта резолвер вернёт как PROJECT_AMBIGUOUS,
+  // а не выберет сам.
+  const catalogAliases: ReadonlyArray<{ slug: string; alias: string }> = [
+    { slug: "raydium", alias: "RAY" },
+  ];
+
+  for (const { slug, alias } of catalogAliases) {
+    const [project] = await db.select().from(projects).where(eq(projects.slug, slug));
+    if (!project) continue;
+    await db.insert(projectAliases).values({ projectId: project.id, alias }).onConflictDoNothing();
   }
 
   // Pattern v1 (D-022, D-052): без этой строки CORE v0.1 отсутствует в БД
