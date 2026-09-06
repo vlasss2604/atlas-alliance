@@ -520,7 +520,13 @@ function baseResult(input: ClaimEvaluationInput): Omit<ClaimSupportResult, "stat
 // §6/D-106 — the 3 out-of-scope intents are handled BEFORE any CORE
 // lookup is attempted; they deliberately have no intentRequirements
 // entry, and that absence is not a configuration error for them.
-const CEILING_INTENTS = new Set(["CLAIM_FACT_CHECK"]);
+//
+// RC-5 — NOT A PROVABLE CLAIM, SO NOT A SUPPORT VERDICT. A methodology
+// question ("what evidence would be required to attribute X to Y?") asks
+// for an evidentiary standard, not for a proposition about a project. It
+// has no CORE requirement set because it is out of scope, so there is no
+// atom to satisfy and nothing that could be partially supported.
+const UNPROVABLE_CLAIM_INTENTS = new Set(["CLAIM_FACT_CHECK"]);
 const UNCLASSIFIED_INTENTS = new Set(["UNKNOWN", "SCENARIO_CAUSAL_IMPACT"]);
 
 export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportResult {
@@ -529,18 +535,26 @@ export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportR
   if (UNCLASSIFIED_INTENTS.has(intent)) {
     return { ...baseResult(input), status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["INTENT_NOT_CLASSIFIED"], requirementResults: [], contextGaps: [] };
   }
-  if (CEILING_INTENTS.has(intent)) {
-    // §3.2/D-106 — the ceiling is a MAXIMUM ("never SUPPORTED"), never a
-    // floor: it must not silently raise a genuinely-empty result (zero S6
-    // flows, i.e. no mechanism evidence exists for this job at all) up to
-    // "partially supported". CLAIM_FACT_CHECK has no CORE requirement set
-    // (out of scope, §28) so there is no per-atom evaluation to run — the
-    // only structurally honest signal available is "did S6 establish any
-    // mechanism at all for this job's topic", which is what gates between
-    // the two reachable outcomes below. NOT_SUPPORTED stays structurally
-    // unreachable here (no requirement set means no positive-incompatibility
-    // check is possible), which is intentional, not a gap — see
-    // phase6-s7-claim-evaluator.test.ts's dedicated regression.
+  if (UNPROVABLE_CLAIM_INTENTS.has(intent)) {
+    // RC-5, measured on the frozen panel. This used to return
+    // PARTIALLY_SUPPORTED whenever S6 had assembled any mechanism at all,
+    // which put two contradictory statements in one row: the reason code
+    // said the proposition could not be structured, while the status said
+    // it was partly proven. A professional reads the status, so a question
+    // ATLAS cannot analyse as a claim came back looking partly answered.
+    //
+    // Whether S6 assembled a mechanism is a fact about the JOB, not about
+    // this question: no amount of mechanism evidence can partially satisfy
+    // a proposition that was never structured. So the two branches now
+    // agree on the honest outcome and differ only in what they can say
+    // about why — NO_RELEVANT_FLOW when the job found no mechanism at all.
+    //
+    // This is strictly a LOWERING: SUPPORTED and PARTIALLY_SUPPORTED are
+    // both now unreachable for these intents, and NOT_SUPPORTED stays
+    // structurally unreachable (no requirement set means no positive
+    // incompatibility check is possible). Nothing here widens scope, and
+    // the in-scope CLAIM_VERIFICATION ceiling further below — which caps a
+    // genuinely evaluated claim — is untouched.
     if (assembly.flows.length === 0) {
       return {
         ...baseResult(input),
@@ -552,7 +566,7 @@ export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportR
     }
     return {
       ...baseResult(input),
-      status: "PARTIALLY_SUPPORTED",
+      status: "INSUFFICIENT_EVIDENCE",
       reasonCodes: ["CLAIM_PROPOSITION_NOT_STRUCTURED"],
       requirementResults: [],
       contextGaps: [],

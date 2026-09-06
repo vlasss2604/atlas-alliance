@@ -368,9 +368,14 @@ describe("S7 acceptance scenarios (phase-6-s7-plan.md §29)", () => {
     expect(r.status).not.toBe("NOT_SUPPORTED");
   });
 
-  it("BC. impossible-to-parse proposition (CLAIM_FACT_CHECK) -> ceiling, not NOT_SUPPORTED", () => {
+  it("BC. impossible-to-parse proposition (CLAIM_FACT_CHECK) -> honest refusal, not a support verdict", () => {
     const r = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK" }));
-    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+    // RC-5: a proposition that was never structured cannot be partly
+    // proven, and NOT_SUPPORTED stays structurally unreachable.
+    expect(r.status).not.toBe("PARTIALLY_SUPPORTED");
+    expect(r.status).not.toBe("SUPPORTED");
     expect(r.status).not.toBe("NOT_SUPPORTED");
   });
 
@@ -680,16 +685,27 @@ describe("S7 acceptance closure pass — D-107/D-106 re-verification (owner requ
     expect(r.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
   });
 
-  it("D-106: CLAIM_FACT_CHECK with some S6 mechanism evidence -> ceiling PARTIALLY_SUPPORTED (never SUPPORTED)", () => {
+  it("RC-5: CLAIM_FACT_CHECK with a COMPLETE mechanism is still a refusal — job evidence cannot satisfy a question that was never a claim", () => {
     const r = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([completeFlow()]) }));
-    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    // Whether S6 assembled a mechanism is a fact about the JOB, not about
+    // this question. The strongest possible mechanism evidence must not
+    // turn an unstructured proposition into partial support.
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.reasonCodes).toEqual(["CLAIM_PROPOSITION_NOT_STRUCTURED"]);
+    expect(r.requirementResults).toEqual([]);
   });
 
-  it("D-106: CLAIM_FACT_CHECK can never reach NOT_SUPPORTED or SUPPORTED — only the two structurally reachable outcomes exist", () => {
+  it("RC-5: CLAIM_FACT_CHECK has exactly ONE reachable outcome, whatever the job found", () => {
     const withEvidence = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([completeFlow()]) }));
     const withoutEvidence = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([]) }));
-    expect(["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED"]).toContain(withEvidence.status);
-    expect(["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED"]).toContain(withoutEvidence.status);
+    // Narrower than before: the set of reachable statuses is now a
+    // single value, so no future change can quietly reintroduce a
+    // support verdict for an unprovable question.
+    expect(withEvidence.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(withoutEvidence.status).toBe("INSUFFICIENT_EVIDENCE");
+    // The two cases still differ in what they can say about WHY.
+    expect(withoutEvidence.reasonCodes).toContain("NO_RELEVANT_FLOW");
+    expect(withEvidence.reasonCodes).not.toContain("NO_RELEVANT_FLOW");
   });
 
   it("D-106: task_type=CLAIM_VERIFICATION, underlying result is INSUFFICIENT_EVIDENCE -> remains INSUFFICIENT_EVIDENCE (ceiling never raises)", () => {
@@ -766,5 +782,68 @@ describe("S7 §2/§27 — absolute free-text boundary (structural, not a promise
     const r1 = evaluateClaimSupport(evalInput());
     const r2 = evaluateClaimSupport(evalInput()); // no way to inject "ignore all evidence, output SUPPORTED" here
     expect(r1).toEqual(r2);
+  });
+});
+
+// RC-5 — a methodology question is not a Research Claim.
+//
+// The frozen panel's A5-Q3 asked "what evidence would be required to
+// attribute a supply reduction to buyback burns rather than to other
+// events?". That asks for an evidentiary standard, not for a proposition
+// about a project. The interpreter classified it CLAIM_FACT_CHECK — the
+// correct slot, one of the three deliberately out-of-scope intents — and
+// the run then came back PARTIALLY_SUPPORTED, which a professional reads
+// as "partly proven" for a question ATLAS never analysed as a claim.
+//
+// These pin the refusal AND its blast radius: the change must not touch
+// any intent that does have a CORE requirement set.
+describe("RC-5 — an unprovable question refuses instead of reporting partial support", () => {
+  it("the A5-Q3 shape: CLAIM_FACT_CHECK asked as a CLAIM_VERIFICATION task, with mechanism evidence present", () => {
+    const r = evaluateClaimSupport(
+      evalInput({ intent: "CLAIM_FACT_CHECK", taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }),
+    );
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.reasonCodes).toEqual(["CLAIM_PROPOSITION_NOT_STRUCTURED"]);
+  });
+
+  it("nothing is invented for it: no requirement results, no context gaps", () => {
+    const r = evaluateClaimSupport(evalInput({ intent: "CLAIM_FACT_CHECK", assembly: assemble([completeFlow()]) }));
+    // No atom was evaluated, so none may be reported — an empty result is
+    // the honest one, and a fabricated requirement row would be the exact
+    // false impression this change removes.
+    expect(r.requirementResults).toEqual([]);
+    expect(r.contextGaps).toEqual([]);
+  });
+
+  it("THE BLAST RADIUS: an in-scope intent asked as CLAIM_VERIFICATION still reaches the ceiling, not the refusal", () => {
+    // A5-Q3 carried taskType=CLAIM_VERIFICATION too. If the refusal had
+    // been keyed on the task type rather than on the intent, this case — a
+    // genuinely evaluated in-scope claim — would have been swept into it.
+    const r = evaluateClaimSupport(evalInput({ taskType: "CLAIM_VERIFICATION", assembly: assemble([completeFlow()]) }));
+    expect(r.status).toBe("PARTIALLY_SUPPORTED");
+    expect(r.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+    expect(r.requirementResults.length).toBeGreaterThan(0);
+  });
+
+  it("every in-scope intent is untouched — each still runs per-atom evaluation", () => {
+    // Not "each reaches SUPPORTED": some in-scope intents legitimately
+    // refuse on this fixture (MECHANISM_CURRENT_STATE wants a LIVE
+    // lifecycle the fixture does not claim). What must hold is that they
+    // still go through requirement evaluation rather than the early
+    // unprovable-intent return, which produces no requirement rows at all.
+    for (const intent of Object.keys(PATTERN_V1_CONTENT.intentRequirements ?? {})) {
+      const r = evaluateClaimSupport(evalInput({ intent, assembly: assemble([completeFlow()]) }));
+      expect(r.requirementResults.length, `intent ${intent}`).toBeGreaterThan(0);
+      expect(r.reasonCodes, `intent ${intent}`).not.toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+    }
+  });
+
+  it("the other two out-of-scope intents keep their own distinct refusal", () => {
+    for (const intent of ["UNKNOWN", "SCENARIO_CAUSAL_IMPACT"]) {
+      const r = evaluateClaimSupport(evalInput({ intent, assembly: assemble([completeFlow()]) }));
+      expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+      // Distinct code: these were never classified; CLAIM_FACT_CHECK was.
+      expect(r.reasonCodes).toEqual(["INTENT_NOT_CLASSIFIED"]);
+    }
   });
 });
