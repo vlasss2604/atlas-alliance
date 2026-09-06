@@ -264,6 +264,12 @@ async function persistResult(
 // (HIGH-4): a Pattern selection failure is a configuration failure, not
 // an evidentiary outcome, and must not produce a derived-projection row
 // that looks like one.
+//
+// RC-1 — PatternSemanticDriftError (the persisted Pattern declares fewer
+// structural obligations than the code contract requires) takes the SAME
+// posture, and for the same reason: reconciling anyway would persist a
+// component result computed under weaker semantics than the code owns,
+// which is indistinguishable in the row from an honest one. It propagates.
 // D-158 PHASE 2 — the project's human-confirmed identity for this job, or
 // null. Degrade-never-throw is deliberately NOT used: a failure to read it
 // would otherwise look like "no programs confirmed" and silently make an

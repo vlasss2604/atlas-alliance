@@ -228,6 +228,72 @@ export class PatternConfigurationError extends Error {
   }
 }
 
+// RC-1 — A PERSISTED PATTERN MAY NOT SILENTLY DROP A CODE-OWNED OBLIGATION.
+//
+// THE DEFECT THIS CLOSES, proven by the frozen 18-question panel in 9 of
+// 12 completed jobs. The active research_patterns row is chosen by
+// IDENTITY (topic + ACTIVE + version) and validated by SHAPE
+// (patternContentSchema). Neither proves CONTENT. `structuralObligations`
+// is optional — correctly, because a component declaring none must behave
+// exactly as it did before obligations existed — so a row seeded before an
+// obligation was added parses cleanly, arrives with the field simply
+// absent, and evaluateStructuralObligations(undefined) reports nothing
+// unmet. SOURCE_OF_VALUE therefore reached SUPPORTED on documentary
+// allocation sentences while SOV.MECHANICAL_PROVENANCE — the rule written
+// to stop precisely that — never executed in production at all.
+//
+// THE VERSION NUMBER CANNOT CATCH IT. seed.ts writes with
+// onConflictDoNothing on (topic, version), so editing PATTERN_V1_CONTENT
+// without bumping the version leaves the persisted row frozen forever,
+// and the plan-time cross-check compares version NUMBERS, which still
+// agree. Same number, different content, no complaint anywhere.
+//
+// THE RULE. For every component, the code's own PATTERN_V1_CONTENT
+// declares which structural obligations that component REQUIRES. A
+// persisted entry must declare at least those. Drift fails closed: this
+// throws rather than reconciling under semantics weaker than the code
+// contract, because a silently weakened obligation is indistinguishable
+// in the output from a component that honestly met it.
+//
+// SUPERSET, NOT EQUALITY — THE ASYMMETRY IS THE ARGUMENT. A MISSING
+// obligation weakens, and that is the defect. An EXTRA obligation the
+// code does not implement cannot manufacture a false green:
+// evaluateStructuralObligations already treats an unknown id as UNMET
+// (structural-obligation.ts), so an unexpected id is fail-closed on its
+// own. Demanding equality would add a failure mode no observed defect
+// calls for.
+//
+// SCOPED PER COMPONENT, NOT A BLANKET PATTERN REFUSAL. A component whose
+// code contract names no obligation has no semantics to lose here and
+// keeps reconciling byte-identically. The blast radius of drift is the
+// components that actually drifted, and nothing else.
+//
+// DERIVED, NEVER RESTATED. The required set is read from
+// PATTERN_V1_CONTENT itself, so adding an obligation to the Pattern arms
+// this check for that component automatically — there is no second list
+// to keep in sync, which is the failure mode this whole guard exists for.
+export class PatternSemanticDriftError extends Error {
+  constructor(
+    readonly component: string,
+    readonly missingObligations: readonly string[],
+  ) {
+    super(
+      `Persisted Pattern content for component "${component}" is missing required structural obligation(s) ` +
+        `[${missingObligations.join(", ")}] declared by the current code contract. The stored Pattern row is stale ` +
+        `relative to PATTERN_V1_CONTENT, and reconciling against it would apply weaker research semantics than the ` +
+        `code requires. This is a configuration failure, not an evidentiary conclusion (RC-1).`,
+    );
+    this.name = "PatternSemanticDriftError";
+  }
+}
+
+// The obligations the CODE requires for this component. Read from
+// PATTERN_V1_CONTENT rather than a hand-maintained list — that is what
+// keeps the guard generic across future obligations.
+function codeRequiredObligationsFor(component: string): readonly string[] {
+  return PATTERN_V1_CONTENT.componentRequirements?.[component]?.structuralObligations ?? [];
+}
+
 export function componentRequirementsFor(
   pattern: PatternContent,
   component: string,
@@ -235,6 +301,15 @@ export function componentRequirementsFor(
   const entry = pattern.componentRequirements?.[component];
   if (entry === undefined) {
     throw new PatternConfigurationError(component);
+  }
+  // RC-1 — the shape is parsed by now; this is the semantics. Every
+  // production reader of component requirements goes through this one
+  // accessor (S4 acquisition planning, S5 reconciliation, S6 assembly),
+  // so the guard covers every path without a new call site anywhere.
+  const declared = new Set(entry.structuralObligations ?? []);
+  const missing = codeRequiredObligationsFor(component).filter((id) => !declared.has(id));
+  if (missing.length > 0) {
+    throw new PatternSemanticDriftError(component, missing);
   }
   return entry;
 }
