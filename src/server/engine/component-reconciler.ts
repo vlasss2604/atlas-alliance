@@ -179,6 +179,24 @@ export interface ComponentReconciliationInput {
   item: Pick<ComponentWorkItem, "step" | "component">;
   requirements: ComponentRequirements;
   evidence: EvidenceRow[];
+  // D-158 STEP 1 — ROWS VISIBLE TO STRUCTURAL OBLIGATIONS AND NOTHING ELSE.
+  //
+  // Same-job Evidence carrying machine-owned on-chain provenance, filed
+  // under ANY component. It exists because the strongest causal record
+  // this system produces is synthesized where a transaction is reachable
+  // — EXECUTION_EVIDENCE — while the obligation that needs it belongs to
+  // another component, and ordinary reconciliation correctly refuses to
+  // let a movement fact speak for that other component.
+  //
+  // THESE ROWS NEVER ENTER `evidence`. They are not merged into the
+  // ordinary pool, are never sorted, deduped, established, excluded or
+  // reported; the caller passes them separately precisely so the two
+  // questions cannot be answered from one collection by accident. A row
+  // here is read by `evaluateStructuralObligations` and by nothing else.
+  //
+  // Absent, or empty, is the normal case: only a component whose contract
+  // names an obligation has any use for them.
+  obligationEvidence?: readonly EvidenceRow[];
   // D-158 PHASE 2 — code-owned context for structural obligations. Absent
   // is treated as "no confirmed identity", which makes an identity-
   // dependent obligation unmet rather than skipped.
@@ -924,10 +942,42 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // `statement`, `summary` or any other prose the model wrote, and the
   // flag is READ-ONLY in the other direction: an obligation is told what
   // establishes, and can never make something establish.
+  //
+  // THE POOL IS ASSEMBLED HERE, SEPARATELY, AND IS USED NOWHERE ELSE.
+  //
+  // `survivingAfterHard` answers the ordinary question and keeps its
+  // ordinary meaning: it is what dedup, establishment and exclusion run
+  // over, and nothing below re-reads the union built here. The union adds
+  // same-job rows carrying machine-owned provenance that ordinary
+  // applicability refused — a TOKEN_TRANSFER filed at EXECUTION_EVIDENCE
+  // is still WRONG_COMPONENT for SOURCE_OF_VALUE, and stays excluded,
+  // unsupporting and absent from supportingEvidenceIds.
+  //
+  // THREE CONDITIONS, ALL MACHINE-OWNED. The row must belong to THIS job;
+  // it must carry a non-null `onchainProvenance`, written by exactly one
+  // code path and unreachable from any model output; and it must be on the
+  // current Evidence contract, as every other admitted row must. Nothing
+  // about its component, class, relationship, statement or summary is
+  // consulted — those are the labels this door is closed to.
+  //
+  // Deduped by id, so a row already in the ordinary pool is inspected once
+  // and a caller passing it twice changes no outcome.
   const establishingIds = new Set(establishing.map((r) => r.id));
+  const obligationPool: EvidenceRow[] = [...survivingAfterHard];
+  if ((requirements.structuralObligations?.length ?? 0) > 0) {
+    const seenForObligation = new Set(obligationPool.map((r) => r.id));
+    for (const row of input.obligationEvidence ?? []) {
+      if (seenForObligation.has(row.id)) continue;
+      if (row.researchJobId !== jobId) continue;
+      if ((row.onchainProvenance ?? null) === null) continue;
+      if (row.evidenceContractVersion !== 2) continue;
+      seenForObligation.add(row.id);
+      obligationPool.push(row);
+    }
+  }
   for (const unmet of evaluateStructuralObligations(
     requirements.structuralObligations,
-    survivingAfterHard.map((r) => ({
+    obligationPool.map((r) => ({
       sourceClass: r.sourceClass,
       officiality: r.officiality,
       entityBinding: r.entityBinding,

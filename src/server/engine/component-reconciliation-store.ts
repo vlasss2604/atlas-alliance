@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, or } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import {
@@ -137,7 +137,13 @@ async function loadEvidenceRows(
           : ownComponent,
       ),
     );
-  return rows.map((r) => ({
+  return rows.map(toEvidenceRow);
+}
+
+// One projection, used by both reads, so the two can never disagree about
+// what a row IS — only about which rows they select.
+function toEvidenceRow(r: typeof evidence.$inferSelect): EvidenceRow {
+  return {
     id: r.id,
     researchJobId: r.researchJobId,
     sourceId: r.sourceId,
@@ -161,7 +167,36 @@ async function loadEvidenceRows(
     publishedAt: r.publishedAt,
     extractionUnitKey: r.extractionUnitKey,
     contentHash: r.contentHash,
-  }));
+  };
+}
+
+// D-158 STEP 1 — THE ROWS A STRUCTURAL OBLIGATION MAY INSPECT.
+//
+// A SECOND QUERY, NOT A WIDER FIRST ONE. `loadEvidenceRows` answers "what
+// evidence may speak for this component", and its union is governed by the
+// closed applicability map. This answers a different question — "what
+// machine-owned provenance does this job hold" — and the two must not share
+// a result set, or the ordinary answer would silently inherit the wider one.
+//
+// SELECTED BY THE PROVENANCE COLUMN ALONE. `onchain_provenance` is written
+// by exactly one code path, the deterministic on-chain synthesis. No
+// documentary, data-provider or model-extracted row carries it, so no
+// amount of model output can place a row in this result — the narrowing is
+// structural, not a rule this query is trusted to follow. Component, class,
+// relationship and step are deliberately NOT predicates here: excluding by
+// component is precisely what this query exists to avoid, and including by
+// any model-authored label is what it must never do.
+//
+// Job-scoped, like every other read in this module.
+async function loadObligationProvenanceRows(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<EvidenceRow[]> {
+  const rows = await db
+    .select()
+    .from(evidence)
+    .where(and(eq(evidence.researchJobId, jobId), isNotNull(evidence.onchainProvenance)));
+  return rows.map(toEvidenceRow);
 }
 
 // The one write this module performs — a deterministic upsert keyed by
@@ -257,11 +292,22 @@ export async function reconcileAndPersistComponent(
     loadConfirmedIdentityForJob(db, jobId),
   ]);
   const requirements = { component: item.component, ...componentRequirementsFor(pattern, item.component) };
+  // A SECOND READ ONLY WHEN THE CONTRACT NAMES AN OBLIGATION. A component
+  // that declares none cannot use these rows, and the reducer would ignore
+  // them, so the query is not issued at all — a component without
+  // obligations behaves exactly as it did, down to the database traffic.
+  const obligationEvidence =
+    (requirements.structuralObligations?.length ?? 0) > 0
+      ? await loadObligationProvenanceRows(db, jobId)
+      : [];
   const result = reconcileComponent({
     jobId,
     item,
     requirements,
     evidence: evidenceRows,
+    // Passed SEPARATELY from `evidence` on purpose: these rows are visible
+    // to structural obligations and to nothing else.
+    obligationEvidence,
     // Absent identity is passed through as null rather than omitted: an
     // identity-dependent obligation must then be UNMET, which is a
     // different and stronger statement than "not evaluated".
