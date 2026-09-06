@@ -4,6 +4,7 @@ import type { Database, Transaction } from "../db/client";
 import { loadProductConfig } from "../config/product";
 import { researchJobs, researchPatterns, researchPlans, memoryRetrievals } from "../db/schema";
 import { patternContentSchema, type PatternContent } from "../domain/pattern";
+import { loadActivePatternVersion, MissingActivePatternError } from "../engine/active-pattern";
 import { planResearch, type PlanResult } from "./planner";
 import { resolveMemoryRetrievalGateway } from "./retrieval-gateway";
 import { parseContract } from "./contract";
@@ -45,6 +46,15 @@ export async function runMemoryPlanningStage(
 
   const config = await loadProductConfig(db);
   const pattern = await loadActivePattern(db, job.topicId);
+  // FREEZE WHAT IS ACTIVE, NOT A LITERAL. The same sanctioned resolver
+  // S4-S7 use, so plan time and run time cannot disagree about which
+  // Pattern version this job belongs to.
+  const patternVersion = await loadActivePatternVersion(db, job.topicId);
+  if (patternVersion === null) {
+    throw new MissingActivePatternError(
+      `no ACTIVE research_patterns row for topic ${job.topicId} — refusing to plan without a confirmed active Pattern version`,
+    );
+  }
   const statementQuery = (job.normalizedTask as { task?: string } | null)?.task;
 
   const startedAt = Date.now();
@@ -62,6 +72,7 @@ export async function runMemoryPlanningStage(
     memoryEnabled: config.memory_enabled,
     hits,
     pattern,
+    patternVersion,
     capabilityAtStart: job.capabilityAtStart,
     budgetAtStart: job.budgetAtStart as never,
     config,

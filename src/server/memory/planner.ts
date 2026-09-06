@@ -47,6 +47,18 @@ export interface PlanInput {
   memoryEnabled: boolean;
   hits: RetrievalHit[];
   pattern: PatternContent;
+  // The Pattern version this plan is frozen against, resolved by the
+  // caller from the ACTIVE row (engine/active-pattern.ts).
+  //
+  // WHY IT IS AN INPUT AND NOT A LITERAL. Every later stage cross-checks
+  // this number against the topic's currently ACTIVE Pattern version: S4's
+  // buildContractView rejects a mismatch as CONTRACT_INVALID, and S5/S6/S7
+  // refuse to run against a Pattern the job was not planned under. A
+  // hardcoded 1 therefore pinned every job ever planned to version 1
+  // whatever was actually ACTIVE, so activating any successor version
+  // failed every new job at the first stage. planResearch stays pure — the
+  // caller does the resolving.
+  patternVersion: number;
   capabilityAtStart: ResearchCapability;
   budgetAtStart: JobBudgetConfig;
   config: ProductConfig;
@@ -160,7 +172,7 @@ function describeComponentProblem(c: ComponentDecision): string {
 }
 
 export function planResearch(input: PlanInput): PlanResult {
-  const { memoryEnabled, hits, pattern, capabilityAtStart, budgetAtStart, config, now } = input;
+  const { memoryEnabled, hits, pattern, patternVersion, capabilityAtStart, budgetAtStart, config, now } = input;
 
   const hitsByStep = new Map<number, RetrievalHit[]>();
   if (memoryEnabled) {
@@ -312,7 +324,7 @@ export function planResearch(input: PlanInput): PlanResult {
   const memoryUsed = memoryEnabled && satisfied.length + requiredFresh.length > 0;
 
   const contract: ResearchBoundaryContract = {
-    patternVersion: 1,
+    patternVersion,
     alreadySatisfiedSteps: satisfied.map((d) => d.step),
     reusableEvidence,
     requiredFreshEvidence: requiredFresh.map((d) => d.step),

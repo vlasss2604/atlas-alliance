@@ -1,15 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 
 import {
   evidence,
   projects,
   researchComponentResults,
   researchPatterns,
+  researchPlans,
   sources,
   topics,
   users,
 } from "../src/server/db/schema";
+import { ContractInvalidError } from "../src/server/engine/contract-view";
+import { loadJobContractView } from "../src/server/engine/job-contract-view";
 import {
   componentRequirementsFor,
   PATTERN_V1_CONTENT,
@@ -295,5 +298,51 @@ describe("RC-1 §2 — the production reconciliation path, against a real databa
     expect(underStale.supportingEvidenceIds.length).toBe(current.supportingEvidenceIds.length);
     expect(underStale.excludedEvidence.length).toBe(current.excludedEvidence.length);
     expect(current.status).toBe("SUPPORTED");
+  });
+
+  // THE HARDCODE THIS WOULD HAVE CAUGHT. planner.ts froze `patternVersion: 1`
+  // as a literal, so every job ever planned claimed version 1 no matter which
+  // Pattern was ACTIVE. Nothing noticed while 1 was the only version that had
+  // ever existed. The moment a v2 was activated, the frozen 1 disagreed with
+  // the active 2 and EVERY new job died at S4 (CONTRACT_INVALID) before any
+  // research began — the plan-time value must track what is actually ACTIVE.
+  async function activateNewVersion(version: number): Promise<void> {
+    await ctx.db
+      .update(researchPatterns)
+      .set({ status: "RETIRED" })
+      .where(and(eq(researchPatterns.topicId, topicId), eq(researchPatterns.status, "ACTIVE")));
+    await ctx.db
+      .insert(researchPatterns)
+      .values({ topicId, version, status: "ACTIVE", content: PATTERN_V1_CONTENT });
+  }
+
+  async function frozenPatternVersion(jobId: string): Promise<number> {
+    const [plan] = await ctx.db
+      .select()
+      .from(researchPlans)
+      .where(eq(researchPlans.researchJobId, jobId))
+      .orderBy(desc(researchPlans.version))
+      .limit(1);
+    return (plan.contract as { patternVersion: number }).patternVersion;
+  }
+
+  it("5. planning freezes the ACTIVE Pattern version, not a literal, and S4 accepts it", async () => {
+    await setPatternContent(PATTERN_V1_CONTENT);
+    const underV1 = await makeJob();
+    expect(await frozenPatternVersion(underV1)).toBe(1);
+
+    await activateNewVersion(2);
+    const underV2 = await makeJob();
+    // The assertion the hardcode failed: 2, not 1.
+    expect(await frozenPatternVersion(underV2)).toBe(2);
+
+    // And S4 — the first stage a real run reaches — accepts the job planned
+    // under the active version...
+    const view = await loadJobContractView(ctx.db, underV2);
+    expect(view.view).toBeTruthy();
+
+    // ...while the job planned under the superseded version is still refused,
+    // which is the guard working, not a regression.
+    await expect(loadJobContractView(ctx.db, underV1)).rejects.toThrow(ContractInvalidError);
   });
 });

@@ -55,6 +55,7 @@ function plan(hits: RetrievalHit[], overrides: Partial<Parameters<typeof planRes
     memoryEnabled: true,
     hits,
     pattern: PATTERN_V1_CONTENT,
+    patternVersion: 1,
     capabilityAtStart: "FRESH_RESEARCH",
     budgetAtStart: budget,
     config: DEFAULT_PRODUCT_CONFIG,
