@@ -127,6 +127,62 @@ export async function runS4ResearchJob(
     //     it was. Only a job that DID do real, already-paid-for research
     //     before running out of budget gets its projection.
     if (e instanceof BudgetExhaustedError) {
+      // PROTECTED DETERMINISTIC WORK STILL RUNS, and the premise that said
+      // otherwise is what changed.
+      //
+      // This path used to skip the three stages below, reasoning that "the
+      // job's axis is spent, so a pass here could only spend components'
+      // one opportunity on reservations that are certain to be refused".
+      // That was true when ONE flat floor was held back from documentary
+      // work alone. It is not true now: the reservation is the contract's
+      // own remaining deterministic demand and is enforced per spender, so
+      // documentary exhaustion means the UNPROTECTED pool is gone while
+      // every component's protected units are still there, untouched, still
+      // reserved for exactly this work.
+      //
+      // Skipping them threw away capacity that had been protected precisely
+      // so it would survive this moment — and with it the burn a
+      // reactivated component would have established, the one bounded
+      // reading that closes an interval, and the delta that needs neither.
+      //
+      // NOTHING IS GRANTED HERE. Each stage passes the same derived ceiling
+      // it always passes: per-component for reactivation, the unprotected
+      // remainder for the opportunistic supply read, and none at all for
+      // materialization, which acquires nothing. All of it goes through the
+      // one ledger mutator, and a stage that cannot reserve refuses and
+      // traces it exactly as on the ordinary path. Documentary work gains
+      // nothing: it is not resumed, and its ceiling is unchanged.
+      //
+      // THE JOB STILL ENDS THE WAY IT ENDED. `e` is re-thrown below
+      // unchanged, so the terminal state stays
+      // BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED and no exhausted job is
+      // converted into a successful one.
+      try {
+        await runOnchainReactivationPass(db, {
+          jobId,
+          projectId: job.projectId,
+          workQueue: view.workQueue,
+          maxSourceOpens: view.researchBudget.maxSourceOpens,
+        });
+        await runPostEventSupplyCompletion(db, {
+          jobId,
+          projectId: job.projectId,
+          maxSourceOpens: view.researchBudget.maxSourceOpens,
+        });
+        await runSupplyDeltaMaterialization(db, { jobId, projectId: job.projectId });
+      } catch (continuation) {
+        // A failure in a continuation stage must NOT replace the terminal
+        // reason. The job stopped because documentary capacity ran out, and
+        // that stays the answer; surfacing a secondary provider or database
+        // error here would rename an honest budget outcome after whatever
+        // happened last. It is reported rather than hidden, and the
+        // original `e` is what propagates.
+        console.error(
+          "[run-job] on-chain continuation after budget exhaustion did not complete:",
+          continuation,
+        );
+      }
+
       await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
       const reconciled = await db
         .select({ id: researchComponentResults.id })
@@ -158,9 +214,11 @@ export async function runS4ResearchJob(
   // NET_EFFECT then reads the applicable typed fact through the ordinary
   // applicability route. Nothing downstream needs to know this pass exists.
   //
-  // Deliberately NOT on the BudgetExhaustedError path above: that job's
-  // axis is spent, so a pass there could only spend components' one
-  // opportunity on reservations that are certain to be refused.
+  // ALSO RUN on the BudgetExhaustedError path above, since Budget
+  // Reservation V2: documentary exhaustion no longer means the axis is
+  // spent, only that the unprotected part of it is, so a pass there spends
+  // capacity that was reserved for exactly this and would otherwise be
+  // thrown away. It is the same call with the same derived ceiling.
   //
   // It creates no attempt, calls no model, runs no search and fetches no
   // document (see the module comment), and it cannot fail the job:
