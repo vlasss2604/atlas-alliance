@@ -39,14 +39,9 @@ import { resolveContentFetcher } from "../engine/providers/content-fetcher";
 import { resolveQueryProposer } from "../engine/providers/query-proposer";
 import { resolveSearchGateway } from "../engine/providers/search-gateway";
 import { assertDirectAcquisitionEgress } from "./egress-integrity";
-import {
-  installFetchRendererCapability,
-  uninstallRendererCapability,
-} from "./renderer-capability";
-import {
-  installOnchainResearchCapability,
-  uninstallOnchainResearchCapability,
-} from "./onchain-capability";
+import { uninstallRendererCapability } from "./renderer-capability";
+import { uninstallOnchainResearchCapability } from "./onchain-capability";
+import { installRuntimeCapabilities } from "./runtime-capabilities";
 import {
   loadWorkerCapabilities,
   workerServesPhase,
@@ -715,7 +710,11 @@ export async function startWorker() {
   // one; a declared-but-broken renderer fails startup here rather than
   // degrading quietly (see renderer-capability.ts). The self-test opens
   // no source and reserves no budget.
-  const renderer = await installFetchRendererCapability({ capabilities });
+  //
+  // Both capabilities are installed through the one bootstrap, so a
+  // process that bypasses this startup cannot end up with a shorter list
+  // than the worker's (see runtime-capabilities.ts).
+  const { renderer, onchain } = await installRuntimeCapabilities({ capabilities });
   console.log("[worker] renderer capability:", renderer.outcome);
 
   // Structured on-chain retrieval, installed BEFORE any queue is served
@@ -724,7 +723,6 @@ export async function startWorker() {
   // that runs the executor installs one; a declared-but-unconstructible
   // retriever fails startup here rather than degrading into a silently
   // documentary-only engine (see onchain-capability.ts).
-  const onchain = installOnchainResearchCapability({ capabilities });
   console.log(
     "[worker] on-chain capability:",
     onchain.outcome,

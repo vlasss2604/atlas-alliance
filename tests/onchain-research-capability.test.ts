@@ -86,9 +86,10 @@ describe("on-chain capability — disabled unless explicitly declared", () => {
     expect(src).toContain("createProductionOnchainRetriever(ONCHAIN_CHAIN, ONCHAIN_NETWORK)");
     // No fixture, no fallback, no second transport anywhere in the path.
     expect(src).not.toMatch(/fixture|fallback|stub|mock/i);
-    // And the worker installs it before serving any queue.
+    // And the worker installs it — through the shared runtime bootstrap —
+    // before serving any queue.
     const worker = readFileSync("src/server/jobs/worker.ts", "utf-8");
-    expect(worker).toContain("installOnchainResearchCapability({ capabilities })");
+    expect(worker).toContain("installRuntimeCapabilities({ capabilities })");
     expect(worker).toContain("uninstallOnchainResearchCapability()");
   });
 

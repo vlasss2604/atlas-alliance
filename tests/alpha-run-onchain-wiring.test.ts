@@ -39,7 +39,10 @@ afterEach(() => {
 
 describe("alpha-run installs the EXISTING capability, never a second one", () => {
   it("it calls the shared installer and constructs no retriever of its own", () => {
-    expect(SCRIPT).toContain("installOnchainResearchCapability({");
+    // Reached through the shared runtime bootstrap, which installs every
+    // capability the worker installs — see runtime-capabilities.ts. The
+    // script names no installer of its own.
+    expect(SCRIPT).toContain("installRuntimeCapabilities({");
     // The endpoint, the allowlist and the https/no-credential contract all
     // live in the installer. A script that reached for the factory directly
     // would be a second provider path with a second set of rules.
@@ -60,7 +63,7 @@ describe("alpha-run installs the EXISTING capability, never a second one", () =>
   });
 
   it("the worker's own installation is untouched", () => {
-    expect(WORKER).toContain("installOnchainResearchCapability({ capabilities })");
+    expect(WORKER).toContain("installRuntimeCapabilities({ capabilities })");
     expect(WORKER).toContain("uninstallOnchainResearchCapability");
   });
 });
@@ -70,7 +73,7 @@ describe("the live pre-flight fails closed BEFORE anything is spent", () => {
   // refusal, it is a report.
   const flagCheck = SCRIPT.indexOf(`process.env[ONCHAIN_RESEARCH_ENV] !== "1"`);
   const endpointCheck = SCRIPT.indexOf("onchainEndpointEnvVar()");
-  const install = SCRIPT.indexOf("installOnchainResearchCapability({");
+  const install = SCRIPT.indexOf("installRuntimeCapabilities({");
   const refusal = SCRIPT.indexOf("[alpha-run] refusing --mode=live — prerequisites missing:");
   const jobCreation = SCRIPT.indexOf("createResearchJob(");
   const liveExecutor = SCRIPT.indexOf("createLiveS4WorkExecutor({");

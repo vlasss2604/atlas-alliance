@@ -52,11 +52,15 @@ import { createBoss, RESEARCH_QUEUE } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import {
-  installOnchainResearchCapability,
   onchainEndpointEnvVar,
   OnchainCapabilityUnavailableError,
   ONCHAIN_RESEARCH_ENV,
 } from "../src/server/jobs/onchain-capability";
+import {
+  RendererCapabilityUnavailableError,
+  RENDERED_DOCS_ENV,
+} from "../src/server/jobs/renderer-capability";
+import { installRuntimeCapabilities } from "../src/server/jobs/runtime-capabilities";
 import { PHASE_CAPABILITIES } from "../src/server/jobs/worker-capabilities";
 import { createTraceFixtureExecutor, type TraceFixtureScenario } from "../src/server/engine/trace-fixture-executor";
 import { createLiveS4WorkExecutor, INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
@@ -120,6 +124,7 @@ async function main() {
   if (mode === "live") {
     const problems: string[] = [];
     let onchainProviderId: string | null = null;
+    let rendererOutcome: string | null = null;
     if (!config.internal_alpha_enabled) problems.push("internal_alpha_enabled is false (product_config)");
     if (!process.env.BRAVE_SEARCH_API_KEY) problems.push("BRAVE_SEARCH_API_KEY is not set");
     if (!process.env.ANTHROPIC_API_KEY) problems.push("ANTHROPIC_API_KEY is not set");
@@ -152,6 +157,13 @@ async function main() {
     // alpha live target is a Solana project whose entire question is the
     // deterministic chain; a live run that cannot reach one spends real
     // money to produce a documentary-only answer that looks like a finding.
+    //
+    // EVERY runtime capability this process needs, through the ONE
+    // bootstrap the worker uses. Installing only the on-chain retriever
+    // here is what left the renderer unavailable inside alpha-run while
+    // RENDERED_DOCS_ENABLED was 1 and the browser started fine — enabled,
+    // capable, and never installed. A short list is exactly the defect the
+    // bootstrap exists to make impossible.
     if (process.env[ONCHAIN_RESEARCH_ENV] !== "1") {
       problems.push(
         `${ONCHAIN_RESEARCH_ENV} is not "1" — structured on-chain retrieval is not declared for this process`,
@@ -160,16 +172,46 @@ async function main() {
       problems.push(`${onchainEndpointEnvVar()} is not set`);
     } else {
       try {
-        const onchain = installOnchainResearchCapability({
+        const installed = await installRuntimeCapabilities({
           capabilities: new Set(PHASE_CAPABILITIES),
         });
-        if (onchain.outcome === "INSTALLED") onchainProviderId = onchain.providerId;
-        else problems.push(`on-chain capability did not install (outcome: ${onchain.outcome})`);
+        if (installed.onchain.outcome === "INSTALLED") {
+          onchainProviderId = installed.onchain.providerId;
+        } else {
+          problems.push(
+            `on-chain capability did not install (outcome: ${installed.onchain.outcome})`,
+          );
+        }
+        // DECLARED MEANS REQUIRED. A renderer that is switched on and does
+        // not install is a silent downgrade: the oversized-document chain
+        // would reach negotiation and never the render, and a live run
+        // could spend its whole budget before that became visible. Not
+        // declared is a different thing and stays a legitimate
+        // configuration — the chain simply has one fewer step.
+        if (
+          process.env[RENDERED_DOCS_ENV] === "1" &&
+          installed.renderer.outcome !== "INSTALLED"
+        ) {
+          problems.push(
+            `${RENDERED_DOCS_ENV} is "1" but the renderer did not install ` +
+              `(outcome: ${installed.renderer.outcome}` +
+              (installed.renderer.selfTest?.reason
+                ? `, self-test: ${installed.renderer.selfTest.reason}`
+                : "") +
+              ")",
+          );
+        }
+        rendererOutcome = installed.renderer.outcome;
       } catch (e) {
-        // Declared and unconstructible. The error names the env var, never
-        // the endpoint — the endpoint can be the credential.
-        if (e instanceof OnchainCapabilityUnavailableError) problems.push(e.message);
-        else throw e;
+        // Declared and unconstructible, from either installer. Each error
+        // names the env var it needs, never an endpoint or a path — an
+        // endpoint can be the credential.
+        if (
+          e instanceof OnchainCapabilityUnavailableError ||
+          e instanceof RendererCapabilityUnavailableError
+        ) {
+          problems.push(e.message);
+        } else throw e;
       }
     }
     let queryProposerProfile;
@@ -197,6 +239,7 @@ async function main() {
     console.log("  real provider cost: YES");
     console.log("  search provider:    brave");
     console.log(`  on-chain retrieval: INSTALLED (${onchainProviderId})`);
+    console.log(`  rendered docs:      ${rendererOutcome}`);
     console.log(`  query proposer:     anthropic ${config.query_proposer_model} (cost profile ${queryProposerProfile!.priceVersion})`);
     console.log(`  evidence extractor: anthropic ${config.evidence_extractor_model} (cost profile ${evidenceExtractorProfile!.priceVersion})`);
     console.log(
