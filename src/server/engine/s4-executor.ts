@@ -63,7 +63,16 @@ import {
   persistFactLocators,
   validateFactLocators,
 } from "./documentary-locator-store";
-import { evaluateRefusalRenderEligibility, evaluateRenderEligibility } from "./rendered-docs-policy";
+import {
+  evaluateRefusalRenderEligibility,
+  evaluateRenderEligibility,
+  routeEligibility,
+} from "./rendered-docs-policy";
+import {
+  MAX_FALLBACK_ATTEMPTS_PER_URL,
+  plannedFallbacks,
+} from "./acquisition-fallback-policy";
+import type { AcquisitionStrategy } from "./acquired-documents";
 import {
   isBrowserLaunchDiagnostic,
   isNavigationDiagnostic,
@@ -1682,7 +1691,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           routeByCandidate.get(canonicalTargetRef(url)) ??
           (await resolveSourceRoute(deps.db, deps.project.id, url));
         const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
-        const fetchResult = await callProvider("CONTENT_FETCHER", () =>
+        let fetchResult = await callProvider("CONTENT_FETCHER", () =>
           contentFetcher.fetch(url, recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : undefined),
         );
         await recordTraceEvent(deps.db, {
@@ -1699,6 +1708,155 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         });
         if (!fetchResult.ok) {
           lastFetchFailureReason = fetchResult.reason;
+
+          // THE SHARED FALLBACK CHAIN, ASKED HERE FOR THE FIRST TIME.
+          //
+          // This path had no fallback of any kind, so a confirmed
+          // OFFICIAL_DOCS page whose html exceeds the transport cap ended
+          // the attempt permanently — while the phased path would have
+          // negotiated a smaller representation and, failing that,
+          // rendered one. Same document, same policy, opposite outcome,
+          // decided only by which executor happened to run.
+          //
+          // NO POLICY IS RESTATED HERE. `plannedFallbacks` is the one
+          // decision module, now imported by both paths; this loop only
+          // executes what it returns. The render gates are the same two
+          // the phased path asks, chosen the same way: the refusal policy
+          // when a status exists, the shared route gate when the message
+          // never completed and there is none. No third notion of
+          // renderability is introduced and no bar is lowered.
+          //
+          // Bounded exactly as the phased chain is: each strategy at most
+          // once, at most MAX_FALLBACK_ATTEMPTS_PER_URL of them, every
+          // attempt taking its own reservation against the SAME
+          // documentary ceiling, and no cap raised anywhere.
+          let fbDiagnostic = fetchResult.fetchFailure?.reason ?? null;
+          let fbHttpStatus = fetchResult.fetchFailure?.httpStatus ?? null;
+          let fbFailedStrategy: AcquisitionStrategy = "DIRECT_HTTP";
+          const fbTried = new Set<AcquisitionStrategy>(["DIRECT_HTTP"]);
+          let fbUsed = 0;
+          // AN HTTP REFUSAL IS ALREADY OWNED, and must stay owned.
+          //
+          // For HTTP_ERROR the planner's only answer is ISOLATED_RENDER,
+          // and the render-on-refusal block below is this executor's
+          // long-standing implementation of exactly that branch — same
+          // renderer, same gate, its own owner-visible reasons
+          // (DOCS_RENDER_AFTER_REFUSAL_*). Running the chain there would
+          // not add a fallback, it would rename one, and the terminal line
+          // an owner reads would change for a case whose behaviour is not
+          // in question. The chain therefore covers only the diagnostics
+          // that previously had NO fallback at all — the transport and
+          // representation failures — and a status-bearing refusal falls
+          // through untouched.
+          const fbChainApplies = fbHttpStatus === null;
+          while (fbChainApplies && fbUsed < MAX_FALLBACK_ATTEMPTS_PER_URL) {
+            const nextStrategy: AcquisitionStrategy | undefined = plannedFallbacks(
+              fbDiagnostic,
+              fbHttpStatus,
+              fbFailedStrategy,
+            ).find(
+              (strategy) => !fbTried.has(strategy),
+            );
+            if (nextStrategy === undefined) break;
+            fbTried.add(nextStrategy);
+            fbUsed += 1;
+
+            if (nextStrategy === "CONTENT_NEGOTIATION") {
+              const negotiationReserved = await reserveJobBudget(
+                deps.db,
+                ctx.jobId,
+                "sourceOpens",
+                1,
+                documentaryMaxSourceOpens,
+              );
+              if (!negotiationReserved) {
+                observations.add("DOCS_FALLBACK_SKIPPED_BUDGET");
+                break;
+              }
+              spent.sourceOpens += 1;
+              const negotiated = await callProvider("CONTENT_FETCHER", () =>
+                contentFetcher.fetch(url, {
+                  ...(recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : {}),
+                  acceptPreference: "TEXT_REPRESENTATION" as const,
+                }),
+              );
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: negotiated.ok ? "FETCH_OK" : "FETCH_FAILED",
+                providerKind: "FETCH",
+                providerName: "content-negotiation",
+                patternStep: item.step,
+                component: item.component,
+                targetRef: url,
+                status: negotiated.ok ? "OK" : "FAILED",
+                reasonCode: negotiated.ok ? "NONE" : "PROVIDER_ERROR",
+              });
+              if (negotiated.ok) {
+                observations.add("DOCS_NEGOTIATED_AFTER_FETCH_FAILURE");
+                fetchResult = negotiated;
+                break;
+              }
+              lastFetchFailureReason = negotiated.reason;
+              fbDiagnostic = negotiated.fetchFailure?.reason ?? null;
+              fbHttpStatus = negotiated.fetchFailure?.httpStatus ?? null;
+              fbFailedStrategy = nextStrategy;
+              continue;
+            }
+
+            // ISOLATED_RENDER — the same renderer, the same one-navigation
+            // isolated child, and the same gates the phased path asks.
+            const renderGate =
+              fbHttpStatus !== null
+                ? evaluateRefusalRenderEligibility({
+                    url,
+                    route: preFetchRoute,
+                    rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
+                    httpStatus: fbHttpStatus,
+                  })
+                : routeEligibility(
+                    url,
+                    preFetchRoute,
+                    renderedDocsEnabled() && renderedDocsAvailable(),
+                  );
+            if (!renderGate.eligible) break;
+            const fallbackRenderReserved = await reserveJobBudget(
+              deps.db,
+              ctx.jobId,
+              "sourceOpens",
+              1,
+              documentaryMaxSourceOpens,
+            );
+            if (!fallbackRenderReserved) {
+              observations.add("DOCS_RENDER_SKIPPED_BUDGET");
+              break;
+            }
+            spent.sourceOpens += 1;
+            try {
+              const rendered = await resolveRenderedDocsFetcher().render(url, {
+                confirmedHost: renderGate.confirmedHost,
+                matchedPathPrefix: renderGate.matchedPathPrefix,
+              });
+              // No static text existed to fall short of — the transport
+              // never delivered one. An absence, not a shortfall.
+              rendered.staticTextLength = 0;
+              fetchedDocs.push(rendered);
+              observations.add("DOCS_RENDERED_AFTER_FETCH_FAILURE");
+            } catch (e) {
+              // Fail closed and stop. A failed render is never evidence
+              // and never fails the attempt; it only says which stage
+              // failed.
+              observations.add(
+                renderFailureObservation("DOCS_RENDER_AFTER_FETCH_FAILURE_FAILED", e),
+              );
+            }
+            break;
+          }
+          if (!fetchResult.ok && fbTried.size > 1) {
+            continue; // the shared chain ran and ended — next candidate
+          }
+        }
+        if (!fetchResult.ok) {
           // RENDER ON REFUSAL.
           //
           // Rendering used to be reachable only as an upgrade to a fetch

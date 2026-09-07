@@ -872,15 +872,17 @@ describe("D-146 §P — when no textual representation fits, the rendered one is
       ["CONTENT_NEGOTIATION", "DIRECT_HTTP", "ISOLATED_RENDER"].sort(),
     );
     // And the per-url bound the transition exactly fills is unchanged.
-    const phases = readFileSync("src/server/engine/acquisition-phases.ts", "utf-8");
-    expect(phases).toContain("const MAX_FALLBACK_ATTEMPTS_PER_URL = 2;");
+    // The policy MOVED to its own module so the single-process executor
+    // could import it without a cycle; the bound itself did not change.
+    const policy = readFileSync("src/server/engine/acquisition-fallback-policy.ts", "utf-8");
+    expect(policy).toContain("MAX_FALLBACK_ATTEMPTS_PER_URL = 2;");
   });
 
   it("P10. no host, project or url is named by the rule", () => {
-    const phases = readFileSync("src/server/engine/acquisition-phases.ts", "utf-8");
-    const rule = phases.slice(
-      phases.indexOf("export function plannedFallbacks"),
-      phases.indexOf("const RENDER_ON_REFUSAL_STATUS_SET"),
+    const policy = readFileSync("src/server/engine/acquisition-fallback-policy.ts", "utf-8");
+    const rule = policy.slice(
+      policy.indexOf("export function plannedFallbacks"),
+      policy.indexOf("const RENDER_ON_REFUSAL_STATUS_SET"),
     );
     expect(rule.length).toBeGreaterThan(0);
     for (const banned of ["pump", "http://", "https://", ".fun", ".com", ".io", "projectId", "slug"]) {
