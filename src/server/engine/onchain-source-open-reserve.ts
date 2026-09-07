@@ -6,6 +6,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { loadJobContractView } from "./job-contract-view";
 import {
+  MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
+  accountBaseReadDemand,
   anchorBaseReadDemand,
   componentAdmitsOnchainAcquisition,
   componentStartsAccountChain,
@@ -59,14 +61,19 @@ import { MAX_PROMOTION_DEPTH, promotedReadsForComponent } from "./onchain-subjec
 // influence what it decides.
 
 // The deepest chain a single component may authorise: its account-level
-// base read plus every promoted hop its rules permit. Kept as the name the
+// base reads plus every promoted hop its rules permit. Kept as the name the
 // V1 floor already had, but it is no longer THE floor — it is the ceiling on
 // the promotion half of a reservation that is now computed per job.
 //
-// Derived, never chosen: if a promotion rule is ever removed the number
-// shrinks with it, and no project, asset or mechanism appears in the
-// derivation.
-export const ONCHAIN_RESERVED_SOURCE_OPENS = 1 + MAX_PROMOTION_DEPTH;
+// BOTH HALVES ARE DERIVED, NEITHER IS CHOSEN. The base half was the literal
+// `1` and that under-counted: an account-level intent is issued once per
+// eligible locator, bounded by MAX_ONCHAIN_INTENTS_PER_ATTEMPT, so a job
+// admitting two locators starts a chain with two reads and was protected for
+// one. The promotion half is MAX_PROMOTION_DEPTH, unchanged. If a promotion
+// rule or an intent cap is ever removed the number shrinks with it, and no
+// project, asset or mechanism appears anywhere in the derivation.
+export const ONCHAIN_RESERVED_SOURCE_OPENS =
+  MAX_ONCHAIN_INTENTS_PER_ATTEMPT + MAX_PROMOTION_DEPTH;
 
 export interface OnchainSourceOpenReserve {
   // Does outstanding plan work admit deterministic on-chain acquisition?
@@ -332,13 +339,21 @@ export function planDeterministicDemand(input: {
       identity: input.identity,
     };
     const base = anchorBaseReadDemand(query);
-    // The account-level base read plus every hop its rules authorise. Zero
+    // The account-level base reads plus every hop its rules authorise. Zero
     // when the component starts no chain, and NOT a constant when it does:
-    // a component authorised one hop costs two reads where one authorised
-    // three costs four, and reserving the deeper number for the shallower
-    // component is over-reservation taken out of documentary acquisition.
+    // a component authorised one hop costs less than one authorised three,
+    // and reserving the deeper number for the shallower component is
+    // over-reservation taken out of documentary acquisition.
+    //
+    // THE BASE HALF IS ASKED, NOT ASSUMED. It was the literal `1`, which is
+    // true only where a single locator is ever admitted; `accountBaseReadDemand`
+    // answers it from the bound the executor itself enforces, so a job that
+    // admits two locators is protected for the chain it will actually start.
     const chain = componentStartsAccountChain(query)
-      ? Math.min(1 + promotedReadsForComponent(c.component), ONCHAIN_RESERVED_SOURCE_OPENS)
+      ? Math.min(
+          accountBaseReadDemand(query) + promotedReadsForComponent(c.component),
+          ONCHAIN_RESERVED_SOURCE_OPENS,
+        )
       : 0;
     out.push({ component: c.component, base, chain });
   }

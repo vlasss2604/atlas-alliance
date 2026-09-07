@@ -158,6 +158,10 @@ const BURN = {
 
 interface FixtureOptions {
   tokenAccounts?: { account: string; owner: string; mint: string }[];
+  // One token account PER OWNER, so a job with two admitted locators has two
+  // genuinely distinct chains rather than two routes to the same account —
+  // which the visited set would collapse into one.
+  tokenAccountByOwner?: Record<string, string>;
   signatures?: { signature: string; slot: number; err: boolean }[];
   burns?: (typeof BURN)[];
   accountExists?: boolean;
@@ -200,9 +204,15 @@ function fixtureRetriever(opts: FixtureOptions = {}) {
               owner: intent.subject,
               mint: MINT,
               rejectedCount: 0,
-              accounts: (opts.tokenAccounts ?? [
-                { account: TOKEN_ACCOUNT, owner: intent.subject, mint: MINT },
-              ]).map((a) => ({ ...a, amountRaw: "0", decimals: 6 })),
+              accounts: (
+                opts.tokenAccounts ?? [
+                  {
+                    account: opts.tokenAccountByOwner?.[intent.subject] ?? TOKEN_ACCOUNT,
+                    owner: intent.subject,
+                    mint: MINT,
+                  },
+                ]
+              ).map((a) => ({ ...a, amountRaw: "0", decimals: 6 })),
             });
           case "SIGNATURES_FOR_ADDRESS":
             return artifactFor(intent, {
@@ -1068,6 +1078,112 @@ describe("FLOW_PATH — relationship-gated history access", () => {
     const { reasons } = await askedFor("EXECUTION_EVIDENCE", ORDINARY);
     expect(reasons).toContain("PROMOTION_TERMINAL_OBSERVATION");
     expect(reasons).not.toContain("PROMOTION_DEPTH_LIMIT");
+  });
+});
+
+// A SECOND DOCUMENTED ADDRESS NO LONGER COSTS THE EXECUTION QUESTION.
+//
+// A project that publishes two addresses admits two locators, so the attempt
+// starts with two base intents. Promotions are bounded across the WHOLE
+// attempt, and under the old FIFO order the three permitted promotions were
+// spent STARTING both chains instead of finishing either — so
+// TRANSACTION_DETAIL was never issued, no matter how much budget remained.
+//
+// These run against the real executor with `reserve: () => true`, which is
+// what makes them a REACHABILITY proof: nothing here can be explained by the
+// ledger, because in these tests the ledger never refuses anything.
+describe("orchestration — two admitted locators still reach a transaction", () => {
+  const WALLET_B = "Wa11etB".padEnd(44, "2");
+  const TOKEN_ACCOUNT_B = "TokenAcctB".padEnd(44, "2");
+  const TWO_CHAINS = {
+    tokenAccountByOwner: { [WALLET]: TOKEN_ACCOUNT, [WALLET_B]: TOKEN_ACCOUNT_B },
+  };
+
+  async function twoLocatorJob(): Promise<string> {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    await admitLocator(jobId, WALLET_B);
+    const admitted = await admittedLocatorsForJob(ctx.db, jobId);
+    // The premise of every assertion below.
+    expect(admitted.map((l) => l.value).sort()).toEqual([WALLET, WALLET_B].sort());
+    return jobId;
+  }
+
+  it("TRANSACTION_DETAIL is actually issued for one eligible chain", async () => {
+    const jobId = await twoLocatorJob();
+    const { asked } = await runExecution(jobId, TWO_CHAINS);
+    const transactions = asked.filter((i) => i.kind === "TRANSACTION_DETAIL");
+    expect(transactions).toHaveLength(1);
+    // And it was reached BY PROMOTION: its subject is a signature the
+    // fixture returned, never an address a test handed the executor.
+    expect(transactions[0]!.subjectKind).toBe("tx");
+    expect([SIG_NEW, SIG_OLD]).toContain(transactions[0]!.subject);
+  });
+
+  it("one complete chain runs, and the second locator is still characterized", async () => {
+    const jobId = await twoLocatorJob();
+    const { asked } = await runExecution(jobId, TWO_CHAINS);
+    expect(asked.map((i) => i.kind)).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+      "TRANSACTION_DETAIL",
+      "ACCOUNT_INFO",
+    ]);
+    // Both documented addresses were read; only one chain was followed down,
+    // which is exactly the one chain the reservation protects.
+    const accountInfoSubjects = asked
+      .filter((i) => i.kind === "ACCOUNT_INFO")
+      .map((i) => i.subject);
+    expect(new Set(accountInfoSubjects)).toEqual(new Set([WALLET, WALLET_B]));
+  });
+
+  it("the signature window that continues to a transaction is NOT cap-refused", async () => {
+    const jobId = await twoLocatorJob();
+    const { asked, traced } = await runExecution(jobId, TWO_CHAINS);
+    const window = asked.find((i) => i.kind === "SIGNATURES_FOR_ADDRESS");
+    expect(window).toBeDefined();
+    const windowUri = buildCanonicalOnchainUri(window!);
+    const capRefusedUris = traced
+      .filter((t) => t.reasonCode === "PROMOTION_INTENT_CAP_REACHED")
+      .map((t) => t.targetRef);
+    expect(capRefusedUris).not.toContain(windowUri);
+  });
+
+  it("the promotion cap is still enforced, and still says so", async () => {
+    const jobId = await twoLocatorJob();
+    const { asked, traced } = await runExecution(jobId, TWO_CHAINS);
+    // Three promotions is the bound, and the fourth chain step is refused
+    // by the cap rather than silently dropped.
+    expect(traced.filter((t) => t.operationType === "SUBJECT_PROMOTED")).toHaveLength(
+      MAX_PROMOTED_INTENTS_PER_ATTEMPT,
+    );
+    expect(traced.some((t) => t.reasonCode === "PROMOTION_INTENT_CAP_REACHED")).toBe(true);
+    expect(asked.length).toBeLessThanOrEqual(2 + MAX_PROMOTED_INTENTS_PER_ATTEMPT);
+  });
+
+  it("the order is deterministic across repeated runs", async () => {
+    const jobId = await twoLocatorJob();
+    const runs: string[][] = [];
+    for (let i = 0; i < 3; i++) {
+      const { asked } = await runExecution(jobId, TWO_CHAINS);
+      runs.push(asked.map((a) => `${a.kind}::${a.subject}`));
+    }
+    for (const run of runs) expect(run).toEqual(runs[0]);
+  });
+
+  it("a single locator behaves exactly as before", async () => {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    const { asked, traced } = await runExecution(jobId, TWO_CHAINS);
+    expect(asked.map((i) => i.kind)).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+      "TRANSACTION_DETAIL",
+    ]);
+    expect(traced.some((t) => t.reasonCode === "PROMOTION_INTENT_CAP_REACHED")).toBe(false);
+    expect(traced.some((t) => t.reasonCode === "PROMOTION_TERMINAL_OBSERVATION")).toBe(true);
   });
 });
 });

@@ -205,6 +205,37 @@ export function anchorBaseReadDemand(input: {
   return Math.min(anchorKinds, MAX_ONCHAIN_INTENTS_PER_ATTEMPT);
 }
 
+// HOW MANY ACCOUNT-LEVEL BASE READS THIS COMPONENT MAY ISSUE.
+//
+// The anchor side above can answer "one per kind" because a project has
+// exactly ONE confirmed identity. The account side cannot: an account-level
+// intent is issued once per ELIGIBLE LOCATOR, and a job may admit several.
+// `selectOnchainIntents` is what actually bounds that list, at
+// MAX_ONCHAIN_INTENTS_PER_ATTEMPT, so the bound — not a guess about how many
+// locators a project will publish — is the honest worst case.
+//
+// WHY IT MATTERS TO THE RESERVATION, AND WHY THE OLD `1` WAS WRONG. A chain
+// costs its account-level base reads PLUS its promoted hops. The reservation
+// assumed a single base read, so a job that admitted two locators scheduled
+// one more guaranteed-if-a-locator-exists read than was ever protected, and
+// the deterministic chain the floor exists for could be left short by exactly
+// that unit. Counting the bound the executor already enforces makes the two
+// agree by construction.
+//
+// DELIBERATELY LOCATOR-BLIND, exactly like `componentStartsAccountChain`. A
+// locator admitted later in this same job is the case the floor exists for,
+// so the demand may not shrink merely because none has arrived yet. Whether a
+// call may be ISSUED still requires a subject, and `selectOnchainIntents`
+// still decides that.
+export function accountBaseReadDemand(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): number {
+  if (!componentStartsAccountChain(input)) return 0;
+  return MAX_ONCHAIN_INTENTS_PER_ATTEMPT;
+}
+
 // Does this component start a chain at an account-level subject? True
 // WITHOUT a locator, deliberately: a locator admitted later in this same
 // job is exactly the case the reservation exists to keep affordable.
@@ -310,6 +341,75 @@ export function evaluateStructuredContainment(
 // outrun the budget even if a caller asked for more.
 export const MAX_ONCHAIN_INTENTS_PER_ATTEMPT = 2;
 
+// ---- scheduling -------------------------------------------------------
+//
+// ONE STEP OF WORK, WAITING ITS TURN. `depth` is the promotion depth the
+// subject sits at (0 for a base intent), and `seq` is the order it entered
+// the work list.
+export interface ScheduledStep {
+  intent: OnchainIntent;
+  depth: number;
+  parent: string | null;
+  seq: number;
+}
+
+// CHAIN-FIRST SCHEDULING: DEEPEST STEP FIRST, INSERTION ORDER TO BREAK TIES.
+//
+// THE DEFECT THIS CLOSES, and it is structural rather than budgetary. The
+// work list used to be strict FIFO, so every base intent was served before
+// any promoted child. `MAX_PROMOTED_INTENTS_PER_ATTEMPT` (3) then bounded the
+// promotions ACROSS the whole attempt, and with two admitted locators the
+// three permitted promotions were spent starting BOTH chains instead of
+// finishing either:
+//
+//   ACCOUNT_INFO(L1)            -> promotes TOKEN_ACCOUNTS_BY_OWNER(L1)   [1]
+//   ACCOUNT_INFO(L2)            -> promotes TOKEN_ACCOUNTS_BY_OWNER(L2)   [2]
+//   TOKEN_ACCOUNTS_BY_OWNER(L1) -> promotes SIGNATURES_FOR_ADDRESS(ta1)   [3]
+//   TOKEN_ACCOUNTS_BY_OWNER(L2) -> refused, PROMOTION_INTENT_CAP_REACHED
+//   SIGNATURES_FOR_ADDRESS(ta1) -> refused, PROMOTION_INTENT_CAP_REACHED
+//
+// So EXECUTION_EVIDENCE could never reach TRANSACTION_DETAIL on a project
+// that documents two addresses, no matter how much source-open capacity
+// remained — the reads it needed were unreachable, not unaffordable. A
+// mechanism that did not run and one whose execution could not be looked at
+// are different findings, and the schedule was quietly turning the second
+// into the first.
+//
+// Serving the deepest available step first means a chain that has STARTED
+// continues to its own terminal observation before an unrelated base intent
+// may claim the remaining promotions. One complete chain is exactly what the
+// architecture promises — `computeOnchainSourceOpenReserve` protects ONE, and
+// `promotedReadsForComponent` sizes ONE — so this makes the schedule agree
+// with the budget instead of contradicting it.
+//
+// NOTHING IS UNBOUNDED, AND NOTHING IS PRIORITISED BY OUTCOME. The same two
+// counters still bind: at most MAX_ONCHAIN_INTENTS_PER_ATTEMPT base intents
+// enter the list, at most MAX_PROMOTED_INTENTS_PER_ATTEMPT are ever added to
+// it, every step is refused past MAX_PROMOTION_DEPTH, and each one must still
+// win its own reservation before it may call anything. The list therefore
+// still cannot exceed those two sums, and every step that was going to be
+// taken is still taken — only the ORDER changed. Nothing here reads a
+// result, so a chain that found a burn and a chain that found nothing are
+// scheduled identically.
+//
+// A TOTAL ORDER, so the sequence cannot depend on array identity, iteration
+// order or how many steps happen to share a depth: deeper wins, and equal
+// depths are served in the order they were created.
+export function takeNextScheduledStep(queue: ScheduledStep[]): ScheduledStep {
+  let best = 0;
+  for (let i = 1; i < queue.length; i += 1) {
+    const candidate = queue[i]!;
+    const incumbent = queue[best]!;
+    if (
+      candidate.depth > incumbent.depth ||
+      (candidate.depth === incumbent.depth && candidate.seq < incumbent.seq)
+    ) {
+      best = i;
+    }
+  }
+  return queue.splice(best, 1)[0]!;
+}
+
 export interface StructuredOnchainOutcome {
   evidenceIds: string[];
   sourceOpensSpent: number;
@@ -400,9 +500,16 @@ export async function runStructuredOnchainAcquisition(
   // each one depth-stamped and each one refused past MAX_PROMOTION_DEPTH.
   // The loop cannot outlive those two counters, and every iteration must
   // still win its own budget reservation before it may call anything.
-  const queue: { intent: OnchainIntent; depth: number; parent: string | null }[] = intents.map(
-    (intent) => ({ intent, depth: 0, parent: null }),
-  );
+  //
+  // `seq` is insertion order, and it exists so the scheduling rule below is
+  // a TOTAL order over the work list rather than a preference with ties.
+  const queue: ScheduledStep[] = intents.map((intent, seq) => ({
+    intent,
+    depth: 0,
+    parent: null,
+    seq,
+  }));
+  let nextSeq = queue.length;
   // Every (kind, subject) this attempt has already addressed. A promoted
   // subject that would repeat one is refused, so a chain cannot loop back
   // on itself or re-read the same account twice.
@@ -410,7 +517,7 @@ export async function runStructuredOnchainAcquisition(
   let promotedIssued = 0;
 
   while (queue.length > 0) {
-    const step = queue.shift()!;
+    const step = takeNextScheduledStep(queue);
     const intent = step.intent;
     if (!retriever.supports(intent.chain, intent.network, intent.kind)) continue;
     const visitKey = `${intent.kind}::${intent.subject}`;
@@ -566,7 +673,13 @@ export async function runStructuredOnchainAcquisition(
         status: "OK",
         reasonCode: "NONE",
       });
-      queue.push({ intent: nextIntent, depth: promoted.depth, parent: promoted.parentSubject });
+      queue.push({
+        intent: nextIntent,
+        depth: promoted.depth,
+        parent: promoted.parentSubject,
+        seq: nextSeq,
+      });
+      nextSeq += 1;
     }
   }
 

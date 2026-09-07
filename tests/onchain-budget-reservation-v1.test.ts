@@ -11,6 +11,7 @@ import {
 } from "../src/server/db/schema";
 import { INTERNAL_ALPHA_V1 } from "../src/server/config/product";
 import {
+  MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
   runStructuredOnchainAcquisition,
   selectOnchainIntents,
 } from "../src/server/engine/onchain-acquisition";
@@ -136,11 +137,14 @@ describe("2/4/6. an actionable on-chain plan receives bounded protected capacity
   });
 
   it("6/11. the floor is ONE authorised chain deep, and never more than half the ceiling", () => {
-    // Derived from the promotion rules, not chosen: a subject is classified
-    // once and may be promoted MAX_PROMOTION_DEPTH times, so the deepest
-    // authorised route costs 1 + MAX_PROMOTION_DEPTH bounded reads.
-    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(1 + MAX_PROMOTION_DEPTH);
-    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(4);
+    // Derived from the two bounds that govern a chain, not chosen: it may
+    // START at as many account-level base reads as one attempt permits
+    // (MAX_ONCHAIN_INTENTS_PER_ATTEMPT, one per admitted locator), and each
+    // of those may be promoted MAX_PROMOTION_DEPTH times.
+    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(
+      MAX_ONCHAIN_INTENTS_PER_ATTEMPT + MAX_PROMOTION_DEPTH,
+    );
+    expect(ONCHAIN_RESERVED_SOURCE_OPENS).toBe(5);
     for (let max = 0; max <= 64; max++) {
       const r = computeOnchainSourceOpenReserve({ maxSourceOpens: max, demands: chainDemands });
       expect(r.reserved).toBeLessThanOrEqual(ONCHAIN_RESERVED_SOURCE_OPENS);
@@ -531,13 +535,17 @@ describe("3/10. documentary fetches cannot consume the protected on-chain capaci
       maxSourceOpens: MAX,
     });
 
-    // The floor was applied, and it is exactly the bounded floor.
-    expect(fetched.onchainReservedSourceOpens).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
-    expect(fetched.documentarySourceOpenCeiling).toBe(MAX - ONCHAIN_RESERVED_SOURCE_OPENS);
+    // The floor was applied, and on an envelope this small it is the
+    // half-ceiling cap that decides its size — the contract's full demand is
+    // larger than half of 8, so protection is trimmed to exactly half.
+    const FLOOR = Math.floor(MAX / 2);
+    expect(FLOOR).toBeLessThan(ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(fetched.onchainReservedSourceOpens).toBe(FLOOR);
+    expect(fetched.documentarySourceOpenCeiling).toBe(MAX - FLOOR);
 
     // Documentary acquisition was hungry for 12 and stopped at the floor.
-    expect(calls.urls.length).toBe(MAX - ONCHAIN_RESERVED_SOURCE_OPENS);
-    expect(await reservedSourceOpens(jobId)).toBe(MAX - ONCHAIN_RESERVED_SOURCE_OPENS);
+    expect(calls.urls.length).toBe(MAX - FLOOR);
+    expect(await reservedSourceOpens(jobId)).toBe(MAX - FLOOR);
 
     // 10. AND THE PROTECTED CAPACITY SURVIVED: the chain path that was
     // refused on the live run now wins its reservations.
@@ -548,7 +556,7 @@ describe("3/10. documentary fetches cannot consume the protected on-chain capaci
     expect(chain.outcome.evidenceIds.length).toBeGreaterThan(0);
 
     // 5. and it spent the CANONICAL ledger, not a private one.
-    expect(await reservedSourceOpens(jobId)).toBe(MAX - ONCHAIN_RESERVED_SOURCE_OPENS + 1);
+    expect(await reservedSourceOpens(jobId)).toBe(MAX - FLOOR + 1);
   }, 120_000);
 
   it("7. the chain path is still bounded by the same total ceiling", async () => {
@@ -651,7 +659,7 @@ describe("9. a floor that protects nothing is released, not wasted", () => {
     expect(held.promotionReserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
     expect(held.reserved).toBe(2 + ONCHAIN_RESERVED_SOURCE_OPENS);
     expect(held.documentaryCeiling).toBe(24 - (2 + ONCHAIN_RESERVED_SOURCE_OPENS));
-    expect(held.documentaryCeiling).toBe(18);
+    expect(held.documentaryCeiling).toBe(17);
   }, 120_000);
 
   it("13. it IS released once every on-chain-capable component has had its opportunity", async () => {

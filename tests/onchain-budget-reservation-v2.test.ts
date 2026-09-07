@@ -8,6 +8,7 @@ import { readJobBudgetReserved } from "../src/server/engine/budget-reservation";
 import { persistFactLocators } from "../src/server/engine/documentary-locator-store";
 import { loadJobContractView } from "../src/server/engine/job-contract-view";
 import {
+  accountBaseReadDemand,
   runStructuredOnchainAcquisition,
   type MechanismLocator,
 } from "../src/server/engine/onchain-acquisition";
@@ -91,9 +92,22 @@ const CHAIN_COMPONENT = { step: 4, component: "EXECUTION_EVIDENCE" };
 const ONCHAIN_CLASSES = ["ONCHAIN_VERIFIABLE"] as const;
 
 // The founder's worst case, DERIVED rather than typed: every guaranteed
-// anchor read this contract schedules, plus one four-deep chain.
+// anchor read this contract schedules, plus ONE complete chain.
+//
+// THE CHAIN'S BASE HALF IS ASKED, NOT ASSUMED. It used to be the literal `1`,
+// which held only while a job admitted a single locator. An account-level
+// intent is issued once per eligible locator, bounded by the executor's own
+// per-attempt cap, so the demand is that bound plus the promoted hops — and
+// the same call the runtime makes is what answers it here.
+const CHAIN_BASE_READS = accountBaseReadDemand({
+  component: CHAIN_COMPONENT.component,
+  establishingClasses: ONCHAIN_CLASSES,
+  identity: IDENTITY,
+});
 const PUMP_SHAPED_DEMAND =
-  ANCHOR_COMPONENTS.length + 1 + promotedReadsForComponent(CHAIN_COMPONENT.component);
+  ANCHOR_COMPONENTS.length +
+  CHAIN_BASE_READS +
+  promotedReadsForComponent(CHAIN_COMPONENT.component);
 
 // ---------------------------------------------------------------------
 // 5/6/8/10. The arithmetic, with no database at all.
@@ -118,10 +132,12 @@ describe("the reservation is the contract's demand, not one flat number", () => 
     expect(r.baseReserved).toBe(2);
     expect(r.promotionReserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
     expect(r.reserved).toBe(PUMP_SHAPED_DEMAND);
-    expect(r.reserved).toBe(6);
-    // Conceptually 18 — derived here, never written into the runtime.
+    // 7, not 6: two guaranteed anchor reads plus a chain that may START at
+    // two account-level base reads before its three promoted hops.
+    expect(r.reserved).toBe(7);
+    // Conceptually 17 — derived here, never written into the runtime.
     expect(r.documentaryCeiling).toBe(24 - PUMP_SHAPED_DEMAND);
-    expect(r.documentaryCeiling).toBe(18);
+    expect(r.documentaryCeiling).toBe(17);
     expect(r.maxSourceOpens).toBe(24);
   });
 
@@ -138,9 +154,9 @@ describe("the reservation is the contract's demand, not one flat number", () => 
       maxSourceOpens: 24,
       demands: demands([CHAIN_COMPONENT]),
     });
-    expect(three.documentaryCeiling).toBe(18);
-    expect(one.documentaryCeiling).toBe(19);
-    expect(none.documentaryCeiling).toBe(20);
+    expect(three.documentaryCeiling).toBe(17);
+    expect(one.documentaryCeiling).toBe(18);
+    expect(none.documentaryCeiling).toBe(19);
   });
 
   it("6. no reachable chain means no promotion reserve is held", () => {
@@ -172,9 +188,13 @@ describe("the reservation is the contract's demand, not one flat number", () => 
       maxSourceOpens: 24,
       demands: demands([{ component: "DESTINATION" }]),
     });
-    // DESTINATION authorises one hop, so its chain costs two reads, not four.
-    expect(shallow.promotionReserved).toBe(1 + promotedReadsForComponent("DESTINATION"));
-    expect(shallow.promotionReserved).toBe(2);
+    // DESTINATION authorises ONE hop, so its chain costs its base reads plus
+    // one — never the deepest chain's five.
+    expect(shallow.promotionReserved).toBe(
+      CHAIN_BASE_READS + promotedReadsForComponent("DESTINATION"),
+    );
+    expect(shallow.promotionReserved).toBe(3);
+    expect(shallow.promotionReserved).toBeLessThan(ONCHAIN_RESERVED_SOURCE_OPENS);
     const deep = computeOnchainSourceOpenReserve({
       maxSourceOpens: 24,
       demands: demands([{ component: "DESTINATION" }, CHAIN_COMPONENT]),
@@ -229,7 +249,7 @@ describe("the reservation is the contract's demand, not one flat number", () => 
   });
 
   it("the half-ceiling cap gives up chain depth before a guaranteed read", () => {
-    // 8 opens: cap 4, demand 6. The guaranteed anchor reads are certain to
+    // 8 opens: cap 4, demand 7. The guaranteed anchor reads are certain to
     // be issued; the chain may not even have a subject, so it is trimmed
     // first — down to what the cap leaves, never below the base.
     const r = computeOnchainSourceOpenReserve({
@@ -250,21 +270,21 @@ describe("3. an ordinary anchor read cannot spend the chain's protected capacity
 
   it("each anchor component may reach its OWN unit and nothing more", () => {
     for (const c of ANCHOR_COMPONENTS) {
-      // 24 - (6 - 1): everything except this component's own protected read.
-      expect(deterministicCeilingForComponent(r, c.component)).toBe(19);
+      // 24 - (7 - 1): everything except this component's own protected read.
+      expect(deterministicCeilingForComponent(r, c.component)).toBe(18);
     }
   });
 
   it("the chain component may reach its whole chain", () => {
-    // 24 - (6 - 4): everything except the anchor reads' own units.
+    // 24 - (7 - 5): everything except the anchor reads' own units.
     expect(deterministicCeilingForComponent(r, CHAIN_COMPONENT.component)).toBe(22);
   });
 
   it("a component with no protected allocation may spend only what is spare", () => {
-    expect(deterministicCeilingForComponent(r, "FLOW_PATH")).toBe(18);
-    expect(deterministicCeilingForComponent(r, "DURABILITY_BASIS")).toBe(18);
+    expect(deterministicCeilingForComponent(r, "FLOW_PATH")).toBe(17);
+    expect(deterministicCeilingForComponent(r, "DURABILITY_BASIS")).toBe(17);
     // An unknown name is fail-closed, never privileged.
-    expect(deterministicCeilingForComponent(r, "NOT_A_COMPONENT")).toBe(18);
+    expect(deterministicCeilingForComponent(r, "NOT_A_COMPONENT")).toBe(17);
   });
 });
 
@@ -569,14 +589,15 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
       contentFetcher: fixtureFetcher(calls),
       maxSourceOpens: MAX,
     });
+    const DOCUMENTARY = MAX - PUMP_SHAPED_DEMAND;
     expect(fetched.onchainReservedSourceOpens).toBe(PUMP_SHAPED_DEMAND);
-    expect(fetched.documentarySourceOpenCeiling).toBe(MAX - PUMP_SHAPED_DEMAND);
-    expect(fetched.documentarySourceOpenCeiling).toBe(18);
-    expect(calls.urls.length).toBe(18);
-    expect(await reservedSourceOpens(jobId)).toBe(18);
+    expect(fetched.documentarySourceOpenCeiling).toBe(DOCUMENTARY);
+    expect(fetched.documentarySourceOpenCeiling).toBe(17);
+    expect(calls.urls.length).toBe(DOCUMENTARY);
+    expect(await reservedSourceOpens(jobId)).toBe(DOCUMENTARY);
 
     // --- 2. every scheduled anchor-level read still executes --------------
-    let expected = 18;
+    let expected = DOCUMENTARY;
     for (const item of ANCHOR_COMPONENTS) {
       const run = await runDeterministic(jobId, project.id, item);
       expect(run.outcome.sourceOpensSpent).toBe(1);
@@ -584,7 +605,7 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
       expected += 1;
       expect(await reservedSourceOpens(jobId)).toBe(expected);
     }
-    expect(expected).toBe(20);
+    expect(expected).toBe(DOCUMENTARY + ANCHOR_COMPONENTS.length);
 
     // --- 3. and the promotion capacity is STILL there ---------------------
     // A component with no protected allocation cannot touch it, even though
@@ -593,10 +614,10 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
     const opportunist = await runDeterministic(jobId, project.id, { step: 2, component: "FLOW_PATH" }, {
       locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
-    expect(opportunist.ceiling).toBe(20);
+    expect(opportunist.ceiling).toBe(DOCUMENTARY + ANCHOR_COMPONENTS.length);
     expect(opportunist.outcome.sourceOpensSpent).toBe(0);
     expect(opportunist.outcome.observations).toContain("ONCHAIN_SOURCE_OPEN_BUDGET_EXHAUSTED");
-    expect(await reservedSourceOpens(jobId)).toBe(20);
+    expect(await reservedSourceOpens(jobId)).toBe(DOCUMENTARY + ANCHOR_COMPONENTS.length);
 
     // --- 2. the full four-step chain runs, end to end ---------------------
     const chain = await runDeterministic(jobId, project.id, CHAIN_COMPONENT, {
@@ -609,11 +630,16 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
       "SIGNATURES_FOR_ADDRESS",
       "TRANSACTION_DETAIL",
     ]);
+    // ONE locator here, so the chain starts with ONE base read and spends
+    // four. The reservation protects the two-locator worst case, so one
+    // protected unit is simply never spent — it stays in the one counter,
+    // which is exactly what a floor that is not a withdrawal means.
     expect(chain.outcome.sourceOpensSpent).toBe(1 + MAX_PROMOTION_DEPTH);
     expect(chain.outcome.observations).not.toContain("ONCHAIN_SOURCE_OPEN_BUDGET_EXHAUSTED");
 
     // --- 4. and the total never grew -------------------------------------
-    expect(await reservedSourceOpens(jobId)).toBe(MAX);
+    const spent = DOCUMENTARY + ANCHOR_COMPONENTS.length + (1 + MAX_PROMOTION_DEPTH);
+    expect(await reservedSourceOpens(jobId)).toBe(spent);
     expect(await reservedSourceOpens(jobId)).toBeLessThanOrEqual(INTERNAL_ALPHA_V1.maxSourceOpens);
   }, 180_000);
 
@@ -636,17 +662,24 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
       });
       expect(await reservedSourceOpens(jobId)).toBeLessThanOrEqual(MAX);
     }
-    expect(await reservedSourceOpens(jobId)).toBe(MAX);
+    // Documentary took its whole ceiling, both anchor reads executed, and the
+    // chain spent its four. The one remaining unit is the second account-level
+    // base read this fixture's single locator never needs — held, not granted.
+    const SPENT =
+      MAX - PUMP_SHAPED_DEMAND + ANCHOR_COMPONENTS.length + (1 + MAX_PROMOTION_DEPTH);
+    expect(await reservedSourceOpens(jobId)).toBe(SPENT);
+    expect(SPENT).toBeLessThanOrEqual(MAX);
 
-    // Beyond it there is nothing, and the refusal is a bounded research
-    // limitation rather than a claim about the project.
+    // Beyond what any remaining component is entitled to there is nothing,
+    // and the refusal is a bounded research limitation rather than a claim
+    // about the project.
     const beyond = await runDeterministic(jobId, project.id, { step: 6, component: "DESTINATION" }, {
       locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
     expect(beyond.outcome.sourceOpensSpent).toBe(0);
     expect(beyond.outcome.evidenceIds).toEqual([]);
     expect(beyond.traced[0]!.reasonCode).toBe("SOURCE_OPEN_BUDGET_EXHAUSTED");
-    expect(await reservedSourceOpens(jobId)).toBe(MAX);
+    expect(await reservedSourceOpens(jobId)).toBe(SPENT);
   }, 180_000);
 });
 
@@ -830,7 +863,8 @@ describe("the work queue is what the reservation reads", () => {
     // anchor-level intent, so it schedules no guaranteed read to protect.
     expect(resolved.baseReserved).toBe(2);
     expect(resolved.promotionReserved).toBe(ONCHAIN_RESERVED_SOURCE_OPENS);
-    expect(resolved.documentaryCeiling).toBe(18);
+    expect(resolved.documentaryCeiling).toBe(24 - PUMP_SHAPED_DEMAND);
+    expect(resolved.documentaryCeiling).toBe(17);
   }, 180_000);
 
   it("a job with no confirmed identity holds nothing", async () => {
