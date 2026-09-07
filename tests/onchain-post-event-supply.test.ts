@@ -11,7 +11,7 @@ import {
   topics,
   users,
 } from "../src/server/db/schema";
-import { readJobBudgetReserved } from "../src/server/engine/budget-reservation";
+import { readJobBudgetReserved, reserveJobBudget } from "../src/server/engine/budget-reservation";
 import { persistFactLocators } from "../src/server/engine/documentary-locator-store";
 import { loadJobContractView } from "../src/server/engine/job-contract-view";
 import { persistOnchainArtifactAndFacts } from "../src/server/engine/onchain-acquisition";
@@ -20,7 +20,11 @@ import {
   postEventSupplyOpportunityConsumed,
   runPostEventSupplyCompletion,
 } from "../src/server/engine/onchain-post-event-supply";
-import { onchainOpportunityConsumedComponents } from "../src/server/engine/onchain-source-open-reserve";
+import {
+  onchainOpportunityConsumedComponents,
+  resolveOnchainSourceOpenReserve,
+  unprotectedCeiling,
+} from "../src/server/engine/onchain-source-open-reserve";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
 import { brandOnchainArtifact } from "../src/server/engine/providers/onchain-types";
 import type {
@@ -336,6 +340,15 @@ async function reservedSourceOpens(jobId: string): Promise<number> {
   return row!.sourceOpens;
 }
 
+// Spend `n` units through the one canonical mutator, exactly as documentary
+// acquisition would, so what remains is only what the reservation protects.
+async function consumeSourceOpens(jobId: string, n: number): Promise<void> {
+  for (let i = 0; i < n; i += 1) {
+    const ok = await reserveJobBudget(ctx.db, jobId, "sourceOpens", 1, n);
+    expect(ok).toBe(true);
+  }
+}
+
 async function run(
   f: Fixture,
   jobId: string,
@@ -533,14 +546,50 @@ describe("8/19/20. it is paid for last, out of the unchanged ledger", () => {
   it("20. it introduces no protected reservation of its own", async () => {
     const { readFile } = await import("node:fs/promises");
     const src = await readFile("src/server/engine/onchain-post-event-supply.ts", "utf-8");
-    // It never consults, never recomputes and never widens the reserve.
-    expect(src).not.toContain("onchain-source-open-reserve");
+    // IT CONSULTS THE RESERVE, AND ONLY TO STAND BACK FROM IT. Passing the
+    // raw job ceiling would have let this opportunistic read spend capacity
+    // a guaranteed anchor read or a reachable promotion chain was promised.
+    // It passes the UNPROTECTED ceiling instead — what no component holds.
+    expect(src).toContain("unprotectedCeiling(supplyReserve)");
+    // It never claims a per-component allocation. That function is how a
+    // component reaches its OWN protected units, and this read has none.
     expect(src).not.toContain("deterministicCeilingForComponent");
-    // And it passes the RAW job ceiling: no allocation, only leftovers.
-    expect(src).toContain('reserveJobBudget(db, input.jobId, "sourceOpens", 1, input.maxSourceOpens)');
+    // It never widens or recomputes the reserve for its own benefit.
+    expect(src).not.toContain("computeOnchainSourceOpenReserve");
+    // And the reserve names no consumer: it answers how much is spare.
     const reserve = await readFile("src/server/engine/onchain-source-open-reserve.ts", "utf-8");
     expect(reserve).not.toContain("post-event");
+    expect(reserve).not.toContain("current-proof");
   });
+
+  it("20b. only PROTECTED capacity remaining is a clean refusal, not a raid", async () => {
+    const f = await makeProject();
+    await establishPriorSupply(f, 100);
+    const jobId = await makeJob(f.id, f.slug);
+    await establishBurn(f, jobId);
+    await establishCurrentSupply(f, jobId, 400, "1000");
+
+    // The job's deterministic demand is protected; documentary work has
+    // taken everything else. What is left is exactly the reservation, and
+    // this read holds none of it.
+    const reserve = await resolveOnchainSourceOpenReserve(ctx.db, {
+      jobId,
+      projectId: f.id,
+      maxSourceOpens: 24,
+    });
+    expect(reserve.reserved).toBeGreaterThan(0);
+    await consumeSourceOpens(jobId, unprotectedCeiling(reserve));
+
+    const { result, asked } = await run(f, jobId, { slot: 900, maxSourceOpens: 24 });
+    // It asks the chain for nothing and spends nothing: the remaining units
+    // belong to deterministic work that has not run yet.
+    expect(asked).toEqual([]);
+    expect(result.outcome).toBe("BUDGET_EXHAUSTED");
+    expect(result.sourceOpensSpent).toBe(0);
+    // The protected capacity is still there, untouched, for its owners.
+    expect(await reservedSourceOpens(jobId)).toBe(unprotectedCeiling(reserve));
+    expect(await reservedSourceOpens(jobId)).toBeLessThan(24);
+  }, 120_000);
 });
 
 // ---------------------------------------------------------------------

@@ -5,6 +5,10 @@ import { researchTraceEvents } from "../db/schema";
 import { resolveConfirmedIdentity } from "../domain/project-identity";
 import { reserveJobBudget } from "./budget-reservation";
 import { persistOnchainArtifact } from "./onchain-acquisition";
+import {
+  resolveOnchainSourceOpenReserve,
+  unprotectedCeiling,
+} from "./onchain-source-open-reserve";
 import { gateCurrentProofSupplyAcquisition } from "./onchain-current-proof-supply-gate";
 import type { CurrentProofSupplyGate } from "./onchain-current-proof-supply-gate";
 import { planPostEventSupplyAcquisition } from "./onchain-post-event-supply-plan";
@@ -276,9 +280,31 @@ export async function runPostEventSupplyCompletion(
     });
   };
 
-  // THE FULL, UNCHANGED JOB CEILING — not a protected allocation, because
-  // this read has none. It proceeds only on capacity nothing else needed.
-  const reserved = await reserveJobBudget(db, input.jobId, "sourceOpens", 1, input.maxSourceOpens);
+  // THE UNPROTECTED CEILING — not the job ceiling, because this read holds
+  // no protected allocation and must not be able to take one.
+  //
+  // It proceeds only on capacity nothing else needed. A guaranteed anchor
+  // read and a still-reachable promotion chain both keep their protection
+  // against it exactly as they do against documentary acquisition, so this
+  // opportunistic read cannot make deterministic work unaffordable. When
+  // only protected capacity remains it refuses cleanly and says so, which is
+  // a limit on what this run observed and never a statement about the token.
+  //
+  // The job's own maxSourceOpens is unchanged and still bounds everything:
+  // this is protection inside the existing hard ceiling, never an extra
+  // allowance.
+  const supplyReserve = await resolveOnchainSourceOpenReserve(db, {
+    jobId: input.jobId,
+    projectId: input.projectId,
+    maxSourceOpens: input.maxSourceOpens,
+  });
+  const reserved = await reserveJobBudget(
+    db,
+    input.jobId,
+    "sourceOpens",
+    1,
+    unprotectedCeiling(supplyReserve),
+  );
   if (!reserved) {
     await trace("CANDIDATE_SKIPPED_BUDGET", "SKIPPED", "SOURCE_OPEN_BUDGET_EXHAUSTED");
     return { ...none, ...base, outcome: "BUDGET_EXHAUSTED" };

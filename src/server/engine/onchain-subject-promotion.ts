@@ -123,6 +123,24 @@ export function componentAllowsRule(component: string, rule: PromotionRule): boo
   return (RULES_BY_COMPONENT[component] ?? []).includes(rule);
 }
 
+// HOW MANY PROMOTED READS THIS COMPONENT'S DEEPEST AUTHORISED CHAIN COSTS.
+//
+// Derived from the rules themselves, never chosen: the rules for a
+// component are the sequential hops it may take, one bounded read each, and
+// the two hard ceilings above cut the answer down if a component is ever
+// given more rules than the loop would run. A component with no rules costs
+// nothing, because it has no chain to protect.
+//
+// Exported so the source-open reservation can protect a chain by its ACTUAL
+// authorised depth instead of assuming every component needs the deepest
+// one. DESTINATION's single hop is not EXECUTION_EVIDENCE's three, and
+// reserving as if it were is over-reservation taken straight out of
+// documentary acquisition.
+export function promotedReadsForComponent(component: string): number {
+  const rules = RULES_BY_COMPONENT[component] ?? [];
+  return Math.min(rules.length, MAX_PROMOTED_INTENTS_PER_ATTEMPT, MAX_PROMOTION_DEPTH);
+}
+
 // Intent kinds that may ONLY be reached by promotion. A transaction cannot
 // be a base intent because a base subject is an address and a transaction
 // subject is a signature — there is nowhere for one to come from except an
