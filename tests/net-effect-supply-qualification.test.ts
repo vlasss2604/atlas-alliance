@@ -243,17 +243,24 @@ describe("net effect — the guard reads types, not text, and only NET_EFFECT", 
   });
 
   it("the decision reads the typed kind and never the fragment", () => {
-    const src = readFileSync("src/server/engine/component-reconciler.ts", "utf-8");
-    const guard = src.slice(
-      src.indexOf("if (requiresSupplyEffectQualification("),
-      src.indexOf("const supportingRows"),
-    );
+    // B2e moved the decision into its own pure evaluator; the rule it
+    // enforces is unchanged and is still typed. The gross-reduction gate is
+    // asked of `onchainFactKind`, and the delta's DIRECTION is read from the
+    // typed relationship rather than from any text.
+    const guard = readFileSync("src/server/engine/net-supply-effect.ts", "utf-8")
+      .split("\n")
+      .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*"))
+      .join("\n");
     expect(guard).toContain("isGrossSupplyReductionFact(r.onchainFactKind)");
+    expect(guard).toContain('onchainFactKind === "TOTAL_SUPPLY_DELTA"');
     // No text is consulted: not the fragment, not the summary, not the
     // does-not-prove prose, and no lexical classifier.
-    for (const forbidden of ["fragment", "summary", "doesNotProve", "classify", "includes(\""]) {
+    for (const forbidden of ["fragment", "summary", "doesNotProve", "classify", "toLowerCase"]) {
       expect(guard, forbidden).not.toContain(forbidden);
     }
+    // And the reconciler still delegates rather than restating it.
+    const reconciler = readFileSync("src/server/engine/component-reconciler.ts", "utf-8");
+    expect(reconciler).toContain("evaluateNetSupplyEffect({");
   });
 
   it("BURN is the only gross-reduction kind", () => {

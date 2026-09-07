@@ -1019,6 +1019,15 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
     "Nothing checked here shows tokens being destroyed — a purchase, a holding or a transfer moves tokens without reducing supply.",
   NET_SUPPLY_CHANGE_NOT_ESTABLISHED:
     "Tokens were destroyed, but nothing checked shows the total supply is lower overall — what else was issued or unlocked over the same period was not observed.",
+  // B2 — the three codes a MEASURED interval adds. Each sentence describes
+  // what was measured and stops there: none of them says a mechanism caused
+  // anything, and none of them accuses the project of anything.
+  NET_SUPPLY_CHANGE_NOT_ATTRIBUTED:
+    "Tokens were destroyed and the total supply was lower at the end of the measured period than at the start — but nothing checked shows that this mechanism is what brought it down.",
+  NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL:
+    "Tokens were destroyed, and the total supply was not lower at the end of the measured period than at the start — so at least as much was issued over that period as was destroyed.",
+  CONFLICTING_SUPPLY_DELTA:
+    "The supply measurements recorded for this period disagree about which way the total moved, so neither was used.",
 };
 
 // The FIRST recognised code wins. `reasonCodes` arrives in the order S5

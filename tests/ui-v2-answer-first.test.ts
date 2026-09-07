@@ -61,6 +61,13 @@ const ENGINE_REASON_CODES = [
   // no copy, and updating the list is the moment that decision is made.
   "SUPPLY_REDUCTION_NOT_ESTABLISHED",
   "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",
+  // B2 — the three a MEASURED interval adds. Same deliberate listing: a
+  // measured outcome that reached a reader with no copy would be worse than
+  // no measurement, because the reader would see a verdict move with no
+  // stated reason.
+  "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED",
+  "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL",
+  "CONFLICTING_SUPPLY_DELTA",
 ];
 
 describe("V2 — every persisted reason code has human copy", () => {

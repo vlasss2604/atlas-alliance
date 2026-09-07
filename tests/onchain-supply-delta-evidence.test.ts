@@ -71,7 +71,10 @@ function nextMint(): string {
     tag = "123456789"[n % 9] + tag;
     n = Math.floor(n / 9);
   } while (n > 0);
-  return `Mint${tag}`.padEnd(44, "1");
+  // Padded with a character the tag itself can never contain: padding with
+  // "1" made "Mint2" + 39 ones and "Mint21" + 38 ones the SAME address, so
+  // two fixtures silently shared a mint and each other's observations.
+  return `Mint${tag}`.padEnd(44, "z");
 }
 
 interface Fixture {
@@ -289,7 +292,10 @@ describe("1/2/3/10. all three directions persist identically", () => {
       .where(eq(evidence.id, (out as { evidenceId: string }).evidenceId));
     // No direction is announced as good or bad news.
     expect(row.summary).toContain("(increase)");
-    expect(row.relationship).toBe("CONTEXT");
+    // B2e: the direction IS the relationship, decided once by the code that
+    // did the subtraction. An increase is evidence AGAINST a net reduction
+    // over the interval, and says nothing about cause.
+    expect(row.relationship).toBe("CONTRADICTS");
   }, 120_000);
 
   it("10. exact recomputation of the same interval is idempotent", async () => {
@@ -781,7 +787,11 @@ describe("20/22..26. boundaries", () => {
     expect(facts).not.toContain('TOTAL_SUPPLY_DELTA: [');
   });
 
-  it("26. the delta cannot influence NET_EFFECT's status", async () => {
+  it("26. a delta alone — with no burn — establishes nothing", async () => {
+    // B2e replaced the old CONTEXT filing with a directional one, so the
+    // block on a lone delta is no longer the relationship: it is the BURN
+    // GATE. Without a typed gross reduction this Research established, a
+    // measured decrease cannot carry NET_EFFECT anywhere.
     const i = await makeInterval({});
     await persist(i);
     const result = await reconcileAndPersistComponent(
@@ -790,20 +800,28 @@ describe("20/22..26. boundaries", () => {
       { step: 7, component: "NET_EFFECT" },
       NOW,
     );
-    // Nothing was established by it: CONTEXT never establishes or
-    // contradicts, and no applicability route exists either.
-    expect(result?.supportingEvidenceIds ?? []).toEqual([]);
     expect(result?.status).not.toBe("SUPPORTED");
+    expect(result?.status).not.toBe("CONTRADICTED");
+    expect(result?.reasonCodes).toContain("SUPPLY_REDUCTION_NOT_ESTABLISHED");
+    expect(result?.reasonCodes).not.toContain("NET_SUPPLY_CHANGE_NOT_ATTRIBUTED");
   }, 120_000);
 
-  it("26. and it is filed CONTEXT, which reconciliation never counts", async () => {
-    const i = await makeInterval({});
-    const out = await persist(i);
-    const [row] = await ctx.db
-      .select()
-      .from(evidence)
-      .where(eq(evidence.id, (out as { evidenceId: string }).evidenceId));
-    expect(row.relationship).toBe("CONTEXT");
+  it("26. and no delta of any direction can reach SUPPORTED on its own", async () => {
+    for (const [from, to] of [
+      ["1000", "900"],
+      ["1000", "1000"],
+      ["900", "1000"],
+    ]) {
+      const i = await makeInterval({ fromAmount: from, toAmount: to });
+      await persist(i);
+      const result = await reconcileAndPersistComponent(
+        ctx.db,
+        i.f.currentJobId,
+        { step: 7, component: "NET_EFFECT" },
+        NOW,
+      );
+      expect(result?.status).not.toBe("SUPPORTED");
+    }
     const reconciler = await codeOf("src/server/engine/component-reconciler.ts");
     expect(reconciler).toContain('row.relationship === "SUPPORTS"');
   }, 120_000);

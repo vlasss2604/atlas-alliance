@@ -64,7 +64,10 @@ function nextMint(): string {
     tag = "123456789"[n % 9] + tag;
     n = Math.floor(n / 9);
   } while (n > 0);
-  return `Mint${tag}`.padEnd(44, "1");
+  // Padded with a character the tag itself can never contain: padding with
+  // "1" made "Mint2" + 39 ones and "Mint21" + 38 ones the SAME address, so
+  // two fixtures silently shared a mint and each other's observations.
+  return `Mint${tag}`.padEnd(44, "z");
 }
 
 function signatureFor(seed: number): string {
@@ -680,7 +683,9 @@ describe("23..30. boundaries", () => {
     expect(facts).not.toContain("TOTAL_SUPPLY_DELTA: [");
   });
 
-  it("29. NET_EFFECT's result is unchanged by the delta being present", async () => {
+  it("29. the materialized delta reaches NET_EFFECT, and never reaches SUPPORTED", async () => {
+    // B2e turned this on. What must NOT change is the ceiling: a measured
+    // decrease upgrades the LIMITATION and never removes the last one.
     const f = await makeFixture();
     await establishBurn(f, 500, 26);
     await observe(f.priorJobId, f.mint, 100, "1000");
@@ -692,6 +697,9 @@ describe("23..30. boundaries", () => {
       { step: 7, component: "NET_EFFECT" },
       NOW,
     );
+    expect(before?.status).toBe("PARTIALLY_SUPPORTED");
+    expect(before?.reasonCodes).toContain("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
+
     expect((await run(f)).outcome).toBe("MATERIALIZED");
     const after = await reconcileAndPersistComponent(
       ctx.db,
@@ -699,9 +707,9 @@ describe("23..30. boundaries", () => {
       { step: 7, component: "NET_EFFECT" },
       NOW,
     );
-    expect(after?.status).toBe(before?.status);
-    expect(after?.reasonCodes).toEqual(before?.reasonCodes);
-    expect(after?.supportingEvidenceIds).toEqual(before?.supportingEvidenceIds);
+    expect(after?.status).toBe("PARTIALLY_SUPPORTED");
+    expect(after?.reasonCodes).toContain("NET_SUPPLY_CHANGE_NOT_ATTRIBUTED");
+    expect(after?.reasonCodes).not.toContain("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
     expect(after?.status).not.toBe("SUPPORTED");
   }, 120_000);
 
