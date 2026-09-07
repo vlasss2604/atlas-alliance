@@ -51,6 +51,13 @@ import { interpretations, projects, researchJobs, researchTraceEvents, topics, u
 import { createBoss, RESEARCH_QUEUE } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
+import {
+  installOnchainResearchCapability,
+  onchainEndpointEnvVar,
+  OnchainCapabilityUnavailableError,
+  ONCHAIN_RESEARCH_ENV,
+} from "../src/server/jobs/onchain-capability";
+import { PHASE_CAPABILITIES } from "../src/server/jobs/worker-capabilities";
 import { createTraceFixtureExecutor, type TraceFixtureScenario } from "../src/server/engine/trace-fixture-executor";
 import { createLiveS4WorkExecutor, INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
 import { loadModelCostProfile, ModelCostProfileMissingError } from "../src/server/engine/model-cost-profile";
@@ -112,9 +119,59 @@ async function main() {
   // anything.
   if (mode === "live") {
     const problems: string[] = [];
+    let onchainProviderId: string | null = null;
     if (!config.internal_alpha_enabled) problems.push("internal_alpha_enabled is false (product_config)");
     if (!process.env.BRAVE_SEARCH_API_KEY) problems.push("BRAVE_SEARCH_API_KEY is not set");
     if (!process.env.ANTHROPIC_API_KEY) problems.push("ANTHROPIC_API_KEY is not set");
+
+    // STRUCTURED ON-CHAIN RETRIEVAL, INSTALLED THE WAY THE WORKER INSTALLS IT.
+    //
+    // THE DEFECT THIS CLOSES. The worker installs the capability during
+    // startup (worker.ts), immediately before it serves any queue. This
+    // script never starts a worker — it drives `handleResearchJobTask`
+    // directly — so no retriever was ever installed for it, and every
+    // component that plans a chain read recorded
+    // ONCHAIN_RETRIEVER_NOT_CONFIGURED. A live run could spend real search
+    // and model budget and still, by construction, never read the chain.
+    // Nothing said so until the trace was read afterwards.
+    //
+    // NO SECOND IMPLEMENTATION. This calls the SAME installer, which owns
+    // the flag, the (chain, network) -> env-var allowlist, the https and
+    // no-credential-in-URL contract, and the allowlist-derived provider
+    // label. This script constructs no retriever and names no endpoint.
+    //
+    // THE CAPABILITY SET IS DECLARED, not read from the environment.
+    // `loadWorkerCapabilities` answers "which queues does this PROCESS
+    // serve", and a deployment splits phases across processes by setting
+    // it. This script is not such a deployment: it runs the whole pipeline
+    // in one process, so it serves every phase by construction and says so
+    // rather than depending on ATLAS_WORKER_CAPABILITIES being set in a
+    // developer's shell.
+    //
+    // REQUIRED IN LIVE MODE, and failing here is the point. The internal
+    // alpha live target is a Solana project whose entire question is the
+    // deterministic chain; a live run that cannot reach one spends real
+    // money to produce a documentary-only answer that looks like a finding.
+    if (process.env[ONCHAIN_RESEARCH_ENV] !== "1") {
+      problems.push(
+        `${ONCHAIN_RESEARCH_ENV} is not "1" — structured on-chain retrieval is not declared for this process`,
+      );
+    } else if (!process.env[onchainEndpointEnvVar()]) {
+      problems.push(`${onchainEndpointEnvVar()} is not set`);
+    } else {
+      try {
+        const onchain = installOnchainResearchCapability({
+          capabilities: new Set(PHASE_CAPABILITIES),
+        });
+        if (onchain.outcome === "INSTALLED") onchainProviderId = onchain.providerId;
+        else problems.push(`on-chain capability did not install (outcome: ${onchain.outcome})`);
+      } catch (e) {
+        // Declared and unconstructible. The error names the env var, never
+        // the endpoint — the endpoint can be the credential.
+        if (e instanceof OnchainCapabilityUnavailableError) problems.push(e.message);
+        else throw e;
+      }
+    }
     let queryProposerProfile;
     try {
       queryProposerProfile = loadModelCostProfile("QUERY_PROPOSER", config.query_proposer_model);
@@ -139,6 +196,7 @@ async function main() {
     console.log("  real internet:      YES");
     console.log("  real provider cost: YES");
     console.log("  search provider:    brave");
+    console.log(`  on-chain retrieval: INSTALLED (${onchainProviderId})`);
     console.log(`  query proposer:     anthropic ${config.query_proposer_model} (cost profile ${queryProposerProfile!.priceVersion})`);
     console.log(`  evidence extractor: anthropic ${config.evidence_extractor_model} (cost profile ${evidenceExtractorProfile!.priceVersion})`);
     console.log(
