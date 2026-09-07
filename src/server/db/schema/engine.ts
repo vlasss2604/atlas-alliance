@@ -29,7 +29,7 @@ import {
   traceStatus,
 } from "./enums";
 import { researchJobs } from "./research";
-import { sources } from "./proof";
+import { evidence, sources } from "./proof";
 
 // Фаза 6, S3 (phase-6-plan.md §19 S3, §6.3 item 5) — сырой журнал попыток
 // исполнения контроллера: персист для idempotent-enough семантики и
@@ -399,14 +399,45 @@ export const onchainArtifacts = pgTable(
   (t) => [
     index("ix_onchain_artifacts_job").on(t.researchJobId),
     index("ix_onchain_artifacts_uri").on(t.canonicalUri),
-    // Replaying the identical observation within one job is a no-op rather
-    // than a duplicate row — same discipline as evidence.extraction_unit_key.
-    uniqueIndex("uq_onchain_artifacts_job_artifact").on(t.researchJobId, t.artifactHash),
+    // AN OBSERVATION IS NOT THE SAME THING AS ITS NORMALIZED VALUE.
+    //
+    // Identity used to be the content address alone, and that silently
+    // collapsed two genuinely different chain observations whenever they
+    // happened to report equal values:
+    //
+    //   slot 100: supply 1,000
+    //   slot 200: supply 1,000        <- dropped, as if it never happened
+    //
+    // "Supply did not move between these two positions" is a finding, and
+    // the record could not hold it. The defect is NOT specific to supply:
+    // `artifact_hash` is sha256 of the NORMALIZED RESULT, and for the four
+    // intent kinds whose slot arrives in the RPC context rather than in the
+    // result body — TOKEN_SUPPLY, ACCOUNT_INFO, TOKEN_ACCOUNT_BALANCE and
+    // TOKEN_ACCOUNTS_BY_OWNER — an unchanged reading at a later slot hashes
+    // identically. SIGNATURES_FOR_ADDRESS and TRANSACTION_DETAIL carry their
+    // slot inside the result, so they were never affected and are unchanged
+    // by adding it here.
+    //
+    // Identity is therefore WHAT CAME BACK plus WHERE ON THE CHAIN it was
+    // read: (artifact_hash, slot), scoped by origin mode. `artifact_hash`
+    // keeps its existing and separate meaning — a content address of the
+    // normalized result — and is not redefined to smuggle position into it.
+    //
+    // An exact retry stays idempotent: the same reading at the same slot is
+    // the same observation however many times it is fetched, which is why
+    // retrieved_at is deliberately NOT part of identity. A retry a second
+    // later is not a new observation.
+    uniqueIndex("uq_onchain_artifacts_job_observation").on(
+      t.researchJobId,
+      t.artifactHash,
+      t.slot,
+    ),
     // Postgres treats NULLs as distinct, so the index above constrains
-    // nothing once the job id is null. Content-addressing the standalone
-    // rows keeps a re-observation of identical content a no-op.
-    uniqueIndex("uq_onchain_artifacts_standalone_hash")
-      .on(t.artifactHash)
+    // nothing once the job id is null. The standalone mode needs the same
+    // identity for the same reason — an owner-script re-observation at a
+    // later slot is a second observation, not a repeat of the first.
+    uniqueIndex("uq_onchain_artifacts_standalone_observation")
+      .on(t.artifactHash, t.slot)
       .where(sql`${t.researchJobId} IS NULL`),
     // Every invalid combination of mode and links is unrepresentable,
     // rather than merely discouraged.
@@ -554,6 +585,66 @@ export const onchainObservedSignatures = pgTable(
     check(
       "ck_onchain_observed_sig_anchor_shape",
       sql`${t.projectAnchor} ~ '^[1-9A-HJ-NP-Za-km-z]{32,44}$'`,
+    ),
+  ],
+);
+
+// TWO-ENDPOINT PROVENANCE FOR A DERIVED INTERVAL FACT.
+//
+// THE SHAPE EVERY OTHER ON-CHAIN FACT HAS, AND WHY THIS ONE CANNOT.
+// `evidence.onchain_artifact_id` records that a fact was derived from ONE
+// artifact, and its own comment states the relation it was built for: many
+// facts may reference one artifact. A TOTAL_SUPPLY_DELTA inverts that. It is
+// established by a historical reading, a current reading and arithmetic, and
+// by neither reading alone — so the singular pointer has no honest value and
+// is left NULL for such a row.
+//
+// ESTABLISHING INPUTS ONLY, AND THE NAME SAYS SO. These are the operands of
+// the arithmetic: FROM is t0, TO is t1, and the delta is true from those two
+// alone. A burn whose slot lies inside the interval is NOT here — it did not
+// establish the number, it only makes the interval interesting — and a table
+// called "supporting artifacts" would eventually collect exactly that kind of
+// contextual, causal-looking row. Whether a burn lies inside a delta's
+// interval is a separate deterministic question, asked later, over two
+// independent Evidence rows.
+//
+// The pair is structurally exactly two: the CHECK pins ordinal 0 to FROM and
+// ordinal 1 to TO, and the two unique indexes forbid a second of either. A
+// three-input derivation is not "unexpected" here, it is unrepresentable.
+export const evidenceOnchainArtifactInputs = pgTable(
+  "evidence_onchain_artifact_inputs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    // CASCADE, matching evidenceDocumentaryLocators: an input has no meaning
+    // without the fact it established, and it is not independent evidence.
+    evidenceId: uuid("evidence_id")
+      .notNull()
+      .references(() => evidence.id, { onDelete: "cascade" }),
+    ordinal: smallint("ordinal").notNull(),
+    inputRole: text("input_role").notNull(),
+    // RESTRICT, deliberately unlike evidence.onchain_artifact_id's SET NULL:
+    // a delta whose endpoint observation was removed is not a fact that
+    // should quietly lose a pointer, it is a fact that is no longer
+    // established. The database refuses the deletion instead.
+    onchainArtifactId: uuid("onchain_artifact_id")
+      .notNull()
+      .references(() => onchainArtifacts.id, { onDelete: "restrict" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => [
+    index("ix_evidence_onchain_inputs_evidence").on(t.evidenceId),
+    // So a future audit can ask from either end: which delta rests on this
+    // observation, as well as which observations this delta rests on.
+    index("ix_evidence_onchain_inputs_artifact").on(t.onchainArtifactId),
+    uniqueIndex("uq_evidence_onchain_inputs_role").on(t.evidenceId, t.inputRole),
+    uniqueIndex("uq_evidence_onchain_inputs_ordinal").on(t.evidenceId, t.ordinal),
+    check(
+      "ck_evidence_onchain_inputs_role",
+      sql`(${t.ordinal} = 0 AND ${t.inputRole} = 'FROM') OR (${t.ordinal} = 1 AND ${t.inputRole} = 'TO')`,
     ),
   ],
 );

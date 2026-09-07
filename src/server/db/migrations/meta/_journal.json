@@ -309,6 +309,20 @@
       "when": 1788289200000,
       "tag": "0043_evidence_onchain_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788375600000,
+      "tag": "0044_onchain_observation_identity",
+      "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788462000000,
+      "tag": "0045_total_supply_delta_provenance",
+      "breakpoints": true
     }
   ]
 }

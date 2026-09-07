@@ -468,4 +468,8 @@ export const onchainFactKind = pgEnum("onchain_fact_kind", [
   "BURN",
   "RECIPROCAL_ASSET_FLOW",
   "DECODED_EXCHANGE",
+  // B2 — the one kind derived from TWO artifacts. Its provenance lives in
+  // evidence_onchain_artifact_inputs, and evidence.onchain_artifact_id is
+  // NULL for such a row because no single artifact established it.
+  "TOTAL_SUPPLY_DELTA",
 ]);
