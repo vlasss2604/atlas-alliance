@@ -824,6 +824,16 @@ const UNVERIFIED_PRIORITY = [
   "DURABILITY_BASIS",
 ];
 
+// The three statuses that are a FINDING about the project rather than a
+// report on coverage. INSUFFICIENT_EVIDENCE and NOT_APPLICABLE are neither:
+// they say what the run did not reach, so they can never make a failed run
+// look like it produced something.
+const SUBSTANTIVE_STATUSES = new Set([
+  "SUPPORTED",
+  "PARTIALLY_SUPPORTED",
+  "CONTRADICTED",
+]);
+
 export interface AnswerInput {
   verdict: string | null;
   outcomeKind?: OutcomeKind;
@@ -882,11 +892,91 @@ export function researchAnswer(input: AnswerInput): string[] {
   switch (input.outcomeKind ?? "VERDICT") {
     case "IN_PROGRESS":
       return [`Still researching this question about ${subject}.`];
-    case "FAILED":
-      return [
-        `This research run did not complete, so it established nothing about ${subject}.`,
-        `The failure is a problem with the run itself — it is not a finding about the project.`,
+    // A FAILED RUN IS NOT AUTOMATICALLY AN EMPTY ONE.
+    //
+    // This branch used to return "established nothing" unconditionally,
+    // without ever reading input.components — even though a run can fail
+    // AFTER components were reconciled from evidence already in hand. When
+    // that happens the component rows on the same page read ESTABLISHED
+    // while the answer above them says nothing was established. The rows are
+    // the source of truth, so the answer follows them.
+    //
+    // Nothing here upgrades a verdict. SUPPORTED stays "established",
+    // PARTIALLY_SUPPORTED stays "partly established", CONTRADICTED keeps its
+    // own sentence, no component without a persisted row is mentioned, and
+    // the run is still reported as failed: the question was not fully
+    // answered and the fault is the run's, not the project's.
+    case "FAILED": {
+      const failedContradicted = pick(
+        input.components,
+        "CONTRADICTED",
+        UNVERIFIED_PRIORITY,
+        2,
+      );
+      const failedVerified = pick(
+        input.components,
+        "SUPPORTED",
+        VERIFIED_PRIORITY,
+        2,
+      );
+      const failedPartial = pick(
+        input.components,
+        "PARTIALLY_SUPPORTED",
+        VERIFIED_PRIORITY,
+        2,
+      );
+
+      // A — nothing substantive survived the failure. The state of the run
+      // is the whole answer, worded exactly as before.
+      if (!input.components.some((c) => SUBSTANTIVE_STATUSES.has(c.status))) {
+        return [
+          `This research run did not complete, so it established nothing about ${subject}.`,
+          `The failure is a problem with the run itself — it is not a finding about the project.`,
+        ];
+      }
+
+      // B — something did survive it.
+      const failed: string[] = [
+        `This research run did not complete, so it did not answer the whole question about ${subject}.`,
       ];
+      if (failedContradicted.length > 0) {
+        failed.push(
+          `On ${joinPhrases(failedContradicted, "and")}, the evidence indicates otherwise.`,
+        );
+      }
+      if (failedVerified.length > 0 && failedPartial.length > 0) {
+        failed.push(
+          `Before it failed it established ${joinPhrases(failedVerified)}, and partly established ${joinPhrases(failedPartial)}.`,
+        );
+      } else if (failedVerified.length > 0) {
+        failed.push(`Before it failed it established ${joinPhrases(failedVerified)}.`);
+      } else if (failedPartial.length > 0) {
+        failed.push(
+          `Before it failed it partly established ${joinPhrases(failedPartial)}.`,
+        );
+      } else if (failedContradicted.length === 0) {
+        // Substantive rows exist, but none of them has a reader-facing
+        // phrase. Point at the rows rather than inventing wording for them.
+        failed.push(
+          `Some findings were established before it failed; they are listed below.`,
+        );
+      }
+      // NO "Not established: …" LIST ON THIS PATH, DELIBERATELY.
+      //
+      // On a completed run that list means "attempted, came back short" —
+      // a limit of the EVIDENCE. On a FAILED run an INSUFFICIENT_EVIDENCE
+      // row cannot carry that meaning: it may equally be a component the
+      // run never got to finish. Naming it as a research result would
+      // misreport the fault as a finding, which is the exact error this
+      // branch exists to avoid. Nothing is hidden by omitting it — every
+      // persisted component status is rendered verbatim in the rows below,
+      // and the lead sentence already says the question was not fully
+      // answered.
+      failed.push(
+        `The failure is a problem with the run itself — it is not a finding about the project.`,
+      );
+      return failed;
+    }
     case "CANCELLED":
       return [`This research was cancelled before it reached a conclusion.`];
     case "STOPPED_AT_LIMIT":

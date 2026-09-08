@@ -884,3 +884,140 @@ describe("UI — no project-specific conclusion", () => {
     expect(src).not.toMatch(/import\s+.*from\s+["'](?!\.)/);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 3g. A FAILED RUN THAT STILL PERSISTED FINDINGS                      */
+/* ------------------------------------------------------------------ */
+
+// A run can fail AFTER components have been reconciled from evidence that
+// was already in hand — a transport fault late in the run does not delete
+// what was already settled. When that happens the component rows below the
+// answer read ESTABLISHED / PARTLY ESTABLISHED, so an answer that says the
+// run "established nothing" contradicts the same page. These tests pin both
+// halves: the empty failure keeps its old wording, and the non-empty failure
+// reports what survived WITHOUT upgrading it, without inferring completion,
+// and without moving the fault from the run to the project.
+describe("UI — a failed run that still persisted findings", () => {
+  const FAULT = "not a finding about the project";
+
+  it("TEST 3g-1: a failure with no substantive verdict still establishes nothing", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components: [
+        { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
+        { component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
+        { component: "DURABILITY_BASIS", status: "NOT_APPLICABLE" },
+      ],
+    });
+    expect(sentences).toHaveLength(2);
+    expect(sentences[0]).toContain("did not complete");
+    expect(sentences[0]).toContain("established nothing about Fixture Project");
+    expect(sentences[1]).toContain(FAULT);
+  });
+
+  it("TEST 3g-2: a failure with a persisted SUPPORTED component names it instead of denying it", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components: [
+        { component: "FLOW_PATH", status: "SUPPORTED" },
+        { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
+      ],
+    }).join(" ");
+    // The contradiction with the rows below is what this fix removes.
+    expect(sentences).not.toContain("established nothing");
+    expect(sentences).toContain("Before it failed it established");
+    expect(sentences).toContain("the path the value takes through the protocol");
+  });
+
+  it("TEST 3g-3: a PARTIALLY_SUPPORTED component is never upgraded to established", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components: [
+        { component: "SOURCE_OF_VALUE", status: "PARTIALLY_SUPPORTED" },
+        { component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
+      ],
+    }).join(" ");
+    expect(sentences).toContain(
+      "Before it failed it partly established where the economic value comes from",
+    );
+    expect(sentences).not.toContain("Before it failed it established");
+    expect(sentences).not.toContain("established nothing");
+  });
+
+  it("TEST 3g-4: a partial failure still reads as an incomplete run whose fault is the run's", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components: [
+        { component: "MECHANISM_SPEC", status: "SUPPORTED" },
+        { component: "SOURCE_OF_VALUE", status: "PARTIALLY_SUPPORTED" },
+      ],
+    });
+    const joined = sentences.join(" ");
+    // Did not complete, did not fully answer, and the fault stays on the run.
+    expect(sentences[0]).toContain("did not complete");
+    expect(sentences[0]).toContain("did not answer the whole question");
+    expect(sentences[sentences.length - 1]).toContain(FAULT);
+    // Both buckets are reported, each in its own vocabulary, in one sentence.
+    expect(joined).toContain(
+      "Before it failed it established what the project's own documentation specifies, and partly established where the economic value comes from",
+    );
+    // Nothing may imply the run reached a conclusion.
+    expect(joined).not.toContain("established nothing");
+    expect(joined.toLowerCase()).not.toContain("therefore");
+    expect(joined.toLowerCase()).not.toContain("completed");
+  });
+
+  it("TEST 3g-5: a component that was not settled is never listed among what was", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components: [
+        { component: "FLOW_PATH", status: "SUPPORTED" },
+        { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
+        // CURRENT_STATE and NET_EFFECT have NO persisted row at all.
+      ],
+    });
+    const established = sentences.find((s) => s.startsWith("Before it failed"));
+    expect(established).toBeDefined();
+    // Attempted-and-short is not established …
+    expect(established).not.toContain("whether the mechanism has actually executed");
+    // … and never-assessed is not mentioned anywhere, in either direction.
+    const joined = sentences.join(" ");
+    expect(joined).not.toContain("whether the mechanism is currently active");
+    expect(joined).not.toContain("a durable effect on token supply");
+  });
+
+  it("TEST 3g-6: a CONTRADICTED component is reported as contradicted, in generic wording", () => {
+    const sentences = researchAnswer({
+      verdict: null,
+      outcomeKind: "FAILED",
+      projectName: "Fixture Project",
+      components: [
+        { component: "NET_EFFECT", status: "CONTRADICTED" },
+        { component: "FLOW_PATH", status: "SUPPORTED" },
+      ],
+    });
+    const joined = sentences.join(" ");
+    expect(joined).toContain(
+      "On a durable effect on token supply, the evidence indicates otherwise",
+    );
+    // CONTRADICTED is not folded into the established list.
+    expect(joined).not.toContain(
+      "established a durable effect on token supply",
+    );
+    expect(sentences[sentences.length - 1]).toContain(FAULT);
+    // The wording is a property of the model, not of any one project.
+    expect(joined.toLowerCase()).not.toContain("raydium");
+    expect(joined.toLowerCase()).not.toContain("pump");
+    expect(joined.toLowerCase()).not.toContain("burn");
+  });
+});
