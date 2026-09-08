@@ -183,7 +183,17 @@ export async function runS4ResearchJob(
         );
       }
 
-      await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
+      // ACQUISITION HAS DEFINITIVELY STOPPED HERE, and that is what the flag
+      // says. The throw came from the reservation boundary, so the work loop
+      // aborted mid-queue and every component after it has no attempt row and
+      // never will — including the one the three stages above may have just
+      // written evidence into. Zero-cost reconciliation of an
+      // EVIDENCE-BACKED pending component is therefore the difference between
+      // reporting what this job deterministically established and discarding
+      // it. A pending component with no persisted inputs stays untouched.
+      await reconcileOutstandingComponents(db, jobId, view.workQueue, now, {
+        acquisitionStopped: true,
+      });
       const reconciled = await db
         .select({ id: researchComponentResults.id })
         .from(researchComponentResults)

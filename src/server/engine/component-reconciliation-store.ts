@@ -348,11 +348,59 @@ export async function reconcileAndPersistComponent(
 // every runS4ResearchJob call (see that module), so a component only
 // pending because it isn't due yet will be swept the moment it does
 // become terminal, either via the per-attempt hook or the next sweep.
+//
+// ---- THE ONE EXCEPTION: ACQUISITION HAS DEFINITIVELY STOPPED ----------
+//
+// "It will be swept the moment it becomes terminal" is true for every
+// pending component EXCEPT one class, and a live run found it: a component
+// that will never GET an attempt because the work loop died before its
+// turn. `BudgetExhaustedError` is thrown at the reservation boundary, so
+// the controller's loop aborts mid-queue — every item after the throwing
+// one is left with no attempt row at all, and no later sweep can change
+// that, because nothing will ever attempt them again.
+//
+// That alone would only be lost coverage. What made it a correctness
+// defect is that the post-exhaustion continuation in run-job.ts WRITES
+// EVIDENCE INTO EXACTLY SUCH A COMPONENT: `runSupplyDeltaMaterialization`
+// files a TOTAL_SUPPLY_DELTA under the component whose question it answers,
+// after the attempt loop is already dead. So one stage of that block
+// produced establishing evidence and the next stage — this sweep — refused
+// to read it, on a condition the component could never satisfy. Evidence
+// that was already acquired and already paid for was discarded, and the
+// job reported the component as MISSING rather than as what the evidence
+// deterministically supports.
+//
+// THE EXCEPTION IS OPT-IN AND NARROW. `acquisitionStopped` is passed by
+// ONE caller — the post-exhaustion path, where no further source read may
+// be spent by anyone. During ordinary acquisition the gate is byte-for-byte
+// what it was: a pending component with partial evidence is NOT reconciled
+// early, because more evidence may still arrive.
+//
+// AND IT IS EVIDENCE-BACKED, NEVER SYNTHETIC. Eligibility asks
+// `loadEvidenceRows` — THE SAME QUERY the reducer itself will use, not a
+// second predicate that could drift from it. So "eligible" means precisely
+// "this reducer has persisted inputs worth evaluating": rows filed at this
+// (job, step, component), plus the cross-component kinds the applicability
+// map already lets it read. A component with no such rows is left exactly
+// as before — untouched, unreconciled, and reported as never completed.
+// "Work never finished" and "the evidence is insufficient" stay different
+// findings, which is the whole point.
+//
+// NOTHING IS SPENT. This path reserves no budget, constructs no executor,
+// and calls no provider — it reads persisted rows and writes a derived
+// projection, exactly as the terminal-attempt path above already does.
+export interface ReconcileOutstandingOptions {
+  // True only where acquisition has definitively stopped for this job, so
+  // a pending component can no longer become terminal by waiting.
+  acquisitionStopped?: boolean;
+}
+
 export async function reconcileOutstandingComponents(
   db: Database | Transaction,
   jobId: string,
   workQueue: Pick<ComponentWorkItem, "step" | "component">[],
   now: Date,
+  options: ReconcileOutstandingOptions = {},
 ): Promise<void> {
   if (workQueue.length === 0) return;
 
@@ -369,7 +417,16 @@ export async function reconcileOutstandingComponents(
   const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "SKIPPED"]);
   for (const item of workQueue) {
     const latest = latestByKey.get(`${item.step}:${item.component}`);
-    if (!latest || !TERMINAL_STATUSES.has(latest.status)) continue;
+    if (latest !== undefined && TERMINAL_STATUSES.has(latest.status)) {
+      await reconcileAndPersistComponent(db, jobId, item, now);
+      continue;
+    }
+    // Pending. Ordinarily that ends it — see the exception above.
+    if (options.acquisitionStopped !== true) continue;
+    // Evidence-backed, asked with the reducer's own selection so the two
+    // can never disagree about what counts as an input.
+    const inputs = await loadEvidenceRows(db, jobId, item.step, item.component);
+    if (inputs.length === 0) continue;
     await reconcileAndPersistComponent(db, jobId, item, now);
   }
 }
