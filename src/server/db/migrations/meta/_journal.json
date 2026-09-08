@@ -330,6 +330,13 @@
       "when": 1788548400000,
       "tag": "0046_documented_transaction_subject",
       "breakpoints": true
+    },
+    {
+      "idx": 47,
+      "version": "7",
+      "when": 1788634800000,
+      "tag": "0047_artifact_reuse_trace_reason",
+      "breakpoints": true
     }
   ]
 }

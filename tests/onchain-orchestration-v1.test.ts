@@ -1179,13 +1179,41 @@ describe("orchestration — two admitted locators still reach a transaction", ()
   });
 
   it("the order is deterministic across repeated runs", async () => {
-    const jobId = await twoLocatorJob();
+    // A FRESH JOB PER RUN, and that is now the only honest way to ask this.
+    // Re-running one job no longer re-reads: same-job artifact reuse answers
+    // the second and third passes from the observations the first one made,
+    // so those passes are shorter BY DESIGN. Determinism is a property of
+    // the schedule, so it is tested against the schedule's own input —
+    // identical jobs — rather than against a job that has already learned.
     const runs: string[][] = [];
     for (let i = 0; i < 3; i++) {
+      const jobId = await twoLocatorJob();
       const { asked } = await runExecution(jobId, TWO_CHAINS);
       runs.push(asked.map((a) => `${a.kind}::${a.subject}`));
     }
     for (const run of runs) expect(run).toEqual(runs[0]);
+    // And the run really did exercise the whole chain, so this is not
+    // determinism over an empty list.
+    expect(runs[0]!.length).toBeGreaterThan(1);
+  });
+
+  it("re-running the SAME job re-reads nothing — it consumes what it already has", async () => {
+    const jobId = await twoLocatorJob();
+    const first = await runExecution(jobId, TWO_CHAINS);
+    expect(first.asked.length).toBeGreaterThan(0);
+
+    const second = await runExecution(jobId, TWO_CHAINS);
+    // Every reusable question is answered from the job's own observations.
+    // SIGNATURES_FOR_ADDRESS is excluded from reuse, so if the chain reaches
+    // one again it is a real read — never an ACCOUNT_INFO or a
+    // TOKEN_ACCOUNTS_BY_OWNER, and never a second TRANSACTION_DETAIL.
+    for (const intent of second.asked) {
+      expect(["SIGNATURES_FOR_ADDRESS", "TOKEN_SUPPLY"]).toContain(intent.kind);
+    }
+    expect(second.outcome.sourceOpensSpent).toBeLessThan(first.outcome.sourceOpensSpent);
+    expect(
+      second.traced.some((t) => t.reasonCode === "ARTIFACT_ALREADY_OBSERVED_IN_JOB"),
+    ).toBe(true);
   });
 
   it("a single locator behaves exactly as before", async () => {

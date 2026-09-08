@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, onchainArtifacts, sources } from "../db/schema";
@@ -13,7 +13,7 @@ import type {
   OnchainSubjectKind,
 } from "./providers/onchain-types";
 import { completeIdentifierShape, type LocatorShape } from "./documentary-locator";
-import { isOnchainArtifact } from "./providers/onchain-types";
+import { brandOnchainArtifact, isOnchainArtifact } from "./providers/onchain-types";
 import { validateOnchainBinding } from "./onchain-binding";
 import { synthesizeOnchainFacts } from "./onchain-facts";
 import { buildCanonicalOnchainUri, subjectKindOf } from "./onchain-uri";
@@ -434,6 +434,157 @@ export function evaluateStructuredContainment(
 // outrun the budget even if a caller asked for more.
 export const MAX_ONCHAIN_INTENTS_PER_ATTEMPT = 2;
 
+// ---- same-job deterministic reuse -------------------------------------
+//
+// WHICH DETERMINISTIC QUESTIONS MAY BE ANSWERED FROM AN OBSERVATION THIS
+// JOB ALREADY MADE, instead of paying for the same read again.
+//
+// THE CASE THIS CLOSES. Different components legitimately ask the SAME
+// question of the SAME subject in one job: "what kind of account is this"
+// is asked by every component that starts an account chain, and "which
+// token accounts does it own for our mint" by every component that
+// promotes through one. A live run issued 13 chain reads over 6 distinct
+// canonical questions — seven repeats, six of them avoidable — and every
+// repeat came back with a BYTE-IDENTICAL decoded result (`artifact_hash`
+// is sha256 of the canonical result, and it matched every time). Only the
+// observation slot had advanced.
+//
+// MEMBERSHIP IS DECIDED BY ONE PROPERTY: does any code path compare this
+// kind of result BY SLOT? Every slot-precise comparison in the engine —
+// the interval's `t1.slot > t0.slot`, the post-event planner, the
+// burn-spanning selector, the current-proof gate — consumes TOKEN_SUPPLY;
+// the one other comparison ranks entries INSIDE a signature window. No
+// path compares an ACCOUNT_INFO or TOKEN_ACCOUNTS_BY_OWNER by slot, and
+// the reconciler's own freshness gate is measured in DAYS, so a
+// same-attempt-old observation is trivially fresh for it.
+//
+// THE TWO EXCLUSIONS ARE THE POINT, and they are excluded HERE, by
+// construction, rather than left to a caller to remember:
+//
+//   TOKEN_SUPPLY           its canonical URI is identical for every read
+//                          regardless of slot, and the whole supply
+//                          interval is slot arithmetic. Reuse would hand
+//                          the post-event planner the very observation it
+//                          just decided was too early
+//                          (EVERY_CURRENT_OBSERVATION_AT_OR_BEFORE_EVENT),
+//                          collapsing t0 -> event -> t1 toward one
+//                          reading and making the delta unobtainable
+//                          exactly when a burn is discovered late.
+//
+//   SIGNATURES_FOR_ADDRESS a window of the NEWEST signatures at read time.
+//                          Its entire purpose is to expose recent
+//                          activity; reusing an earlier window would pin a
+//                          component to a staler view of the chain and
+//                          silently narrow what is discoverable.
+//
+// A kind is added here only by a reviewed decision, never by default.
+export const REUSABLE_INTENT_KINDS: ReadonlySet<OnchainIntentKind> = new Set([
+  // Immutable by identity: the subject IS the signature, reads are at
+  // `finalized`, and the slot that matters is the transaction's own —
+  // carried inside the result, not a function of when it was read.
+  "TRANSACTION_DETAIL",
+  // Consumed for classification and program/owner binding, which is what
+  // decides promotion. Its balance rides along and the fact statement
+  // names its own slot, so a reused reading stays true about the moment it
+  // describes.
+  "ACCOUNT_INFO",
+  // Consumed for token-account discovery and mint binding. The mint filter
+  // is the project anchor structurally, not a caller's choice.
+  "TOKEN_ACCOUNTS_BY_OWNER",
+]);
+
+// THE OBSERVATION THIS JOB ALREADY HAS FOR EXACTLY THIS QUESTION, or null.
+//
+// IDENTITY IS THE CANONICAL URI, WITHIN THIS JOB. The URI already encodes
+// chain, network, project anchor, subject kind, subject and intent kind, so
+// equality on it IS "the same deterministic question". The job predicate is
+// inside the query and never optional: another job's observation is
+// unreachable here exactly as it is through every other path.
+//
+// GREATEST SLOT WINS, the same tie-break `onchain-current-proof-supply-gate`
+// already applies — where several readings of one question exist, the most
+// recent is the one to consume.
+//
+// REBUILDING IS TRANSPORT, NOT TRUST — the doctrine
+// `onchain-supply-candidate-store` already states for its own historical
+// reads. Every rule that decides what this artifact may establish still runs
+// afterwards, over this object: binding, fact synthesis, promotion, all
+// unchanged. FAIL CLOSED: a row whose stored shape does not reconstruct into
+// the question that was asked returns null and the caller pays for a real
+// read.
+export async function findReusableSameJobArtifact(
+  db: Database | Transaction,
+  jobId: string,
+  intent: OnchainIntent,
+): Promise<OnchainArtifact | null> {
+  if (!REUSABLE_INTENT_KINDS.has(intent.kind)) return null;
+  const canonicalUri = buildCanonicalOnchainUri(intent);
+  const [row] = await db
+    .select()
+    .from(onchainArtifacts)
+    .where(
+      and(
+        eq(onchainArtifacts.researchJobId, jobId),
+        eq(onchainArtifacts.canonicalUri, canonicalUri),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot))
+    .limit(1);
+  if (!row) return null;
+
+  // The stored row must describe the question that was actually asked.
+  // Every one of these is already implied by the canonical URI; asserting
+  // them is what makes a future URI change fail closed instead of silently
+  // resolving to a different observation.
+  if (
+    row.intentKind !== intent.kind ||
+    row.chain !== intent.chain ||
+    row.network !== intent.network ||
+    row.projectAnchor !== intent.projectAnchor ||
+    row.subject !== intent.subject ||
+    row.subjectKind !== intent.subjectKind
+  ) {
+    return null;
+  }
+  const result = row.normalizedResult as { kind?: unknown } | null;
+  if (!result || typeof result !== "object" || result.kind !== intent.kind) return null;
+  if (typeof row.slot !== "number" || !Number.isInteger(row.slot) || row.slot < 0) return null;
+
+  return brandOnchainArtifact({
+    intent,
+    canonicalUri: row.canonicalUri,
+    result: result as OnchainArtifact["result"],
+    // Not stored, and deliberately not reconstructed: the normalized text
+    // exists to be hashed at retrieval, and the hash it produced is what
+    // travels below.
+    normalizedText: JSON.stringify(result),
+    provenance: {
+      chain: intent.chain,
+      network: intent.network,
+      projectAnchor: row.projectAnchor,
+      subjectKind: intent.subjectKind,
+      subject: row.subject,
+      // THE ORIGINAL POSITION, never "now". This is the whole reason reuse
+      // is honest: the observation still describes the moment it was made.
+      slot: row.slot,
+      // The two column-to-provenance conversions the historical loader in
+      // onchain-supply-candidate-store already performs, applied the same
+      // way so the two readers cannot disagree about what a row means.
+      blockTime: row.blockTime === null ? null : Math.floor(row.blockTime.getTime() / 1000),
+      blockHash: row.blockHash,
+      finality: row.finality === "finalized" ? "finalized" : "confirmed",
+      retrievalMethod: "RPC",
+      providerId: row.providerId,
+      providerMethod: row.providerMethod,
+      requestParams: row.requestParams as Record<string, string | number | boolean>,
+      retrievedAt: row.retrievedAt,
+      rawResponseHash: row.rawResponseHash,
+      artifactHash: row.artifactHash,
+      transactionSignature: row.transactionSignature,
+    },
+  });
+}
+
 // ---- scheduling -------------------------------------------------------
 //
 // ONE STEP OF WORK, WAITING ITS TURN. `depth` is the promotion depth the
@@ -533,6 +684,9 @@ export interface OnchainTraceEvent {
     | "FETCH_OK"
     | "FETCH_FAILED"
     | "CANDIDATE_SKIPPED_BUDGET"
+    // A read this job had already made. Not a fetch, and never recorded as
+    // one — see REUSABLE_INTENT_KINDS.
+    | "CANDIDATE_DEDUPED"
     // A base subject the engine will not address. Reused rather than given
     // a new operation type: the subject came from a locator, and this is
     // the existing name for refusing one.
@@ -555,7 +709,8 @@ export interface OnchainTraceEvent {
     | "PROMOTION_INTENT_CAP_REACHED"
     | "PROMOTION_TERMINAL_OBSERVATION"
     | "PROMOTION_RELATIONSHIP_UNRESOLVED"
-    | "SUBJECT_SHAPE_MISMATCH";
+    | "SUBJECT_SHAPE_MISMATCH"
+    | "ARTIFACT_ALREADY_OBSERVED_IN_JOB";
 }
 
 export async function runStructuredOnchainAcquisition(
@@ -652,35 +807,60 @@ export async function runStructuredOnchainAcquisition(
       continue;
     }
 
-    // Reservation BEFORE the call, always.
-    const reserved = await reserve("sourceOpens", 1, deps.maxSourceOpens);
-    if (!reserved) {
+    // REUSE IS ASKED BEFORE THE RESERVATION, WHICH IS WHAT MAKES IT FREE.
+    //
+    // `visited` already stops one attempt re-reading its own subject. This
+    // is the case it cannot see: a LATER component, in a fresh call, asking
+    // the same deterministic question the job has already answered. Asking
+    // here means a reused observation costs no budget, issues no call, and
+    // cannot be refused by an exhausted ledger.
+    //
+    // It is a CONSUMPTION, not a fetch. The artifact keeps its original id,
+    // slot, provider and content; the only thing that changes is which
+    // component's facts are synthesized from it below — through exactly the
+    // same persistence path a fresh read uses, which resolves to the
+    // existing artifact row rather than writing a second observation.
+    let artifact: OnchainArtifact;
+    const reused = await findReusableSameJobArtifact(deps.db, deps.jobId, intent);
+    if (reused !== null) {
       await trace({
-        operationType: step.depth === 0 ? "CANDIDATE_SKIPPED_BUDGET" : "SUBJECT_PROMOTION_BUDGET_EXHAUSTED",
+        operationType: "CANDIDATE_DEDUPED",
         targetRef: uri,
         status: "SKIPPED",
-        reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
+        reasonCode: "ARTIFACT_ALREADY_OBSERVED_IN_JOB",
       });
-      observations.push("ONCHAIN_SOURCE_OPEN_BUDGET_EXHAUSTED");
-      break;
-    }
-    sourceOpensSpent += 1;
-    await trace({ operationType: "FETCH_ATTEMPTED", targetRef: uri, status: "OK" });
+      observations.push("ONCHAIN_ARTIFACT_REUSED_IN_JOB");
+      artifact = reused;
+    } else {
+      // Reservation BEFORE the call, always.
+      const reserved = await reserve("sourceOpens", 1, deps.maxSourceOpens);
+      if (!reserved) {
+        await trace({
+          operationType: step.depth === 0 ? "CANDIDATE_SKIPPED_BUDGET" : "SUBJECT_PROMOTION_BUDGET_EXHAUSTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
+        });
+        observations.push("ONCHAIN_SOURCE_OPEN_BUDGET_EXHAUSTED");
+        break;
+      }
+      sourceOpensSpent += 1;
+      await trace({ operationType: "FETCH_ATTEMPTED", targetRef: uri, status: "OK" });
 
-    let artifact: OnchainArtifact;
-    try {
-      artifact = await retriever.retrieve(intent);
-    } catch {
-      // Fail closed: a provider failure is never evidence about the chain,
-      // and never a reason to try the same call again.
-      await trace({
-        operationType: "FETCH_FAILED",
-        targetRef: uri,
-        status: "FAILED",
-        reasonCode: "PROVIDER_ERROR",
-      });
-      observations.push("ONCHAIN_RETRIEVAL_FAILED");
-      continue;
+      try {
+        artifact = await retriever.retrieve(intent);
+      } catch {
+        // Fail closed: a provider failure is never evidence about the chain,
+        // and never a reason to try the same call again.
+        await trace({
+          operationType: "FETCH_FAILED",
+          targetRef: uri,
+          status: "FAILED",
+          reasonCode: "PROVIDER_ERROR",
+        });
+        observations.push("ONCHAIN_RETRIEVAL_FAILED");
+        continue;
+      }
     }
 
     const persisted = await persistOnchainArtifactAndFacts({

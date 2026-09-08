@@ -670,16 +670,26 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
     expect(await reservedSourceOpens(jobId)).toBe(SPENT);
     expect(SPENT).toBeLessThanOrEqual(MAX);
 
-    // Beyond what any remaining component is entitled to there is nothing,
-    // and the refusal is a bounded research limitation rather than a claim
-    // about the project.
+    // Beyond what any remaining component is entitled to, THE LEDGER GRANTS
+    // NOTHING — which is what this test is about, and is unchanged.
     const beyond = await runDeterministic(jobId, project.id, { step: 6, component: "DESTINATION" }, {
       locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
+    // Not one unit spent, and the ledger stands exactly where it stood.
     expect(beyond.outcome.sourceOpensSpent).toBe(0);
-    expect(beyond.outcome.evidenceIds).toEqual([]);
-    expect(beyond.traced[0]!.reasonCode).toBe("SOURCE_OPEN_BUDGET_EXHAUSTED");
     expect(await reservedSourceOpens(jobId)).toBe(SPENT);
+    // WHAT DID CHANGE, and it costs the ledger nothing. Every question this
+    // component asks — ACCOUNT_INFO on the documented wallet, then the token
+    // accounts it owns — was already answered by the chain component IN THIS
+    // SAME JOB. So the whole one-hop chain is consumed from observations
+    // already paid for, rather than the component being told there is no
+    // budget left to look at evidence the job already has.
+    expect(beyond.traced.some((t) => t.reasonCode === "ARTIFACT_ALREADY_OBSERVED_IN_JOB")).toBe(
+      true,
+    );
+    // AND NOTHING WAS FETCHED. No attempt row exists, because no provider
+    // was contacted — reuse is a consumption, never a disguised read.
+    expect(beyond.traced.some((t) => t.operationType === "FETCH_ATTEMPTED")).toBe(false);
   }, 180_000);
 });
 

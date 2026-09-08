@@ -1,0 +1,14 @@
+-- A READ SATISFIED BY AN OBSERVATION THIS JOB ALREADY MADE.
+--
+-- Different components legitimately ask the same deterministic question of
+-- the same subject in one job — "what kind of account is this", "which token
+-- accounts does it own for our mint". Each such repeat used to spend a
+-- protected source open and issue a real RPC read that returned, in the live
+-- run that motivated this, byte-identical decoded content every time.
+--
+-- Reuse consumes the EXISTING artifact instead: same artifact id, same slot,
+-- same provider provenance, same decoded content. Nothing about it is a new
+-- observation, so it must not be recorded as one. FETCH_OK would claim a
+-- provider was contacted; DUPLICATE_URL names a web address rather than a
+-- canonical on-chain observation. This code says what actually happened.
+ALTER TYPE "public"."trace_reason_code" ADD VALUE IF NOT EXISTS 'ARTIFACT_ALREADY_OBSERVED_IN_JOB';

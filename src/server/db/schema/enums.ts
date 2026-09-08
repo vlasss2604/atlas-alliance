@@ -435,6 +435,14 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   // false twice over. This is knowable before any call, costs nothing, and
   // names the engine's own mistake as the engine's.
   "SUBJECT_SHAPE_MISMATCH",
+  // A deterministic observation this SAME job already made satisfied the
+  // read, so no provider call was issued and no source open was spent.
+  // Deliberately NOT DUPLICATE_URL: that code means "a search returned a
+  // web address this job already handled", and reusing it for a canonical
+  // on-chain observation would name the wrong kind of thing. Deliberately
+  // NOT any FETCH_* code either — nothing was fetched, and saying so would
+  // be the "pretend another provider read happened" this exists to avoid.
+  "ARTIFACT_ALREADY_OBSERVED_IN_JOB",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,
