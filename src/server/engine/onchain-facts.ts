@@ -290,6 +290,129 @@ export function applicableFactKindsForComponent(component: string): readonly Onc
   return out;
 }
 
+// ---- ONE FACT, THE COMPONENTS IT MAY ESTABLISH ------------------------
+//
+// A SECOND AND DELIBERATELY SEPARATE AXIS FROM THE MAP ABOVE. That map
+// answers "may this row be READ here?"; this one answers "may a row of
+// this KIND carry this component?". They are different questions with
+// different defaults, and fusing them would be a severe regression: the
+// visibility map declares exactly one pair (BURN -> NET_EFFECT), so using
+// it as an establishment gate would stop every other kind from
+// establishing anything anywhere. They must never share a table.
+//
+// WHY IT EXISTS. Establishment was decided entirely from row PROVENANCE
+// QUALITY — class, officiality, entity binding, relationship, directness,
+// freshness — and never from TOPICAL FITNESS: whether this sort of
+// observation can answer this component's question at all. The reconciler
+// already learned that lesson once, for one component, in B1: a holding, a
+// transfer, an exchange or a supply level each satisfied NET_EFFECT with
+// "nothing whatever checking that the row was ABOUT a supply reduction".
+// The rule was right and was never generalised, so `ACCOUNT_INFO` — a row
+// whose own doesNotProve says role and control "are economic labels, not
+// chain facts" — established DESTINATION and RECIPIENT.
+//
+// TOTAL, NOT PARTIAL. Every kind is listed explicitly, empty array
+// included, so a new fact kind fails to compile until someone decides what
+// it may carry. Absence is never a silent grant. (The visibility map above
+// is Partial on purpose: there, absence already means "no crossing".)
+//
+// EVERY ENTRY IS ITS KIND'S OWN doesNotProve, READ AS A RULE. Nothing here
+// is inferred and nothing is lexical — the sentences were authored by hand
+// beside the Pattern's evidenceGoal data, and this table only makes them
+// enforceable.
+// Spelled as a name rather than a bare literal: "this observation carries
+// no component" is a DECISION about the kind, and it should read as one.
+const ESTABLISHES_NOTHING: readonly string[] = [];
+
+const ESTABLISHING_COMPONENTS_BY_KIND: Record<OnchainFactKind, readonly string[]> = {
+  // A level at a slot: the quantity that exists now. It is current state,
+  // and it is never a change — NET_EFFECT's own reducer owns that.
+  TOKEN_SUPPLY: ["CURRENT_STATE"],
+  // Existence and owner program, and nothing else. "It does not establish
+  // who controls the account, what role it plays in any mechanism, or
+  // whether it is a treasury, a vault, a burn address or an ordinary
+  // holder." It starts promotion chains; it carries no component.
+  ACCOUNT_INFO: ESTABLISHES_NOTHING,
+  // The account IS this project's token account. That is ENTITY BINDING,
+  // which the reconciler already checks on its own axis — it is not a role.
+  ACCOUNT_TOKEN_RELATION: ESTABLISHES_NOTHING,
+  // A token account for someone else's mint. It says nothing about this
+  // project at all.
+  ACCOUNT_TOKEN_RELATION_FOREIGN: ESTABLISHES_NOTHING,
+  // A position at a moment. WHERE the tokens are is what DESTINATION asks,
+  // so a holding answers it; WHO economically receives or controls them is
+  // what RECIPIENT asks, and a balance cannot say. That split is the whole
+  // distinction between the two components.
+  TOKEN_ACCOUNT_BALANCE: ["CURRENT_STATE", "DESTINATION"],
+  TOKEN_ACCOUNTS_BY_OWNER: ["CURRENT_STATE", "DESTINATION"],
+  // A list of transactions touching an address: discovery, not a finding.
+  SIGNATURES_FOR_ADDRESS: ESTABLISHES_NOTHING,
+  // One transaction's content. "It does not establish the economic purpose
+  // of the transaction... or that it belongs to any particular mechanism."
+  // A transaction ran; the CLAIMED mechanism running is a different claim.
+  TRANSACTION_DETAIL: ESTABLISHES_NOTHING,
+  // A movement, which is what a flow path is made of — and never a
+  // purchase, a receipt or a destruction. RECIPIENT is refused on both:
+  // tokens arriving at an address does not make that address the economic
+  // recipient, which is the DESTINATION/RECIPIENT split itself.
+  NATIVE_TRANSFER: ["FLOW_PATH"],
+  // SOURCE_OF_VALUE is included because D-158 requires it. That obligation
+  // asks for machine-owned CAUSAL provenance behind documentary support,
+  // and it binds only to rows the reducer already accepted as ESTABLISHING
+  // — so an attributed transfer of external value into the project is
+  // exactly the row that carries it. Refusing it here would leave
+  // MECHANICAL_PROVENANCE_NOT_ESTABLISHED permanently unclearable.
+  TOKEN_TRANSFER: ["SOURCE_OF_VALUE", "FLOW_PATH"],
+  // The one observation that destroys tokens: it establishes that the burn
+  // executed. NET_EFFECT is deliberately NOT listed — that component is
+  // exempt from this gate and its B1/B2 reducer is the sole authority on
+  // what a burn means for supply. COUPLING, STATED: if that exemption is
+  // ever removed, BURN and TOTAL_SUPPLY_DELTA must be granted NET_EFFECT
+  // here first, or `evaluateNetSupplyEffect` loses the rows it reads.
+  BURN: ["EXECUTION_EVIDENCE"],
+  // Two movements in one transaction. "Two unrelated transfers batched into
+  // one transaction produce exactly this picture."
+  RECIPROCAL_ASSET_FLOW: ESTABLISHES_NOTHING,
+  // It establishes that an exchange executed and what was given and
+  // received. It does NOT establish that the exchange was the project's
+  // buyback, and mechanism attribution is separate admitted evidence.
+  DECODED_EXCHANGE: ESTABLISHES_NOTHING,
+  // The arithmetic net of an interval, read only by NET_EFFECT's own exempt
+  // reducer. It independently establishes nothing, here or anywhere.
+  TOTAL_SUPPLY_DELTA: ESTABLISHES_NOTHING,
+};
+
+// May a row of this KIND establish `component`?
+//
+// NULL KIND IS TRUE, AND THE ASYMMETRY IS THE POINT. This is a restriction
+// that only makes sense for deterministic chain observations, so it does
+// not apply to anything else: documentary, data-provider and
+// model-extracted rows have no typed kind and are returned unchanged, which
+// is why no existing documentary behaviour moves. `onchainFactAppliesToComponent`
+// is the opposite (null => false) because a missing kind there means "no
+// permission to cross", and absence of permission is the safe default for
+// visibility. Absence of a RESTRICTION is the safe default here.
+//
+// Unlike visibility, this applies to a row's OWN component too — that is
+// exactly the case the visibility map deliberately short-circuits, and
+// exactly where the overclaim lived.
+export function onchainFactCanEstablishComponent(
+  kind: string | null | undefined,
+  component: string,
+): boolean {
+  if (kind === null || kind === undefined) return true;
+  const establishing = ESTABLISHING_COMPONENTS_BY_KIND[kind as OnchainFactKind];
+  // An unknown string is not a known kind. It cannot establish anything.
+  if (establishing === undefined) return false;
+  return establishing.includes(component);
+}
+
+// Exposed for tests, so the map itself can be asserted rather than only its
+// consequences — and so its totality can be checked against ONCHAIN_FACT_KINDS.
+export function establishableComponentsForFactKind(kind: OnchainFactKind): readonly string[] {
+  return ESTABLISHING_COMPONENTS_BY_KIND[kind];
+}
+
 // A deterministic fact plus the kind it was synthesized as. Separate from
 // ExtractedFact so the model's shape is untouched and cannot carry a kind.
 export type SynthesizedFact = ExtractedFact & {

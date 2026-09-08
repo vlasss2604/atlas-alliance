@@ -528,7 +528,24 @@ export const PATTERN_V1_CONTENT: PatternContent = {
         "determine what happened to the relevant tokens or assets after the mechanism executed, and whether circulating supply, total supply, holder ownership or another economically relevant state actually changed as a result",
     },
     DURABILITY_BASIS: {
-      establishingClasses: ["GOVERNANCE", "OFFICIAL_DOCS"],
+      // V1, CONSERVATIVE AND MODEL-FREE. This component asks whether the
+      // mechanism is "permanent, time-limited, discretionary or revocable -
+      // and what could change or end it". A product docs page describing the
+      // CURRENT arrangement is admissible prose about a different question:
+      // in the live Raydium run all three establishing rows were
+      // OFFICIAL_DOCS, each one's own doesNotProve said in terms that it did
+      // not establish whether the arrangement was "permanent, time-limited,
+      // discretionary, revocable, or subject to governance changes", and the
+      // component was nonetheless SUPPORTED with no reason codes.
+      //
+      // Durability is a GOVERNANCE question, so only a governance source may
+      // answer it. This deliberately prefers a safe false negative — a docs
+      // page that DOES state an immutability or a revocation condition is now
+      // excluded too — over the false positive of asserting durability from a
+      // document that never spoke to it. Typing the distinction on the
+      // evidence row instead would need a new enum column and a migration;
+      // that is a separate decision and is not taken here.
+      establishingClasses: ["GOVERNANCE"],
       requiresCurrentState: false,
       requiresLiveMechanismState: false,
       freshnessClass: "LOW_CHANGE",

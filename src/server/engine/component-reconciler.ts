@@ -1,4 +1,8 @@
-import { onchainFactAppliesToComponent, type OnchainFactKind } from "./onchain-facts";
+import {
+  onchainFactAppliesToComponent,
+  onchainFactCanEstablishComponent,
+  type OnchainFactKind,
+} from "./onchain-facts";
 import { evaluateNetSupplyEffect, type NetSupplyEffect } from "./net-supply-effect";
 import type { ConfirmedProjectIdentity } from "../domain/project-identity";
 import type { EvidenceProvenanceMetadata } from "./onchain-invocation-provenance";
@@ -51,7 +55,14 @@ export type ExclusionReason =
   // sourceClass is untouched (it is still genuinely ONCHAIN_VERIFIABLE
   // data) — it simply cannot establish THIS project's component. Every
   // other class is unaffected; this axis is null (inapplicable) for them.
-  | "ENTITY_NOT_CONFIRMED";
+  | "ENTITY_NOT_CONFIRMED"
+  // The row's KIND cannot carry this component. Same shape as
+  // ENTITY_NOT_CONFIRMED one line above, on a different axis: the row's
+  // sourceClass is untouched (it is still genuinely ONCHAIN_VERIFIABLE
+  // data, and still true) — an observation of what an account IS simply
+  // cannot establish what it DOES. Null-kind rows never carry this reason,
+  // so no documentary evidence is affected.
+  | "FACT_KIND_CANNOT_ESTABLISH";
 
 // §10 — closed.
 export type ResultReasonCode =
@@ -171,6 +182,25 @@ export interface EvidenceRow {
 // is a Pattern-semantics decision, not an implementation liberty.
 export function requiresSupplyEffectQualification(component: string): boolean {
   return component === "NET_EFFECT";
+}
+
+// A COMPONENT THAT ALREADY OWNS A DEDICATED TYPED ESTABLISHMENT RULE IS NOT
+// SUBJECT TO THE GENERIC ONE.
+//
+// NET_EFFECT is the only such component, and its B1/B2 path is a genuinely
+// different mechanism, not a stricter version of the same one: it KEEPS a
+// non-qualifying row as supporting evidence and expresses the failure as a
+// reason code, so a holding, a transfer, an exchange or a supply level stay
+// visible as support and are capped below SUPPORTED. The generic gate
+// EXCLUDES instead. Applying both would silently rewrite approved NET_EFFECT
+// verdicts — and would blind `evaluateNetSupplyEffect`, which reads BURN and
+// TOTAL_SUPPLY_DELTA out of the establishing set it would have emptied.
+//
+// Stated as its own named predicate rather than an inline
+// `component === "NET_EFFECT"` so the REASON for the exemption is the thing
+// a reader finds, and so a second such component has one place to be added.
+export function componentOwnsTypedEstablishmentQualification(component: string): boolean {
+  return requiresSupplyEffectQualification(component);
 }
 
 // §11.1 — Pattern/CORE data (D-095), never invented in this file.
@@ -686,6 +716,39 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     const v = verdictByRowId.get(row.id)!;
     if (!v.eligibleCore) {
       excluded.set(row.id, v.exclusionReason!);
+      continue;
+    }
+    // TOPICAL FITNESS — the axis every other gate here is missing. The rest
+    // of this file asks whether a row is GOOD ENOUGH (class, officiality,
+    // entity binding, directness, freshness); none of it asks whether an
+    // observation of this KIND can answer this component's question at all.
+    // That is how `ACCOUNT_INFO` — "the account exists and program X owns
+    // it" — established DESTINATION and RECIPIENT after passing every
+    // quality gate cleanly.
+    //
+    // ASKED OF A ROW'S OWN COMPONENT TOO. The visibility check in Step 2
+    // deliberately short-circuits on `ownComponent`, because a row filed
+    // HERE may plainly be READ here; that says nothing about whether its
+    // kind can CARRY the component, and the overclaim lived in that gap.
+    //
+    // SUPPORTS ONLY, AND DELIBERATELY LATE. This removes a row from
+    // ESTABLISHMENT, never from the record: it runs here rather than in the
+    // hard-exclusion pass so the row still reaches `survivingAfterHard` and
+    // therefore the structural-obligation pool, where a CONTEXT-labelled
+    // chain observation carrying provenance does real work (D-158). CONTEXT,
+    // LIMITS and CONTRADICTS rows keep their existing paths untouched.
+    //
+    // TYPED, NEVER LEXICAL: `onchainFactKind` is written only by
+    // deterministic chain synthesis, so this rests on what the observation
+    // IS. `does_not_prove` is not read here or anywhere in this file. And a
+    // null kind is unrestricted, so documentary, data-provider and
+    // model-extracted rows behave exactly as before.
+    if (
+      row.relationship === "SUPPORTS" &&
+      !componentOwnsTypedEstablishmentQualification(item.component) &&
+      !onchainFactCanEstablishComponent(row.onchainFactKind, item.component)
+    ) {
+      excluded.set(row.id, "FACT_KIND_CANNOT_ESTABLISH");
       continue;
     }
     if (row.relationship === "SUPPORTS" || row.relationship === "CONTRADICTS") {
