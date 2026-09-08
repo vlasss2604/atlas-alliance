@@ -1778,6 +1778,25 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 break;
               }
               spent.sourceOpens += 1;
+              // ONE RESERVATION, ONE ATTEMPT ROW. This is a real request to
+              // the origin with a different Accept, and it spends a source
+              // open — so it is an ATTEMPT, and the trace has to say so
+              // before the call rather than only reporting how it ended.
+              // Without this row the reservation is invisible and documentary
+              // spend cannot be reconstructed from the attempt stream. The
+              // strategy is carried in providerName, the same identity the
+              // outcome row below already uses.
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "FETCH_ATTEMPTED",
+                providerKind: "FETCH",
+                providerName: "content-negotiation",
+                patternStep: item.step,
+                component: item.component,
+                targetRef: url,
+                status: "OK",
+              });
               const negotiated = await callProvider("CONTENT_FETCHER", () =>
                 contentFetcher.fetch(url, {
                   ...(recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : {}),
@@ -1836,6 +1855,21 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               break;
             }
             spent.sourceOpens += 1;
+            // A render is a browser navigation to the origin. It reserved,
+            // so it attempts — and it used to emit no trace row at all, which
+            // is how the one open that produced the only usable document in a
+            // live run became invisible.
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "FETCH_ATTEMPTED",
+              providerKind: "FETCH",
+              providerName: "isolated-render",
+              patternStep: item.step,
+              component: item.component,
+              targetRef: url,
+              status: "OK",
+            });
             try {
               const rendered = await resolveRenderedDocsFetcher().render(url, {
                 confirmedHost: renderGate.confirmedHost,
@@ -1893,6 +1927,19 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             );
             if (refusalReserved) {
               spent.sourceOpens += 1;
+              // Same rule as the two above: reserved, so it attempts, so the
+              // trace says so before the navigation.
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "FETCH_ATTEMPTED",
+                providerKind: "FETCH",
+                providerName: "isolated-render",
+                patternStep: item.step,
+                component: item.component,
+                targetRef: url,
+                status: "OK",
+              });
               try {
                 const rendered = await resolveRenderedDocsFetcher().render(url, {
                   confirmedHost: refusal.confirmedHost,
@@ -1956,6 +2003,21 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           );
           if (renderReserved) {
             spent.sourceOpens += 1;
+            // The static fetch already has its own attempt row and keeps the
+            // open it spent; this is a SECOND external action with a second
+            // reservation, so it gets its own row rather than being folded
+            // into the fetch that justified it.
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "FETCH_ATTEMPTED",
+              providerKind: "FETCH",
+              providerName: "isolated-render",
+              patternStep: item.step,
+              component: item.component,
+              targetRef: acquiredDoc.finalUrl,
+              status: "OK",
+            });
             try {
               const rendered = await resolveRenderedDocsFetcher().render(acquiredDoc.finalUrl, {
                 confirmedHost: eligibility.confirmedHost,
