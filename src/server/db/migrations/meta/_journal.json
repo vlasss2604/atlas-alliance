@@ -323,6 +323,13 @@
       "when": 1788462000000,
       "tag": "0045_total_supply_delta_provenance",
       "breakpoints": true
+    },
+    {
+      "idx": 46,
+      "version": "7",
+      "when": 1788548400000,
+      "tag": "0046_documented_transaction_subject",
+      "breakpoints": true
     }
   ]
 }

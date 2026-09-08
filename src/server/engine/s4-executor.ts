@@ -990,8 +990,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           attemptId,
           item,
           plan,
+          // The validator's shape travels with the value. Dropping it here
+          // is what made a documented transaction signature an ACCOUNT_INFO
+          // subject that spent a protected source open and failed.
           locators: admittedLocators.map((l) => ({
-            address: l.value,
+            value: l.value,
+            shape: l.shape,
             origin: "ADMITTED_EVIDENCE_SOURCE" as const,
           })),
           maxSourceOpens: deterministicCeilingForComponent(deterministicReserve, item.component),

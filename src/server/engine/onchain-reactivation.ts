@@ -139,7 +139,10 @@ export async function runOnchainReactivationPass(
   // admittedLocatorsForJob; this pass cannot widen it and never asks for a
   // locator from anywhere else.
   const locators: MechanismLocator[] = (await admittedLocatorsForJob(db, input.jobId)).map(
-    (l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const }),
+    // Shape carried, not discarded — same reason as the fetch-phase call
+    // site: an admitted locator may be a signature, and a signature is not
+    // an address.
+    (l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const }),
   );
 
   for (const item of input.workQueue) {

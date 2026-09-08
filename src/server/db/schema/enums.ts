@@ -427,6 +427,14 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   // mint, so it stopped. "Nothing to promote" and "could not tell" are
   // different findings and must not share a name at readback.
   "PROMOTION_RELATIONSHIP_UNRESOLVED",
+  // The subject's identifier shape contradicts the intent addressed to it —
+  // a signature where an account read was to be issued, or an address where
+  // a transaction read was. Distinct from PROVIDER_ERROR ON PURPOSE: the
+  // provider validates the same thing and throws, but that arrives AFTER a
+  // source open has been spent and reads as "the provider failed", which is
+  // false twice over. This is knowable before any call, costs nothing, and
+  // names the engine's own mistake as the engine's.
+  "SUBJECT_SHAPE_MISMATCH",
 ]);
 
 // The three existing authoritative budget axes (research_jobs.*Reserved,

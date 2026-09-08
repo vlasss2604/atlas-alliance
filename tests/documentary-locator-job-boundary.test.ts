@@ -405,7 +405,7 @@ function fixtureRetriever() {
 describe("7/12. confirmed project identity is NOT a documentary locator", () => {
   it("7. token-level reads still resolve from the confirmed identity alone", () => {
     // No locator anywhere, and the anchor is still addressable.
-    expect(eligibleSubjects(IDENTITY, [])).toEqual([{ subject: MINT, isAnchor: true }]);
+    expect(eligibleSubjects(IDENTITY, [])).toEqual([{ subject: MINT, kind: "token" }]);
     const intents = selectOnchainIntents({
       component: "NET_EFFECT",
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
@@ -425,7 +425,7 @@ describe("7/12. confirmed project identity is NOT a documentary locator", () => 
 
     const freshJob = await makeJob(projectId);
     const locators = (await admittedLocatorsForJob(ctx.db, freshJob)).map((l) => ({
-      address: l.value,
+      value: l.value, shape: l.shape,
       origin: "ADMITTED_EVIDENCE_SOURCE" as const,
     }));
     expect(locators).toEqual([]);
@@ -472,7 +472,7 @@ describe("7/12. confirmed project identity is NOT a documentary locator", () => 
     const jobId = await makeJob(projectId);
     await admitFact(jobId, ADDRESS, { patternStep: 6, component: "DESTINATION" });
     const locators = (await admittedLocatorsForJob(ctx.db, jobId)).map((l) => ({
-      address: l.value,
+      value: l.value, shape: l.shape,
       origin: "ADMITTED_EVIDENCE_SOURCE" as const,
     }));
     const intents = selectOnchainIntents({

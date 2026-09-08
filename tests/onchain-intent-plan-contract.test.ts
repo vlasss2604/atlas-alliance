@@ -36,7 +36,7 @@ const IDENTITY: ConfirmedProjectIdentity = {
 // A locator-derived account subject, so account-kind intents are reachable.
 const ACCOUNT_LOCATOR = [
   {
-    address: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM",
+    value: "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM", shape: "ADDRESS_LIKE" as const,
     origin: "ADMITTED_EVIDENCE_SOURCE" as const,
   },
 ];

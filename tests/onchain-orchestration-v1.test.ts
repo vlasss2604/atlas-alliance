@@ -3,6 +3,8 @@ import { and, eq } from "drizzle-orm";
 
 import {
   evidence,
+  evidenceOfficiality,
+  evidenceSourceClass,
   onchainArtifacts,
   onchainDerivedSubjects,
   onchainObservedSignatures,
@@ -18,6 +20,8 @@ import {
   selectOnchainIntents,
 } from "../src/server/engine/onchain-acquisition";
 import { buildCanonicalOnchainUri } from "../src/server/engine/onchain-uri";
+import { recordTraceEvent } from "../src/server/engine/trace-store";
+import { resolveOnchainSubject } from "../src/server/engine/onchain-subject-provenance";
 import { MAX_PROMOTED_INTENTS_PER_ATTEMPT } from "../src/server/engine/onchain-subject-promotion";
 import type { ConfirmedProjectIdentity } from "../src/server/domain/project-identity";
 import { brandOnchainArtifact } from "../src/server/engine/providers/onchain-types";
@@ -83,7 +87,17 @@ async function makeJob(): Promise<string> {
 
 // An admitted documentary fact naming an account — the ONLY thing the test
 // puts in front of acquisition. Everything after this must be discovered.
-async function admitLocator(jobId: string, address: string): Promise<string> {
+async function admitLocator(
+  jobId: string,
+  address: string,
+  // Defaults reproduce the original helper exactly, so every caller written
+  // before these options behaves identically.
+  opts: {
+    shape?: "ADDRESS_LIKE" | "SIGNATURE_LIKE";
+    sourceClass?: (typeof evidenceSourceClass.enumValues)[number];
+    officiality?: (typeof evidenceOfficiality.enumValues)[number];
+  } = {},
+): Promise<string> {
   const [source] = await ctx.db
     .insert(sources)
     .values({
@@ -110,11 +124,13 @@ async function admitLocator(jobId: string, address: string): Promise<string> {
       patternStep: 3,
       component: "MECHANISM_SPEC",
       directness: "DIRECT",
-      sourceClass: "OFFICIAL_DOCS",
-      officiality: "CONFIRMED",
+      sourceClass: opts.sourceClass ?? "OFFICIAL_DOCS",
+      officiality: opts.officiality ?? "CONFIRMED",
     })
     .returning();
-  await persistFactLocators(ctx.db, row.id, [{ value: address, shape: "ADDRESS_LIKE" }]);
+  await persistFactLocators(ctx.db, row.id, [
+    { value: address, shape: opts.shape ?? "ADDRESS_LIKE" },
+  ]);
   return row.id;
 }
 
@@ -265,7 +281,7 @@ async function runExecution(
     attemptId: null,
     item: { step: 4, component: overrides.component ?? "EXECUTION_EVIDENCE" },
     plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
-    locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+    locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
     maxSourceOpens: overrides.maxSourceOpens ?? 24,
     retriever: fixture.retriever,
     reserve: async () => true,
@@ -431,7 +447,7 @@ describe("orchestration — terminal variants", () => {
       attemptId: null,
       item: { step: 4, component: "EXECUTION_EVIDENCE" },
       plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
-      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
       maxSourceOpens: 24,
       retriever: fixture.retriever,
       // One reservation, then the ceiling.
@@ -539,7 +555,7 @@ describe("orchestration — the bounds cannot be walked around", () => {
       attemptId: null,
       item: { step: 4, component: "EXECUTION_EVIDENCE" },
       plan: { establishingClasses: ["OFFICIAL_DOCS"], confirmedIdentity: identity },
-      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
       maxSourceOpens: 24,
       retriever: fixture.retriever,
       reserve: async () => true,
@@ -561,7 +577,7 @@ describe("orchestration — trace rows are real and safe", () => {
       attemptId: null,
       item: { step: 4, component: "EXECUTION_EVIDENCE" },
       plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
-      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
       maxSourceOpens: 24,
       retriever: fixture.retriever,
       reserve: async () => true,
@@ -627,7 +643,7 @@ describe("trace fidelity — unresolved relationship is durably distinguishable"
       // decision is the one under test.
       item: { step: 6, component: "DESTINATION" },
       plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
-      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
       maxSourceOpens: 24,
       retriever: {
         name: "fixture",
@@ -742,7 +758,7 @@ describe("trace fidelity — unresolved relationship is durably distinguishable"
       attemptId: null,
       item: { step: 6, component: "DESTINATION" },
       plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
-      locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+      locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
       maxSourceOpens: 24,
       retriever: {
         name: "fixture",
@@ -803,7 +819,7 @@ describe("acquisition — owner discovery is gated by ACCOUNT_INFO", () => {
       item: { step: 6, component },
       plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
       locators: locators.map((l) => ({
-        address: l.value,
+        value: l.value, shape: l.shape,
         origin: "ADMITTED_EVIDENCE_SOURCE" as const,
       })),
       maxSourceOpens: 24,
@@ -964,7 +980,7 @@ describe("acquisition — owner discovery is gated by ACCOUNT_INFO", () => {
         component: "DESTINATION",
         establishingClasses: ["ONCHAIN_VERIFIABLE"],
         identity,
-        locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+        locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
         maxIntents: 8,
       }).map((i) => i.kind),
     ).not.toContain("TOKEN_ACCOUNTS_BY_OWNER");
@@ -1052,7 +1068,7 @@ describe("FLOW_PATH — relationship-gated history access", () => {
           component,
           establishingClasses: ["ONCHAIN_VERIFIABLE"],
           identity,
-          locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+          locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
           maxIntents: 8,
         }).map((i) => i.kind),
         component,
@@ -1186,4 +1202,274 @@ describe("orchestration — two admitted locators still reach a transaction", ()
     expect(traced.some((t) => t.reasonCode === "PROMOTION_TERMINAL_OBSERVATION")).toBe(true);
   });
 });
+});
+
+// A DOCUMENTED TRANSACTION IS A SUBJECT, AND STILL ONLY A SUBJECT.
+//
+// THE DEFECT. `documentary-locator.ts` has always classified a locator as
+// ADDRESS_LIKE or SIGNATURE_LIKE, the extractor has always been told to
+// propose "one concrete on-chain address, account, program or transaction
+// signature", and the locator table has always stored which. Both hand-offs
+// to the executor then dropped `shape` and copied the value into a field
+// called `address`. A documented signature therefore became an ACCOUNT_INFO
+// subject, won a protected source-open reservation, and was refused by the
+// Solana adapter's own pre-call validation — recorded as PROVIDER_ERROR,
+// though no provider was reached and none had failed.
+//
+// WHAT IS PROVED HERE. That an admitted SIGNATURE_LIKE locator reaches
+// getTransaction through the REAL executor and the REAL locator table, that
+// it costs one read and not two, and — the half that matters more — that
+// the document supplies only the SUBJECT. Every burn assertion below is an
+// assertion about the DECODED TRANSACTION, and the refusal cases prove the
+// document alone yields nothing at all.
+//
+// No project, mint or transaction is named: every identifier is a fixture
+// literal built from the constants this file already declares.
+describe("orchestration — an admitted documentary signature is a readable subject", () => {
+  const DOC_SIG = "Sig3333333333333333333333333333333333333333333333333333333333333333";
+
+  async function signatureJob(
+    opts: Parameters<typeof admitLocator>[2] = {},
+  ): Promise<string> {
+    const jobId = await makeJob();
+    await admitLocator(jobId, DOC_SIG, { shape: "SIGNATURE_LIKE", ...opts });
+    return jobId;
+  }
+
+  it("1. an admitted SIGNATURE_LIKE locator becomes a DIRECT TRANSACTION_DETAIL read", async () => {
+    const jobId = await signatureJob();
+    // The premise: the locator survived admission carrying its shape.
+    const admitted = await admittedLocatorsForJob(ctx.db, jobId);
+    expect(admitted).toHaveLength(1);
+    expect(admitted[0]!.shape).toBe("SIGNATURE_LIKE");
+
+    const { asked } = await runExecution(jobId);
+    expect(asked.map((i) => i.kind)).toEqual(["TRANSACTION_DETAIL"]);
+    expect(asked[0]!.subject).toBe(DOC_SIG);
+    expect(asked[0]!.subjectKind).toBe("tx");
+    // Reached as a BASE intent: nothing was promoted to get here.
+    expect(asked.some((i) => i.kind === "SIGNATURES_FOR_ADDRESS")).toBe(false);
+  });
+
+  it("2. it never becomes ACCOUNT_INFO, and spends no ACCOUNT_INFO open", async () => {
+    const jobId = await signatureJob();
+    const { asked, outcome, traced } = await runExecution(jobId);
+    expect(asked.some((i) => i.kind === "ACCOUNT_INFO")).toBe(false);
+    expect(asked.some((i) => i.subjectKind === "account")).toBe(false);
+    // One read, not the wasted classification plus the real one.
+    expect(outcome.sourceOpensSpent).toBe(1);
+    // And the old symptom is gone: no provider was blamed for the engine.
+    expect(traced.some((t) => t.reasonCode === "PROVIDER_ERROR")).toBe(false);
+  });
+
+  it("6/7. the DOCUMENT alone materializes no BURN — only the decoded transaction does", async () => {
+    // Same admitted signature, twice. The ONLY difference is what the
+    // transaction contains, which is the whole claim: the documentary row is
+    // identical in both runs and decides nothing.
+    const withBurn = await signatureJob();
+    await runExecution(withBurn);
+    const burnedRows = await ctx.db
+      .select({ id: evidence.id })
+      .from(evidence)
+      .where(and(eq(evidence.researchJobId, withBurn), eq(evidence.onchainFactKind, "BURN")));
+    expect(burnedRows.length).toBeGreaterThan(0);
+
+    const noBurn = await signatureJob();
+    await runExecution(noBurn, { burns: [] });
+    const emptyRows = await ctx.db
+      .select({ id: evidence.id })
+      .from(evidence)
+      .where(and(eq(evidence.researchJobId, noBurn), eq(evidence.onchainFactKind, "BURN")));
+    expect(emptyRows).toHaveLength(0);
+  });
+
+  it("7. no fetched transaction, no BURN — a refused provider yields nothing", async () => {
+    const jobId = await signatureJob();
+    const { outcome } = await runExecution(jobId, { failOn: "TRANSACTION_DETAIL" });
+    expect(outcome.evidenceIds).toHaveLength(0);
+    const rows = await ctx.db
+      .select({ id: evidence.id })
+      .from(evidence)
+      .where(and(eq(evidence.researchJobId, jobId), eq(evidence.onchainFactKind, "BURN")));
+    expect(rows).toHaveLength(0);
+  });
+
+  it("8. foreign-mint safety is untouched by the route the signature arrived on", async () => {
+    const jobId = await signatureJob();
+    await runExecution(jobId, {
+      burns: [{ ...BURN, mint: "Other1111111111111111111111111111111111111" }],
+    });
+    // The canonical foreign-mint behaviour, unchanged: the observation is
+    // still RECORDED — a burn of another token really did happen — and it is
+    // still not SUPPORTING, so it establishes nothing about this project.
+    // A documentary signature confers nothing that alters either half.
+    const rows = await ctx.db
+      .select({ relationship: evidence.relationship })
+      .from(evidence)
+      .where(and(eq(evidence.researchJobId, jobId), eq(evidence.onchainFactKind, "BURN")));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.relationship).not.toBe("SUPPORTS");
+    expect(rows[0]!.relationship).toBe("CONTEXT");
+  });
+
+  it("4. a signature from a NON-ADMISSIBLE source class never becomes a subject", async () => {
+    // SOCIAL never independently establishes anything, so it never hands the
+    // deterministic path a subject either.
+    const jobId = await signatureJob({ sourceClass: "SOCIAL" });
+    expect(await admittedLocatorsForJob(ctx.db, jobId)).toHaveLength(0);
+    const { asked, outcome } = await runExecution(jobId);
+    expect(asked.some((i) => i.subject === DOC_SIG)).toBe(false);
+    expect(outcome.sourceOpensSpent).toBe(0);
+  });
+
+  it("4. a signature whose officiality is only CLAIMED never becomes a subject", async () => {
+    const jobId = await signatureJob({ officiality: "CLAIMED" });
+    expect(await admittedLocatorsForJob(ctx.db, jobId)).toHaveLength(0);
+    const { asked } = await runExecution(jobId);
+    expect(asked.some((i) => i.subject === DOC_SIG)).toBe(false);
+  });
+
+  it("5. a signature with NO admitted documentary grounding is unreachable", async () => {
+    // The model-proposal case: a signature that exists nowhere in this job's
+    // admitted Evidence. Nothing in base selection can invent a tx subject,
+    // so the attempt issues no read at all.
+    const jobId = await makeJob();
+    const { asked, outcome } = await runExecution(jobId);
+    expect(asked.some((i) => i.subjectKind === "tx")).toBe(false);
+    expect(asked.some((i) => i.subject === DOC_SIG)).toBe(false);
+    expect(outcome.sourceOpensSpent).toBe(0);
+  });
+
+  it("5. another job's admitted signature cannot be borrowed", async () => {
+    const theirs = await makeJob();
+    await admitLocator(theirs, DOC_SIG, { shape: "SIGNATURE_LIKE" });
+    const mine = await makeJob();
+    const { asked } = await runExecution(mine);
+    expect(asked.some((i) => i.subject === DOC_SIG)).toBe(false);
+  });
+
+  it("3/9. an address locator still walks the whole promotion chain, unchanged", async () => {
+    const jobId = await makeJob();
+    await admitLocator(jobId, WALLET);
+    const { asked, traced } = await runExecution(jobId);
+    expect(asked.map((i) => i.kind)).toEqual([
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+      "TRANSACTION_DETAIL",
+    ]);
+    // The observed-signature route is intact: the transaction subject is the
+    // signature the WINDOW returned, not anything a document said.
+    expect(asked.find((i) => i.kind === "TRANSACTION_DETAIL")!.subject).toBe(SIG_NEW);
+    expect(traced.some((t) => t.reasonCode === "PROMOTION_TERMINAL_OBSERVATION")).toBe(true);
+    expect(traced.some((t) => t.reasonCode === "SUBJECT_SHAPE_MISMATCH")).toBe(false);
+  });
+
+  it("no NEW provenance class was needed: a documented signature already resolves", async () => {
+    // THIS PINS THE MIGRATION DECISION. The obvious way to build this feature
+    // is a new persisted provenance class (ADMITTED_DOCUMENTARY_SIGNATURE)
+    // and the enum migration to carry it. None was added, because none is
+    // needed: `resolveOnchainSubject` resolves ANY admitted locator value,
+    // and `findAdmittedLocator` has never filtered by shape — so a documented
+    // SIGNATURE already has canonical DOCUMENTARY_LOCATOR provenance, with
+    // the same documents and the same authority as a documented address.
+    //
+    // If this ever stops being true, this test fails and the decision gets
+    // re-made deliberately instead of by accident.
+    const jobId = await signatureJob();
+    const out = await resolveOnchainSubject(ctx.db, {
+      subject: DOC_SIG,
+      chain: "solana",
+      network: "mainnet",
+      projectAnchor: MINT,
+    });
+    expect(out.eligible).toBe(true);
+    expect(out.eligible && out.provenance.class).toBe("DOCUMENTARY_LOCATOR");
+    expect(out.eligible && out.provenance.subject).toBe(DOC_SIG);
+    // And it carries the DOCUMENT's authority for a reader to print — never
+    // a claim about what the transaction contains.
+    const documents =
+      out.eligible && out.provenance.class === "DOCUMENTARY_LOCATOR"
+        ? out.provenance.documents
+        : [];
+    expect(documents.length).toBeGreaterThan(0);
+    expect(documents[0]!.sourceClass).toBe("OFFICIAL_DOCS");
+    expect(documents[0]!.officiality).toBe("CONFIRMED");
+    expect(Object.keys(documents[0]!)).not.toContain("burns");
+    expect(jobId).toBeTruthy();
+  });
+
+  it("the shape-mismatch refusal is PERSISTABLE — the migration is what makes it so", async () => {
+    // `research_trace_events.reason_code` is a NOT NULL pgEnum column, so a
+    // new code is unwritable until the type carries it. This is the test that
+    // makes migration 0046 load-bearing rather than decorative: it drives the
+    // guard through the REAL trace store and reads the row back.
+    //
+    // The subject is a locator whose recorded shape CONTRADICTS its value.
+    // Base selection can no longer produce one — this is the future
+    // regression the guard exists to catch, exercised deliberately.
+    const jobId = await makeJob();
+    const fixture = fixtureRetriever();
+    await runStructuredOnchainAcquisition({
+      db: ctx.db,
+      jobId,
+      attemptId: null,
+      item: { step: 4, component: "EXECUTION_EVIDENCE" },
+      plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: identity },
+      locators: [{ value: SIG_NEW, shape: "ADDRESS_LIKE", origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      maxSourceOpens: 24,
+      retriever: fixture.retriever,
+      reserve: async () => true,
+      recordTrace: async (e) =>
+        recordTraceEvent(ctx.db, {
+          researchJobId: jobId,
+          operationType: e.operationType,
+          providerKind: "FETCH",
+          patternStep: 4,
+          component: "EXECUTION_EVIDENCE",
+          targetRef: e.targetRef,
+          status: e.status,
+          reasonCode: e.reasonCode ?? "NONE",
+        }),
+    });
+
+    // The provider was never reached...
+    expect(fixture.asked).toHaveLength(0);
+    // ...and the reason survived a round trip through the enum column.
+    const rows = await ctx.db
+      .select({
+        operationType: researchTraceEvents.operationType,
+        reasonCode: researchTraceEvents.reasonCode,
+      })
+      .from(researchTraceEvents)
+      .where(eq(researchTraceEvents.researchJobId, jobId));
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.reasonCode).toBe("SUBJECT_SHAPE_MISMATCH");
+    expect(rows[0]!.operationType).toBe("LOCATOR_REJECTED");
+  });
+
+  it("both routes coexist: a documented transaction and a documented address", async () => {
+    const jobId = await makeJob();
+    await admitLocator(jobId, DOC_SIG, { shape: "SIGNATURE_LIKE" });
+    await admitLocator(jobId, WALLET);
+    const { asked } = await runExecution(jobId);
+    // The documented transaction is read FIRST — it is terminal, costs one
+    // read, and is reachable no other way — and the address chain still runs
+    // to its own transaction afterwards. THE TWO ROUTES ARE ADDITIVE: the
+    // new one did not displace the promotion chain, and the chain did not
+    // crowd out the documented candidate.
+    expect(asked[0]!.kind).toBe("TRANSACTION_DETAIL");
+    expect(asked[0]!.subject).toBe(DOC_SIG);
+    expect(asked.map((i) => i.kind)).toEqual([
+      "TRANSACTION_DETAIL",
+      "ACCOUNT_INFO",
+      "TOKEN_ACCOUNTS_BY_OWNER",
+      "SIGNATURES_FOR_ADDRESS",
+      "TRANSACTION_DETAIL",
+    ]);
+    // Two transactions, each earning its subject a DIFFERENT way: one stated
+    // by a document, one observed in a signature window.
+    const txSubjects = asked.filter((i) => i.subjectKind === "tx").map((i) => i.subject);
+    expect(txSubjects).toEqual([DOC_SIG, SIG_NEW]);
+  });
 });

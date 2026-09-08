@@ -612,7 +612,7 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
     // it is on-chain work with a real subject.
     await admitLocatorFact(jobId, WALLET);
     const opportunist = await runDeterministic(jobId, project.id, { step: 2, component: "FLOW_PATH" }, {
-      locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
     expect(opportunist.ceiling).toBe(DOCUMENTARY + ANCHOR_COMPONENTS.length);
     expect(opportunist.outcome.sourceOpensSpent).toBe(0);
@@ -621,7 +621,7 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
 
     // --- 2. the full four-step chain runs, end to end ---------------------
     const chain = await runDeterministic(jobId, project.id, CHAIN_COMPONENT, {
-      locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
     expect(chain.ceiling).toBe(24);
     expect(chain.asked.map((i) => i.kind)).toEqual([
@@ -658,7 +658,7 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
     await admitLocatorFact(jobId, WALLET);
     for (const item of [...ANCHOR_COMPONENTS, CHAIN_COMPONENT]) {
       await runDeterministic(jobId, project.id, item, {
-        locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+        locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
       });
       expect(await reservedSourceOpens(jobId)).toBeLessThanOrEqual(MAX);
     }
@@ -674,7 +674,7 @@ describe("1/2/4. the PUMP-shaped worst case, saturated, against the real ledger"
     // and the refusal is a bounded research limitation rather than a claim
     // about the project.
     const beyond = await runDeterministic(jobId, project.id, { step: 6, component: "DESTINATION" }, {
-      locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
     expect(beyond.outcome.sourceOpensSpent).toBe(0);
     expect(beyond.outcome.evidenceIds).toEqual([]);
@@ -699,7 +699,7 @@ describe("7/9. one-shot semantics are untouched", () => {
     // The chain component takes its one opportunity, exactly as acquisition
     // marks it: the trace row written immediately before the real call.
     await runDeterministic(jobId, project.id, CHAIN_COMPONENT, {
-      locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
     });
 
     const after = await resolveOnchainSourceOpenReserve(ctx.db, {
@@ -719,7 +719,7 @@ describe("7/9. one-shot semantics are untouched", () => {
     await admitLocatorFact(jobId, WALLET);
 
     const failed = await runDeterministic(jobId, project.id, CHAIN_COMPONENT, {
-      locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
       fail: true,
     });
     // The unit was reserved BEFORE the call, so the failure still paid.

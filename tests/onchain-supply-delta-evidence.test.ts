@@ -868,7 +868,13 @@ describe("20/22..26. boundaries", () => {
   it("the migration is additive: no rewrite, no delete, no merge", async () => {
     const { readFile, readdir } = await import("node:fs/promises");
     const files = (await readdir("src/server/db/migrations")).filter((f) => f.endsWith(".sql")).sort();
-    expect(files[files.length - 1]).toBe("0045_total_supply_delta_provenance.sql");
+    // THIS MIGRATION STILL EXISTS, UNDER THIS NAME — which is what "no
+    // rewrite, no delete, no merge" actually claims, and what the content
+    // assertions below verify. It used to be pinned as the LAST file, which
+    // asserted something else entirely: that no later migration is ever
+    // added. That made every unrelated future migration fail this test
+    // without saying anything about 0045's own integrity.
+    expect(files).toContain("0045_total_supply_delta_provenance.sql");
     const sqlText = await readFile(
       "src/server/db/migrations/0045_total_supply_delta_provenance.sql",
       "utf-8",

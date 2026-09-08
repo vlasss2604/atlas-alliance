@@ -240,8 +240,9 @@ function baseIntentsFor(component: string, locators: readonly string[]): Onchain
     component,
     establishingClasses: ONCHAIN_CLASSES,
     identity: IDENTITY,
-    locators: locators.map((address) => ({
-      address,
+    locators: locators.map((value) => ({
+      value,
+      shape: "ADDRESS_LIKE" as const,
       origin: "ADMITTED_EVIDENCE_SOURCE" as const,
     })),
     maxIntents: MAX_ONCHAIN_INTENTS_PER_ATTEMPT,

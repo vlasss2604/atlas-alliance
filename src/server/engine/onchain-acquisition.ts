@@ -6,7 +6,13 @@ import type { Database, Transaction } from "../db/client";
 import { evidence, onchainArtifacts, sources } from "../db/schema";
 import type { ConfirmedProjectIdentity } from "../domain/project-identity";
 import type { EvidenceSourceClass } from "./providers/types";
-import type { OnchainArtifact, OnchainIntent, OnchainIntentKind } from "./providers/onchain-types";
+import type {
+  OnchainArtifact,
+  OnchainIntent,
+  OnchainIntentKind,
+  OnchainSubjectKind,
+} from "./providers/onchain-types";
+import { completeIdentifierShape, type LocatorShape } from "./documentary-locator";
 import { isOnchainArtifact } from "./providers/onchain-types";
 import { validateOnchainBinding } from "./onchain-binding";
 import { synthesizeOnchainFacts } from "./onchain-facts";
@@ -17,6 +23,7 @@ import {
 } from "./onchain-subject-provenance";
 import { persistObservedSignatures } from "./onchain-signature-provenance";
 import {
+  DOCUMENTARY_BASE_INTENTS,
   intentForPromotedSubject,
   MAX_PROMOTED_INTENTS_PER_ATTEMPT,
   promoteFromObservation,
@@ -54,22 +61,77 @@ export type MechanismLocatorOrigin =
   | "CONFIRMED_ONCHAIN_ARTIFACT"
   | "ADMITTED_EVIDENCE_SOURCE";
 
+// AN ADMITTED LOCATOR IS AN IDENTIFIER, NOT NECESSARILY AN ADDRESS.
+//
+// `value` was called `address`, and the name was the defect. The validator
+// has always classified a locator as ADDRESS_LIKE or SIGNATURE_LIKE
+// (documentary-locator.ts), the locator table has always stored which, and
+// `admittedLocatorsForJob` has always returned it — but both call sites
+// discarded `shape` and copied the value into a field called `address`.
+// Everything downstream then believed it. A documented transaction
+// signature became an ACCOUNT_INFO subject, won a protected source-open
+// reservation, and was refused by the Solana adapter's own pre-call
+// validation, which the loop could only report as PROVIDER_ERROR.
+//
+// So the shape travels with the value. It is not new information and it is
+// not a new authority: it is the validator's existing verdict, no longer
+// thrown away at the hand-off.
 export interface MechanismLocator {
-  address: string;
+  value: string;
+  shape: LocatorShape;
   origin: MechanismLocatorOrigin;
+}
+
+// WHICH KIND OF SUBJECT AN ADMITTED IDENTIFIER IS.
+//
+// Derived from the validator's shape, never guessed from length here: this
+// module does not re-classify identifiers, it asks what was already decided.
+// Total by construction — LocatorShape has exactly two members, and each
+// maps to exactly one OnchainSubjectKind.
+function subjectKindOfLocator(shape: LocatorShape): OnchainSubjectKind {
+  return shape === "SIGNATURE_LIKE" ? "tx" : "account";
+}
+
+// DOES THIS SUBJECT'S IDENTIFIER SHAPE MATCH THE INTENT ADDRESSED TO IT?
+//
+// Asked from the SAME authority that classified the locator in the first
+// place — `completeIdentifierShape` — rather than from a second copy of the
+// base58 length rules. There are already four such copies in the tree
+// (documentary-locator, document-links, embedded-records, onchain-solana);
+// a fifth written here is one more place for them to drift.
+//
+// FAIL CLOSED. An identifier of no recognised shape matches nothing, so an
+// unrecognisable subject is refused rather than sent to an endpoint to find
+// out. A `token` subject is an address like an `account` one — the anchor is
+// a mint — so the two share a case rather than pretending to differ.
+export function subjectShapeMatchesIntent(intent: OnchainIntent): boolean {
+  const shape = completeIdentifierShape(intent.subject);
+  if (shape === null) return false;
+  return subjectKindOf(intent.kind) === "tx"
+    ? shape === "SIGNATURE_LIKE"
+    : shape === "ADDRESS_LIKE";
 }
 
 // Subjects this job may legitimately address, in priority order: the
 // project's own confirmed identity first, then any locator that earned its
 // place. Deliberately returns ONLY the anchor when no locator exists.
+//
+// EACH SUBJECT NOW CARRIES ITS KIND rather than a boolean. `isAnchor` could
+// only express "the anchor, or not the anchor", which silently made every
+// non-anchor subject an account — true while the only admitted locators
+// were addresses, and false the moment one was a signature. The kind is the
+// same vocabulary the intents themselves use (`subjectKindOf`), so pairing
+// an intent with a subject is one comparison rather than a convention.
 export function eligibleSubjects(
   identity: ConfirmedProjectIdentity,
   locators: readonly MechanismLocator[],
-): { subject: string; isAnchor: boolean }[] {
-  const out = [{ subject: identity.tokenAddress!, isAnchor: true }];
+): { subject: string; kind: OnchainSubjectKind }[] {
+  const out: { subject: string; kind: OnchainSubjectKind }[] = [
+    { subject: identity.tokenAddress!, kind: "token" },
+  ];
   for (const l of locators) {
-    if (l.address && l.address !== identity.tokenAddress) {
-      out.push({ subject: l.address, isAnchor: false });
+    if (l.value && l.value !== identity.tokenAddress) {
+      out.push({ subject: l.value, kind: subjectKindOfLocator(l.shape) });
     }
   }
   return out;
@@ -108,10 +170,31 @@ const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
   // holding has already been observed.
   DESTINATION: ["ACCOUNT_INFO"],
   RECIPIENT: ["ACCOUNT_INFO"],
-  // Whether a mechanism actually RAN. Same start: a signature window is
-  // worth having only on a subject bound to this project, and which
-  // subject that is cannot be known before classification.
-  EXECUTION_EVIDENCE: ["ACCOUNT_INFO"],
+  // Whether a mechanism actually RAN. Two ways in, and the order between
+  // them is deliberate.
+  //
+  // TRANSACTION_DETAIL IS FIRST because it is TERMINAL AND UNREACHABLE ANY
+  // OTHER WAY. A documented transaction costs exactly one read, promotes
+  // nothing, and answers this component's question directly; an account
+  // chain costs its base read plus up to three promoted hops to arrive
+  // somewhere similar, and may arrive somewhere else entirely. With base
+  // intents capped at MAX_ONCHAIN_INTENTS_PER_ATTEMPT, listing the account
+  // chain first would let two documented ADDRESSES consume the whole cap
+  // and leave a documented TRANSACTION unread — the feature would exist and
+  // never fire on precisely the projects that publish most.
+  //
+  // The rule reads POSITION AND SHAPE ONLY — never a result, a memo, an
+  // amount or a mint. It cannot be steered by what a transaction contains,
+  // because nothing has been read when it is applied. And it is inert
+  // without a signature locator: TRANSACTION_DETAIL matches no subject when
+  // every admitted locator is ADDRESS_LIKE, so a job that documents only
+  // addresses behaves exactly as it did before.
+  //
+  // ACCOUNT_INFO still starts every account chain, for the reason it always
+  // did: a signature window is worth having only on a subject bound to this
+  // project, and which subject that is cannot be known before
+  // classification.
+  EXECUTION_EVIDENCE: ["TRANSACTION_DETAIL", "ACCOUNT_INFO"],
   // SOURCE_OF_VALUE IS ABSENT, AND THE ABSENCE IS THE POINT.
   //
   // It mapped to TOKEN_SUPPLY, which is the one intent addressed to the
@@ -270,19 +353,29 @@ export function selectOnchainIntents(input: {
     // reached by promotion is skipped here even if a component map names
     // it, so re-adding one to a base map cannot silently reintroduce a
     // question asked before its prerequisite was established.
-    if (PROMOTION_ONLY_INTENTS.has(kind)) continue;
+    //
+    // The ONE exception is stated as a set rather than as a special case:
+    // a DOCUMENTARY_BASE_INTENT is admitted here, and is then subject to
+    // exactly the same subject-matching rule as every other intent. It
+    // gains no subject of its own — see below.
+    if (PROMOTION_ONLY_INTENTS.has(kind) && !DOCUMENTARY_BASE_INTENTS.has(kind)) continue;
+    const wants = subjectKindOf(kind);
     for (const s of subjects) {
       if (intents.length >= input.maxIntents) return intents;
-      // A token-level read is only meaningful against the anchor itself;
-      // account-level reads only against a locator-derived account.
-      const wantsToken = subjectKindOf(kind) === "token";
-      if (wantsToken !== s.isAnchor) continue;
+      // AN INTENT IS PAIRED WITH A SUBJECT OF ITS OWN KIND, and that single
+      // comparison is what keeps every case honest at once: a token-level
+      // read only against the anchor, an account-level read only against an
+      // ADDRESS_LIKE locator, a transaction read only against a
+      // SIGNATURE_LIKE one. Nothing here can hand getTransaction an address
+      // or getAccountInfo a signature, because no subject of the wrong kind
+      // is ever offered to the intent.
+      if (wants !== s.kind) continue;
       intents.push({
         kind,
         chain: "solana",
         network: "mainnet",
         projectAnchor: input.identity!.tokenAddress!,
-        subjectKind: subjectKindOf(kind),
+        subjectKind: wants,
         subject: s.subject,
       });
     }
@@ -440,6 +533,10 @@ export interface OnchainTraceEvent {
     | "FETCH_OK"
     | "FETCH_FAILED"
     | "CANDIDATE_SKIPPED_BUDGET"
+    // A base subject the engine will not address. Reused rather than given
+    // a new operation type: the subject came from a locator, and this is
+    // the existing name for refusing one.
+    | "LOCATOR_REJECTED"
     // Promotion decisions. An action the engine took, never a claim.
     | "SUBJECT_PROMOTED"
     | "SUBJECT_PROMOTION_REJECTED"
@@ -457,7 +554,8 @@ export interface OnchainTraceEvent {
     | "PROMOTION_BINDING_NOT_CONFIRMED"
     | "PROMOTION_INTENT_CAP_REACHED"
     | "PROMOTION_TERMINAL_OBSERVATION"
-    | "PROMOTION_RELATIONSHIP_UNRESOLVED";
+    | "PROMOTION_RELATIONSHIP_UNRESOLVED"
+    | "SUBJECT_SHAPE_MISMATCH";
 }
 
 export async function runStructuredOnchainAcquisition(
@@ -524,6 +622,35 @@ export async function runStructuredOnchainAcquisition(
     if (visited.has(visitKey)) continue;
     visited.add(visitKey);
     const uri = buildCanonicalOnchainUri(intent);
+
+    // THE SHAPE CHECK COMES BEFORE THE RESERVATION, AND THAT IS THE POINT.
+    //
+    // The Solana adapter already refuses a subject whose shape contradicts
+    // its intent, and refuses it before any request is built — so nothing
+    // unsafe ever reached an endpoint. But it does so by THROWING, which
+    // lands in the catch below, after a source open has been spent, and is
+    // recorded as PROVIDER_ERROR: a protected read consumed for nothing, and
+    // a failure attributed to a provider that was never contacted.
+    //
+    // Both halves are fixed by asking the question one step earlier. The
+    // engine can answer it alone, so it costs no budget and names itself.
+    //
+    // DEFENCE IN DEPTH, NOT THE PRIMARY GUARANTEE. `selectOnchainIntents`
+    // now pairs each intent with a subject of its own kind, and promotion
+    // builds subjects from decoded results, so a mismatch should be
+    // unreachable. This is the assertion that says so out loud, and the one
+    // that will catch a future map or rule that stops being true.
+    if (!subjectShapeMatchesIntent(intent)) {
+      await trace({
+        operationType:
+          step.depth === 0 ? "LOCATOR_REJECTED" : "SUBJECT_PROMOTION_REJECTED",
+        targetRef: uri,
+        status: "SKIPPED",
+        reasonCode: "SUBJECT_SHAPE_MISMATCH",
+      });
+      observations.push("ONCHAIN_SUBJECT_SHAPE_MISMATCH");
+      continue;
+    }
 
     // Reservation BEFORE the call, always.
     const reserved = await reserve("sourceOpens", 1, deps.maxSourceOpens);

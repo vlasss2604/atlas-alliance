@@ -1,0 +1,14 @@
+-- A SUBJECT WHOSE SHAPE CONTRADICTS ITS INTENT IS THE ENGINE'S MISTAKE,
+-- AND IT NOW SAYS SO.
+--
+-- An admitted documentary locator may be an ADDRESS_LIKE or a
+-- SIGNATURE_LIKE identifier, and both were handed to the acquisition path
+-- as "an address". A documented transaction signature therefore became an
+-- ACCOUNT_INFO subject, won a protected source-open reservation, and was
+-- refused by the Solana adapter's own pre-call validation — which the loop
+-- could only report as PROVIDER_ERROR.
+--
+-- That reading was wrong in both halves: no provider was reached, and
+-- nothing about the provider failed. The shape mismatch is knowable before
+-- any call is made, so it gets its own code and costs no budget.
+ALTER TYPE "public"."trace_reason_code" ADD VALUE IF NOT EXISTS 'SUBJECT_SHAPE_MISMATCH';

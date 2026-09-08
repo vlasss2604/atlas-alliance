@@ -595,7 +595,7 @@ describe("intent selection and mechanism locators (AMENDMENT D)", () => {
       component: "EXECUTION_EVIDENCE",
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       identity,
-      locators: [{ address: ACCOUNT, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+      locators: [{ value: ACCOUNT, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
       maxIntents: 2,
     });
     expect(intents.length).toBe(1);
@@ -799,7 +799,8 @@ describe("budget — one bounded operation, one reservation", () => {
       establishingClasses: ["ONCHAIN_VERIFIABLE"],
       identity,
       locators: Array.from({ length: 50 }, (_, i) => ({
-        address: `Acct${String(i).padStart(38, "x")}`,
+        value: `Acct${String(i).padStart(38, "x")}`,
+        shape: "ADDRESS_LIKE" as const,
         origin: "ADMITTED_EVIDENCE_SOURCE" as const,
       })),
       maxIntents: MAX_ONCHAIN_INTENTS_PER_ATTEMPT,

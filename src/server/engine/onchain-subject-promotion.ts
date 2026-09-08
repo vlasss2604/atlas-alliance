@@ -141,13 +141,14 @@ export function promotedReadsForComponent(component: string): number {
   return Math.min(rules.length, MAX_PROMOTED_INTENTS_PER_ATTEMPT, MAX_PROMOTION_DEPTH);
 }
 
-// Intent kinds that may ONLY be reached by promotion. A transaction cannot
-// be a base intent because a base subject is an address and a transaction
-// subject is a signature — there is nowhere for one to come from except an
-// observation that produced it.
+// Intent kinds that may ONLY be reached by promotion, because the subject
+// each one needs cannot exist until an earlier observation produced it.
 export const PROMOTION_ONLY_INTENTS: ReadonlySet<OnchainIntentKind> = new Set([
-  // A transaction subject is a SIGNATURE, and nothing but an observation
-  // can produce one.
+  // A transaction subject is a SIGNATURE. It stays here because a signature
+  // is not an address and no address-shaped subject may ever be handed to
+  // getTransaction — but see DOCUMENTARY_BASE_INTENTS below: the premise
+  // this entry USED to carry ("nothing but an observation can produce a
+  // signature") was false, and a document that states one is the exception.
   "TRANSACTION_DETAIL",
   // Owner discovery is only meaningful once ACCOUNT_INFO has established
   // that the subject is NOT itself a token account. As a base intent it
@@ -158,6 +159,47 @@ export const PROMOTION_ONLY_INTENTS: ReadonlySet<OnchainIntentKind> = new Set([
   // reached by promotion it is always a token account for the confirmed
   // mint.
   "SIGNATURES_FOR_ADDRESS",
+]);
+
+// THE ONE EXCEPTION, AND IT IS NARROW BY CONSTRUCTION.
+//
+// `PROMOTION_ONLY_INTENTS` justified TRANSACTION_DETAIL with "nothing but an
+// observation can produce a signature". That was never true of this codebase:
+// the extractor is explicitly instructed to propose "one concrete on-chain
+// address, account, program or transaction signature", `documentary-locator.ts`
+// validates SIGNATURE_LIKE as a first-class shape, and the locator table has
+// stored them all along. The rule outlived its own premise, and the cost was
+// not merely a missed capability — a documented signature was handed to
+// ACCOUNT_INFO and spent a protected source open failing.
+//
+// So the blanket ban is replaced by the precise rule it was approximating. A
+// TRANSACTION_DETAIL subject is eligible when it came from EITHER:
+//
+//   A. deterministic observed-signature provenance — a SIGNATURES_FOR_ADDRESS
+//      result for a subject that itself had provenance (unchanged), or
+//   B. an admitted documentary SIGNATURE_LIKE locator, which has already
+//      passed the full admission bar: literal in the document, validation
+//      CONFIRMED, officiality CONFIRMED, an OFFICIAL_DOCS/GOVERNANCE/
+//      OFFICIAL_REPORT source class, a live source row, and this job's own
+//      Evidence. `admittedLocatorsForJob` is the only way in.
+//
+// WHY THIS SET IS SAFE AT ONE ENTRY. Membership here does not admit a base
+// intent on its own; it only stops PROMOTION_ONLY_INTENTS from refusing it.
+// The subject still has to exist and still has to MATCH: `selectOnchainIntents`
+// pairs an intent with a subject of its own `subjectKindOf`, and the only
+// source of a "tx"-kind subject is a SIGNATURE_LIKE admitted locator. A
+// project anchor is "token" and an ADDRESS_LIKE locator is "account", so
+// neither can ever reach getTransaction.
+//
+// WHAT THE DOCUMENT ESTABLISHES: that ATLAS may READ this transaction, and
+// nothing else. Not that a burn occurred, not that the mint matches, not that
+// anything executed, not that supply moved. Every one of those remains an
+// output of the decode, the binding and the fact pipeline, exactly as for a
+// signature reached by promotion. Eligibility to be read is not authority to
+// be believed — the same sentence `onchain-subject-provenance.ts` already
+// makes about derived subjects.
+export const DOCUMENTARY_BASE_INTENTS: ReadonlySet<OnchainIntentKind> = new Set([
+  "TRANSACTION_DETAIL",
 ]);
 
 export interface PromotionInput {

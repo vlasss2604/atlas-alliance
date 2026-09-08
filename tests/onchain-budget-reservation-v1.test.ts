@@ -218,7 +218,7 @@ describe("2/8. capacity is Pattern semantics; ACTION still needs a subject", () 
         component: ACCOUNT_COMPONENT.component,
         establishingClasses: ACCOUNT_COMPONENT.establishingClasses,
         identity: IDENTITY,
-        locators: [{ address: WALLET, origin: "ADMITTED_EVIDENCE_SOURCE" }],
+        locators: [{ value: WALLET, shape: "ADDRESS_LIKE" as const, origin: "ADMITTED_EVIDENCE_SOURCE" }],
         maxIntents: 4,
       }).map((i) => i.subject),
     ).toEqual([WALLET]);
@@ -509,7 +509,7 @@ async function runOnchain(
     attemptId: null,
     item: { step: 7, component: opts.component ?? "NET_EFFECT" },
     plan: { establishingClasses: ["ONCHAIN_VERIFIABLE"], confirmedIdentity: IDENTITY },
-    locators: locators.map((l) => ({ address: l.value, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
+    locators: locators.map((l) => ({ value: l.value, shape: l.shape, origin: "ADMITTED_EVIDENCE_SOURCE" as const })),
     maxSourceOpens,
     retriever: opts.retriever === false ? null : fixture.retriever,
     recordTrace: async (e) => {
