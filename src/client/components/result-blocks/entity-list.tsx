@@ -52,8 +52,8 @@ function EntityRow({ entity }: { entity: EntityRef }) {
 
   return (
     <div
-      className="rounded-lg border border-[var(--hairline)] px-3 py-2.5"
-      style={{ background: "var(--surface-1)" }}
+      className="rounded-lg rounded-l-sm border border-l-2 border-[var(--hairline)] px-3 py-2.5"
+      style={{ background: "var(--surface-1)", borderLeftColor: s.color }}
       data-testid="entity-row"
       data-state={entity.state}
     >

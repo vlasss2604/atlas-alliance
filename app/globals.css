@@ -591,6 +591,46 @@ body {
 }
 
 /* ---------------------------------------------------------------- *
+ * RESULT ANSWER DISCLOSURE
+ * ----------------------------------------------------------------
+ * The supporting paragraphs of a result answer are a disclosure on a
+ * handset — four paragraphs there are the difference between a result
+ * and a wall of text — and simply open on a wide screen, where there
+ * is a column for them and a reader expects an analyst's reasoning to
+ * be on the page rather than behind a click.
+ *
+ * ONE COPY OF THE TEXT. The alternative is rendering the paragraphs
+ * twice and hiding one per breakpoint, which duplicates them for a
+ * screen reader and for page search. This opens the one <details>
+ * that is already there.
+ *
+ * GUARDED, because the failure mode matters. A browser without
+ * ::details-content keeps both the summary and the closed disclosure —
+ * the handset behaviour, which works everywhere — rather than ending
+ * up with a hidden paragraph and no control to open it.
+ */
+/* Safari — and therefore the iOS Mini App webview — draws its own
+   disclosure triangle from a `::-webkit-details-marker` that `list-style:
+   none` does not reach, which would put a second arrow beside ours. */
+.answer-detail > summary::-webkit-details-marker {
+  display: none;
+}
+.answer-detail > summary::marker {
+  content: "";
+}
+
+@supports selector(::details-content) {
+  @media (min-width: 1024px) {
+    .answer-detail > summary {
+      display: none;
+    }
+    .answer-detail::details-content {
+      content-visibility: visible;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- *
  * NAVIGATION
  * ---------------------------------------------------------------- */
 .navbar {

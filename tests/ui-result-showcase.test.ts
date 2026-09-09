@@ -7,7 +7,15 @@ import { describe, expect, it } from "vitest";
 import { ResultShowcase } from "../src/client/components/result-blocks/result-showcase";
 import {
   FIXTURE_CHART,
+  FIXTURE_CHART_BURNED,
+  FIXTURE_EVIDENCE,
+  FIXTURE_FLOW,
+  FIXTURE_HEADER,
+  FIXTURE_METRICS,
+  FIXTURE_METRIC_ATTRIBUTION,
+  FIXTURE_PROOF_MAP,
   FIXTURE_TABLE_ROWS,
+  FIXTURE_TIMELINE,
 } from "../src/client/result-showcase-fixture";
 import { PROOF_STATE } from "../src/client/components/result-blocks/types";
 
@@ -147,9 +155,13 @@ describe("structure did not cost the epistemic rules", () => {
   });
 
   it("an unestablished table figure is a dash, never a zero", () => {
-    const open = FIXTURE_TABLE_ROWS.find((r) => r.state === "NOT_ESTABLISHED")!;
+    // The open period is PARTLY established, not unestablished: its provider
+    // figures came through and only its chain reads did not. The cells the
+    // research could not settle are dashes; a zero would be a measurement.
+    const open = FIXTURE_TABLE_ROWS.find((r) => r.state === "PARTLY_ESTABLISHED")!;
     expect(open.cells.acquired).toBe("—");
     expect(open.cells.burned).toBe("—");
+    expect(open.cells.revenue).not.toBe("—");
   });
 
   it("the flow shows where the proof stops, in words", () => {
@@ -243,5 +255,171 @@ describe("the adapter is deliberately absent", () => {
     for (const lib of ["recharts", "chart.js", "d3", "victory", "nivo", "visx", "echarts"]) {
       expect(Object.keys(all), lib).not.toContain(lib);
     }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 7. A MEASUREMENT AND THE CONCLUSION DRAWN FROM IT ARE NOT ONE THING */
+/* ------------------------------------------------------------------ */
+
+// The composition pass moved the headline numbers into the economic chain
+// they argue — SOURCE → ALLOCATION → EXECUTION → EFFECT — and that is
+// exactly the arrangement that invites a reader to join four sound figures
+// into a causal story the research never established. These hold the two
+// apart.
+
+describe("measured fact and causal conclusion stay separate", () => {
+  it("the effect metric is graded on whether it was MEASURED, not on whether the story held", () => {
+    // Two reads of total supply either side of an interval is something this
+    // product can settle. Stamping that measurement CONTRADICTED because the
+    // conclusion someone wanted from it collapsed says the number itself is
+    // unreliable, which is a different and false claim.
+    const effect = FIXTURE_METRICS.find((m) => m.step === "EFFECT");
+    expect(effect?.state).toBe("ESTABLISHED");
+  });
+
+  it("the causal claim is stated on its own, and it is the thing that failed", () => {
+    expect(FIXTURE_METRIC_ATTRIBUTION.state).toBe("CONTRADICTED");
+    expect(html).toContain('data-testid="metric-attribution"');
+    // And it comes after the strip it qualifies, never instead of it.
+    expect(html.indexOf('data-testid="metric-tile"')).toBeLessThan(
+      html.indexOf('data-testid="metric-attribution"'),
+    );
+  });
+
+  it("the headline measures are the economic chain, in its order", () => {
+    expect(FIXTURE_METRICS.map((m) => m.step)).toEqual([
+      "SOURCE",
+      "ALLOCATION",
+      "EXECUTION",
+      "EFFECT",
+    ]);
+  });
+
+  it("the supply figure agrees with the evidence card that produced it", () => {
+    // 998.4M at the start of the interval and 1,005.1M at the end: supply
+    // ROSE. This shipped once as "−6.7M", which contradicted the evidence,
+    // the proof map and the answer all at the same time.
+    const q = FIXTURE_EVIDENCE.find((e) => e.kind === "QUANTITATIVE");
+    expect(q?.fragment).toContain("998.4M");
+    expect(q?.fragment).toContain("1,005.1M");
+    const effect = FIXTURE_METRICS.find((m) => m.step === "EFFECT");
+    expect(effect?.value.startsWith("+")).toBe(true);
+  });
+
+  it("no block claims an execution the proof map says was not established", () => {
+    const execution = FIXTURE_PROOF_MAP.find((c) => c.label === "Execution");
+    expect(execution?.state).toBe("NOT_ESTABLISHED");
+    // The timeline is where this slipped: a dated milestone read "first
+    // transaction attributed to the mechanism" while the proof map, the
+    // flow, the metric attribution and the on-chain snapshot's own
+    // `doesNotProve` all said nothing had been attributed to it.
+    for (const event of FIXTURE_TIMELINE) {
+      const text = `${event.label} ${event.note ?? ""}`;
+      if (/attributed to the mechanism/i.test(text)) {
+        expect(text, event.label).toMatch(/not attributed to the mechanism/i);
+      }
+    }
+  });
+
+  it("the flow and the proof map agree about where the evidence stopped", () => {
+    const onMap = FIXTURE_PROOF_MAP.find((c) => c.label === "Execution");
+    const inFlow = FIXTURE_FLOW.find((s) => s.step === "EXECUTION");
+    expect(inFlow?.state).toBe(onMap?.state);
+  });
+
+  it("no connector is drawn solid into a stage the evidence did not reach", () => {
+    // `data-carried="true"` is the only link the diagram draws unbroken.
+    const carried = FIXTURE_FLOW.filter(
+      (s, i) =>
+        i > 0 && s.state === "ESTABLISHED" && FIXTURE_FLOW[i - 1].state === "ESTABLISHED",
+    );
+    expect(html.split('data-carried="true"').length - 1).toBe(carried.length);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 8. THE FIRST SCREEN IS A RESULT, NOT AN ESSAY                       */
+/* ------------------------------------------------------------------ */
+
+describe("the top of a result answers before it explains", () => {
+  it("the answer arrives as one sentence before it arrives as paragraphs", () => {
+    expect(FIXTURE_HEADER.short.length).toBeLessThan(200);
+    expect(html.indexOf('data-testid="answer-short"')).toBeLessThan(
+      html.indexOf('data-testid="answer-prose"'),
+    );
+  });
+
+  it("the supporting paragraphs are compressed, never withheld", () => {
+    // A disclosure on a handset is progressive depth. A paragraph missing
+    // from the served markup is a paragraph a reader, a screen reader and a
+    // page search cannot reach, and it would be a different thing entirely.
+    for (const sentence of FIXTURE_HEADER.answer) {
+      expect(html).toContain(sentence.slice(0, 40));
+    }
+  });
+
+  it("how much of the claim stands up shares the first screen with the answer", () => {
+    expect(html).toContain('data-testid="proof-coverage"');
+    expect(html.indexOf('data-testid="block-masthead"')).toBeLessThan(
+      html.indexOf('data-testid="block-answer"'),
+    );
+    expect(html.indexOf('data-testid="block-answer"')).toBeLessThan(
+      html.indexOf('data-testid="block-proof-map"'),
+    );
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 9. THE CHART AND THE TABLE DO DIFFERENT JOBS                        */
+/* ------------------------------------------------------------------ */
+
+describe("the chart earns its place beside the table", () => {
+  it("it plots the table's own columns, not a third set of numbers", () => {
+    const pairs = [
+      [FIXTURE_CHART, "acquired"],
+      [FIXTURE_CHART_BURNED, "burned"],
+    ] as const;
+    for (const [series, key] of pairs) {
+      series.forEach((point, i) => {
+        const cell = FIXTURE_TABLE_ROWS[i].cells[key];
+        if (point.value === null) expect(cell).toBe("—");
+        else expect(Number(cell)).toBe(point.value);
+      });
+    }
+  });
+
+  it("the headline measures are the table's own columns added up", () => {
+    // A number at the top of a result that a reader can disprove by adding
+    // up the table underneath it is worse than no number at all. The
+    // execution headline shipped as 11.2M against an acquired column that
+    // adds to 10.0.
+    const sum = (key: string) =>
+      FIXTURE_TABLE_ROWS.reduce((total, r) => {
+        const v = Number(r.cells[key]);
+        return total + (Number.isFinite(v) ? v : 0);
+      }, 0);
+    const figure = (step: string) =>
+      Number(FIXTURE_METRICS.find((m) => m.step === step)!.value.replace(/[^0-9.]/g, ""));
+
+    expect(figure("SOURCE")).toBeCloseTo(sum("revenue"), 2);
+    expect(figure("EXECUTION")).toBeCloseTo(sum("acquired"), 2);
+    // The documented 30% allocation is the allocation column of the table.
+    expect(sum("allocation")).toBeCloseTo(sum("revenue") * (figure("ALLOCATION") / 100), 2);
+    // And what was acquired but not burned is what the treasury holds.
+    expect(sum("acquired") - sum("burned")).toBeCloseTo(sum("treasury"), 2);
+  });
+
+  it("a measured zero is drawn as a measurement, and only an unknown as a gap", () => {
+    // The two sit in adjacent slots on purpose: P5 burned nothing and the
+    // research established that; P6 established nothing at all.
+    const zero = FIXTURE_CHART_BURNED.find((p) => p.value === 0);
+    expect(zero?.state).toBe("ESTABLISHED");
+    const unknown = FIXTURE_CHART_BURNED.find((p) => p.value === null);
+    expect(unknown?.state).toBe("NOT_ESTABLISHED");
+    // The zero carries a bar with its value written on it...
+    expect(html).toContain(">0.0<");
+    // ...and the empty slot is drawn once, for the one unknown period.
+    expect(html.split("established</tspan>").length - 1).toBe(1);
   });
 });

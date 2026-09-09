@@ -8,6 +8,13 @@ import { PROOF_STATE, type TableColumn, type TableRow } from "./types";
 // measures, dense enough to scan down a column and compare periods without
 // reading a word.
 //
+// IT DOES A DIFFERENT JOB FROM THE CHART BESIDE IT. The chart is for
+// recognising a shape in a second; the table is where the exact figure, the
+// period it belongs to, and HOW WELL ESTABLISHED that period is all live
+// together. That last part used to be a footnote under the table; it is now
+// on the row it describes, because a reader scanning a column needs to know
+// which cells they are allowed to trust while they are looking at them.
+//
 // THE MOBILE TREATMENT IS A DECISION, NOT AN ACCIDENT. Six measures cannot
 // honestly fit 430px, and the two dishonest answers are dropping columns
 // (information disappears with no notice) or letting the table silently push
@@ -47,7 +54,7 @@ export function AnalyticalTableBlock({
                   scope="col"
                   className={`whitespace-nowrap px-2 pb-2 text-[0.62rem] font-semibold uppercase tracking-[0.06em] text-[var(--atlas-text-dim)] ${
                     c.numeric ? "text-right" : "text-left"
-                  } ${i === 0 ? "sticky left-0 z-10 w-[6.5rem] pl-0" : ""}`}
+                  } ${i === 0 ? "sticky left-0 z-10 w-[7.5rem] pl-0" : ""}`}
                   style={i === 0 ? { background: "var(--surface-1)" } : undefined}
                 >
                   {c.label}
@@ -70,10 +77,24 @@ export function AnalyticalTableBlock({
                       // Digits stack only if they are the same width and share
                       // an edge — this is most of what makes a column scannable.
                       c.numeric ? "text-right tabular-nums" : "text-left"
-                    } ${i === 0 ? "sticky left-0 z-10 w-[6.5rem] whitespace-nowrap pl-0 font-medium" : "text-[var(--atlas-text-dim)]"}`}
+                    } ${i === 0 ? "sticky left-0 z-10 w-[7.5rem] pl-0 font-medium" : "text-[var(--atlas-text-dim)]"}`}
                     style={i === 0 ? { background: "var(--surface-1)" } : undefined}
                   >
-                    {r.cells[c.key] ?? "—"}
+                    {i === 0 ? (
+                      <>
+                        <span className="block whitespace-nowrap">{r.cells[c.key] ?? "—"}</span>
+                        {r.state && (
+                          <span
+                            className="mt-0.5 block text-[0.58rem] font-semibold uppercase leading-tight tracking-[0.04em]"
+                            style={{ color: PROOF_STATE[r.state].color }}
+                          >
+                            {PROOF_STATE[r.state].label}
+                          </span>
+                        )}
+                      </>
+                    ) : (
+                      (r.cells[c.key] ?? "—")
+                    )}
                   </td>
                 ))}
               </tr>
@@ -85,20 +106,6 @@ export function AnalyticalTableBlock({
       {note && (
         <p className="mt-3 border-t border-[var(--hairline)] pt-2.5 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]">
           {note}
-        </p>
-      )}
-
-      {/* A row whose figures the research did not establish is named here
-          rather than quietly rendered as if it were measured. */}
-      {rows.some((r) => r.state && r.state !== "ESTABLISHED") && (
-        <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[0.65rem]">
-          {rows
-            .filter((r) => r.state && r.state !== "ESTABLISHED")
-            .map((r) => (
-              <span key={r.key} style={{ color: PROOF_STATE[r.state!].color }}>
-                {r.cells[columns[0].key]} — {PROOF_STATE[r.state!].label.toLowerCase()}
-              </span>
-            ))}
         </p>
       )}
     </section>

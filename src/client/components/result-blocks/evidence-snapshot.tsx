@@ -21,13 +21,19 @@ const KIND_ACCENT: Record<EvidenceKindMeta["kind"], string> = {
 
 export function EvidenceSnapshotBlock({ items }: { items: EvidenceKindMeta[] }) {
   return (
-    <section className="flex flex-col gap-2.5" data-testid="block-evidence">
+    <section data-testid="block-evidence">
       <p className="eyebrow px-1" style={{ color: "var(--atlas-text-dim)" }}>
         Evidence snapshots
       </p>
-      {items.map((item) => (
-        <SnapshotCard key={item.source} item={item} />
-      ))}
+      {/* TWO PER ROW ON A WIDE SCREEN. Four full-width cards were four
+          screens of scrolling for four short quotations, and the shared
+          structure — quote, what it supports, what it does not — is much
+          easier to compare when two of them are side by side. */}
+      <div className="mt-2.5 grid gap-2.5 lg:grid-cols-2">
+        {items.map((item) => (
+          <SnapshotCard key={item.source} item={item} />
+        ))}
+      </div>
     </section>
   );
 }
@@ -36,7 +42,7 @@ function SnapshotCard({ item }: { item: EvidenceKindMeta }) {
   const accent = KIND_ACCENT[item.kind];
   return (
     <article
-      className="panel overflow-hidden"
+      className="panel flex h-full flex-col overflow-hidden"
       data-testid="evidence-snapshot"
       data-kind={item.kind}
     >
@@ -61,7 +67,7 @@ function SnapshotCard({ item }: { item: EvidenceKindMeta }) {
         </span>
       </div>
 
-      <div className="px-4 py-3">
+      <div className="flex flex-1 flex-col px-4 py-3">
         {/* THE SOURCE'S OWN WORDS, marked as a quotation by a rule down the
             left rather than by quote marks that a fragment may itself
             contain. */}
@@ -73,7 +79,7 @@ function SnapshotCard({ item }: { item: EvidenceKindMeta }) {
           {item.fragment}
         </blockquote>
 
-        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="mt-3 mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div>
             <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
               What it supports
@@ -91,7 +97,7 @@ function SnapshotCard({ item }: { item: EvidenceKindMeta }) {
         </div>
 
         {item.href && (
-          <p className="mt-3 border-t border-[var(--hairline)] pt-2.5">
+          <p className="mt-auto border-t border-[var(--hairline)] pt-2.5">
             <span className="text-[0.7rem] text-[var(--atlas-text-dim)]">
               Open source · inspect capture
             </span>

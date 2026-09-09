@@ -31,18 +31,44 @@ export function ValueFlowBlock({ stages }: { stages: FlowStage[] }) {
         Each step is a separate claim. The link between two steps is drawn only as far as
         the evidence carried.
       </p>
+      {/* The connector vocabulary, stated once. A dash pattern that has to
+          be inferred is a dash pattern that gets read as decoration. */}
+      <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.62rem] text-[var(--atlas-text-dim)]">
+        <span className="flex items-center gap-1.5">
+          <span
+            className="block h-px w-5"
+            style={{ background: PROOF_STATE.ESTABLISHED.color }}
+            aria-hidden
+          />
+          solid — the evidence carried
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span
+            className="block h-px w-5"
+            style={{
+              background: `repeating-linear-gradient(90deg, ${PROOF_STATE.NOT_ESTABLISHED.color} 0 3px, transparent 3px 6px)`,
+            }}
+            aria-hidden
+          />
+          broken — it did not
+        </span>
+      </p>
 
       {/* One markup, two directions: a vertical rail on a phone, a
           left-to-right chain from `lg`. The connectors flip axis with it. */}
-      <div className="mt-4 flex flex-col lg:flex-row lg:items-stretch" data-testid="flow-chain">
+      {/* `lg:pb-7` is the seat for the break label. It hangs under the
+          connector on a wide screen, and with nothing reserved for it it
+          landed across the text of the two stages either side. */}
+      <div className="mt-4 flex flex-col lg:flex-row lg:items-stretch lg:pb-7" data-testid="flow-chain">
         {stages.map((stage, i) => {
           const s = PROOF_STATE[stage.state];
           const downstream = breakAt !== -1 && i > breakAt;
+          const atBreak = i === breakAt;
           const prev = i > 0 ? stages[i - 1] : null;
           return (
             <div
               key={stage.label}
-              className="flex min-w-0 flex-col lg:flex-1 lg:flex-row lg:items-center"
+              className="flex min-w-0 flex-col lg:flex-1 lg:flex-row lg:items-stretch"
             >
               {i > 0 && (
                 <FlowConnector from={prev!} to={stage} firstBreak={i === breakAt} />
@@ -52,11 +78,24 @@ export function ValueFlowBlock({ stages }: { stages: FlowStage[] }) {
                 style={{
                   background: downstream ? "transparent" : "var(--surface-1)",
                   borderColor: downstream ? "var(--hairline)" : s.dim.replace("0.1", "0.3"),
+                  // The node the chain gives out at is drawn with a broken
+                  // edge as well as a broken link into it. It is the single
+                  // most important thing on the diagram and one dashed
+                  // connector was carrying all of that weight.
+                  borderStyle: atBreak ? "dashed" : "solid",
                 }}
                 data-testid="flow-stage"
                 data-state={stage.state}
               >
-                <div className="flex items-center gap-2">
+                {/* The same four words as the metric strip, so the reader
+                    meets ONE chain on this page rather than two diagrams
+                    that happen to be about the same thing. */}
+                {stage.step && (
+                  <p className="text-[0.55rem] font-semibold uppercase tracking-[0.1em] text-[var(--atlas-text-dim)]">
+                    {stage.step}
+                  </p>
+                )}
+                <div className="mt-0.5 flex items-center gap-2">
                   <span
                     className="h-1.5 w-1.5 shrink-0 rounded-full"
                     style={{ background: s.color }}
@@ -64,19 +103,17 @@ export function ValueFlowBlock({ stages }: { stages: FlowStage[] }) {
                   />
                   <p className="text-[0.78rem] font-semibold leading-tight">{stage.label}</p>
                 </div>
-                <p className="mt-0.5 flex flex-wrap items-baseline gap-x-1.5">
-                  <span
-                    className="text-[0.6rem] font-semibold uppercase tracking-[0.05em]"
-                    style={{ color: s.color }}
-                  >
-                    {s.label}
-                  </span>
-                  {stage.detail && (
-                    <span className="text-[0.66rem] leading-snug text-[var(--atlas-text-dim)]">
-                      {stage.detail}
-                    </span>
+                <p className="mt-1 text-[0.6rem] font-semibold uppercase leading-tight tracking-[0.05em]">
+                  <span style={{ color: s.color }}>{s.label}</span>
+                  {stage.evidenceRef && (
+                    <span className="text-[var(--atlas-text-dim)]"> · {stage.evidenceRef}</span>
                   )}
                 </p>
+                {stage.detail && (
+                  <p className="mt-0.5 text-[0.66rem] leading-snug text-[var(--atlas-text-dim)]">
+                    {stage.detail}
+                  </p>
+                )}
               </div>
             </div>
           );
@@ -113,7 +150,7 @@ function FlowConnector({
 
   return (
     <div
-      className="relative flex shrink-0 items-center gap-2 py-1 pl-3 lg:flex-col lg:px-1.5 lg:py-0 lg:pl-0"
+      className="relative flex shrink-0 items-center gap-2 py-1 pl-3 lg:flex-col lg:justify-center lg:px-1.5 lg:py-0 lg:pl-0"
       data-testid="flow-connector"
       data-carried={carried ? "true" : "false"}
     >

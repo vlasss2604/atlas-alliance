@@ -1,64 +1,108 @@
 "use client";
 
-import { PROOF_STATE, type ProofMapCell } from "./types";
+import { PROOF_STATE, type ProofMapCell, type ProofState } from "./types";
 
-// 2. PROOF MAP — THE SHAPE OF THE RESEARCH, IN ONE GLANCE.
+// 2. PROOF MAP — HOW MUCH OF THE CLAIM ACTUALLY STANDS UP.
 //
-// Deliberately NOT a vertical table and NOT one card per component. A
-// reader's first question is not "what does each check say" but "how much of
-// this actually stands up" — and a grid answers that in about a second,
-// where ten stacked rows make them count.
+// It answers ONE question — "what parts of this economic claim are
+// established?" — and it has to answer it before the reader has read a word,
+// which is why it opens with a coverage bar: one segment per check, in the
+// order of the argument, coloured by state. The shape of that bar IS the
+// answer, and the counts under it say the same thing in words.
 //
-// Each cell is a dense tile with a state bar across its top. The bar is the
-// fast channel; the word under it is the real one, so the map is still
-// readable with no colour at all.
+// IT IS NOT A TABLE, AND IT IS NOT FIVE CARDS. Five boxed tiles read as five
+// separate findings and cost a whole screen on a handset; five table rows
+// read as data to be studied. These are hairline rows with a coloured spine
+// — an index into the argument, which is what a map is.
+//
+// IT RENDERS NO FRAME OF ITS OWN — the masthead panel wraps it beside the
+// answer, so the first screen carries the answer AND its coverage.
+const ORDER: ProofState[] = [
+  "ESTABLISHED",
+  "PARTLY_ESTABLISHED",
+  "NOT_ESTABLISHED",
+  "CONTRADICTED",
+];
+
 export function ProofMapBlock({ cells }: { cells: ProofMapCell[] }) {
+  // Arithmetic over the cells above and nothing else. The map does not know
+  // a fifth fact about the research; it counts what it was handed.
+  const counts = ORDER.map((state) => ({
+    state,
+    n: cells.filter((c) => c.state === state).length,
+  })).filter((c) => c.n > 0);
+
   return (
-    <section className="panel px-4 py-4 sm:px-5" data-testid="block-proof-map">
+    <section className="min-w-0" data-testid="block-proof-map">
       <div className="flex items-baseline justify-between gap-3">
         <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
           Proof map
         </p>
-        <p className="text-[0.7rem] text-[var(--atlas-text-dim)]">
+        <p className="text-[0.68rem] text-[var(--atlas-text-dim)]">
           {cells.length} checks
         </p>
       </div>
 
-      {/* Two columns on a phone, three from `sm`, five on a wide screen —
-          the map should fill its width rather than stretch five tiles across
-          a desktop or squeeze them onto a handset. */}
-      <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+      {/* THE COVERAGE BAR. Segments are equal width because each check is
+          one check — weighting them by anything would be a claim about
+          importance that no evidence supports. */}
+      <div
+        className="mt-2.5 flex gap-1"
+        role="img"
+        aria-label={counts
+          .map((c) => `${c.n} ${PROOF_STATE[c.state].label.toLowerCase()}`)
+          .join(", ")}
+        data-testid="proof-coverage"
+      >
+        {cells.map((c) => (
+          <span
+            key={c.label}
+            className="h-1.5 flex-1 rounded-full"
+            style={{ background: PROOF_STATE[c.state].color }}
+          />
+        ))}
+      </div>
+
+      {/* The bar restated in words, so colour is never the only carrier. */}
+      <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[0.63rem] font-medium">
+        {counts.map((c) => (
+          <span key={c.state} style={{ color: PROOF_STATE[c.state].color }}>
+            {c.n} {PROOF_STATE[c.state].label.toLowerCase()}
+          </span>
+        ))}
+      </p>
+
+      <ul className="mt-3 flex flex-col gap-1.5">
         {cells.map((c) => {
           const s = PROOF_STATE[c.state];
           return (
-            <div
+            <li
               key={c.label}
-              className="overflow-hidden rounded-lg border border-[var(--hairline)]"
-              style={{ background: "var(--surface-1)" }}
+              className="rounded-r-md border-l-2 py-1 pl-2.5"
+              style={{ borderColor: s.color, background: s.dim }}
               data-testid="proof-cell"
               data-state={c.state}
             >
-              <div className="h-[3px] w-full" style={{ background: s.color }} aria-hidden />
-              <div className="px-2.5 py-2.5">
-                <p className="text-[0.72rem] font-medium uppercase leading-tight tracking-[0.05em] text-[var(--atlas-text-dim)]">
-                  {c.label}
-                </p>
-                <p
-                  className="mt-1.5 text-[0.78rem] font-semibold leading-tight"
-                  style={{ color: s.color }}
-                >
-                  {s.label}
-                </p>
-                {c.note && (
-                  <p className="mt-1 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]">
-                    {c.note}
-                  </p>
+              <div className="flex items-baseline justify-between gap-2">
+                <p className="text-[0.76rem] font-medium leading-tight">{c.label}</p>
+                {c.evidenceRef && (
+                  <span className="shrink-0 text-[0.58rem] uppercase tracking-[0.05em] text-[var(--atlas-text-dim)]">
+                    {c.evidenceRef}
+                  </span>
                 )}
               </div>
-            </div>
+              <p className="mt-0.5 text-[0.65rem] leading-snug">
+                <span className="font-semibold" style={{ color: s.color }}>
+                  {s.label}
+                </span>
+                {c.note && (
+                  <span className="text-[var(--atlas-text-dim)]"> · {c.note}</span>
+                )}
+              </p>
+            </li>
           );
         })}
-      </div>
+      </ul>
     </section>
   );
 }

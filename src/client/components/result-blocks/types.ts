@@ -44,8 +44,14 @@ export interface AnswerHeader {
   question: string;
   verdict: string;
   confidence: string;
-  // Three to five sentences. The ONLY substantial prose at the top of a
-  // result — everything below communicates through structure.
+  // THE TEN-SECOND ANSWER. One sentence, and the largest text on the page
+  // after the question. It says nothing the paragraphs below do not; it is
+  // the same finding compressed to the length a reader will actually read
+  // before deciding whether to read further.
+  short: string;
+  // Three to five sentences, behind a disclosure on a handset. The ONLY
+  // substantial prose at the top of a result — everything below
+  // communicates through structure.
   answer: string[];
   asOf: string;
 }
@@ -58,19 +64,47 @@ export interface ProofMapCell {
   // One short clause, optional. A proof map is a shape, not a summary: a
   // cell that needs a sentence belongs in the ladder, not here.
   note?: string;
+  // WHICH CLASS OF EVIDENCE ANSWERED THIS. Optional and typed rather than
+  // folded into `note`, so every analytical block on the page is
+  // STRUCTURALLY able to name its source without a second subsystem being
+  // invented to carry it.
+  evidenceRef?: string;
 }
 
 /* -------------------------- 3. KEY METRICS ------------------------- */
 
 export interface Metric {
+  // WHERE THIS NUMBER SITS IN THE ECONOMIC CHAIN. Four headline measures in
+  // a row are four unrelated facts; the same four named SOURCE, ALLOCATION,
+  // EXECUTION, EFFECT are an argument, and a reader can see at a glance
+  // which link of it the evidence reached.
+  step?: "SOURCE" | "ALLOCATION" | "EXECUTION" | "EFFECT";
   // Rendered first and largest. A metric that reads as a sentence is not a
   // metric — the number is the point and the words are its caption.
   value: string;
   unit?: string;
   label: string;
+  // THE STANDING OF THE MEASUREMENT, AND ONLY OF THE MEASUREMENT. Whether
+  // the number was correctly measured and whether the mechanism CAUSED it
+  // are two different questions, and a state that answers both at once
+  // answers neither. Causal attribution is carried by `MetricAttribution`
+  // below, next to the chain rather than stamped on one of its numbers.
   state: ProofState;
   period?: string;
   source?: string;
+}
+
+// THE SENTENCE THE METRIC STRIP IS NOT ALLOWED TO IMPLY.
+//
+// A measured fall in supply is not the mechanism causing a fall in supply,
+// and four tiles in a row invite exactly that reading. This states the
+// causal claim separately, in its own words, with its own state — so a
+// sound measurement keeps its own standing and the conclusion drawn from it
+// keeps its own.
+export interface MetricAttribution {
+  label: string;
+  state: ProofState;
+  detail: string;
 }
 
 /* ------------------------ 4. MECHANISM FLOW ------------------------ */
@@ -79,6 +113,14 @@ export interface FlowStage {
   label: string;
   state: ProofState;
   detail?: string;
+  // The link back to the metric strip: the same words, so the reader meets
+  // ONE chain on the page rather than two unrelated diagrams. The flow
+  // names one position the metric strip has no number for — where the
+  // acquired tokens went — and DESTINATION is that position. It is not a
+  // `Metric` step precisely because no measure established it.
+  step?: "SOURCE" | "ALLOCATION" | "EXECUTION" | "DESTINATION" | "EFFECT";
+  // See `ProofMapCell.evidenceRef` — every block can name its source class.
+  evidenceRef?: string;
 }
 
 /* ----------------------- 5. ANALYTICAL TABLE ----------------------- */
