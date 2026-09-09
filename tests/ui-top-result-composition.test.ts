@@ -93,16 +93,39 @@ describe("the unresolved block names the fact, not the process", () => {
     }
   });
 
+  // THIS DUTY MOVED, IT DID NOT LAPSE.
+  //
+  // The `answer-boundary` callout these two tests read is gone. It named
+  // the single most important open check and explained it — which the
+  // short answer's own "Main limitation" sentence now does, in the same
+  // words from the same persisted reason code. On a live Raydium result
+  // the two rendered back to back saying the same thing, and "Still open"
+  // said it a third time.
+  //
+  // The obligations are unchanged and are now discharged by the still-open
+  // section, so these tests follow them there rather than being deleted.
+  const BRIEFING = "src/client/components/result-briefing.tsx";
+  const MODEL = "src/client/research-model.ts";
+
   it("TEST 3b: it names the unresolved thing and why", () => {
-    const block = code.slice(code.indexOf('data-testid="answer-boundary"'));
+    const brief = readFileSync(BRIEFING, "utf-8");
+    const block = brief.slice(brief.indexOf('data-testid="unresolved-section"'));
     // The unresolved finding's own label, then its canonical explanation.
-    expect(block).toContain("{boundary.label}");
-    expect(block).toContain("findingExplanation(boundary)");
+    expect(block).toContain("{u.label}");
+    expect(block).toContain("{u.detail}");
+    // And the callout it replaced is really gone from the answer panel.
+    expect(code).not.toContain('data-testid="answer-boundary"');
   });
 
   it("TEST 4: an evidence gap and a research limitation are labelled differently", () => {
-    const block = code.slice(code.indexOf('data-testid="answer-boundary"'));
-    expect(block).toContain('boundary.coverage === "BLOCKED" ? "Research limitation" : "Still unresolved"');
+    // The distinction is now made where the copy is derived: a blocked
+    // check speaks with its limitation, an ordinary gap with its reason.
+    const model = readFileSync(MODEL, "utf-8");
+    expect(model).toContain("detail: (blocked ? r.limitation : r.reason) ?? fallback");
+    // And a blocked check carries an extra line saying whose limit it is.
+    const brief = readFileSync(BRIEFING, "utf-8");
+    expect(brief).toContain("{u.blocked && (");
+    expect(brief).toContain("not evidence for or against the project");
   });
 
   it("TEST 4b: the limitation wording still refuses to blame the project", () => {

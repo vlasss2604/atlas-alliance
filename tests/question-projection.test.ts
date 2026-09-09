@@ -5,7 +5,7 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { ResultLadder } from "../src/client/components/result-ladder";
-import { deriveQuestionFindings } from "../src/client/research-model";
+import { deriveQuestionFindings, resultBriefing } from "../src/client/research-model";
 import {
   MAX_FINDINGS,
   MIN_FINDINGS,
@@ -583,17 +583,53 @@ describe("projection — the question shapes the default screen", () => {
   });
 
   it("TEST 20d: the stated boundary prefers a hard stop over a partial one", () => {
-    const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");
-    // A row established by NOTHING is a harder stop than one established
-    // in part, even when the projection ordered the partial row first.
-    const unresolvedAt = page.indexOf('questionRows.find((r) => r.state === "UNRESOLVED")');
-    const partialAt = page.indexOf('questionRows.find((r) => r.state === "PARTIAL")');
-    expect(unresolvedAt).toBeGreaterThan(-1);
-    expect(partialAt).toBeGreaterThan(-1);
-    expect(unresolvedAt).toBeLessThan(partialAt);
-    // A contradiction is a finding, not a boundary, and never becomes one.
-    const boundaryBlock = page.slice(unresolvedAt - 200, partialAt + 200);
-    expect(boundaryBlock).not.toContain("NOT_HAPPENING");
+    // THE BOUNDARY MOVED FROM THE PAGE INTO THE SHORT ANSWER.
+    //
+    // It used to be a row this page picked out for its own callout. That
+    // callout is gone — it repeated the answer's "Main limitation"
+    // sentence word for word — so the rule is asserted where it now
+    // lives, and behaviourally rather than by reading source order.
+    const findings = [
+      { label: "Where does it go?", patternStep: 6, component: "DESTINATION", supportingComponents: [] },
+      { label: "Is it running?", patternStep: 4, component: "EXECUTION_EVIDENCE", supportingComponents: [] },
+    ];
+    const components = [
+      // The projection orders the PARTIAL row first, deliberately.
+      { component: "DESTINATION", status: "PARTIALLY_SUPPORTED", coverage: "COMPLETED" as const },
+      {
+        component: "EXECUTION_EVIDENCE",
+        status: "INSUFFICIENT_EVIDENCE",
+        coverage: "COMPLETED" as const,
+        reasonCodes: ["MISSING_EXECUTION_EVIDENCE"],
+      },
+    ];
+    const rows = deriveQuestionFindings(findings, components);
+    const briefing = resultBriefing({
+      verdict: "PARTIALLY_SUPPORTED",
+      outcomeKind: "VERDICT",
+      projectName: "Raydium",
+      components: components.map((c) => ({ component: c.component, status: c.status })),
+      rows,
+    });
+    const text = briefing.shortAnswer.join(" ");
+    // A row established by NOTHING is the harder stop, even though the
+    // projection put the partial row first.
+    expect(text).toContain("Main limitation — whether the mechanism has actually executed");
+    expect(text).not.toContain("Main limitation — where the value ends up");
+
+    // A CONTRADICTION IS A FINDING, NOT A BOUNDARY.
+    const contradicted = resultBriefing({
+      verdict: "PARTIALLY_SUPPORTED",
+      outcomeKind: "VERDICT",
+      projectName: "Raydium",
+      components: [{ component: "NET_EFFECT", status: "CONTRADICTED" }],
+      rows: deriveQuestionFindings(
+        [{ label: "Supply?", patternStep: 7, component: "NET_EFFECT", supportingComponents: [] }],
+        [{ component: "NET_EFFECT", status: "CONTRADICTED", coverage: "COMPLETED" }],
+      ),
+    });
+    expect(contradicted.shortAnswer.join(" ")).not.toContain("Main limitation");
+    expect(contradicted.unresolved).toEqual([]);
   });
 
   it("TEST 21: the projection version is what authorises regeneration", () => {

@@ -1714,6 +1714,22 @@ export function deriveResultLadder(
 // recipients, current execution or holder benefit. Protocol-held RAY has
 // no typed carrier; therefore it has no cell here.
 
+// A STATUS INDEX ROW: THE CLAIM, AND HOW FAR THE EVIDENCE GOT. NOTHING ELSE.
+//
+// This carried a third field — a sentence saying what the evidence reached
+// — and it was cut after seeing it on a real result. Every value it could
+// hold was either the badge restated in longer words ("The checked evidence
+// establishes what the project's own documentation specifies") or a reason
+// code the ladder already prints one screen below. Meanwhile the ladder's
+// own row for the same finding said something a reader actually wants:
+// "Raydium protocol trading fees are split between liquidity providers, RAY
+// buybacks, and treasury destinations…". The index cannot win that
+// comparison and should not try: it is a scannable map of the ten checks,
+// and the ladder is where a finding is read.
+//
+// It also cost the mobile layout. Three columns needed 544px inside a 364px
+// panel, so the substance column sat off-screen behind a sideways scroll on
+// the one form factor this product ships to.
 export interface KeyFinding {
   // The persisted component. Carried for keys and tests — NEVER rendered.
   component: string;
@@ -1721,10 +1737,6 @@ export interface KeyFinding {
   check: string;
   result: string;
   tone: VerdictTone;
-  // What the evidence reached, from typed state and persisted reason codes
-  // only. Null where neither has anything to say.
-  established: string | null;
-  blocked: boolean;
 }
 
 export interface UnresolvedItem {
@@ -1736,8 +1748,12 @@ export interface UnresolvedItem {
 
 export interface ResultBriefing {
   shortAnswer: string[];
+  // At most MAX_UNRESOLVED_SHOWN. The rest are counted, never dropped.
   keyFindings: KeyFinding[];
   unresolved: UnresolvedItem[];
+  // How many unresolved checks are NOT in `unresolved` above. Zero when all
+  // of them fit. The full set is always in the ladder below.
+  unresolvedMore: number;
 }
 
 export interface BriefingInput {
@@ -1766,36 +1782,6 @@ function stateTone(state: RealityState): VerdictTone {
   }
 }
 
-// THE THIRD COLUMN, AND WHY IT NEVER REACHES FOR A SUMMARY.
-//
-// A blocked row speaks with its limitation, because there is no result to
-// state and borrowing evidence copy would read as one. Otherwise `shows`
-// is the typed restatement of the row's own state, and where that is null
-// — which is exactly the unresolved case — the persisted reason code
-// explains why, falling back to the state's own sentence when the run
-// recorded no code. Every one of those four is already rendered elsewhere
-// on this page from the same fields, so the briefing cannot disagree with
-// the detail below it.
-function establishedCell(row: ResultRow): string | null {
-  if (row.coverage === "BLOCKED") return row.limitation;
-  if (row.shows !== null) return row.shows;
-  if (row.reason !== null) return row.reason;
-  // NEITHER SPOKE, SO THE STATE ITSELF DOES.
-  //
-  // `shows` is null exactly on an unresolved row, and a run can reach one
-  // with no persisted reason code at all. Leaving the cell empty made the
-  // most important rows in the table — the ones that came back short — the
-  // only rows that said nothing. This is the same typed sentence
-  // `findingMicroAnswer` falls back to, so the table and the ladder agree.
-  const phrase = COMPONENT_PHRASES[row.component] ?? null;
-  if (row.state === "UNRESOLVED") {
-    return phrase === null
-      ? "This was not established."
-      : `${capitalise(phrase)} was not established.`;
-  }
-  return null;
-}
-
 export function keyFindingsFrom(rows: readonly ResultRow[]): KeyFinding[] {
   return rows
     .filter((r) => r.state !== "NOT_ASSESSED")
@@ -1804,8 +1790,6 @@ export function keyFindingsFrom(rows: readonly ResultRow[]): KeyFinding[] {
       check: r.label,
       result: r.stateLabel,
       tone: stateTone(r.state),
-      established: establishedCell(r),
-      blocked: r.coverage === "BLOCKED",
     }));
 }
 
@@ -1954,11 +1938,24 @@ function shortAnswerFor(input: BriefingInput, rows: readonly ResultRow[]): strin
   return sentences.slice(0, 6);
 }
 
+// THREE OPEN ITEMS, AND A COUNT FOR THE REST.
+//
+// A Raydium-shaped run leaves four checks open, and printing all of them
+// made the section a second ladder — every one of those labels already
+// appears in the status index above and again in the ladder below, so the
+// full list bought repetition and nothing else. Three is enough to show
+// WHAT KIND of thing is missing; the count keeps the reader honest about
+// how much, and points at where the rest actually live.
+const MAX_UNRESOLVED_SHOWN = 3;
+
 export function resultBriefing(input: BriefingInput): ResultBriefing {
   const rows = input.rows.filter((r) => r.state !== "NOT_ASSESSED");
+  const allUnresolved = unresolvedFrom(rows, input.outcomeKind);
   return {
     shortAnswer: shortAnswerFor(input, rows),
     keyFindings: keyFindingsFrom(rows),
-    unresolved: unresolvedFrom(rows, input.outcomeKind),
+    unresolved: allUnresolved.slice(0, MAX_UNRESOLVED_SHOWN),
+    // Never negative, and zero whenever everything fit.
+    unresolvedMore: Math.max(0, allUnresolved.length - MAX_UNRESOLVED_SHOWN),
   };
 }

@@ -17,7 +17,6 @@ import {
   CONFIDENCE_LABELS,
   deriveQuestionFindings,
   deriveResultLadder,
-  findingExplanation,
   groupEvidenceByDocument,
   isTerminal,
   jobOutcome,
@@ -281,27 +280,20 @@ export default function ResearchDetailPage() {
   const usedDocs = admittedDocs.reduce((n, d) => n + d.groups.length, 0);
 
   const ladder = deriveResultLadder(components, sourceClassesByComponent);
-  // WHERE THE EVIDENCE STOPS, ON THE QUESTION'S OWN TERMS.
+  // THE QUESTION'S OWN FINDINGS, WHERE A PROJECTION RESOLVED.
   //
-  // With a projection, the boundary is the first thing the QUESTION asked
-  // about that the evidence did not establish — which is what a reader is
-  // actually looking for. Without one it falls back to the Pattern
-  // ladder's own conservative boundary, which is only drawn where an
-  // established run exists to end.
+  // These are the rows a reader asked about, in the question's terms
+  // rather than the Pattern's. The briefing summarises them and the ladder
+  // renders them, so both surfaces answer the same question.
+  //
+  // The single "boundary" row that used to be picked out here — the first
+  // thing the question asked about that the evidence did not establish —
+  // is gone with the callout it fed. The short answer's own "Main
+  // limitation" sentence names it, and "Still open" lists it with the
+  // others, so choosing one row for a third treatment only repeated them.
   const questionRows = detail.questionFindings
     ? deriveQuestionFindings(detail.questionFindings, components, sourceClassesByComponent)
     : [];
-  // A row established by NOTHING is a harder stop than one established in
-  // part, so it is preferred even when the projection ordered a partial
-  // row first. "Partly established" is progress; "not established" is the
-  // edge of what the evidence reaches, which is what a reader is asking
-  // about when they ask where it stops.
-  const boundary =
-    questionRows.length > 0
-      ? (questionRows.find((r) => r.state === "UNRESOLVED") ??
-        questionRows.find((r) => r.state === "PARTIAL") ??
-        null)
-      : ladder.boundary;
 
   // THE BRIEFING — QUICK UNDERSTANDING, ABOVE THE PROOF AND NEVER INSTEAD
   // OF IT.
@@ -437,38 +429,16 @@ export default function ResearchDetailPage() {
             ))}
           </div>
 
-          {/* WHAT REMAINS UNRESOLVED, AND WHY.
-              This said "The evidence stops at: …", which describes ATLAS's
-              own workflow rather than the reader's knowledge. Nobody asked
-              where our evidence collection ended; they asked what is still
-              unknown. So the block now names the unresolved thing and the
-              reason it is unresolved, and nothing about the process.
-              The heading also separates the two cases the rest of the
-              product works hard to keep apart: evidence that was checked
-              and did not establish something, versus a research run that
-              was blocked from checking at all. */}
-          {boundary && (
-            // A quiet callout, not a divider-and-text block. A flat
-            // border-top read as one more paragraph of the answer; a soft
-            // amber wash — restrained enough that it is not the red/alarm
-            // tone this product reserves for a positive contradiction —
-            // gives the one thing most worth a reader's attention its own
-            // visual weight without dramatising it.
-            <div
-              className="mt-5 rounded-xl border border-[rgba(251,191,36,0.16)] bg-[rgba(251,191,36,0.04)] p-4"
-              data-testid="answer-boundary"
-            >
-              <p className="eyebrow" style={{ color: "#fcd34d" }}>
-                {boundary.coverage === "BLOCKED" ? "Research limitation" : "Still unresolved"}
-              </p>
-              <p className="mt-1.5 text-[0.9rem] font-medium leading-snug text-[var(--atlas-text)]">
-                {boundary.label}
-              </p>
-              <p className="mt-1.5 text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]">
-                {findingExplanation(boundary).join(" ")}
-              </p>
-            </div>
-          )}
+          {/* THE UNRESOLVED CALLOUT THAT USED TO SIT HERE IS GONE.
+              It named the single most important open check and explained
+              it — which the short answer's own "Main limitation" sentence
+              now does, two paragraphs above, in the same words drawn from
+              the same persisted reason code. On a live Raydium result the
+              two rendered back to back and said the same thing twice, and
+              the "Still open" section below said it a third time.
+              Nothing is lost: the limitation is still stated in the
+              answer, every open check is listed below, and each one is
+              read in full in the ladder. */}
 
           {/* WHAT THE ANSWER RESTS ON — ONE NUMBER, AND ONLY THIS ONE.
               This used to read "4 sources read · 2 not used as evidence".
@@ -504,7 +474,11 @@ export default function ResearchDetailPage() {
            Nothing beneath it was removed: the ladder, the evidence, the
            snapshots and the full audit all continue unchanged. ------- */}
       {finished && (
-        <ResultBriefing keyFindings={briefing.keyFindings} unresolved={briefing.unresolved} />
+        <ResultBriefing
+          keyFindings={briefing.keyFindings}
+          unresolved={briefing.unresolved}
+          unresolvedMore={briefing.unresolvedMore}
+        />
       )}
 
       {/* ---- 2. THE CLAIMS, AND LEVEL 2 INSIDE THEM ------------------ */}
