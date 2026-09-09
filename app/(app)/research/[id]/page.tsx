@@ -10,6 +10,7 @@ import { AtlasHeader } from "@/src/client/components/atlas-header";
 import { DeveloperDetails } from "@/src/client/components/developer-details";
 import { type EvidenceRole } from "@/src/client/components/evidence-document-card";
 import { ResearchProgress } from "@/src/client/components/research-progress";
+import { ResultBriefing } from "@/src/client/components/result-briefing";
 import { ResultLadder } from "@/src/client/components/result-ladder";
 import { OutcomeBadge } from "@/src/client/components/verdict-badge";
 import {
@@ -20,7 +21,7 @@ import {
   groupEvidenceByDocument,
   isTerminal,
   jobOutcome,
-  researchAnswer,
+  resultBriefing,
   relativeAge,
   type EvidenceItemLike,
 } from "@/src/client/research-model";
@@ -157,12 +158,9 @@ export default function ResearchDetailPage() {
   const projectName = job.projectName ?? job.projectTicker ?? "Unresolved project";
   const finished = isTerminal(job.state);
   const outcome = jobOutcome({ state: job.state, verdict: proof?.verdict ?? null });
-  const answer = researchAnswer({
-    verdict: proof?.verdict ?? null,
-    outcomeKind: outcome.kind,
-    projectName: job.projectName,
-    components,
-  });
+  // The briefing is derived further down, once the finding rows it reads
+  // exist — it must summarise exactly the rows this page renders below it,
+  // never a separately-derived set that could disagree with them.
 
   // Evidence roles come from PERSISTED relationships only — S8's citation
   // binding first, then S5's component sets. An excluded row is labelled
@@ -304,6 +302,28 @@ export default function ResearchDetailPage() {
         questionRows.find((r) => r.state === "PARTIAL") ??
         null)
       : ladder.boundary;
+
+  // THE BRIEFING — QUICK UNDERSTANDING, ABOVE THE PROOF AND NEVER INSTEAD
+  // OF IT.
+  //
+  // It reads the SAME rows the ladder below renders: the question
+  // projection where one resolved, the Pattern ladder otherwise. Deriving
+  // it from anything else would let the summary at the top of the page
+  // disagree with the detail underneath it, which is the one failure this
+  // layer must not have.
+  //
+  // Nothing is recomputed and nothing is re-decided: statuses, reason copy
+  // and coverage are all canonical and arrive here already resolved.
+  const briefingRows =
+    questionRows.length > 0 ? questionRows : [...ladder.mechanism, ...ladder.value];
+  const briefing = resultBriefing({
+    verdict: proof?.verdict ?? null,
+    outcomeKind: outcome.kind,
+    projectName: job.projectName,
+    components,
+    rows: briefingRows,
+  });
+  const answer = briefing.shortAnswer;
 
   return (
     <main className="enter flex flex-col gap-5 pb-6">
@@ -475,6 +495,16 @@ export default function ResearchDetailPage() {
             </p>
           )}
         </section>
+      )}
+
+      {/* ---- 1b. QUICK UNDERSTANDING, BEFORE THE PROOF ---------------
+           Key findings as one scannable table, then the checks that are
+           still open. Both are derived from the same rows the ladder
+           below renders, so this cannot say anything the detail does not.
+           Nothing beneath it was removed: the ladder, the evidence, the
+           snapshots and the full audit all continue unchanged. ------- */}
+      {finished && (
+        <ResultBriefing keyFindings={briefing.keyFindings} unresolved={briefing.unresolved} />
       )}
 
       {/* ---- 2. THE CLAIMS, AND LEVEL 2 INSIDE THEM ------------------ */}

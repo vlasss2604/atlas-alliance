@@ -979,14 +979,15 @@ export function researchAnswer(input: AnswerInput): string[] {
     }
     case "CANCELLED":
       return [`This research was cancelled before it reached a conclusion.`];
+    // These two leads are shared with the result briefing below, so the top
+    // of a result and this answer can never drift into two different
+    // sentences for one run state. The wording is unchanged.
     case "STOPPED_AT_LIMIT":
-      sentences.push(
-        `This research stopped at its limit before covering everything it set out to check about ${subject}.`,
-      );
+    case "NO_CONCLUSION": {
+      const lead = OUTCOME_LEADS[input.outcomeKind ?? "VERDICT"];
+      if (lead) sentences.push(lead(subject));
       break;
-    case "NO_CONCLUSION":
-      sentences.push(`This research finished without producing a Proof for ${subject}.`);
-      break;
+    }
     default:
       // No lead. The lists below are the answer.
       break;
@@ -1673,4 +1674,291 @@ export function deriveResultLadder(
     firstEstablished === -1 || firstOpen === -1 ? null : (mechanism[firstOpen] ?? null);
 
   return { mechanism, value, boundary, derivable: components.length > 0 };
+}
+
+/* ------------------------------------------------------------------ *
+ * RESULT BRIEFING — THE TOP OF A FINISHED RESULT
+ * ------------------------------------------------------------------ */
+
+// WHAT THIS LAYER IS, AND WHAT IT IS FORBIDDEN TO BE.
+//
+// A finished result already carries everything a reader needs, spread
+// across the ladder, the evidence and the audit. What it did not carry was
+// a way to understand the ANSWER without reading the Proof: the top of the
+// page said "Partially supported" and then, at most, three sentences that
+// never mentioned the partially-established findings at all, because
+// `researchAnswer`'s verdict path reads SUPPORTED, CONTRADICTED and
+// INSUFFICIENT_EVIDENCE and silently skips PARTIALLY_SUPPORTED. On a run
+// whose components are mostly partial — the ordinary shape of a real
+// result — the summary was close to empty.
+//
+// This is PRESENTATION ONLY, and the boundary is absolute:
+//
+//   IT READS persisted component statuses, the persisted reason codes
+//   already rendered as `ResultRow.reason`, the coverage classification,
+//   and the outcome kind. That is the whole input.
+//
+//   IT NEVER reruns research, calls a model, reinterprets a source,
+//   creates evidence, changes a component verdict, changes the Proof
+//   verdict or confidence, or infers recipient, control or causation.
+//
+// NO FREE TEXT REACHES THIS LAYER, AND THAT IS A DELIBERATE EXCLUSION.
+//
+// `findingMicroAnswer` may put an admitted Evidence summary on a ladder
+// row, where it sits beside that row's own provenance and reads as the
+// source's statement. The briefing has no such frame — a sentence at the
+// top of a result reads as ATLAS's own conclusion. So every cell here is
+// derived from a TYPED field, and a summary like "Bought-back RAY tokens
+// are held by the protocol at a public on-chain address" can never be
+// promoted into a system-level claim about protocol holdings, burns,
+// recipients, current execution or holder benefit. Protocol-held RAY has
+// no typed carrier; therefore it has no cell here.
+
+export interface KeyFinding {
+  // The persisted component. Carried for keys and tests — NEVER rendered.
+  component: string;
+  // The claim, in the same words the ladder below uses. Never an enum.
+  check: string;
+  result: string;
+  tone: VerdictTone;
+  // What the evidence reached, from typed state and persisted reason codes
+  // only. Null where neither has anything to say.
+  established: string | null;
+  blocked: boolean;
+}
+
+export interface UnresolvedItem {
+  component: string;
+  label: string;
+  detail: string;
+  blocked: boolean;
+}
+
+export interface ResultBriefing {
+  shortAnswer: string[];
+  keyFindings: KeyFinding[];
+  unresolved: UnresolvedItem[];
+}
+
+export interface BriefingInput {
+  verdict: string | null;
+  outcomeKind: OutcomeKind;
+  projectName: string | null;
+  components: { component: string; status: string }[];
+  // Already-derived rows — the question projection where one resolved, the
+  // Pattern ladder otherwise. Derived by the caller so this layer cannot
+  // pick a different set of findings than the page renders below it.
+  rows: readonly ResultRow[];
+}
+
+function stateTone(state: RealityState): VerdictTone {
+  switch (state) {
+    case "VERIFIED":
+      return "supported";
+    case "PARTIAL":
+      return "partial";
+    case "NOT_HAPPENING":
+      return "negative";
+    case "UNRESOLVED":
+      return "insufficient";
+    default:
+      return "neutral";
+  }
+}
+
+// THE THIRD COLUMN, AND WHY IT NEVER REACHES FOR A SUMMARY.
+//
+// A blocked row speaks with its limitation, because there is no result to
+// state and borrowing evidence copy would read as one. Otherwise `shows`
+// is the typed restatement of the row's own state, and where that is null
+// — which is exactly the unresolved case — the persisted reason code
+// explains why, falling back to the state's own sentence when the run
+// recorded no code. Every one of those four is already rendered elsewhere
+// on this page from the same fields, so the briefing cannot disagree with
+// the detail below it.
+function establishedCell(row: ResultRow): string | null {
+  if (row.coverage === "BLOCKED") return row.limitation;
+  if (row.shows !== null) return row.shows;
+  if (row.reason !== null) return row.reason;
+  // NEITHER SPOKE, SO THE STATE ITSELF DOES.
+  //
+  // `shows` is null exactly on an unresolved row, and a run can reach one
+  // with no persisted reason code at all. Leaving the cell empty made the
+  // most important rows in the table — the ones that came back short — the
+  // only rows that said nothing. This is the same typed sentence
+  // `findingMicroAnswer` falls back to, so the table and the ladder agree.
+  const phrase = COMPONENT_PHRASES[row.component] ?? null;
+  if (row.state === "UNRESOLVED") {
+    return phrase === null
+      ? "This was not established."
+      : `${capitalise(phrase)} was not established.`;
+  }
+  return null;
+}
+
+export function keyFindingsFrom(rows: readonly ResultRow[]): KeyFinding[] {
+  return rows
+    .filter((r) => r.state !== "NOT_ASSESSED")
+    .map((r) => ({
+      component: r.component,
+      check: r.label,
+      result: r.stateLabel,
+      tone: stateTone(r.state),
+      established: establishedCell(r),
+      blocked: r.coverage === "BLOCKED",
+    }));
+}
+
+// WHAT IS STILL OPEN — AND THE THREE OUTCOMES WHERE THIS LIST MUST BE
+// EMPTY.
+//
+// On a COMPLETED run, an unresolved row means "attempted, came back short":
+// a limit of the public evidence, worth naming. On a FAILED, cancelled or
+// still-running one it cannot carry that meaning — the same row may simply
+// be a component the run never reached — so naming it as a research result
+// would report a product fault as a finding about the project. That is the
+// exact error 7f80ebb fixed in the answer, and it is not reintroduced here
+// through a different section.
+//
+// Nothing is hidden by the omission: every persisted component status still
+// renders in the key findings above and in the ladder below.
+export function unresolvedFrom(
+  rows: readonly ResultRow[],
+  outcomeKind: OutcomeKind,
+): UnresolvedItem[] {
+  if (outcomeKind === "FAILED" || outcomeKind === "IN_PROGRESS" || outcomeKind === "CANCELLED") {
+    return [];
+  }
+  return rows
+    .filter((r) => r.state === "UNRESOLVED")
+    .map((r) => {
+      const phrase = COMPONENT_PHRASES[r.component] ?? null;
+      const blocked = r.coverage === "BLOCKED";
+      const fallback =
+        phrase === null ? "This was not established." : `${capitalise(phrase)} was not established.`;
+      return {
+        component: r.component,
+        label: r.label,
+        detail: (blocked ? r.limitation : r.reason) ?? fallback,
+        blocked,
+      };
+    });
+}
+
+// The leads for the two outcomes that are neither a clean verdict nor a
+// fault. Shared with `researchAnswer` so the briefing and the older answer
+// cannot drift into two different sentences for one state.
+const OUTCOME_LEADS: Partial<Record<OutcomeKind, (subject: string) => string>> = {
+  STOPPED_AT_LIMIT: (s) =>
+    `This research stopped at its limit before covering everything it set out to check about ${s}.`,
+  NO_CONCLUSION: (s) => `This research finished without producing a Proof for ${s}.`,
+};
+
+// THE SHORT ANSWER — THREE TO SIX SENTENCES, EACH ONE A PERSISTED STATUS.
+//
+// Order is what a reader needs first, not what the engine computed first:
+// the strongest claim a run can make leads, then what was settled, then
+// what was partly settled, then what was not, then the single limitation
+// that most affects the answer.
+//
+// PARTIALLY_SUPPORTED HAS ITS OWN SENTENCE, which is the substantive gap
+// this closes. It is worded so it can never be read as either of its
+// neighbours: it says the evidence went part of the way, and stops.
+//
+// A component with NO persisted row contributes nothing — it was not
+// assessed, and "could not verify" about it would misreport the run.
+function shortAnswerFor(input: BriefingInput, rows: readonly ResultRow[]): string[] {
+  // RUN-STATE OUTCOMES DELEGATE WHOLESALE, ON PURPOSE.
+  //
+  // A failed run's wording is settled law (7f80ebb): branch A is byte-for-
+  // byte fixed and branch B names only what survived, with the fault kept
+  // on the run. Re-deriving any of that here would be a second
+  // implementation of a rule that took a live regression to get right, so
+  // this calls the original rather than restating it.
+  if (
+    input.outcomeKind === "FAILED" ||
+    input.outcomeKind === "IN_PROGRESS" ||
+    input.outcomeKind === "CANCELLED"
+  ) {
+    return researchAnswer({
+      verdict: input.verdict,
+      outcomeKind: input.outcomeKind,
+      projectName: input.projectName,
+      components: input.components,
+    });
+  }
+
+  const subject = input.projectName ?? "this project";
+  const sentences: string[] = [];
+
+  const lead = OUTCOME_LEADS[input.outcomeKind];
+  if (lead) sentences.push(lead(subject));
+
+  const contradicted = pick(input.components, "CONTRADICTED", UNVERIFIED_PRIORITY, 2);
+  if (contradicted.length > 0) {
+    sentences.push(`On ${joinPhrases(contradicted, "and")}, the evidence indicates otherwise.`);
+  }
+
+  const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
+  if (verified.length > 0) {
+    sentences.push(`Established: ${joinPhrases(verified)}.`);
+  }
+
+  // THE SENTENCE THE OLD ANSWER NEVER HAD.
+  //
+  // "Partly established" is its own epistemic state and must read as
+  // neither of its neighbours: it is not a confirmation, and it is not a
+  // gap. The trailing clause says exactly what partial means so a reader
+  // does not round it to whichever side they expected.
+  const partial = pick(input.components, "PARTIALLY_SUPPORTED", VERIFIED_PRIORITY, 3);
+  if (partial.length > 0) {
+    sentences.push(
+      `Partly established: ${joinPhrases(partial)} — the evidence goes part of the way and stops short of the whole claim.`,
+    );
+  }
+
+  const unresolved = pick(input.components, "INSUFFICIENT_EVIDENCE", UNVERIFIED_PRIORITY, 3);
+  if (unresolved.length > 0) {
+    sentences.push(`Not established: ${joinPhrases(unresolved, "or")}.`);
+  }
+
+  // THE ONE LIMITATION THAT MOST AFFECTS THE ANSWER.
+  //
+  // A blocked check outranks an unresolved one: it means ATLAS could not
+  // look, which bears on how much the rest of the result covers. Both
+  // sentences are the row's own persisted text, and both stay statements
+  // about the evidence or the run — never about the project.
+  const boundary =
+    rows.find((r) => r.coverage === "BLOCKED") ?? rows.find((r) => r.state === "UNRESOLVED");
+  if (boundary) {
+    const detail = boundary.coverage === "BLOCKED" ? boundary.limitation : boundary.reason;
+    // THE SUBJECT IS THE PHRASE, NOT THE ROW LABEL.
+    //
+    // A ladder label is a CLAIM — "It has been observed executing" — and
+    // reading "Main limitation — It has been observed executing: …" says
+    // the opposite of what is meant. The component phrase is a noun phrase
+    // written to sit inside a sentence, so it slots in and stays true.
+    const subjectPhrase = COMPONENT_PHRASES[boundary.component] ?? null;
+    if (detail) {
+      sentences.push(
+        subjectPhrase === null
+          ? `Main limitation: ${detail}`
+          : `Main limitation — ${subjectPhrase}: ${detail}`,
+      );
+    }
+  }
+
+  // SIX, NOT MORE. The answer is meant to be read whole; a seventh sentence
+  // is one nobody reaches, and an unread sentence is not more honest than
+  // six that land.
+  return sentences.slice(0, 6);
+}
+
+export function resultBriefing(input: BriefingInput): ResultBriefing {
+  const rows = input.rows.filter((r) => r.state !== "NOT_ASSESSED");
+  return {
+    shortAnswer: shortAnswerFor(input, rows),
+    keyFindings: keyFindingsFrom(rows),
+    unresolved: unresolvedFrom(rows, input.outcomeKind),
+  };
 }
