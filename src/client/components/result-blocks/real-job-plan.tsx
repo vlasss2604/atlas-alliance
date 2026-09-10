@@ -113,10 +113,10 @@ export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: 
 
   return (
     <div className="flex flex-col gap-4" data-testid="real-job-plan">
-      <section className="panel px-4 py-3 sm:px-5" data-testid="plan-summary">
-        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-          Selector decision · real job {detail.job.id}
-        </p>
+      <details className="panel px-4 py-3 sm:px-5" data-testid="plan-summary">
+        <summary className="eyebrow cursor-pointer" style={{ color: "var(--atlas-text-dim)" }}>
+          Selector decision · real job {detail.job.id} · show
+        </summary>
         <p className="mt-1 text-[0.78rem]">
           <span className="text-[var(--atlas-text-dim)]">Selected: </span>
           {plan.orderedBlocks.map((b) => b.type).join(" → ")}
@@ -134,7 +134,7 @@ export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: 
           evidence rows, {input.flows.length} mechanism flows, {input.quantities.length} typed quantities,{" "}
           {input.entities.length} entities.
         </p>
-      </section>
+      </details>
 
       {view === "audit" ? (
         <AuditCompositionView

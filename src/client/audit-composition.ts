@@ -52,6 +52,10 @@ export interface AuditFinding {
   // The row's own sentence: what the evidence positively shows for a
   // contradiction, the persisted reason for a gap. Never composed here.
   sentence: string;
+  // The persisted codes behind that sentence, carried so a compact surface
+  // can show a SHORT form keyed on the code while the sentence stays the
+  // full record. Data passthrough; nothing is derived from it here.
+  reasonCodes: readonly string[];
   sources: number;
 }
 
@@ -64,6 +68,8 @@ export interface AuditCheck {
   check: string;
   established: string;
   state: ProofState;
+  reasonCodes: readonly string[];
+  blocked: boolean;
   sources: number;
 }
 
@@ -71,6 +77,7 @@ export interface AuditBoundaryItem {
   component: string;
   label: string;
   detail: string;
+  reasonCodes: readonly string[];
   // A gap in the PROJECT RECORD (the sources ATLAS read did not establish
   // it) as opposed to a gap in the RUN (the sources could not be opened).
   // The second is a limitation of the research and says nothing about the
@@ -112,15 +119,18 @@ export function composeAudit(args: {
 
   const proofMap = plan.orderedBlocks.find((b) => b.type === "PROOF_MAP");
   const coverage = proofMap && proofMap.type === "PROOF_MAP" ? proofMap.spec.cells : [];
+  const codes = new Map(
+    args.components.map((c) => [c.component, (c.reasonCodes ?? []).filter((x): x is string => typeof x === "string")]),
+  );
 
   return {
     question: args.input.question.text,
     verdict: args.input.verdict,
     confidenceBand: args.input.confidenceBand,
     coverage,
-    findings: auditFindings(rows),
-    checks: auditChecks(rows),
-    boundary: auditBoundary(rows, args.outcomeKind),
+    findings: auditFindings(rows, codes),
+    checks: auditChecks(rows, codes),
+    boundary: auditBoundary(rows, args.outcomeKind, codes),
     analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type)),
     evidence: (plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as AuditComposition["evidence"]) ?? null,
     deep: (plan.orderedBlocks.find((b) => b.type === "DEEP_PROOF") as AuditComposition["deep"]) ?? null,
@@ -143,11 +153,21 @@ export function composeAudit(args: {
 //
 // An established check is not a finding either. An audit's findings are the
 // weaknesses; what stood is on the map and in the table.
-export function auditFindings(rows: readonly ResultRow[]): AuditFinding[] {
+export function auditFindings(
+  rows: readonly ResultRow[],
+  codes: ReadonlyMap<string, readonly string[]> = new Map(),
+): AuditFinding[] {
   const toFinding = (r: ResultRow, sentence: string | null): AuditFinding | null => {
     const state = proofStateOfRung(r.state);
     if (state === null || sentence === null) return null;
-    return { component: r.component, label: r.label, state, sentence, sources: r.admittedCount };
+    return {
+      component: r.component,
+      label: r.label,
+      state,
+      sentence,
+      reasonCodes: codes.get(r.component) ?? [],
+      sources: r.admittedCount,
+    };
   };
   const contradicted = rows.filter((r) => r.state === "NOT_HAPPENING").map((r) => toFinding(r, r.shows ?? r.reason));
   const partial = rows.filter((r) => r.state === "PARTIAL").map((r) => toFinding(r, r.reason));
@@ -168,19 +188,24 @@ export function auditFindings(rows: readonly ResultRow[]): AuditFinding[] {
 // evidence reached something, and its persisted `reason` where it did not.
 // Nothing is read from a fragment and no project statement is invented to
 // fill the left-hand column.
-export function auditChecks(rows: readonly ResultRow[]): AuditCheck[] {
+export function auditChecks(
+  rows: readonly ResultRow[],
+  codes: ReadonlyMap<string, readonly string[]> = new Map(),
+): AuditCheck[] {
   return rows.flatMap((r) => {
     const state = proofStateOfRung(r.state);
     if (state === null) return [];
+    const blocked = r.coverage === "BLOCKED";
     return [
       {
         component: r.component,
         check: r.label,
-        established:
-          r.coverage === "BLOCKED"
-            ? (r.limitation ?? "Sources for this check could not be opened.")
-            : (r.shows ?? r.reason ?? "—"),
+        established: blocked
+          ? (r.limitation ?? "Sources for this check could not be opened.")
+          : (r.shows ?? r.reason ?? "—"),
         state,
+        reasonCodes: codes.get(r.component) ?? [],
+        blocked,
         sources: r.admittedCount,
       },
     ];
@@ -200,16 +225,27 @@ export function auditChecks(rows: readonly ResultRow[]): AuditCheck[] {
 // because "attribution not established" and "state not fully live" are the
 // boundaries an audit exists to name. Nothing is inferred, and a row with
 // no stated reason contributes no sentence.
-export function auditBoundary(rows: readonly ResultRow[], outcomeKind: OutcomeKind): AuditBoundaryItem[] {
+export function auditBoundary(
+  rows: readonly ResultRow[],
+  outcomeKind: OutcomeKind,
+  codes: ReadonlyMap<string, readonly string[]> = new Map(),
+): AuditBoundaryItem[] {
   const unresolved: AuditBoundaryItem[] = unresolvedFrom(rows, outcomeKind).map((u: UnresolvedItem) => ({
     component: u.component,
     label: u.label,
     detail: u.detail,
+    reasonCodes: codes.get(u.component) ?? [],
     kind: u.blocked ? "COULD_NOT_CHECK" : "NOT_ESTABLISHED",
   }));
   const partial: AuditBoundaryItem[] = rows
     .filter((r) => r.state === "PARTIAL" && r.reason !== null)
-    .map((r) => ({ component: r.component, label: r.label, detail: r.reason!, kind: "PARTLY_ESTABLISHED" }));
+    .map((r) => ({
+      component: r.component,
+      label: r.label,
+      detail: r.reason!,
+      reasonCodes: codes.get(r.component) ?? [],
+      kind: "PARTLY_ESTABLISHED",
+    }));
   // Partial checks first — they are the sharper boundaries — then the
   // unestablished ones, then what could not be checked at all, each group
   // in ladder order.

@@ -16,7 +16,8 @@ import {
 import { AuditCompositionView } from "../src/client/components/result-blocks/audit-composition";
 import { chooseAnalyticalBlocks, proofStateOf, type AnalyticalOutputInputV1 } from "../src/client/output-plan";
 import { OUTPUT_PLAN_FIXTURES, outputPlanFixture } from "../src/client/output-plan-fixtures";
-import { deriveResultLadder, type LadderComponentInput } from "../src/client/research-model";
+import { SHORT_REASON } from "../src/client/components/result-blocks/audit-composition";
+import { deriveResultLadder, REASON_CODE_EXPLANATIONS, type LadderComponentInput } from "../src/client/research-model";
 
 // AUDIT OUTPUT V1 — A COMPOSITION MODE, NOT A SECOND ENGINE.
 //
@@ -63,11 +64,16 @@ describe("the audit is structurally a different page", () => {
       const h = html(f.key);
       const at = (id: string) => h.indexOf(`data-testid="${id}"`);
       expect(at("block-audit-verdict"), f.key).toBeGreaterThan(-1);
-      expect(at("block-proof-map"), f.key).toBeGreaterThan(at("block-audit-verdict"));
-      expect(at("block-audit-findings"), f.key).toBeGreaterThan(at("block-proof-map"));
+      // Coverage sits INSIDE the masthead as a compact grid; the full map
+      // is a depth layer after everything that is scanned.
+      expect(at("audit-coverage-grid"), f.key).toBeGreaterThan(at("block-audit-verdict"));
+      expect(at("block-audit-findings"), f.key).toBeGreaterThan(at("audit-coverage-grid"));
       expect(at("block-claim-reality"), f.key).toBeGreaterThan(at("block-audit-findings"));
       expect(at("block-not-verified"), f.key).toBeGreaterThan(at("block-claim-reality"));
-      expect(at("block-deep-proof"), f.key).toBeGreaterThan(at("block-not-verified"));
+      expect(at("block-proof-map"), f.key).toBeGreaterThan(at("block-not-verified"));
+      expect(at("block-deep-proof"), f.key).toBeGreaterThan(at("block-proof-map"));
+      // One cell per check, in the grid.
+      expect(h.match(/data-testid="coverage-cell"/g)?.length ?? 0, f.key).toBe(audit(f.key).coverage.length);
       // The research answer block is absent: an audit does not open with prose.
       expect(h, f.key).not.toContain('data-testid="block-answer"');
     }
@@ -356,3 +362,84 @@ describe("the dev route's audit mode", () => {
     ]);
   });
 });
+
+/* ------------------------------------------------------------------ */
+/* 7. COMPRESSION IS VISUAL, NEVER SEMANTIC                            */
+/* ------------------------------------------------------------------ */
+
+describe("the compressed audit folds text; it does not remove it", () => {
+  it("every short form is keyed on a code that has a full sentence, and never strengthens it", () => {
+    for (const [code, short] of Object.entries(SHORT_REASON)) {
+      expect(REASON_CODE_EXPLANATIONS[code], code).toBeTruthy();
+      expect(short, code).toMatch(/^[A-Z]/);
+      expect(short.length, code).toBeLessThanOrEqual(40);
+      // Describes the record, never the project: no verdict words, no
+      // accusation, no cause.
+      expect(short, code).not.toMatch(/\b(false|failed|fake|lied|fraud|caused|because|proves?|confirm)/i);
+      expect(short, code).not.toContain("_");
+    }
+    // And every code with copy has a short form, so a tile never falls
+    // back to a clamped sentence for a reason the product already names.
+    for (const code of Object.keys(REASON_CODE_EXPLANATIONS)) {
+      expect(SHORT_REASON[code], code).toBeTruthy();
+    }
+  });
+
+  it("every finding tile keeps its full sentence in the DOM beneath the short form", () => {
+    for (const f of OUTPUT_PLAN_FIXTURES) {
+      const a = audit(f.key);
+      const h = html(f.key);
+      const tiles = h.match(/data-testid="audit-finding"/g)?.length ?? 0;
+      expect(tiles, f.key).toBe(a.findings.length);
+      expect(h.match(/data-testid="finding-sentence"/g)?.length ?? 0, f.key).toBe(a.findings.length);
+      for (const x of a.findings) expect(h, `${f.key} ${x.component}`).toContain(escape(x.sentence));
+    }
+  });
+
+  it("every claim row keeps its full sentence in the fold, and shows a short form above it", () => {
+    for (const f of OUTPUT_PLAN_FIXTURES) {
+      const a = audit(f.key);
+      const h = html(f.key);
+      expect(h.match(/data-testid="claim-row"/g)?.length ?? 0, f.key).toBe(a.checks.length);
+      for (const c of a.checks) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
+      // The short "found" cell is never a raw code and never a sentence
+      // written here: it is a phrase, a short form, or a state label.
+      const founds = [...h.matchAll(/data-testid="claim-found">([^<]*)</g)].map((m) => m[1]);
+      for (const text of founds) expect(text, f.key).not.toMatch(/[A-Z]{3,}_[A-Z_]+/);
+    }
+  });
+
+  it("every boundary chip carries its full detail, and the three kinds stay apart", () => {
+    for (const f of OUTPUT_PLAN_FIXTURES) {
+      const a = audit(f.key);
+      const h = html(f.key);
+      expect(h.match(/data-testid="boundary-item"/g)?.length ?? 0, f.key).toBe(a.boundary.length);
+      for (const b of a.boundary) expect(h, `${f.key} ${b.component}`).toContain(escape(b.detail));
+      // A blocked check is chipped "Not checked", never "Not established".
+      const blocked = a.boundary.filter((b) => b.kind === "COULD_NOT_CHECK");
+      if (blocked.length > 0) expect(h).toContain("Not checked");
+    }
+  });
+
+  it("the masthead is a fraction and a distribution, not a paragraph", () => {
+    for (const f of OUTPUT_PLAN_FIXTURES) {
+      const a = audit(f.key);
+      const h = html(f.key);
+      const established = a.coverage.filter((c) => c.state === "ESTABLISHED").length;
+      expect(h, f.key).toContain('data-testid="audit-fraction"');
+      expect(h, f.key).toMatch(new RegExp(`>${established}</span><span[^>]*>/ ${a.coverage.length}</span>`));
+      const chips = h.match(/data-testid="audit-distribution"[\s\S]*?<\/ul>/)?.[0] ?? "";
+      const shown = [...chips.matchAll(/data-state="([A-Z_]+)"/g)].map((m) => m[1]);
+      const nonZero = ["ESTABLISHED", "PARTLY_ESTABLISHED", "CONTRADICTED", "NOT_ESTABLISHED"].filter(
+        (s) => a.coverage.some((c) => c.state === s),
+      );
+      expect(shown, f.key).toEqual(nonZero);
+      // Subordinate, still present.
+      expect(h, f.key).toContain("Coverage counts checks, not quality.");
+    }
+  });
+});
+
+function escape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+}

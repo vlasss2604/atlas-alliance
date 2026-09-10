@@ -795,6 +795,12 @@ const COMPONENT_PHRASES: Record<string, string> = {
   DURABILITY_BASIS: "how durable the mechanism is",
 };
 
+// The phrase, for a surface that needs the SUBJECT of a check without the
+// sentence around it. Null where the component has none.
+export function componentPhrase(component: string): string | null {
+  return COMPONENT_PHRASES[component] ?? null;
+}
+
 // Which findings a reader actually needs first. Documentation and governance
 // establish that something is SPECIFIED; execution, current state and net
 // effect establish that it HAPPENS. The second kind decides more, so it leads

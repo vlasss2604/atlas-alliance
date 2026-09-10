@@ -86,10 +86,10 @@ export default async function DevOutputPlanPage({
         ))}
       </nav>
 
-      <section className="panel px-4 py-3 sm:px-5" data-testid="plan-summary">
-        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-          Selector decision · fixture {fixture.key}
-        </p>
+      <details className="panel px-4 py-3 sm:px-5" data-testid="plan-summary">
+        <summary className="eyebrow cursor-pointer" style={{ color: "var(--atlas-text-dim)" }}>
+          Selector decision · fixture {fixture.key} · show
+        </summary>
         <p className="mt-1 text-[0.78rem]">
           <span className="text-[var(--atlas-text-dim)]">Selected: </span>
           {plan.orderedBlocks.map((b) => b.type).join(" → ")}
@@ -102,7 +102,7 @@ export default async function DevOutputPlanPage({
           ))}
           {plan.rejected.length === 0 && <li>Nothing declined.</li>}
         </ul>
-      </section>
+      </details>
 
       {view === "audit" ? (
         <AuditCompositionView

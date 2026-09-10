@@ -45,6 +45,20 @@ seven audit invariants (not established ≠ false; absence ≠ absence;
 documented ≠ approved ≠ activated ≠ executing; transaction ≠ mechanism
 executed; address ≠ role; burn ≠ net deflation; measurement ≠ attribution).
 
+### Compression (visual only)
+
+Top = scan, bottom = inspect. The masthead is a verdict, a fraction
+("0 / 10 checks established"), the distribution as chips and a bar; on a
+desk a single-column coverage list sits beside it, and the full proof map
+is a depth layer after the boundary. Findings are tiles (check, state chip,
+one short fact); claim vs reality is a stacked row per check on a handset
+and a three-column comparison on a desk; the boundary is chips in three
+groups. Every short fact is `SHORT_REASON[code]`, a closed map over the same
+vocabulary as `REASON_CODE_EXPLANATIONS` (a test requires both directions
+of coverage), and EVERY full sentence stays in the DOM beneath a
+`<details>` — compression folds text, it never removes or rewrites it. No
+page-level horizontal overflow at 430 or 1440.
+
 ### Dev surface
 
 `/dev/output-plan?view=audit` on both modes — `&fixture=A..E` and
