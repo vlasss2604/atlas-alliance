@@ -2,66 +2,61 @@
 
 > Overwrite this file each round. Never append.
 
-## NONE — dynamic on-chain reactivation V1 + production fact applicability
+## ANALYTICAL OUTPUT INTELLIGENCE V1 — deterministic block selection
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
-Cloud-safe focused tests only.
+Focused tests only.
 
-### PART A — the applicability map was unreachable in production
+### What it is
 
-`onchainFactAppliesToComponent` was right; `loadEvidenceRows` was scoped to
-`(job, step, component)`, so a BURN filed at EXECUTION_EVIDENCE was never
-offered to NET_EFFECT. The loader now selects a union of the component's own
-Evidence plus this job's Evidence whose persisted `onchain_fact_kind` the
-closed map declares relevant, with the job predicate outside the union. The
-kind list is derived from the same map (`applicableFactKindsForComponent`),
-never restated. Documentary rows carry a NULL kind and cannot cross. The map
-is still exactly `BURN -> NET_EFFECT`.
+One pure function, `chooseAnalyticalBlocks(input)` in
+`src/client/output-plan.ts`, sitting where the result presentation was
+missing its rule:
 
-### PART B — one bounded reactivation, after the controller
+```
+QUESTION → RESEARCH → EVIDENCE → PROOF → chooseAnalyticalBlocks → UI
+```
 
-`onchain-reactivation.ts`, called from `run-job.ts` between
-`runResearchController` and `reconcileOutstandingComponents`.
+Given the structured record of a finished Research it returns which of the
+approved result blocks (ANSWER, PROOF_MAP, METRIC, TABLE, CHART, FLOW,
+TIMELINE, ENTITY, EVIDENCE_SNAPSHOT, DEEP_PROOF) that record justifies, in
+what order, resting on which component results and Evidence rows — and, for
+every block it declines, a closed reason. NONE is a decision, not an absence.
 
-Eligible iff: a terminal attempt exists; no on-chain operation was ever
-issued for `(job, component)`; and `selectOnchainIntents` now returns an
-intent with the locators THIS job has admitted by now. The unit is only
-`runStructuredOnchainAcquisition` — no attempt row, no query, no search, no
-fetch, no render, no model call.
+### Shape, deliberately small
 
-One-shot is derived from trace (`FETCH_ATTEMPTED` /
-`CANDIDATE_SKIPPED_BUDGET` with a canonical on-chain `target_ref`), written
-before the call, so a failure consumes the opportunity and a redelivery
-repeats nothing. No schema field was added for it.
+- No persistence, no service, no orchestration, no model, no agent.
+- Input is a structural subset of `ResearchJobDetail` (components, admitted
+  Evidence, `mechanism.flows`, verdict, question findings) plus two
+  reference carriers the API does not project yet: `quantities` (typed
+  on-chain amounts, by Evidence id and fact kind) and `entities` (addresses
+  with a claimed role and the component that would establish it).
+  `inputFromResearchJobDetail` fills what the payload carries and leaves
+  those two EMPTY rather than guessed, so on a real payload today METRIC /
+  TABLE / CHART / ENTITY are correctly declined.
+- Every state in a plan is a presentation of a persisted status (one map,
+  `proofStateOf`, with the ladder's asymmetry). A measurement's state comes
+  from its Evidence row's admission, never from the component it bears on.
+- The selector performs no arithmetic: every amount in a plan is an amount
+  in the input. Unknown stays null. Attribution of a supply change to the
+  mechanism is NOT_ESTABLISHED whenever stated — nothing in the record
+  establishes causation, and nothing disproves it.
+- Intent and question findings ORDER blocks and pick which metrics survive
+  the cap; they never admit a block.
 
-### PART C — the floor is one authorised chain deep
+### Dev surface
 
-`ONCHAIN_RESERVED_SOURCE_OPENS = 1 + MAX_PROMOTION_DEPTH` (4), derived from
-the promotion rules, capped at half the ceiling, inside an unchanged total
-(24 for INTERNAL_ALPHA_V1). Capacity is held while any work-queue component
-admits on-chain acquisition and has not had its opportunity — `pendingComponents`
-emptiness is no longer a release condition, and a component with no locator
-YET keeps the floor because the read it unblocks is what the floor is for.
+`/dev/output-plan?fixture=A..E` — five invented records (value capture;
+supply effect; governance state; sparse; wallet flow) → selector → the
+existing blocks via `selected-blocks.tsx`, with the selector's own
+selected/declined list printed above. Production-gated like the showcase.
 
-### PART D — the chain proved offline
+### Known limits
 
-late locator → ACCOUNT_INFO → TOKEN_ACCOUNTS_BY_OWNER → SIGNATURES_FOR_ADDRESS
-→ TRANSACTION_DETAIL → one BURN Evidence row at EXECUTION_EVIDENCE →
-NET_EFFECT reads it through typed applicability →
-`SUPPLY_REDUCTION_NOT_ESTABLISHED` clears, `NET_SUPPLY_CHANGE_NOT_ESTABLISHED`
-remains, status `PARTIALLY_SUPPORTED`, never `SUPPORTED`.
-
-### Accepted limitation
-
-A reactivated acquisition is indistinguishable in the audit from an ordinary
-on-chain one (same operation types, same reason codes, null attempt id).
-Labelling it needs a new trace enum value, i.e. a migration — deliberately
-not done.
-
-### Standing boundaries
-
-- Applicability grants visibility, never admission.
-- Reactivation is newly-unblocked work, never a retry.
-- A failure consumes the opportunity; there is no free retry in V1.
-- Every RPC still spends one unit of the one canonical sourceOpens ledger.
-- No Pattern change, no Research Memory, no historical locator reuse.
+- Quantities and entities are not projected by the job-detail API; a
+  later step must project persisted on-chain facts and admitted locators.
+- Intent → component relevance lives in the Pattern (CORE, server). The
+  client selector uses the question projection's findings for relevance;
+  with none, everything is relevant.
+- TIMELINE dates come from `publishedAt` / `observedAt` only; a milestone
+  with neither is shown undated.

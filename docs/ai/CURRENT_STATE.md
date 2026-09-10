@@ -27,6 +27,25 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## A RESULT CHOOSES ITS OWN BLOCKS, AND SAYS WHICH ONES IT DECLINED
+
+`chooseAnalyticalBlocks` (`src/client/output-plan.ts`) is the deterministic
+rule between a finished Proof and the result blocks in
+`components/result-blocks/`. It takes a structural subset of the job-detail
+payload plus two reference carriers (`quantities`, `entities`) and returns
+the justified blocks in order with what each rests on, and a closed
+rejection reason for every block it declined. No persistence, no model, no
+arithmetic on quantities, no state stronger than the persisted status it
+presents. `/dev/output-plan?fixture=A..E` shows it choosing from five
+invented records; `tests/ui-output-plan.test.ts` pins positive and negative
+selection and the invariants (unknown ≠ zero, measurement ≠ cause, executed
+flag ≠ observed transfer, address ≠ role).
+
+**Not yet projected by the API:** typed on-chain amounts and admitted
+locators. `inputFromResearchJobDetail` leaves `quantities` and `entities`
+empty, so a real payload today yields ANSWER / PROOF_MAP / FLOW / TIMELINE /
+EVIDENCE_SNAPSHOT / DEEP_PROOF and correctly declines the rest.
+
 ## A TYPED CHAIN FACT NOW ACTUALLY REACHES THE COMPONENT IT BEARS ON
 
 `onchainFactAppliesToComponent` was correct and **unreachable**. The

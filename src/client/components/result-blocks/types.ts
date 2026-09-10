@@ -7,10 +7,10 @@
 // flow, comparable rows as a table, a capture as evidence.
 //
 // NOTHING HERE READS THE ENGINE, AND NOTHING HERE DECIDES ANYTHING. Every
-// block takes data and renders it. The adapter that will one day choose
-// which block a real finding belongs in is deliberately NOT built yet: the
-// presentation language is approved first, and a selection rule written
-// before that would encode a layout nobody has agreed to.
+// block takes data and renders it. The rule that chooses which of these
+// blocks a real record justifies lives in `src/client/output-plan.ts`
+// (`chooseAnalyticalBlocks`), written after this language was approved so
+// that it selects from an agreed vocabulary rather than inventing one.
 //
 // ONE STATE VOCABULARY FOR THE WHOLE RESULT. Every block that shows how far
 // the evidence got uses `ProofState` and nothing else, so a reader meets the

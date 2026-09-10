@@ -52,10 +52,11 @@ import { ValueFlowBlock } from "./value-flow";
 // evidence card do not look alike, and a reader should be able to tell what
 // kind of thing they are looking at before reading a word of it.
 //
-// NOTHING HERE SELECTS BLOCKS. A real result will render only the blocks its
-// findings actually justify, and the rule that decides that is deliberately
-// not written yet — the presentation language is agreed first. This page
-// shows every block at once, which no real result ever would.
+// NOTHING HERE SELECTS BLOCKS. A real result renders only the blocks its
+// record justifies — that rule is `chooseAnalyticalBlocks` in
+// `src/client/output-plan.ts`, and /dev/output-plan shows it choosing. This
+// page shows every block at once, which no real result ever would: it is
+// what ATLAS CAN express, not what a given Research needs.
 export function ResultShowcase() {
   return (
     <main className="enter flex flex-col gap-4 pb-6" data-testid="result-showcase">
