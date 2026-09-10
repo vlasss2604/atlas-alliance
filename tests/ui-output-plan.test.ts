@@ -135,10 +135,11 @@ describe("materially different records produce different plans", () => {
     expect(delta.state).toBe("ESTABLISHED");
     expect(fx("B").input.components.find((c) => c.component === "NET_EFFECT")!.status).toBe("CONTRADICTED");
     expect(block("B", "PROOF_MAP")!.spec.cells.find((c) => c.component === "NET_EFFECT")!.state).toBe("CONTRADICTED");
-    // Three propositions, three states.
-    const claims = Object.fromEntries(m.spec.claims.map((c) => [c.kind, c.state]));
-    expect(claims.NET_SUPPLY_REDUCTION).toBe("CONTRADICTED");
-    expect(claims.MECHANISM_ATTRIBUTION).toBe("NOT_ESTABLISHED");
+    // The claim beside it is the engine's NET_EFFECT result, copied — and
+    // no attribution claim exists, because upstream carries none.
+    expect(m.spec.claims).toEqual([
+      { component: "NET_EFFECT", state: "CONTRADICTED", evidenceIds: ["b-delta"] },
+    ]);
     // Two supply readings are a two-row table and NOT a chart.
     expect(block("B", "TABLE")!.spec.rows).toHaveLength(2);
     expect(rejection("B", "CHART")).toBe("INSUFFICIENT_ORDERED_POINTS");
@@ -161,10 +162,12 @@ describe("materially different records produce different plans", () => {
     // A state question leads with the timeline.
     expect(t.indexOf("TIMELINE")).toBe(2);
     const events = block("C", "TIMELINE")!.spec.events;
-    expect(events.map((e) => e.kind)).toEqual(["DOCUMENTED", "APPROVED", "ACTIVATED", "EXECUTED"]);
+    // CURRENT_STATE is in the record and partly established. It dates NO
+    // milestone: "live now" is not "was switched on", and the selector does
+    // not infer the one from the other.
+    expect(events.map((e) => e.kind)).toEqual(["DOCUMENTED", "APPROVED", "EXECUTED"]);
     expect(events.find((e) => e.kind === "EXECUTED")!.date).toBeNull();
     expect(events.find((e) => e.kind === "EXECUTED")!.state).toBe("NOT_ESTABLISHED");
-    expect(events.find((e) => e.kind === "ACTIVATED")!.state).toBe("PARTLY_ESTABLISHED");
   });
 
   it("D — sparse: answer, proof map, evidence, deep proof, and nothing analytical", () => {
@@ -358,27 +361,66 @@ describe("the selector cannot make a claim the record did not", () => {
     expect(src).not.toMatch(/parseFloat|parseInt|Number\(q\.amountRaw|reduce\(/);
   });
 
-  it("never states a cause: attribution is NOT_ESTABLISHED whenever it is stated", () => {
+  it("states no cause: upstream carries no attribution proposition, so the plan carries none", () => {
     for (const f of OUTPUT_PLAN_FIXTURES) {
-      for (const b of chooseAnalyticalBlocks(f.input).orderedBlocks) {
-        if (b.type !== "METRIC") continue;
-        for (const c of b.spec.claims) {
-          if (c.kind === "MECHANISM_ATTRIBUTION") expect(c.state, f.key).toBe("NOT_ESTABLISHED");
-        }
+      const json = JSON.stringify(chooseAnalyticalBlocks(f.input));
+      expect(json, f.key).not.toMatch(/ATTRIBUTION|CAUSAL|CAUSE/i);
+    }
+    // And the selector does not hold a verdict of its own to hand out.
+    const src = readFileSync(SELECTOR, "utf-8");
+    expect(src).not.toMatch(/ATTRIBUTION/);
+    expect(src).not.toMatch(/state:\s*"(NOT_ESTABLISHED|CONTRADICTED|ESTABLISHED|PARTLY_ESTABLISHED)"\s*,?\s*evidenceIds/);
+  });
+
+  it("does not become a second NET_EFFECT reducer: the measured direction grades nothing", () => {
+    const b = fx("B").input;
+    // Upstream NET_EFFECT absent: the delta is still a metric, and there is
+    // no claim beside it — nothing is manufactured from INCREASED.
+    const without = chooseAnalyticalBlocks({
+      ...b,
+      components: b.components.filter((c) => c.component !== "NET_EFFECT"),
+      quantities: b.quantities.filter((x) => x.component !== "NET_EFFECT" || x.factKind === "TOTAL_SUPPLY_DELTA").map((x) => (x.factKind === "TOTAL_SUPPLY_DELTA" ? { ...x, component: "EXECUTION_EVIDENCE", step: 4 } : x)),
+    });
+    const m = without.orderedBlocks.find((x) => x.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(m.spec.metrics.some((x) => x.factKind === "TOTAL_SUPPLY_DELTA")).toBe(true);
+    expect(m.spec.claims).toEqual([]);
+    // Upstream NET_EFFECT present: its state is copied EXACTLY, whatever the
+    // measured direction says. A DECREASED delta beside a CONTRADICTED
+    // component still shows CONTRADICTED; SUPPORTED shows ESTABLISHED.
+    for (const [status, state] of [
+      ["SUPPORTED", "ESTABLISHED"],
+      ["PARTIALLY_SUPPORTED", "PARTLY_ESTABLISHED"],
+      ["CONTRADICTED", "CONTRADICTED"],
+      ["INSUFFICIENT_EVIDENCE", "NOT_ESTABLISHED"],
+    ] as const) {
+      for (const direction of ["DECREASED", "INCREASED", "UNCHANGED"] as const) {
+        const p = chooseAnalyticalBlocks({
+          ...b,
+          components: b.components.map((c) => (c.component === "NET_EFFECT" ? { ...c, status } : c)),
+          quantities: b.quantities.map((x) => (x.factKind === "TOTAL_SUPPLY_DELTA" ? { ...x, direction } : x)),
+        });
+        const metric = p.orderedBlocks.find((x) => x.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+        expect(metric.spec.claims, `${status} ${direction}`).toEqual([{ component: "NET_EFFECT", state, evidenceIds: ["b-delta"] }]);
+        // The measurement's own state is unaffected by the verdict it bears on.
+        expect(metric.spec.metrics.find((x) => x.factKind === "TOTAL_SUPPLY_DELTA")!.state).toBe("ESTABLISHED");
       }
     }
-    // A measured DECREASE establishes a net reduction as a measurement and still attributes nothing.
-    const decreased = chooseAnalyticalBlocks({
-      ...fx("B").input,
-      quantities: fx("B").input.quantities.map((x) => (x.factKind === "TOTAL_SUPPLY_DELTA" ? { ...x, amountRaw: "-6700000000000", direction: "DECREASED" as const } : x)),
+  });
+
+  it("CURRENT_STATE alone cannot create an ACTIVATED milestone", () => {
+    const c = fx("C").input;
+    const p = chooseAnalyticalBlocks({
+      ...c,
+      components: c.components.map((x) => (x.component === "CURRENT_STATE" ? { ...x, status: "SUPPORTED" } : x)),
+      evidence: c.evidence.map((e) => (e.id === "c-state" ? { ...e, mechanismState: "LIVE", directness: "DIRECT" } : e)),
     });
-    const claims = Object.fromEntries(block("B", "METRIC")!.spec.claims.map((c) => [c.kind, c.state]));
-    expect(claims.NET_SUPPLY_REDUCTION).toBe("CONTRADICTED");
-    const claimsDec = Object.fromEntries(
-      (decreased.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>).spec.claims.map((c) => [c.kind, c.state]),
-    );
-    expect(claimsDec.NET_SUPPLY_REDUCTION).toBe("ESTABLISHED");
-    expect(claimsDec.MECHANISM_ATTRIBUTION).toBe("NOT_ESTABLISHED");
+    expect(JSON.stringify(p)).not.toContain("ACTIVATED");
+    const events = (p.orderedBlocks.find((b) => b.type === "TIMELINE") as Extract<PlannedBlock, { type: "TIMELINE" }>).spec.events;
+    expect(events.map((e) => e.kind)).toEqual(["DOCUMENTED", "APPROVED", "EXECUTED"]);
+    // Only components with milestone propositions date one.
+    for (const f of OUTPUT_PLAN_FIXTURES) {
+      expect(JSON.stringify(chooseAnalyticalBlocks(f.input)), f.key).not.toContain("ACTIVATED");
+    }
   });
 
   it("a flow's execution stage reads the executed flag, never the basis or an observed transfer", () => {

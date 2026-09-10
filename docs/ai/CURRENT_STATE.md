@@ -38,8 +38,11 @@ rejection reason for every block it declined. No persistence, no model, no
 arithmetic on quantities, no state stronger than the persisted status it
 presents. `/dev/output-plan?fixture=A..E` shows it choosing from five
 invented records; `tests/ui-output-plan.test.ts` pins positive and negative
-selection and the invariants (unknown ≠ zero, measurement ≠ cause, executed
-flag ≠ observed transfer, address ≠ role).
+selection and the invariants (unknown ≠ zero, measurement ≠ verdict, executed
+flag ≠ observed transfer, address ≠ role, CURRENT_STATE ≠ ACTIVATED). It
+grades no proposition of its own: the only claim it shows beside a
+measurement is the persisted NET_EFFECT state, and it states nothing about
+causal attribution, for which V1 has no upstream proposition.
 
 **Not yet projected by the API:** typed on-chain amounts and admitted
 locators. `inputFromResearchJobDetail` leaves `quantities` and `entities`

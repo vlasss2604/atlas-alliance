@@ -5,7 +5,6 @@ import type {
   AnalyticalOutputInputV1,
   AnalyticalOutputPlanV1,
   PlannedBlock,
-  PlannedClaim,
 } from "../../output-plan";
 import { AnalyticalTableBlock } from "./analytical-table";
 import { AnswerHeaderBlock } from "./answer-header";
@@ -65,19 +64,14 @@ const TIMELINE_KIND_LABEL: Record<TimelineEvent["kind"], string> = {
   EXECUTED: "Observed executing",
 };
 
-// The two propositions the metric strip is not allowed to imply, in the
-// same words the Golden Result settled on. The STATE beside each is the
-// plan's; only the wording lives here.
-const CLAIM_COPY: Record<PlannedClaim["kind"], { label: string; detail: string }> = {
-  NET_SUPPLY_REDUCTION: {
+// The proposition shown beside a supply measurement is the engine's own
+// component result for it. The STATE is the plan's (copied from upstream);
+// only the wording lives here, keyed by the component it presents.
+const CLAIM_COPY: Record<string, { label: string; detail: string }> = {
+  NET_EFFECT: {
     label: "Net supply reduction over the measured interval",
     detail:
-      "Settled directly by the measured direction of total supply across the interval, and by nothing else.",
-  },
-  MECHANISM_ATTRIBUTION: {
-    label: "Attribution of any reduction to the documented mechanism",
-    detail:
-      "A separate question the measurement does not answer. Nothing in this record establishes that the mechanism caused a change in supply, and nothing disproves it.",
+      "The research's own Net effect check, shown beside the measurement it bears on. The measurement is a number; this is the proposition the engine graded from it.",
   },
 };
 
@@ -186,9 +180,9 @@ function Block({
         source: "On-chain reads",
       }));
       const claims: MetricAttribution[] = block.spec.claims.map((c) => ({
-        label: CLAIM_COPY[c.kind].label,
+        label: CLAIM_COPY[c.component]?.label ?? componentLabel(c.component),
         state: c.state,
-        detail: CLAIM_COPY[c.kind].detail,
+        detail: CLAIM_COPY[c.component]?.detail ?? "",
       }));
       return <MetricGridBlock metrics={metrics} claims={claims} />;
     }

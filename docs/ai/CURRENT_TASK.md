@@ -38,9 +38,10 @@ every block it declines, a closed reason. NONE is a decision, not an absence.
   `proofStateOf`, with the ladder's asymmetry). A measurement's state comes
   from its Evidence row's admission, never from the component it bears on.
 - The selector performs no arithmetic: every amount in a plan is an amount
-  in the input. Unknown stays null. Attribution of a supply change to the
-  mechanism is NOT_ESTABLISHED whenever stated — nothing in the record
-  establishes causation, and nothing disproves it.
+  in the input. Unknown stays null. The proposition shown beside a supply
+  measurement is the persisted NET_EFFECT component state, copied exactly;
+  with no NET_EFFECT result there is no claim. Causal attribution has no
+  upstream proposition in V1 and is never stated by the selector.
 - Intent and question findings ORDER blocks and pick which metrics survive
   the cap; they never admit a block.
 
@@ -59,4 +60,5 @@ selected/declined list printed above. Production-gated like the showcase.
   client selector uses the question projection's findings for relevance;
   with none, everything is relevant.
 - TIMELINE dates come from `publishedAt` / `observedAt` only; a milestone
-  with neither is shown undated.
+  with neither is shown undated. ACTIVATED is omitted: no V1 component has
+  activation as its proposition, and CURRENT_STATE (live now) is not it.

@@ -223,20 +223,18 @@ export interface PlannedMetric {
   coverage: { observed: number; expected: number } | null;
 }
 
-// A PROPOSITION THE METRICS INVITE, WITH THE STATE THE RECORD SUPPORTS FOR
-// IT. Stated beside the numbers precisely so the numbers do not have to
-// imply it. Two closed kinds:
+// THE CANONICAL PROPOSITION A MEASUREMENT BEARS ON, SHOWN BESIDE IT.
 //
-//   NET_SUPPLY_REDUCTION  — settled by the measured direction of a
-//                           TOTAL_SUPPLY_DELTA, and by nothing else.
-//   MECHANISM_ATTRIBUTION — whether the researched mechanism CAUSED any
-//                           change. NOTHING in the V1 record establishes
-//                           causation (the engine's own
-//                           NET_SUPPLY_EFFECT_DOES_NOT_PROVE says so), and
-//                           nothing disproves it either, so this is
-//                           NOT_ESTABLISHED whenever it is stated at all.
+// A supply measurement invites the reader to conclude something about net
+// effect. The selector does not draw that conclusion: it shows, next to the
+// number, the state the ENGINE already persisted for the component that
+// proposition belongs to (NET_EFFECT), copied exactly. When the record has
+// no such component result, no claim is shown — a missing verdict is
+// absent presentation data, never a verdict the selector supplies. Causal
+// attribution has no upstream proposition in V1 and is therefore never
+// stated here at all.
 export interface PlannedClaim {
-  kind: "NET_SUPPLY_REDUCTION" | "MECHANISM_ATTRIBUTION";
+  component: string;
   state: ProofState;
   evidenceIds: string[];
 }
@@ -386,13 +384,16 @@ const QUANTITY_FACT_KINDS = new Set([
   "TOKEN_ACCOUNT_BALANCE",
 ]);
 
-// The four milestones a timeline dates, each read from exactly one
-// component. An APPROVED milestone comes from GOVERNANCE_BASIS and from
-// nothing else — an established execution says nothing about it.
+// The milestones a timeline dates, each read from exactly one component
+// whose proposition IS that milestone. An APPROVED milestone comes from
+// GOVERNANCE_BASIS and from nothing else — an established execution says
+// nothing about it. ACTIVATED IS DELIBERATELY ABSENT: no component in the
+// V1 record has "the mechanism was switched on" as its proposition —
+// CURRENT_STATE grades whether the mechanism is live NOW, which is a
+// different claim — so the milestone is omitted rather than inferred.
 const TIMELINE_KIND_OF_COMPONENT: Record<string, PlannedTimelineEvent["kind"]> = {
   MECHANISM_SPEC: "DOCUMENTED",
   GOVERNANCE_BASIS: "APPROVED",
-  CURRENT_STATE: "ACTIVATED",
   EXECUTION_EVIDENCE: "EXECUTED",
 };
 const TIMELINE_KIND_ORDER: Record<PlannedTimelineEvent["kind"], number> = {
@@ -629,35 +630,30 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
         components: uniqueKeys(ctx, metrics.map((m) => m.component)),
         evidenceIds: metrics.map((m) => m.evidenceId),
       },
-      spec: { metrics, claims: claimsFor(metrics) },
+      spec: { metrics, claims: claimsFor(ctx, metrics) },
     },
   ];
 }
 
-// THE PROPOSITIONS THE STRIP MUST NOT IMPLY, STATED WITH THEIR OWN STATES.
+// THE PROPOSITION THE STRIP MUST NOT IMPLY, COPIED FROM UPSTREAM.
 //
-// A measured direction of total supply settles exactly one thing: whether
-// supply ended the interval lower than it began. INCREASED or UNCHANGED
-// contradicts a net reduction; DECREASED establishes one AS A MEASUREMENT.
-// Neither says a word about what caused it — a burn of 5 against issuance
-// of 11.7 still ends higher — so attribution is stated separately and is
-// NOT_ESTABLISHED: not proven, and not disproven either.
-function claimsFor(metrics: PlannedMetric[]): PlannedClaim[] {
-  const deltas = metrics.filter((m) => m.factKind === "TOTAL_SUPPLY_DELTA" && m.direction !== null);
-  if (deltas.length === 0) return [];
-  const directions = new Set(deltas.map((d) => d.direction));
-  const ids = deltas.map((d) => d.evidenceId);
-  // Two intervals pointing opposite ways settle nothing; the engine refuses
-  // to average them and so does this.
-  const net: ProofState =
-    directions.size > 1
-      ? "NOT_ESTABLISHED"
-      : directions.has("DECREASED")
-        ? "ESTABLISHED"
-        : "CONTRADICTED";
+// When a total-supply measurement is on the strip, the reader will ask
+// what it means for net effect. The answer shown is the persisted
+// NET_EFFECT component result — its state, exactly — and nothing is
+// computed from the measured direction here: the engine's reducer already
+// read the same delta and graded the proposition, and a second grading in
+// the presentation layer could only agree with it or contradict it. With
+// no NET_EFFECT result in the record there is no claim.
+function claimsFor(ctx: Context, metrics: PlannedMetric[]): PlannedClaim[] {
+  const deltas = metrics.filter((m) => m.factKind === "TOTAL_SUPPLY_DELTA");
+  const netEffect = ctx.componentByName.get("NET_EFFECT");
+  if (deltas.length === 0 || !netEffect) return [];
   return [
-    { kind: "NET_SUPPLY_REDUCTION", state: net, evidenceIds: ids },
-    { kind: "MECHANISM_ATTRIBUTION", state: "NOT_ESTABLISHED", evidenceIds: ids },
+    {
+      component: netEffect.component,
+      state: proofStateOf(netEffect.status),
+      evidenceIds: deltas.map((d) => d.evidenceId),
+    },
   ];
 }
 
