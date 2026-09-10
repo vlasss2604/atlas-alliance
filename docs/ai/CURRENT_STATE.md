@@ -27,30 +27,27 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
-## AN AUDIT IS THE SAME RECORD READ FOR ITS WEAKNESSES
+## AN AUDIT IS WHAT DESERVES ATTENTION AFTER THE VERIFICATION
 
 `composeAudit` (`src/client/audit-composition.ts`) is a composition mode over
-the existing result, and V2 says it once: the Proof's verdict; the research
-screen's own lead sentence as the summary; coverage as counts (never a
-fraction); ONE table of every assessed check — CHECK · WHAT ATLAS FOUND ·
-STATE, short forms keyed on the engine's reason codes with the full
-sentence folded beneath, BLOCKED rows chipped "Not checked"; ONE "where the
-audit stops" block chosen by the short answer's own main-limitation
-priority (blocked → unresolved → partial with reason); then the selector's
-analytical blocks, the proof map as depth, the same key evidence and deep
-proof. Every state is a persisted component status through
-`deriveResultLadder`; every sentence is a derivation the result screen
-already runs. No severity, no score, no second verdict, no ENTITY.
-The top table is the KEY CHECKS (`auditHighlights`: contradiction → stated
-partial → stated gap → established → blocked, ladder order, capped at 3);
-the proof map is compact (bar and counts); the deep audit lists every
-check. Rendered at `/dev/output-plan?view=audit` for fixtures and real
-jobs, with the historical-semantics banner kept, and at
-`/dev/audit-showcase` for `GOLDEN_AUDIT_FIXTURE` — the invented, balanced
-record that shows what the audit can express when the evidence supports
-it, beside the real sparse one that shows what it does when it does not.
-`tests/ui-audit-output.test.ts` pins the structure, the upstream-only rule,
-the three-layer rule and the seven audit invariants.
+the existing result that surfaces exceptions, not checks: the Proof's
+verdict and the research screen's own lead sentence; WHAT STOOD UP
+(established, ladder order, ≤3; partly established stands in when nothing
+was); MAIN GAPS (2–4, round-robin over could-not-check → not established →
+partly established with a reason, ladder order within); CONTRADICTIONS
+(persisted CONTRADICTED only, else "No contradiction established"); the
+selector's analytical blocks kept only where they bear on a gap or a
+contradiction; the selector's evidence filtered to the selected findings;
+and one collapsed FULL AUDIT TRAIL holding the compact proof map and every
+check with its state and sources — the only complete list on the page.
+Every state is a persisted component status through `deriveResultLadder`;
+every sentence is a derivation the result screen already runs. No
+severity, no score, no second verdict, no ENTITY. A sparse record yields a
+sparse audit. Rendered at `/dev/output-plan?view=audit` (fixtures and real
+jobs, historical-semantics banner kept) and `/dev/audit-showcase`
+(`GOLDEN_AUDIT_FIXTURE`). `tests/ui-audit-output.test.ts` pins the
+structure, the one-thing-per-check rule, the finding-tied filters, the
+upstream-only rule and the seven audit invariants.
 
 ## A RESULT CHOOSES ITS OWN BLOCKS, AND SAYS WHICH ONES IT DECLINED
 

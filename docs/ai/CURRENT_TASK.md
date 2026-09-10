@@ -2,35 +2,37 @@
 
 > Overwrite this file each round. Never append.
 
-## GOLDEN AUDIT FIXTURE V1 — what an audit can express
+## AUDIT OUTPUT V3 — exceptions first
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
-Presentation and fixture data only; the selector is unchanged.
+Presentation only; the selector is unchanged.
 
-### Two records, one composition
+### Principle
 
-`/dev/audit-showcase` renders `GOLDEN_AUDIT_FIXTURE` — invented, balanced
-(3 established · 2 partly · 1 contradicted · 1 not established · 1 blocked),
-structured enough that the same `chooseAnalyticalBlocks` justifies four
-metrics, a flow, a table, a chart and a timeline — through the same
-`composeAudit` / `AuditCompositionView` as the real job at
-`/dev/output-plan?job=…&view=audit`. Golden = full expressive capability;
-real = evidence-constrained sparse result. Both stay; neither is edited to
-look like the other. No entities: nothing in the fixture binds an address
-to a role.
+An audit is what deserves attention after the verification. The main page
+lists most checks not at all:
 
-### Three layers, three purposes
+1. AUDIT VERDICT — verdict, band, the research screen's own lead sentence
+2. WHAT STOOD UP — established checks, ladder order, at most 3; if none,
+   the partly-established ones stand in (and are then not also gaps)
+3. MAIN GAPS — 2–4: one of each open kind in the existing priority
+   (could not check → not established → partly established with a
+   reason), then round again; ladder order within; never scored
+4. CONTRADICTIONS — only checks whose persisted state is CONTRADICTED;
+   otherwise "No contradiction established." — never a gap dressed up
+5. analytical blocks ONLY when their `refs.components` touch a gap or a
+   contradiction (a standalone measure that explains no exception is set
+   aside — composition, not truth; the research view still shows it)
+6. KEY EVIDENCE — the selector's choice filtered to the selected findings'
+   components, falling back to the selector's choice untouched
+7. FULL AUDIT TRAIL — one collapsed `<details>`: compact proof map, every
+   check with what ATLAS found / state / sources, full sentences, handover
 
-The top table is now the KEY CHECKS — `auditHighlights`: a contradiction
-first, then partly established with a stated reason, then not established
-with a stated reason, then what stood, blocked last; ladder order within;
-capped at THREE, never scored. Their full sentences sit in one fold
-beneath; the complete list is the deep audit's and nowhere else. The proof map is `compact` — the bar and the counts, no third
-list. The deep audit lists every check with its sources. On a desk the
-chart and the timeline are paired, as the research showcase pairs them.
+Removed from the main page: the key-checks table, the counts dashboard,
+the proof map beside the verdict, the deep-audit block. Every check is
+still in the trail, once.
 
 ### Dev surfaces
 
-- `/dev/audit-showcase` — the golden audit, with links to the real sparse
-  audit and the golden research result
+- `/dev/audit-showcase` — the golden audit
 - `/dev/output-plan?view=audit` — `&fixture=A..E` and `&job=<uuid>`

@@ -82,14 +82,20 @@ export interface AuditComposition {
   summary: string | null;
   coverage: { step: number; component: string; state: ProofState }[];
   checks: AuditCheck[];
-  // THE THREE DECISION-RELEVANT CHECKS, for the top of the page. The full
-  // set is `checks`, shown ONLY in the deep audit; repeating all of them
-  // was the noise V2 removed. Order: a contradiction
-  // first, then partly established with a stated reason, then not
-  // established with a stated reason, then what stood — ladder order
-  // within each — and a blocked check last, because it is a fact about the
-  // run. Capped, not scored.
-  highlights: AuditCheck[];
+  // WHAT STOOD UP: the established checks, ladder order, at most three.
+  // When nothing was established, the partly-established checks stand in
+  // for them — and are then not also listed as gaps; a check is one thing
+  // on this page.
+  stoodUp: AuditCheck[];
+  // THE MAIN GAPS, two to four: one of each open kind in the priority the
+  // short answer already uses — could not check, not established, partly
+  // established with a stated reason — then round again, ladder order
+  // within a kind, until the cap. Round-robin so a record with four
+  // blocked checks shows what ELSE is open too; never a score.
+  gaps: AuditBoundaryItem[];
+  // CONTRADICTIONS: checks whose persisted state is CONTRADICTED. Only
+  // that state — never a gap dressed as one.
+  contradictions: AuditCheck[];
   boundary: AuditBoundaryItem[];
   // WHERE THE AUDIT STOPS: the single most important open boundary, chosen
   // by the priority the short answer already uses for its "main
@@ -98,9 +104,15 @@ export interface AuditComposition {
   // establish, else the first partly-established check with a stated
   // reason. Ladder order within each. Null when every check stood.
   gap: AuditBoundaryItem | null;
-  // The selector's analytical blocks, exactly as chosen — an audit shows a
-  // flow or a metric only when the research result would have.
+  // The selector's analytical blocks, exactly as chosen, FILTERED to those
+  // that bear on a gap or a contradiction. An audit shows a measure only
+  // when it helps explain an exception; a block the selector chose that
+  // touches nothing open is omitted here — composition, not truth.
   analytical: PlannedBlock[];
+  // The selector's evidence choice, filtered to the components of the
+  // selected findings (contradictions, gaps, what stood up). When nothing
+  // survives the filter the selector's choice stands unfiltered rather
+  // than the page showing none.
   evidence: Extract<PlannedBlock, { type: "EVIDENCE_SNAPSHOT" }> | null;
   deep: Extract<PlannedBlock, { type: "DEEP_PROOF" }> | null;
   plan: AnalyticalOutputPlanV1;
@@ -131,6 +143,21 @@ export function composeAudit(args: {
 
   const boundary = auditBoundary(rows, args.outcomeKind, codes);
   const checks = auditChecks(rows, codes);
+  const stoodUp = auditStoodUp(checks);
+  const standing = new Set(stoodUp.map((c) => c.component));
+  const gaps = auditGaps(boundary.filter((b) => !standing.has(b.component)));
+  const contradictions = checks.filter((c) => !c.blocked && c.state === "CONTRADICTED");
+  const open = new Set([...gaps.map((g) => g.component), ...contradictions.map((c) => c.component)]);
+  const selected = new Set([...open, ...standing]);
+  const explains = (b: PlannedBlock) => b.refs.components.some((k) => open.has(k.component));
+  const evidenceBlock = plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as AuditComposition["evidence"];
+  const evidenceById = new Map(args.input.evidence.map((e) => [e.id, e]));
+  const tied = evidenceBlock
+    ? evidenceBlock.spec.evidenceIds.filter((id) => {
+        const c = evidenceById.get(id)?.component;
+        return c !== null && c !== undefined && selected.has(c);
+      })
+    : [];
   const briefing = resultBriefing({
     verdict: args.input.verdict,
     outcomeKind: args.outcomeKind,
@@ -146,11 +173,16 @@ export function composeAudit(args: {
     summary: briefing.shortAnswer[0] ?? null,
     coverage,
     checks,
-    highlights: auditHighlights(checks),
+    stoodUp,
+    gaps,
+    contradictions,
     boundary,
     gap: auditGap(rows, boundary),
-    analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type)),
-    evidence: (plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as AuditComposition["evidence"]) ?? null,
+    analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type) && explains(b)),
+    evidence:
+      evidenceBlock && tied.length > 0
+        ? { ...evidenceBlock, spec: { evidenceIds: tied } }
+        : (evidenceBlock ?? null),
     deep: (plan.orderedBlocks.find((b) => b.type === "DEEP_PROOF") as AuditComposition["deep"]) ?? null,
     plan,
   };
@@ -254,16 +286,33 @@ export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBou
 // THREE, NOT FIVE. The top of an audit is the three checks most useful for
 // understanding it quickly; the complete list, with sources, is the deep
 // audit and lives nowhere else. Same priority, shorter cut.
-export const MAX_AUDIT_HIGHLIGHTS = 3;
 
-export function auditHighlights(checks: readonly AuditCheck[], cap = MAX_AUDIT_HIGHLIGHTS): AuditCheck[] {
-  const stated = (c: AuditCheck) => c.reasonCodes.some((code) => typeof code === "string" && code.length > 0);
-  const groups: AuditCheck[][] = [
-    checks.filter((c) => !c.blocked && c.state === "CONTRADICTED"),
-    checks.filter((c) => !c.blocked && c.state === "PARTLY_ESTABLISHED" && stated(c)),
-    checks.filter((c) => !c.blocked && c.state === "NOT_ESTABLISHED" && stated(c)),
-    checks.filter((c) => !c.blocked && c.state === "ESTABLISHED"),
-    checks.filter((c) => c.blocked),
-  ];
-  return groups.flat().slice(0, cap);
+export const MAX_STOOD_UP = 3;
+export const MAX_GAPS = 4;
+
+// WHAT STOOD UP. Established, ladder order, at most three. If nothing was
+// established, the partly-established checks stand in — they are what
+// held, part of the way — so a sparse record still says what it can.
+export function auditStoodUp(checks: readonly AuditCheck[], cap = MAX_STOOD_UP): AuditCheck[] {
+  const established = checks.filter((c) => !c.blocked && c.state === "ESTABLISHED");
+  if (established.length > 0) return established.slice(0, cap);
+  return checks.filter((c) => !c.blocked && c.state === "PARTLY_ESTABLISHED").slice(0, cap);
+}
+
+// THE MAIN GAPS. One of each kind in priority order, then round again,
+// ladder order within a kind, until the cap. Four blocked checks on a
+// sparse record would otherwise fill the whole list with "not checked"
+// and say nothing about what the sources did not establish.
+export function auditGaps(boundary: readonly AuditBoundaryItem[], cap = MAX_GAPS): AuditBoundaryItem[] {
+  const kinds: AuditBoundaryItem["kind"][] = ["COULD_NOT_CHECK", "NOT_ESTABLISHED", "PARTLY_ESTABLISHED"];
+  const queues = kinds.map((k) => boundary.filter((b) => b.kind === k));
+  const out: AuditBoundaryItem[] = [];
+  while (out.length < cap && queues.some((q) => q.length > 0)) {
+    for (const q of queues) {
+      if (out.length >= cap) break;
+      const next = q.shift();
+      if (next) out.push(next);
+    }
+  }
+  return out;
 }

@@ -2,25 +2,22 @@
 
 import type { AuditBoundaryItem, AuditCheck, AuditComposition } from "../../audit-composition";
 import { CONFIDENCE_LABELS, componentPhrase, verdictLabel } from "../../research-model";
-import { DeepProofEntryBlock } from "./deep-proof-entry";
 import { ProofMapBlock } from "./proof-map";
 import { SelectedBlocks } from "./selected-blocks";
 import { PROOF_STATE, type ProofState } from "./types";
 
-// AUDIT OUTPUT V2 — ONE INSTRUMENT, NOT MANY BOXES.
+// AUDIT OUTPUT V3 — EXCEPTIONS FIRST.
 //
-// The audit answers, in this order: what is the result; what stood up and
-// what did not; what is the main gap; what evidence supports that; then the
-// verification layer. The first screen is one verdict, one sentence, the
-// counts, and ONE table. Nothing on it is a paragraph.
+// AN AUDIT IS WHAT DESERVES ATTENTION AFTER THE VERIFICATION. Not every
+// check: what stood up, what is open, what the record contradicts, and the
+// evidence tied to those — in that order. The main page lists no check
+// twice and lists most checks not at all; the complete list is one
+// collapsed trail at the bottom, with the coverage shape inside it.
 //
-// WHAT V1 HAD AND V2 DOES NOT. V1 showed the same ten statuses four times —
-// a coverage grid, finding tiles, a comparison table and a chip list — and
-// each was individually honest and together they were noise. V2 keeps the
-// table, because it is the one form that carries check, finding and state
-// in a single row, and folds the rest into it: the map moves below as
-// depth, the tiles and chips are gone, and the boundary becomes ONE block
-// naming the single most important open check.
+// Analytical blocks appear only when they bear on a gap or a contradiction.
+// A measure the selector chose that explains no exception is set aside —
+// composition, never truth: the plan is unchanged and the research view
+// still shows it.
 //
 // Nothing here decides a state. The verdict is the Proof's; the summary is
 // the research screen's own lead sentence; every row state is a persisted
@@ -104,26 +101,24 @@ export function AuditCompositionView({
 }) {
   return (
     <div className="flex flex-col gap-3 sm:gap-4" data-testid="audit-composition">
-      {/* 1–5 — THE INSTRUMENT. On a handset: verdict, summary, counts, the
-          table, the gap, in that order. On a desk: the verdict column at
-          the left with the gap beneath it, the table as the main area. */}
+      {/* 1–4 — THE EXCEPTIONS. Verdict and what stood up at the left; the
+          gaps and any contradiction as the main area. Nothing here is a
+          list of every check. */}
       <section className="panel panel-raised p-4 sm:p-5 lg:p-6" data-testid="block-audit-verdict">
-        <div className="grid gap-5 lg:grid-cols-[21rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:gap-x-8 lg:gap-y-5">
-          <AuditMasthead audit={audit} asOf={asOf} />
-          <div className="lg:col-start-2 lg:row-span-2 lg:border-l lg:border-[var(--hairline)] lg:pl-8">
-            <AuditTable audit={audit} />
+        <div className="grid gap-5 lg:grid-cols-[21rem_minmax(0,1fr)] lg:gap-x-8">
+          <div className="flex flex-col gap-5">
+            <AuditMasthead audit={audit} asOf={asOf} />
+            <StoodUp audit={audit} />
           </div>
-          <div className="lg:col-start-1 lg:row-start-2">
-            <AuditGap audit={audit} />
+          <div className="flex flex-col gap-5 lg:border-l lg:border-[var(--hairline)] lg:pl-8">
+            <MainGaps audit={audit} />
+            <Contradictions audit={audit} />
           </div>
         </div>
       </section>
 
-      {/* 6 — the analytical blocks the selector chose, and only those,
-          arranged for the 30-second read: the measures, the movement, the
-          exact values, then the two readings of the same periods side by
-          side on a wide screen — as the research showcase pairs them. The
-          arrangement is presentation; which blocks exist is the plan's. */}
+      {/* 5 — analytical blocks that bear on a gap or a contradiction, and
+          only those; a measure that explains no exception is not shown. */}
       {audit.analytical.length > 0 && (
         <div className="flex flex-col gap-3 sm:gap-4" data-testid="audit-analytical">
           <Analytical audit={audit} input={input} asOf={asOf} include={["METRIC"]} />
@@ -144,15 +139,10 @@ export function AuditCompositionView({
         </div>
       )}
 
-      {/* 7 — the map: a coverage SHAPE, not a third list of the checks */}
-      <section className="panel p-4 sm:p-5" data-testid="block-audit-map">
-        <ProofMapBlock compact cells={audit.coverage.map((c) => ({ label: checkLabel(audit, c.component), state: c.state }))} />
-      </section>
-
-      {/* 8 — the same evidence selection, framed for the audit */}
+      {/* 6 — evidence tied to the selected findings */}
       {audit.evidence && (
         <SelectedBlocks
-          plan={audit.plan}
+          plan={{ ...audit.plan, orderedBlocks: audit.plan.orderedBlocks.map((b) => (b.type === "EVIDENCE_SNAPSHOT" ? audit.evidence! : b)) }}
           input={input}
           include={["EVIDENCE_SNAPSHOT"]}
           answer={{ short: "", paragraphs: [] }}
@@ -161,14 +151,9 @@ export function AuditCompositionView({
         />
       )}
 
-      {/* 9 — the same verification layer */}
-      {audit.deep && (
-        <DeepProofEntryBlock
-          title="Deep audit"
-          intro="Above is what the audit found. Below is every check with the sources behind it, what they were refused for, and the full research audit."
-          rows={audit.deep.spec.rows.map((r) => ({ label: checkLabel(audit, r.component), state: r.state, sources: r.sources }))}
-        />
-      )}
+      {/* 7 — the full audit trail: every check, the coverage shape, the
+          handover — collapsed. The one place the whole list lives. */}
+      <FullAuditTrail audit={audit} />
     </div>
   );
 }
@@ -177,8 +162,9 @@ function has(audit: AuditComposition, type: AuditComposition["analytical"][numbe
   return audit.analytical.some((b) => b.type === type);
 }
 
-// One or two of the plan's blocks, through the same renderer the research
-// view uses. Renders nothing when the plan holds none of them.
+// One or two of the audit's kept blocks, through the same renderer the
+// research view uses. The plan is narrowed to the blocks the audit kept,
+// so the renderer cannot show a block the audit set aside.
 function Analytical({
   audit,
   input,
@@ -191,28 +177,18 @@ function Analytical({
   include: AuditComposition["analytical"][number]["type"][];
 }) {
   if (!include.some((t) => has(audit, t))) return null;
-  return <SelectedBlocks plan={audit.plan} input={input} include={include} answer={{ short: "", paragraphs: [] }} asOf={asOf} />;
+  const kept = new Set(audit.analytical);
+  const plan = { ...audit.plan, orderedBlocks: audit.plan.orderedBlocks.filter((b) => kept.has(b)) };
+  return <SelectedBlocks plan={plan} input={input} include={include} answer={{ short: "", paragraphs: [] }} asOf={asOf} />;
 }
 
 function checkLabel(audit: AuditComposition, component: string): string {
   return audit.checks.find((c) => c.component === component)?.check ?? component;
 }
 
-/* --------------------------- 1–3. MASTHEAD -------------------------- */
-
-// COUNTS, NOT A SCORE. "Established: 2" beside "Not established: 6" is a
-// coverage summary; "2 / 10" as a hero number reads as a grade, and a check
-// the sources did not establish is not a point lost. The subordinate line
-// says so once.
-const COUNT_ORDER: { state: ProofState; label: string }[] = [
-  { state: "ESTABLISHED", label: "Established" },
-  { state: "PARTLY_ESTABLISHED", label: "Partial" },
-  { state: "CONTRADICTED", label: "Contradicted" },
-  { state: "NOT_ESTABLISHED", label: "Not established" },
-];
+/* ---------------------------- 1. MASTHEAD --------------------------- */
 
 function AuditMasthead({ audit, asOf }: { audit: AuditComposition; asOf: string }) {
-  const n = (s: ProofState) => audit.coverage.filter((c) => c.state === s).length;
   const tone = audit.verdict ? verdictColor(audit.verdict) : "var(--atlas-text-dim)";
   return (
     <div className="flex min-w-0 flex-col" data-testid="audit-masthead">
@@ -229,30 +205,13 @@ function AuditMasthead({ audit, asOf }: { audit: AuditComposition; asOf: string 
       </p>
       <p className="mt-1.5 text-[0.7rem] text-[var(--atlas-text-dim)]">
         {audit.confidenceBand ? `${CONFIDENCE_LABELS[audit.confidenceBand] ?? audit.confidenceBand} confidence` : "No confidence band"}
+        <span className="opacity-70"> · {audit.checks.length} checks made</span>
       </p>
-
       {audit.summary && (
         <p className="mt-3 text-[0.86rem] leading-snug" data-testid="audit-summary">
           {audit.summary}
         </p>
       )}
-
-      <dl className="mt-3.5 grid grid-cols-2 gap-x-4 gap-y-1" data-testid="audit-counts">
-        {COUNT_ORDER.filter((c) => n(c.state) > 0).map((c) => (
-          <div key={c.state} className="flex items-baseline justify-between gap-2 border-b border-[var(--hairline)] pb-1" data-state={c.state}>
-            <dt className="flex items-center gap-1.5 text-[0.7rem] text-[var(--atlas-text-dim)]">
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: PROOF_STATE[c.state].color }} aria-hidden />
-              {c.label}
-            </dt>
-            <dd className="text-[0.86rem] font-semibold tabular-nums" style={{ color: PROOF_STATE[c.state].color }}>
-              {n(c.state)}
-            </dd>
-          </div>
-        ))}
-      </dl>
-      <p className="mt-2 text-[0.62rem] leading-snug text-[var(--atlas-text-dim)] opacity-80">
-        Coverage counts checks, not quality. A check the sources did not establish is not a check that failed.
-      </p>
       <p className="mt-2 line-clamp-2 text-[0.66rem] leading-snug text-[var(--atlas-text-dim)]">{audit.question}</p>
     </div>
   );
@@ -271,31 +230,136 @@ function verdictColor(verdict: string): string {
   }
 }
 
-/* -------------------------- 4. THE TABLE --------------------------- */
+/* ------------------------- 2. WHAT STOOD UP ------------------------ */
 
-// CHECK · WHAT ATLAS FOUND · STATE. The three decision-relevant checks — a
-// contradiction, the stated gaps, what stood — one line each, stacked on a
-// handset and three true columns on a desk. Their full sentences are one
-// fold below; every check with its sources is the deep audit, and only the
-// deep audit. Three layers, three purposes: what matters most, coverage at
-// a glance, complete verification.
-function AuditTable({ audit }: { audit: AuditComposition }) {
-  const rows = audit.highlights;
+function StoodUp({ audit }: { audit: AuditComposition }) {
   return (
-    <div data-testid="block-audit-table">
+    <div data-testid="block-stood-up">
+      <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>What stood up</p>
+      {audit.stoodUp.length === 0 ? (
+        <p className="mt-1.5 text-[0.76rem] text-[var(--atlas-text-dim)]" data-testid="stood-up-none">
+          Nothing was established or partly established.
+        </p>
+      ) : (
+        <ul className="mt-1.5 flex flex-col">
+          {audit.stoodUp.map((c) => (
+            <li key={c.component} className="flex items-center justify-between gap-3 border-t border-[var(--hairline)] py-1.5 first:border-t-0" data-testid="stood-up-item" data-state={c.state}>
+              <p className="min-w-0 text-[0.78rem] font-medium leading-tight">{c.check}</p>
+              <StateChip state={c.state} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* --------------------------- 3. MAIN GAPS -------------------------- */
+
+const GAP_CHIP: Record<AuditBoundaryItem["kind"], { state: ProofState; blocked: boolean }> = {
+  COULD_NOT_CHECK: { state: "NOT_ESTABLISHED", blocked: true },
+  NOT_ESTABLISHED: { state: "NOT_ESTABLISHED", blocked: false },
+  PARTLY_ESTABLISHED: { state: "PARTLY_ESTABLISHED", blocked: false },
+};
+
+// THE CORE OF THE PAGE. Two to four open checks: the label, the chip, the
+// short form of the persisted reason, and the row's own sentence beneath.
+function MainGaps({ audit }: { audit: AuditComposition }) {
+  const others = audit.boundary.length - audit.gaps.length;
+  return (
+    <div data-testid="block-main-gaps">
       <div className="flex items-baseline justify-between gap-3">
-        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Key checks</p>
-        <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">{rows.length} of {audit.checks.length}</p>
+        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Main gaps</p>
+        <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">
+          {audit.gaps.length} shown{others > 0 ? ` · ${others} more in the audit trail` : ""}
+        </p>
+      </div>
+      {audit.gaps.length === 0 ? (
+        <p className="mt-1.5 text-[0.76rem] text-[var(--atlas-text-dim)]" data-testid="gaps-none">
+          Every check the research made was established.
+        </p>
+      ) : (
+        <ol className="mt-2 grid gap-2 sm:grid-cols-2">
+          {audit.gaps.map((g) => {
+            const chip = GAP_CHIP[g.kind];
+            const s = PROOF_STATE[chip.state];
+            // A blocked check's reason code describes the record it could not
+            // reach; the fact that matters is that it could not reach it.
+            const short = g.kind === "COULD_NOT_CHECK" ? "Sources could not be opened" : shortReason(g.reasonCodes);
+            return (
+              <li key={g.component} className="flex flex-col rounded-lg border-l-2 px-3 py-2.5" style={{ borderColor: s.color, background: s.dim }} data-testid="gap-item" data-kind={g.kind}>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 text-[0.8rem] font-semibold leading-tight">{g.label}</p>
+                  <StateChip state={chip.state} blocked={chip.blocked} />
+                </div>
+                {short && <p className="mt-1.5 text-[0.76rem] leading-snug">{short}</p>}
+                <p className="mt-1 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="gap-detail">{g.detail}</p>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------ 4. CONTRADICTIONS ------------------------ */
+
+// SEPARATE FROM THE GAPS, ALWAYS. A contradiction is the one state in
+// which the record positively says otherwise; a gap is the record saying
+// nothing. When there is none the block says so in one neutral line, and
+// never borrows a gap to fill the space.
+function Contradictions({ audit }: { audit: AuditComposition }) {
+  const s = PROOF_STATE.CONTRADICTED;
+  return (
+    <div data-testid="block-contradictions">
+      <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Contradictions</p>
+      {audit.contradictions.length === 0 ? (
+        <p className="mt-1.5 text-[0.76rem] text-[var(--atlas-text-dim)]" data-testid="contradictions-none">
+          No contradiction established.
+        </p>
+      ) : (
+        <ul className="mt-2 flex flex-col gap-2">
+          {audit.contradictions.map((c) => (
+            <li key={c.component} className="rounded-lg border-l-2 px-3 py-2.5" style={{ borderColor: s.color, background: s.dim }} data-testid="contradiction-item">
+              <div className="flex items-start justify-between gap-2">
+                <p className="min-w-0 text-[0.82rem] font-semibold leading-tight">{c.check}</p>
+                <StateChip state="CONTRADICTED" />
+              </div>
+              <p className="mt-1.5 text-[0.76rem] leading-snug">{shortReason(c.reasonCodes) ?? s.label}</p>
+              <p className="mt-1 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]">{c.established} <span className="opacity-70">· {c.sources} src</span></p>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/* ------------------------ 7. FULL AUDIT TRAIL ----------------------- */
+
+// EVERY CHECK, ONCE, COLLAPSED. The coverage shape, then each check with
+// what ATLAS found, its state and its sources, then the handover to the
+// full research audit. The main page above lists none of this twice.
+function FullAuditTrail({ audit }: { audit: AuditComposition }) {
+  return (
+    <details className="panel px-4 py-3.5 sm:px-5 sm:py-4" data-testid="block-audit-trail">
+      <summary className="flex cursor-pointer items-baseline justify-between gap-3">
+        <span className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Full audit trail</span>
+        <span className="text-[0.64rem] text-[var(--atlas-text-dim)]">all {audit.checks.length} checks</span>
+      </summary>
+
+      <div className="mt-3" data-testid="block-audit-map">
+        <ProofMapBlock compact cells={audit.coverage.map((c) => ({ label: checkLabel(audit, c.component), state: c.state }))} />
       </div>
 
-      <div className="mt-2 hidden grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] gap-x-4 border-b border-[var(--hairline-strong)] pb-1.5 text-[0.58rem] font-semibold uppercase tracking-[0.06em] text-[var(--atlas-text-dim)] lg:grid">
+      <div className="mt-3 hidden grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] gap-x-4 border-b border-[var(--hairline-strong)] pb-1.5 text-[0.58rem] font-semibold uppercase tracking-[0.06em] text-[var(--atlas-text-dim)] lg:grid">
         <span>Check</span>
         <span>What ATLAS found</span>
         <span className="text-right">State</span>
       </div>
-
       <ul className="mt-1 flex flex-col">
-        {rows.map((c) => (
+        {audit.checks.map((c) => (
           <li
             key={c.component}
             className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 border-t border-[var(--hairline)] py-2 first:border-t-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] lg:items-center lg:gap-x-4"
@@ -307,72 +371,26 @@ function AuditTable({ audit }: { audit: AuditComposition }) {
             <div className="col-start-2 row-start-1 flex justify-end lg:col-start-3">
               <StateChip state={c.state} blocked={c.blocked} />
             </div>
-            <p className="col-span-2 min-w-0 text-[0.72rem] leading-snug text-[var(--atlas-text-dim)] lg:col-span-1 lg:col-start-2 lg:row-start-1" data-testid="audit-found">
+            <p className="col-span-2 min-w-0 text-[0.72rem] leading-snug text-[var(--atlas-text-dim)] lg:col-span-1 lg:col-start-2 lg:row-start-1" data-testid="audit-found" title={c.established}>
               {shortFound(c)}
               <span className="ml-1.5 text-[0.6rem] tabular-nums opacity-70">{c.sources} src</span>
             </p>
           </li>
         ))}
       </ul>
-
-      {/* The full sentences for THESE checks, folded. Not the complete list:
-          that is the deep audit's, and only the deep audit's. */}
-      <details className="mt-2 border-t border-[var(--hairline)] pt-2">
-        <summary className="cursor-pointer text-[0.64rem] text-[var(--atlas-text-dim)]">Full sentences for these checks · all {audit.checks.length} in the deep audit below</summary>
-        <ul className="mt-1.5 flex flex-col gap-1.5 text-[0.72rem] leading-snug" data-testid="audit-full">
-          {rows.map((c) => (
-            <li key={c.component}>
-              <span className="font-medium">{c.check}</span>
-              <span className="text-[var(--atlas-text-dim)]"> — {c.established}</span>
-            </li>
-          ))}
-        </ul>
-        <p className="mt-2 text-[0.62rem] leading-snug text-[var(--atlas-text-dim)]">
-          The state grades the check and nothing else. A check the sources did not establish is not a check that failed; a
-          check that could not be opened is a limit of the run, not a finding about the project.
-        </p>
-      </details>
-    </div>
-  );
-}
-
-/* --------------------------- 5. THE GAP ---------------------------- */
-
-const GAP_KIND_LABEL: Record<AuditBoundaryItem["kind"], string> = {
-  PARTLY_ESTABLISHED: "Partly established",
-  NOT_ESTABLISHED: "Not established",
-  COULD_NOT_CHECK: "Could not be checked",
-};
-
-// ONE BLOCK, ONE CHECK. The single most important open boundary, with its
-// full sentence — the one place above the fold a whole sentence is shown,
-// because this is the sentence the audit exists to deliver. The count of
-// other open checks points back at the table rather than listing them
-// again.
-function AuditGap({ audit }: { audit: AuditComposition }) {
-  const g = audit.gap;
-  const others = audit.boundary.length - (g ? 1 : 0);
-  const state: ProofState = g?.kind === "PARTLY_ESTABLISHED" ? "PARTLY_ESTABLISHED" : "NOT_ESTABLISHED";
-  return (
-    <div className="rounded-lg border-l-2 py-2.5 pl-3 pr-2" style={{ borderColor: PROOF_STATE[state].color, background: g ? PROOF_STATE[state].dim : "transparent" }} data-testid="block-audit-gap">
-      <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Where the audit stops</p>
-      {g ? (
-        <>
-          <div className="mt-1.5 flex items-start justify-between gap-2">
-            <p className="text-[0.82rem] font-semibold leading-tight" data-testid="audit-gap-check">{g.label}</p>
-            <StateChip state={state} blocked={g.kind === "COULD_NOT_CHECK"} />
-          </div>
-          <p className="mt-1.5 text-[0.74rem] leading-snug" data-testid="audit-gap-detail">{g.detail}</p>
-          <p className="mt-1.5 text-[0.62rem] text-[var(--atlas-text-dim)]">
-            {GAP_KIND_LABEL[g.kind]}
-            {others > 0 && ` · ${others} other open ${others === 1 ? "check" : "checks"} in the table`}
-          </p>
-        </>
-      ) : (
-        <p className="mt-1.5 text-[0.76rem] text-[var(--atlas-text-dim)]" data-testid="audit-gap-none">
-          Every check the research made was established.
-        </p>
-      )}
-    </div>
+      <ul className="mt-2 flex flex-col gap-1 border-t border-[var(--hairline)] pt-2 text-[0.7rem] leading-snug" data-testid="audit-full">
+        {audit.checks.map((c) => (
+          <li key={c.component}>
+            <span className="font-medium">{c.check}</span>
+            <span className="text-[var(--atlas-text-dim)]"> — {c.established}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 text-[0.62rem] leading-snug text-[var(--atlas-text-dim)]">
+        The state grades the check and nothing else. A check the sources did not establish is not a check that failed; a
+        check that could not be opened is a limit of the run, not a finding about the project.
+      </p>
+      <p className="mt-3 border-t border-[var(--hairline)] pt-3 text-[0.75rem] text-[var(--atlas-text-dim)]">Full research audit →</p>
+    </details>
   );
 }

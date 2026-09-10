@@ -8,9 +8,11 @@ import {
   auditBoundary,
   auditChecks,
   auditGap,
-  auditHighlights,
+  auditGaps,
+  auditStoodUp,
   composeAudit,
-  MAX_AUDIT_HIGHLIGHTS,
+  MAX_GAPS,
+  MAX_STOOD_UP,
   proofStateOfRung,
   type AuditComposition,
 } from "../src/client/audit-composition";
@@ -24,15 +26,16 @@ import {
   type LadderComponentInput,
 } from "../src/client/research-model";
 
-// AUDIT OUTPUT V2 — ONE INSTRUMENT, NOT MANY BOXES.
+// AUDIT OUTPUT V3 — EXCEPTIONS FIRST.
 //
-// An audit answers "what is the result, what stood up, what is the main
-// gap, what supports that?" from the SAME record, selector and blocks as
-// the research result. V2 says it once: a verdict, one sentence, the
-// counts, ONE table, one gap. These tests hold that every state shown is a
-// persisted status, every sentence is a derivation the research screen
-// already runs, the page has no duplicated summary, and the invariants an
-// audit is most tempted to break still hold.
+// An audit is what deserves attention after the verification: what stood
+// up, what is open, what the record contradicts, and the evidence tied to
+// those. The main page lists most checks not at all; the complete list is
+// one collapsed trail. These tests hold that every state shown is a
+// persisted status, every sentence a derivation the research screen
+// already runs, a contradiction is never manufactured from a gap, a sparse
+// record yields a sparse audit, and nothing is lost: every check is still
+// in the trail.
 
 const AUDIT_SRC = "src/client/audit-composition.ts";
 const AUDIT_VIEW = "src/client/components/result-blocks/audit-composition.tsx";
@@ -45,13 +48,15 @@ function codeOf(path: string): string {
     .join("\n");
 }
 
+type Fixture = { input: ReturnType<typeof outputPlanFixture>["input"]; auditComponents?: readonly LadderComponentInput[] };
 const fx = (key: string) => outputPlanFixture(key);
-const auditOf = (f: { input: AuditComposition["plan"] extends never ? never : ReturnType<typeof outputPlanFixture>["input"]; auditComponents?: readonly LadderComponentInput[] }): AuditComposition =>
+const auditOf = (f: Fixture): AuditComposition =>
   composeAudit({ input: f.input, components: f.auditComponents ?? f.input.components, outcomeKind: "VERDICT" });
-const htmlOf = (f: Parameters<typeof auditOf>[0]) =>
+const htmlOf = (f: Fixture) =>
   renderToStaticMarkup(createElement(AuditCompositionView, { audit: auditOf(f), input: f.input, asOf: "Fixture" }));
 const audit = (key: string): AuditComposition => auditOf(fx(key));
 const html = (key: string) => htmlOf(fx(key));
+const ALL: Fixture[] = [...OUTPUT_PLAN_FIXTURES, GOLDEN_AUDIT_FIXTURE];
 const rowsOf = (components: readonly LadderComponentInput[]) => {
   const l = deriveResultLadder(components);
   return [...l.mechanism, ...l.value].filter((r) => r.state !== "NOT_ASSESSED");
@@ -67,64 +72,55 @@ const row = (component: string, status: string, reasonCodes: string[] = [], cove
 function escape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
 }
+const count = (h: string, id: string) => h.match(new RegExp(`data-testid="${id}"`, "g"))?.length ?? 0;
 
 /* ------------------------------------------------------------------ */
-/* 1. STRUCTURE — fewer sections, no duplicated summary                */
+/* 1. STRUCTURE — exceptions, not a checklist                          */
 /* ------------------------------------------------------------------ */
 
-describe("the audit is one instrument", () => {
-  it("orders verdict → summary → counts → table → gap → analytical → map → evidence → deep, and nothing else at the top", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      const h = html(f.key);
+describe("the audit surfaces exceptions, not every check", () => {
+  it("orders verdict → stood up → main gaps → contradictions → evidence → trail, with no checklist and no map beside the verdict", () => {
+    for (const f of ALL) {
+      const h = htmlOf(f);
       const at = (id: string) => h.indexOf(`data-testid="${id}"`);
-      expect(at("audit-verdict-label"), f.key).toBeGreaterThan(-1);
-      expect(at("audit-counts"), f.key).toBeGreaterThan(at("audit-verdict-label"));
-      expect(at("block-audit-table"), f.key).toBeGreaterThan(at("audit-counts"));
-      expect(at("block-audit-gap"), f.key).toBeGreaterThan(at("block-audit-table"));
-      expect(at("block-audit-map"), f.key).toBeGreaterThan(at("block-audit-gap"));
-      expect(at("block-deep-proof"), f.key).toBeGreaterThan(at("block-audit-map"));
-      if (audit(f.key).summary) expect(at("audit-summary"), f.key).toBeLessThan(at("audit-counts"));
-      // Gone: the research answer, the finding tiles, the chip list, the
-      // separate comparison section, the coverage grid.
-      for (const gone of ["block-answer", "block-audit-findings", "block-not-verified", "block-claim-reality", "audit-coverage-grid", "audit-fraction"]) {
-        expect(h, `${f.key} ${gone}`).not.toContain(`data-testid="${gone}"`);
+      expect(at("audit-verdict-label")).toBeGreaterThan(-1);
+      expect(at("block-stood-up")).toBeGreaterThan(at("audit-verdict-label"));
+      expect(at("block-main-gaps")).toBeGreaterThan(at("block-stood-up"));
+      expect(at("block-contradictions")).toBeGreaterThan(at("block-main-gaps"));
+      expect(at("block-audit-trail")).toBeGreaterThan(at("block-contradictions"));
+      // The map lives INSIDE the trail, and the trail is collapsed.
+      expect(at("block-audit-map")).toBeGreaterThan(at("block-audit-trail"));
+      expect(h).toMatch(/<details[^>]*data-testid="block-audit-trail"/);
+      expect(h).not.toMatch(/<details[^>]*data-testid="block-audit-trail"[^>]*\sopen/);
+      // Gone from the main page: the research answer, any key-checks
+      // table, counts dashboard, finding tiles, chip lists, deep-proof block.
+      for (const gone of ["block-answer", "block-audit-table", "audit-counts", "audit-fraction", "block-audit-findings", "block-not-verified", "block-deep-proof", "block-claim-reality"]) {
+        expect(h, gone).not.toContain(`data-testid="${gone}"`);
       }
     }
   });
 
-  it("three layers, three purposes: key checks at the top, a coverage shape in the map, every check in the deep audit", () => {
-    for (const f of [...OUTPUT_PLAN_FIXTURES, GOLDEN_AUDIT_FIXTURE]) {
+  it("every check lives in the trail, once, and the map there lists no rows", () => {
+    for (const f of ALL) {
       const a = auditOf(f);
       const h = htmlOf(f);
-      // Top: the decision-relevant subset, capped.
-      expect(h.match(/data-testid="audit-row"/g)?.length ?? 0, f.key).toBe(a.highlights.length);
-      expect(a.highlights.length, f.key).toBeLessThanOrEqual(MAX_AUDIT_HIGHLIGHTS);
-      // Map: the bar and the counts, and NOT a list of the checks.
-      expect(h.match(/data-testid="proof-cell"/g)?.length ?? 0, f.key).toBe(0);
-      expect(h, f.key).toContain('data-testid="proof-coverage"');
-      // Deep: every check — and ONLY here is every check listed.
-      expect(h.match(/data-testid="deep-proof-row"/g)?.length ?? 0, f.key).toBe(a.checks.length);
-      expect(h.match(/data-testid="audit-full"[\s\S]*?<\/ul>/)?.[0].match(/<li/g)?.length ?? 0, f.key).toBe(a.highlights.length);
-      // The key checks' full sentences stay one fold under the table.
-      for (const c of a.highlights) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
-      // Exactly three at the top, whenever the record has three to show.
-      expect(a.highlights.length, f.key).toBe(Math.min(3, a.checks.length));
-      expect(h.indexOf('data-testid="block-audit-map"')).toBeGreaterThan(h.indexOf('data-testid="block-audit-gap"'));
+      expect(count(h, "audit-row")).toBe(a.checks.length);
+      expect(count(h, "proof-cell")).toBe(0);
+      expect(h).toContain('data-testid="proof-coverage"');
+      for (const c of a.checks) expect(h, c.component).toContain(escape(c.established));
     }
   });
 
-  it("a sparse record yields a sparse audit", () => {
+  it("a sparse record yields a sparse audit: no metric, no flow, no map on the main page, no filler", () => {
     const h = html("D");
-    for (const absent of ["block-metrics", "block-flow", "block-chart", "block-timeline", "block-entities"]) {
+    for (const absent of ["block-metrics", "block-flow", "block-chart", "block-timeline", "block-entities", "block-table"]) {
       expect(h, absent).not.toContain(`data-testid="${absent}"`);
     }
-  });
-
-  it("frames the shared depth layers as audit layers without a second component", () => {
-    const h = html("A");
-    expect(h).toContain("Deep audit");
-    expect(h).toContain("Key evidence");
-    expect(h).toContain("Where the audit stops");
+    const a = audit("D");
+    expect(a.contradictions).toEqual([]);
+    expect(h).toContain("No contradiction established.");
+    expect(a.gaps.length).toBeGreaterThanOrEqual(2);
+    expect(a.gaps.length).toBeLessThanOrEqual(MAX_GAPS);
   });
 });
 
@@ -133,15 +129,11 @@ describe("the audit is one instrument", () => {
 /* ------------------------------------------------------------------ */
 
 describe("the audit asserts nothing of its own", () => {
-  it("the verdict is the Proof's verdict, relabelled and nothing more", () => {
+  it("the verdict is the Proof's, and the summary is the research screen's own lead sentence", () => {
     for (const f of OUTPUT_PLAN_FIXTURES) {
-      expect(audit(f.key).verdict, f.key).toBe(f.input.verdict);
-      expect(audit(f.key).confidenceBand, f.key).toBe(f.input.confidenceBand);
-    }
-  });
-
-  it("the summary is the research screen's own lead sentence, not a phrasing of ours", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
+      const a = audit(f.key);
+      expect(a.verdict).toBe(f.input.verdict);
+      expect(a.confidenceBand).toBe(f.input.confidenceBand);
       const rows = rowsOf(f.input.components);
       const briefing = resultBriefing({
         verdict: f.input.verdict,
@@ -150,33 +142,34 @@ describe("the audit asserts nothing of its own", () => {
         components: f.input.components.map((c) => ({ component: c.component, status: c.status })),
         rows,
       });
-      expect(audit(f.key).summary, f.key).toBe(briefing.shortAnswer[0] ?? null);
+      expect(a.summary).toBe(briefing.shortAnswer[0] ?? null);
     }
-    // And the view composes no sentence: the only literal prose in it is
-    // the two subordinate notes.
-    const src = codeOf(AUDIT_SRC);
-    expect(src).not.toMatch(/`[^`]*\$\{[^}]*\}[^`]*(is|was|has|did)[^`]*`/);
+    expect(codeOf(AUDIT_SRC)).not.toMatch(/`[^`]*\$\{[^}]*\}[^`]*(is|was|has|did)[^`]*`/);
   });
 
-  it("every state shown equals the persisted component status, in the table, the gap and the map", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      const a = audit(f.key);
-      const status = new Map(f.input.components.map((c) => [c.component, c.status]));
-      for (const c of a.coverage) expect(c.state, `${f.key} map ${c.component}`).toBe(proofStateOf(status.get(c.component)));
-      for (const c of a.checks) expect(c.state, `${f.key} row ${c.component}`).toBe(proofStateOf(status.get(c.component)));
-      for (const c of a.highlights) expect(c.state, `${f.key} key ${c.component}`).toBe(proofStateOf(status.get(c.component)));
-      if (a.gap) {
-        const s = proofStateOf(status.get(a.gap.component));
-        expect(s === "NOT_ESTABLISHED" || s === "PARTLY_ESTABLISHED", `${f.key} gap ${a.gap.component}`).toBe(true);
+  it("every state shown equals the persisted component status, wherever it appears", () => {
+    for (const f of ALL) {
+      const a = auditOf(f);
+      const status = new Map((f.auditComponents ?? f.input.components).map((c) => [c.component, c.status]));
+      for (const c of a.checks) expect(c.state, `row ${c.component}`).toBe(proofStateOf(status.get(c.component)));
+      for (const c of a.stoodUp) expect(c.state, `stood ${c.component}`).toBe(proofStateOf(status.get(c.component)));
+      for (const c of a.contradictions) expect(proofStateOf(status.get(c.component)), `contra ${c.component}`).toBe("CONTRADICTED");
+      for (const g of a.gaps) {
+        const s = proofStateOf(status.get(g.component));
+        expect(s === "NOT_ESTABLISHED" || s === "PARTLY_ESTABLISHED", `gap ${g.component}`).toBe(true);
       }
     }
   });
 
-  it("the analytical blocks are the selector's, exactly, and never an audit variant", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      const plan = chooseAnalyticalBlocks(f.input);
-      const chosen = plan.orderedBlocks.filter((b) => ["METRIC", "FLOW", "TABLE", "CHART", "TIMELINE"].includes(b.type));
-      expect(audit(f.key).analytical, f.key).toEqual(chosen);
+  it("a check is one thing on the page: never both stood up and a gap, never both a gap and a contradiction", () => {
+    for (const f of ALL) {
+      const a = auditOf(f);
+      const stood = new Set(a.stoodUp.map((c) => c.component));
+      const gaps = new Set(a.gaps.map((g) => g.component));
+      const contra = new Set(a.contradictions.map((c) => c.component));
+      for (const c of gaps) expect(stood.has(c), c).toBe(false);
+      for (const c of contra) expect(gaps.has(c), c).toBe(false);
+      for (const c of contra) expect(stood.has(c), c).toBe(false);
     }
   });
 
@@ -187,56 +180,242 @@ describe("the audit asserts nothing of its own", () => {
       expect(src, file).not.toMatch(/risk\s*score|severity|\bscore\b/i);
       expect(src, file).not.toMatch(/fetch\(|anthropic|drizzle|getDb/i);
     }
-    // The counts are a list, not "N / M".
-    for (const f of OUTPUT_PLAN_FIXTURES) expect(html(f.key), f.key).not.toMatch(/>\s*\/\s*\d+\s*</);
+    for (const f of ALL) expect(htmlOf(f)).not.toMatch(/>\s*\/\s*\d+\s*</);
   });
 
-  it("reads no fragment: every table sentence is a row's own", () => {
-    const src = codeOf(AUDIT_SRC);
-    expect(src).not.toMatch(/fragment|summary\b(?!:)|\.match\(|parseFloat|parseInt/);
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      const rows = rowsOf(f.input.components);
+  it("reads no fragment: every sentence on the page is a row's own", () => {
+    expect(codeOf(AUDIT_SRC)).not.toMatch(/fragment|summary\b(?!:)|\.match\(|parseFloat|parseInt/);
+    for (const f of ALL) {
+      const rows = rowsOf(f.auditComponents ?? f.input.components);
       const own = new Set(rows.flatMap((r) => [r.shows, r.reason, r.limitation].filter((x): x is string => x !== null)));
-      for (const c of audit(f.key).checks) {
-        expect(own.has(c.established) || c.established === "—", `${f.key} ${c.component}`).toBe(true);
-      }
-      const g = audit(f.key).gap;
-      if (g) expect(own.has(g.detail) || /was not established\.$|^This was not established\.$/.test(g.detail), `${f.key} gap`).toBe(true);
+      const a = auditOf(f);
+      for (const c of a.checks) expect(own.has(c.established) || c.established === "—", c.component).toBe(true);
+      for (const g of a.gaps) expect(own.has(g.detail) || /was not established\.$|^This was not established\.$/.test(g.detail), g.component).toBe(true);
     }
   });
 });
 
 /* ------------------------------------------------------------------ */
-/* 3. THE TABLE                                                        */
+/* 3. WHAT STOOD UP, MAIN GAPS, CONTRADICTIONS                          */
 /* ------------------------------------------------------------------ */
 
-describe("the main audit table", () => {
-  it("one row per assessed check, in ladder order, labelled with the ladder's own claim", () => {
-    const checks = auditChecks(rowsOf(fx("C").input.components));
-    expect(checks.map((c) => c.component)).toEqual(["MECHANISM_SPEC", "GOVERNANCE_BASIS", "CURRENT_STATE", "EXECUTION_EVIDENCE"]);
-    expect(checks.map((c) => c.check)).toEqual([
-      "The project documents the mechanism",
-      "A governing decision authorises it",
-      "It is currently active",
-      "It has been observed executing",
-    ]);
-    expect(checks.some((c) => c.component === "NET_EFFECT")).toBe(false);
+describe("what stood up", () => {
+  it("is the established checks in ladder order, at most three", () => {
+    const checks = auditChecks(rowsOf([
+      row("SOURCE_OF_VALUE", "SUPPORTED"),
+      row("FLOW_PATH", "SUPPORTED"),
+      row("MECHANISM_SPEC", "SUPPORTED"),
+      row("GOVERNANCE_BASIS", "SUPPORTED"),
+      row("NET_EFFECT", "PARTIALLY_SUPPORTED", ["NET_SUPPLY_CHANGE_NOT_ESTABLISHED"]),
+    ]));
+    expect(auditStoodUp(checks).map((c) => c.component)).toEqual(["MECHANISM_SPEC", "GOVERNANCE_BASIS", "SOURCE_OF_VALUE"]);
+    expect(MAX_STOOD_UP).toBe(3);
   });
 
-  it("'what ATLAS found' is a short form of the row's own meaning, with the full sentence in the fold", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      const h = html(f.key);
-      const a = audit(f.key);
-      for (const c of a.highlights) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
-      const founds = [...h.matchAll(/data-testid="audit-found">([^<]*)</g)].map((m) => m[1]);
-      expect(founds.length, f.key).toBe(a.highlights.length);
-      for (const t of founds) {
-        expect(t, f.key).not.toMatch(/[A-Z]{3,}_[A-Z_]+/);
-        expect(t.length, f.key).toBeLessThanOrEqual(60);
-      }
+  it("stands the partly-established checks in when nothing was established, and says so when nothing was either", () => {
+    const partial = auditChecks(rowsOf([
+      row("CURRENT_STATE", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
+      row("NET_EFFECT", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
+      row("MECHANISM_SPEC", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
+    ]));
+    expect(auditStoodUp(partial).map((c) => [c.component, c.state])).toEqual([
+      ["CURRENT_STATE", "PARTLY_ESTABLISHED"],
+      ["NET_EFFECT", "PARTLY_ESTABLISHED"],
+    ]);
+    expect(auditStoodUp(auditChecks(rowsOf([row("MECHANISM_SPEC", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"])])))).toEqual([]);
+    expect(html("D")).not.toContain('data-testid="stood-up-none"');
+  });
+});
+
+describe("main gaps", () => {
+  it("takes one of each open kind in priority order, then rounds again — so four blocked checks do not crowd out the rest", () => {
+    const rows = rowsOf([
+      row("MECHANISM_SPEC", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
+      row("GOVERNANCE_BASIS", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
+      row("CURRENT_STATE", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
+      row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
+      row("DESTINATION", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
+      row("RECIPIENT", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
+      row("DURABILITY_BASIS", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
+    ]);
+    const gaps = auditGaps(auditBoundary(rows, "VERDICT"));
+    expect(gaps.map((g) => [g.component, g.kind])).toEqual([
+      ["EXECUTION_EVIDENCE", "COULD_NOT_CHECK"],
+      ["MECHANISM_SPEC", "NOT_ESTABLISHED"],
+      ["CURRENT_STATE", "PARTLY_ESTABLISHED"],
+      ["DESTINATION", "COULD_NOT_CHECK"],
+    ]);
+    expect(gaps).toHaveLength(MAX_GAPS);
+  });
+
+  it("a blocked check is chipped 'Not checked', its short line says the sources could not be opened, and its sentence is the run's limit", () => {
+    const rows = rowsOf([row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED")]);
+    const a = composeAudit({ input: { ...fx("D").input, components: [{ step: 4, component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"], supportingEvidenceIds: [], contradictingEvidenceIds: [] }] }, components: [row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED")], outcomeKind: "VERDICT" });
+    expect(rows).toHaveLength(1);
+    const blocked = renderToStaticMarkup(createElement(AuditCompositionView, { audit: a, input: fx("D").input, asOf: "t" }));
+    const gap = blocked.slice(blocked.indexOf('data-testid="gap-item"'), blocked.indexOf('data-testid="gap-detail"'));
+    expect(gap).toContain("Sources could not be opened");
+    expect(gap).not.toContain("Nothing found in checked sources");
+    const h = html("D");
+    // Fixture D has no blocked check; the golden one does.
+    expect(h).not.toContain('data-kind="COULD_NOT_CHECK"');
+    const g = htmlOf(GOLDEN_AUDIT_FIXTURE);
+    expect(g).toContain('data-kind="COULD_NOT_CHECK"');
+    expect(g).toContain("Not checked");
+    expect(g).toContain("limit of the research run, not evidence for or against the project");
+  });
+
+  it("still knows the single most important boundary, by the short answer's own priority", () => {
+    const rows = rowsOf([
+      row("MECHANISM_SPEC", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
+      row("GOVERNANCE_BASIS", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
+      row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
+    ]);
+    expect(auditGap(rows, auditBoundary(rows, "VERDICT"))?.component).toBe("EXECUTION_EVIDENCE");
+  });
+});
+
+describe("contradictions", () => {
+  it("are only checks the record positively contradicts — a gap is never dressed as one", () => {
+    for (const f of ALL) {
+      const a = auditOf(f);
+      const status = new Map((f.auditComponents ?? f.input.components).map((c) => [c.component, c.status]));
+      const expected = a.checks.filter((c) => status.get(c.component) === "CONTRADICTED").map((c) => c.component);
+      expect(a.contradictions.map((c) => c.component)).toEqual(expected);
+    }
+    // Fixture D: four open checks and no contradiction. The block says so.
+    const h = html("D");
+    expect(count(h, "contradiction-item")).toBe(0);
+    expect(h).toContain('data-testid="contradictions-none"');
+    // Fixture B: one contradiction, shown prominently with its own reason.
+    const b = html("B");
+    expect(count(b, "contradiction-item")).toBe(1);
+    expect(audit("B").contradictions[0].component).toBe("NET_EFFECT");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 4. ANALYTICAL BLOCKS AND EVIDENCE — TIED TO THE FINDINGS            */
+/* ------------------------------------------------------------------ */
+
+describe("analytical blocks and evidence serve the findings", () => {
+  it("keeps a selector block only when it bears on a gap or a contradiction", () => {
+    for (const f of ALL) {
+      const a = auditOf(f);
+      const open = new Set([...a.gaps.map((g) => g.component), ...a.contradictions.map((c) => c.component)]);
+      const chosen = chooseAnalyticalBlocks(f.input).orderedBlocks.filter((b) => ["METRIC", "FLOW", "TABLE", "CHART", "TIMELINE"].includes(b.type));
+      const expected = chosen.filter((b) => b.refs.components.some((k) => open.has(k.component)));
+      expect(a.analytical).toEqual(expected);
+      // And never a block the selector did not choose.
+      for (const b of a.analytical) expect(chosen).toContainEqual(b);
     }
   });
 
+  it("omits a standalone measure that explains no exception — the real-shaped case", () => {
+    // A single supply reading on NET_EFFECT, which is partly established
+    // and therefore among what stood up, with the open checks elsewhere.
+    const input = {
+      ...fx("D").input,
+      components: [
+        { step: 5, component: "CURRENT_STATE", status: "PARTIALLY_SUPPORTED", reasonCodes: ["INSUFFICIENT_AUTHORITY"], supportingEvidenceIds: ["s"], contradictingEvidenceIds: [] },
+        { step: 7, component: "NET_EFFECT", status: "PARTIALLY_SUPPORTED", reasonCodes: ["INSUFFICIENT_AUTHORITY"], supportingEvidenceIds: ["s"], contradictingEvidenceIds: [] },
+        { step: 3, component: "MECHANISM_SPEC", status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"], supportingEvidenceIds: [], contradictingEvidenceIds: [] },
+      ],
+      evidence: [{ ...fx("D").input.evidence[0], id: "s", component: "NET_EFFECT", relationship: "SUPPORTS", directness: "DIRECT", sourceClass: "ONCHAIN_VERIFIABLE" }],
+      quantities: [{ evidenceId: "s", observationId: "o", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: "M", decimals: 6, amountRaw: "100", position: null }],
+    };
+    const plan = chooseAnalyticalBlocks(input);
+    expect(plan.orderedBlocks.some((b) => b.type === "METRIC")).toBe(true);
+    const a = composeAudit({ input, components: input.components, outcomeKind: "VERDICT", plan });
+    expect(a.stoodUp.map((c) => c.component)).toEqual(["CURRENT_STATE", "NET_EFFECT"]);
+    expect(a.analytical).toEqual([]);
+    const h = renderToStaticMarkup(createElement(AuditCompositionView, { audit: a, input, asOf: "t" }));
+    expect(h).not.toContain('data-testid="block-metrics"');
+  });
+
+  it("filters the selector's evidence to the selected findings, and falls back to the selector's choice untouched", () => {
+    for (const f of ALL) {
+      const a = auditOf(f);
+      const chosen = chooseAnalyticalBlocks(f.input).orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as Extract<PlannedBlock, { type: "EVIDENCE_SNAPSHOT" }> | undefined;
+      if (!chosen) {
+        expect(a.evidence).toBeNull();
+        continue;
+      }
+      const byId = new Map(f.input.evidence.map((e) => [e.id, e]));
+      const selected = new Set([...a.gaps.map((g) => g.component), ...a.contradictions.map((c) => c.component), ...a.stoodUp.map((c) => c.component)]);
+      const tied = chosen.spec.evidenceIds.filter((id) => selected.has(byId.get(id)!.component!));
+      expect(a.evidence!.spec.evidenceIds).toEqual(tied.length > 0 ? tied : chosen.spec.evidenceIds);
+      // Never an id the selector did not choose.
+      for (const id of a.evidence!.spec.evidenceIds) expect(chosen.spec.evidenceIds).toContain(id);
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 5. THE SEVEN AUDIT INVARIANTS                                       */
+/* ------------------------------------------------------------------ */
+
+describe("audit safety invariants", () => {
+  it("NOT_ESTABLISHED ≠ FALSE: gaps are amber, never red, and never accused", () => {
+    expect(proofStateOfRung("UNRESOLVED")).toBe("NOT_ESTABLISHED");
+    expect(proofStateOfRung("NOT_HAPPENING")).toBe("CONTRADICTED");
+    const h = html("D");
+    expect(h).not.toMatch(/data-testid="gap-item"[^>]*data-kind="[^"]*"[^>]*>[\s\S]*?data-state="CONTRADICTED"/);
+    expect(h).not.toMatch(/\b(false|fake|lied|misleading|fraud|violat|deceiv)/i);
+  });
+
+  it("ABSENCE OF EVIDENCE ≠ EVIDENCE OF ABSENCE: gap details say what was not found, never what is not so", () => {
+    for (const g of audit("D").gaps) expect(g.detail).not.toMatch(/does not|did not|is not|no such|never/);
+    expect(html("D")).toContain("No contradiction established.");
+  });
+
+  it("DOCUMENTED ≠ APPROVED ≠ ACTIVATED ≠ EXECUTING: four rows, four independent states", () => {
+    const checks = Object.fromEntries(auditChecks(rowsOf(fx("C").input.components)).map((c) => [c.component, c.state]));
+    expect(checks).toEqual({ MECHANISM_SPEC: "ESTABLISHED", GOVERNANCE_BASIS: "ESTABLISHED", CURRENT_STATE: "PARTLY_ESTABLISHED", EXECUTION_EVIDENCE: "NOT_ESTABLISHED" });
+  });
+
+  it("TRANSACTION HAPPENED ≠ CLAIMED MECHANISM EXECUTED: the flow, when shown, still breaks where the selector's does", () => {
+    const flow = chooseAnalyticalBlocks(fx("E").input).orderedBlocks.find((b) => b.type === "FLOW");
+    expect(flow && flow.type === "FLOW" && flow.spec.stages.find((s) => s.step === "EXECUTION")?.state).toBe("NOT_ESTABLISHED");
+    expect(audit("E").checks.find((c) => c.component === "EXECUTION_EVIDENCE")!.state).toBe("PARTLY_ESTABLISHED");
+  });
+
+  it("ADDRESS EXISTS ≠ ECONOMIC ROLE ESTABLISHED: the audit never renders an entity block", () => {
+    for (const f of ALL) expect(htmlOf(f)).not.toContain('data-testid="block-entities"');
+  });
+
+  it("BURN ≠ NET DEFLATION: a burn is an execution measure and the net-effect check is the contradiction", () => {
+    const a = audit("B");
+    const metric = a.analytical.find((b) => b.type === "METRIC");
+    const burn = metric && metric.type === "METRIC" ? metric.spec.metrics.find((m) => m.factKind === "BURN") : undefined;
+    expect(burn?.step).toBe("EXECUTION");
+    expect(a.contradictions.map((c) => c.component)).toEqual(["NET_EFFECT"]);
+    expect(a.checks.find((c) => c.component === "EXECUTION_EVIDENCE")!.state).toBe("ESTABLISHED");
+  });
+
+  it("MEASUREMENT ≠ CAUSAL ATTRIBUTION: no audit text states a cause", () => {
+    for (const f of ALL) {
+      expect(htmlOf(f)).not.toMatch(/\bcaused\b/i);
+      expect(JSON.stringify(auditOf(f))).not.toMatch(/ATTRIBUTION|CAUSAL/);
+    }
+  });
+
+  it("no audit presentation strengthens upstream", () => {
+    for (const f of ALL) {
+      const a = auditOf(f);
+      for (const c of (f.auditComponents ?? f.input.components).filter((x) => x.status === "PARTIALLY_SUPPORTED")) {
+        expect(a.checks.find((x) => x.component === c.component)!.state, c.component).toBe("PARTLY_ESTABLISHED");
+      }
+      expect(htmlOf(f)).not.toContain("undefined");
+    }
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 6. SHORT FORMS, THE GOLDEN AUDIT, THE DEV ROUTES                    */
+/* ------------------------------------------------------------------ */
+
+describe("short forms and fixtures", () => {
   it("every short form is keyed on a code with full copy, in both directions, and never strengthens it", () => {
     for (const [code, short] of Object.entries(SHORT_REASON)) {
       expect(REASON_CODE_EXPLANATIONS[code], code).toBeTruthy();
@@ -246,155 +425,32 @@ describe("the main audit table", () => {
     for (const code of Object.keys(REASON_CODE_EXPLANATIONS)) expect(SHORT_REASON[code], code).toBeTruthy();
   });
 
-  it("a blocked check is chipped 'Not checked' and says so, never 'not established' as a finding", () => {
-    const checks = auditChecks(rowsOf([row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED")]));
-    expect(checks[0].blocked).toBe(true);
-    expect(checks[0].established).toMatch(/limit of the research run/);
-    const a = composeAudit({
-      input: { ...fx("D").input, components: [{ step: 4, component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"], supportingEvidenceIds: [], contradictingEvidenceIds: [] }] },
-      components: [row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED")],
-      outcomeKind: "VERDICT",
-    });
-    const h = renderToStaticMarkup(createElement(AuditCompositionView, { audit: a, input: fx("D").input, asOf: "t" }));
-    expect(h).toMatch(/data-testid="audit-row"[^>]*data-blocked="true"/);
-    expect(h).toContain("Not checked");
-    expect(h).toContain("Sources could not be opened");
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* 4. THE GAP                                                          */
-/* ------------------------------------------------------------------ */
-
-describe("where the audit stops", () => {
-  it("is chosen by the short answer's own priority: blocked, then not established, then partial — ladder order within", () => {
-    const rows = rowsOf([
-      row("MECHANISM_SPEC", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
-      row("GOVERNANCE_BASIS", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
-      row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
-      row("NET_EFFECT", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
+  it("the golden audit leads with what stood up, four gaps, and the contradiction — and keeps every analytical block that explains one", () => {
+    const a = auditOf(GOLDEN_AUDIT_FIXTURE);
+    expect(a.stoodUp.map((c) => c.component)).toEqual(["MECHANISM_SPEC", "SOURCE_OF_VALUE", "FLOW_PATH"]);
+    expect(a.gaps.map((g) => [g.component, g.kind])).toEqual([
+      ["DESTINATION", "COULD_NOT_CHECK"],
+      ["CURRENT_STATE", "NOT_ESTABLISHED"],
+      ["GOVERNANCE_BASIS", "PARTLY_ESTABLISHED"],
+      ["EXECUTION_EVIDENCE", "PARTLY_ESTABLISHED"],
     ]);
-    const boundary = auditBoundary(rows, "VERDICT");
-    expect(auditGap(rows, boundary)?.component).toBe("EXECUTION_EVIDENCE");
-    expect(auditGap(rows, boundary)?.kind).toBe("COULD_NOT_CHECK");
-    // No blocked: the first unresolved in ladder order.
-    const rows2 = rowsOf([
-      row("MECHANISM_SPEC", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
-      row("GOVERNANCE_BASIS", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
-      row("NET_EFFECT", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
-    ]);
-    expect(auditGap(rows2, auditBoundary(rows2, "VERDICT"))?.component).toBe("GOVERNANCE_BASIS");
-    // No unresolved: the first partial WITH a reason.
-    const rows3 = rowsOf([
-      row("MECHANISM_SPEC", "SUPPORTED"),
-      row("EXECUTION_EVIDENCE", "PARTIALLY_SUPPORTED", ["MECHANICAL_PROVENANCE_NOT_ESTABLISHED"]),
-      row("NET_EFFECT", "PARTIALLY_SUPPORTED", ["NET_SUPPLY_CHANGE_NOT_ESTABLISHED"]),
-    ]);
-    const g3 = auditGap(rows3, auditBoundary(rows3, "VERDICT"));
-    expect(g3?.component).toBe("EXECUTION_EVIDENCE");
-    expect(g3?.detail).toBe(REASON_CODE_EXPLANATIONS.MECHANICAL_PROVENANCE_NOT_ESTABLISHED);
-    // Everything stood: no gap, and the view says so.
-    const rows4 = rowsOf([row("MECHANISM_SPEC", "SUPPORTED"), row("SOURCE_OF_VALUE", "SUPPORTED")]);
-    expect(auditGap(rows4, auditBoundary(rows4, "VERDICT"))).toBeNull();
+    expect(a.contradictions.map((c) => c.component)).toEqual(["NET_EFFECT"]);
+    expect(a.analytical.map((b) => b.type)).toEqual(["METRIC", "TABLE", "CHART", "FLOW", "TIMELINE"]);
+    const h = htmlOf(GOLDEN_AUDIT_FIXTURE);
+    for (const id of ["block-metrics", "block-flow", "block-table", "block-chart", "block-timeline", "block-evidence", "block-audit-trail"]) expect(h, id).toContain(`data-testid="${id}"`);
+    expect(h).not.toContain('data-testid="block-entities"');
   });
 
-  it("is one block with one full sentence, and counts the rest instead of listing them", () => {
-    const h = html("D");
-    expect(h.match(/data-testid="audit-gap-detail"/g)?.length).toBe(1);
-    const a = audit("D");
-    expect(a.gap).not.toBeNull();
-    expect(h).toContain(escape(a.gap!.detail));
-    expect(h).toContain(`${a.boundary.length - 1} other open checks in the table`);
-  });
-
-  it("names the fixture's mechanism-execution gap in the words the record uses", () => {
-    // Fixture A: nothing unresolved, execution partly established under
-    // D-158 — the gap the audit exists to name.
-    const g = audit("A").gap!;
-    expect(g.component).toBe("EXECUTION_EVIDENCE");
-    expect(g.kind).toBe("PARTLY_ESTABLISHED");
-    expect(html("A")).toContain("nothing read from the chain ties what happened to the documented mechanism itself");
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* 5. THE SEVEN AUDIT INVARIANTS                                       */
-/* ------------------------------------------------------------------ */
-
-describe("audit safety invariants", () => {
-  it("NOT_ESTABLISHED ≠ FALSE: an unestablished check is amber, never red, and never accused", () => {
-    expect(proofStateOfRung("UNRESOLVED")).toBe("NOT_ESTABLISHED");
-    expect(proofStateOfRung("NOT_HAPPENING")).toBe("CONTRADICTED");
-    const h = html("D");
-    expect(h.match(/data-testid="audit-row" data-state="CONTRADICTED"/g)).toBeNull();
-    expect(h).not.toMatch(/\b(false|fake|lied|misleading|fraud|violat|deceiv)/i);
-  });
-
-  it("ABSENCE OF EVIDENCE ≠ EVIDENCE OF ABSENCE: the unresolved rows say what was not found, never what is not so", () => {
-    for (const c of audit("D").checks.filter((x) => x.state === "NOT_ESTABLISHED")) {
-      expect(c.established).not.toMatch(/does not|did not|is not|no such|never/);
-    }
-    expect(html("D")).toContain("is not a check that failed");
-  });
-
-  it("DOCUMENTED ≠ APPROVED ≠ ACTIVATED ≠ EXECUTING: four rows, four independent states", () => {
-    const checks = Object.fromEntries(auditChecks(rowsOf(fx("C").input.components)).map((c) => [c.component, c.state]));
-    expect(checks).toEqual({
-      MECHANISM_SPEC: "ESTABLISHED",
-      GOVERNANCE_BASIS: "ESTABLISHED",
-      CURRENT_STATE: "PARTLY_ESTABLISHED",
-      EXECUTION_EVIDENCE: "NOT_ESTABLISHED",
-    });
-  });
-
-  it("TRANSACTION HAPPENED ≠ CLAIMED MECHANISM EXECUTED: the flow still breaks where the selector's does", () => {
-    const flow = audit("E").analytical.find((b) => b.type === "FLOW");
-    expect(flow && flow.type === "FLOW" && flow.spec.stages.find((s) => s.step === "EXECUTION")?.state).toBe("NOT_ESTABLISHED");
-    expect(audit("E").checks.find((c) => c.component === "EXECUTION_EVIDENCE")!.state).toBe("PARTLY_ESTABLISHED");
-  });
-
-  it("ADDRESS EXISTS ≠ ECONOMIC ROLE ESTABLISHED: the audit never renders an entity block", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) expect(html(f.key), f.key).not.toContain('data-testid="block-entities"');
-  });
-
-  it("BURN ≠ NET DEFLATION: a burn is an execution measure and the net-effect check is its own row", () => {
-    const a = audit("B");
-    const metric = a.analytical.find((b) => b.type === "METRIC");
-    const burn = metric && metric.type === "METRIC" ? metric.spec.metrics.find((m) => m.factKind === "BURN") : undefined;
-    expect(burn?.step).toBe("EXECUTION");
-    const by = Object.fromEntries(a.checks.map((c) => [c.component, c.state]));
-    expect(by.EXECUTION_EVIDENCE).toBe("ESTABLISHED");
-    expect(by.NET_EFFECT).toBe("CONTRADICTED");
-  });
-
-  it("MEASUREMENT ≠ CAUSAL ATTRIBUTION: no audit text states a cause", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      expect(html(f.key), f.key).not.toMatch(/\bcaused\b/i);
-      expect(JSON.stringify(audit(f.key)), f.key).not.toMatch(/ATTRIBUTION|CAUSAL/);
-    }
-  });
-
-  it("no audit presentation strengthens upstream: a partly established check is never shown established", () => {
-    for (const f of OUTPUT_PLAN_FIXTURES) {
-      for (const c of f.input.components.filter((x) => x.status === "PARTIALLY_SUPPORTED")) {
-        expect(audit(f.key).checks.find((x) => x.component === c.component)!.state, `${f.key} ${c.component}`).toBe("PARTLY_ESTABLISHED");
-      }
-      expect(html(f.key)).not.toContain("undefined");
-    }
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* 6. THE DEV ROUTE                                                    */
-/* ------------------------------------------------------------------ */
-
-describe("the dev route's audit mode", () => {
-  it("is one parameter on the existing route, gated like it, with the historical warning for a real job", () => {
+  it("both dev routes render the same composition, gated, with the historical warning for a real job", () => {
     const page = readFileSync("app/(app)/dev/output-plan/page.tsx", "utf-8");
     expect(page).toContain('one(params.view) === "audit"');
     expect(page).toContain('process.env.NODE_ENV === "production"');
     expect(page).toContain("real-job-banner");
     expect(page).not.toMatch(/db\.|drizzle|getDb|fetch\(/);
+    const showcase = readFileSync("app/(app)/dev/audit-showcase/page.tsx", "utf-8");
+    expect(showcase).toContain("composeAudit(");
+    expect(showcase).toContain("<AuditCompositionView");
+    expect(showcase).toContain("fixture-banner");
     const bridge = readFileSync("src/client/components/result-blocks/real-job-plan.tsx", "utf-8");
     expect(bridge).toContain("composeAudit");
     expect(bridge).toContain("projectName: detail.job.projectName");
@@ -404,98 +460,5 @@ describe("the dev route's audit mode", () => {
     expect(chooseAnalyticalBlocks(fx("A").input).orderedBlocks.map((b) => b.type)).toEqual([
       "ANSWER", "PROOF_MAP", "METRIC", "FLOW", "TABLE", "CHART", "ENTITY", "TIMELINE", "EVIDENCE_SNAPSHOT", "DEEP_PROOF",
     ]);
-  });
-});
-
-/* ------------------------------------------------------------------ */
-/* 7. KEY CHECKS AND THE GOLDEN AUDIT                                  */
-/* ------------------------------------------------------------------ */
-
-describe("key checks", () => {
-  it("contradiction first, then stated gaps, then what stood, blocked last — capped, not scored", () => {
-    const checks = auditChecks(rowsOf([
-      row("SOURCE_OF_VALUE", "SUPPORTED"),
-      row("MECHANISM_SPEC", "SUPPORTED"),
-      row("GOVERNANCE_BASIS", "PARTIALLY_SUPPORTED", ["INDIRECT_ONLY"]),
-      row("EXECUTION_EVIDENCE", "PARTIALLY_SUPPORTED", ["MECHANICAL_PROVENANCE_NOT_ESTABLISHED"]),
-      row("CURRENT_STATE", "INSUFFICIENT_EVIDENCE", ["MISSING_CURRENT_STATE"]),
-      row("DESTINATION", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
-      row("NET_EFFECT", "CONTRADICTED", ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"]),
-    ]), new Map([
-      ["GOVERNANCE_BASIS", ["INDIRECT_ONLY"]],
-      ["EXECUTION_EVIDENCE", ["MECHANICAL_PROVENANCE_NOT_ESTABLISHED"]],
-      ["CURRENT_STATE", ["MISSING_CURRENT_STATE"]],
-      ["DESTINATION", ["NO_EVIDENCE_FOUND"]],
-      ["NET_EFFECT", ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"]],
-    ]));
-    expect(auditHighlights(checks).map((c) => c.component)).toEqual([
-      "NET_EFFECT",
-      "GOVERNANCE_BASIS",
-      "EXECUTION_EVIDENCE",
-    ]);
-    expect(auditHighlights(checks, 5).map((c) => c.component)).toEqual([
-      "NET_EFFECT",
-      "GOVERNANCE_BASIS",
-      "EXECUTION_EVIDENCE",
-      "CURRENT_STATE",
-      "MECHANISM_SPEC",
-    ]);
-    // Blocked is never promoted into the key checks ahead of a real finding.
-    expect(auditHighlights(checks, 10).at(-1)?.component).toBe("DESTINATION");
-  });
-});
-
-describe("the golden audit", () => {
-  const g = GOLDEN_AUDIT_FIXTURE;
-
-  it("is balanced: every state the audit must present, including a blocked check", () => {
-    const a = auditOf(g);
-    const by = (s: string) => a.checks.filter((c) => c.state === s && !c.blocked).length;
-    expect(by("ESTABLISHED")).toBe(3);
-    expect(by("PARTLY_ESTABLISHED")).toBe(2);
-    expect(by("CONTRADICTED")).toBe(1);
-    expect(by("NOT_ESTABLISHED")).toBe(1);
-    expect(a.checks.filter((c) => c.blocked)).toHaveLength(1);
-    expect(a.gap?.kind).toBe("COULD_NOT_CHECK");
-  });
-
-  it("the same selector justifies the full analytical middle from it — and no entity", () => {
-    const plan = chooseAnalyticalBlocks(g.input);
-    const types = plan.orderedBlocks.map((b) => b.type);
-    for (const t of ["METRIC", "FLOW", "TABLE", "CHART", "TIMELINE"]) expect(types, t).toContain(t);
-    expect(types).not.toContain("ENTITY");
-    const metric = plan.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
-    expect(metric.spec.metrics.length).toBeGreaterThanOrEqual(3);
-    expect(metric.spec.metrics.length).toBeLessThanOrEqual(4);
-    // The delta's claim is the CONTRADICTED net-effect state, copied.
-    expect(metric.spec.claims).toEqual([{ component: "NET_EFFECT", state: "CONTRADICTED", evidenceIds: ["g-delta"] }]);
-    // A burn never sits at EFFECT.
-    expect(metric.spec.metrics.find((m) => m.factKind === "BURN")!.step).not.toBe("EFFECT");
-    const flow = plan.orderedBlocks.find((b) => b.type === "FLOW") as Extract<PlannedBlock, { type: "FLOW" }>;
-    expect(flow.spec.stages.map((s) => s.state)).toEqual(["ESTABLISHED", "ESTABLISHED", "PARTLY_ESTABLISHED", "NOT_ESTABLISHED", "CONTRADICTED"]);
-  });
-
-  it("renders the whole audit language and leads with the contradiction", () => {
-    const h = htmlOf(g);
-    for (const id of ["block-audit-verdict", "block-audit-table", "block-audit-gap", "block-metrics", "block-flow", "block-table", "block-chart", "block-timeline", "block-audit-map", "block-evidence", "block-deep-proof"]) {
-      expect(h, id).toContain(`data-testid="${id}"`);
-    }
-    expect(h).not.toContain('data-testid="block-entities"');
-    const a = auditOf(g);
-    expect(a.highlights[0].component).toBe("NET_EFFECT");
-    expect(a.highlights[0].state).toBe("CONTRADICTED");
-    expect(a.highlights).toHaveLength(3);
-    expect(a.highlights.map((c) => c.component)).toEqual(["NET_EFFECT", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"]);
-    expect(a.summary).toMatch(/^On .*the evidence indicates otherwise\.$/);
-  });
-
-  it("is the same composition as the sparse real record, not a second one", () => {
-    // The fixture page and the real-job bridge call the same two functions.
-    const page = readFileSync("app/(app)/dev/audit-showcase/page.tsx", "utf-8");
-    expect(page).toContain("composeAudit(");
-    expect(page).toContain("<AuditCompositionView");
-    expect(page).toContain('process.env.NODE_ENV === "production"');
-    expect(page).toContain("fixture-banner");
-    expect(page).not.toMatch(/db\.|drizzle|getDb|fetch\(/);
   });
 });
