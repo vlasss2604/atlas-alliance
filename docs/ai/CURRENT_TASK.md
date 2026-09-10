@@ -2,32 +2,31 @@
 
 > Overwrite this file each round. Never append.
 
-## VERIFICATION EXPERIENCE V1 — first real product pass (done this round)
+## PRODUCT VERIFICATION TAB V1 (done this round)
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
-Presentation only; the selector, reducer, evidence semantics and verdicts
-are unchanged.
+Product wiring only; Research truth, the selector and the Verification
+composition are unchanged.
 
 ### What landed
 
-The user-facing modes are RESEARCH and VERIFICATION. The old "Audit"
-composition became the Verification page: VERIFICATION RESULT with coverage
-counts → WHAT STOOD UP beside MAIN GAPS → CONTRADICTION (own panel only when
-real, with the measured figure the reconciler tied to it) → HOW THE CLAIM
-HOLDS UP (the selector's flow) → relevant signals → WHERE VERIFICATION STOPS
-→ KEY EVIDENCE (each card names its check) → collapsed FULL VERIFICATION.
-NONE is a valid decision for every optional block; the real sparse job shows
-no chain, no signals, no contradiction panel.
+`/research/[id]` — a finished result has RESEARCH | VERIFICATION in the
+result header. Research is the default and untouched. Verification renders
+the approved composition for the same loaded payload through
+`JobVerification` (pure; no fetch, no recomputation). `?view=verification`
+opens it; the switch mirrors state with the History API and never
+navigates. FAILED / CANCELLED runs offer no switch. The historical-semantics
+note is shown on every product Verification.
 
-### Dev surfaces
+### Real completed job
 
-- `/dev/verification-showcase` — the golden verification
-- `/dev/output-plan?view=verification` — `&fixture=A..E` and `&job=<uuid>`
-  (`view=audit` still accepted)
+- `http://localhost:3000/research/1302b67e-273d-4a38-b02c-78c9d8155a77`
+  (Research) — switch in the header, or append `?view=verification`.
 
-### Next candidates (not started; need Founder scope)
+### Known, not this round
 
-- Wire Verification into the product `/research/[id]` surface as a mode
-  beside the result (today it exists on dev routes only).
-- Give the FULL VERIFICATION trail a real link to `/research/[id]/audit`
-  when a job id is in scope.
+- First load in a fresh browser session can race the auth bootstrap (the
+  page's first job read returns 401, then succeeds); pre-existing, seen
+  while capturing screenshots.
+- Dev overlay reports a hydration attribute mismatch on the dev showcase
+  routes; pre-existing on the baseline.

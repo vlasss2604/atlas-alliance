@@ -10,6 +10,7 @@ import { AtlasHeader } from "@/src/client/components/atlas-header";
 import { DeveloperDetails } from "@/src/client/components/developer-details";
 import { type EvidenceRole } from "@/src/client/components/evidence-document-card";
 import { ResearchProgress } from "@/src/client/components/research-progress";
+import { JobVerification } from "@/src/client/components/job-verification";
 import { ResultBriefing } from "@/src/client/components/result-briefing";
 import { ResultLadder } from "@/src/client/components/result-ladder";
 import { OutcomeBadge } from "@/src/client/components/verdict-badge";
@@ -53,12 +54,41 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 // separate panel where the answer began — which read as a page header next
 // to an unrelated result window, and buried the one thing a reader most
 // needs on returning to a finished research: the question they asked.
+//
+// TWO VIEWS OF ONE FINISHED RESULT: RESEARCH | VERIFICATION.
+//
+// Research is what ATLAS found; Verification is what from the claim
+// actually survived verification. They are two readings of the SAME loaded
+// payload — the switch changes which composition renders and nothing
+// else: no second request, no recomputation, no research run. The view is
+// a piece of local state mirrored into `?view=` with the native History
+// API, so a link can open a result in Verification and the switch itself
+// never navigates.
+type ResultView = "research" | "verification";
+
+function viewFromLocation(): ResultView {
+  if (typeof window === "undefined") return "research";
+  return new URLSearchParams(window.location.search).get("view") === "verification" ? "verification" : "research";
+}
+
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
   const { refresh } = useApp();
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  // Initialised from the URL on the client; the server render has no
+  // location and defaults to Research. Nothing rendered before the payload
+  // loads depends on it, so the two cannot disagree on screen.
+  const [view, setView] = useState<ResultView>(viewFromLocation);
+
+  const switchView = useCallback((next: ResultView) => {
+    setView(next);
+    const url = new URL(window.location.href);
+    if (next === "research") url.searchParams.delete("view");
+    else url.searchParams.set("view", next);
+    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
+  }, []);
 
   // Re-read the whole detail. Used when the job reaches a terminal state,
   // because the Proof only exists once the job has finished.
@@ -157,6 +187,13 @@ export default function ResearchDetailPage() {
   const projectName = job.projectName ?? job.projectTicker ?? "Unresolved project";
   const finished = isTerminal(job.state);
   const outcome = jobOutcome({ state: job.state, verdict: proof?.verdict ?? null });
+  // VERIFICATION NEEDS A RESEARCH RESULT TO VERIFY. A failed or cancelled
+  // run is a product fault, not a finding, and the Research view already
+  // says so; offering a verification of it would present an empty gap
+  // list as "every check was established". The switch is not shown there
+  // and a requested `?view=verification` falls back to Research.
+  const verifiable = finished && outcome.kind !== "FAILED" && outcome.kind !== "CANCELLED";
+  const shown: ResultView = verifiable ? view : "research";
   // The briefing is derived further down, once the finding rows it reads
   // exist — it must summarise exactly the rows this page renders below it,
   // never a separately-derived set that could disagree with them.
@@ -380,13 +417,19 @@ export default function ResearchDetailPage() {
             >
               {projectName.slice(0, 2).toUpperCase()}
             </span>
-            <div className="min-w-0">
-              <p className="eyebrow eyebrow-violet">Research result</p>
+            <div className="min-w-0 flex-1">
+              <p className="eyebrow eyebrow-violet">{shown === "verification" ? "Verification" : "Research result"}</p>
               <p className="mt-0.5 text-[1rem] font-semibold leading-tight tracking-tight">
                 {projectName}
               </p>
             </div>
+            {/* THE MODE SWITCH, IN THE RESULT HEADER. Beside the identity
+                from `sm`; below it on a handset, where the row is too
+                narrow for both. The subject and the question stay above
+                whichever view is chosen. */}
+            {verifiable && <ViewSwitch view={shown} onChange={switchView} className="hidden sm:inline-flex" />}
           </div>
+          {verifiable && <ViewSwitch view={shown} onChange={switchView} className="mt-4 inline-flex w-full sm:hidden" />}
 
           {/* THE QUESTION IS THE HEADING OF THIS RESULT.
               It used to be a grey subtitle under a 2.15rem project name,
@@ -407,6 +450,8 @@ export default function ResearchDetailPage() {
             {job.originalQuestion}
           </h1>
 
+          {shown === "research" && (
+          <>
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--hairline)] pt-4">
             <OutcomeBadge job={{ state: job.state, verdict: proof?.verdict ?? null }} />
             {proof?.confidence.band && (
@@ -464,7 +509,17 @@ export default function ResearchDetailPage() {
               Sources · {usedDocs}
             </p>
           )}
+          </>
+          )}
         </section>
+      )}
+
+      {/* ---- VERIFICATION: the approved composition over the same
+           payload. Nothing below is fetched or recomputed for it. ------ */}
+      {shown === "verification" && (
+        <div data-testid="verification-view">
+          <JobVerification detail={detail} />
+        </div>
       )}
 
       {/* ---- 1b. QUICK UNDERSTANDING, BEFORE THE PROOF ---------------
@@ -473,7 +528,7 @@ export default function ResearchDetailPage() {
            below renders, so this cannot say anything the detail does not.
            Nothing beneath it was removed: the ladder, the evidence, the
            snapshots and the full audit all continue unchanged. ------- */}
-      {finished && (
+      {finished && shown === "research" && (
         <ResultBriefing
           keyFindings={briefing.keyFindings}
           unresolved={briefing.unresolved}
@@ -482,7 +537,7 @@ export default function ResearchDetailPage() {
       )}
 
       {/* ---- 2. THE CLAIMS, AND LEVEL 2 INSIDE THEM ------------------ */}
-      {finished && (
+      {finished && shown === "research" && (
         <ResultLadder
           components={components}
           jobId={jobId}
@@ -543,6 +598,55 @@ export default function ResearchDetailPage() {
       {/* ---- engine internals, behind an explicit opt-in ------------- */}
       <DeveloperDetails detail={detail} />
     </main>
+  );
+}
+
+// RESEARCH | VERIFICATION — one segmented control, two buttons. Pressed
+// state is carried by `aria-pressed` and by the colour; the words are the
+// product's two modes and nothing else, so it cannot read as two products.
+function ViewSwitch({
+  view,
+  onChange,
+  className = "",
+}: {
+  view: ResultView;
+  onChange: (v: ResultView) => void;
+  className?: string;
+}) {
+  const options: { key: ResultView; label: string }[] = [
+    { key: "research", label: "Research" },
+    { key: "verification", label: "Verification" },
+  ];
+  return (
+    <div
+      className={`${className} shrink-0 items-center gap-0.5 rounded-full border border-[var(--hairline)] p-0.5`}
+      style={{ background: "rgba(4,7,13,0.45)" }}
+      role="group"
+      aria-label="Result view"
+      data-testid="view-switch"
+      data-view={view}
+    >
+      {options.map((o) => {
+        const active = o.key === view;
+        return (
+          <button
+            key={o.key}
+            type="button"
+            onClick={() => onChange(o.key)}
+            aria-pressed={active}
+            className="flex-1 rounded-full px-3.5 py-1.5 text-[0.74rem] font-semibold tracking-[0.02em] transition-colors sm:flex-none"
+            style={{
+              color: active ? "var(--atlas-text)" : "var(--atlas-text-dim)",
+              background: active ? "rgba(103, 232, 249, 0.14)" : "transparent",
+              boxShadow: active ? "inset 0 0 0 1px rgba(103, 232, 249, 0.35)" : "none",
+            }}
+            data-testid={`view-${o.key}`}
+          >
+            {o.label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 

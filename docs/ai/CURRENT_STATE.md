@@ -61,6 +61,24 @@ chain, no signals, no contradiction panel. Rendered at
 `/dev/output-plan?view=verification` (`audit` accepted as the older
 spelling; fixtures and real jobs, historical-semantics banner kept) and
 `/dev/verification-showcase` (`GOLDEN_AUDIT_FIXTURE`).
+
+**On the product result screen** (`/research/[id]`) a finished result
+carries a RESEARCH | VERIFICATION switch in the result header, under the
+project identity and above the question, which stay visible in both modes.
+Research is the default and is unchanged. Verification renders
+`JobVerification` (`src/client/components/job-verification.tsx`): a pure
+projection of the already-loaded `ResearchJobDetail` through
+`inputFromResearchJobDetail` → `chooseAnalyticalBlocks` → `composeAudit` —
+no request, no recomputation, no model. View state is local and mirrored
+into `?view=verification` with `window.history.replaceState`, so a link can
+open Verification and the switch never navigates. The verdict shown is
+`jobOutcome`'s (a terminal product state outranks a persisted verdict); a
+FAILED or CANCELLED run offers no switch and falls back to Research. Every
+Verification on the product surface carries the historical-semantics note
+(the payload records no semantics version, so it is stated for every job).
+The dev bridge renders the same component with its own banner.
+`tests/ui-verification-tab.test.ts` pins the switch, the default, the
+gating, the purity and the sparse case.
 `tests/ui-audit-output.test.ts` pins the structure, the counts, the chain's
 edge rule, the contradiction's measurement provenance, the boundary choice,
 the one-thing-per-check rule, the finding-tied filters, the upstream-only

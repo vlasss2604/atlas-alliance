@@ -616,8 +616,10 @@ describe("short forms and fixtures", () => {
     expect(showcase).toContain("<AuditCompositionView");
     expect(showcase).toContain("fixture-banner");
     const bridge = readFileSync("src/client/components/result-blocks/real-job-plan.tsx", "utf-8");
-    expect(bridge).toContain("composeAudit");
-    expect(bridge).toContain("projectName: detail.job.projectName");
+    expect(bridge).toContain("<JobVerification detail={detail}");
+    const verification = readFileSync("src/client/components/job-verification.tsx", "utf-8");
+    expect(verification).toContain("composeAudit(");
+    expect(verification).toContain("projectName: detail.job.projectName");
   });
 
   it("the result view is unchanged by the verification mode", () => {

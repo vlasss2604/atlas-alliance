@@ -4,7 +4,6 @@ import { useEffect, useState } from "react";
 
 import { api, type ResearchJobDetail } from "../../api";
 import { authenticate } from "../../api";
-import { composeAudit } from "../../audit-composition";
 import { chooseAnalyticalBlocks, inputFromResearchJobDetail } from "../../output-plan";
 import {
   deriveQuestionFindings,
@@ -14,7 +13,7 @@ import {
   resultBriefing,
   type JobState,
 } from "../../research-model";
-import { AuditCompositionView } from "./audit-composition";
+import { JobVerification } from "../job-verification";
 import { SelectedBlocks } from "./selected-blocks";
 
 // THE DEV BRIDGE — A REAL COMPLETED RESEARCH THROUGH THE SELECTOR.
@@ -137,11 +136,10 @@ export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: 
       </details>
 
       {view === "verification" ? (
-        <AuditCompositionView
-          audit={composeAudit({ input, components, outcomeKind: outcome.kind, projectName: detail.job.projectName, plan })}
-          input={input}
-          asOf={detail.job.finishedAt ?? detail.job.createdAt}
-        />
+        // The SAME component the product result screen renders — the
+        // banner above already says this is a historical record, so the
+        // component's own note is not repeated.
+        <JobVerification detail={detail} historicalNote={false} />
       ) : (
         <SelectedBlocks
           plan={plan}
