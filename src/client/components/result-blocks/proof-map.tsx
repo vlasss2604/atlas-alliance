@@ -24,7 +24,15 @@ const ORDER: ProofState[] = [
   "CONTRADICTED",
 ];
 
-export function ProofMapBlock({ cells }: { cells: ProofMapCell[] }) {
+export function ProofMapBlock({
+  cells,
+  compact = false,
+}: {
+  cells: ProofMapCell[];
+  // The bar and the counts without the per-check list: a coverage SHAPE for
+  // a surface that lists the checks elsewhere and must not list them again.
+  compact?: boolean;
+}) {
   // Arithmetic over the cells above and nothing else. The map does not know
   // a fifth fact about the research; it counts what it was handed.
   const counts = ORDER.map((state) => ({
@@ -72,7 +80,7 @@ export function ProofMapBlock({ cells }: { cells: ProofMapCell[] }) {
         ))}
       </p>
 
-      <ul className="mt-3 flex flex-col gap-1.5">
+      {!compact && <ul className="mt-3 flex flex-col gap-1.5">
         {cells.map((c) => {
           const s = PROOF_STATE[c.state];
           return (
@@ -102,7 +110,7 @@ export function ProofMapBlock({ cells }: { cells: ProofMapCell[] }) {
             </li>
           );
         })}
-      </ul>
+      </ul>}
     </section>
   );
 }

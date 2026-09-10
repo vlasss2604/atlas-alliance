@@ -82,6 +82,14 @@ export interface AuditComposition {
   summary: string | null;
   coverage: { step: number; component: string; state: ProofState }[];
   checks: AuditCheck[];
+  // THE 3–5 DECISION-RELEVANT CHECKS, for the top of the page. The full
+  // set is `checks`, shown in the fold and in the deep audit; repeating all
+  // of them three times was the noise V2 removed. Order: a contradiction
+  // first, then partly established with a stated reason, then not
+  // established with a stated reason, then what stood — ladder order
+  // within each — and a blocked check last, because it is a fact about the
+  // run. Capped, not scored.
+  highlights: AuditCheck[];
   boundary: AuditBoundaryItem[];
   // WHERE THE AUDIT STOPS: the single most important open boundary, chosen
   // by the priority the short answer already uses for its "main
@@ -122,6 +130,7 @@ export function composeAudit(args: {
   );
 
   const boundary = auditBoundary(rows, args.outcomeKind, codes);
+  const checks = auditChecks(rows, codes);
   const briefing = resultBriefing({
     verdict: args.input.verdict,
     outcomeKind: args.outcomeKind,
@@ -136,7 +145,8 @@ export function composeAudit(args: {
     confidenceBand: args.input.confidenceBand,
     summary: briefing.shortAnswer[0] ?? null,
     coverage,
-    checks: auditChecks(rows, codes),
+    checks,
+    highlights: auditHighlights(checks),
     boundary,
     gap: auditGap(rows, boundary),
     analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type)),
@@ -239,4 +249,18 @@ export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBou
     first((r) => r.state === "UNRESOLVED") ??
     first((r) => r.state === "PARTIAL" && r.reason !== null)
   );
+}
+
+export const MAX_AUDIT_HIGHLIGHTS = 5;
+
+export function auditHighlights(checks: readonly AuditCheck[], cap = MAX_AUDIT_HIGHLIGHTS): AuditCheck[] {
+  const stated = (c: AuditCheck) => c.reasonCodes.some((code) => typeof code === "string" && code.length > 0);
+  const groups: AuditCheck[][] = [
+    checks.filter((c) => !c.blocked && c.state === "CONTRADICTED"),
+    checks.filter((c) => !c.blocked && c.state === "PARTLY_ESTABLISHED" && stated(c)),
+    checks.filter((c) => !c.blocked && c.state === "NOT_ESTABLISHED" && stated(c)),
+    checks.filter((c) => !c.blocked && c.state === "ESTABLISHED"),
+    checks.filter((c) => c.blocked),
+  ];
+  return groups.flat().slice(0, cap);
 }

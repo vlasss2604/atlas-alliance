@@ -2,40 +2,35 @@
 
 > Overwrite this file each round. Never append.
 
-## AUDIT OUTPUT V2 — one instrument, not many boxes
+## GOLDEN AUDIT FIXTURE V1 — what an audit can express
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
-Presentation only; the selector and every derivation it reads are unchanged.
+Presentation and fixture data only; the selector is unchanged.
 
-### Order
+### Two records, one composition
 
-1. AUDIT VERDICT — the Proof's verdict, its band
-2. SHORT SUMMARY — `resultBriefing().shortAnswer[0]`, the research screen's
-   own lead sentence; nothing is composed
-3. COVERAGE COUNTS — "Established: 2 · Partial: 2 · Not established: 6" as a
-   list, never "N / M" (a fraction reads as a grade; a check the sources did
-   not establish is not a point lost)
-4. MAIN AUDIT TABLE — CHECK · WHAT ATLAS FOUND · STATE, one row per assessed
-   check in ladder order; found = the check's phrase where it stood, the
-   `SHORT_REASON[code]` where it did not, "Sources could not be opened" where
-   blocked; a BLOCKED row is chipped **Not checked**; full sentences in one
-   fold beneath
-5. WHERE THE AUDIT STOPS — ONE check, chosen by the short answer's own
-   "main limitation" priority (blocked → first unresolved → first partial
-   with a reason, ladder order within), with its full sentence and a count
-   of other open checks; no list
-6. analytical blocks, exactly as the selector chose
-7. PROOF MAP — supporting depth, no longer beside the verdict
-8. KEY EVIDENCE  9. DEEP AUDIT
+`/dev/audit-showcase` renders `GOLDEN_AUDIT_FIXTURE` — invented, balanced
+(3 established · 2 partly · 1 contradicted · 1 not established · 1 blocked),
+structured enough that the same `chooseAnalyticalBlocks` justifies four
+metrics, a flow, a table, a chart and a timeline — through the same
+`composeAudit` / `AuditCompositionView` as the real job at
+`/dev/output-plan?job=…&view=audit`. Golden = full expressive capability;
+real = evidence-constrained sparse result. Both stay; neither is edited to
+look like the other. No entities: nothing in the fixture binds an address
+to a role.
 
-Removed as separate sections: MAIN FINDINGS (tiles), CLAIM VS REALITY
-(now the main table), WHAT COULD NOT BE VERIFIED (chips), the coverage grid
-and the hero fraction. `auditFindings` is gone from the derivation.
+### Three layers, three purposes
 
-Desktop: verdict column (21rem) with the gap beneath it, the table as the
-main area, in one panel. Mobile: the same in DOM order, stacked rows. No
-horizontal overflow at 430 or 1440.
+The top table is now the KEY CHECKS — `auditHighlights`: a contradiction
+first, then partly established with a stated reason, then not established
+with a stated reason, then what stood, blocked last; ladder order within;
+capped at 5, never scored. All checks with full sentences sit in one fold
+beneath. The proof map is `compact` — the bar and the counts, no third
+list. The deep audit lists every check with its sources. On a desk the
+chart and the timeline are paired, as the research showcase pairs them.
 
-### Dev surface
+### Dev surfaces
 
-`/dev/output-plan?view=audit` — `&fixture=A..E` and `&job=<uuid>`.
+- `/dev/audit-showcase` — the golden audit, with links to the real sparse
+  audit and the golden research result
+- `/dev/output-plan?view=audit` — `&fixture=A..E` and `&job=<uuid>`

@@ -20,12 +20,18 @@ import type {
   PlanFlow,
   PlanQuantity,
 } from "./output-plan";
+import type { LadderComponentInput } from "./research-model";
 
 export interface OutputPlanFixture {
   key: string;
   title: string;
   input: AnalyticalOutputInputV1;
   answer: { short: string; paragraphs: string[] };
+  // The component rows WITH coverage, for the audit composition — the one
+  // thing the selector's input does not carry and the audit needs, so a
+  // BLOCKED check can be shown as "not checked". Absent on the research
+  // fixtures, which have no blocked check to show.
+  auditComponents?: readonly LadderComponentInput[];
 }
 
 const FETCHED = "2026-03-02T09:00:00.000Z";
@@ -403,6 +409,115 @@ const FIXTURE_E: OutputPlanFixture = {
       { address: "Cp9ZxCvBnMaSdFgHjKlQwErTyUiOp0987654321ZxCw", chain: "Fixture chain", claimedRole: "Buyback executor", roleComponent: "EXECUTION_EVIDENCE", evidenceIds: ["e-other"] },
     ],
   },
+};
+
+/* ---------------------------- GOLDEN AUDIT ---------------------------- */
+
+// THE GOLDEN AUDIT FIXTURE — WHAT AN AUDIT CAN EXPRESS.
+//
+// The real historical job is a truth test and a sparsity test: mostly not
+// established, one metric, no flow, no timeline. Designing the audit
+// language around it produces a checklist. This record is the other end:
+// invented, balanced, and structured enough that the selector justifies
+// four metrics, a flow, a table, a chart and a timeline — so the audit's
+// analytical middle can be judged at all. It is a design fixture in exactly
+// the sense the research showcase is: what ATLAS CAN express, never what a
+// given research needs.
+//
+// BALANCED BY DESIGN: three established checks, two partly established, one
+// contradicted, one not established, one that could not be checked — every
+// state the audit has to present, once each at least. No entities: nothing
+// in this record binds an address to a role, and the fixture does not
+// pretend otherwise.
+
+const G_ACQUIRED = periodSeries("EXECUTION_EVIDENCE", 4, "DECODED_EXCHANGE", [
+  "1400000000000",
+  "1900000000000",
+  "2200000000000",
+  "1700000000000",
+  "2300000000000",
+  null,
+], "g-acquired-total");
+const G_BURNED = periodSeries("NET_EFFECT", 7, "BURN", [
+  "1400000000000",
+  "1900000000000",
+  "1100000000000",
+  "1700000000000",
+  "0",
+  null,
+], "g-burned-total");
+
+export const GOLDEN_AUDIT_FIXTURE: OutputPlanFixture = {
+  key: "GOLDEN",
+  title: "Golden audit — full expressive capability",
+  answer: {
+    short: "Fees are collected and routed as documented; acquisitions ran in five of six periods; total supply still rose over the interval.",
+    paragraphs: [],
+  },
+  input: {
+    question: { text: "Does the buyback-and-burn reduce the token's total supply, and is it running as documented?", intent: "BURN_OR_SUPPLY_EFFECT", relevantComponents: ["NET_EFFECT", "EXECUTION_EVIDENCE", "SOURCE_OF_VALUE"] },
+    verdict: "PARTIALLY_SUPPORTED",
+    confidenceBand: "LIMITED",
+    components: [
+      comp(1, "SOURCE_OF_VALUE", "SUPPORTED", ["g-fees"]),
+      comp(2, "FLOW_PATH", "SUPPORTED", ["g-path"]),
+      comp(3, "MECHANISM_SPEC", "SUPPORTED", ["g-docs"]),
+      comp(3, "GOVERNANCE_BASIS", "PARTIALLY_SUPPORTED", ["g-gov"], [], ["INDIRECT_ONLY"]),
+      comp(4, "EXECUTION_EVIDENCE", "PARTIALLY_SUPPORTED", ["g-acquired-total", ...G_ACQUIRED.slice(0, 5).map((q) => q.evidenceId)], [], ["MECHANICAL_PROVENANCE_NOT_ESTABLISHED"]),
+      comp(5, "CURRENT_STATE", "INSUFFICIENT_EVIDENCE", [], [], ["MISSING_CURRENT_STATE"]),
+      comp(6, "DESTINATION", "INSUFFICIENT_EVIDENCE", [], [], ["NO_EVIDENCE_FOUND"]),
+      comp(7, "NET_EFFECT", "CONTRADICTED", ["g-burned-total", ...G_BURNED.slice(0, 5).map((q) => q.evidenceId)], ["g-delta"], ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"]),
+    ],
+    evidence: [
+      ev("g-fees", 1, "SOURCE_OF_VALUE", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · fee program", observedAt: "2026-04-30", fragment: '{"program":"FeeProg","feeAssetRaw":"18400000000000"}', summary: "Trading fees are collected by a program the project confirmed as its own.", doesNotProve: "Where the collected fees go, or that any of them reach the token." }),
+      ev("g-path", 2, "FLOW_PATH", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · treasury inflows", observedAt: "2026-04-30", fragment: '{"from":"FeeProg","to":"Treasury","amountRaw":"5520000000000"}', summary: "Collected fees are transferred to the treasury account named in the documentation.", doesNotProve: "That the treasury spends them as documented." }),
+      ev("g-docs", 3, "MECHANISM_SPEC", { sourceTitle: "Protocol documentation · Tokenomics", publishedAt: "2025-11-04", fragment: "30% of protocol fees are used to purchase the token on the open market and burn it each period.", summary: "The documentation specifies a 30% fee allocation to purchases that are then burned.", doesNotProve: "That the purchases happen, or that burning them lowers total supply." }),
+      ev("g-gov", 3, "GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", sourceTitle: "Governance record · proposal 41", directness: "INDIRECT", publishedAt: "2026-01-22", fragment: "Proposal 41 — Allocate 30% of protocol fees to token purchases. Result: passed.", summary: "A governance record refers to the allocation being ratified.", doesNotProve: "That the proposal was executed. Proposal passed is not proposal executed." }),
+      ev("g-acquired-total", 4, "EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · acquisitions, six periods", observedAt: "2026-04-30", fragment: '{"acquiredRaw":"9500000000000","periods":5}', summary: "Token acquisitions were observed on chain across five of six periods.", doesNotProve: "That the acquisitions were the documented mechanism running — the invoking program is not bound to it by any on-chain provenance." }),
+      ...G_ACQUIRED.slice(0, 5).map((q, i) => ev(q.evidenceId, 4, "EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: `Chain read · acquisitions, period ${i + 1}`, observedAt: `2026-0${2 + Math.floor(i / 2)}-1${i}`, fragment: `{"acquiredRaw":"${q.amountRaw}","period":${i + 1}}`, summary: `Token acquisitions of the stated amount were observed on chain in period ${i + 1}.`, doesNotProve: "That the acquisition was the documented mechanism running, or where the acquired tokens went." })),
+      ev("g-burned-total", 7, "NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · burns, six periods", observedAt: "2026-04-30", fragment: '{"burnedRaw":"6100000000000","periods":5}', summary: "Burn instructions of the stated amounts were executed on the mint across five periods.", doesNotProve: "That total supply fell over the interval — what was issued or unlocked in the same window is a separate measurement." }),
+      ...G_BURNED.slice(0, 5).map((q, i) => ev(q.evidenceId, 7, "NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: `Chain read · burns, period ${i + 1}`, observedAt: `2026-0${2 + Math.floor(i / 2)}-1${i}`, fragment: `{"burnedRaw":"${q.amountRaw}","period":${i + 1}}`, summary: q.amountRaw === "0" ? `No burn instruction was executed on the mint in period ${i + 1}: a measured zero.` : `A burn instruction of the stated amount was executed on the mint in period ${i + 1}.`, doesNotProve: "That total supply fell over the period — what was issued or unlocked in the same window is a separate measurement." })),
+      ev("g-delta", 7, "NET_EFFECT", { relationship: "CONTRADICTS", sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · total supply, interval", observedAt: "2026-05-01", fragment: '{"supplyStartRaw":"998400000000000","supplyEndRaw":"1005100000000000","direction":"INCREASED","slotSpan":14000000}', summary: "Total supply was higher at the end of the interval than at the start.", doesNotProve: "That no tokens were destroyed — only that at least as many were issued or unlocked over the same period as were removed." }),
+    ],
+    flows: [
+      {
+        flowId: "g-flow-1",
+        lifecycle: "CURRENT",
+        shape: "PARTIAL_PATH",
+        nodes: [
+          { kind: "VALUE_SOURCE", component: "SOURCE_OF_VALUE", componentStatus: "SUPPORTED" },
+          { kind: "MECHANISM", component: "MECHANISM_SPEC", componentStatus: "SUPPORTED" },
+          { kind: "DESTINATION", component: "DESTINATION", componentStatus: "INSUFFICIENT_EVIDENCE" },
+        ],
+        edges: [
+          { from: "VALUE_SOURCE", to: "MECHANISM", basisComponent: "FLOW_PATH", basisStatus: "SUPPORTED", executed: true },
+          { from: "MECHANISM", to: "DESTINATION", basisComponent: "EXECUTION_EVIDENCE", basisStatus: "PARTIALLY_SUPPORTED", executed: true },
+        ],
+        netEffect: { componentStatus: "CONTRADICTED" },
+      },
+    ],
+    quantities: [
+      { evidenceId: "g-fees", observationId: "obs-g-fees", factKind: "TOKEN_TRANSFER", step: 1, component: "SOURCE_OF_VALUE", mint: "FixFeeAssetMint111111111111111111111111111", decimals: DECIMALS, amountRaw: "18400000000000", position: null, coverage: { observed: 6, expected: 6 } },
+      { evidenceId: "g-acquired-total", observationId: "obs-g-acquired-total", factKind: "DECODED_EXCHANGE", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "9500000000000", position: null, coverage: { observed: 5, expected: 6 } },
+      { evidenceId: "g-burned-total", observationId: "obs-g-burned-total", factKind: "BURN", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6100000000000", position: null, coverage: { observed: 5, expected: 6 } },
+      { evidenceId: "g-delta", observationId: "obs-g-delta", factKind: "TOTAL_SUPPLY_DELTA", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6700000000000", direction: "INCREASED", position: null },
+      ...G_ACQUIRED,
+      ...G_BURNED,
+    ],
+    entities: [],
+  },
+  // The same eight, with coverage: DESTINATION is the check the run could
+  // not open sources for — a fact about the run, shown as "not checked".
+  auditComponents: [
+    { component: "SOURCE_OF_VALUE", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["g-fees"], contradictingEvidenceIds: [], coverage: "COMPLETED" },
+    { component: "FLOW_PATH", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["g-path"], contradictingEvidenceIds: [], coverage: "COMPLETED" },
+    { component: "MECHANISM_SPEC", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["g-docs"], contradictingEvidenceIds: [], coverage: "COMPLETED" },
+    { component: "GOVERNANCE_BASIS", status: "PARTIALLY_SUPPORTED", reasonCodes: ["INDIRECT_ONLY"], supportingEvidenceIds: ["g-gov"], contradictingEvidenceIds: [], coverage: "COMPLETED" },
+    { component: "EXECUTION_EVIDENCE", status: "PARTIALLY_SUPPORTED", reasonCodes: ["MECHANICAL_PROVENANCE_NOT_ESTABLISHED"], supportingEvidenceIds: ["g-acquired-total", ...G_ACQUIRED.slice(0, 5).map((q) => q.evidenceId)], contradictingEvidenceIds: [], coverage: "COMPLETED" },
+    { component: "CURRENT_STATE", status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["MISSING_CURRENT_STATE"], supportingEvidenceIds: [], contradictingEvidenceIds: [], coverage: "COMPLETED" },
+    { component: "DESTINATION", status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"], supportingEvidenceIds: [], contradictingEvidenceIds: [], coverage: "BLOCKED" },
+    { component: "NET_EFFECT", status: "CONTRADICTED", reasonCodes: ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"], supportingEvidenceIds: ["g-burned-total", ...G_BURNED.slice(0, 5).map((q) => q.evidenceId)], contradictingEvidenceIds: ["g-delta"], coverage: "COMPLETED" },
+  ],
 };
 
 export const OUTPUT_PLAN_FIXTURES: readonly OutputPlanFixture[] = [

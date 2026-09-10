@@ -41,9 +41,16 @@ analytical blocks, the proof map as depth, the same key evidence and deep
 proof. Every state is a persisted component status through
 `deriveResultLadder`; every sentence is a derivation the result screen
 already runs. No severity, no score, no second verdict, no ENTITY.
-Rendered at `/dev/output-plan?view=audit` for fixtures and real jobs, with
-the historical-semantics banner kept. `tests/ui-audit-output.test.ts` pins
-the structure, the upstream-only rule and the seven audit invariants.
+The top table is the KEY CHECKS (`auditHighlights`: contradiction → stated
+partial → stated gap → established → blocked, ladder order, capped at 5);
+the proof map is compact (bar and counts); the deep audit lists every
+check. Rendered at `/dev/output-plan?view=audit` for fixtures and real
+jobs, with the historical-semantics banner kept, and at
+`/dev/audit-showcase` for `GOLDEN_AUDIT_FIXTURE` — the invented, balanced
+record that shows what the audit can express when the evidence supports
+it, beside the real sparse one that shows what it does when it does not.
+`tests/ui-audit-output.test.ts` pins the structure, the upstream-only rule,
+the three-layer rule and the seven audit invariants.
 
 ## A RESULT CHOOSES ITS OWN BLOCKS, AND SAYS WHICH ONES IT DECLINED
 

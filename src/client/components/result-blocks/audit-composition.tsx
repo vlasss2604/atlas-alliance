@@ -119,20 +119,34 @@ export function AuditCompositionView({
         </div>
       </section>
 
-      {/* 6 — the analytical blocks the selector chose, and only those */}
+      {/* 6 — the analytical blocks the selector chose, and only those,
+          arranged for the 30-second read: the measures, the movement, the
+          exact values, then the two readings of the same periods side by
+          side on a wide screen — as the research showcase pairs them. The
+          arrangement is presentation; which blocks exist is the plan's. */}
       {audit.analytical.length > 0 && (
-        <SelectedBlocks
-          plan={audit.plan}
-          input={input}
-          include={["METRIC", "FLOW", "TABLE", "CHART", "TIMELINE"]}
-          answer={{ short: "", paragraphs: [] }}
-          asOf={asOf}
-        />
+        <div className="flex flex-col gap-3 sm:gap-4" data-testid="audit-analytical">
+          <Analytical audit={audit} input={input} asOf={asOf} include={["METRIC"]} />
+          <Analytical audit={audit} input={input} asOf={asOf} include={["FLOW"]} />
+          <Analytical audit={audit} input={input} asOf={asOf} include={["TABLE"]} />
+          {has(audit, "CHART") && has(audit, "TIMELINE") ? (
+            <div className="grid gap-3 sm:gap-4 lg:grid-cols-12">
+              <div className="[&>div>section]:h-full lg:col-span-7">
+                <Analytical audit={audit} input={input} asOf={asOf} include={["CHART"]} />
+              </div>
+              <div className="[&>div>section]:h-full lg:col-span-5">
+                <Analytical audit={audit} input={input} asOf={asOf} include={["TIMELINE"]} />
+              </div>
+            </div>
+          ) : (
+            <Analytical audit={audit} input={input} asOf={asOf} include={["CHART", "TIMELINE"]} />
+          )}
+        </div>
       )}
 
-      {/* 7 — the map: supporting depth, not a second summary */}
+      {/* 7 — the map: a coverage SHAPE, not a third list of the checks */}
       <section className="panel p-4 sm:p-5" data-testid="block-audit-map">
-        <ProofMapBlock cells={audit.coverage.map((c) => ({ label: checkLabel(audit, c.component), state: c.state }))} />
+        <ProofMapBlock compact cells={audit.coverage.map((c) => ({ label: checkLabel(audit, c.component), state: c.state }))} />
       </section>
 
       {/* 8 — the same evidence selection, framed for the audit */}
@@ -157,6 +171,27 @@ export function AuditCompositionView({
       )}
     </div>
   );
+}
+
+function has(audit: AuditComposition, type: AuditComposition["analytical"][number]["type"]): boolean {
+  return audit.analytical.some((b) => b.type === type);
+}
+
+// One or two of the plan's blocks, through the same renderer the research
+// view uses. Renders nothing when the plan holds none of them.
+function Analytical({
+  audit,
+  input,
+  asOf,
+  include,
+}: {
+  audit: AuditComposition;
+  input: Parameters<typeof SelectedBlocks>[0]["input"];
+  asOf: string;
+  include: AuditComposition["analytical"][number]["type"][];
+}) {
+  if (!include.some((t) => has(audit, t))) return null;
+  return <SelectedBlocks plan={audit.plan} input={input} include={include} answer={{ short: "", paragraphs: [] }} asOf={asOf} />;
 }
 
 function checkLabel(audit: AuditComposition, component: string): string {
@@ -238,16 +273,19 @@ function verdictColor(verdict: string): string {
 
 /* -------------------------- 4. THE TABLE --------------------------- */
 
-// CHECK · WHAT ATLAS FOUND · STATE. Every assessed check, in the ladder's
-// order, one line each. Stacked on a handset (label and chip on one line,
-// the finding beneath), three true columns on a desk. Full sentences are
-// one fold below the table, never removed.
+// CHECK · WHAT ATLAS FOUND · STATE. The decision-relevant checks — a
+// contradiction, the stated gaps, what stood — one line each, stacked on a
+// handset and three true columns on a desk. Every check, with its full
+// sentence, is one fold below; every check with its sources is the deep
+// audit. Three layers, three purposes, and the ten checks are not listed
+// three times.
 function AuditTable({ audit }: { audit: AuditComposition }) {
+  const rows = audit.highlights;
   return (
     <div data-testid="block-audit-table">
       <div className="flex items-baseline justify-between gap-3">
-        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Checks</p>
-        <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">{audit.checks.length} made</p>
+        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Key checks</p>
+        <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">{rows.length} of {audit.checks.length}</p>
       </div>
 
       <div className="mt-2 hidden grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] gap-x-4 border-b border-[var(--hairline-strong)] pb-1.5 text-[0.58rem] font-semibold uppercase tracking-[0.06em] text-[var(--atlas-text-dim)] lg:grid">
@@ -257,7 +295,7 @@ function AuditTable({ audit }: { audit: AuditComposition }) {
       </div>
 
       <ul className="mt-1 flex flex-col">
-        {audit.checks.map((c) => (
+        {rows.map((c) => (
           <li
             key={c.component}
             className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-3 gap-y-0.5 border-t border-[var(--hairline)] py-2 first:border-t-0 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.25fr)_auto] lg:items-center lg:gap-x-4"
@@ -278,7 +316,7 @@ function AuditTable({ audit }: { audit: AuditComposition }) {
       </ul>
 
       <details className="mt-2 border-t border-[var(--hairline)] pt-2">
-        <summary className="cursor-pointer text-[0.64rem] text-[var(--atlas-text-dim)]">Full sentences for every check</summary>
+        <summary className="cursor-pointer text-[0.64rem] text-[var(--atlas-text-dim)]">All {audit.checks.length} checks, with full sentences</summary>
         <ul className="mt-1.5 flex flex-col gap-1.5 text-[0.72rem] leading-snug" data-testid="audit-full">
           {audit.checks.map((c) => (
             <li key={c.component}>

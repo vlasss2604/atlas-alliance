@@ -162,6 +162,13 @@ function RealJobPage({ jobId, view }: { jobId: string; view: "result" | "audit" 
       <nav className="flex flex-wrap gap-2" data-testid="fixture-picker">
         <ViewToggle view={view} href={(v) => `/dev/output-plan?job=${jobId}&view=${v}`} />
         <Link
+          href="/dev/audit-showcase"
+          className="rounded-lg border px-2.5 py-1 text-[0.72rem]"
+          style={{ borderColor: "var(--hairline)", color: "var(--atlas-text-dim)" }}
+        >
+          Golden audit →
+        </Link>
+        <Link
           href="/dev/output-plan"
           className="rounded-lg border px-2.5 py-1 text-[0.72rem]"
           style={{ borderColor: "var(--hairline)", color: "var(--atlas-text-dim)" }}
