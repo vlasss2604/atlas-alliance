@@ -1094,6 +1094,11 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
     "The only sources describing this are too old to speak for the present.",
   INSUFFICIENT_AUTHORITY:
     "The claim appears only in sources that cannot settle it.",
+  // D-158 PHASE 2 — documentary support without machine-owned causal
+  // provenance. The sentence describes the RECORD: it says what the chain
+  // did not tie together, never that the mechanism did not run.
+  MECHANICAL_PROVENANCE_NOT_ESTABLISHED:
+    "The sources describe this, but nothing read from the chain ties what happened to the documented mechanism itself.",
   INDIRECT_ONLY:
     "The sources refer to this indirectly, without stating it.",
   STATE_NOT_FULLY_LIVE:

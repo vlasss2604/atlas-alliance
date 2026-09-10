@@ -2,90 +2,58 @@
 
 > Overwrite this file each round. Never append.
 
-## ANALYTICAL OUTPUT INTELLIGENCE V1 — deterministic block selection
+## AUDIT OUTPUT V1 — a composition mode over the existing result
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
-Focused tests only.
 
 ### What it is
 
-One pure function, `chooseAnalyticalBlocks(input)` in
-`src/client/output-plan.ts`, sitting where the result presentation was
-missing its rule:
+An audit answers "what exactly was checked, where did it not line up, and
+what could not be verified?" from the SAME record, the SAME selector
+(`chooseAnalyticalBlocks`) and the SAME blocks as a research result. It is
+`composeAudit` in `src/client/audit-composition.ts` plus one composition
+component, `AuditCompositionView`. No engine, no verdict, no score.
 
-```
-QUESTION → RESEARCH → EVIDENCE → PROOF → chooseAnalyticalBlocks → UI
-```
+### Structure
 
-Given the structured record of a finished Research it returns which of the
-approved result blocks (ANSWER, PROOF_MAP, METRIC, TABLE, CHART, FLOW,
-TIMELINE, ENTITY, EVIDENCE_SNAPSHOT, DEEP_PROOF) that record justifies, in
-what order, resting on which component results and Evidence rows — and, for
-every block it declines, a closed reason. NONE is a decision, not an absence.
+1. AUDIT VERDICT + COVERAGE — the Proof's verdict relabelled, its band, the
+   proof map, coverage restated in words ("2 partly established · 8 not
+   established"). Coverage counts checks, not quality.
+2. MAIN FINDINGS — at most 5: CONTRADICTED, then PARTIALLY_SUPPORTED with a
+   persisted reason, then INSUFFICIENT_EVIDENCE with a persisted reason, in
+   ladder order. A BLOCKED check is never a finding; an established check
+   is never a finding; a gap with no reason code contributes nothing.
+3. CLAIM VS REALITY — one table row per assessed check: the ladder's own
+   claim sentence, the row's `shows` / `reason` / `limitation`, its state,
+   its source count. No prose is parsed and no project claim is invented.
+4. ANALYTICAL BLOCKS — METRIC / FLOW / TABLE / CHART / TIMELINE exactly as
+   the selector chose them, rendered through `SelectedBlocks` with a filter.
+   No audit variants.
+5. WHAT COULD NOT BE VERIFIED — three kinds, never mixed: partly
+   established (reason names the missing part), not established
+   (`unresolvedFrom`, the research screen's own derivation), could not be
+   checked (BLOCKED — a limit of the run, not a finding about the project).
+6. KEY EVIDENCE — the same snapshot selection, retitled.
+7. DEEP AUDIT — the same verification layer, retitled.
 
-### Shape, deliberately small
+### Every state is upstream
 
-- No persistence, no service, no orchestration, no model, no agent.
-- Input is a structural subset of `ResearchJobDetail` (components, admitted
-  Evidence, `mechanism.flows`, verdict, question findings) plus two
-  reference carriers the API does not project yet: `quantities` (typed
-  on-chain amounts, by Evidence id and fact kind) and `entities` (addresses
-  with a claimed role and the component that would establish it).
-  `inputFromResearchJobDetail` fills what the payload carries and leaves
-  those two EMPTY rather than guessed, so on a real payload today METRIC /
-  TABLE / CHART / ENTITY are correctly declined.
-- Every state in a plan is a presentation of a persisted status (one map,
-  `proofStateOf`, with the ladder's asymmetry). A measurement's state comes
-  from its Evidence row's admission, never from the component it bears on.
-- The selector performs no arithmetic: every amount in a plan is an amount
-  in the input. Unknown stays null. The proposition shown beside a supply
-  measurement is the persisted NET_EFFECT component state, copied exactly;
-  with no NET_EFFECT result there is no claim. Causal attribution has no
-  upstream proposition in V1 and is never stated by the selector.
-- Intent and question findings ORDER blocks and pick which metrics survive
-  the cap; they never admit a block.
+Every state shown is `proofStateOf(component.status)` through
+`deriveResultLadder`; every sentence is a row's own `shows`, `reason` or
+`limitation`. Tests sweep all fixtures asserting exactly that, and pin the
+seven audit invariants (not established ≠ false; absence ≠ absence;
+documented ≠ approved ≠ activated ≠ executing; transaction ≠ mechanism
+executed; address ≠ role; burn ≠ net deflation; measurement ≠ attribution).
 
 ### Dev surface
 
-`/dev/output-plan?fixture=A..E` — five invented records (value capture;
-supply effect; governance state; sparse; wallet flow) → selector → the
-existing blocks via `selected-blocks.tsx`, with the selector's own
-selected/declined list printed above. Production-gated like the showcase.
+`/dev/output-plan?view=audit` on both modes — `&fixture=A..E` and
+`&job=<uuid>` — with a result/audit toggle. The real-job mode keeps its
+historical-semantics banner. ENTITY is never rendered in the audit.
 
-`/dev/output-plan?job=<uuid>` — a REAL completed Research through the same
-selector. The bridge (`real-job-plan.tsx`) reads the job through
-`api.getResearchJob`, the production endpoint with the production session,
-so ownership and admission are enforced exactly where they always were; the
-answer prose is the existing `researchAnswer` / `resultBriefing`
-derivation. It adds no server route and no query. A real record is a
-HISTORICAL run whose statuses were reduced by the semantics in force when
-it ran — the banner says so, because a stale status rendered confidently is
-what this product must not ship. Verified on
-`8be4e607-5a72-4cfa-b45f-88842b10155c` (Raydium, 2026-09-08): the plan is
-ANSWER → PROOF_MAP → EVIDENCE_SNAPSHOT → DEEP_PROOF, everything else
-declined. No selector change was needed.
+### One line of copy added
 
-### Quantity projection (V1)
-
-The detail route projects `quantities` for a CLOSED set of on-chain fact
-kinds — currently `TOKEN_SUPPLY` alone, whose artifact carries kind, mint,
-decimals and amountRaw at its top level, so the projection is a field copy
-with no decision in it. Rows failing any canonical check are dropped, never
-defaulted. `BURN` (a list per transaction) and `TOTAL_SUPPLY_DELTA` (derived
-from two artifacts, null `onchain_artifact_id`) are excluded: each needs a
-derivation decision. A real METRIC now appears automatically; the selector
-was not changed.
-
-### Known limits
-
-- Entities are not projected by the job-detail API; a later step must
-  project admitted documentary locators.
-- No series exists in the record — every projected quantity is a point
-  reading with a null `position` — so TABLE and CHART cannot appear on a
-  real payload regardless of how many kinds are projected.
-- Intent → component relevance lives in the Pattern (CORE, server). The
-  client selector uses the question projection's findings for relevance;
-  with none, everything is relevant.
-- TIMELINE dates come from `publishedAt` / `observedAt` only; a milestone
-  with neither is shown undated. ACTIVATED is omitted: no V1 component has
-  activation as its proposition, and CURRENT_STATE (live now) is not it.
+`MECHANICAL_PROVENANCE_NOT_ESTABLISHED` (D-158) had no entry in
+`REASON_CODE_EXPLANATIONS`, which that map's own comment calls "a silent
+gap on the Result and the audit". One sentence was added, worded from
+D-158's definition, describing the record and not the project.

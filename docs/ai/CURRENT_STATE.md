@@ -27,6 +27,23 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## AN AUDIT IS THE SAME RECORD READ FOR ITS WEAKNESSES
+
+`composeAudit` (`src/client/audit-composition.ts`) is a composition mode over
+the existing result: the Proof's verdict relabelled, the proof map as
+coverage, at most five MAIN FINDINGS (contradicted → partly established
+with a reason → not established with a reason, ladder order), a CLAIM VS
+REALITY table of every assessed check in the ladder's own words, the
+selector's analytical blocks exactly as chosen, a three-kind boundary of
+what could not be verified (partly / not established / could not be
+checked — the last a limit of the run, never a finding), the same key
+evidence and the same deep proof. Every state is a persisted component
+status through `deriveResultLadder`; every sentence is a row's own. No
+severity, no score, no second verdict, no ENTITY. Rendered at
+`/dev/output-plan?view=audit` for fixtures and real jobs, with the
+historical-semantics banner kept. `tests/ui-audit-output.test.ts` pins the
+structure, the upstream-only rule and the seven audit invariants.
+
 ## A RESULT CHOOSES ITS OWN BLOCKS, AND SAYS WHICH ONES IT DECLINED
 
 `chooseAnalyticalBlocks` (`src/client/output-plan.ts`) is the deterministic

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api, type ResearchJobDetail } from "../../api";
 import { authenticate } from "../../api";
+import { composeAudit } from "../../audit-composition";
 import { chooseAnalyticalBlocks, inputFromResearchJobDetail } from "../../output-plan";
 import {
   deriveQuestionFindings,
@@ -13,6 +14,7 @@ import {
   resultBriefing,
   type JobState,
 } from "../../research-model";
+import { AuditCompositionView } from "./audit-composition";
 import { SelectedBlocks } from "./selected-blocks";
 
 // THE DEV BRIDGE — A REAL COMPLETED RESEARCH THROUGH THE SELECTOR.
@@ -36,7 +38,7 @@ import { SelectedBlocks } from "./selected-blocks";
 // entities today, so METRIC, TABLE, CHART and ENTITY are declined — and
 // that is the correct result, printed as such, rather than a number parsed
 // out of a fragment to make the page look analytical.
-export function RealJobPlan({ jobId }: { jobId: string }) {
+export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: "result" | "audit" }) {
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -134,12 +136,20 @@ export function RealJobPlan({ jobId }: { jobId: string }) {
         </p>
       </section>
 
-      <SelectedBlocks
-        plan={plan}
-        input={input}
-        answer={{ short: briefing.shortAnswer.join(" "), paragraphs }}
-        asOf={detail.job.finishedAt ?? detail.job.createdAt}
-      />
+      {view === "audit" ? (
+        <AuditCompositionView
+          audit={composeAudit({ input, components, outcomeKind: outcome.kind, plan })}
+          input={input}
+          asOf={detail.job.finishedAt ?? detail.job.createdAt}
+        />
+      ) : (
+        <SelectedBlocks
+          plan={plan}
+          input={input}
+          answer={{ short: briefing.shortAnswer.join(" "), paragraphs }}
+          asOf={detail.job.finishedAt ?? detail.job.createdAt}
+        />
+      )}
     </div>
   );
 }

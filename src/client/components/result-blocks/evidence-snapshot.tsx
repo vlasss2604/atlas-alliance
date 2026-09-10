@@ -19,11 +19,17 @@ const KIND_ACCENT: Record<EvidenceKindMeta["kind"], string> = {
   QUANTITATIVE: "#fcd34d",
 };
 
-export function EvidenceSnapshotBlock({ items }: { items: EvidenceKindMeta[] }) {
+export function EvidenceSnapshotBlock({
+  items,
+  title = "Evidence snapshots",
+}: {
+  items: EvidenceKindMeta[];
+  title?: string;
+}) {
   return (
     <section data-testid="block-evidence">
       <p className="eyebrow px-1" style={{ color: "var(--atlas-text-dim)" }}>
-        Evidence snapshots
+        {title}
       </p>
       {/* TWO PER ROW ON A WIDE SCREEN. Four full-width cards were four
           screens of scrolling for four short quotations, and the shared

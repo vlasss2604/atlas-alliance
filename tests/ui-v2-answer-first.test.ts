@@ -52,6 +52,10 @@ const ENGINE_REASON_CODES = [
   "MISSING_CURRENT_STATE",
   "STALE_CURRENT_STATE",
   "INSUFFICIENT_AUTHORITY",
+  // D-158 PHASE 2. Was absent from this list while present in the engine —
+  // the drift this test exists to catch, in the one direction it did not
+  // check. Its copy landed with the audit composition.
+  "MECHANICAL_PROVENANCE_NOT_ESTABLISHED",
   "INDIRECT_ONLY",
   "STATE_NOT_FULLY_LIVE",
   "CONFLICTING_STATE",

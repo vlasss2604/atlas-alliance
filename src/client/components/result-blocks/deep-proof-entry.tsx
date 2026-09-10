@@ -11,24 +11,27 @@ import { PROOF_STATE, type ProofState } from "./types";
 // rather than another analytical block.
 export function DeepProofEntryBlock({
   rows,
+  title = "Verification layer",
+  intro = "Above is what the research concluded. Below is every step of why — each finding with the sources behind it, what they were refused for, and the full audit.",
 }: {
   rows: { label: string; state: ProofState; sources: number }[];
+  // A composition mode may frame the SAME layer in its own words — "Deep
+  // audit" — without a second component. The rows are not its to change.
+  title?: string;
+  intro?: string;
 }) {
   return (
     <section data-testid="block-deep-proof">
       <div className="flex items-center gap-3 px-1">
         <span className="h-px flex-1" style={{ background: "var(--hairline-strong)" }} aria-hidden />
         <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-          Verification layer
+          {title}
         </p>
         <span className="h-px flex-1" style={{ background: "var(--hairline-strong)" }} aria-hidden />
       </div>
 
       <div className="panel mt-3 px-4 py-4 sm:px-5">
-        <p className="text-[0.8rem] leading-snug text-[var(--atlas-text-dim)]">
-          Above is what the research concluded. Below is every step of why — each finding
-          with the sources behind it, what they were refused for, and the full audit.
-        </p>
+        <p className="text-[0.8rem] leading-snug text-[var(--atlas-text-dim)]">{intro}</p>
 
         <ul className="mt-3 flex flex-col">
           {rows.map((r) => {

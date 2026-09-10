@@ -115,17 +115,26 @@ export function SelectedBlocks({
   input,
   answer,
   asOf,
+  include,
+  evidenceTitle,
 }: {
   plan: AnalyticalOutputPlanV1;
   input: AnalyticalOutputInputV1;
   answer: { short: string; paragraphs: string[] };
   asOf: string;
+  // A composition mode may render a SUBSET of the plan in its own place —
+  // the audit shows the analytical blocks after its findings rather than
+  // after the answer. The subset is a filter over what the selector chose,
+  // never an addition to it.
+  include?: readonly PlannedBlock["type"][];
+  evidenceTitle?: string;
 }) {
   const evidenceById = new Map(input.evidence.map((e) => [e.id, e]));
+  const blocks = include ? plan.orderedBlocks.filter((b) => include.includes(b.type)) : plan.orderedBlocks;
   return (
     <div className="flex flex-col gap-4" data-testid="selected-blocks">
-      {plan.orderedBlocks.map((block, i) => (
-        <Block key={`${block.type}-${i}`} block={block} answer={answer} asOf={asOf} evidenceById={evidenceById} />
+      {blocks.map((block, i) => (
+        <Block key={`${block.type}-${i}`} block={block} answer={answer} asOf={asOf} evidenceById={evidenceById} evidenceTitle={evidenceTitle} />
       ))}
     </div>
   );
@@ -136,11 +145,13 @@ function Block({
   answer,
   asOf,
   evidenceById,
+  evidenceTitle,
 }: {
   block: PlannedBlock;
   answer: { short: string; paragraphs: string[] };
   asOf: string;
   evidenceById: Map<string, AnalyticalOutputInputV1["evidence"][number]>;
+  evidenceTitle?: string;
 }) {
   switch (block.type) {
     case "ANSWER":
@@ -293,7 +304,7 @@ function Block({
           },
         ];
       });
-      return <EvidenceSnapshotBlock items={items} />;
+      return <EvidenceSnapshotBlock items={items} title={evidenceTitle} />;
     }
     case "DEEP_PROOF":
       return (

@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
+import { composeAudit } from "@/src/client/audit-composition";
+import { AuditCompositionView } from "@/src/client/components/result-blocks/audit-composition";
 import { RealJobPlan } from "@/src/client/components/result-blocks/real-job-plan";
 import { SelectedBlocks } from "@/src/client/components/result-blocks/selected-blocks";
 import { chooseAnalyticalBlocks } from "@/src/client/output-plan";
@@ -41,8 +43,12 @@ export default async function DevOutputPlanPage({
   if (process.env.NODE_ENV === "production") notFound();
   const params = await searchParams;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  // ONE MORE PARAMETER, NOT ONE MORE PAGE. `view=audit` renders the same
+  // record through the audit composition: same selector, same plan, same
+  // blocks, a different order and three small audit-only blocks.
+  const view: "result" | "audit" = one(params.view) === "audit" ? "audit" : "result";
   const jobId = one(params.job);
-  if (jobId) return <RealJobPage jobId={jobId} />;
+  if (jobId) return <RealJobPage jobId={jobId} view={view} />;
 
   const fixture = outputPlanFixture(one(params.fixture));
   const plan = chooseAnalyticalBlocks(fixture.input);
@@ -64,10 +70,11 @@ export default async function DevOutputPlanPage({
       </section>
 
       <nav className="flex flex-wrap gap-2" data-testid="fixture-picker">
+        <ViewToggle view={view} href={(v) => `/dev/output-plan?fixture=${fixture.key}&view=${v}`} />
         {OUTPUT_PLAN_FIXTURES.map((f) => (
           <Link
             key={f.key}
-            href={`/dev/output-plan?fixture=${f.key}`}
+            href={`/dev/output-plan?fixture=${f.key}&view=${view}`}
             className="rounded-lg border px-2.5 py-1 text-[0.72rem]"
             style={{
               borderColor: f.key === fixture.key ? "#5eead4" : "var(--hairline)",
@@ -97,15 +104,43 @@ export default async function DevOutputPlanPage({
         </ul>
       </section>
 
-      <SelectedBlocks plan={plan} input={fixture.input} answer={fixture.answer} asOf="Fixture · no run" />
+      {view === "audit" ? (
+        <AuditCompositionView
+          audit={composeAudit({ input: fixture.input, components: fixture.input.components, outcomeKind: "VERDICT", plan })}
+          input={fixture.input}
+          asOf="Fixture · no run"
+        />
+      ) : (
+        <SelectedBlocks plan={plan} input={fixture.input} answer={fixture.answer} asOf="Fixture · no run" />
+      )}
     </main>
+  );
+}
+
+function ViewToggle({ view, href }: { view: "result" | "audit"; href: (v: "result" | "audit") => string }) {
+  return (
+    <span className="flex gap-1" data-testid="view-toggle">
+      {(["result", "audit"] as const).map((v) => (
+        <Link
+          key={v}
+          href={href(v)}
+          className="rounded-lg border px-2.5 py-1 text-[0.72rem] uppercase tracking-[0.05em]"
+          style={{
+            borderColor: v === view ? "#c4b5fd" : "var(--hairline)",
+            color: v === view ? "#c4b5fd" : "var(--atlas-text-dim)",
+          }}
+        >
+          {v}
+        </Link>
+      ))}
+    </span>
   );
 }
 
 // THE REAL-JOB MODE. A banner, then the bridge. Everything analytical is
 // decided by the selector in the browser from the real payload; nothing on
 // this page decides anything.
-function RealJobPage({ jobId }: { jobId: string }) {
+function RealJobPage({ jobId, view }: { jobId: string; view: "result" | "audit" }) {
   return (
     <main className="enter flex flex-col gap-4 pb-6" data-testid="output-plan-page">
       <section
@@ -125,6 +160,7 @@ function RealJobPage({ jobId }: { jobId: string }) {
       </section>
 
       <nav className="flex flex-wrap gap-2" data-testid="fixture-picker">
+        <ViewToggle view={view} href={(v) => `/dev/output-plan?job=${jobId}&view=${v}`} />
         <Link
           href="/dev/output-plan"
           className="rounded-lg border px-2.5 py-1 text-[0.72rem]"
@@ -134,7 +170,7 @@ function RealJobPage({ jobId }: { jobId: string }) {
         </Link>
       </nav>
 
-      <RealJobPlan jobId={jobId} />
+      <RealJobPlan jobId={jobId} view={view} />
     </main>
   );
 }
