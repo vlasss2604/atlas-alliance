@@ -51,8 +51,20 @@ present at the artifact's top level, so the projection has no decision in
 it. The allowlist is closed and a row whose artifact disagrees with its
 Evidence row about its kind, or whose amount/decimals/mint are not
 canonical, is dropped rather than repaired. **A real METRIC now appears
-automatically** (verified on `1302b67e`: two `TOKEN_SUPPLY` readings,
-ESTABLISHED, 835619825233489752 raw at 6 decimals).
+automatically** (verified on `1302b67e`: 835619825233489752 raw at 6
+decimals, ESTABLISHED).
+
+**A MEASUREMENT'S CHAIN POSITION FOLLOWS ITS KIND, NOT THE COMPONENT THAT
+CONSUMED IT.** `ECONOMIC_STEPS_A_FACT_KIND_CAN_CARRY` is a total, closed
+table: the component proposes a step and the kind must be able to carry it,
+otherwise the measure is shown without one. `TOKEN_SUPPLY` and
+`TOKEN_ACCOUNT_BALANCE` carry NO step — a level is a state, not a movement,
+a destruction or a change — so a supply reading admitted by NET_EFFECT is
+no longer published at EFFECT. `TOTAL_SUPPLY_DELTA` carries EFFECT and
+`BURN` carries either EXECUTION or EFFECT, so the stage is reserved rather
+than emptied. Identical observations (same kind, unit domain and exact
+amount) collapse to ONE headline tile, with every carrying row still
+referenced by the block.
 
 `BURN` and `TOTAL_SUPPLY_DELTA` are deliberately NOT projected. A BURN
 artifact is a TRANSACTION_DETAIL whose `burns` is a LIST — choosing among
