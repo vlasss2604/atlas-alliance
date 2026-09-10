@@ -30,19 +30,20 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 ## AN AUDIT IS THE SAME RECORD READ FOR ITS WEAKNESSES
 
 `composeAudit` (`src/client/audit-composition.ts`) is a composition mode over
-the existing result: the Proof's verdict relabelled, the proof map as
-coverage, at most five MAIN FINDINGS (contradicted → partly established
-with a reason → not established with a reason, ladder order), a CLAIM VS
-REALITY table of every assessed check in the ladder's own words, the
-selector's analytical blocks exactly as chosen, a three-kind boundary of
-what could not be verified (partly / not established / could not be
-checked — the last a limit of the run, never a finding), the same key
-evidence and the same deep proof. Every state is a persisted component
-status through `deriveResultLadder`; every sentence is a row's own. No
-severity, no score, no second verdict, no ENTITY. Rendered at
-`/dev/output-plan?view=audit` for fixtures and real jobs, with the
-historical-semantics banner kept. `tests/ui-audit-output.test.ts` pins the
-structure, the upstream-only rule and the seven audit invariants.
+the existing result, and V2 says it once: the Proof's verdict; the research
+screen's own lead sentence as the summary; coverage as counts (never a
+fraction); ONE table of every assessed check — CHECK · WHAT ATLAS FOUND ·
+STATE, short forms keyed on the engine's reason codes with the full
+sentence folded beneath, BLOCKED rows chipped "Not checked"; ONE "where the
+audit stops" block chosen by the short answer's own main-limitation
+priority (blocked → unresolved → partial with reason); then the selector's
+analytical blocks, the proof map as depth, the same key evidence and deep
+proof. Every state is a persisted component status through
+`deriveResultLadder`; every sentence is a derivation the result screen
+already runs. No severity, no score, no second verdict, no ENTITY.
+Rendered at `/dev/output-plan?view=audit` for fixtures and real jobs, with
+the historical-semantics banner kept. `tests/ui-audit-output.test.ts` pins
+the structure, the upstream-only rule and the seven audit invariants.
 
 ## A RESULT CHOOSES ITS OWN BLOCKS, AND SAYS WHICH ONES IT DECLINED
 

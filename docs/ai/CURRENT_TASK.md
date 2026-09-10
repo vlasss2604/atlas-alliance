@@ -2,72 +2,40 @@
 
 > Overwrite this file each round. Never append.
 
-## AUDIT OUTPUT V1 — a composition mode over the existing result
+## AUDIT OUTPUT V2 — one instrument, not many boxes
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
+Presentation only; the selector and every derivation it reads are unchanged.
 
-### What it is
+### Order
 
-An audit answers "what exactly was checked, where did it not line up, and
-what could not be verified?" from the SAME record, the SAME selector
-(`chooseAnalyticalBlocks`) and the SAME blocks as a research result. It is
-`composeAudit` in `src/client/audit-composition.ts` plus one composition
-component, `AuditCompositionView`. No engine, no verdict, no score.
+1. AUDIT VERDICT — the Proof's verdict, its band
+2. SHORT SUMMARY — `resultBriefing().shortAnswer[0]`, the research screen's
+   own lead sentence; nothing is composed
+3. COVERAGE COUNTS — "Established: 2 · Partial: 2 · Not established: 6" as a
+   list, never "N / M" (a fraction reads as a grade; a check the sources did
+   not establish is not a point lost)
+4. MAIN AUDIT TABLE — CHECK · WHAT ATLAS FOUND · STATE, one row per assessed
+   check in ladder order; found = the check's phrase where it stood, the
+   `SHORT_REASON[code]` where it did not, "Sources could not be opened" where
+   blocked; a BLOCKED row is chipped **Not checked**; full sentences in one
+   fold beneath
+5. WHERE THE AUDIT STOPS — ONE check, chosen by the short answer's own
+   "main limitation" priority (blocked → first unresolved → first partial
+   with a reason, ladder order within), with its full sentence and a count
+   of other open checks; no list
+6. analytical blocks, exactly as the selector chose
+7. PROOF MAP — supporting depth, no longer beside the verdict
+8. KEY EVIDENCE  9. DEEP AUDIT
 
-### Structure
+Removed as separate sections: MAIN FINDINGS (tiles), CLAIM VS REALITY
+(now the main table), WHAT COULD NOT BE VERIFIED (chips), the coverage grid
+and the hero fraction. `auditFindings` is gone from the derivation.
 
-1. AUDIT VERDICT + COVERAGE — the Proof's verdict relabelled, its band, the
-   proof map, coverage restated in words ("2 partly established · 8 not
-   established"). Coverage counts checks, not quality.
-2. MAIN FINDINGS — at most 5: CONTRADICTED, then PARTIALLY_SUPPORTED with a
-   persisted reason, then INSUFFICIENT_EVIDENCE with a persisted reason, in
-   ladder order. A BLOCKED check is never a finding; an established check
-   is never a finding; a gap with no reason code contributes nothing.
-3. CLAIM VS REALITY — one table row per assessed check: the ladder's own
-   claim sentence, the row's `shows` / `reason` / `limitation`, its state,
-   its source count. No prose is parsed and no project claim is invented.
-4. ANALYTICAL BLOCKS — METRIC / FLOW / TABLE / CHART / TIMELINE exactly as
-   the selector chose them, rendered through `SelectedBlocks` with a filter.
-   No audit variants.
-5. WHAT COULD NOT BE VERIFIED — three kinds, never mixed: partly
-   established (reason names the missing part), not established
-   (`unresolvedFrom`, the research screen's own derivation), could not be
-   checked (BLOCKED — a limit of the run, not a finding about the project).
-6. KEY EVIDENCE — the same snapshot selection, retitled.
-7. DEEP AUDIT — the same verification layer, retitled.
-
-### Every state is upstream
-
-Every state shown is `proofStateOf(component.status)` through
-`deriveResultLadder`; every sentence is a row's own `shows`, `reason` or
-`limitation`. Tests sweep all fixtures asserting exactly that, and pin the
-seven audit invariants (not established ≠ false; absence ≠ absence;
-documented ≠ approved ≠ activated ≠ executing; transaction ≠ mechanism
-executed; address ≠ role; burn ≠ net deflation; measurement ≠ attribution).
-
-### Compression (visual only)
-
-Top = scan, bottom = inspect. The masthead is a verdict, a fraction
-("0 / 10 checks established"), the distribution as chips and a bar; on a
-desk a single-column coverage list sits beside it, and the full proof map
-is a depth layer after the boundary. Findings are tiles (check, state chip,
-one short fact); claim vs reality is a stacked row per check on a handset
-and a three-column comparison on a desk; the boundary is chips in three
-groups. Every short fact is `SHORT_REASON[code]`, a closed map over the same
-vocabulary as `REASON_CODE_EXPLANATIONS` (a test requires both directions
-of coverage), and EVERY full sentence stays in the DOM beneath a
-`<details>` — compression folds text, it never removes or rewrites it. No
-page-level horizontal overflow at 430 or 1440.
+Desktop: verdict column (21rem) with the gap beneath it, the table as the
+main area, in one panel. Mobile: the same in DOM order, stacked rows. No
+horizontal overflow at 430 or 1440.
 
 ### Dev surface
 
-`/dev/output-plan?view=audit` on both modes — `&fixture=A..E` and
-`&job=<uuid>` — with a result/audit toggle. The real-job mode keeps its
-historical-semantics banner. ENTITY is never rendered in the audit.
-
-### One line of copy added
-
-`MECHANICAL_PROVENANCE_NOT_ESTABLISHED` (D-158) had no entry in
-`REASON_CODE_EXPLANATIONS`, which that map's own comment calls "a silent
-gap on the Result and the audit". One sentence was added, worded from
-D-158's definition, describing the record and not the project.
+`/dev/output-plan?view=audit` — `&fixture=A..E` and `&job=<uuid>`.

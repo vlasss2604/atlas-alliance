@@ -18,6 +18,7 @@ import { chooseAnalyticalBlocks, type AnalyticalOutputInputV1, type AnalyticalOu
 import type { ProofState } from "./components/result-blocks/types";
 import {
   deriveResultLadder,
+  resultBriefing,
   unresolvedFrom,
   type LadderComponentInput,
   type OutcomeKind,
@@ -25,8 +26,6 @@ import {
   type ResultRow,
   type UnresolvedItem,
 } from "./research-model";
-
-export const MAX_AUDIT_FINDINGS = 5;
 
 // RUNG STATE → BLOCK STATE. The ladder's own asymmetry, kept: only a
 // positive contradiction is red, and "not established" is never "false".
@@ -43,20 +42,6 @@ export function proofStateOfRung(state: RealityState): ProofState | null {
     default:
       return null;
   }
-}
-
-export interface AuditFinding {
-  component: string;
-  label: string;
-  state: ProofState;
-  // The row's own sentence: what the evidence positively shows for a
-  // contradiction, the persisted reason for a gap. Never composed here.
-  sentence: string;
-  // The persisted codes behind that sentence, carried so a compact surface
-  // can show a SHORT form keyed on the code while the sentence stays the
-  // full record. Data passthrough; nothing is derived from it here.
-  reasonCodes: readonly string[];
-  sources: number;
 }
 
 // ONE ROW OF THE CHECK TABLE: the claim ATLAS set out to test, what the
@@ -89,10 +74,22 @@ export interface AuditComposition {
   question: string;
   verdict: string | null;
   confidenceBand: string | null;
+  // ONE SENTENCE, AND NOT ONE OF OURS. The lead sentence of the research
+  // screen's own short answer — a contradiction if there is one, else what
+  // stood, else what partly stood, else what did not — so the audit's
+  // summary is the result's summary, not a second phrasing of it. Null
+  // only when that derivation has nothing to say.
+  summary: string | null;
   coverage: { step: number; component: string; state: ProofState }[];
-  findings: AuditFinding[];
   checks: AuditCheck[];
   boundary: AuditBoundaryItem[];
+  // WHERE THE AUDIT STOPS: the single most important open boundary, chosen
+  // by the priority the short answer already uses for its "main
+  // limitation" — a BLOCKED check first (ATLAS could not look, which bears
+  // on everything else), else the first check the sources did not
+  // establish, else the first partly-established check with a stated
+  // reason. Ladder order within each. Null when every check stood.
+  gap: AuditBoundaryItem | null;
   // The selector's analytical blocks, exactly as chosen — an audit shows a
   // flow or a metric only when the research result would have.
   analytical: PlannedBlock[];
@@ -110,6 +107,7 @@ export function composeAudit(args: {
   // selector's input carries no coverage, and does not need to.
   components: readonly LadderComponentInput[];
   outcomeKind: OutcomeKind;
+  projectName?: string | null;
   plan?: AnalyticalOutputPlanV1;
 }): AuditComposition {
   const plan = args.plan ?? chooseAnalyticalBlocks(args.input);
@@ -123,60 +121,29 @@ export function composeAudit(args: {
     args.components.map((c) => [c.component, (c.reasonCodes ?? []).filter((x): x is string => typeof x === "string")]),
   );
 
+  const boundary = auditBoundary(rows, args.outcomeKind, codes);
+  const briefing = resultBriefing({
+    verdict: args.input.verdict,
+    outcomeKind: args.outcomeKind,
+    projectName: args.projectName ?? null,
+    components: args.components.map((c) => ({ component: c.component, status: c.status })),
+    rows,
+  });
+
   return {
     question: args.input.question.text,
     verdict: args.input.verdict,
     confidenceBand: args.input.confidenceBand,
+    summary: briefing.shortAnswer[0] ?? null,
     coverage,
-    findings: auditFindings(rows, codes),
     checks: auditChecks(rows, codes),
-    boundary: auditBoundary(rows, args.outcomeKind, codes),
+    boundary,
+    gap: auditGap(rows, boundary),
     analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type)),
     evidence: (plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as AuditComposition["evidence"]) ?? null,
     deep: (plan.orderedBlocks.find((b) => b.type === "DEEP_PROOF") as AuditComposition["deep"]) ?? null,
     plan,
   };
-}
-
-// MAIN FINDINGS — WHAT DID NOT LINE UP, IN A FIXED ORDER.
-//
-// A contradiction first, always: it is the one state in which the record
-// positively says otherwise. Then checks the evidence only partly reached,
-// then checks it did not reach — each only when a PERSISTED reason code
-// explains why, because a finding with no stated reason is not a finding.
-// Within a group the ladder's order stands (mechanism before value), so
-// "important" is the Pattern's ordering and not a score of ours.
-//
-// A BLOCKED check is never a finding. The sources could not be opened; that
-// is a limit of the run, it belongs in the boundary, and listing it here
-// would present a fetch failure as something learned about the project.
-//
-// An established check is not a finding either. An audit's findings are the
-// weaknesses; what stood is on the map and in the table.
-export function auditFindings(
-  rows: readonly ResultRow[],
-  codes: ReadonlyMap<string, readonly string[]> = new Map(),
-): AuditFinding[] {
-  const toFinding = (r: ResultRow, sentence: string | null): AuditFinding | null => {
-    const state = proofStateOfRung(r.state);
-    if (state === null || sentence === null) return null;
-    return {
-      component: r.component,
-      label: r.label,
-      state,
-      sentence,
-      reasonCodes: codes.get(r.component) ?? [],
-      sources: r.admittedCount,
-    };
-  };
-  const contradicted = rows.filter((r) => r.state === "NOT_HAPPENING").map((r) => toFinding(r, r.shows ?? r.reason));
-  const partial = rows.filter((r) => r.state === "PARTIAL").map((r) => toFinding(r, r.reason));
-  const unresolved = rows
-    .filter((r) => r.state === "UNRESOLVED" && r.coverage !== "BLOCKED")
-    .map((r) => toFinding(r, r.reason));
-  return [...contradicted, ...partial, ...unresolved]
-    .filter((f): f is AuditFinding => f !== null)
-    .slice(0, MAX_AUDIT_FINDINGS);
 }
 
 // CLAIM VS REALITY — EVERY CHECK, AS A TABLE ROW.
@@ -254,4 +221,22 @@ export function auditBoundary(
     ...unresolved.filter((u) => u.kind === "NOT_ESTABLISHED"),
     ...unresolved.filter((u) => u.kind === "COULD_NOT_CHECK"),
   ];
+}
+
+// THE ONE BOUNDARY THAT MATTERS MOST — by the priority the short answer
+// already applies to its "main limitation": a blocked check outranks an
+// unestablished one, because ATLAS could not look and that bears on how
+// much the rest covers; an unestablished check outranks a partly
+// established one. Ladder order decides within a kind. Nothing is scored.
+export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBoundaryItem[]): AuditBoundaryItem | null {
+  const byComponent = new Map(boundary.map((b) => [b.component, b]));
+  const first = (pred: (r: ResultRow) => boolean) => {
+    const r = rows.find(pred);
+    return r ? (byComponent.get(r.component) ?? null) : null;
+  };
+  return (
+    first((r) => r.coverage === "BLOCKED") ??
+    first((r) => r.state === "UNRESOLVED") ??
+    first((r) => r.state === "PARTIAL" && r.reason !== null)
+  );
 }

@@ -138,7 +138,7 @@ export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: 
 
       {view === "audit" ? (
         <AuditCompositionView
-          audit={composeAudit({ input, components, outcomeKind: outcome.kind, plan })}
+          audit={composeAudit({ input, components, outcomeKind: outcome.kind, projectName: detail.job.projectName, plan })}
           input={input}
           asOf={detail.job.finishedAt ?? detail.job.createdAt}
         />
