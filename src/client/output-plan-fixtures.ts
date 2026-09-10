@@ -89,16 +89,22 @@ function periodSeries(
   values: (string | null)[],
   unknownRef: string,
 ): PlanQuantity[] {
-  return values.map((amountRaw, i) => ({
-    evidenceId: amountRaw === null ? unknownRef : `${component.toLowerCase()}-${factKind.toLowerCase()}-p${i + 1}`,
-    factKind,
-    step,
-    component,
-    mint: MINT,
-    decimals: DECIMALS,
-    amountRaw,
-    position: { key: `P${i + 1}`, ordinal: i + 1 },
-  }));
+  return values.map((amountRaw, i) => {
+    const evidenceId =
+      amountRaw === null ? unknownRef : `${component.toLowerCase()}-${factKind.toLowerCase()}-p${i + 1}`;
+    return {
+      evidenceId,
+      // One fixture observation per reading, as a real record has.
+      observationId: `obs-${evidenceId}`,
+      factKind,
+      step,
+      component,
+      mint: MINT,
+      decimals: DECIMALS,
+      amountRaw,
+      position: { key: `P${i + 1}`, ordinal: i + 1 },
+    };
+  });
 }
 
 /* ------------------------------ A ------------------------------ */
@@ -176,8 +182,8 @@ const FIXTURE_A: OutputPlanFixture = {
     ],
     flows: [A_FLOW],
     quantities: [
-      { evidenceId: "a-acquired-total", factKind: "DECODED_EXCHANGE", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "10000000000000", position: null, coverage: { observed: 5, expected: 6 } },
-      { evidenceId: "a-burned-total", factKind: "BURN", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6700000000000", position: null, coverage: { observed: 5, expected: 6 } },
+      { evidenceId: "a-acquired-total", observationId: "obs-a-acquired-total", factKind: "DECODED_EXCHANGE", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "10000000000000", position: null, coverage: { observed: 5, expected: 6 } },
+      { evidenceId: "a-burned-total", observationId: "obs-a-burned-total", factKind: "BURN", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6700000000000", position: null, coverage: { observed: 5, expected: 6 } },
       ...A_ACQUIRED,
       ...A_BURNED,
     ],
@@ -238,10 +244,10 @@ const FIXTURE_B: OutputPlanFixture = {
       },
     ],
     quantities: [
-      { evidenceId: "b-burn", factKind: "BURN", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "5000000000000", position: null },
-      { evidenceId: "b-delta", factKind: "TOTAL_SUPPLY_DELTA", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6700000000000", direction: "INCREASED", position: null },
-      { evidenceId: "b-t0", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "998400000000000", position: { key: "Start of interval", ordinal: 0 } },
-      { evidenceId: "b-t1", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "1005100000000000", position: { key: "End of interval", ordinal: 1 } },
+      { evidenceId: "b-burn", observationId: "obs-b-burn", factKind: "BURN", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "5000000000000", position: null },
+      { evidenceId: "b-delta", observationId: "obs-b-delta", factKind: "TOTAL_SUPPLY_DELTA", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6700000000000", direction: "INCREASED", position: null },
+      { evidenceId: "b-t0", observationId: "obs-b-t0", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "998400000000000", position: { key: "Start of interval", ordinal: 0 } },
+      { evidenceId: "b-t1", observationId: "obs-b-t1", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "1005100000000000", position: { key: "End of interval", ordinal: 1 } },
     ],
     entities: [],
   },
@@ -385,7 +391,7 @@ const FIXTURE_E: OutputPlanFixture = {
       },
     ],
     quantities: [
-      { evidenceId: "e-tx", factKind: "TOKEN_TRANSFER", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "2500000000000", position: null },
+      { evidenceId: "e-tx", observationId: "obs-e-tx", factKind: "TOKEN_TRANSFER", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "2500000000000", position: null },
     ],
     entities: [
       { address: "7xK9fVn2QsWmT4aBcDeFgHjKpLmNoPqRsTuVwXyPq21", chain: "Fixture chain", claimedRole: "Protocol treasury", roleComponent: "DESTINATION", evidenceIds: ["e-treasury"] },

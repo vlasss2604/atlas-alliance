@@ -114,6 +114,14 @@ export interface PlanFlow {
 // how much of the series it actually observed.
 export interface PlanQuantity {
   evidenceId: string;
+  // THE DETERMINISTIC OBSERVATION THIS VALUE WAS READ FROM — the stored
+  // retrieval artifact, one row per read, carrying its own slot and hash.
+  // It is what makes "the same measurement" answerable: two Evidence rows
+  // that cite ONE artifact are one observation referenced twice, and two
+  // artifacts are two observations however alike their numbers look. Null
+  // where the record does not identify one, and a null never matches
+  // anything, including another null.
+  observationId: string | null;
   factKind: string;
   step: number;
   component: string;
@@ -208,6 +216,7 @@ export type FlowStep = EconomicStep | "DESTINATION";
 
 export interface PlannedMetric {
   evidenceId: string;
+  observationId: string | null;
   factKind: string;
   component: string;
   step: EconomicStep | null;
@@ -399,9 +408,15 @@ const ECONOMIC_STEPS_A_FACT_KIND_CAN_CARRY: Record<string, readonly EconomicStep
   // A measured change in total supply across an interval. This is the one
   // supply fact that IS an effect.
   TOTAL_SUPPLY_DELTA: ["EFFECT"],
-  // A destruction event: the mechanism running, and a gross reduction. Which
-  // of the two is being shown is what the component decides.
-  BURN: ["EXECUTION", "EFFECT"],
+  // A destruction event: the mechanism running. NOT an effect — EFFECT on
+  // this chain means the NET change in supply, and a burn is a GROSS
+  // reduction. The engine keeps the same two apart with two reason codes:
+  // one deterministic BURN clears SUPPLY_REDUCTION_NOT_ESTABLISHED and
+  // leaves NET_SUPPLY_CHANGE_NOT_ESTABLISHED standing, because destroying
+  // tokens says nothing about what issuance did over the same interval.
+  // Letting a burn occupy EFFECT would publish a gross reduction as the net
+  // outcome — the exact leap that distinction exists to prevent.
+  BURN: ["EXECUTION"],
   // Movements of value.
   DECODED_EXCHANGE: ["EXECUTION"],
   TOKEN_TRANSFER: ["EXECUTION"],
@@ -642,6 +657,7 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
     if (coverage !== null && (coverage.expected <= 0 || coverage.observed > coverage.expected)) continue;
     candidates.push({
       evidenceId: q.evidenceId,
+      observationId: q.observationId,
       factKind: q.factKind,
       component: q.component,
       step: economicStepFor(q.factKind, q.component),
@@ -674,19 +690,33 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
   // The same reading is admitted by more than one component whenever two
   // propositions rest on it — a total-supply level answers both "is this
   // mechanism live?" and "did supply change?" — and the record then holds
-  // it as two Evidence rows. Two identical tiles side by side read as two
-  // findings and inflate one measurement into a pattern; it is one
-  // measurement, referenced twice.
+  // it as two Evidence rows citing ONE stored artifact. Two identical tiles
+  // side by side read as two findings and inflate one measurement into a
+  // pattern; it is one measurement, referenced twice.
   //
-  // Identity is the MEASUREMENT, not the row: same kind, same unit domain,
-  // same exact amount. The first in the deterministic order keeps the tile,
-  // and every row that carried it stays in the block's references, so
-  // collapsing the tile loses nothing from the record trail.
-  const identity = (m: PlannedMetric) => `${m.factKind}|${m.mint}|${m.decimals}|${m.amountRaw}`;
+  // IDENTITY IS THE OBSERVATION, NEVER AN EQUAL NUMBER. Two reads of total
+  // supply at different slots can return the same amount — that is what
+  // "supply was UNCHANGED across the interval" IS, and the engine models it
+  // explicitly. Collapsing on the value would erase one endpoint of exactly
+  // that interval and turn two real observations into one. So rows collapse
+  // only when they cite the same artifact for the same fact kind: one read,
+  // one slot, one hash, referenced more than once.
+  //
+  // A null observation id matches nothing, including another null: a value
+  // whose read the record does not identify is never merged with anything.
+  // The first in the deterministic order keeps the tile, and every row that
+  // carried it stays in the block's references, so collapsing loses nothing
+  // from the record trail.
+  const identity = (m: PlannedMetric) =>
+    m.observationId === null ? null : `${m.factKind}|${m.observationId}`;
   const unique: PlannedMetric[] = [];
   const alsoCarriedBy = new Map<string, string[]>();
   for (const m of [...candidates].sort((a, b) => relevance(a) - relevance(b) || stable(a, b))) {
     const key = identity(m);
+    if (key === null) {
+      unique.push(m);
+      continue;
+    }
     const existing = alsoCarriedBy.get(key);
     if (existing) {
       existing.push(m.evidenceId);
@@ -703,7 +733,12 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
       refs: {
         components: uniqueKeys(ctx, metrics.map((m) => m.component)),
         evidenceIds: [
-          ...new Set(metrics.flatMap((m) => [m.evidenceId, ...(alsoCarriedBy.get(identity(m)) ?? [])])),
+          ...new Set(
+            metrics.flatMap((m) => {
+              const key = identity(m);
+              return [m.evidenceId, ...(key === null ? [] : (alsoCarriedBy.get(key) ?? []))];
+            }),
+          ),
         ].sort(byString),
       },
       spec: { metrics, claims: claimsFor(ctx, metrics) },
@@ -1212,6 +1247,7 @@ export function inputFromResearchJobDetail(detail: ResearchJobDetail): Analytica
     // adds only `position`, which the record does not carry.
     quantities: (detail.quantities ?? []).map((q) => ({
       evidenceId: q.evidenceId,
+      observationId: q.observationId ?? null,
       factKind: q.factKind,
       step: q.step,
       component: q.component,

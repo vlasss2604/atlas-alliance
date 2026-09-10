@@ -227,6 +227,7 @@ describe("materially different records produce different plans", () => {
 const base = fx("A").input;
 const q = (over: Partial<AnalyticalOutputInputV1["quantities"][number]>) => ({
   evidenceId: "a-acquired-total",
+  observationId: "obs-a-acquired-total",
   factKind: "DECODED_EXCHANGE",
   step: 4,
   component: "EXECUTION_EVIDENCE",
@@ -512,16 +513,34 @@ describe("the selector cannot make a claim the record did not", () => {
     expect(bm.spec.metrics[0].step).toBeNull();
   });
 
-  it("a measured CHANGE still reaches EFFECT, so the fix removed a wrong stage and not the stage", () => {
-    // The counterpart: EFFECT is not emptied, it is reserved. A
-    // TOTAL_SUPPLY_DELTA is a change across an interval and belongs there.
+  it("only a measured NET change reaches EFFECT; a gross reduction never does", () => {
+    // EFFECT on this chain means the NET change in supply. A
+    // TOTAL_SUPPLY_DELTA is one and belongs there — the stage is reserved,
+    // not emptied.
     const delta = block("B", "METRIC")!.spec.metrics.find((m) => m.factKind === "TOTAL_SUPPLY_DELTA")!;
     expect(delta.step).toBe("EFFECT");
-    // And a BURN takes the position its component asks for, because a
-    // destruction event can legitimately be read either way.
-    const burn = block("B", "METRIC")!.spec.metrics.find((m) => m.factKind === "BURN")!;
-    expect(burn.step).toBe("EXECUTION");
-    expect(block("A", "METRIC")!.spec.metrics.find((m) => m.factKind === "BURN")!.step).toBe("EFFECT");
+
+    // A BURN is a GROSS reduction: it destroys the stated tokens and says
+    // nothing about what issuance did over the same interval. The engine
+    // keeps the two apart with two reason codes, and one deterministic burn
+    // clears only the first. So a burn is the mechanism EXECUTING and is
+    // never the net outcome, whichever component admitted it.
+    expect(block("B", "METRIC")!.spec.metrics.find((m) => m.factKind === "BURN")!.step).toBe("EXECUTION");
+    // Fixture A admits its burn total at NET_EFFECT. It still may not take
+    // that component's stage.
+    const aBurn = block("A", "METRIC")!.spec.metrics.find((m) => m.factKind === "BURN")!;
+    expect(aBurn.component).toBe("NET_EFFECT");
+    expect(aBurn.step).toBeNull();
+
+    // Nothing anywhere may put a burn at EFFECT.
+    for (const f of OUTPUT_PLAN_FIXTURES) {
+      for (const b of chooseAnalyticalBlocks(f.input).orderedBlocks) {
+        if (b.type !== "METRIC") continue;
+        for (const m of b.spec.metrics) {
+          if (m.factKind === "BURN") expect(m.step, `${f.key} burn`).not.toBe("EFFECT");
+        }
+      }
+    }
   });
 
   it("every quantity kind declares what it can mean, so a new one cannot drift onto the chain", () => {
@@ -534,44 +553,90 @@ describe("the selector cannot make a claim the record did not", () => {
   });
 
   it("the same observation admitted twice is one headline metric, not two", () => {
-    const twice = chooseAnalyticalBlocks({
-      ...base,
-      components: [
-        { step: 5, component: "CURRENT_STATE", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] },
-        { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-path"], contradictingEvidenceIds: [] },
-      ],
-      quantities: [
-        q({ evidenceId: "a-fees", factKind: "TOKEN_SUPPLY", component: "CURRENT_STATE", step: 5, amountRaw: "835619825233489752" }),
-        q({ evidenceId: "a-path", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "835619825233489752" }),
-      ],
-      flows: [],
-      entities: [],
-    });
-    const m = twice.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
-    expect(m.spec.metrics).toHaveLength(1);
-    // Nothing is lost: both rows remain referenced by the block.
-    expect(m.refs.evidenceIds).toEqual(["a-fees", "a-path"]);
+    // ONE artifact, cited by two components. That is one read of the chain
+    // referenced twice, and two identical tiles would read as two findings.
+    const twoComponents = (overA: object, overB: object) =>
+      chooseAnalyticalBlocks({
+        ...base,
+        components: [
+          { step: 5, component: "CURRENT_STATE", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] },
+          { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-path"], contradictingEvidenceIds: [] },
+        ],
+        quantities: [
+          q({ evidenceId: "a-fees", factKind: "TOKEN_SUPPLY", component: "CURRENT_STATE", step: 5, ...overA }),
+          q({ evidenceId: "a-path", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, ...overB }),
+        ],
+        flows: [],
+        entities: [],
+      });
+    const metricsOf = (p: ReturnType<typeof chooseAnalyticalBlocks>) =>
+      p.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
 
-    // A DIFFERENT amount of the same kind is a different observation and
-    // keeps its own tile — dedupe collapses repeats, never distinct readings.
-    const distinct = chooseAnalyticalBlocks({
+    const sameRead = twoComponents(
+      { observationId: "artifact-1", amountRaw: "835619825233489752" },
+      { observationId: "artifact-1", amountRaw: "835619825233489752" },
+    );
+    expect(metricsOf(sameRead).spec.metrics).toHaveLength(1);
+    // Nothing is lost: both rows remain referenced by the block.
+    expect(metricsOf(sameRead).refs.evidenceIds).toEqual(["a-fees", "a-path"]);
+  });
+
+  it("two reads that happen to agree are two observations, never one", () => {
+    // THE BUG THIS PINS. Collapsing on mint + decimals + amount would merge
+    // two DIFFERENT reads of total supply that returned the same number —
+    // and two equal readings at different slots is precisely what "supply
+    // was UNCHANGED across the interval" IS. The engine models that
+    // direction explicitly, so erasing one endpoint of it would destroy the
+    // one case the comparison exists to detect.
+    const p = chooseAnalyticalBlocks({
       ...base,
       components: [
-        { step: 5, component: "CURRENT_STATE", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] },
-        { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-path"], contradictingEvidenceIds: [] },
+        { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees", "a-path"], contradictingEvidenceIds: [] },
       ],
       quantities: [
-        q({ evidenceId: "a-fees", factKind: "TOKEN_SUPPLY", component: "CURRENT_STATE", step: 5, amountRaw: "100" }),
-        q({ evidenceId: "a-path", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "200" }),
+        // Same mint, same decimals, same exact amount — different reads.
+        q({ evidenceId: "a-fees", observationId: "artifact-t0", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "998400000000000" }),
+        q({ evidenceId: "a-path", observationId: "artifact-t1", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "998400000000000" }),
       ],
       flows: [],
       entities: [],
     });
-    const dm = distinct.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
-    expect(dm.spec.metrics).toHaveLength(2);
-    // And two readings of the same thing are still not a change between them.
-    expect(dm.spec.claims).toEqual([]);
-    expect(JSON.stringify(dm.spec)).not.toMatch(/delta|change|reduction/i);
+    const m = p.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(m.spec.metrics).toHaveLength(2);
+    expect(m.spec.metrics.map((x) => x.observationId).sort()).toEqual(["artifact-t0", "artifact-t1"]);
+    // Two equal readings are still not a change between them.
+    expect(m.spec.claims).toEqual([]);
+    expect(JSON.stringify(m.spec)).not.toMatch(/delta|change|reduction/i);
+  });
+
+  it("an unidentified read is never merged, not even with another unidentified one", () => {
+    // A null observation id matches nothing, including another null: the
+    // record did not say these were the same read, so the selector does not
+    // decide that they were.
+    const p = chooseAnalyticalBlocks({
+      ...base,
+      components: [
+        { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees", "a-path"], contradictingEvidenceIds: [] },
+      ],
+      quantities: [
+        q({ evidenceId: "a-fees", observationId: null, factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "77" }),
+        q({ evidenceId: "a-path", observationId: null, factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "77" }),
+      ],
+      flows: [],
+      entities: [],
+    });
+    const m = p.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(m.spec.metrics).toHaveLength(2);
+  });
+
+  it("collapsing is keyed on the observation and never on the value", () => {
+    const src = readFileSync(SELECTOR, "utf-8");
+    const dedupe = src.slice(src.indexOf("const identity = (m: PlannedMetric)"), src.indexOf("const metrics = unique"));
+    expect(dedupe).toContain("observationId");
+    // The amount, the mint and the unit are not part of identity.
+    expect(dedupe).not.toContain("amountRaw");
+    expect(dedupe).not.toContain("mint");
+    expect(dedupe).not.toContain("decimals");
   });
 
   it("contains no project-specific rule and imports nothing from the server", () => {
@@ -750,9 +815,11 @@ describe("the detail-payload adapter", () => {
         sourceTitle: null,
       })),
       // Exactly what the route projects: the artifact's own four fields.
+      // ONE artifact, cited by both components — which is what the real
+      // record holds: both rows point at the same read, same slot, same hash.
       quantities: [
-        { evidenceId: "q-cur", factKind: "TOKEN_SUPPLY", step: 5, component: "CURRENT_STATE", mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", decimals: 6, amountRaw: "835619825233489752" },
-        { evidenceId: "q-net", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", decimals: 6, amountRaw: "835619825233489752" },
+        { evidenceId: "q-cur", observationId: "66e5564b", factKind: "TOKEN_SUPPLY", step: 5, component: "CURRENT_STATE", mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", decimals: 6, amountRaw: "835619825233489752" },
+        { evidenceId: "q-net", observationId: "66e5564b", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", decimals: 6, amountRaw: "835619825233489752" },
       ],
     } as unknown as ResearchJobDetail;
 
@@ -886,6 +953,9 @@ describe("the dev route renders exactly the selected blocks", () => {
     // Every canonical field is validated and an incomplete row is dropped,
     // never repaired: no ?? 0, no ?? "", no guessed decimals or mint.
     expect(route).toContain("CANONICAL_UNSIGNED_INTEGER");
+    // And it carries the artifact identity, so a consumer can tell one read
+    // cited twice from two reads that happen to agree.
+    expect(route).toContain("observationId: onchainArtifacts.id");
     expect(route).not.toMatch(/amountRaw\s*\?\?|decimals\s*\?\?\s*\d|mint\s*\?\?/);
     // And nothing reads prose: the quantity comes from the stored artifact,
     // never from a fragment or a summary.

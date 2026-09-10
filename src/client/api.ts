@@ -368,6 +368,11 @@ export interface ResearchJobDetail {
   // simply absent — never a zero, never a guessed unit.
   quantities: {
     evidenceId: string;
+    // The stored retrieval artifact this value was read from — one row per
+    // chain read, with its own slot and hash. Two Evidence rows citing the
+    // same id are one observation referenced twice; two ids are two
+    // observations, however alike their numbers.
+    observationId: string;
     factKind: string;
     step: number;
     component: string;

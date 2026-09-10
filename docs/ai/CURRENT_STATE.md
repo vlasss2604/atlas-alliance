@@ -60,11 +60,20 @@ table: the component proposes a step and the kind must be able to carry it,
 otherwise the measure is shown without one. `TOKEN_SUPPLY` and
 `TOKEN_ACCOUNT_BALANCE` carry NO step — a level is a state, not a movement,
 a destruction or a change — so a supply reading admitted by NET_EFFECT is
-no longer published at EFFECT. `TOTAL_SUPPLY_DELTA` carries EFFECT and
-`BURN` carries either EXECUTION or EFFECT, so the stage is reserved rather
-than emptied. Identical observations (same kind, unit domain and exact
-amount) collapse to ONE headline tile, with every carrying row still
-referenced by the block.
+no longer published at EFFECT. `TOTAL_SUPPLY_DELTA` is the ONLY kind that
+carries EFFECT, because EFFECT means the NET change; `BURN` carries
+EXECUTION only — a burn is a GROSS reduction, which is why one deterministic
+burn clears `SUPPLY_REDUCTION_NOT_ESTABLISHED` and leaves
+`NET_SUPPLY_CHANGE_NOT_ESTABLISHED` standing.
+
+**Collapsing is keyed on the OBSERVATION, never on an equal value.** The
+projection carries `observationId` (the `onchain_artifacts` row: one read,
+one slot, one hash). Two Evidence rows citing one artifact are one
+observation referenced twice and show one tile, with both rows still in the
+block's references; two artifacts are two observations however alike their
+numbers, and a null id matches nothing including another null. Keying on
+mint + decimals + amount would have merged two reads that returned the same
+number — which is exactly what an UNCHANGED interval is.
 
 `BURN` and `TOTAL_SUPPLY_DELTA` are deliberately NOT projected. A BURN
 artifact is a TRANSACTION_DETAIL whose `burns` is a LIST — choosing among

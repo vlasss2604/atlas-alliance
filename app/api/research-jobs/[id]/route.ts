@@ -239,6 +239,7 @@ export async function GET(
     const quantityRows = await db
       .select({
         evidenceId: evidence.id,
+        observationId: onchainArtifacts.id,
         factKind: evidence.onchainFactKind,
         patternStep: evidence.patternStep,
         component: evidence.component,
@@ -267,6 +268,9 @@ export async function GET(
       return [
         {
           evidenceId: r.evidenceId,
+          // The artifact identity, so a consumer can tell one read cited
+          // twice from two reads that happen to agree.
+          observationId: r.observationId,
           factKind: r.factKind,
           step: r.patternStep,
           component: r.component,
