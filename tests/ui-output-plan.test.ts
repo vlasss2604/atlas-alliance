@@ -478,6 +478,102 @@ describe("the selector cannot make a claim the record did not", () => {
     expect(without.rejected).toEqual(withRelevance.rejected);
   });
 
+  it("a point-in-time supply reading is never placed at EFFECT, whatever consumed it", () => {
+    // THE BUG THIS PINS. A TOKEN_SUPPLY row admitted by NET_EFFECT was
+    // taking that component's chain position, so an observation of what
+    // supply IS was published under the stage that means what the mechanism
+    // DID. Level ≠ change; the kind decides, not the component.
+    const supplyAt = (component: string, step: number) =>
+      chooseAnalyticalBlocks({
+        ...base,
+        components: [{ step, component, status: "PARTIALLY_SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] }],
+        quantities: [q({ evidenceId: "a-fees", factKind: "TOKEN_SUPPLY", component, step, amountRaw: "999" })],
+        flows: [],
+        entities: [],
+      });
+    for (const [component, step] of [["NET_EFFECT", 7], ["CURRENT_STATE", 5], ["SOURCE_OF_VALUE", 1], ["EXECUTION_EVIDENCE", 4]] as const) {
+      const p = supplyAt(component, step);
+      const m = p.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+      // It is still a real, established measurement — it simply has no
+      // position in the chain.
+      expect(m.spec.metrics, component).toHaveLength(1);
+      expect(m.spec.metrics[0].state, component).toBe("ESTABLISHED");
+      expect(m.spec.metrics[0].step, component).toBeNull();
+    }
+    // A balance is a position, and equally not a stage.
+    const balance = chooseAnalyticalBlocks({
+      ...base,
+      components: [{ step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] }],
+      quantities: [q({ evidenceId: "a-fees", factKind: "TOKEN_ACCOUNT_BALANCE", component: "NET_EFFECT", step: 7, amountRaw: "5" })],
+      flows: [],
+      entities: [],
+    });
+    const bm = balance.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(bm.spec.metrics[0].step).toBeNull();
+  });
+
+  it("a measured CHANGE still reaches EFFECT, so the fix removed a wrong stage and not the stage", () => {
+    // The counterpart: EFFECT is not emptied, it is reserved. A
+    // TOTAL_SUPPLY_DELTA is a change across an interval and belongs there.
+    const delta = block("B", "METRIC")!.spec.metrics.find((m) => m.factKind === "TOTAL_SUPPLY_DELTA")!;
+    expect(delta.step).toBe("EFFECT");
+    // And a BURN takes the position its component asks for, because a
+    // destruction event can legitimately be read either way.
+    const burn = block("B", "METRIC")!.spec.metrics.find((m) => m.factKind === "BURN")!;
+    expect(burn.step).toBe("EXECUTION");
+    expect(block("A", "METRIC")!.spec.metrics.find((m) => m.factKind === "BURN")!.step).toBe("EFFECT");
+  });
+
+  it("every quantity kind declares what it can mean, so a new one cannot drift onto the chain", () => {
+    const src = readFileSync(SELECTOR, "utf-8");
+    const declared = src.slice(src.indexOf("ECONOMIC_STEPS_A_FACT_KIND_CAN_CARRY"), src.indexOf("function economicStepFor"));
+    const kinds = src.slice(src.indexOf("const QUANTITY_FACT_KINDS"), src.indexOf("]);", src.indexOf("const QUANTITY_FACT_KINDS")));
+    for (const kind of kinds.match(/"[A-Z_]+"/g) ?? []) {
+      expect(declared, kind).toContain(kind.replace(/"/g, ""));
+    }
+  });
+
+  it("the same observation admitted twice is one headline metric, not two", () => {
+    const twice = chooseAnalyticalBlocks({
+      ...base,
+      components: [
+        { step: 5, component: "CURRENT_STATE", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] },
+        { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-path"], contradictingEvidenceIds: [] },
+      ],
+      quantities: [
+        q({ evidenceId: "a-fees", factKind: "TOKEN_SUPPLY", component: "CURRENT_STATE", step: 5, amountRaw: "835619825233489752" }),
+        q({ evidenceId: "a-path", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "835619825233489752" }),
+      ],
+      flows: [],
+      entities: [],
+    });
+    const m = twice.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(m.spec.metrics).toHaveLength(1);
+    // Nothing is lost: both rows remain referenced by the block.
+    expect(m.refs.evidenceIds).toEqual(["a-fees", "a-path"]);
+
+    // A DIFFERENT amount of the same kind is a different observation and
+    // keeps its own tile — dedupe collapses repeats, never distinct readings.
+    const distinct = chooseAnalyticalBlocks({
+      ...base,
+      components: [
+        { step: 5, component: "CURRENT_STATE", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-fees"], contradictingEvidenceIds: [] },
+        { step: 7, component: "NET_EFFECT", status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["a-path"], contradictingEvidenceIds: [] },
+      ],
+      quantities: [
+        q({ evidenceId: "a-fees", factKind: "TOKEN_SUPPLY", component: "CURRENT_STATE", step: 5, amountRaw: "100" }),
+        q({ evidenceId: "a-path", factKind: "TOKEN_SUPPLY", component: "NET_EFFECT", step: 7, amountRaw: "200" }),
+      ],
+      flows: [],
+      entities: [],
+    });
+    const dm = distinct.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(dm.spec.metrics).toHaveLength(2);
+    // And two readings of the same thing are still not a change between them.
+    expect(dm.spec.claims).toEqual([]);
+    expect(JSON.stringify(dm.spec)).not.toMatch(/delta|change|reduction/i);
+  });
+
   it("contains no project-specific rule and imports nothing from the server", () => {
     const src = readFileSync(SELECTOR, "utf-8");
     expect(src).not.toMatch(/projectSlug|projectName|projectTicker|project\s*===|slug\s*===/);
@@ -672,20 +768,20 @@ describe("the detail-payload adapter", () => {
     const p = chooseAnalyticalBlocks(input);
     expect(p.orderedBlocks.map((b) => b.type)).toContain("METRIC");
     const metric = p.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
-    expect(metric.spec.metrics).toHaveLength(2);
+    // ONE measurement, though two components admitted it. Two identical
+    // tiles would read as two findings.
+    expect(metric.spec.metrics).toHaveLength(1);
     // The exact integer survives: a supply of this size loses a unit to a
     // float, and a measurement that lost a unit is a false fact.
-    expect(metric.spec.metrics.map((m) => m.amountRaw)).toEqual([
-      "835619825233489752",
-      "835619825233489752",
-    ]);
+    expect(metric.spec.metrics[0].amountRaw).toBe("835619825233489752");
     // The measurement's standing comes from its row's admission, not from
     // the PARTIALLY_SUPPORTED component it bears on.
-    for (const m of metric.spec.metrics) expect(m.state).toBe("ESTABLISHED");
-    // NET_EFFECT's reading sits at EFFECT in the chain; CURRENT_STATE has
-    // no position in the economic chain and is carried without one.
-    expect(metric.spec.metrics.find((m) => m.component === "NET_EFFECT")!.step).toBe("EFFECT");
-    expect(metric.spec.metrics.find((m) => m.component === "CURRENT_STATE")!.step).toBeNull();
+    expect(metric.spec.metrics[0].state).toBe("ESTABLISHED");
+    // A SUPPLY LEVEL IS NOT AN OUTCOME. It occupies no position in the
+    // economic chain, whichever component consumed it.
+    expect(metric.spec.metrics[0].step).toBeNull();
+    // Collapsing the tile loses nothing: both rows stay referenced.
+    expect(metric.refs.evidenceIds).toEqual(["q-cur", "q-net"]);
     // No TOTAL_SUPPLY_DELTA, so no proposition is shown beside the strip.
     expect(metric.spec.claims).toEqual([]);
     // And still no series: point readings carry no position to order.

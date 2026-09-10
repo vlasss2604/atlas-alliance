@@ -365,6 +365,57 @@ const ECONOMIC_STEP_OF_COMPONENT: Record<string, EconomicStep> = {
   EXECUTION_EVIDENCE: "EXECUTION",
   NET_EFFECT: "EFFECT",
 };
+
+// WHICH POSITIONS A MEASUREMENT OF THIS KIND CAN ACTUALLY OCCUPY.
+//
+// The component above says which QUESTION a reading was admitted for; it
+// does not say what the reading MEANS. Those come apart exactly where it
+// matters most: a total-supply level is admitted by NET_EFFECT because the
+// question "did supply change?" is answered partly from levels — and the
+// level itself is not a change. Placing it at EFFECT because of the
+// component that consumed it publishes a point-in-time observation as a
+// measured outcome, which is the difference between
+//
+//   TOTAL SUPPLY IS 835.6B      (a state, at one observation)
+//   SUPPLY FELL BY 6.7M         (a change, across an interval)
+//
+// and the product exists to keep those apart. So the kind CONSTRAINS and
+// the component SELECTS: a reading takes its component's step only when
+// its own kind can carry that step, and otherwise carries none.
+//
+// TOTAL, NOT PARTIAL — every quantity kind is listed, the empty sets
+// included, so a kind added later must declare what it can mean before it
+// can appear anywhere on the chain.
+//
+// THE EMPTY SETS ARE THE POINT. A supply level and an account balance are
+// STATES: neither is a movement of value, a destruction of it, or a change
+// in anything. They are real, established measurements with no position in
+// SOURCE → ALLOCATION → EXECUTION → EFFECT, and they are shown as measures
+// without one rather than filed under a stage they do not belong to.
+const ECONOMIC_STEPS_A_FACT_KIND_CAN_CARRY: Record<string, readonly EconomicStep[]> = {
+  // States, not events.
+  TOKEN_SUPPLY: [],
+  TOKEN_ACCOUNT_BALANCE: [],
+  // A measured change in total supply across an interval. This is the one
+  // supply fact that IS an effect.
+  TOTAL_SUPPLY_DELTA: ["EFFECT"],
+  // A destruction event: the mechanism running, and a gross reduction. Which
+  // of the two is being shown is what the component decides.
+  BURN: ["EXECUTION", "EFFECT"],
+  // Movements of value.
+  DECODED_EXCHANGE: ["EXECUTION"],
+  TOKEN_TRANSFER: ["EXECUTION"],
+  NATIVE_TRANSFER: ["SOURCE", "EXECUTION"],
+};
+
+// The chain position for one measurement, or null when its kind cannot
+// carry the position its component would suggest.
+function economicStepFor(factKind: string, component: string): EconomicStep | null {
+  const candidate = ECONOMIC_STEP_OF_COMPONENT[component];
+  if (candidate === undefined) return null;
+  const allowed = ECONOMIC_STEPS_A_FACT_KIND_CAN_CARRY[factKind] ?? [];
+  return allowed.includes(candidate) ? candidate : null;
+}
 const ECONOMIC_STEP_ORDER: Record<EconomicStep, number> = {
   SOURCE: 0,
   ALLOCATION: 1,
@@ -593,7 +644,7 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
       evidenceId: q.evidenceId,
       factKind: q.factKind,
       component: q.component,
-      step: ECONOMIC_STEP_OF_COMPONENT[q.component] ?? null,
+      step: economicStepFor(q.factKind, q.component),
       mint: q.mint,
       decimals: q.decimals,
       amountRaw: q.amountRaw,
@@ -618,17 +669,42 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
     ctx.relevant.size === 0 || ctx.relevant.has(m.component) ? 0 : 1;
   const stable = (a: PlannedMetric, b: PlannedMetric) =>
     rank(a) - rank(b) || byString(a.factKind, b.factKind) || byString(a.evidenceId, b.evidenceId);
-  const metrics = [...candidates]
-    .sort((a, b) => relevance(a) - relevance(b) || stable(a, b))
-    .slice(0, MAX_METRICS)
-    .sort(stable);
+  // ONE OBSERVATION, ONE HEADLINE.
+  //
+  // The same reading is admitted by more than one component whenever two
+  // propositions rest on it — a total-supply level answers both "is this
+  // mechanism live?" and "did supply change?" — and the record then holds
+  // it as two Evidence rows. Two identical tiles side by side read as two
+  // findings and inflate one measurement into a pattern; it is one
+  // measurement, referenced twice.
+  //
+  // Identity is the MEASUREMENT, not the row: same kind, same unit domain,
+  // same exact amount. The first in the deterministic order keeps the tile,
+  // and every row that carried it stays in the block's references, so
+  // collapsing the tile loses nothing from the record trail.
+  const identity = (m: PlannedMetric) => `${m.factKind}|${m.mint}|${m.decimals}|${m.amountRaw}`;
+  const unique: PlannedMetric[] = [];
+  const alsoCarriedBy = new Map<string, string[]>();
+  for (const m of [...candidates].sort((a, b) => relevance(a) - relevance(b) || stable(a, b))) {
+    const key = identity(m);
+    const existing = alsoCarriedBy.get(key);
+    if (existing) {
+      existing.push(m.evidenceId);
+      continue;
+    }
+    alsoCarriedBy.set(key, []);
+    unique.push(m);
+  }
+  const metrics = unique.slice(0, MAX_METRICS).sort(stable);
 
   return [
     {
       type: "METRIC",
       refs: {
         components: uniqueKeys(ctx, metrics.map((m) => m.component)),
-        evidenceIds: metrics.map((m) => m.evidenceId),
+        evidenceIds: [
+          ...new Set(metrics.flatMap((m) => [m.evidenceId, ...(alsoCarriedBy.get(identity(m)) ?? [])])),
+        ].sort(byString),
       },
       spec: { metrics, claims: claimsFor(ctx, metrics) },
     },
