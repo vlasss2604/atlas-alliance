@@ -38,7 +38,7 @@ import { SelectedBlocks } from "./selected-blocks";
 // entities today, so METRIC, TABLE, CHART and ENTITY are declined — and
 // that is the correct result, printed as such, rather than a number parsed
 // out of a fragment to make the page look analytical.
-export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: "result" | "audit" }) {
+export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: "result" | "verification" }) {
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -136,7 +136,7 @@ export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: 
         </p>
       </details>
 
-      {view === "audit" ? (
+      {view === "verification" ? (
         <AuditCompositionView
           audit={composeAudit({ input, components, outcomeKind: outcome.kind, projectName: detail.job.projectName, plan })}
           input={input}

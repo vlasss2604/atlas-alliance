@@ -6,13 +6,13 @@ import { AuditCompositionView } from "@/src/client/components/result-blocks/audi
 import { chooseAnalyticalBlocks } from "@/src/client/output-plan";
 import { GOLDEN_AUDIT_FIXTURE } from "@/src/client/output-plan-fixtures";
 
-// DEV-ONLY ROUTE — THE GOLDEN AUDIT.
+// DEV-ONLY ROUTE — THE GOLDEN VERIFICATION.
 //
-// What an audit can express when the record supports it: an invented,
-// balanced record with every state the audit has to present, structured
+// What verification can express when the record supports it: an invented,
+// balanced record with every state verification has to present, structured
 // enough that the SAME selector justifies four metrics, a flow, a table, a
 // chart and a timeline. Next to it, the real historical job at
-// /dev/output-plan?job=…&view=audit is the sparsity test — the same
+// /dev/output-plan?job=…&view=verification is the sparsity test — the same
 // composition, constrained by what its evidence actually holds.
 //
 // Same gate and same discipline as /dev/result-showcase: absent from a
@@ -22,7 +22,7 @@ export const dynamic = "force-dynamic";
 
 const REAL_SPARSE_JOB = "1302b67e-273d-4a38-b02c-78c9d8155a77";
 
-export default function DevAuditShowcasePage() {
+export default function DevVerificationShowcasePage() {
   if (process.env.NODE_ENV === "production") notFound();
   const f = GOLDEN_AUDIT_FIXTURE;
   const plan = chooseAnalyticalBlocks(f.input);
@@ -34,31 +34,31 @@ export default function DevAuditShowcasePage() {
   });
 
   return (
-    <main className="enter flex flex-col gap-4 pb-6" data-testid="audit-showcase-page">
+    <main className="enter flex flex-col gap-4 pb-6" data-testid="verification-showcase-page">
       <section
         className="rounded-xl border px-3.5 py-2.5"
         style={{ borderColor: "rgba(251, 191, 36, 0.32)", background: "rgba(251, 191, 36, 0.07)" }}
         data-testid="fixture-banner"
       >
         <p className="text-[0.68rem] font-semibold uppercase tracking-[0.08em]" style={{ color: "#fcd34d" }}>
-          Golden audit · design fixture · not a real research result
+          Golden verification · design fixture · not a real research result
         </p>
         <p className="mt-0.5 text-[0.7rem] leading-snug text-[var(--atlas-text-dim)]">
-          Every value below is invented. This page shows what the audit can express when the record supports
-          it; the real historical job shows the same composition constrained by its evidence.
+          Every value below is invented. This page shows what verification can express when the record
+          supports it; the real historical job shows the same composition constrained by its evidence.
         </p>
       </section>
 
       <nav className="flex flex-wrap gap-2" data-testid="fixture-picker">
         <span className="rounded-lg border px-2.5 py-1 text-[0.72rem]" style={{ borderColor: "#c4b5fd", color: "#c4b5fd" }}>
-          Golden audit
+          Golden verification
         </span>
         <Link
-          href={`/dev/output-plan?job=${REAL_SPARSE_JOB}&view=audit`}
+          href={`/dev/output-plan?job=${REAL_SPARSE_JOB}&view=verification`}
           className="rounded-lg border px-2.5 py-1 text-[0.72rem]"
           style={{ borderColor: "var(--hairline)", color: "var(--atlas-text-dim)" }}
         >
-          Real sparse audit →
+          Real sparse verification →
         </Link>
         <Link
           href="/dev/result-showcase"

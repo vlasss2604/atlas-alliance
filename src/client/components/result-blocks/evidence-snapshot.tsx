@@ -74,11 +74,17 @@ function SnapshotCard({ item }: { item: EvidenceKindMeta }) {
       </div>
 
       <div className="flex flex-1 flex-col px-4 py-3">
+        {item.claim && (
+          <p className="mb-2 text-[0.66rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="evidence-claim">
+            <span className="uppercase tracking-[0.06em]">Bears on</span> · {item.claim}
+          </p>
+        )}
         {/* THE SOURCE'S OWN WORDS, marked as a quotation by a rule down the
             left rather than by quote marks that a fragment may itself
-            contain. */}
+            contain. A chain fragment is one unbroken token, so the quote
+            must be allowed to wrap anywhere or it overflows the card. */}
         <blockquote
-          className="border-l-2 pl-3 text-[0.83rem] leading-relaxed"
+          className="border-l-2 pl-3 text-[0.83rem] leading-relaxed [overflow-wrap:anywhere]"
           style={{ borderColor: accent }}
           data-testid="evidence-fragment"
         >
@@ -86,17 +92,17 @@ function SnapshotCard({ item }: { item: EvidenceKindMeta }) {
         </blockquote>
 
         <div className="mt-3 mb-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div>
+          <div className="min-w-0">
             <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
               What it supports
             </p>
-            <p className="mt-1 text-[0.78rem] leading-snug">{item.proves}</p>
+            <p className="mt-1 text-[0.78rem] leading-snug [overflow-wrap:anywhere]">{item.proves}</p>
           </div>
-          <div>
+          <div className="min-w-0">
             <p className="eyebrow" style={{ color: "#fcd34d" }}>
               What it does not establish
             </p>
-            <p className="mt-1 text-[0.78rem] leading-snug text-[var(--atlas-text-dim)]">
+            <p className="mt-1 text-[0.78rem] leading-snug text-[var(--atlas-text-dim)] [overflow-wrap:anywhere]">
               {item.doesNotProve}
             </p>
           </div>

@@ -27,27 +27,44 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
-## AN AUDIT IS WHAT DESERVES ATTENTION AFTER THE VERIFICATION
+## VERIFICATION: WHAT FROM THIS CLAIM ACTUALLY SURVIVED
 
-`composeAudit` (`src/client/audit-composition.ts`) is a composition mode over
-the existing result that surfaces exceptions, not checks: the Proof's
-verdict and the research screen's own lead sentence; WHAT STOOD UP
-(established, ladder order, ≤3; partly established stands in when nothing
-was); MAIN GAPS (2–4, round-robin over could-not-check → not established →
-partly established with a reason, ladder order within); CONTRADICTIONS
-(persisted CONTRADICTED only, else "No contradiction established"); the
-selector's analytical blocks kept only where they bear on a gap or a
-contradiction; the selector's evidence filtered to the selected findings;
-and one collapsed FULL AUDIT TRAIL holding the compact proof map and every
-check with its state and sources — the only complete list on the page.
-Every state is a persisted component status through `deriveResultLadder`;
-every sentence is a derivation the result screen already runs. No
-severity, no score, no second verdict, no ENTITY. A sparse record yields a
-sparse audit. Rendered at `/dev/output-plan?view=audit` (fixtures and real
-jobs, historical-semantics banner kept) and `/dev/audit-showcase`
-(`GOLDEN_AUDIT_FIXTURE`). `tests/ui-audit-output.test.ts` pins the
-structure, the one-thing-per-check rule, the finding-tied filters, the
-upstream-only rule and the seven audit invariants.
+The user-facing modes are RESEARCH ("what did ATLAS find?") and
+VERIFICATION ("what from this claim actually survived verification?").
+`composeAudit` (`src/client/audit-composition.ts` — the file keeps its
+historical name) is the verification composition over the existing result:
+same record, same selector, same blocks. The main page shows, in order:
+VERIFICATION RESULT (the Proof's verdict, confidence, the research screen's
+own lead sentence, coverage counts — a tally per state, never a fraction or
+score; a blocked check counts as "not checked"); WHAT STOOD UP (established,
+ladder order, ≤3; partly established stands in when nothing was) beside MAIN
+GAPS (2–4, round-robin over could-not-check → not established → partly
+established with a reason, ladder order within); CONTRADICTION as its own
+panel only when a persisted state is CONTRADICTED — claim checked, what was
+measured (the selector's METRIC entries whose evidence the reconciler listed
+as contradicting, copied), conclusion — else one small line "No
+contradiction established."; HOW THE CLAIM HOLDS UP (the selector's FLOW,
+exactly as planned, when it touches a finding on the page; solid link only
+between two established stages; the first hard stop is named); the
+selector's METRIC / TABLE / CHART / TIMELINE only where they bear on a gap or
+a contradiction; WHERE VERIFICATION STOPS (the one boundary the short answer
+already calls its main limitation: blocked → not established → partly
+established, ladder order within; absent when nothing is open); KEY EVIDENCE
+(the selector's choice filtered to the selected findings, each card naming
+the check it bears on); and one collapsed FULL VERIFICATION holding the
+compact proof map and every check with its state and sources — the only
+complete list on the page. Every state is a persisted component status
+through `deriveResultLadder`; every sentence is a derivation the result
+screen already runs. No severity, no score, no second verdict, no ENTITY, no
+engine or selector change. A sparse record yields a sparse verification: no
+chain, no signals, no contradiction panel. Rendered at
+`/dev/output-plan?view=verification` (`audit` accepted as the older
+spelling; fixtures and real jobs, historical-semantics banner kept) and
+`/dev/verification-showcase` (`GOLDEN_AUDIT_FIXTURE`).
+`tests/ui-audit-output.test.ts` pins the structure, the counts, the chain's
+edge rule, the contradiction's measurement provenance, the boundary choice,
+the one-thing-per-check rule, the finding-tied filters, the upstream-only
+rule and the seven invariants.
 
 ## A RESULT CHOOSES ITS OWN BLOCKS, AND SAYS WHICH ONES IT DECLINED
 

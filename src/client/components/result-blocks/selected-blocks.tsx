@@ -1,6 +1,6 @@
 "use client";
 
-import { componentLabel } from "../../research-model";
+import { componentClaimLabel, componentLabel } from "../../research-model";
 import type {
   AnalyticalOutputInputV1,
   AnalyticalOutputPlanV1,
@@ -39,7 +39,7 @@ import { ValueFlowBlock } from "./value-flow";
 // (the fixture, on the dev route; the existing briefing derivation, on a
 // real result). The selector produces no text, and neither does this.
 
-const FACT_KIND_LABEL: Record<string, string> = {
+export const FACT_KIND_LABEL: Record<string, string> = {
   TOKEN_SUPPLY: "Total supply",
   TOTAL_SUPPLY_DELTA: "Observed total supply change",
   BURN: "Observed burns",
@@ -117,6 +117,9 @@ export function SelectedBlocks({
   asOf,
   include,
   evidenceTitle,
+  evidenceClaims,
+  flowTitle,
+  flowIntro,
 }: {
   plan: AnalyticalOutputPlanV1;
   input: AnalyticalOutputInputV1;
@@ -128,13 +131,30 @@ export function SelectedBlocks({
   // never an addition to it.
   include?: readonly PlannedBlock["type"][];
   evidenceTitle?: string;
+  // Verification lists evidence beside named findings, so each card names
+  // the check it was admitted for. Off by default: the result view's cards
+  // are already claim-scoped by their position.
+  evidenceClaims?: boolean;
+  // Verification retitles the chain. Words only; the stages are the plan's.
+  flowTitle?: string;
+  flowIntro?: string;
 }) {
   const evidenceById = new Map(input.evidence.map((e) => [e.id, e]));
   const blocks = include ? plan.orderedBlocks.filter((b) => include.includes(b.type)) : plan.orderedBlocks;
   return (
     <div className="flex flex-col gap-4" data-testid="selected-blocks">
       {blocks.map((block, i) => (
-        <Block key={`${block.type}-${i}`} block={block} answer={answer} asOf={asOf} evidenceById={evidenceById} evidenceTitle={evidenceTitle} />
+        <Block
+          key={`${block.type}-${i}`}
+          block={block}
+          answer={answer}
+          asOf={asOf}
+          evidenceById={evidenceById}
+          evidenceTitle={evidenceTitle}
+          evidenceClaims={evidenceClaims}
+          flowTitle={flowTitle}
+          flowIntro={flowIntro}
+        />
       ))}
     </div>
   );
@@ -146,12 +166,18 @@ function Block({
   asOf,
   evidenceById,
   evidenceTitle,
+  evidenceClaims = false,
+  flowTitle,
+  flowIntro,
 }: {
   block: PlannedBlock;
   answer: { short: string; paragraphs: string[] };
   asOf: string;
   evidenceById: Map<string, AnalyticalOutputInputV1["evidence"][number]>;
   evidenceTitle?: string;
+  evidenceClaims?: boolean;
+  flowTitle?: string;
+  flowIntro?: string;
 }) {
   switch (block.type) {
     case "ANSWER":
@@ -204,7 +230,7 @@ function Block({
         state: s.state,
         detail: s.component ? componentLabel(s.component) : "Not reached",
       }));
-      return <ValueFlowBlock stages={stages} />;
+      return <ValueFlowBlock stages={stages} title={flowTitle} intro={flowIntro} />;
     }
     case "TABLE": {
       const columns = [
@@ -301,6 +327,7 @@ function Block({
             doesNotProve: e.doesNotProve ?? "",
             retrievedAt: dateOnly(e.fetchedAt),
             href: e.retrievedUrl,
+            claim: evidenceClaims && e.component ? componentClaimLabel(e.component) : undefined,
           },
         ];
       });

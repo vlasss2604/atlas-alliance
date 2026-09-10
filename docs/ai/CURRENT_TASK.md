@@ -2,37 +2,32 @@
 
 > Overwrite this file each round. Never append.
 
-## AUDIT OUTPUT V3 — exceptions first
+## VERIFICATION EXPERIENCE V1 — first real product pass (done this round)
 
 Offline round. No live HTTP, no RPC, no model call, no Proof, no migration.
-Presentation only; the selector is unchanged.
+Presentation only; the selector, reducer, evidence semantics and verdicts
+are unchanged.
 
-### Principle
+### What landed
 
-An audit is what deserves attention after the verification. The main page
-lists most checks not at all:
-
-1. AUDIT VERDICT — verdict, band, the research screen's own lead sentence
-2. WHAT STOOD UP — established checks, ladder order, at most 3; if none,
-   the partly-established ones stand in (and are then not also gaps)
-3. MAIN GAPS — 2–4: one of each open kind in the existing priority
-   (could not check → not established → partly established with a
-   reason), then round again; ladder order within; never scored
-4. CONTRADICTIONS — only checks whose persisted state is CONTRADICTED;
-   otherwise "No contradiction established." — never a gap dressed up
-5. analytical blocks ONLY when their `refs.components` touch a gap or a
-   contradiction (a standalone measure that explains no exception is set
-   aside — composition, not truth; the research view still shows it)
-6. KEY EVIDENCE — the selector's choice filtered to the selected findings'
-   components, falling back to the selector's choice untouched
-7. FULL AUDIT TRAIL — one collapsed `<details>`: compact proof map, every
-   check with what ATLAS found / state / sources, full sentences, handover
-
-Removed from the main page: the key-checks table, the counts dashboard,
-the proof map beside the verdict, the deep-audit block. Every check is
-still in the trail, once.
+The user-facing modes are RESEARCH and VERIFICATION. The old "Audit"
+composition became the Verification page: VERIFICATION RESULT with coverage
+counts → WHAT STOOD UP beside MAIN GAPS → CONTRADICTION (own panel only when
+real, with the measured figure the reconciler tied to it) → HOW THE CLAIM
+HOLDS UP (the selector's flow) → relevant signals → WHERE VERIFICATION STOPS
+→ KEY EVIDENCE (each card names its check) → collapsed FULL VERIFICATION.
+NONE is a valid decision for every optional block; the real sparse job shows
+no chain, no signals, no contradiction panel.
 
 ### Dev surfaces
 
-- `/dev/audit-showcase` — the golden audit
-- `/dev/output-plan?view=audit` — `&fixture=A..E` and `&job=<uuid>`
+- `/dev/verification-showcase` — the golden verification
+- `/dev/output-plan?view=verification` — `&fixture=A..E` and `&job=<uuid>`
+  (`view=audit` still accepted)
+
+### Next candidates (not started; need Founder scope)
+
+- Wire Verification into the product `/research/[id]` surface as a mode
+  beside the result (today it exists on dev routes only).
+- Give the FULL VERIFICATION trail a real link to `/research/[id]/audit`
+  when a job id is in scope.

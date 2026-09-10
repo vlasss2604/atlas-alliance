@@ -1,10 +1,13 @@
-// AUDIT OUTPUT V1 — A COMPOSITION MODE OVER THE EXISTING RESULT.
+// VERIFICATION — A COMPOSITION MODE OVER THE EXISTING RESULT.
 //
-// An audit answers a different question from a research result. The result
-// says WHAT IS HAPPENING; the audit says WHAT EXACTLY WAS CHECKED, WHERE IT
-// DID NOT LINE UP, AND WHAT COULD NOT BE VERIFIED. Same record, same
-// selector, same blocks — a different emphasis and order, and three small
-// derivations the research page does not need.
+// (The file keeps its historical name; the user-facing mode is VERIFICATION.)
+//
+// Verification answers a different question from a research result. The
+// result says WHAT ATLAS FOUND; verification says WHAT FROM THIS CLAIM
+// ACTUALLY SURVIVED VERIFICATION — what stood up, the main gaps, whether
+// there is a real contradiction, and where the evidence stops. Same record,
+// same selector, same blocks — a different emphasis and order, and a few
+// small derivations the research page does not need.
 //
 // IT IS NOT A SECOND ENGINE, AND THE SHAPE OF THIS FILE IS HOW. Every state
 // below is a persisted component status read through the SAME two functions
@@ -14,7 +17,7 @@
 // (the Proof's verdict is relabelled), no severity (nothing upstream carries
 // one), no risk score, and no sentence that is not a restatement of a stored
 // row. The functions here choose, order and group; they assert nothing.
-import { chooseAnalyticalBlocks, type AnalyticalOutputInputV1, type AnalyticalOutputPlanV1, type PlannedBlock } from "./output-plan";
+import { chooseAnalyticalBlocks, type AnalyticalOutputInputV1, type AnalyticalOutputPlanV1, type PlannedBlock, type PlannedMetric } from "./output-plan";
 import type { ProofState } from "./components/result-blocks/types";
 import {
   deriveResultLadder,
@@ -70,10 +73,33 @@ export interface AuditBoundaryItem {
   kind: "NOT_ESTABLISHED" | "PARTLY_ESTABLISHED" | "COULD_NOT_CHECK";
 }
 
+// A CONTRADICTED CHECK, WITH THE MEASUREMENT THAT CONTRADICTS IT WHERE THE
+// RECORD CARRIES ONE. `measured` is the selector's own METRIC entries whose
+// evidence row is among the component's persisted CONTRADICTING evidence —
+// copied, never derived: no quantity is read here that the plan did not
+// already type, and an empty list is the honest state when the
+// contradiction rests on something other than a planned number.
+export interface AuditContradiction extends AuditCheck {
+  measured: PlannedMetric[];
+}
+
+// COVERAGE COUNTS. How many checks ended in each state — an index of the
+// record's shape, never a score: they are not summed, not divided, and no
+// fraction is formed from them. A blocked check is counted as NOT CHECKED
+// rather than not established, because the two are different facts.
+export interface AuditCounts {
+  established: number;
+  partlyEstablished: number;
+  contradicted: number;
+  notEstablished: number;
+  notChecked: number;
+}
+
 export interface AuditComposition {
   question: string;
   verdict: string | null;
   confidenceBand: string | null;
+  counts: AuditCounts;
   // ONE SENTENCE, AND NOT ONE OF OURS. The lead sentence of the research
   // screen's own short answer — a contradiction if there is one, else what
   // stood, else what partly stood, else what did not — so the audit's
@@ -95,7 +121,7 @@ export interface AuditComposition {
   gaps: AuditBoundaryItem[];
   // CONTRADICTIONS: checks whose persisted state is CONTRADICTED. Only
   // that state — never a gap dressed as one.
-  contradictions: AuditCheck[];
+  contradictions: AuditContradiction[];
   boundary: AuditBoundaryItem[];
   // WHERE THE AUDIT STOPS: the single most important open boundary, chosen
   // by the priority the short answer already uses for its "main
@@ -104,10 +130,18 @@ export interface AuditComposition {
   // establish, else the first partly-established check with a stated
   // reason. Ladder order within each. Null when every check stood.
   gap: AuditBoundaryItem | null;
-  // The selector's analytical blocks, exactly as chosen, FILTERED to those
-  // that bear on a gap or a contradiction. An audit shows a measure only
-  // when it helps explain an exception; a block the selector chose that
-  // touches nothing open is omitted here — composition, not truth.
+  // HOW THE CLAIM HOLDS UP: the selector's FLOW, exactly as planned, when
+  // it touches a selected finding (what stood up, a gap, a contradiction).
+  // Every stage state is the plan's; the block exists to show where the
+  // claim stops being proven, so a chain that touches none of the findings
+  // on this page explains nothing here and is not shown. Null when the
+  // selector planned no flow — a sparse record yields no chain.
+  chain: Extract<PlannedBlock, { type: "FLOW" }> | null;
+  // The selector's analytical signals — METRIC, TABLE, CHART, TIMELINE —
+  // exactly as chosen, FILTERED to those that bear on a gap or a
+  // contradiction. Verification shows a measure only when it helps explain
+  // an exception; a block the selector chose that touches nothing open is
+  // omitted here — composition, not truth.
   analytical: PlannedBlock[];
   // The selector's evidence choice, filtered to the components of the
   // selected findings (contradictions, gaps, what stood up). When nothing
@@ -118,7 +152,7 @@ export interface AuditComposition {
   plan: AnalyticalOutputPlanV1;
 }
 
-const ANALYTICAL: ReadonlySet<PlannedBlock["type"]> = new Set(["METRIC", "FLOW", "TABLE", "CHART", "TIMELINE"]);
+const ANALYTICAL: ReadonlySet<PlannedBlock["type"]> = new Set(["METRIC", "TABLE", "CHART", "TIMELINE"]);
 
 export function composeAudit(args: {
   input: AnalyticalOutputInputV1;
@@ -146,10 +180,13 @@ export function composeAudit(args: {
   const stoodUp = auditStoodUp(checks);
   const standing = new Set(stoodUp.map((c) => c.component));
   const gaps = auditGaps(boundary.filter((b) => !standing.has(b.component)));
-  const contradictions = checks.filter((c) => !c.blocked && c.state === "CONTRADICTED");
+  const contradictions = auditContradictions(checks, args.components, plan);
   const open = new Set([...gaps.map((g) => g.component), ...contradictions.map((c) => c.component)]);
   const selected = new Set([...open, ...standing]);
   const explains = (b: PlannedBlock) => b.refs.components.some((k) => open.has(k.component));
+  const chain = plan.orderedBlocks.find(
+    (b): b is Extract<PlannedBlock, { type: "FLOW" }> => b.type === "FLOW" && b.refs.components.some((k) => selected.has(k.component)),
+  );
   const evidenceBlock = plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as AuditComposition["evidence"];
   const evidenceById = new Map(args.input.evidence.map((e) => [e.id, e]));
   const tied = evidenceBlock
@@ -170,6 +207,7 @@ export function composeAudit(args: {
     question: args.input.question.text,
     verdict: args.input.verdict,
     confidenceBand: args.input.confidenceBand,
+    counts: auditCounts(checks),
     summary: briefing.shortAnswer[0] ?? null,
     coverage,
     checks,
@@ -178,6 +216,7 @@ export function composeAudit(args: {
     contradictions,
     boundary,
     gap: auditGap(rows, boundary),
+    chain: chain ?? null,
     analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type) && explains(b)),
     evidence:
       evidenceBlock && tied.length > 0
@@ -221,7 +260,40 @@ export function auditChecks(
   });
 }
 
-// THE AUDIT BOUNDARY — WHAT COULD NOT BE VERIFIED, AND WHY, IN THREE KINDS.
+// THE COUNTS. Arithmetic over the checks above and nothing else.
+export function auditCounts(checks: readonly AuditCheck[]): AuditCounts {
+  const n = (pred: (c: AuditCheck) => boolean) => checks.filter(pred).length;
+  return {
+    established: n((c) => !c.blocked && c.state === "ESTABLISHED"),
+    partlyEstablished: n((c) => !c.blocked && c.state === "PARTLY_ESTABLISHED"),
+    contradicted: n((c) => !c.blocked && c.state === "CONTRADICTED"),
+    notEstablished: n((c) => !c.blocked && c.state === "NOT_ESTABLISHED"),
+    notChecked: n((c) => c.blocked),
+  };
+}
+
+// CONTRADICTIONS, WITH WHAT WAS MEASURED. Only checks whose persisted
+// state is CONTRADICTED; beside each, the planned METRIC entries whose
+// evidence row the engine itself listed as CONTRADICTING that component.
+// The number shown against a contradiction is therefore one the selector
+// already qualified AND one the reconciler already tied to the
+// contradiction — never a figure chosen here because it looked relevant.
+export function auditContradictions(
+  checks: readonly AuditCheck[],
+  components: readonly LadderComponentInput[],
+  plan: AnalyticalOutputPlanV1,
+): AuditContradiction[] {
+  const contradicting = new Map(components.map((c) => [c.component, new Set(c.contradictingEvidenceIds ?? [])]));
+  const metrics = plan.orderedBlocks.flatMap((b) => (b.type === "METRIC" ? b.spec.metrics : []));
+  return checks
+    .filter((c) => !c.blocked && c.state === "CONTRADICTED")
+    .map((c) => ({
+      ...c,
+      measured: metrics.filter((m) => m.component === c.component && (contradicting.get(c.component)?.has(m.evidenceId) ?? false)),
+    }));
+}
+
+// THE VERIFICATION BOUNDARY — WHAT COULD NOT BE VERIFIED, AND WHY, IN THREE KINDS.
 //
 //   NOT_ESTABLISHED   the sources ATLAS read did not establish it
 //   PARTLY_ESTABLISHED the evidence went part of the way; the reason says
@@ -265,11 +337,12 @@ export function auditBoundary(
   ];
 }
 
-// THE ONE BOUNDARY THAT MATTERS MOST — by the priority the short answer
-// already applies to its "main limitation": a blocked check outranks an
-// unestablished one, because ATLAS could not look and that bears on how
-// much the rest covers; an unestablished check outranks a partly
-// established one. Ladder order decides within a kind. Nothing is scored.
+// WHERE VERIFICATION STOPS — THE ONE BOUNDARY THAT MATTERS MOST, by the
+// priority the short answer already applies to its "main limitation": a
+// blocked check outranks an unestablished one, because ATLAS could not
+// look and that bears on how much the rest covers; an unestablished check
+// outranks a partly established one. Ladder order decides within a kind.
+// Nothing is scored, and nothing is chosen for how it reads.
 export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBoundaryItem[]): AuditBoundaryItem | null {
   const byComponent = new Map(boundary.map((b) => [b.component, b]));
   const first = (pred: (r: ResultRow) => boolean) => {
@@ -283,9 +356,9 @@ export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBou
   );
 }
 
-// THREE, NOT FIVE. The top of an audit is the three checks most useful for
-// understanding it quickly; the complete list, with sources, is the deep
-// audit and lives nowhere else. Same priority, shorter cut.
+// THREE, NOT FIVE. The top of a verification is the three checks most
+// useful for understanding it quickly; the complete list, with sources, is
+// the full verification and lives nowhere else. Same priority, shorter cut.
 
 export const MAX_STOOD_UP = 3;
 export const MAX_GAPS = 4;

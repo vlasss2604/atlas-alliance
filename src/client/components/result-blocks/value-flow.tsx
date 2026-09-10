@@ -17,20 +17,32 @@ import { PROOF_STATE, type FlowStage } from "./types";
 // claims the mechanism makes, and hiding them would misreport the mechanism.
 // Dimmed, because after the break they are no longer things this research
 // established, and they must not read as if they were.
-export function ValueFlowBlock({ stages }: { stages: FlowStage[] }) {
+export function ValueFlowBlock({
+  stages,
+  title = "How the value moves",
+  intro = "Each step is a separate claim. The link between two steps is drawn only as far as the evidence carried.",
+}: {
+  stages: FlowStage[];
+  // A composition mode may retitle the chain — verification calls it "How
+  // the claim holds up" — without changing what it draws. Words only.
+  title?: string;
+  intro?: string;
+}) {
   // The first stage the evidence did not fully reach. Everything after it is
   // downstream of a gap, however good its own row looks.
   const breakAt = stages.findIndex((s) => s.state !== "ESTABLISHED");
+  // The first stage the evidence did not reach AT ALL — where the words
+  // "evidence stops here" belong. A partly established stage before it
+  // dims what follows but does not stop the chain, so a chain that runs
+  // established → partly → not established still names its break.
+  const stopAt = stages.findIndex((s) => s.state === "NOT_ESTABLISHED" || s.state === "CONTRADICTED");
 
   return (
     <section className="panel px-4 py-4 sm:px-5" data-testid="block-flow">
       <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-        How the value moves
+        {title}
       </p>
-      <p className="mt-1 text-[0.75rem] leading-snug text-[var(--atlas-text-dim)]">
-        Each step is a separate claim. The link between two steps is drawn only as far as
-        the evidence carried.
-      </p>
+      <p className="mt-1 text-[0.75rem] leading-snug text-[var(--atlas-text-dim)]">{intro}</p>
       {/* The connector vocabulary, stated once. A dash pattern that has to
           be inferred is a dash pattern that gets read as decoration. */}
       <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.62rem] text-[var(--atlas-text-dim)]">
@@ -71,7 +83,7 @@ export function ValueFlowBlock({ stages }: { stages: FlowStage[] }) {
               className="flex min-w-0 flex-col lg:flex-1 lg:flex-row lg:items-stretch"
             >
               {i > 0 && (
-                <FlowConnector from={prev!} to={stage} firstBreak={i === breakAt} />
+                <FlowConnector from={prev!} to={stage} firstBreak={i === stopAt} />
               )}
               <div
                 className={`min-w-0 rounded-lg border px-3 py-2 lg:flex-1 ${downstream ? "opacity-55" : ""}`}

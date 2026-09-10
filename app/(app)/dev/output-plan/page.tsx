@@ -43,10 +43,12 @@ export default async function DevOutputPlanPage({
   if (process.env.NODE_ENV === "production") notFound();
   const params = await searchParams;
   const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
-  // ONE MORE PARAMETER, NOT ONE MORE PAGE. `view=audit` renders the same
-  // record through the audit composition: same selector, same plan, same
-  // blocks, a different order and three small audit-only blocks.
-  const view: "result" | "audit" = one(params.view) === "audit" ? "audit" : "result";
+  // ONE MORE PARAMETER, NOT ONE MORE PAGE. `view=verification` renders the
+  // same record through the verification composition: same selector, same
+  // plan, same blocks, a different order and a few small
+  // verification-only blocks. `audit` is accepted as the older spelling.
+  const raw = one(params.view);
+  const view: "result" | "verification" = raw === "verification" || raw === "audit" ? "verification" : "result";
   const jobId = one(params.job);
   if (jobId) return <RealJobPage jobId={jobId} view={view} />;
 
@@ -104,7 +106,7 @@ export default async function DevOutputPlanPage({
         </ul>
       </details>
 
-      {view === "audit" ? (
+      {view === "verification" ? (
         <AuditCompositionView
           audit={composeAudit({ input: fixture.input, components: fixture.input.components, outcomeKind: "VERDICT", plan })}
           input={fixture.input}
@@ -117,10 +119,10 @@ export default async function DevOutputPlanPage({
   );
 }
 
-function ViewToggle({ view, href }: { view: "result" | "audit"; href: (v: "result" | "audit") => string }) {
+function ViewToggle({ view, href }: { view: "result" | "verification"; href: (v: "result" | "verification") => string }) {
   return (
     <span className="flex gap-1" data-testid="view-toggle">
-      {(["result", "audit"] as const).map((v) => (
+      {(["result", "verification"] as const).map((v) => (
         <Link
           key={v}
           href={href(v)}
@@ -140,7 +142,7 @@ function ViewToggle({ view, href }: { view: "result" | "audit"; href: (v: "resul
 // THE REAL-JOB MODE. A banner, then the bridge. Everything analytical is
 // decided by the selector in the browser from the real payload; nothing on
 // this page decides anything.
-function RealJobPage({ jobId, view }: { jobId: string; view: "result" | "audit" }) {
+function RealJobPage({ jobId, view }: { jobId: string; view: "result" | "verification" }) {
   return (
     <main className="enter flex flex-col gap-4 pb-6" data-testid="output-plan-page">
       <section
@@ -162,11 +164,11 @@ function RealJobPage({ jobId, view }: { jobId: string; view: "result" | "audit" 
       <nav className="flex flex-wrap gap-2" data-testid="fixture-picker">
         <ViewToggle view={view} href={(v) => `/dev/output-plan?job=${jobId}&view=${v}`} />
         <Link
-          href="/dev/audit-showcase"
+          href="/dev/verification-showcase"
           className="rounded-lg border px-2.5 py-1 text-[0.72rem]"
           style={{ borderColor: "var(--hairline)", color: "var(--atlas-text-dim)" }}
         >
-          Golden audit →
+          Golden verification →
         </Link>
         <Link
           href="/dev/output-plan"

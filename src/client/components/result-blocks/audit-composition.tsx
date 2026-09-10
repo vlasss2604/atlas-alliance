@@ -1,29 +1,27 @@
 "use client";
 
-import type { AuditBoundaryItem, AuditCheck, AuditComposition } from "../../audit-composition";
+import type { AuditBoundaryItem, AuditCheck, AuditComposition, AuditContradiction } from "../../audit-composition";
 import { CONFIDENCE_LABELS, componentPhrase, verdictLabel } from "../../research-model";
 import { ProofMapBlock } from "./proof-map";
-import { SelectedBlocks } from "./selected-blocks";
+import { compactAmount, FACT_KIND_LABEL, SelectedBlocks } from "./selected-blocks";
 import { PROOF_STATE, type ProofState } from "./types";
 
-// AUDIT OUTPUT V3 — EXCEPTIONS FIRST.
+// VERIFICATION V1 — WHAT FROM THIS CLAIM ACTUALLY SURVIVED VERIFICATION.
 //
-// AN AUDIT IS WHAT DESERVES ATTENTION AFTER THE VERIFICATION. Not every
-// check: what stood up, what is open, what the record contradicts, and the
-// evidence tied to those — in that order. The main page lists no check
-// twice and lists most checks not at all; the complete list is one
-// collapsed trail at the bottom, with the coverage shape inside it.
+// (The file keeps its historical name; the user-facing mode is VERIFICATION.)
 //
-// Analytical blocks appear only when they bear on a gap or a contradiction.
-// A measure the selector chose that explains no exception is set aside —
-// composition, never truth: the plan is unchanged and the research view
-// still shows it.
+// The first screen is meant to be understood in ten seconds: the result,
+// what stood up, the main gaps, whether there is a real contradiction, and
+// where the evidence stops. Then only the visuals that help explain those
+// findings, the evidence tied to them, and one collapsed trail holding every
+// check. The main page lists no check twice and lists most checks not at
+// all.
 //
 // Nothing here decides a state. The verdict is the Proof's; the summary is
 // the research screen's own lead sentence; every row state is a persisted
-// component status; the gap is chosen by the short answer's own priority;
-// the analytical blocks are the plan's. Every short form keeps its full
-// sentence in the DOM, folded.
+// component status; the boundary is chosen by the short answer's own
+// priority; the chain and the analytical blocks are the selector's plan.
+// Every short form keeps its full sentence in the DOM.
 
 // SHORT FORMS, KEYED ON THE ENGINE'S OWN CODES. A closed map of the same
 // vocabulary REASON_CODE_EXPLANATIONS covers, each entry a compression of
@@ -100,29 +98,57 @@ export function AuditCompositionView({
   asOf: string;
 }) {
   return (
-    <div className="flex flex-col gap-3 sm:gap-4" data-testid="audit-composition">
-      {/* 1–4 — THE EXCEPTIONS. Verdict and what stood up at the left; the
-          gaps and any contradiction as the main area. Nothing here is a
-          list of every check. */}
+    <div className="flex flex-col gap-3 sm:gap-4" data-testid="audit-composition" data-mode="verification">
+      {/* 1 — VERIFICATION RESULT. The verdict, the confidence, one sentence,
+          the coverage counts. Readable without scrolling on a handset. */}
       <section className="panel panel-raised p-4 sm:p-5 lg:p-6" data-testid="block-audit-verdict">
-        <div className="grid gap-5 lg:grid-cols-[21rem_minmax(0,1fr)] lg:gap-x-8">
-          <div className="flex flex-col gap-5">
-            <AuditMasthead audit={audit} asOf={asOf} />
-            <StoodUp audit={audit} />
-          </div>
-          <div className="flex flex-col gap-5 lg:border-l lg:border-[var(--hairline)] lg:pl-8">
+        <VerificationResult audit={audit} asOf={asOf} />
+      </section>
+
+      {/* 2 — WHAT STOOD UP beside MAIN GAPS. Two columns from `lg`; the
+          gaps are the main area. A single neutral line closes the gaps
+          column when the record holds no contradiction. */}
+      <section className="panel p-4 sm:p-5" data-testid="block-findings">
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)] lg:gap-x-8">
+          <StoodUp audit={audit} />
+          <div className="flex flex-col gap-3 lg:border-l lg:border-[var(--hairline)] lg:pl-8">
             <MainGaps audit={audit} />
-            <Contradictions audit={audit} />
+            {audit.contradictions.length === 0 && (
+              <p className="text-[0.7rem] text-[var(--atlas-text-dim)]" data-testid="block-contradictions">
+                <span data-testid="contradictions-none">No contradiction established.</span>
+              </p>
+            )}
           </div>
         </div>
       </section>
 
-      {/* 5 — analytical blocks that bear on a gap or a contradiction, and
+      {/* 3 — CONTRADICTION, only when the record positively holds one.
+          Visually distinct from a gap: a gap is the record saying nothing,
+          a contradiction is the record saying otherwise. */}
+      {audit.contradictions.length > 0 && <Contradictions audit={audit} />}
+
+      {/* 4 — HOW THE CLAIM HOLDS UP: the selector's chain, when it touches a
+          finding on this page. Each stage has its own state; the link into
+          a stage is drawn solid only where the evidence carried. */}
+      {audit.chain && (
+        <div data-testid="block-claim-chain">
+          <SelectedBlocks
+            plan={{ ...audit.plan, orderedBlocks: [audit.chain] }}
+            input={input}
+            include={["FLOW"]}
+            answer={{ short: "", paragraphs: [] }}
+            asOf={asOf}
+            flowTitle="How the claim holds up"
+            flowIntro="Each stage is a separate claim with its own state. The link into a stage is drawn only as far as the evidence carried — the chain shows where the claim stops being proven."
+          />
+        </div>
+      )}
+
+      {/* 5 — analytical signals that bear on a gap or a contradiction, and
           only those; a measure that explains no exception is not shown. */}
       {audit.analytical.length > 0 && (
         <div className="flex flex-col gap-3 sm:gap-4" data-testid="audit-analytical">
           <Analytical audit={audit} input={input} asOf={asOf} include={["METRIC"]} />
-          <Analytical audit={audit} input={input} asOf={asOf} include={["FLOW"]} />
           <Analytical audit={audit} input={input} asOf={asOf} include={["TABLE"]} />
           {has(audit, "CHART") && has(audit, "TIMELINE") ? (
             <div className="grid gap-3 sm:gap-4 lg:grid-cols-12">
@@ -139,7 +165,11 @@ export function AuditCompositionView({
         </div>
       )}
 
-      {/* 6 — evidence tied to the selected findings */}
+      {/* 6 — WHERE VERIFICATION STOPS: one boundary, the one the short
+          answer already calls its main limitation. */}
+      {audit.gap && <WhereVerificationStops audit={audit} />}
+
+      {/* 7 — evidence tied to the selected findings */}
       {audit.evidence && (
         <SelectedBlocks
           plan={{ ...audit.plan, orderedBlocks: audit.plan.orderedBlocks.map((b) => (b.type === "EVIDENCE_SNAPSHOT" ? audit.evidence! : b)) }}
@@ -148,12 +178,13 @@ export function AuditCompositionView({
           answer={{ short: "", paragraphs: [] }}
           asOf={asOf}
           evidenceTitle="Key evidence"
+          evidenceClaims
         />
       )}
 
-      {/* 7 — the full audit trail: every check, the coverage shape, the
+      {/* 8 — full verification: every check, the coverage shape, the
           handover — collapsed. The one place the whole list lives. */}
-      <FullAuditTrail audit={audit} />
+      <FullVerification audit={audit} />
     </div>
   );
 }
@@ -162,9 +193,9 @@ function has(audit: AuditComposition, type: AuditComposition["analytical"][numbe
   return audit.analytical.some((b) => b.type === type);
 }
 
-// One or two of the audit's kept blocks, through the same renderer the
-// research view uses. The plan is narrowed to the blocks the audit kept,
-// so the renderer cannot show a block the audit set aside.
+// One or two of the kept analytical blocks, through the same renderer the
+// research view uses. The plan is narrowed to the blocks verification kept,
+// so the renderer cannot show a block that was set aside.
 function Analytical({
   audit,
   input,
@@ -186,34 +217,66 @@ function checkLabel(audit: AuditComposition, component: string): string {
   return audit.checks.find((c) => c.component === component)?.check ?? component;
 }
 
-/* ---------------------------- 1. MASTHEAD --------------------------- */
+/* ----------------------- 1. VERIFICATION RESULT --------------------- */
 
-function AuditMasthead({ audit, asOf }: { audit: AuditComposition; asOf: string }) {
+function VerificationResult({ audit, asOf }: { audit: AuditComposition; asOf: string }) {
   const tone = audit.verdict ? verdictColor(audit.verdict) : "var(--atlas-text-dim)";
   return (
-    <div className="flex min-w-0 flex-col" data-testid="audit-masthead">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="eyebrow eyebrow-violet">Audit verdict</p>
-        <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">{asOf}</p>
-      </div>
-      <p
-        className="mt-1.5 text-[1.7rem] font-semibold leading-none tracking-tight sm:text-[2rem]"
-        style={{ color: tone }}
-        data-testid="audit-verdict-label"
-      >
-        {verdictLabel(audit.verdict)}
-      </p>
-      <p className="mt-1.5 text-[0.7rem] text-[var(--atlas-text-dim)]">
-        {audit.confidenceBand ? `${CONFIDENCE_LABELS[audit.confidenceBand] ?? audit.confidenceBand} confidence` : "No confidence band"}
-        <span className="opacity-70"> · {audit.checks.length} checks made</span>
-      </p>
-      {audit.summary && (
-        <p className="mt-3 text-[0.86rem] leading-snug" data-testid="audit-summary">
-          {audit.summary}
+    <div className="grid gap-4 lg:grid-cols-[21rem_minmax(0,1fr)] lg:gap-x-8" data-testid="audit-masthead">
+      <div className="flex min-w-0 flex-col">
+        <div className="flex items-baseline justify-between gap-3">
+          <p className="eyebrow eyebrow-violet">Verification result</p>
+          <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">{asOf}</p>
+        </div>
+        <p
+          className="mt-1.5 text-[1.7rem] font-semibold leading-none tracking-tight sm:text-[2rem]"
+          style={{ color: tone }}
+          data-testid="audit-verdict-label"
+        >
+          {verdictLabel(audit.verdict)}
         </p>
-      )}
-      <p className="mt-2 line-clamp-2 text-[0.66rem] leading-snug text-[var(--atlas-text-dim)]">{audit.question}</p>
+        <p className="mt-1.5 text-[0.7rem] text-[var(--atlas-text-dim)]">
+          {audit.confidenceBand ? `${CONFIDENCE_LABELS[audit.confidenceBand] ?? audit.confidenceBand} confidence` : "No confidence band"}
+          <span className="opacity-70"> · {audit.checks.length} checks made</span>
+        </p>
+      </div>
+      <div className="flex min-w-0 flex-col justify-center lg:border-l lg:border-[var(--hairline)] lg:pl-8">
+        {audit.summary && (
+          <p className="text-[0.92rem] leading-snug" data-testid="audit-summary">
+            {audit.summary}
+          </p>
+        )}
+        <Counts audit={audit} />
+        <p className="mt-2 line-clamp-2 text-[0.66rem] leading-snug text-[var(--atlas-text-dim)]">{audit.question}</p>
+      </div>
     </div>
+  );
+}
+
+// COVERAGE COUNTS, AS A ROW OF WORDS. One entry per state the record
+// actually holds, each with its colour and its count — an index of the
+// record's shape. No total, no fraction, no bar: nothing here can be read
+// as a score.
+function Counts({ audit }: { audit: AuditComposition }) {
+  const c = audit.counts;
+  const all: { n: number; label: string; state: ProofState }[] = [
+    { n: c.established, label: "established", state: "ESTABLISHED" },
+    { n: c.partlyEstablished, label: "partly established", state: "PARTLY_ESTABLISHED" },
+    { n: c.contradicted, label: "contradicted", state: "CONTRADICTED" },
+    { n: c.notEstablished, label: "not established", state: "NOT_ESTABLISHED" },
+    { n: c.notChecked, label: "not checked", state: "NOT_ESTABLISHED" },
+  ];
+  const entries = all.filter((e) => e.n > 0);
+  return (
+    <ul className="mt-2.5 flex flex-wrap gap-x-4 gap-y-1" data-testid="verification-counts">
+      {entries.map((e) => (
+        <li key={e.label} className="flex items-center gap-1.5 text-[0.7rem]" data-count={e.label}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: PROOF_STATE[e.state].color }} aria-hidden />
+          <span className="font-semibold tabular-nums">{e.n}</span>
+          <span className="text-[var(--atlas-text-dim)]">{e.label}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -232,6 +295,8 @@ function verdictColor(verdict: string): string {
 
 /* ------------------------- 2. WHAT STOOD UP ------------------------ */
 
+// COMPACT TILES: the claim, the chip, and the row's own sentence for what
+// the evidence established. Never a paragraph.
 function StoodUp({ audit }: { audit: AuditComposition }) {
   return (
     <div data-testid="block-stood-up">
@@ -241,13 +306,27 @@ function StoodUp({ audit }: { audit: AuditComposition }) {
           Nothing was established or partly established.
         </p>
       ) : (
-        <ul className="mt-1.5 flex flex-col">
-          {audit.stoodUp.map((c) => (
-            <li key={c.component} className="flex items-center justify-between gap-3 border-t border-[var(--hairline)] py-1.5 first:border-t-0" data-testid="stood-up-item" data-state={c.state}>
-              <p className="min-w-0 text-[0.78rem] font-medium leading-tight">{c.check}</p>
-              <StateChip state={c.state} />
-            </li>
-          ))}
+        <ul className="mt-2 flex flex-col gap-2">
+          {audit.stoodUp.map((c) => {
+            const s = PROOF_STATE[c.state];
+            return (
+              <li
+                key={c.component}
+                className="flex flex-col rounded-lg border-l-2 px-3 py-2"
+                style={{ borderColor: s.color, background: s.dim }}
+                data-testid="stood-up-item"
+                data-state={c.state}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 text-[0.8rem] font-semibold leading-tight">{c.check}</p>
+                  <StateChip state={c.state} />
+                </div>
+                <p className="mt-1 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="stood-up-detail">
+                  {c.established}
+                </p>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>
@@ -271,7 +350,7 @@ function MainGaps({ audit }: { audit: AuditComposition }) {
       <div className="flex items-baseline justify-between gap-3">
         <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Main gaps</p>
         <p className="text-[0.64rem] text-[var(--atlas-text-dim)]">
-          {audit.gaps.length} shown{others > 0 ? ` · ${others} more in the audit trail` : ""}
+          {audit.gaps.length} shown{others > 0 ? ` · ${others} more in full verification` : ""}
         </p>
       </div>
       {audit.gaps.length === 0 ? (
@@ -305,47 +384,106 @@ function MainGaps({ audit }: { audit: AuditComposition }) {
 
 /* ------------------------ 4. CONTRADICTIONS ------------------------ */
 
-// SEPARATE FROM THE GAPS, ALWAYS. A contradiction is the one state in
-// which the record positively says otherwise; a gap is the record saying
-// nothing. When there is none the block says so in one neutral line, and
-// never borrows a gap to fill the space.
+// SEPARATE FROM THE GAPS, ALWAYS, AND ONLY WHEN REAL. Three columns: the
+// claim that was checked, what was measured (the selector's own metric,
+// where the reconciler tied one to the contradiction), and the conclusion
+// in the persisted state's own words. A contradiction is never
+// manufactured from missing evidence — this block is absent unless a
+// persisted state says CONTRADICTED.
 function Contradictions({ audit }: { audit: AuditComposition }) {
   const s = PROOF_STATE.CONTRADICTED;
   return (
-    <div data-testid="block-contradictions">
-      <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Contradictions</p>
-      {audit.contradictions.length === 0 ? (
-        <p className="mt-1.5 text-[0.76rem] text-[var(--atlas-text-dim)]" data-testid="contradictions-none">
-          No contradiction established.
-        </p>
-      ) : (
-        <ul className="mt-2 flex flex-col gap-2">
-          {audit.contradictions.map((c) => (
-            <li key={c.component} className="rounded-lg border-l-2 px-3 py-2.5" style={{ borderColor: s.color, background: s.dim }} data-testid="contradiction-item">
-              <div className="flex items-start justify-between gap-2">
-                <p className="min-w-0 text-[0.82rem] font-semibold leading-tight">{c.check}</p>
-                <StateChip state="CONTRADICTED" />
-              </div>
-              <p className="mt-1.5 text-[0.76rem] leading-snug">{shortReason(c.reasonCodes) ?? s.label}</p>
-              <p className="mt-1 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]">{c.established} <span className="opacity-70">· {c.sources} src</span></p>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+    <section className="panel p-4 sm:p-5" data-testid="block-contradictions">
+      <p className="eyebrow" style={{ color: s.color }}>Contradiction</p>
+      <ul className="mt-2 flex flex-col gap-2">
+        {audit.contradictions.map((c) => (
+          <ContradictionRow key={c.component} c={c} />
+        ))}
+      </ul>
+    </section>
   );
 }
 
-/* ------------------------ 7. FULL AUDIT TRAIL ----------------------- */
+function ContradictionRow({ c }: { c: AuditContradiction }) {
+  const s = PROOF_STATE.CONTRADICTED;
+  const cols = c.measured.length > 0 ? "sm:grid-cols-3" : "sm:grid-cols-2";
+  return (
+    <li className={`grid gap-3 rounded-lg border-l-2 px-3 py-3 ${cols}`} style={{ borderColor: s.color, background: s.dim }} data-testid="contradiction-item">
+      <div className="min-w-0">
+        <p className="text-[0.58rem] font-semibold uppercase tracking-[0.1em] text-[var(--atlas-text-dim)]">Claim checked</p>
+        <p className="mt-1 text-[0.84rem] font-semibold leading-tight">{c.check}</p>
+        <p className="mt-1 text-[0.72rem] leading-snug">{shortReason(c.reasonCodes) ?? s.label}</p>
+      </div>
+      {c.measured.length > 0 && (
+        <div className="min-w-0" data-testid="contradiction-measured">
+          <p className="text-[0.58rem] font-semibold uppercase tracking-[0.1em] text-[var(--atlas-text-dim)]">Measured</p>
+          {c.measured.map((m) => (
+            <p key={m.evidenceId} className="mt-1 leading-tight">
+              <span className="text-[1.15rem] font-semibold tabular-nums tracking-tight">
+                {compactAmount(m.amountRaw, m.decimals, m.factKind === "TOTAL_SUPPLY_DELTA")}
+              </span>
+              <span className="ml-1 text-[0.7rem] text-[var(--atlas-text-dim)]">tokens</span>
+              <span className="block text-[0.7rem] leading-snug text-[var(--atlas-text-dim)]">
+                {FACT_KIND_LABEL[m.factKind] ?? m.factKind}
+                {m.coverage ? ` · ${m.coverage.observed} of ${m.coverage.expected} periods` : ""}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
+      <div className="min-w-0">
+        <p className="text-[0.58rem] font-semibold uppercase tracking-[0.1em] text-[var(--atlas-text-dim)]">Conclusion</p>
+        <div className="mt-1">
+          <StateChip state="CONTRADICTED" />
+        </div>
+        <p className="mt-1.5 text-[0.68rem] leading-snug text-[var(--atlas-text-dim)]">
+          {c.established} <span className="opacity-70">· {c.sources} src</span>
+        </p>
+      </div>
+    </li>
+  );
+}
+
+/* ------------------- 6. WHERE VERIFICATION STOPS ------------------- */
+
+// ONE BOUNDARY, STATED ONCE. The check the short answer already calls its
+// main limitation, with the row's own sentence — a product expression of
+// "reality stops where the evidence stops". Every other open check is in
+// full verification, and the line beneath says how many.
+function WhereVerificationStops({ audit }: { audit: AuditComposition }) {
+  const g = audit.gap!;
+  const chip = GAP_CHIP[g.kind];
+  const s = PROOF_STATE[chip.state];
+  const others = audit.boundary.length - 1;
+  return (
+    <section className="panel p-4 sm:p-5" data-testid="block-verification-stops">
+      <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Where verification stops</p>
+      <div className="mt-2 rounded-lg border-l-2 px-3 py-2.5" style={{ borderColor: s.color, background: s.dim }}>
+        <div className="flex items-start justify-between gap-2">
+          <p className="min-w-0 text-[0.84rem] font-semibold leading-tight">{g.label}</p>
+          <StateChip state={chip.state} blocked={chip.blocked} />
+        </div>
+        <p className="mt-1.5 text-[0.8rem] leading-snug" data-testid="verification-stops-detail">{g.detail}</p>
+      </div>
+      {others > 0 && (
+        <p className="mt-2 text-[0.66rem] text-[var(--atlas-text-dim)]">
+          {others} further open {others === 1 ? "check is" : "checks are"} listed in full verification.
+        </p>
+      )}
+    </section>
+  );
+}
+
+/* ----------------------- 8. FULL VERIFICATION ---------------------- */
 
 // EVERY CHECK, ONCE, COLLAPSED. The coverage shape, then each check with
 // what ATLAS found, its state and its sources, then the handover to the
-// full research audit. The main page above lists none of this twice.
-function FullAuditTrail({ audit }: { audit: AuditComposition }) {
+// full research record. The main page above lists none of this twice.
+function FullVerification({ audit }: { audit: AuditComposition }) {
   return (
     <details className="panel px-4 py-3.5 sm:px-5 sm:py-4" data-testid="block-audit-trail">
       <summary className="flex cursor-pointer items-baseline justify-between gap-3">
-        <span className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Full audit trail</span>
+        <span className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Full verification</span>
         <span className="text-[0.64rem] text-[var(--atlas-text-dim)]">all {audit.checks.length} checks</span>
       </summary>
 

@@ -187,6 +187,10 @@ export interface EvidenceKindMeta {
   doesNotProve: string;
   retrievedAt: string;
   href?: string;
+  // The check this evidence was admitted for, in the ladder's own words.
+  // Optional: a surface that lists evidence beside named findings shows
+  // it, so a card can be tied back to the finding it bears on.
+  claim?: string;
 }
 
 export const EVIDENCE_KIND_LABEL: Record<EvidenceKindMeta["kind"], string> = {
