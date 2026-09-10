@@ -9,7 +9,7 @@ import {
   FIXTURE_FLOW,
   FIXTURE_HEADER,
   FIXTURE_METRICS,
-  FIXTURE_METRIC_ATTRIBUTION,
+  FIXTURE_METRIC_CLAIMS,
   FIXTURE_NOTICE,
   FIXTURE_PROOF_MAP,
   FIXTURE_TABLE_COLUMNS,
@@ -73,12 +73,10 @@ export function ResultShowcase() {
         </div>
       </section>
 
-      {/* 3 — the numbers, as the chain they argue, with the causal claim
-          they are NOT allowed to imply stated separately underneath */}
-      <MetricGridBlock
-        metrics={FIXTURE_METRICS}
-        attribution={FIXTURE_METRIC_ATTRIBUTION}
-      />
+      {/* 3 — the numbers, as the chain they argue, with the claims they are
+          NOT allowed to imply stated separately underneath, each with the
+          state its own evidence supports */}
+      <MetricGridBlock metrics={FIXTURE_METRICS} claims={FIXTURE_METRIC_CLAIMS} />
 
       {/* 4 — the same chain as a diagram, which shows where it stops */}
       <ValueFlowBlock stages={FIXTURE_FLOW} />

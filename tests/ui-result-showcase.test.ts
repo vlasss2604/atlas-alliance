@@ -12,7 +12,7 @@ import {
   FIXTURE_FLOW,
   FIXTURE_HEADER,
   FIXTURE_METRICS,
-  FIXTURE_METRIC_ATTRIBUTION,
+  FIXTURE_METRIC_CLAIMS,
   FIXTURE_PROOF_MAP,
   FIXTURE_TABLE_ROWS,
   FIXTURE_TIMELINE,
@@ -278,13 +278,35 @@ describe("measured fact and causal conclusion stay separate", () => {
     expect(effect?.state).toBe("ESTABLISHED");
   });
 
-  it("the causal claim is stated on its own, and it is the thing that failed", () => {
-    expect(FIXTURE_METRIC_ATTRIBUTION.state).toBe("CONTRADICTED");
+  it("the claims drawn from the strip are stated on their own, after it", () => {
+    expect(FIXTURE_METRIC_CLAIMS.length).toBeGreaterThan(0);
     expect(html).toContain('data-testid="metric-attribution"');
-    // And it comes after the strip it qualifies, never instead of it.
+    // And they come after the strip they qualify, never instead of it.
     expect(html.indexOf('data-testid="metric-tile"')).toBeLessThan(
       html.indexOf('data-testid="metric-attribution"'),
     );
+  });
+
+  it("a disproved claim and an unproven one do not share a state", () => {
+    // THE DISTINCTION THIS FIXTURE EXISTS TO SHOW. Total supply rising
+    // DISPROVES a net reduction and says nothing about whether the mechanism
+    // removed tokens — issuance elsewhere can outrun a real burn, which is
+    // what the quantitative snapshot's own `doesNotProve` states. One row
+    // carrying both collapsed a disproof and an open question into a single
+    // verdict, and it read as evidence against the mechanism that is not.
+    const net = FIXTURE_METRIC_CLAIMS.find((c) => /net supply reduction/i.test(c.label));
+    expect(net?.state).toBe("CONTRADICTED");
+
+    const attribution = FIXTURE_METRIC_CLAIMS.find((c) => /attribution/i.test(c.label));
+    expect(attribution?.state).toBe("NOT_ESTABLISHED");
+
+    // Nothing on the page may mark causation CONTRADICTED: no admitted
+    // evidence here disproves it.
+    for (const claim of FIXTURE_METRIC_CLAIMS) {
+      if (/attribut|caus/i.test(claim.label)) {
+        expect(claim.state, claim.label).not.toBe("CONTRADICTED");
+      }
+    }
   });
 
   it("the headline measures are the economic chain, in its order", () => {
@@ -308,7 +330,7 @@ describe("measured fact and causal conclusion stay separate", () => {
   });
 
   it("no block claims an execution the proof map says was not established", () => {
-    const execution = FIXTURE_PROOF_MAP.find((c) => c.label === "Execution");
+    const execution = FIXTURE_PROOF_MAP.find((c) => c.label === "Mechanism execution");
     expect(execution?.state).toBe("NOT_ESTABLISHED");
     // The timeline is where this slipped: a dated milestone read "first
     // transaction attributed to the mechanism" while the proof map, the
@@ -323,9 +345,25 @@ describe("measured fact and causal conclusion stay separate", () => {
   });
 
   it("the flow and the proof map agree about where the evidence stopped", () => {
-    const onMap = FIXTURE_PROOF_MAP.find((c) => c.label === "Execution");
+    const onMap = FIXTURE_PROOF_MAP.find((c) => c.label === "Mechanism execution");
     const inFlow = FIXTURE_FLOW.find((s) => s.step === "EXECUTION");
     expect(inFlow?.state).toBe(onMap?.state);
+    // And they say so under the SAME name, because a reader matches these
+    // two blocks by their words. "Execution" beside "Token action" left it
+    // to the reader to work out they were one claim.
+    expect(inFlow?.label).toBe(onMap?.label);
+  });
+
+  it("no two blocks grade the same-sounding claim differently", () => {
+    // The measured tile and the proof-map check are DIFFERENT propositions
+    // and legitimately hold different states — which is exactly why they
+    // must not share a name. One counts activity; the other grades the
+    // mechanism.
+    const measured = FIXTURE_METRICS.find((m) => m.step === "EXECUTION");
+    const graded = FIXTURE_PROOF_MAP.find((c) => c.label === "Mechanism execution");
+    expect(measured?.state).not.toBe(graded?.state);
+    expect(measured?.label.toLowerCase()).not.toContain("mechanism");
+    expect(measured?.label).not.toBe(graded?.label);
   });
 
   it("no connector is drawn solid into a stage the evidence did not reach", () => {

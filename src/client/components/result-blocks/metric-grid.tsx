@@ -18,17 +18,24 @@ import { PROOF_STATE, type Metric, type MetricAttribution } from "./types";
 // correctly is ESTABLISHED even when the conclusion someone wanted to draw
 // from it collapsed; stamping it CONTRADICTED because the story failed makes
 // the number itself look unreliable, which is a different — and false —
-// claim. So the causal reading is lifted out and stated once, underneath the
-// strip, in its own words and with its own state.
+// claim. So the readings drawn from the strip are lifted out and stated
+// underneath it, each in its own words and with its own state.
 //
 //   MEASURED SUPPLY DECREASE  ≠  MECHANISM CAUSED SUPPLY DECREASE
 //   TOKENS ACQUIRED           ≠  VALUE CAPTURE FOR HOLDERS
+//
+// AND THERE IS MORE THAN ONE SUCH READING, WITH DIFFERENT STATES. A rise in
+// total supply CONTRADICTS a net reduction and says nothing whatever about
+// whether the mechanism removed tokens — issuance elsewhere can outrun a
+// real burn. One row carrying both collapsed a disproof and an open question
+// into a single verdict, so `claims` is a list: each proposition the numbers
+// invite, named, with the state the evidence actually supports for it.
 export function MetricGridBlock({
   metrics,
-  attribution,
+  claims,
 }: {
   metrics: Metric[];
-  attribution?: MetricAttribution;
+  claims?: MetricAttribution[];
 }) {
   return (
     <section className="panel px-4 py-4 sm:px-5" data-testid="block-metrics">
@@ -119,17 +126,20 @@ export function MetricGridBlock({
         })}
       </div>
 
-      {attribution && <AttributionRow attribution={attribution} />}
+      {claims?.map((claim) => (
+        <AttributionRow key={claim.label} attribution={claim} />
+      ))}
     </section>
   );
 }
 
-// THE CLAIM THE FOUR TILES ARE NOT ALLOWED TO IMPLY.
+// A CLAIM THE FOUR TILES ARE NOT ALLOWED TO IMPLY.
 //
 // Set apart from the strip and tinted with its own state, so it cannot be
 // read as a fifth measure. Four sound numbers in a row invite the reader to
-// join them into a causal story; this is the sentence that says whether the
-// research actually joined them, and here it says it did not.
+// join them into a story; each of these says whether the research actually
+// joined them, and — because "disproved" and "not shown" are different
+// findings — carries its own state rather than borrowing its neighbour's.
 function AttributionRow({ attribution }: { attribution: MetricAttribution }) {
   const s = PROOF_STATE[attribution.state];
   return (
