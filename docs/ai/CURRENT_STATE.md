@@ -46,8 +46,27 @@ causal attribution, for which V1 has no upstream proposition.
 
 **Not yet projected by the API:** typed on-chain amounts and admitted
 locators. `inputFromResearchJobDetail` leaves `quantities` and `entities`
-empty, so a real payload today yields ANSWER / PROOF_MAP / FLOW / TIMELINE /
-EVIDENCE_SNAPSHOT / DEEP_PROOF and correctly declines the rest.
+empty, so METRIC / TABLE / CHART / ENTITY are always declined on a real
+payload.
+
+**A REAL COMPLETED RESEARCH NOW GOES THROUGH IT**, at
+`/dev/output-plan?job=<uuid>`. The bridge (`real-job-plan.tsx`) reads the
+job through `api.getResearchJob` — the production endpoint, the production
+session, no new server route and no second query — and the answer prose is
+the existing `researchAnswer` / `resultBriefing` derivation. Verified on
+`8be4e607-5a72-4cfa-b45f-88842b10155c` (2026-09-08): ANSWER → PROOF_MAP →
+EVIDENCE_SNAPSHOT → DEEP_PROOF, with METRIC, TABLE, CHART, FLOW, TIMELINE
+and ENTITY declined. The selector needed no change to consume it.
+
+Two absences there are the payload, not the rule: no admitted Evidence row
+in that job carries `publishedAt` or `observedAt`, so no milestone can be
+dated (TIMELINE declined); and all three persisted mechanism flows are a
+single VALUE_SOURCE node with ZERO edges, so there is no movement to draw
+(FLOW declined). **A real record is a historical run** — its statuses were
+reduced by the semantics in force when it ran, and that job predates D-159
+(`fba4e1b`), which stopped `ACCOUNT_INFO` establishing DESTINATION and
+RECIPIENT. Those two rows read PARTLY_ESTABLISHED there and might not
+today. The dev banner states this; nothing re-derives it.
 
 ## A TYPED CHAIN FACT NOW ACTUALLY REACHES THE COMPONENT IT BEARS ON
 

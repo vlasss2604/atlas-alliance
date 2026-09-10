@@ -52,6 +52,19 @@ supply effect; governance state; sparse; wallet flow) → selector → the
 existing blocks via `selected-blocks.tsx`, with the selector's own
 selected/declined list printed above. Production-gated like the showcase.
 
+`/dev/output-plan?job=<uuid>` — a REAL completed Research through the same
+selector. The bridge (`real-job-plan.tsx`) reads the job through
+`api.getResearchJob`, the production endpoint with the production session,
+so ownership and admission are enforced exactly where they always were; the
+answer prose is the existing `researchAnswer` / `resultBriefing`
+derivation. It adds no server route and no query. A real record is a
+HISTORICAL run whose statuses were reduced by the semantics in force when
+it ran — the banner says so, because a stale status rendered confidently is
+what this product must not ship. Verified on
+`8be4e607-5a72-4cfa-b45f-88842b10155c` (Raydium, 2026-09-08): the plan is
+ANSWER → PROOF_MAP → EVIDENCE_SNAPSHOT → DEEP_PROOF, everything else
+declined. No selector change was needed.
+
 ### Known limits
 
 - Quantities and entities are not projected by the job-detail API; a

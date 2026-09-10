@@ -534,6 +534,91 @@ describe("the detail-payload adapter", () => {
     expect(p.orderedBlocks.map((b) => b.type)).toEqual(["ANSWER", "PROOF_MAP", "FLOW", "TIMELINE", "EVIDENCE_SNAPSHOT", "DEEP_PROOF"]);
   });
 
+  // THE SHAPE A REAL COMPLETED RESEARCH ACTUALLY HAS TODAY, reduced to its
+  // structural essentials: ten component results, admitted evidence with NO
+  // dates of its own, mechanism flows that are single nodes with no edges,
+  // no question projection — and no typed quantities or entities, because
+  // the endpoint does not project them. Pinned because the correct plan for
+  // it is a SPARSE one, and a future change that quietly filled a gap here
+  // (a date guessed from fetchedAt, a number read out of a fragment, a
+  // one-node flow drawn as a movement) would show up as this test going
+  // green on a richer plan.
+  it("a real payload's shape yields a sparse plan, and every absence has a reason", () => {
+    const real = {
+      job: { originalQuestion: "Does the token receive real economic value from fees today?", projectName: "P" },
+      proof: { verdict: "PARTIALLY_SUPPORTED", confidence: { band: "LOW", score: 20 } },
+      claimSupport: { intent: "VALUE_CAPTURE" },
+      questionFindings: null,
+      mechanism: {
+        flows: [
+          { flowId: "f1", lifecycle: "NOT_ESTABLISHED", shape: "PARTIAL_PATH", nodes: [{ kind: "VALUE_SOURCE", component: "SOURCE_OF_VALUE", componentStatus: "PARTIALLY_SUPPORTED" }], edges: [], netEffect: null },
+        ],
+      },
+      components: [
+        ["SOURCE_OF_VALUE", 1, "PARTIALLY_SUPPORTED"],
+        ["FLOW_PATH", 2, "PARTIALLY_SUPPORTED"],
+        ["GOVERNANCE_BASIS", 3, "INSUFFICIENT_EVIDENCE"],
+        ["MECHANISM_SPEC", 3, "SUPPORTED"],
+        ["EXECUTION_EVIDENCE", 4, "INSUFFICIENT_EVIDENCE"],
+        ["CURRENT_STATE", 5, "INSUFFICIENT_EVIDENCE"],
+        ["DESTINATION", 6, "PARTIALLY_SUPPORTED"],
+        ["RECIPIENT", 6, "PARTIALLY_SUPPORTED"],
+        ["NET_EFFECT", 7, "INSUFFICIENT_EVIDENCE"],
+        ["DURABILITY_BASIS", 8, "SUPPORTED"],
+      ].map(([component, step, status]) => ({
+        patternStep: step,
+        component,
+        status,
+        reasonCodes: [],
+        supportingEvidenceIds: status === "INSUFFICIENT_EVIDENCE" ? [] : [`e-${component}`],
+        contradictingEvidenceIds: [],
+        excludedEvidence: [],
+        coverage: "COMPLETED",
+      })),
+      evidence: ["SOURCE_OF_VALUE", "FLOW_PATH", "MECHANISM_SPEC", "DESTINATION", "RECIPIENT", "DURABILITY_BASIS"].map((c) => ({
+        id: `e-${c}`,
+        patternStep: 1,
+        component: c,
+        relationship: "SUPPORTS",
+        directness: "DIRECT",
+        sourceClass: "OFFICIAL_DOCS",
+        officiality: "CONFIRMED",
+        fragment: `Fragment for ${c}.`,
+        summary: null,
+        doesNotProve: null,
+        mechanismState: null,
+        // The real record carries neither date.
+        publishedAt: null,
+        observedAt: null,
+        fetchedAt: "2026-09-08T18:26:00.000Z",
+        retrievedUrl: "https://example.invalid/doc",
+        sourceTitle: "Doc",
+      })),
+    } as unknown as ResearchJobDetail;
+
+    const input = inputFromResearchJobDetail(real);
+    expect(input.quantities).toEqual([]);
+    expect(input.entities).toEqual([]);
+    expect(input.flows).toHaveLength(1);
+
+    const p = chooseAnalyticalBlocks(input);
+    expect(p.orderedBlocks.map((b) => b.type)).toEqual(["ANSWER", "PROOF_MAP", "EVIDENCE_SNAPSHOT", "DEEP_PROOF"]);
+    expect(p.rejected).toEqual([
+      { type: "METRIC", reason: "NO_QUALIFIED_MEASUREMENT" },
+      { type: "TABLE", reason: "NO_COMPARABLE_ROWS" },
+      { type: "CHART", reason: "INSUFFICIENT_ORDERED_POINTS" },
+      // One node and no edges is not a movement, however many flows there are.
+      { type: "FLOW", reason: "NO_ESTABLISHED_EDGE" },
+      { type: "TIMELINE", reason: "NO_ORDERED_STATE_CHANGE" },
+      { type: "ENTITY", reason: "NO_ESTABLISHED_ROLE" },
+    ]);
+    // The proof map still carries all ten, at their persisted states.
+    const map = p.orderedBlocks.find((b) => b.type === "PROOF_MAP") as Extract<PlannedBlock, { type: "PROOF_MAP" }>;
+    expect(map.spec.cells).toHaveLength(10);
+    expect(map.spec.cells.find((c) => c.component === "MECHANISM_SPEC")!.state).toBe("ESTABLISHED");
+    expect(map.spec.cells.find((c) => c.component === "NET_EFFECT")!.state).toBe("NOT_ESTABLISHED");
+  });
+
   it("a payload with no Proof yields a null verdict, never an invented one", () => {
     const input = inputFromResearchJobDetail({ ...detail, proof: null, claimSupport: null, questionFindings: null, mechanism: null });
     expect(input.verdict).toBeNull();
@@ -585,11 +670,32 @@ describe("the dev route renders exactly the selected blocks", () => {
     expect(p6).not.toMatch(/>0<|>0\.0</);
   });
 
-  it("the page is gated out of production and touches nothing", () => {
+  it("the page is gated out of production and opens no data path of its own", () => {
     const page = readFileSync(PAGE, "utf-8");
     expect(page).toContain('process.env.NODE_ENV === "production"');
     expect(page).toContain("notFound()");
     expect(page).toContain("fixture-banner");
-    expect(page).not.toMatch(/db\.|drizzle|fetch\(|api\./);
+    // No database, no server query, no fetch: the fixture mode renders
+    // constants and the real-job mode delegates to the bridge.
+    expect(page).not.toMatch(/db\.|drizzle|getDb|fetch\(/);
+  });
+
+  it("the real-job bridge reuses the existing endpoint and states its record is historical", () => {
+    const bridge = readFileSync("src/client/components/result-blocks/real-job-plan.tsx", "utf-8");
+    // The production endpoint, through the production client — not a second
+    // query, and not a server route added for this page.
+    expect(bridge).toContain("api.getResearchJob");
+    expect(bridge).not.toMatch(/drizzle|getDb|from\s+["'][^"']*server\//);
+    // The answer is the derivation the result screen already runs.
+    expect(bridge).toContain("researchAnswer");
+    expect(bridge).toContain("resultBriefing");
+    // And nothing fills a gap in the payload.
+    expect(bridge).not.toMatch(/quantities:\s*\[[^\]]/);
+    expect(bridge).not.toMatch(/parseFloat|parseInt|match\(|RegExp/);
+    // A historical record must say so.
+    const page = readFileSync(PAGE, "utf-8");
+    expect(page).toContain("real-job-banner");
+    expect(page.toLowerCase()).toContain("historical record");
+    expect(page.toLowerCase()).toContain("semantics in force at that time");
   });
 });

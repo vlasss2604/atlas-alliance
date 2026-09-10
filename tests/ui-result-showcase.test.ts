@@ -76,9 +76,32 @@ describe("the fixture announces itself", () => {
 /* 2. IT READS AND WRITES NOTHING                                      */
 /* ------------------------------------------------------------------ */
 
+// THE PRESENTATION BLOCKS, WHICH ARE NOT EVERY FILE IN THE DIRECTORY.
+//
+// `selected-blocks.tsx` and `real-job-plan.tsx` are the SELECTION layer that
+// arrived after this language was approved: the first turns a plan into
+// these blocks' props, the second reads one real completed job through the
+// production endpoint and hands it to the selector. They are allowed to know
+// about component results and to call the API — that is their job — and they
+// are no part of the showcase, which still composes presentation blocks
+// alone. Everything below therefore scans the RENDERING blocks, and the
+// separate guard at the bottom holds the boundary between the two.
+const ADAPTERS = ["selected-blocks.tsx", "real-job-plan.tsx"];
+const PRESENTATION_BLOCKS = readdirSync(BLOCKS_DIR).filter((f) => !ADAPTERS.includes(f));
+
+// These files EXPLAIN themselves at length, and several of them explain
+// where the selection rule lives. A guard that read the prose would forbid
+// naming the thing being kept out, so it reads the code.
+function codeOf(path: string): string {
+  return readFileSync(path, "utf-8")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+}
+
 describe("the showcase is inert", () => {
   it("no block reaches a database, a provider or a model", () => {
-    const files = readdirSync(BLOCKS_DIR).map((f) => `${BLOCKS_DIR}/${f}`);
+    const files = PRESENTATION_BLOCKS.map((f) => `${BLOCKS_DIR}/${f}`);
     for (const file of [...files, FIXTURE, PAGE]) {
       const src = readFileSync(file, "utf-8");
       for (const forbidden of [
@@ -231,19 +254,32 @@ describe("430px is the design target, not an afterthought", () => {
 });
 
 /* ------------------------------------------------------------------ */
-/* 6. NO SELECTION LOGIC WAS BUILT                                     */
+/* 6. SELECTION LIVES OUTSIDE THE BLOCKS                               */
 /* ------------------------------------------------------------------ */
 
-describe("the adapter is deliberately absent", () => {
-  it("nothing decides which block a finding belongs in", () => {
-    // That rule is the NEXT decision, and writing it before the language is
-    // approved would encode a layout nobody has agreed to.
-    for (const f of readdirSync(BLOCKS_DIR)) {
-      const src = readFileSync(`${BLOCKS_DIR}/${f}`, "utf-8");
+describe("the adapter is confined", () => {
+  it("no rendering block decides which block a finding belongs in", () => {
+    // The rule exists now (`chooseAnalyticalBlocks`), and it deliberately
+    // does not live in here. A block that knew about component results
+    // could grade one, and then two layers would decide the same thing.
+    for (const f of PRESENTATION_BLOCKS) {
+      const src = codeOf(`${BLOCKS_DIR}/${f}`);
       expect(src, f).not.toContain("ComponentResult");
       expect(src, f).not.toContain("reconcile");
       expect(src, f).not.toContain("questionFindings");
+      expect(src, f).not.toContain("chooseAnalyticalBlocks");
     }
+  });
+
+  it("the showcase composes presentation blocks only, never the adapter", () => {
+    const showcase = codeOf(`${BLOCKS_DIR}/result-showcase.tsx`);
+    for (const adapter of ADAPTERS) {
+      expect(showcase, adapter).not.toContain(adapter.replace(".tsx", ""));
+    }
+    // And it still renders from constants: every value it passes down is a
+    // FIXTURE_ import, so no plan can reach it.
+    expect(showcase).not.toContain("output-plan");
+    expect(showcase.match(/FIXTURE_[A-Z_]+/g)?.length ?? 0).toBeGreaterThan(10);
   });
 
   it("no chart dependency was added to the project", () => {
