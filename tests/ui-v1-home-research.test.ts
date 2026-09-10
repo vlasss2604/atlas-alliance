@@ -780,6 +780,7 @@ const detailFixture = {
   ],
   snapshotEvidenceIds: [],
   evidence: [],
+  quantities: [],
 };
 
 describe("UI — developer details", () => {
@@ -858,6 +859,14 @@ describe("UI — no project-specific conclusion", () => {
   it("TEST 13b: no verdict or component status is hardcoded in a screen", () => {
     for (const file of uiSourceFiles()) {
       if (file.includes("research-model")) continue; // the label maps live here
+      // A FIXTURE IS INVENTED DATA, NOT A SCREEN. The dev-only records that
+      // feed the result showcase and the block selector are made ENTIRELY of
+      // literal values — a verdict among them — because that is what a
+      // fixture is. The invariant this test protects is that a SCREEN never
+      // decides a status for itself; a file whose whole purpose is to carry
+      // invented ones is outside it, and each is gated out of a production
+      // build by the route that renders it.
+      if (/fixtures?\.ts$/.test(file)) continue;
       const src = codeOf(readFileSync(file, "utf-8"));
       expect(src, file).not.toMatch(
         /verdict\s*[:=]\s*["'](SUPPORTED|NOT_SUPPORTED)["'](?!\s*\|)/,

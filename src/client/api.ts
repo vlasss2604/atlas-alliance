@@ -358,6 +358,23 @@ export interface ResearchJobDetail {
         supportingComponents: string[];
       }[]
     | null;
+  // STRUCTURED QUANTITIES, AS STORED. Each one is a field copy of an
+  // on-chain retrieval artifact this research already persisted — the
+  // amount exact as an integer string (a token supply routinely exceeds
+  // Number.MAX_SAFE_INTEGER), with the unit domain that gives it meaning
+  // and the Evidence row that carries it. The server projects a CLOSED set
+  // of fact kinds and drops any row whose canonical fields are incomplete,
+  // so an entry here is always showable and an absent measurement is
+  // simply absent — never a zero, never a guessed unit.
+  quantities: {
+    evidenceId: string;
+    factKind: string;
+    step: number;
+    component: string;
+    mint: string;
+    decimals: number;
+    amountRaw: string;
+  }[];
   components: {
     patternStep: number;
     component: string;

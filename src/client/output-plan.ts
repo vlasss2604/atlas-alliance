@@ -1077,14 +1077,22 @@ function isPlanFlow(value: unknown): value is PlanFlow {
 }
 
 // WHAT THE PAYLOAD CAN FILL TODAY, AND WHAT IT CANNOT. Components, admitted
-// Evidence, the assembled mechanism, the verdict and the question's own
-// findings are all in the detail response and are mapped here. Typed
-// quantities and documentary entities are persisted server-side (on-chain
-// facts with amounts; admitted locators with their provenance) but the API
-// does not project them yet, so on a real payload `quantities` and
-// `entities` are empty and METRIC / TABLE / CHART / ENTITY are correctly
-// rejected. Projecting them is a separate, later step; nothing here guesses
-// a number from a fragment to fill the gap.
+// Evidence, the assembled mechanism, the verdict, the question's own
+// findings and now the structured quantities are all in the detail
+// response and are copied here.
+//
+// `quantities` arrives already validated by the server projection, which
+// carries a CLOSED set of on-chain fact kinds and drops any row whose
+// canonical fields are incomplete. Every entry therefore has an exact
+// amount, a unit domain and an Evidence row; `position` is null because
+// the record holds point readings and nothing yet groups them into an
+// ordered series. That is why a real payload can now produce a METRIC and
+// still cannot produce a TABLE or a CHART: those need positions, and no
+// position exists to copy.
+//
+// `entities` remains empty — admitted documentary locators are persisted
+// but not projected — so ENTITY is still correctly rejected. Nothing here
+// guesses a number from a fragment to fill any of these gaps.
 export function inputFromResearchJobDetail(detail: ResearchJobDetail): AnalyticalOutputInputV1 {
   const findings = detail.questionFindings ?? [];
   return {
@@ -1124,7 +1132,18 @@ export function inputFromResearchJobDetail(detail: ResearchJobDetail): Analytica
       sourceTitle: e.sourceTitle,
     })),
     flows: (detail.mechanism?.flows ?? []).filter(isPlanFlow),
-    quantities: [],
+    // Copied field for field. The server decided what was showable; this
+    // adds only `position`, which the record does not carry.
+    quantities: (detail.quantities ?? []).map((q) => ({
+      evidenceId: q.evidenceId,
+      factKind: q.factKind,
+      step: q.step,
+      component: q.component,
+      mint: q.mint,
+      decimals: q.decimals,
+      amountRaw: q.amountRaw,
+      position: null,
+    })),
     entities: [],
   };
 }

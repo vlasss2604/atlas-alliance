@@ -619,6 +619,107 @@ describe("the detail-payload adapter", () => {
     expect(map.spec.cells.find((c) => c.component === "NET_EFFECT")!.state).toBe("NOT_ESTABLISHED");
   });
 
+  // THE QUANTITY PROJECTION, END TO END FROM THE PAYLOAD SHAPE THE ROUTE
+  // NOW RETURNS. `quantities` is a field copy of a stored on-chain artifact
+  // — the server validated it and dropped anything incomplete — so the
+  // adapter adds only `position`, and the selector needs no new rule to
+  // turn it into a measure.
+  it("a projected TOKEN_SUPPLY becomes a real METRIC with no new selector logic", () => {
+    const withSupply = {
+      job: { originalQuestion: "Does the buyback reduce supply?", projectName: "P" },
+      proof: { verdict: "PARTIALLY_SUPPORTED", confidence: { band: "LOW", score: 20 } },
+      claimSupport: { intent: "BURN_OR_SUPPLY_EFFECT" },
+      questionFindings: null,
+      mechanism: null,
+      components: [
+        { patternStep: 5, component: "CURRENT_STATE", status: "PARTIALLY_SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["q-cur"], contradictingEvidenceIds: [], excludedEvidence: [], coverage: "COMPLETED" },
+        { patternStep: 7, component: "NET_EFFECT", status: "PARTIALLY_SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["q-net"], contradictingEvidenceIds: [], excludedEvidence: [], coverage: "COMPLETED" },
+      ],
+      evidence: ["q-cur", "q-net"].map((id) => ({
+        id,
+        patternStep: id === "q-cur" ? 5 : 7,
+        component: id === "q-cur" ? "CURRENT_STATE" : "NET_EFFECT",
+        relationship: "SUPPORTS",
+        directness: "DIRECT",
+        sourceClass: "ONCHAIN_VERIFIABLE",
+        officiality: null,
+        fragment: '{"amountRaw":"835619825233489752"}',
+        summary: null,
+        doesNotProve: null,
+        mechanismState: null,
+        publishedAt: null,
+        observedAt: null,
+        fetchedAt: "2026-09-04T17:47:00.000Z",
+        retrievedUrl: "https://rpc.invalid/",
+        sourceTitle: null,
+      })),
+      // Exactly what the route projects: the artifact's own four fields.
+      quantities: [
+        { evidenceId: "q-cur", factKind: "TOKEN_SUPPLY", step: 5, component: "CURRENT_STATE", mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", decimals: 6, amountRaw: "835619825233489752" },
+        { evidenceId: "q-net", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: "pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn", decimals: 6, amountRaw: "835619825233489752" },
+      ],
+    } as unknown as ResearchJobDetail;
+
+    const input = inputFromResearchJobDetail(withSupply);
+    expect(input.quantities).toHaveLength(2);
+    // A point reading carries no position, which is exactly why it is a
+    // metric and not a table row.
+    for (const q of input.quantities) {
+      expect(q.position).toBeNull();
+      expect(q.amountRaw).toBe("835619825233489752");
+    }
+
+    const p = chooseAnalyticalBlocks(input);
+    expect(p.orderedBlocks.map((b) => b.type)).toContain("METRIC");
+    const metric = p.orderedBlocks.find((b) => b.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;
+    expect(metric.spec.metrics).toHaveLength(2);
+    // The exact integer survives: a supply of this size loses a unit to a
+    // float, and a measurement that lost a unit is a false fact.
+    expect(metric.spec.metrics.map((m) => m.amountRaw)).toEqual([
+      "835619825233489752",
+      "835619825233489752",
+    ]);
+    // The measurement's standing comes from its row's admission, not from
+    // the PARTIALLY_SUPPORTED component it bears on.
+    for (const m of metric.spec.metrics) expect(m.state).toBe("ESTABLISHED");
+    // NET_EFFECT's reading sits at EFFECT in the chain; CURRENT_STATE has
+    // no position in the economic chain and is carried without one.
+    expect(metric.spec.metrics.find((m) => m.component === "NET_EFFECT")!.step).toBe("EFFECT");
+    expect(metric.spec.metrics.find((m) => m.component === "CURRENT_STATE")!.step).toBeNull();
+    // No TOTAL_SUPPLY_DELTA, so no proposition is shown beside the strip.
+    expect(metric.spec.claims).toEqual([]);
+    // And still no series: point readings carry no position to order.
+    expect(p.rejected).toContainEqual({ type: "TABLE", reason: "NO_COMPARABLE_ROWS" });
+    expect(p.rejected).toContainEqual({ type: "CHART", reason: "INSUFFICIENT_ORDERED_POINTS" });
+  });
+
+  it("an unadmitted quantity is projected but never becomes a measure", () => {
+    // The server copies what is STORED; the selector decides what is
+    // SHOWABLE. A CONTEXT row is stored and is not evidence for anything.
+    const base2 = {
+      job: { originalQuestion: "q", projectName: "P" },
+      proof: null,
+      claimSupport: null,
+      questionFindings: null,
+      mechanism: null,
+      components: [
+        { patternStep: 7, component: "NET_EFFECT", status: "PARTIALLY_SUPPORTED", reasonCodes: [], supportingEvidenceIds: [], contradictingEvidenceIds: [], excludedEvidence: [], coverage: "COMPLETED" },
+      ],
+      evidence: [
+        { id: "ctx", patternStep: 7, component: "NET_EFFECT", relationship: "CONTEXT", directness: "DIRECT", sourceClass: "ONCHAIN_VERIFIABLE", officiality: null, fragment: "{}", summary: null, doesNotProve: null, mechanismState: null, publishedAt: null, observedAt: null, fetchedAt: "2026-09-04T00:00:00.000Z", retrievedUrl: "https://rpc.invalid/", sourceTitle: null },
+      ],
+      quantities: [
+        { evidenceId: "ctx", factKind: "TOKEN_SUPPLY", step: 7, component: "NET_EFFECT", mint: "M", decimals: 6, amountRaw: "100" },
+      ],
+    } as unknown as ResearchJobDetail;
+    const input = inputFromResearchJobDetail(base2);
+    expect(input.quantities).toHaveLength(1);
+    expect(chooseAnalyticalBlocks(input).rejected).toContainEqual({
+      type: "METRIC",
+      reason: "NO_QUALIFIED_MEASUREMENT",
+    });
+  });
+
   it("a payload with no Proof yields a null verdict, never an invented one", () => {
     const input = inputFromResearchJobDetail({ ...detail, proof: null, claimSupport: null, questionFindings: null, mechanism: null });
     expect(input.verdict).toBeNull();
@@ -678,6 +779,22 @@ describe("the dev route renders exactly the selected blocks", () => {
     // No database, no server query, no fetch: the fixture mode renders
     // constants and the real-job mode delegates to the bridge.
     expect(page).not.toMatch(/db\.|drizzle|getDb|fetch\(/);
+  });
+
+  it("the server projects a closed set of quantity kinds and defaults nothing", () => {
+    const route = readFileSync("app/api/research-jobs/[id]/route.ts", "utf-8");
+    // A closed allowlist, so a fact kind cannot join by accident.
+    expect(route).toContain('PROJECTED_QUANTITY_KINDS = ["TOKEN_SUPPLY"]');
+    // The artifact must agree with the evidence row about its own kind.
+    expect(route).toContain("result.kind !== r.factKind");
+    // Every canonical field is validated and an incomplete row is dropped,
+    // never repaired: no ?? 0, no ?? "", no guessed decimals or mint.
+    expect(route).toContain("CANONICAL_UNSIGNED_INTEGER");
+    expect(route).not.toMatch(/amountRaw\s*\?\?|decimals\s*\?\?\s*\d|mint\s*\?\?/);
+    // And nothing reads prose: the quantity comes from the stored artifact,
+    // never from a fragment or a summary.
+    const projection = route.slice(route.indexOf("PROJECTED_QUANTITY_KINDS"), route.indexOf("const quantities = quantityRows") + 900);
+    expect(projection).not.toMatch(/fragment|summary|parseFloat|parseInt|\.match\(/);
   });
 
   it("the real-job bridge reuses the existing endpoint and states its record is historical", () => {

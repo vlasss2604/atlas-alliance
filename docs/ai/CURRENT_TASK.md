@@ -65,10 +65,24 @@ what this product must not ship. Verified on
 ANSWER → PROOF_MAP → EVIDENCE_SNAPSHOT → DEEP_PROOF, everything else
 declined. No selector change was needed.
 
+### Quantity projection (V1)
+
+The detail route projects `quantities` for a CLOSED set of on-chain fact
+kinds — currently `TOKEN_SUPPLY` alone, whose artifact carries kind, mint,
+decimals and amountRaw at its top level, so the projection is a field copy
+with no decision in it. Rows failing any canonical check are dropped, never
+defaulted. `BURN` (a list per transaction) and `TOTAL_SUPPLY_DELTA` (derived
+from two artifacts, null `onchain_artifact_id`) are excluded: each needs a
+derivation decision. A real METRIC now appears automatically; the selector
+was not changed.
+
 ### Known limits
 
-- Quantities and entities are not projected by the job-detail API; a
-  later step must project persisted on-chain facts and admitted locators.
+- Entities are not projected by the job-detail API; a later step must
+  project admitted documentary locators.
+- No series exists in the record — every projected quantity is a point
+  reading with a null `position` — so TABLE and CHART cannot appear on a
+  real payload regardless of how many kinds are projected.
 - Intent → component relevance lives in the Pattern (CORE, server). The
   client selector uses the question projection's findings for relevance;
   with none, everything is relevant.

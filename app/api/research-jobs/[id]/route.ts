@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, inArray } from "drizzle-orm";
 
 import type { ComponentCoverage } from "@/src/client/research-model";
 import {
@@ -9,6 +9,7 @@ import {
 } from "@/src/server/auth/guards";
 import {
   evidence,
+  onchainArtifacts,
   projects,
   researchAttempts,
   researchClaimSupport,
@@ -195,6 +196,86 @@ export async function GET(
       .innerJoin(sources, eq(evidence.sourceId, sources.id))
       .where(eq(evidence.researchJobId, id))
       .orderBy(evidence.patternStep, evidence.createdAt);
+
+    // ---- STRUCTURED QUANTITIES, PROJECTED AND NOT DERIVED ---------------
+    //
+    // WHY THIS EXISTS. The result presentation can render a measured number
+    // as a number, but only if it is handed one. Every quantity this
+    // research established already sits in `onchain_artifacts.normalized_result`
+    // — read by code from the chain, never restated by a model — and the
+    // detail response simply did not carry it, so a real result could show
+    // no measure at all. This closes that gap by COPYING what is stored.
+    //
+    // EXACTLY ONE FACT KIND IN V1, AND IT IS THE SMALLEST ONE.
+    // `TOKEN_SUPPLY` is a single point reading of one mint whose artifact
+    // carries the whole canonical set at its top level — kind, mint,
+    // decimals, amountRaw — so a projection is a field copy with no
+    // decision in it. The other quantity-bearing kinds are deliberately
+    // NOT here, because each needs a decision this pass is not authorised
+    // to take:
+    //
+    //   BURN — the artifact is a TRANSACTION_DETAIL whose `burns` is a
+    //   LIST. One transaction may destroy tokens more than once, and
+    //   choosing among them, or adding them up, is a derivation.
+    //
+    //   TOTAL_SUPPLY_DELTA — derived from TWO artifacts, so its own
+    //   `onchain_artifact_id` is NULL by construction and its provenance
+    //   lives in evidence_onchain_artifact_inputs. Reassembling it here
+    //   would be recomputing a fact, not projecting one.
+    //
+    // The allowlist is a closed set rather than a filter on "has an
+    // amount", so a fact kind cannot join this projection by accident.
+    //
+    // NOTHING IS INFERRED AND NOTHING IS DEFAULTED. A row whose artifact
+    // disagrees with the evidence row about its own kind, or whose amount
+    // is not a canonical unsigned integer, or whose decimals are not a
+    // non-negative integer, or whose mint is empty, is DROPPED. A missing
+    // field never becomes a zero, an empty string or a guessed unit — an
+    // unshowable measurement is absent, which is what the presentation
+    // layer already knows how to render.
+    const PROJECTED_QUANTITY_KINDS = ["TOKEN_SUPPLY"] as const;
+    const CANONICAL_UNSIGNED_INTEGER = /^(?:0|[1-9][0-9]*)$/;
+
+    const quantityRows = await db
+      .select({
+        evidenceId: evidence.id,
+        factKind: evidence.onchainFactKind,
+        patternStep: evidence.patternStep,
+        component: evidence.component,
+        normalizedResult: onchainArtifacts.normalizedResult,
+      })
+      .from(evidence)
+      .innerJoin(onchainArtifacts, eq(evidence.onchainArtifactId, onchainArtifacts.id))
+      .where(
+        and(
+          eq(evidence.researchJobId, id),
+          inArray(evidence.onchainFactKind, [...PROJECTED_QUANTITY_KINDS]),
+        ),
+      )
+      .orderBy(evidence.patternStep, evidence.createdAt);
+
+    const quantities = quantityRows.flatMap((r) => {
+      const result = r.normalizedResult as Record<string, unknown> | null;
+      if (result === null || typeof result !== "object") return [];
+      // The artifact must agree with the evidence row about what it is.
+      if (result.kind !== r.factKind) return [];
+      const { mint, decimals, amountRaw } = result;
+      if (typeof mint !== "string" || mint.length === 0) return [];
+      if (typeof decimals !== "number" || !Number.isInteger(decimals) || decimals < 0) return [];
+      if (typeof amountRaw !== "string" || !CANONICAL_UNSIGNED_INTEGER.test(amountRaw)) return [];
+      if (r.patternStep === null || r.component === null) return [];
+      return [
+        {
+          evidenceId: r.evidenceId,
+          factKind: r.factKind,
+          step: r.patternStep,
+          component: r.component,
+          mint,
+          decimals,
+          amountRaw,
+        },
+      ];
+    });
 
     // ---- Component ownership, straight from S5 --------------------------
     // Every evidence row is annotated with the component result(s) that
@@ -473,6 +554,9 @@ export async function GET(
       finding,
       questionFindings,
       components,
+      // Copied from the stored retrieval artifacts, never computed. See the
+      // projection above for what is deliberately excluded.
+      quantities,
       // Retained for transparency/debug, now carrying its ownership links.
       // NOT the Proof source — `proof` is, and `finding` was before it.
       evidence: evidenceRows.map((e) => ({

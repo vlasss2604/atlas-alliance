@@ -44,10 +44,27 @@ grades no proposition of its own: the only claim it shows beside a
 measurement is the persisted NET_EFFECT state, and it states nothing about
 causal attribution, for which V1 has no upstream proposition.
 
-**Not yet projected by the API:** typed on-chain amounts and admitted
-locators. `inputFromResearchJobDetail` leaves `quantities` and `entities`
-empty, so METRIC / TABLE / CHART / ENTITY are always declined on a real
-payload.
+**Quantities ARE now projected, for exactly one fact kind.** The detail
+route returns `quantities`: a field copy of `onchain_artifacts.normalized_result`
+for admitted `TOKEN_SUPPLY` rows — kind, mint, decimals, amountRaw, all
+present at the artifact's top level, so the projection has no decision in
+it. The allowlist is closed and a row whose artifact disagrees with its
+Evidence row about its kind, or whose amount/decimals/mint are not
+canonical, is dropped rather than repaired. **A real METRIC now appears
+automatically** (verified on `1302b67e`: two `TOKEN_SUPPLY` readings,
+ESTABLISHED, 835619825233489752 raw at 6 decimals).
+
+`BURN` and `TOTAL_SUPPLY_DELTA` are deliberately NOT projected. A BURN
+artifact is a TRANSACTION_DETAIL whose `burns` is a LIST — choosing among
+them or summing them is a derivation. A TOTAL_SUPPLY_DELTA is derived from
+TWO artifacts, so its own `onchain_artifact_id` is NULL and reassembling it
+would be recomputing a fact. Both need a decision this projection was not
+authorised to take.
+
+**Still not projected:** admitted documentary locators, so `entities` is
+empty and ENTITY is always declined. **No series exists anywhere in the
+record** — every projected quantity is a point reading with a null
+`position` — so TABLE and CHART remain declined on every real payload.
 
 **A REAL COMPLETED RESEARCH NOW GOES THROUGH IT**, at
 `/dev/output-plan?job=<uuid>`. The bridge (`real-job-plan.tsx`) reads the
