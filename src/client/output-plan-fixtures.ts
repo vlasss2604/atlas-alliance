@@ -469,7 +469,7 @@ export const GOLDEN_AUDIT_FIXTURE: OutputPlanFixture = {
       comp(7, "NET_EFFECT", "CONTRADICTED", ["g-burned-total", ...G_BURNED.slice(0, 5).map((q) => q.evidenceId)], ["g-delta"], ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"]),
     ],
     evidence: [
-      ev("g-fees", 1, "SOURCE_OF_VALUE", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · fee program", observedAt: "2026-04-30", fragment: '{"program":"FeeProg","feeAssetRaw":"18400000000000"}', summary: "Trading fees are collected by a program the project confirmed as its own.", doesNotProve: "Where the collected fees go, or that any of them reach the token." }),
+      ev("g-fees", 1, "SOURCE_OF_VALUE", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · fee program", observedAt: "2026-04-30", fragment: '{"program":"FeeProg","lamportsRaw":"18400000000000000"}', summary: "Trading fees are collected by a program the project confirmed as its own.", doesNotProve: "Where the collected fees go, or that any of them reach the token." }),
       ev("g-path", 2, "FLOW_PATH", { sourceClass: "ONCHAIN_VERIFIABLE", sourceTitle: "Chain read · treasury inflows", observedAt: "2026-04-30", fragment: '{"from":"FeeProg","to":"Treasury","amountRaw":"5520000000000"}', summary: "Collected fees are transferred to the treasury account named in the documentation.", doesNotProve: "That the treasury spends them as documented." }),
       ev("g-docs", 3, "MECHANISM_SPEC", { sourceTitle: "Protocol documentation · Tokenomics", publishedAt: "2025-11-04", fragment: "30% of protocol fees are used to purchase the token on the open market and burn it each period.", summary: "The documentation specifies a 30% fee allocation to purchases that are then burned.", doesNotProve: "That the purchases happen, or that burning them lowers total supply." }),
       ev("g-gov", 3, "GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", sourceTitle: "Governance record · proposal 41", directness: "INDIRECT", publishedAt: "2026-01-22", fragment: "Proposal 41 — Allocate 30% of protocol fees to token purchases. Result: passed.", summary: "A governance record refers to the allocation being ratified.", doesNotProve: "That the proposal was executed. Proposal passed is not proposal executed." }),
@@ -497,7 +497,11 @@ export const GOLDEN_AUDIT_FIXTURE: OutputPlanFixture = {
       },
     ],
     quantities: [
-      { evidenceId: "g-fees", observationId: "obs-g-fees", factKind: "TOKEN_TRANSFER", step: 1, component: "SOURCE_OF_VALUE", mint: "FixFeeAssetMint111111111111111111111111111", decimals: DECIMALS, amountRaw: "18400000000000", position: null, coverage: { observed: 6, expected: 6 } },
+      // Fees in the chain's native asset — its own unit domain (nine
+      // decimals, the native mint id) — and the one movement kind that
+      // can stand at SOURCE. A token transfer is a movement; native fee
+      // inflow is where the value comes from.
+      { evidenceId: "g-fees", observationId: "obs-g-fees", factKind: "NATIVE_TRANSFER", step: 1, component: "SOURCE_OF_VALUE", mint: "So11111111111111111111111111111111111111112", decimals: 9, amountRaw: "18400000000000000", position: null, coverage: { observed: 6, expected: 6 } },
       { evidenceId: "g-acquired-total", observationId: "obs-g-acquired-total", factKind: "DECODED_EXCHANGE", step: 4, component: "EXECUTION_EVIDENCE", mint: MINT, decimals: DECIMALS, amountRaw: "9500000000000", position: null, coverage: { observed: 5, expected: 6 } },
       { evidenceId: "g-burned-total", observationId: "obs-g-burned-total", factKind: "BURN", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6100000000000", position: null, coverage: { observed: 5, expected: 6 } },
       { evidenceId: "g-delta", observationId: "obs-g-delta", factKind: "TOTAL_SUPPLY_DELTA", step: 7, component: "NET_EFFECT", mint: MINT, decimals: DECIMALS, amountRaw: "6700000000000", direction: "INCREASED", position: null },
