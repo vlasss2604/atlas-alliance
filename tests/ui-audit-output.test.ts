@@ -102,10 +102,13 @@ describe("the audit is one instrument", () => {
       // Map: the bar and the counts, and NOT a list of the checks.
       expect(h.match(/data-testid="proof-cell"/g)?.length ?? 0, f.key).toBe(0);
       expect(h, f.key).toContain('data-testid="proof-coverage"');
-      // Deep: every check.
+      // Deep: every check — and ONLY here is every check listed.
       expect(h.match(/data-testid="deep-proof-row"/g)?.length ?? 0, f.key).toBe(a.checks.length);
-      // And every check's full sentence is still one fold under the table.
-      for (const c of a.checks) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
+      expect(h.match(/data-testid="audit-full"[\s\S]*?<\/ul>/)?.[0].match(/<li/g)?.length ?? 0, f.key).toBe(a.highlights.length);
+      // The key checks' full sentences stay one fold under the table.
+      for (const c of a.highlights) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
+      // Exactly three at the top, whenever the record has three to show.
+      expect(a.highlights.length, f.key).toBe(Math.min(3, a.checks.length));
       expect(h.indexOf('data-testid="block-audit-map"')).toBeGreaterThan(h.indexOf('data-testid="block-audit-gap"'));
     }
   });
@@ -224,7 +227,7 @@ describe("the main audit table", () => {
     for (const f of OUTPUT_PLAN_FIXTURES) {
       const h = html(f.key);
       const a = audit(f.key);
-      for (const c of a.checks) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
+      for (const c of a.highlights) expect(h, `${f.key} ${c.component}`).toContain(escape(c.established));
       const founds = [...h.matchAll(/data-testid="audit-found">([^<]*)</g)].map((m) => m[1]);
       expect(founds.length, f.key).toBe(a.highlights.length);
       for (const t of founds) {
@@ -429,6 +432,11 @@ describe("key checks", () => {
       "NET_EFFECT",
       "GOVERNANCE_BASIS",
       "EXECUTION_EVIDENCE",
+    ]);
+    expect(auditHighlights(checks, 5).map((c) => c.component)).toEqual([
+      "NET_EFFECT",
+      "GOVERNANCE_BASIS",
+      "EXECUTION_EVIDENCE",
       "CURRENT_STATE",
       "MECHANISM_SPEC",
     ]);
@@ -476,7 +484,8 @@ describe("the golden audit", () => {
     const a = auditOf(g);
     expect(a.highlights[0].component).toBe("NET_EFFECT");
     expect(a.highlights[0].state).toBe("CONTRADICTED");
-    expect(a.highlights).toHaveLength(5);
+    expect(a.highlights).toHaveLength(3);
+    expect(a.highlights.map((c) => c.component)).toEqual(["NET_EFFECT", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"]);
     expect(a.summary).toMatch(/^On .*the evidence indicates otherwise\.$/);
   });
 

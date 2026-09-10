@@ -273,12 +273,12 @@ function verdictColor(verdict: string): string {
 
 /* -------------------------- 4. THE TABLE --------------------------- */
 
-// CHECK · WHAT ATLAS FOUND · STATE. The decision-relevant checks — a
+// CHECK · WHAT ATLAS FOUND · STATE. The three decision-relevant checks — a
 // contradiction, the stated gaps, what stood — one line each, stacked on a
-// handset and three true columns on a desk. Every check, with its full
-// sentence, is one fold below; every check with its sources is the deep
-// audit. Three layers, three purposes, and the ten checks are not listed
-// three times.
+// handset and three true columns on a desk. Their full sentences are one
+// fold below; every check with its sources is the deep audit, and only the
+// deep audit. Three layers, three purposes: what matters most, coverage at
+// a glance, complete verification.
 function AuditTable({ audit }: { audit: AuditComposition }) {
   const rows = audit.highlights;
   return (
@@ -315,10 +315,12 @@ function AuditTable({ audit }: { audit: AuditComposition }) {
         ))}
       </ul>
 
+      {/* The full sentences for THESE checks, folded. Not the complete list:
+          that is the deep audit's, and only the deep audit's. */}
       <details className="mt-2 border-t border-[var(--hairline)] pt-2">
-        <summary className="cursor-pointer text-[0.64rem] text-[var(--atlas-text-dim)]">All {audit.checks.length} checks, with full sentences</summary>
+        <summary className="cursor-pointer text-[0.64rem] text-[var(--atlas-text-dim)]">Full sentences for these checks · all {audit.checks.length} in the deep audit below</summary>
         <ul className="mt-1.5 flex flex-col gap-1.5 text-[0.72rem] leading-snug" data-testid="audit-full">
-          {audit.checks.map((c) => (
+          {rows.map((c) => (
             <li key={c.component}>
               <span className="font-medium">{c.check}</span>
               <span className="text-[var(--atlas-text-dim)]"> — {c.established}</span>

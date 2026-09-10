@@ -42,7 +42,7 @@ proof. Every state is a persisted component status through
 `deriveResultLadder`; every sentence is a derivation the result screen
 already runs. No severity, no score, no second verdict, no ENTITY.
 The top table is the KEY CHECKS (`auditHighlights`: contradiction → stated
-partial → stated gap → established → blocked, ladder order, capped at 5);
+partial → stated gap → established → blocked, ladder order, capped at 3);
 the proof map is compact (bar and counts); the deep audit lists every
 check. Rendered at `/dev/output-plan?view=audit` for fixtures and real
 jobs, with the historical-semantics banner kept, and at

@@ -82,9 +82,9 @@ export interface AuditComposition {
   summary: string | null;
   coverage: { step: number; component: string; state: ProofState }[];
   checks: AuditCheck[];
-  // THE 3–5 DECISION-RELEVANT CHECKS, for the top of the page. The full
-  // set is `checks`, shown in the fold and in the deep audit; repeating all
-  // of them three times was the noise V2 removed. Order: a contradiction
+  // THE THREE DECISION-RELEVANT CHECKS, for the top of the page. The full
+  // set is `checks`, shown ONLY in the deep audit; repeating all of them
+  // was the noise V2 removed. Order: a contradiction
   // first, then partly established with a stated reason, then not
   // established with a stated reason, then what stood — ladder order
   // within each — and a blocked check last, because it is a fact about the
@@ -251,7 +251,10 @@ export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBou
   );
 }
 
-export const MAX_AUDIT_HIGHLIGHTS = 5;
+// THREE, NOT FIVE. The top of an audit is the three checks most useful for
+// understanding it quickly; the complete list, with sources, is the deep
+// audit and lives nowhere else. Same priority, shorter cut.
+export const MAX_AUDIT_HIGHLIGHTS = 3;
 
 export function auditHighlights(checks: readonly AuditCheck[], cap = MAX_AUDIT_HIGHLIGHTS): AuditCheck[] {
   const stated = (c: AuditCheck) => c.reasonCodes.some((code) => typeof code === "string" && code.length > 0);

@@ -24,8 +24,8 @@ to a role.
 The top table is now the KEY CHECKS — `auditHighlights`: a contradiction
 first, then partly established with a stated reason, then not established
 with a stated reason, then what stood, blocked last; ladder order within;
-capped at 5, never scored. All checks with full sentences sit in one fold
-beneath. The proof map is `compact` — the bar and the counts, no third
+capped at THREE, never scored. Their full sentences sit in one fold
+beneath; the complete list is the deep audit's and nowhere else. The proof map is `compact` — the bar and the counts, no third
 list. The deep audit lists every check with its sources. On a desk the
 chart and the timeline are paired, as the research showcase pairs them.
 
