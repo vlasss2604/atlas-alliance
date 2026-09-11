@@ -10,10 +10,8 @@ import {
   providerAttemptCount,
   strategyAlreadyAttempted,
 } from "./acquisition-ledger";
-import { componentsAdmittingClass, loadAcquisitionPlan } from "./acquisition-plan";
-import { loadJobContractView } from "./job-contract-view";
-import { loadEligibleSourceResourcesWithCoverage } from "../memory/source-resource";
-import { deriveSourceType, resolveSourceClass } from "./source-authority";
+import { loadAcquisitionPlan } from "./acquisition-plan";
+import { selectApprovedSeedTargets } from "./source-resource-seeds";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
   calculateActualCostMicro,
@@ -445,103 +443,6 @@ async function currentSearchQueriesReserved(
 // a copy: only CANDIDATE_RETURNED rows contribute, lossy refs are already
 // excluded by loadAcquisitionLedger, and urls this job already proved
 // dead or already fetched are dropped here.
-// D-148 — WHAT THIS RESEARCH STILL NEEDS, as component names.
-//
-// The boundary contract's own work queue: the components the planner did
-// NOT mark satisfied from memory. Using it rather than the whole pattern is
-// what keeps a seeded resource question-bounded — a project's curated
-// sources are eligible because they serve something this job is actually
-// missing, not merely because they exist.
-//
-// Degrade-never-throw, exactly like the ledger it sits beside: acquisition
-// memory is an optimisation and must never fail a job that would otherwise
-// run. No readable contract, no seeds.
-async function neededWorkItems(
-  db: Database | Transaction,
-  jobId: string,
-): Promise<Array<{ step: number; component: string }>> {
-  try {
-    const { view } = await loadJobContractView(db, jobId);
-    // The step travels with the component because provenance must record
-    // BOTH: the extraction replay is keyed by (step, component), and the
-    // canonical mapping between them belongs to the ACTIVE pattern the
-    // contract was built from — never to a second lookup that could drift.
-    return view.workQueue.map((item) => ({ step: item.step, component: item.component }));
-  } catch {
-    return [];
-  }
-}
-
-// D-150 — WHY A COMPONENT MAY READ A DOCUMENT NO SEARCH RETURNED.
-//
-// A seeded resource has no search provenance, and the extraction replay
-// builds each component's corpus from search provenance. Without this, a
-// seeded document is fetched, sealed with full authority, and then shown to
-// nobody — which is exactly what happened on the first live run.
-//
-// So the association is PERSISTED AT SELECTION TIME, once, as a fact about
-// this run: this url was admitted for these components of this job. It is
-// written before the url is returned as a target, so a document can never
-// be acquired for a component that cannot later read it.
-//
-// It is deliberately NOT a CANDIDATE_RETURNED row. That event means "a
-// search returned this", and forging it would make the extraction map work
-// by corrupting search provenance — the trace would no longer be able to
-// tell a discovered candidate from a curated one.
-//
-// Idempotent across redelivery: what is already recorded is not recorded
-// again, so a phase that runs twice does not double the trace.
-async function recordSeedProvenance(
-  db: Database | Transaction,
-  jobId: string,
-  url: string,
-  components: readonly string[],
-  workItems: ReadonlyArray<{ step: number; component: string }>,
-  already: ReadonlySet<string>,
-): Promise<void> {
-  const canonical = canonicalTargetRef(url);
-  for (const item of workItems) {
-    // Only components this resource was APPROVED to serve, intersected
-    // with what this job still needs. Never the resource's whole coverage,
-    // and never a component outside the job's boundary.
-    if (!components.includes(item.component)) continue;
-    if (already.has(`${item.step}:${item.component}:${canonical}`)) continue;
-    await recordTraceEvent(db, {
-      researchJobId: jobId,
-      operationType: "SOURCE_RESOURCE_SELECTED",
-      providerKind: "FETCH",
-      // Names the provenance channel, so search and curated targets stay
-      // distinguishable in the trace by more than the operation alone.
-      providerName: "source-resource",
-      patternStep: item.step,
-      component: item.component,
-      targetRef: url,
-      status: "OK",
-    });
-  }
-}
-
-// What this job has ALREADY recorded, so redelivery is quiet.
-async function existingSeedProvenance(
-  db: Database | Transaction,
-  jobId: string,
-): Promise<Set<string>> {
-  const rows = await db
-    .select({
-      patternStep: researchTraceEvents.patternStep,
-      component: researchTraceEvents.component,
-      targetRef: researchTraceEvents.targetRef,
-    })
-    .from(researchTraceEvents)
-    .where(eq(researchTraceEvents.researchJobId, jobId));
-  const out = new Set<string>();
-  for (const row of rows) {
-    if (row.patternStep === null || row.component === null || !row.targetRef) continue;
-    out.add(`${row.patternStep}:${row.component}:${canonicalTargetRef(row.targetRef)}`);
-  }
-  return out;
-}
-
 export async function loadFetchTargets(
   db: Database | Transaction,
   jobId: string,
@@ -575,55 +476,17 @@ export async function loadFetchTargets(
   // Seeds spend the ordinary source-open budget like any other target. No
   // ceiling moves because a project has curated sources.
   if (projectId) {
-    const workItems = await neededWorkItems(db, jobId);
-    const needed = new Set(workItems.map((item) => item.component));
-    const seeds = await loadEligibleSourceResourcesWithCoverage(db, projectId, needed);
-    const already = seeds.length > 0 ? await existingSeedProvenance(db, jobId) : new Set<string>();
+    // ONE POLICY, TWO PATHS. Selection, D-156 routing and D-150 provenance
+    // all happen inside selectApprovedSeedTargets, which the single-process
+    // executor consumes too — so which seeds a job gets can no longer
+    // depend on which executor happened to run it. This list only decides
+    // what is still worth a FETCH: a seed this job already sealed is not
+    // fetched twice, exactly as a search candidate is not.
+    const seeds = await selectApprovedSeedTargets(db, jobId, projectId);
     for (const seed of seeds) {
       const canonical = canonicalTargetRef(seed.canonicalUrl);
       if (seen.has(canonical)) continue;
       seen.add(canonical);
-      // D-156 — WHO MAY READ THIS DOCUMENT IS DECIDED BY ADMISSIBILITY,
-      // NOT ONLY BY THE LIST A HUMAN TYPED.
-      //
-      // The registered componentKeys are kept, so nothing a human approved
-      // is withdrawn. What is ADDED is every component this job still needs
-      // whose Pattern admits this resource s resolved class — the same
-      // Pattern data S5 will consult again, per Evidence row, when it
-      // decides what was actually established.
-      //
-      // This grants no authority and admits no Evidence. It only lets a
-      // component that COULD be established by this class inspect the
-      // document with its OWN evidenceGoal, instead of the document being
-      // acquired at full authority and shown to components that
-      // structurally cannot use it. Extraction stays per (step, component),
-      // so nothing is cloned between components.
-      //
-      // Class is the resolver s answer, carried from the eligibility check
-      // that already required it to be non-null; this module never decides
-      // it.
-      const admitting = await componentsAdmittingClass(
-        db,
-        jobId,
-        resolveSourceClass(
-          seed.canonicalUrl,
-          deriveSourceType(seed.canonicalUrl),
-          seed.routeClass,
-        ),
-        [...needed],
-      );
-      const routedComponents = [...new Set([...seed.componentKeys, ...admitting])];
-      // D-150 — provenance is written even when the url is already
-      // acquired: a redelivery must still be able to tell extraction which
-      // components this document was selected for.
-      await recordSeedProvenance(
-        db,
-        jobId,
-        seed.canonicalUrl,
-        routedComponents,
-        workItems,
-        already,
-      );
       if (ledger.fetchedUrls.has(canonical)) continue;
       out.push(seed.canonicalUrl);
     }

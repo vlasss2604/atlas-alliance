@@ -15,6 +15,7 @@ import {
   resolveConfirmedIdentity,
   type ConfirmedProjectIdentity,
 } from "../domain/project-identity";
+import { componentAdmitsOnchainAcquisition } from "./onchain-acquisition";
 import type { EvidenceSourceClass } from "./providers/types";
 import { researchPatterns } from "../db/schema";
 
@@ -38,7 +39,10 @@ export interface AcquisitionPlan {
   // D-133 — `site:<explorer> <tokenAddress>` locators derived from the
   // project's human-confirmed on-chain identity. Empty when no ACTIVE
   // PROJECT_IDENTITY record with a token address exists, which is the
-  // safe default: an explorer is never searched by project name.
+  // safe default: an explorer is never searched by project name. Also
+  // empty when the deterministic on-chain adapter has no intent that can
+  // establish THIS component (see onchainLocatorsFor) — targeting an
+  // explorer for a fact no on-chain path owns is spend, not reach.
   onchainLocators: string[];
   // D-134 — the parsed identity itself, reused by s4-executor.ts at
   // evidence-persist time for entity binding (RISK 2), so this is the
@@ -127,8 +131,39 @@ async function loadConfirmedRouteDomains(
 // ACTIVEd one. Only the identity's own chain bounds which explorers may
 // be addressed, and only its token address is used as the query text, so
 // neither a project name nor another chain's explorer can leak in.
-function onchainLocatorsFor(identity: ConfirmedProjectIdentity | null): string[] {
-  return identity ? explorerLocatorsForIdentity(identity) : [];
+//
+// EXPLORER TARGETING FOLLOWS ON-CHAIN REACHABILITY, NOT THE CLASS ALONE.
+//
+// THE DEFECT THIS CLOSES, measured on the clean Raydium validation run
+// (job 5cc4a75a-…): a component whose Pattern admits ONCHAIN_VERIFIABLE
+// but for which the deterministic adapter has NO intent — nothing it could
+// read that bears on the question — still had two of its three search
+// slots rewritten into `site:<explorer> <address>` locators. Those searches
+// returned only explorer pages; all six of the component's paid documentary
+// opens went to them, and the acquisition-side explorer rule correctly did
+// NOT skip them, because no on-chain path owned that fact. Targeting said
+// "the chain establishes this", acquisition said "nothing here reads the
+// chain for this", and the budget paid for the disagreement.
+//
+// THE RULE IS THE SHARED GATE, NOT A SECOND MAP. `componentAdmitsOnchain
+// Acquisition` is the one function the on-chain source-open reserve, the
+// intent selector and the executor's explorer rule already ask — the
+// Pattern's establishingClasses, the confirmed identity, the supported
+// chain and the component -> intent map, in one place. A locator exists
+// here exactly when that gate says a bounded deterministic read could
+// establish this component. When it says no, the explorer is not
+// targeted for it: general search still runs, an explorer url general
+// search returns is still a candidate, a human-approved explorer resource
+// is still seeded, admitted locators still address explorers, and nothing
+// about what counts as evidence moves. No project, chain, token or
+// explorer name appears in the condition.
+function onchainLocatorsFor(
+  component: string,
+  establishingClasses: readonly EvidenceSourceClass[],
+  identity: ConfirmedProjectIdentity | null,
+): string[] {
+  if (!componentAdmitsOnchainAcquisition({ component, establishingClasses, identity })) return [];
+  return explorerLocatorsForIdentity(identity!);
 }
 
 export async function loadAcquisitionPlan(
@@ -180,7 +215,7 @@ export async function loadAcquisitionPlan(
     return {
       establishingClasses,
       confirmedRouteDomainsByClass: await loadConfirmedRouteDomains(db, projectId),
-      onchainLocators: onchainLocatorsFor(confirmedIdentity),
+      onchainLocators: onchainLocatorsFor(component, establishingClasses, confirmedIdentity),
       confirmedIdentity,
       intentRequired: intentRequiredComponents(requirementSet),
       intent,

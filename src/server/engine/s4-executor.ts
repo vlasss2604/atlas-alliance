@@ -91,6 +91,7 @@ import {
 } from "./providers/rendered-docs-fetcher";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
+import { seedRoutedForComponent, selectApprovedSeedTargets } from "./source-resource-seeds";
 import { computeEntityBinding } from "../domain/project-identity";
 import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
@@ -1338,6 +1339,31 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // NO_SOURCE_COULD_BE_FETCHED reason that hides WHY every candidate/
       // query failed.
       let lastSearchFailureReason: string | null = null;
+      // D-148 — THE SAME SEED POLICY THE PHASED FETCH PATH APPLIES, ASKED
+      // HERE TOO.
+      //
+      // THE DEFECT THIS CLOSES, measured on the clean Raydium validation
+      // run (job 5cc4a75a-…): the project held two ACTIVE human-approved
+      // SOURCE_RESOURCE rows under ACTIVE classified routes, approved for
+      // precisely the components the run failed on, and this executor
+      // selected neither — SOURCE_RESOURCE_SELECTED: 0. Seeds were injected
+      // only by the phased FETCH path's loadFetchTargets; here they were
+      // consulted only as a tie-break among urls search had already
+      // returned (D-154), so an approved document search did not
+      // rediscover was unreachable at any budget.
+      //
+      // Selection, D-156 routing and D-150 provenance are the ONE shared
+      // function, so the two paths cannot disagree about what is seedable.
+      // Asked BEFORE the ledger is read, so the ledger's own
+      // sourceResourcesByComponent — the D-154 tie-break and the explorer
+      // rule's human-approval exemption below — sees this run's provenance
+      // the same way a phased run's extraction does. What is admitted, and
+      // where, is decided further down, once search has had its say.
+      //
+      // Idempotent on redelivery and on the phased EXTRACTING replay, where
+      // the FETCH phase already recorded the same rows: nothing is written
+      // twice and nothing is opened here.
+      const approvedSeeds = await selectApprovedSeedTargets(deps.db, ctx.jobId, deps.project.id);
       // B: what this JOB has already searched and already proven dead.
       // Derived from persisted trace, so it spans components, attempts and
       // recovery without any new state.
@@ -1512,6 +1538,39 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             candidateUrls.set(r.url, { url: r.url });
           }
         }
+      }
+      // D-148 — AN APPROVED SEED IS A CANDIDATE WHETHER OR NOT SEARCH
+      // RETURNED IT.
+      //
+      // Only seeds the shared policy routed to THIS (step, component) — the
+      // human's componentKeys plus the components whose Pattern admits the
+      // resource's resolved class, intersected with what the job still
+      // needs — and never one already in the set: dedupe is by the same
+      // canonicalTargetRef the ledger and the phased list use, so a url
+      // known both ways is one candidate and one budget spend. Trailing
+      // slash or host case from search cannot make it two.
+      //
+      // WHAT THIS IS NOT. Not a CANDIDATE_RETURNED row — no search returned
+      // it, and D-150/D-152 keep that provenance honest. Not priority: the
+      // seed joins the ordinary set and is then ranked by
+      // orderCandidatesForComponent from its predicted class and the
+      // project's own resolved route (D-155), with approval breaking only
+      // an equal-rank tie (D-154). Not authority: what the document is
+      // worth is resolveSourceRoute's answer at open and at persist time,
+      // as for any other url. Not free: it takes the same reservation
+      // against the same documentary ceiling, inside the same per-attempt
+      // allowance, through the same SSRF-safe transport, and a seed this
+      // job already proved dead or already sealed is treated exactly as a
+      // search candidate in that state is.
+      const knownCandidates = new Set<string>();
+      for (const url of candidateUrls.keys()) knownCandidates.add(canonicalTargetRef(url));
+      for (const seed of approvedSeeds) {
+        if (!seedRoutedForComponent(seed, item.step, item.component)) continue;
+        const canonical = canonicalTargetRef(seed.canonicalUrl);
+        if (knownCandidates.has(canonical)) continue;
+        knownCandidates.add(canonical);
+        candidateUrls.set(seed.canonicalUrl, { url: seed.canonicalUrl });
+        observations.add("SOURCE_RESOURCE_SEED_ADMITTED");
       }
       if (candidateUrls.size === 0) {
         // A budget denial for this axis already threw above, at the

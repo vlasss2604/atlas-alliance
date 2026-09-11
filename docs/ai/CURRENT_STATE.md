@@ -349,7 +349,8 @@ ROUTING — skipped in the intended situation, opened in every other one.
 **What it is not.** Not a blacklist: no domain leaves any list, no class is
 lowered, and the url is skipped only as a documentary PURCHASE. Its
 `CANDIDATE_RETURNED` provenance stays in the trace, D-133 targeting still
-aims search at explorers by confirmed address, admitted locators still
+aims search at explorers by confirmed address for a component the adapter
+owns (see the reachability section below), admitted locators still
 address them, the deterministic adapter still reaches them, and every
 non-documentary role (provenance, transaction locator, user-visible link)
 is untouched. A url this job's own `SOURCE_RESOURCE_SELECTED` provenance
@@ -365,6 +366,62 @@ component-agnostic by construction and runs in a process that may not be
 the one holding the retriever, so the distinction cannot be made there
 safely. The live run used the single-process executor, which is where the
 waste was measured.
+
+## CANDIDATE REACHABILITY IS PATH-INDEPENDENT, AND TARGETING FOLLOWS THE ADAPTER
+
+The clean Raydium validation run (`5cc4a75a-…`, 2026-09-11,
+`BUDGET_LIMIT_REACHED`, single-process path) proved the research semantics
+and showed the source-open budget was not the bottleneck: the documents
+that could answer the question were not reachable on that path at any
+budget. Two generic routing defects, both closed offline
+(`tests/acquisition-candidate-reachability-v1.test.ts`).
+
+**A — D-148 seed injection is one policy for both paths.** It used to
+live only in the phased FETCH path's `loadFetchTargets`; the single-process
+executor built `candidateUrls` from search results alone and consulted
+approvals only as D-154's tie-break among urls search had already returned.
+On the run, two ACTIVE approved resources under ACTIVE `OFFICIAL_DOCS`
+routes (`/ray/protocol-fees.md` for SOURCE_OF_VALUE / MECHANISM_SPEC /
+CURRENT_STATE, `/ray/ray-buybacks.md` for DESTINATION / RECIPIENT) were
+selected zero times. The selection — D-148 eligibility, D-156 routing,
+D-150 provenance — is now `selectApprovedSeedTargets` in
+`src/server/engine/source-resource-seeds.ts`, extracted unchanged and
+consumed by BOTH `loadFetchTargets` and the executor. The executor asks it
+before reading the ledger (so `sourceResourcesByComponent` sees the run's
+own provenance) and, after search, admits every seed routed to the
+(step, component) it is executing into the ordinary candidate set, deduped
+by `canonicalTargetRef`. Observation `SOURCE_RESOURCE_SEED_ADMITTED`. A
+seed is then ranked by `orderCandidatesForComponent` from its predicted
+class and the project's own resolved route (D-155) with approval breaking
+only a tie (D-154); it takes the same reservation against the same
+documentary ceiling, inside the same per-attempt allowance, through the
+same SSRF-safe transport; a seed already proved dead or already sealed is
+treated as any search candidate in that state. No `CANDIDATE_RETURNED` row
+is forged. Authority is still `resolveSourceRoute`'s answer at open and
+persist time — a seeded url classifies exactly as the same url reached by
+search. Seed cap (3), open caps and every budget are unchanged.
+Structurally replayed against the persisted rows: both resources are
+eligible and rank first for the single-process path; what they prove
+remains unverified without a live fetch.
+
+**B — D-133 explorer targeting is issued only where the deterministic
+adapter owns the fact.** `loadAcquisitionPlan` now derives
+`onchainLocators` through `componentAdmitsOnchainAcquisition` — the SAME
+gate the on-chain source-open reserve, `selectOnchainIntents` and the
+executor's explorer-open rule use — instead of from the identity alone. A
+component whose Pattern admits `ONCHAIN_VERIFIABLE` but has no entry in the
+adapter's component → intent map (today: SOURCE_OF_VALUE, by design) no
+longer has its search slots rewritten into `site:<explorer> <address>`; on
+the run those two rewrites produced all six of that component's
+documentary opens, every one an explorer page. `buildTargetedQueries`,
+`explorerLocatorsForIdentity` and the adapter are untouched; general
+search is not filtered; an explorer url general search returns is still a
+candidate and, for such a component, still openable; a human-approved
+explorer resource is still opened; admitted locators still address
+explorers. One consequence stated plainly: a project confirmed on a chain
+the adapter does not support (v1: anything but Solana) receives no explorer
+targeting either, because no supported deterministic path owns its chain
+facts — no persisted identity is on such a chain today.
 
 ## THE EXTRACTOR'S CLASSIFIED FAILURE NOW SURVIVES THE BUDGET-EXHAUSTED PATH
 

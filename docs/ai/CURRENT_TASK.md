@@ -2,47 +2,52 @@
 
 > Overwrite this file each round. Never append.
 
-## POST-RAYDIUM ACQUISITION CLEANUP V1 (done this round)
+## ACQUISITION CANDIDATE REACHABILITY ALIGNMENT V1 (done this round)
 
 Offline round. No live call, no provider/model call, no new Research job, no
-budget increase, no schema, no new subsystem. Three areas only, from the
-fresh post-fix Raydium run `8eb1e920-f216-417c-a04c-f2027bc4ef3e` (which
-proved D1/D2/D3 work live).
+budget change, no schema, no new subsystem. Two generic candidate-routing
+defects the clean Raydium validation run `5cc4a75a-e6e3-46cc-9670-c8ba462f185f`
+left standing after proving research semantics and showing the source-open
+budget was not the bottleneck.
 
-- **A — explorer HTTP documentary opens.** A url the code-owned classifier
-  recognizes as an on-chain explorer is not bought as an ordinary
-  documentary HTTP source when the dedicated deterministic adapter owns
-  that component's chain facts (`componentAdmitsOnchainAcquisition`, the
-  reserve's own gate) AND could act in this process. Not a blacklist:
-  provenance, targeting, locators, the deterministic path and every
-  non-documentary role are untouched, and a human-approved
-  `SOURCE_RESOURCE` for the component is always opened. The live run's
-  5 explorer-shell opens are the reported class this removes; that
-  reduction is NOT verified here — no live trace was replayed this round.
-  What is proved offline is the routing: the explorer candidate is skipped
-  in the intended situation and opened in every other one.
-- **B — D3 observability.** `EXTRACT_FAILED` now persists the extractor's
-  own classified failure in the existing `diagnostic_code` column, so it
-  survives the budget-exhausted flow that discards the attempt's
-  observation string. No retry, no extra model call, no outcome change.
-- **C — `--owner`.** `scripts/alpha-run.ts` accepts an optional
-  `--owner=<existing-user-id>`, validated (shape, then existence) before
-  anything can be spent. Omitted, behaviour is unchanged.
+- **A — D-148 seed injection is path-independent.** The selection policy
+  (D-148 eligibility, D-156 routing, D-150 provenance) is extracted
+  unchanged into `src/server/engine/source-resource-seeds.ts`
+  (`selectApprovedSeedTargets`) and consumed by both `loadFetchTargets`
+  (phased FETCH) and the single-process executor, which now admits every
+  seed routed to the component it is executing into its ordinary candidate
+  set — same reservation, same ceiling, same allowance, same transport,
+  same ranking, same dedupe, same authority resolution. Structurally
+  replayed read-only against the persisted rows: both approved Raydium
+  resources are eligible and rank first for the single-process path.
+  Whether they produce Evidence is NOT verified — no live fetch.
+- **B — D-133 explorer targeting follows on-chain reachability.**
+  `loadAcquisitionPlan.onchainLocators` is now gated by
+  `componentAdmitsOnchainAcquisition`, the gate the reserve, the intent
+  selector and the executor's explorer-open rule already share. A component
+  the adapter has no intent for (today: SOURCE_OF_VALUE) gets no
+  `site:<explorer> <address>` rewrite; general search, organic explorer
+  candidates, human-approved explorer resources and admitted locators are
+  untouched. On the run, all six SOURCE_OF_VALUE explorer opens came from
+  the two rewrites this removes.
 
-Job `8eb1e920-…` was NOT mutated. `maxSourceOpens`, search budgets,
-evidence/admission/verdict semantics, Research | Verification composition,
-D-149, SSRF and IP pinning are all untouched.
+Job `5cc4a75a-…` was NOT mutated. `maxSourceOpens`, refunds, cross-job
+dead-url memory, OFFICIAL_DOCS pathPrefix rules, evidence authority,
+reducers/verdicts, Pattern semantics, the deterministic adapter, D-149,
+SSRF/IP pinning and the UI are all untouched.
 
 ### Reported, not done
 
-- `MODEL_CALL_ATTEMPTED` accounting on the failing-extraction path is a
-  separate defect; cost accounting was deliberately not redesigned here.
-- The phased FETCH phase still opens explorer candidates: it is
-  component-agnostic and may run in a process without the retriever, so
-  the distinction cannot be made there safely. The live run used the
-  single-process executor.
+- Explorer targeting is still issued for a component the adapter owns even
+  in a process where the adapter is available and the executor will then
+  skip the explorer HTTP opens it returns; those search units are the
+  remaining explorer-related spend and were deliberately not touched.
+- The `CLASS_REQUIRES_CONFIRMED_ROUTE:ONCHAIN_VERIFIABLE` observation now
+  also appears for a component with no adapter intent; it is observability
+  wording only.
 - Still open and deliberately out of scope: cross-job dead-url memory, a
-  second budget counter, refunds, repeated `WRONG_PROJECT` extraction.
+  second budget counter, refunds, repeated `WRONG_PROJECT` extraction,
+  `/ray/protocol-fees` vs `/ray/protocol-fees.md` pathPrefix disjointness.
 
 ### Next
 
