@@ -184,13 +184,21 @@ function buildScenarioExecutor(
 
     case "BUDGET_SKIPPED_SOURCE_OPEN":
       // Two candidates, but the job's own maxSourceOpens ceiling (passed
-      // by the real controller, not this fixture) is expected to be 1 in
-      // any scenario configuration that wants to actually observe this
+      // by the real controller, not this fixture) is expected to be small
+      // in any scenario configuration that wants to actually observe this
       // trace event — this fixture only supplies two real candidates so
       // there is something for the ceiling to skip.
+      //
+      // The query is per component ON PURPOSE. With one shared query the
+      // job-wide ledger hands component 1's candidates to every later
+      // component, and since a url already fetched in the job is now served
+      // from its sealed copy rather than opened again, the ceiling would
+      // never be reached through repeats — which is exactly the waste that
+      // rule removes. Distinct queries give each component its own urls,
+      // so the ceiling is reached by genuine opens.
       return createS4WorkExecutor({
         ...base,
-        queryProposer: queryProposer(["non-live-fixture-query"]),
+        queryProposer: queryProposer([`non-live-fixture-query-${step}-${component}`]),
         searchGateway: searchGateway([urlA, urlB]),
         contentFetcher: contentFetcher({ [urlA]: doc, [urlB]: docB }),
         evidenceExtractor: evidenceExtractor({ [urlA]: [fact], [urlB]: [factB] }),

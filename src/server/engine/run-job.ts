@@ -158,16 +158,25 @@ export async function runS4ResearchJob(
       // BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED and no exhausted job is
       // converted into a successful one.
       try {
+        // Documentary acquisition is over: the throw came from the
+        // reservation boundary and nothing here resumes it, so a component
+        // with no admissible subject by now will never have one. Declaring
+        // that lets the reservation release what it was holding for such a
+        // component (D2) instead of stranding it — on the first fresh
+        // Raydium run five of twenty-four units ended the job held for a
+        // chain that had no subject and no way left to get one.
         await runOnchainReactivationPass(db, {
           jobId,
           projectId: job.projectId,
           workQueue: view.workQueue,
           maxSourceOpens: view.researchBudget.maxSourceOpens,
+          documentaryAcquisitionFinished: true,
         });
         await runPostEventSupplyCompletion(db, {
           jobId,
           projectId: job.projectId,
           maxSourceOpens: view.researchBudget.maxSourceOpens,
+          documentaryAcquisitionFinished: true,
         });
         await runSupplyDeltaMaterialization(db, { jobId, projectId: job.projectId });
       } catch (continuation) {
@@ -234,11 +243,20 @@ export async function runS4ResearchJob(
   // document (see the module comment), and it cannot fail the job:
   // acquisition-level outcomes are recorded as observations and trace, the
   // same way the executor's own on-chain branch records them.
+  //
+  // The controller has returned, so every documentary attempt this job will
+  // ever make has been made and extracted: the same declaration the
+  // budget-exhausted path makes above, for the same reason (D2). The one
+  // stop reason that is resumable — INTERRUPTED, a per-call attempt cap
+  // this worker never sets — is the one case where documentary work could
+  // still follow, and it withholds the declaration rather than guess.
+  const documentaryAcquisitionFinished = result.stopReason !== "INTERRUPTED";
   await runOnchainReactivationPass(db, {
     jobId,
     projectId: job.projectId,
     workQueue: view.workQueue,
     maxSourceOpens: view.researchBudget.maxSourceOpens,
+    documentaryAcquisitionFinished,
   });
 
   // POST-EVENT SUPPLY COMPLETION — one bounded reading, for a temporal gap
@@ -266,6 +284,7 @@ export async function runS4ResearchJob(
     jobId,
     projectId: job.projectId,
     maxSourceOpens: view.researchBudget.maxSourceOpens,
+    documentaryAcquisitionFinished,
   });
 
   // SUPPLY DELTA MATERIALIZATION — the exact change this job can already

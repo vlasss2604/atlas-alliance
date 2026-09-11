@@ -2,6 +2,26 @@
 
 > Overwrite this file each round. Never append.
 
+## SOURCE OPEN EFFICIENCY FIX D1+D2+D3 (done this round)
+
+Offline round. No live call, no model, no Research rerun, no schema, no
+refund, no ceiling change. Founder-approved D1 + D2 + D3 only (see
+CURRENT_STATE "SOURCE OPENS ARE NOT SPENT TWICE…").
+
+- D1: a url already fetched in this job is served from its sealed copy,
+  never opened again (executor seals on fetch, replays on re-encounter).
+- D2: the on-chain reserve for a component with no admissible subject is
+  released only once documentary acquisition is over.
+- D3: documents fetched before a refused source-open reservation are
+  extracted before the same terminal error is thrown.
+
+Offline replay of `bd7cf5ef`: 3 duplicate opens avoided (19 → 16), 5 held
+units released at the end, the unread official page extracted.
+
+### Next
+
+- Founder decides whether to spend one bounded validation run.
+
 ## POST-LIVE VERIFICATION PRESENTATION CLEANUP V1 (done this round)
 
 Offline round. No live call, no model, no engine, reducer, selector,

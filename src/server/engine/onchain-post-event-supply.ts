@@ -161,6 +161,11 @@ export async function runPostEventSupplyCompletion(
     jobId: string;
     projectId: string | null;
     maxSourceOpens: number;
+    // Same declaration the reactivation pass carries: this stage runs after
+    // documentary acquisition is over, so units held for a component with
+    // no subject can be released into the unprotected pool this read
+    // draws on. Absent means "not known": nothing is released.
+    documentaryAcquisitionFinished?: boolean;
     // Test seam only, exactly as the acquisition leaf's own. Absent means
     // "resolve the production retriever, if this process has one".
     retriever?: OnchainRetriever | null;
@@ -297,6 +302,7 @@ export async function runPostEventSupplyCompletion(
     jobId: input.jobId,
     projectId: input.projectId,
     maxSourceOpens: input.maxSourceOpens,
+    documentaryAcquisitionFinished: input.documentaryAcquisitionFinished,
   });
   const reserved = await reserveJobBudget(
     db,

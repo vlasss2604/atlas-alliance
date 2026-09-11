@@ -4,6 +4,7 @@ import type { EvidenceSourceClass } from "./providers/types";
 import { researchTraceEvents } from "../db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { loadAcquisitionPlan } from "./acquisition-plan";
+import { admittedLocatorsForJob } from "./documentary-locator-store";
 import { loadJobContractView } from "./job-contract-view";
 import {
   MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
@@ -11,6 +12,8 @@ import {
   anchorBaseReadDemand,
   componentAdmitsOnchainAcquisition,
   componentStartsAccountChain,
+  selectOnchainIntents,
+  type MechanismLocator,
 } from "./onchain-acquisition";
 import { parseCanonicalOnchainUri } from "./onchain-uri";
 import { MAX_PROMOTION_DEPTH, promotedReadsForComponent } from "./onchain-subject-promotion";
@@ -80,6 +83,12 @@ export interface OnchainSourceOpenReserve {
   planned: boolean;
   // Why no capacity is held, when none is.
   released: OnchainReserveReleaseReason | null;
+  // Components whose protected units were released because documentary
+  // acquisition is over and no admissible subject exists for them — see
+  // `documentaryAcquisitionFinished`. Empty unless that flag released
+  // something; a full release for that reason is also reported in
+  // `released`.
+  unreachableComponents: readonly string[];
   // Units of the EXISTING ceiling documentary acquisition may not take.
   reserved: number;
   // The two halves, reported separately because they are protected for
@@ -103,7 +112,11 @@ export type OnchainReserveReleaseReason =
   | "NO_ACTIONABLE_ONCHAIN_WORK"
   // This execution context cannot reach a chain at all, so a floor here
   // would protect capacity nothing can use.
-  | "ONCHAIN_ACQUISITION_UNAVAILABLE";
+  | "ONCHAIN_ACQUISITION_UNAVAILABLE"
+  // Documentary acquisition has finished for this job, and no outstanding
+  // component has an admissible subject: nothing can still arrive that
+  // would make a protected read possible, so nothing is protected.
+  | "NO_SUBJECT_AFTER_DOCUMENTARY_ACQUISITION";
 
 export interface OnchainReserveDemand {
   component: string;
@@ -177,6 +190,7 @@ export function computeOnchainSourceOpenReserve(
     return {
       planned: demands.length > 0,
       released: release,
+      unreachableComponents: [],
       reserved: 0,
       baseReserved: 0,
       promotionReserved: 0,
@@ -246,6 +260,7 @@ export function computeOnchainSourceOpenReserve(
   return {
     planned: true,
     released: null,
+    unreachableComponents: [],
     reserved,
     baseReserved,
     promotionReserved,
@@ -422,6 +437,28 @@ export async function onchainOpportunityConsumedComponents(
 // DEGRADE, NEVER THROW. A budget floor is a scheduling protection and must
 // never fail a job that would otherwise run. Anything unreadable yields NO
 // floor — exactly the behaviour that existed before this module.
+//
+// THE ONE RELEASE THAT DEPENDS ON TIME, STATED EXACTLY. A component's chain
+// units are held WITHOUT a subject, because the locator that would give it
+// one may be admitted by documentary extraction later in the same job —
+// by ANY component's attempt, from ANY document. While documentary work
+// remains, that arrival is never deterministically impossible, so the
+// floor is never released early: on the first fresh live run the last
+// documentary open of the job was an official page that had not yet been
+// read when the axis was refused, and it could have carried the address.
+//
+// It IS deterministically impossible once documentary acquisition has
+// finished — every attempt terminal or never to be made, every fetched
+// document extracted, no locator still to be admitted. Only a caller that
+// KNOWS this (the post-controller stages, on the ordinary path and on the
+// budget-exhausted path alike) may declare `documentaryAcquisitionFinished`;
+// the executor's own attempts never do. Under that declaration a
+// component is asked the SAME question the reactivation pass asks before
+// it acts — `selectOnchainIntents` against every locator this job admitted
+// — and one that has no actionable subject NOW can never have one, so its
+// protected units are released to the unprotected pool. A component that
+// HAS a subject keeps every unit it was protected: nothing is released
+// that a read could still use, and no read is lost to this release.
 export async function resolveOnchainSourceOpenReserve(
   db: Database | Transaction,
   input: {
@@ -429,6 +466,10 @@ export async function resolveOnchainSourceOpenReserve(
     projectId: string | null;
     maxSourceOpens: number;
     onchainAcquisitionUnavailable?: boolean;
+    // Declared ONLY by a caller that knows no documentary extraction can
+    // still run for this job. Absent means "not known", which never
+    // releases anything.
+    documentaryAcquisitionFinished?: boolean;
   },
 ): Promise<OnchainSourceOpenReserve> {
   const none = (): OnchainSourceOpenReserve =>
@@ -446,11 +487,50 @@ export async function resolveOnchainSourceOpenReserve(
       identity = plan.confirmedIdentity ?? identity;
       components.push({ component: item.component, establishingClasses: plan.establishingClasses });
     }
-    return computeOnchainSourceOpenReserve({
+
+    const unreachable: string[] = [];
+    let reachable = components;
+    if (input.documentaryAcquisitionFinished === true) {
+      const locators: MechanismLocator[] = (await admittedLocatorsForJob(db, input.jobId)).map((l) => ({
+        value: l.value,
+        shape: l.shape,
+        origin: "ADMITTED_EVIDENCE_SOURCE" as const,
+      }));
+      reachable = components.filter((c) => {
+        const actionable =
+          selectOnchainIntents({
+            component: c.component,
+            establishingClasses: c.establishingClasses,
+            identity,
+            locators,
+            maxIntents: MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
+          }).length > 0;
+        // Only a component that HELD something is reported as released;
+        // one that never admitted chain acquisition was never protected.
+        if (!actionable && componentAdmitsOnchainAcquisition({ component: c.component, establishingClasses: c.establishingClasses, identity })) {
+          unreachable.push(c.component);
+        }
+        return actionable;
+      });
+    }
+
+    const reserve = computeOnchainSourceOpenReserve({
       maxSourceOpens: input.maxSourceOpens,
-      demands: planDeterministicDemand({ identity, components }),
+      demands: planDeterministicDemand({ identity, components: reachable }),
       onchainAcquisitionUnavailable: input.onchainAcquisitionUnavailable,
     });
+    if (unreachable.length === 0) return reserve;
+    return {
+      ...reserve,
+      unreachableComponents: unreachable,
+      // Every protected component was released for this reason, and the
+      // plan DID hold chain work — say so rather than "no work".
+      released:
+        reserve.reserved === 0 && reserve.released === "NO_ACTIONABLE_ONCHAIN_WORK"
+          ? "NO_SUBJECT_AFTER_DOCUMENTARY_ACQUISITION"
+          : reserve.released,
+      planned: true,
+    };
   } catch {
     return none();
   }

@@ -557,6 +557,13 @@ describe("PHASE 3 — EXTRACTING through the NORMAL controller (items 1, 14-23)"
     const replayCalls = { n: 0, urls: [] as string[] };
     const countingReplay = {
       name: replay.fetcher.name,
+      // D-137: the wrapper carries the replay's metering declaration, as the
+      // d136 phase-queue wrapper already does. Without it the executor
+      // takes this counting wrapper for a live transport — charging a
+      // source open per replay, and (now that a url already fetched in the
+      // job is served from its sealed copy before any metered fetch) never
+      // calling it at all.
+      metering: replay.fetcher.metering,
       fetch: async (url: string) => {
         replayCalls.n += 1;
         replayCalls.urls.push(url);

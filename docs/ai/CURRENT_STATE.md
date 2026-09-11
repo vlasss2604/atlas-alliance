@@ -307,6 +307,72 @@ true.** Historical reuse may return only through an explicit future design
 carrying provenance, freshness, revalidation, revocation and transparent
 historical reuse.
 
+## SOURCE OPENS ARE NOT SPENT TWICE ON THE SAME PAGE, STRANDED, OR THROWN AWAY UNREAD
+
+The first fresh current-semantics Raydium run (`bd7cf5ef-…`, 2026-09-10)
+ended `BUDGET_LIMIT_REACHED` on source opens with 19 of 24 units reserved.
+Its persisted trace showed three avoidable losses, each generic, and each is
+now closed without a refund, a new ledger or a moved ceiling.
+
+**D1 — a url is opened once per job.** The single-process executor
+remembered only urls it had proven DEAD; a page that fetched fine — and was
+then rejected as another project's, or held nothing for that component —
+was bought again by every later component whose search returned it (one
+explorer page ×3, one aggregator page ×2 on the live run). The executor now
+seals every metered fetch through the same door the phased FETCH phase
+uses (`persistAcquiredDocument`, admission `PRODUCT_ACQUISITION`) and, when
+a candidate is already in the job's fetched ledger (`isAlreadyFetchedUrl`),
+serves it from `sealedDocumentsForJob` — no reservation, no transport,
+traced as `FETCH_ATTEMPTED`/`FETCH_OK` under the replay provider name
+`acquired-document-replay`, observation `REUSED_ACQUIRED_DOCUMENT`. The
+document is still INSPECTED for the new component (reuse is never "ignore
+the source"), and it still counts toward the per-attempt candidate cap. A
+wrong-project page is fetched once and rejected as many times as it is
+met. The phased EXTRACTING replay (metering `REPLAY`) is untouched; it and
+the executor now read one sealed set.
+
+**D2 — the on-chain reserve is released only when the subject can no longer
+arrive.** Chain units are held WITHOUT a subject because a locator may be
+admitted later by any component's extraction, so during documentary work
+the floor is never released early. Once documentary acquisition has
+finished — the controller has returned (any stop reason but the resumable
+`INTERRUPTED`), or the axis was refused and nothing resumes it — run-job
+declares `documentaryAcquisitionFinished` to the reactivation pass and the
+post-event supply completion, and `resolveOnchainSourceOpenReserve` asks
+each unconsumed component the same question the reactivation pass asks
+before acting (`selectOnchainIntents` against every admitted locator). A
+component with no actionable subject NOW can never have one: its units are
+released (`unreachableComponents`, release reason
+`NO_SUBJECT_AFTER_DOCUMENTARY_ACQUISITION`). A component with a subject keeps
+every unit. Anchor-level reads need no locator and are never released by
+this rule. The executor never sets the flag. On the live run's persisted
+state this turns 5 held / 19 documentary into 0 held / 24 unprotected.
+
+**D3 — what was paid for is read before the axis is honoured.** A refused
+source-open reservation used to throw at the denial boundary, aborting the
+attempt with fetched documents unextracted (the live run's last open, an
+official documentation page, was never read). The refusal now ends the
+open loop (`CANDIDATE_SKIPPED_BUDGET` still recorded, observation
+`SOURCE_OPENS_EXHAUSTED_MID_ATTEMPT`), extraction runs over what was
+fetched — Evidence and locators persisted as usual — and the SAME
+`BudgetExhaustedError` is thrown afterwards. No further open occurs; the
+terminal contract (D-121) is unchanged; a job with nothing fetched before
+the refusal throws at once as before. The budget-stopped reconciliation
+already reads persisted Evidence for an attempt with no terminal row.
+
+Unchanged: `maxSourceOpens` (24), every other ceiling, `reserveJobBudget`
+(still no decrement anywhere), D-149, SSRF/pinning, evidence authority,
+reducers, verdicts, the DB schema. A failed open still costs its unit; a
+successful wrong-project fetch still costs its unit. Known and accepted:
+`acquired_documents` now grows with single-process jobs too (as it already
+did with phased ones); a wrong-project page reused by a later component
+still costs that component one extraction call, because the wrong-project
+check runs after extraction (pre-existing; not in this round).
+`tests/source-open-efficiency-d1-d3.test.ts` replays the live run's fetch
+sequence (16 opens under D1, not 19), its end state (5 → 0 stranded), and
+the fetch-then-refuse shape (2 documents extracted, third refused, no
+fourth open, same error).
+
 ## DOCUMENTARY ACQUISITION CAN NO LONGER STARVE THE CHAIN
 
 `sourceOpens` is ONE axis paying for documentary opens, renders and bounded

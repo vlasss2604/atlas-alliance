@@ -1,7 +1,7 @@
 import { asc, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { acquiredDocuments, researchTraceEvents } from "../db/schema";
+import { researchTraceEvents } from "../db/schema";
 import {
   loadAcquisitionLedger,
   persistedFailureDiagnostics,
@@ -24,9 +24,10 @@ import type { ModelCostProfile } from "./model-cost-profile";
 import { loadProductConfig } from "../config/product";
 import { researchJobs } from "../db/schema";
 import {
+  ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
   persistAcquiredDocument,
   replayContentFetcher,
-  textSha256,
+  sealedDocumentsForJob,
   type AcquisitionStrategy,
 } from "./acquired-documents";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
@@ -1201,47 +1202,23 @@ export async function prepareExtractionReplayFetcher(
   db: Database | Transaction,
   jobId: string,
 ): Promise<{ fetcher: ContentFetcher; documentCount: number }> {
-  const rows = await db
-    .select()
-    .from(acquiredDocuments)
-    .where(eq(acquiredDocuments.acquiringJobId, jobId));
-
+  // D-146 — the SAME tamper seal the strict resume path verifies, applied
+  // inside `sealedDocumentsForJob`: a row whose text no longer hashes to
+  // its seal is simply not in the replay set, and the fetcher's existing
+  // refusal covers any request for it. Altered content is never repaired
+  // and never re-sealed. The same set now also serves the single-process
+  // executor's in-job reuse, so the two replay paths cannot disagree
+  // about which documents this job holds.
+  const sealed = await sealedDocumentsForJob(db, jobId);
   const byUrl = new Map<string, ContentFetcher>();
-  let admitted = 0;
-  for (const row of rows) {
-    // D-146 — the SAME tamper seal the strict resume path verifies. The
-    // phased replay previously served persisted text without recomputing
-    // it, so the two Stage-B entry points disagreed about whether a
-    // sealed document had to still hash to what was sealed. A mismatch
-    // fails closed by omission: the document is simply not in the replay
-    // set, and the fetcher's existing refusal covers any request for it.
-    // Altered content is never repaired and never re-sealed.
-    if (textSha256(row.normalizedText) !== row.textSha256) continue;
-    admitted += 1;
-    const doc: FetchedDocument = {
-      finalUrl: row.finalUrl,
-      requestedUrl: row.url,
-      httpStatus: row.httpStatus,
-      // Same narrowing loadAcquiredDocumentForResume already applies to
-      // this column — one rule, not a second one.
-      contentType: row.contentType as FetchedDocument["contentType"],
-      normalizedText: row.normalizedText,
-      contentHash: row.contentHash,
-      fetchedAt: row.acquiredAt,
-      byteLength: row.byteLength,
-      staticTextLength: row.staticTextLength ?? undefined,
-    };
-    const one = replayContentFetcher(doc);
-    byUrl.set(canonicalTargetRef(row.url), one);
-    byUrl.set(canonicalTargetRef(row.finalUrl), one);
-  }
+  for (const [key, doc] of sealed.byUrl) byUrl.set(key, replayContentFetcher(doc));
 
   return {
     // Admitted documents only: a row refused by the tamper seal is not
     // part of the replay set and must not be counted as one.
-    documentCount: admitted,
+    documentCount: sealed.documentCount,
     fetcher: {
-      name: "acquired-document-replay",
+      name: ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
       // D-137: every document here was fetched and charged by the FETCH
       // phase. Replaying it performs no external open.
       metering: "REPLAY" as const,

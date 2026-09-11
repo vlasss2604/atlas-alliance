@@ -8,6 +8,7 @@ import { ContentFetchError, replaceNullCharacters } from "./providers/content-fe
 import type { ContentFetcher } from "./providers/content-fetcher";
 import type { ContentType, FetchedDocument } from "./providers/types";
 import type { ResolvedSourceRoute } from "./source-authority";
+import { canonicalTargetRef } from "./trace-store";
 
 // THE HANDOFF between document acquisition (Stage A) and model extraction
 // (Stage B). See the schema comment on `acquired_documents` for why the
@@ -235,6 +236,24 @@ export async function loadAcquiredDocumentForResume(
     };
   }
   const doc: FetchedDocument = {
+    ...fetchedDocumentOfRow(row),
+    staticTextLength: row.staticTextLength ?? row.normalizedText.length,
+  };
+  return { ok: true, row, doc };
+}
+
+// THE PROVIDER NAME A REPLAYED DOCUMENT IS TRACED UNDER. One identity for
+// every place a sealed document is served back without a network call —
+// the phased EXTRACTING replay and the single-process executor's in-job
+// reuse alike — so a trace reader can tell a replay from a transport by
+// this name alone.
+export const ACQUIRED_DOCUMENT_REPLAY_PROVIDER = "acquired-document-replay";
+
+// A sealed row, read back as the document the transport produced. Shared
+// by every replay path so the reconstruction — and the narrowing of the
+// stored content type — is one rule rather than a copy per consumer.
+export function fetchedDocumentOfRow(row: AcquiredDocumentRow): FetchedDocument {
+  return {
     finalUrl: row.finalUrl,
     requestedUrl: row.url,
     httpStatus: row.httpStatus,
@@ -243,9 +262,47 @@ export async function loadAcquiredDocumentForResume(
     contentHash: row.contentHash,
     fetchedAt: row.acquiredAt,
     byteLength: row.byteLength,
-    staticTextLength: row.staticTextLength ?? row.normalizedText.length,
+    staticTextLength: row.staticTextLength ?? undefined,
   };
-  return { ok: true, row, doc };
+}
+
+// THE DOCUMENTS THIS JOB ALREADY PAID FOR, keyed by canonical url.
+//
+// A url is worth opening once per job. The phased path already lives by
+// that rule — FETCH seals every document it opens and EXTRACTING replays
+// the sealed set — but the single-process executor had no sealed set to
+// replay from, so the same page was bought again by every later component
+// whose search returned it: on the first fresh Raydium run one explorer
+// page was opened three times and one aggregator page twice, each open a
+// source-open unit and each a fresh extraction call, for a document the
+// job already held. This is the set that lets the executor serve the
+// second and third encounter from storage.
+//
+// Both the requested and the final url map to the row, exactly as the
+// phased replay keys them. A row whose stored text no longer hashes to
+// its seal is left out — never repaired, never served — and the caller
+// then treats the url as it did before this set existed.
+export async function sealedDocumentsForJob(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<{ byUrl: Map<string, FetchedDocument>; documentCount: number }> {
+  const rows = await db
+    .select()
+    .from(acquiredDocuments)
+    .where(eq(acquiredDocuments.acquiringJobId, jobId));
+  const byUrl = new Map<string, FetchedDocument>();
+  let admitted = 0;
+  for (const row of rows) {
+    if (textSha256(row.normalizedText) !== row.textSha256) continue;
+    admitted += 1;
+    const doc = fetchedDocumentOfRow(row);
+    // First seal wins: a url sealed twice (possible only before in-job
+    // reuse existed) serves the earlier document, deterministically.
+    for (const key of [canonicalTargetRef(row.url), canonicalTargetRef(row.finalUrl)]) {
+      if (!byUrl.has(key)) byUrl.set(key, doc);
+    }
+  }
+  return { byUrl, documentCount: admitted };
 }
 
 // The Stage B transport: a ContentFetcher that can serve EXACTLY ONE
@@ -259,7 +316,7 @@ export function replayContentFetcher(doc: FetchedDocument): ContentFetcher {
     // already-accounted document and refuses every other url, so the job
     // must not be charged a source open for using it.
     metering: "REPLAY" as const,
-    name: "acquired-document-replay",
+    name: ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
     async fetch(url: string): Promise<FetchedDocument> {
       if (url !== doc.requestedUrl && url !== doc.finalUrl) {
         throw new ContentFetchError(

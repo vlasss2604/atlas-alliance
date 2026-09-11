@@ -450,8 +450,19 @@ export function persistedFailureDiagnostics(
 // True when this URL is already known to be unfetchable in this job, so
 // opening it again would spend a source-open reservation on a proven dead
 // end. Fetched-successfully URLs are NOT filtered here: re-reading a
-// document is a separate question from re-trying a broken one, and the
-// existing per-attempt candidate dedup already covers the common case.
+// document is a separate question from re-trying a broken one — and is
+// answered by `isAlreadyFetchedUrl` below, whose consumer serves the
+// document from the job's sealed copy rather than skipping it.
 export function isKnownDeadUrl(url: string, ledger: AcquisitionLedger): boolean {
   return ledger.deadUrls.has(canonicalTargetRef(url));
+}
+
+// True when this job already fetched this URL successfully — in any
+// attempt, for any component, on any delivery — so the document exists and
+// a second external open would buy what the job holds. Whether the
+// document was USEFUL is deliberately not asked: a page rejected as another
+// project's, or one that yielded nothing for an earlier component, was
+// still fetched, and is still not worth fetching again.
+export function isAlreadyFetchedUrl(url: string, ledger: AcquisitionLedger): boolean {
+  return ledger.fetchedUrls.has(canonicalTargetRef(url));
 }

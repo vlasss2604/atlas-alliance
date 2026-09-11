@@ -36,7 +36,7 @@ import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isTransientError } from "./providers/retry";
 import { isTokenCountDiagnostic, ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
-import type { ComponentTarget, ExtractedFact, ModelUsage } from "./providers/types";
+import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from "./providers/types";
 import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import {
   blendQueries,
@@ -47,6 +47,7 @@ import {
 } from "./acquisition-targeting";
 import {
   approvedResourcesForComponent,
+  isAlreadyFetchedUrl,
   isKnownDeadUrl,
   loadAcquisitionLedger,
   planQueries,
@@ -72,7 +73,12 @@ import {
   MAX_FALLBACK_ATTEMPTS_PER_URL,
   plannedFallbacks,
 } from "./acquisition-fallback-policy";
-import type { AcquisitionStrategy } from "./acquired-documents";
+import {
+  ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
+  persistAcquiredDocument,
+  sealedDocumentsForJob,
+  type AcquisitionStrategy,
+} from "./acquired-documents";
 import {
   isBrowserLaunchDiagnostic,
   isNavigationDiagnostic,
@@ -1641,18 +1647,81 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         observations.add("SKIPPED_KNOWN_DEAD_URL");
         return false;
       });
+      // A URL IS OPENED ONCE PER JOB. The phased path already lives by that
+      // rule (FETCH seals, EXTRACTING replays the sealed set); this
+      // executor remembered only the urls it had proven DEAD, so a page
+      // that fetched fine — and was then rejected as another project's, or
+      // simply held nothing for that component — was bought again by every
+      // later component whose search returned it. On the first fresh
+      // Raydium run one explorer page was opened three times and one
+      // aggregator page twice: five source-open units and five extraction
+      // calls for two documents the job already held.
+      //
+      // The sealed set is loaded lazily, once per attempt, and only when a
+      // candidate is actually already in this job's fetched ledger. A url
+      // served from it takes NO reservation (D-137: no external open
+      // occurs) and is traced under the replay provider name so the trace
+      // distinguishes a replay from a transport. It DOES count toward the
+      // per-attempt candidate cap: this attempt inspects the same number
+      // of documents it would have, and only the external opens are gone.
+      // Not a skip: the document is inspected for THIS component exactly as
+      // a fresh fetch would be — reuse never means "ignore the source".
+      //
+      // A url in the ledger with no sealed copy (sealed before this rule
+      // existed, or refused by the size bound) falls through to the
+      // ordinary paid fetch, exactly as before.
+      let sealedByUrl: Map<string, FetchedDocument> | null = null;
+      // D3 — SOURCE-OPEN EXHAUSTION IS HONOURED AFTER THE PAID WORK IS
+      // READ. A refused reservation used to throw at the denial boundary,
+      // aborting the attempt with documents already fetched — and already
+      // paid for — sitting unextracted in `fetchedDocs`. On the first
+      // fresh Raydium run an official documentation page was opened as the
+      // 19th unit, the 20th reservation was refused, and the page was
+      // never read. The refusal now ends the OPEN loop and is remembered
+      // here; nothing below this loop opens anything, extraction runs over
+      // what was fetched, and the SAME error is thrown afterwards. The
+      // terminal outcome is unchanged (D-121): the job still ends
+      // BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED, no ceiling moves, no unit is
+      // refunded, and no further source open is made.
+      let sourceOpenExhaustion: BudgetExhaustedError | null = null;
       for (const url of orderedCandidates) {
         if (opensAttempted >= openAllowance) break;
+        if (fetchMetered && isAlreadyFetchedUrl(url, ledger)) {
+          sealedByUrl ??= (await sealedDocumentsForJob(deps.db, ctx.jobId)).byUrl;
+          const sealed = sealedByUrl.get(canonicalTargetRef(url));
+          if (sealed) {
+            opensAttempted += 1;
+            observations.add("REUSED_ACQUIRED_DOCUMENT");
+            for (const operationType of ["FETCH_ATTEMPTED", "FETCH_OK"] as const) {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType,
+                providerKind: "FETCH",
+                providerName: ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
+                patternStep: item.step,
+                component: item.component,
+                targetRef: url,
+                status: "OK",
+              });
+            }
+            fetchedDocs.push(sealed);
+            continue;
+          }
+          observations.add("ACQUIRED_DOCUMENT_UNAVAILABLE");
+        }
         const reserved = fetchMetered
           ? await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, documentaryMaxSourceOpens)
           : true;
         if (!reserved) {
           // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
-          // dimensional budget axis — throw AT the denial boundary,
-          // regardless of whether an earlier candidate in this same loop
-          // was already fetched. A non-empty partial result (one document
-          // already fetched) is not proof that the planned source-open
-          // work was complete — S4 is not the sufficiency adjudicator.
+          // dimensional budget axis — the denial is terminal regardless of
+          // whether an earlier candidate in this same loop was already
+          // fetched. A non-empty partial result (one document already
+          // fetched) is not proof that the planned source-open work was
+          // complete — S4 is not the sufficiency adjudicator. What changes
+          // (D3, above) is only WHEN the error leaves this function: after
+          // the documents already opened have been extracted, never before.
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -1665,7 +1734,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAxis: "sourceOpens",
             budgetAmount: 1,
           });
-          throw new BudgetExhaustedError("sourceOpens", lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED");
+          sourceOpenExhaustion = new BudgetExhaustedError(
+            "sourceOpens",
+            lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED",
+          );
+          observations.add("SOURCE_OPENS_EXHAUSTED_MID_ATTEMPT");
+          break;
         }
         opensAttempted += 1;
         await recordTraceEvent(deps.db, {
@@ -1710,6 +1784,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           status: fetchResult.ok ? "OK" : "FAILED",
           reasonCode: fetchResult.ok ? "NONE" : "PROVIDER_ERROR",
         });
+        // Which bounded strategy finally produced the document, recorded as
+        // provenance on the sealed copy (D-146: a strategy alters nothing
+        // about authority or admissibility).
+        let acquiredVia: AcquisitionStrategy = "DIRECT_HTTP";
         if (!fetchResult.ok) {
           lastFetchFailureReason = fetchResult.reason;
 
@@ -1818,6 +1896,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               if (negotiated.ok) {
                 observations.add("DOCS_NEGOTIATED_AFTER_FETCH_FAILURE");
                 fetchResult = negotiated;
+                acquiredVia = "CONTENT_NEGOTIATION";
                 break;
               }
               lastFetchFailureReason = negotiated.reason;
@@ -2028,6 +2107,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               rendered.staticTextLength =
                 acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length;
               acquiredDoc = rendered;
+              acquiredVia = "ISOLATED_RENDER";
               observations.add("DOCS_RENDERED");
             } catch (e) {
               // Fail closed: a failed render is never evidence, and never
@@ -2040,12 +2120,44 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             observations.add("DOCS_RENDER_SKIPPED_BUDGET");
           }
         }
+        // SEAL WHAT WAS PAID FOR, so a later component meets it in storage
+        // rather than at the origin. Same door the phased FETCH phase uses
+        // (`persistAcquiredDocument`, PRODUCT_ACQUISITION): the seal is a
+        // statement about the transport only — authority is recorded as
+        // resolved on the final url, never granted, and extraction below
+        // and in every later attempt re-resolves it live. A refused seal
+        // (the size bound) or a storage error changes nothing about this
+        // attempt: the document is extracted from memory as before, and the
+        // next encounter simply pays for its own fetch.
+        if (fetchMetered) {
+          try {
+            const sealRoute = await resolveSourceRoute(deps.db, deps.project.id, acquiredDoc.finalUrl);
+            const sealed = await persistAcquiredDocument(deps.db, {
+              projectId: deps.project.id,
+              acquiringJobId: ctx.jobId,
+              doc: acquiredDoc,
+              route: sealRoute,
+              renderMode: acquiredVia === "ISOLATED_RENDER" ? "RENDERED" : "STATIC",
+              acquisitionStrategy: acquiredVia,
+              admission: "PRODUCT_ACQUISITION",
+            });
+            if (!sealed.ok) observations.add(`ACQUIRED_DOCUMENT_NOT_SEALED:${sealed.refusal}`);
+          } catch {
+            observations.add("ACQUIRED_DOCUMENT_NOT_SEALED:STORE_ERROR");
+          }
+        }
         fetchedDocs.push(acquiredDoc);
       }
+      if (fetchedDocs.length === 0 && sourceOpenExhaustion !== null) {
+        // Nothing was opened before the axis was refused, so there is
+        // nothing to read first: the denial is terminal exactly as it was
+        // at the boundary.
+        throw sourceOpenExhaustion;
+      }
       if (fetchedDocs.length === 0) {
-        // A source-open budget denial already threw above, at the point
-        // of denial — reaching here with zero documents means every
-        // candidate failed for a non-budget reason.
+        // No source-open budget denial occurred (one would have thrown just
+        // above) — reaching here with zero documents means every candidate
+        // failed for a non-budget reason.
         // Folded into the SAME observation channel every other terminal
         // return here already uses. This path was the one exception, and
         // it is precisely the path a render-after-refusal ends on — so a
@@ -2447,6 +2559,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           });
         }
       }
+
+      // D3 — THE PAID-FOR DOCUMENTS HAVE NOW BEEN READ. Every Evidence row
+      // and every admitted locator they yielded is persisted above; the
+      // attempt's terminal outcome is still the budget denial, exactly as
+      // D-121 requires, so nothing after this point can mistake a
+      // budget-constrained attempt for a completed one. The reconciliation
+      // that runs after a job stops on budget already reads persisted
+      // Evidence for a component whose attempt never reached a terminal
+      // row (acquisitionStopped), so what was extracted here is counted.
+      if (sourceOpenExhaustion !== null) throw sourceOpenExhaustion;
 
       if (insertedEvidenceIds.length > 0) {
         return {

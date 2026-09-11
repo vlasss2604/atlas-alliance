@@ -119,6 +119,14 @@ export async function runOnchainReactivationPass(
     projectId: string | null;
     workQueue: readonly Pick<ComponentWorkItem, "step" | "component">[];
     maxSourceOpens: number;
+    // This pass runs after the controller, when no documentary extraction
+    // can still admit a locator. Passing that knowledge to the reservation
+    // lets it release the units held for a component that has no subject
+    // NOW and therefore never will — units this very pass would otherwise
+    // refuse to let any other component or stage reach. See
+    // `resolveOnchainSourceOpenReserve`. Absent means "not known": nothing
+    // is released.
+    documentaryAcquisitionFinished?: boolean;
     // Test seam only, exactly as runStructuredOnchainAcquisition's own.
     // Absent means "resolve the production retriever, if this process has
     // one" — an unconfigured environment simply performs no chain read.
@@ -185,6 +193,7 @@ export async function runOnchainReactivationPass(
       jobId: input.jobId,
       projectId: input.projectId,
       maxSourceOpens: input.maxSourceOpens,
+      documentaryAcquisitionFinished: input.documentaryAcquisitionFinished,
     });
 
     const outcome = await runStructuredOnchainAcquisition({
