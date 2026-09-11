@@ -111,6 +111,30 @@ export function isTestNetworkHost(url: string): boolean {
   return host.split(".").some((label) => TESTNET_HOST_LABELS.has(label));
 }
 
+// EXPLORER-HOST RECOGNITION, read back out of the SAME code-owned list
+// that classifies these hosts as ONCHAIN_VERIFIABLE above — never a
+// second, parallel opinion about what an explorer is, and never a
+// blacklist. D-129's CLASS_OWNED_DOMAINS exists for exactly this reason;
+// this is the single-URL form of the same read.
+//
+// It answers ONE question: "is the chain the thing this host is showing
+// me?" — i.e. would resolveSourceClass classify this url as
+// ONCHAIN_VERIFIABLE from the explorer list alone. A TEST network host is
+// deliberately NOT an explorer here: D-131 already refuses it production
+// on-chain authority (it classifies as SOCIAL), so the two answers stay
+// consistent and this function can never claim explorer status for a url
+// the classifier does not treat as on-chain.
+//
+// Saying nothing about what a caller may DO with a recognized host is the
+// point: acquisition reads it to decide whether an HTTP documentary open
+// can establish what a deterministic chain read is responsible for, and
+// nothing here withdraws provenance, a locator, or a user-visible link.
+export function isOnchainExplorerUrl(url: string): boolean {
+  if (isTestNetworkHost(url)) return false;
+  const host = hostnameOf(url);
+  return host !== null && hostMatchesAnyPlatform(host, ONCHAIN_EXPLORER_DOMAINS);
+}
+
 const SOCIAL_DOMAINS = new Set([
   "twitter.com",
   "x.com",

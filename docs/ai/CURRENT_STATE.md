@@ -307,6 +307,110 @@ true.** Historical reuse may return only through an explicit future design
 carrying provenance, freshness, revalidation, revocation and transparent
 historical reuse.
 
+## AN EXPLORER PAGE IS NOT THE MECHANISM THAT ESTABLISHES A CHAIN FACT
+
+The fresh post-fix Raydium run (`8eb1e920-…`, 2026-09-11) proved D1/D2/D3
+work live and then showed what the remaining waste is. Of 17 paid
+documentary opens: 9 technical failures, 5 explorer-shell fetches rejected
+as another project's, 1 successful page with no traceable fact, 1 genuinely
+useful documentary page class.
+
+Every one of those explorer opens was a url from the code-owned
+`ONCHAIN_EXPLORER_DOMAINS` list. Because `resolveSourceClass` classifies
+such a host as `ONCHAIN_VERIFIABLE`, `rankCandidateForComponent` ranked it
+FIRST for any component admitting that class — and it was then bought
+through the ordinary documentary HTTP path, which is not how this
+repository reads a chain.
+
+**The rule, in the single-process executor's open loop.** A candidate url
+that `isOnchainExplorerUrl` recognizes (`source-authority.ts` — a READ of
+the same code-owned list that classifies it, testnet hosts excluded so it
+agrees with D-131) is not opened as an ordinary documentary HTTP source
+when BOTH hold:
+
+- `componentAdmitsOnchainAcquisition({ component, establishingClasses,
+  identity })` — the SAME shared gate the on-chain source-open reserve uses:
+  the Pattern admits `ONCHAIN_VERIFIABLE`, the project's chain identity is
+  human-confirmed, the chain is supported, and the component → intent map
+  has real work for this component. One authority, so acquisition and the
+  reserve cannot drift;
+- the deterministic path could act in THIS process
+  (`onchainAcquisitionUnavailable` is false — not `DOCUMENTARY_ONLY`, and a
+  retriever is installed).
+
+By that point the deterministic adapter has already run for the component
+and produced no evidence (a success returns before search), so the skip is
+never "instead of trying". Observation `SKIPPED_EXPLORER_HTTP_ONCHAIN_PATH_OWNS_FACT`.
+
+How many opens this saves on a real run is NOT verified: no live trace was
+replayed this round. `tests/post-raydium-cleanup-v1.test.ts` proves the
+ROUTING — skipped in the intended situation, opened in every other one.
+
+**What it is not.** Not a blacklist: no domain leaves any list, no class is
+lowered, and the url is skipped only as a documentary PURCHASE. Its
+`CANDIDATE_RETURNED` provenance stays in the trace, D-133 targeting still
+aims search at explorers by confirmed address, admitted locators still
+address them, the deterministic adapter still reaches them, and every
+non-documentary role (provenance, transaction locator, user-visible link)
+is untouched. A url this job's own `SOURCE_RESOURCE_SELECTED` provenance
+says a human approved for this component is ALWAYS opened — an acquisition
+rule never overrules a human decision. A component the adapter has no
+intent for (e.g. `SOURCE_OF_VALUE`), a project with no confirmed identity,
+and every ordinary official/docs/data-provider url are all unaffected. No
+project, chain, token or explorer literal appears in the condition.
+
+**Not changed, deliberately.** The phased path's FETCH phase
+(`loadFetchTargets`/`runFetchPhase`) still opens explorer candidates: it is
+component-agnostic by construction and runs in a process that may not be
+the one holding the retriever, so the distinction cannot be made there
+safely. The live run used the single-process executor, which is where the
+waste was measured.
+
+## THE EXTRACTOR'S CLASSIFIED FAILURE NOW SURVIVES THE BUDGET-EXHAUSTED PATH
+
+On the same run D3 correctly rescued an official Raydium documentation page
+that would previously have been paid for and never read. Extraction of it
+failed, and the durable record said only `EXTRACT_FAILED / PROVIDER_ERROR`.
+The classified WHY existed — the throw site produced it and
+`safeFailureDetail` had already gated it — but travelled ONLY in the
+attempt's observation string, and on the D3 flow that string is never
+persisted: the attempt re-throws the source-open `BudgetExhaustedError`
+after extraction, so it returns no result at all.
+
+`EXTRACT_FAILED` now carries the detail in the EXISTING `diagnostic_code`
+column. `providers/extractor-failure-diagnostics.ts` states the closed
+vocabulary once — a `TokenCountDiagnostic`, an `ExtractorOutputDiagnostic`,
+`OUTPUT_SCHEMA_INVALID:<ExtractorSchemaField>`, or
+`<TokenCountDiagnostic>:<http status>` — every half decided by a membership
+test that already existed, so nothing model-derived, provider-derived or
+free-text can pass. `recordTraceEvent` re-checks membership independently
+(a forged value stores null), and `diagnosticCodeHead` already exists for
+readers that want the class alone. The acquisition ledger reads
+`diagnostic_code` only on `FETCH_FAILED` rows, so planning is untouched.
+
+No schema change, no retry, no extra model call, no source-open change:
+successful extraction is unchanged, a failed extraction stays failed, and
+the Research outcome is identical.
+
+**Reported, not fixed (separate defect).** `MODEL_CALL_ATTEMPTED` accounting
+for the failing extraction path was not redesigned in this round.
+
+## ALPHA-RUN CAN CREATE THE RESEARCH UNDER AN EXISTING USER
+
+`scripts/alpha-run.ts` created a fresh anonymous `users` row per run, so a
+valid fresh job could not be opened in the owner-scoped Research |
+Verification UI without rewriting its ownership afterwards.
+
+`--owner=<existing-user-id>` is optional. Supplied, it is validated BEFORE
+the live prerequisite block, the capability install, the interpretation and
+`createResearchJob`: uuid shape first (so a typo is a refusal, not a
+Postgres cast error), then existence. Either refusal closes the pool and
+exits 1 — no job, no user, no provider call, no reservation. The Research
+is then created under that user and NO disposable row is inserted. Omitted,
+behaviour is exactly as before. Nothing reads, asserts or relaxes a role or
+entitlement; ownership still flows through `createResearchJob`, and the
+product APIs stay owner-scoped.
+
 ## SOURCE OPENS ARE NOT SPENT TWICE ON THE SAME PAGE, STRANDED, OR THROWN AWAY UNREAD
 
 The first fresh current-semantics Raydium run (`bd7cf5ef-…`, 2026-09-10)

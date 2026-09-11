@@ -33,11 +33,25 @@
 // result.
 //
 // Usage:
-//   tsx scripts/alpha-run.ts --mode=fixture --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name>]
-//   tsx scripts/alpha-run.ts --mode=live    --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."]
+//   tsx scripts/alpha-run.ts --mode=fixture --actor=<name> [--owner=<user-id>] [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name>]
+//   tsx scripts/alpha-run.ts --mode=live    --actor=<name> [--owner=<user-id>] [--asset=<name>] [--project=<slug>] [--question="..."]
 //
 // --actor is required in both modes (owner/admin invocation must name
 // who is running this, for the audit trail printed below).
+//
+// --owner is OPTIONAL and names an EXISTING users.id the Research is
+// created under. Without it this script keeps creating a disposable
+// anonymous user per run (below), which is why a fresh alpha job could
+// never be opened in the ordinary owner-scoped Research | Verification UI
+// without someone rewriting its ownership afterwards.
+//
+// It is not an access-control change of any kind: the job is still
+// created through createResearchJob, the product APIs still scope every
+// read to the signed-in user, and nothing here grants, relaxes or
+// impersonates an entitlement — this script simply stops inventing a
+// user nobody can sign in as. The id must already exist; a missing or
+// malformed one fails BEFORE the interpretation, before the job, and
+// therefore before any provider call or reservation.
 //
 // --asset must name one of interpreter/fake.ts's KNOWN_ASSETS (default
 // "Aave" in fixture mode, "Pump.fun" in live mode — §18's owner-approved
@@ -80,9 +94,15 @@ function parseArgs(argv: string[]): Record<string, string> {
   return out;
 }
 
+// The same shape check scripts/extract-from-document.ts already applies to
+// an id it is handed. Checked BEFORE the lookup, not instead of it: a
+// malformed value must be refused as a refusal, never reach Postgres as a
+// uuid cast and surface as a driver error.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function usage(): never {
   console.error(
-    'usage: tsx scripts/alpha-run.ts --mode=fixture|live --actor=<name> [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name> (fixture only)]',
+    'usage: tsx scripts/alpha-run.ts --mode=fixture|live --actor=<name> [--owner=<existing-user-id>] [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name> (fixture only)]',
   );
   process.exit(1);
 }
@@ -116,6 +136,38 @@ async function main() {
     console.error(`  allowed: ${[...INTERNAL_ALPHA_LIVE_PROJECT_SLUGS].join(", ")}`);
     await pool.end();
     process.exit(1);
+  }
+
+  // OWNERSHIP IS RESOLVED BEFORE ANYTHING IS SPENT.
+  //
+  // Deliberately here — above the live-prerequisite block, above the
+  // interpretation and above createResearchJob — so that "this owner does
+  // not exist" costs exactly one indexed SELECT and ends the process with
+  // no provider call, no reservation, no job row and no capability
+  // installed. An owner that turns out to be wrong AFTER a live run has
+  // started is the one failure this option must never introduce.
+  //
+  // Two independent refusals, in order: the value must have the shape of a
+  // uuid (so a typo is a refusal here rather than a Postgres cast error),
+  // and the row must actually exist (so a well-formed id for nobody is a
+  // refusal too). Neither reads, relaxes or asserts anything about the
+  // user's role or entitlement — the entitlement this run uses is the
+  // script's own envelope below, exactly as before.
+  let ownerUserId: string | null = null;
+  if (args.owner !== undefined) {
+    const requested = args.owner.trim();
+    if (!UUID_RE.test(requested)) {
+      console.error(`[alpha-run] refusing --owner="${requested}" — not a uuid. No Research was created and nothing was spent.`);
+      await pool.end();
+      process.exit(1);
+    }
+    const [existing] = await db.select({ id: users.id }).from(users).where(eq(users.id, requested));
+    if (!existing) {
+      console.error(`[alpha-run] refusing --owner=${requested} — OWNER_NOT_FOUND. No Research was created and nothing was spent.`);
+      await pool.end();
+      process.exit(1);
+    }
+    ownerUserId = existing.id;
   }
 
   // §11 — fail closed BEFORE creating a half-configured live job, for
@@ -274,7 +326,15 @@ async function main() {
     // human-readable --actor label, which IS the audit identity (this
     // schema has no free-text label column on `users`, by design —
     // production users are Telegram-identity-linked, not admin-labeled).
-    const [user] = await db.insert(users).values({}).returning();
+    //
+    // With --owner, that disposable row is NOT created at all: the
+    // Research belongs to an account that already exists, so the result
+    // opens in the ordinary owner-scoped product UI instead of being
+    // reachable only by rewriting ownership afterwards. The id was proved
+    // to exist above, before anything could be spent.
+    const user = ownerUserId === null
+      ? (await db.insert(users).values({}).returning())[0]
+      : { id: ownerUserId };
 
     // Real Interpreter service (interpret.ts), non-live gateway forced
     // above. This is the SAME code path a real question goes through —
@@ -376,6 +436,7 @@ async function main() {
     console.log("[alpha-run]");
     console.log(`  mode:               ${mode}`);
     console.log(`  actor:              ${actor}`);
+    console.log(`  owner:              ${user.id} (${ownerUserId === null ? "anonymous user created for this run" : "existing user, --owner"})`);
     console.log(`  jobId:              ${job.id}`);
     console.log(`  createdAt:          ${createdAt.toISOString()}`);
     console.log(`  interpretation:     normalized_intent=${normalizedIntent ?? "null"} task_type=${interp.understood.taskType ?? "null"} project_slug=${interp.understood.projectSlug}`);

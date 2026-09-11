@@ -36,8 +36,9 @@ import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isTransientError } from "./providers/retry";
 import { isTokenCountDiagnostic, ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
+import { isExtractorFailureDiagnosticCode } from "./providers/extractor-failure-diagnostics";
 import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from "./providers/types";
-import { resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
+import { isOnchainExplorerUrl, resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import {
   blendQueries,
   buildTargetedQueries,
@@ -52,7 +53,7 @@ import {
   loadAcquisitionLedger,
   planQueries,
 } from "./acquisition-ledger";
-import { runStructuredOnchainAcquisition } from "./onchain-acquisition";
+import { componentAdmitsOnchainAcquisition, runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import {
   deterministicCeilingForComponent,
   resolveOnchainSourceOpenReserve,
@@ -1598,6 +1599,70 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
+      // AN EXPLORER PAGE IS NOT THE MECHANISM THAT ESTABLISHES A CHAIN FACT.
+      //
+      // THE DEFECT THIS CLOSES, measured on the fresh post-fix Raydium run
+      // (job 8eb1e920-…): of 17 paid documentary opens, five bought an
+      // explorer SPA shell that was then correctly rejected as another
+      // project's, and several more failed in transport. Every one of them
+      // was a url from the code-owned ONCHAIN_EXPLORER_DOMAINS list, ranked
+      // FIRST precisely because its predicted class (ONCHAIN_VERIFIABLE) is
+      // one the component admits — the strongest rank there is — and then
+      // opened through the ordinary documentary HTTP path, which is not the
+      // mechanism this repository uses to read a chain.
+      //
+      // THE RULE IS GENERIC, and states one thing only: when a component's
+      // on-chain facts are the DEDICATED deterministic adapter's
+      // responsibility and that adapter could actually act in this process,
+      // an HTTP documentary open of an explorer host cannot establish what
+      // the adapter is responsible for — so it is not bought.
+      //
+      // Both halves are required, and neither is restated here:
+      //   * `componentAdmitsOnchainAcquisition` is the SAME shared gate the
+      //     on-chain source-open reserve already uses to decide what to
+      //     protect capacity for — the Pattern's establishingClasses, the
+      //     project's human-confirmed identity, the supported chain, and the
+      //     component -> intent map, in one place so the two answers cannot
+      //     drift. It says exactly what is needed here: the deterministic
+      //     adapter has real, addressable work for THIS component. A
+      //     component it has no intent for is untouched, and so is a project
+      //     with no confirmed identity;
+      //   * `onchainAcquisitionUnavailable` is false — the deterministic
+      //     path is installed and permitted here, so it is a real
+      //     alternative and not a promise nothing can keep. A
+      //     DOCUMENTARY_ONLY job, or a process with no retriever, changes
+      //     nothing: every explorer candidate stays openable exactly as
+      //     before.
+      //
+      // By the time this line is reached, the deterministic path has ALREADY
+      // run for this component and produced no evidence (a success returns
+      // at step 0b) — so this is never "instead of trying"; it is "the one
+      // mechanism that can answer this has been tried, and buying the SPA
+      // shell of the same explorer is not a second attempt at it".
+      //
+      // WHAT THIS IS NOT. Not a blacklist: nothing is removed from any
+      // domain list, no class is lowered, and the explorer is skipped ONLY
+      // as a documentary HTTP purchase. Its CANDIDATE_RETURNED provenance
+      // stays in the trace, D-133 targeting still aims search at explorers
+      // by confirmed address, admitted locators still address them, the
+      // deterministic adapter still reaches them, and every non-documentary
+      // role an explorer url plays (provenance, transaction locator,
+      // user-visible link) is untouched. No project, chain or token appears
+      // in the condition.
+      const explorerHttpOpenIsNotTheMechanism =
+        !onchainAcquisitionUnavailable &&
+        componentAdmitsOnchainAcquisition({
+          component: item.component,
+          establishingClasses: plan.establishingClasses,
+          identity: plan.confirmedIdentity,
+        });
+
+      // D-154's approved-resource tie-break input, read once. Resolved HERE
+      // rather than at the call below because the explorer rule above also
+      // consults it, and asking the ledger the same question twice for one
+      // attempt would be two answers waiting to disagree.
+      const approvedForComponent = approvedResourcesForComponent(ledger, item.step, item.component);
+
       // C: open candidates whose predicted class could ESTABLISH this
       // component first, ranked across ALL of this attempt's queries — not
       // in discovery order, which drained query #1's list and never
@@ -1641,11 +1706,26 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         [...candidateUrls.keys()],
         plan.establishingClasses,
         routeClassByCandidate,
-        approvedResourcesForComponent(ledger, item.step, item.component),
+        approvedForComponent,
       ).filter((url) => {
-        if (!isKnownDeadUrl(url, ledger)) return true;
-        observations.add("SKIPPED_KNOWN_DEAD_URL");
-        return false;
+        if (isKnownDeadUrl(url, ledger)) {
+          observations.add("SKIPPED_KNOWN_DEAD_URL");
+          return false;
+        }
+        if (
+          explorerHttpOpenIsNotTheMechanism &&
+          isOnchainExplorerUrl(url) &&
+          // A HUMAN DECISION IS NEVER OVERRULED BY AN ACQUISITION RULE.
+          // Where this job's own provenance says someone approved this
+          // exact url as a SOURCE_RESOURCE for this component (D-151/
+          // D-154), it is opened. The rule above removes waste nobody
+          // chose; it must not silently discard a document somebody did.
+          !approvedForComponent.has(canonicalTargetRef(url))
+        ) {
+          observations.add("SKIPPED_EXPLORER_HTTP_ONCHAIN_PATH_OWNS_FACT");
+          return false;
+        }
+        return true;
       });
       // A URL IS OPENED ONCE PER JOB. The phased path already lives by that
       // rule (FETCH seals, EXTRACTING replays the sealed set); this
@@ -2317,6 +2397,25 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             targetRef: doc.finalUrl,
             status: "FAILED",
             reasonCode: extractOutcome.reasonCode ?? "PROVIDER_ERROR",
+            // THE CLASSIFIED WHY, ON THE ROW ITSELF.
+            //
+            // The observation added just above says the same thing, and on
+            // the D3 flow it is lost: source opens are exhausted, the
+            // documents already paid for are extracted here, and the SAME
+            // budget error is then thrown — so this attempt returns no
+            // result and its observation string is never persisted
+            // anywhere. The live run that proved D3 works ended with
+            // exactly that shape and recorded only PROVIDER_ERROR.
+            //
+            // The trace row is written before any of that, in its own
+            // committed transaction, so the diagnostic survives the throw.
+            // `detail` is already the product of safeFailureDetail's two
+            // gates; this narrows it to the persistable vocabulary, and
+            // recordTraceEvent re-checks membership independently. A
+            // failure with no closed detail persists null — never a guess.
+            diagnosticCode: isExtractorFailureDiagnosticCode(extractOutcome.detail)
+              ? extractOutcome.detail
+              : null,
           });
           continue;
         }

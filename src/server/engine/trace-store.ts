@@ -11,6 +11,10 @@ import {
   RENDERED_DOCS_FAILURE_REASONS,
   type RenderedDocsFailureReason,
 } from "./providers/rendered-docs-fetcher";
+import {
+  isExtractorFailureDiagnosticCode,
+  type ExtractorFailureDiagnosticCode,
+} from "./providers/extractor-failure-diagnostics";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — the
 // only writer of research_trace_events. Append-only by discipline: no
@@ -48,6 +52,11 @@ export interface TraceEventInput {
     | ContentFetchFailureReason
     | RenderedDocsFailureReason
     | RenderNavigationDiagnosticCode
+    // The EXTRACT side of the same field. A model-role failure is
+    // classified at its own throw site into its own closed vocabulary, and
+    // until now that classification had no durable home — see
+    // providers/extractor-failure-diagnostics.ts.
+    | ExtractorFailureDiagnosticCode
     | null;
   // S10 (live-provider-enablement.md §7) — AUDIT ONLY. See engine.ts's
   // column comments and model-cost-profile.ts's calculateActualCostMicro.
@@ -211,7 +220,11 @@ const DIAGNOSTIC_CODES: ReadonlySet<string> = new Set<string>([
 
 function safeDiagnosticCode(value: string | null | undefined): string | null {
   if (typeof value !== "string") return null;
-  return DIAGNOSTIC_CODES.has(value) ? value : null;
+  if (DIAGNOSTIC_CODES.has(value)) return value;
+  // The EXTRACT-side vocabulary, decided by its own module's closed rule
+  // rather than restated here — one authority per vocabulary, so the two
+  // cannot drift. Same discipline, same guarantee: membership only.
+  return isExtractorFailureDiagnosticCode(value) ? value : null;
 }
 
 // THE STAGE, RECOVERED FROM A STORED CODE.
