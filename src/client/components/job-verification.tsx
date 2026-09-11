@@ -18,12 +18,17 @@ import { AuditCompositionView } from "./result-blocks/audit-composition";
 // different emphasis. Switching a finished result between Research and
 // Verification therefore costs nothing but a render.
 //
-// HISTORICAL SEMANTICS. Every component status here was reduced by the
-// engine semantics in force when the job ran, and nothing on this surface
-// re-derives it. The payload carries no version of those semantics, so the
-// note is stated for every finished job rather than for an unknowable
-// subset: a status is never made to look more current than it is.
-export function JobVerification({ detail, historicalNote = true }: { detail: ResearchJobDetail; historicalNote?: boolean }) {
+// HISTORICAL SEMANTICS — STATED ONLY WHERE A ROUTE KNOWS IT. Every
+// component status here was reduced by the engine semantics in force when
+// the job ran, and nothing on this surface re-derives it. The payload
+// carries no version of those semantics, so this component cannot tell an
+// old record from one that finished a minute ago — and a warning it cannot
+// ground is not stated: the note used to be on by default and labelled the
+// first fresh current-semantics run as historical. It is now opt-in
+// (`historicalNote`), for a caller such as a dev/fixture route that knows
+// from its own structure that the record is historical. The product route
+// passes nothing, and no age or date cutoff is guessed here.
+export function JobVerification({ detail, historicalNote = false }: { detail: ResearchJobDetail; historicalNote?: boolean }) {
   const outcome = jobOutcome({ state: detail.job.state as JobState, verdict: detail.proof?.verdict ?? null });
   // A TERMINAL PRODUCT STATE OUTRANKS A PERSISTED VERDICT — the rule the
   // Research view already applies through `jobOutcome`. The verdict the

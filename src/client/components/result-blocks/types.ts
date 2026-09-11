@@ -176,8 +176,41 @@ export interface EntityRef {
 
 /* ----------------------- 9. EVIDENCE SNAPSHOT ---------------------- */
 
+// THE KIND OF EVIDENCE A CARD BEARS — ONE PER ENGINE SOURCE CLASS, AND
+// NOTHING STRONGER THAN THE CLASS THE ENGINE PERSISTED.
+//
+//   ONCHAIN_VERIFIABLE            → ON_CHAIN
+//   GOVERNANCE                    → GOVERNANCE
+//   DATA_PROVIDER                 → QUANTITATIVE
+//   OFFICIAL_DOCS, OFFICIAL_REPORT → DOCUMENTARY
+//   RESEARCH_MEDIA                → MEDIA
+//   SOCIAL                        → SOCIAL
+//   anything else, or none        → OTHER ("Unclassified")
+//
+// There is no default that reads as authority. The mapping used to fall
+// through to DOCUMENTARY for every class it did not name, and on the first
+// fresh run a third-party tokenomics aggregator the engine had stored as
+// SOCIAL — merely claimed — wore a "Documentary" band, the label reserved
+// for the project's own documents. A class this surface does not know is
+// shown as exactly that.
+export type EvidenceKind = "DOCUMENTARY" | "ON_CHAIN" | "GOVERNANCE" | "QUANTITATIVE" | "MEDIA" | "SOCIAL" | "OTHER";
+
+const EVIDENCE_KIND_OF_SOURCE_CLASS: Record<string, EvidenceKind> = {
+  ONCHAIN_VERIFIABLE: "ON_CHAIN",
+  GOVERNANCE: "GOVERNANCE",
+  DATA_PROVIDER: "QUANTITATIVE",
+  OFFICIAL_DOCS: "DOCUMENTARY",
+  OFFICIAL_REPORT: "DOCUMENTARY",
+  RESEARCH_MEDIA: "MEDIA",
+  SOCIAL: "SOCIAL",
+};
+
+export function evidenceKindOf(sourceClass: string | null | undefined): EvidenceKind {
+  return (sourceClass && EVIDENCE_KIND_OF_SOURCE_CLASS[sourceClass]) || "OTHER";
+}
+
 export interface EvidenceKindMeta {
-  kind: "DOCUMENTARY" | "ON_CHAIN" | "GOVERNANCE" | "QUANTITATIVE";
+  kind: EvidenceKind;
   source: string;
   // The retrieved passage, verbatim. Always shown before any paraphrase.
   fragment: string;
@@ -198,4 +231,7 @@ export const EVIDENCE_KIND_LABEL: Record<EvidenceKindMeta["kind"], string> = {
   ON_CHAIN: "On-chain",
   GOVERNANCE: "Governance",
   QUANTITATIVE: "Quantitative",
+  MEDIA: "Research media",
+  SOCIAL: "Social",
+  OTHER: "Unclassified",
 };

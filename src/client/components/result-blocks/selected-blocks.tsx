@@ -15,14 +15,15 @@ import { MetricGridBlock } from "./metric-grid";
 import { ProofMapBlock } from "./proof-map";
 import { QuantChartBlock, type ChartSeries } from "./quant-chart";
 import { ResearchTimelineBlock } from "./research-timeline";
-import type {
-  EvidenceKindMeta,
-  FlowStage,
-  Metric,
-  MetricAttribution,
-  ProofMapCell,
-  TableRow,
-  TimelineEvent,
+import {
+  evidenceKindOf,
+  type EvidenceKindMeta,
+  type FlowStage,
+  type Metric,
+  type MetricAttribution,
+  type ProofMapCell,
+  type TableRow,
+  type TimelineEvent,
 } from "./types";
 import { ValueFlowBlock } from "./value-flow";
 
@@ -313,14 +314,9 @@ function Block({
         if (!e) return [];
         return [
           {
-            kind:
-              e.sourceClass === "ONCHAIN_VERIFIABLE"
-                ? "ON_CHAIN"
-                : e.sourceClass === "GOVERNANCE"
-                  ? "GOVERNANCE"
-                  : e.sourceClass === "DATA_PROVIDER"
-                    ? "QUANTITATIVE"
-                    : "DOCUMENTARY",
+            // The persisted source class, and never a stronger one: see
+            // `evidenceKindOf` — an unknown class is OTHER, not DOCUMENTARY.
+            kind: evidenceKindOf(e.sourceClass),
             source: e.sourceTitle ?? e.retrievedUrl,
             fragment: e.fragment,
             proves: e.summary ?? "",

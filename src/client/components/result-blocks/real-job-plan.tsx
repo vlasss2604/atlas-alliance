@@ -136,10 +136,10 @@ export function RealJobPlan({ jobId, view = "result" }: { jobId: string; view?: 
       </details>
 
       {view === "verification" ? (
-        // The SAME component the product result screen renders — the
-        // banner above already says this is a historical record, so the
-        // component's own note is not repeated.
-        <JobVerification detail={detail} historicalNote={false} />
+        // The SAME component the product result screen renders. This dev
+        // route knows its record is historical and says so in the banner
+        // above; the component's own note is opt-in and not repeated here.
+        <JobVerification detail={detail} />
       ) : (
         <SelectedBlocks
           plan={plan}

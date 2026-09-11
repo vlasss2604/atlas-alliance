@@ -344,7 +344,9 @@ const GAP_CHIP: Record<AuditBoundaryItem["kind"], { state: ProofState; blocked: 
 // THE CORE OF THE PAGE. Two to four open checks: the label, the chip, the
 // short form of the persisted reason, and the row's own sentence beneath.
 function MainGaps({ audit }: { audit: AuditComposition }) {
-  const others = audit.boundary.length - audit.gaps.length;
+  // Counted over what is OPEN, not over the whole boundary: a check shown
+  // under WHAT STOOD UP is never also "one more in full verification".
+  const others = audit.open.length - audit.gaps.length;
   return (
     <div data-testid="block-main-gaps">
       <div className="flex items-baseline justify-between gap-3">
@@ -355,7 +357,11 @@ function MainGaps({ audit }: { audit: AuditComposition }) {
       </div>
       {audit.gaps.length === 0 ? (
         <p className="mt-1.5 text-[0.76rem] text-[var(--atlas-text-dim)]" data-testid="gaps-none">
-          Every check the research made was established.
+          {/* Nothing open is not the same as everything established: the
+              partly-established checks may all be standing in above. */}
+          {audit.boundary.length === 0
+            ? "Every check the research made was established."
+            : "No open check beyond what stood up, part of the way, above."}
         </p>
       ) : (
         <ol className="mt-2 grid gap-2 sm:grid-cols-2">
@@ -454,7 +460,9 @@ function WhereVerificationStops({ audit }: { audit: AuditComposition }) {
   const g = audit.gap!;
   const chip = GAP_CHIP[g.kind];
   const s = PROOF_STATE[chip.state];
-  const others = audit.boundary.length - 1;
+  // The rest of what is OPEN — `gap` is one of `open`, so this can never
+  // count a check that stood up.
+  const others = audit.open.length - 1;
   return (
     <section className="panel p-4 sm:p-5" data-testid="block-verification-stops">
       <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>Where verification stops</p>

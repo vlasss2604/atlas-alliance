@@ -122,7 +122,25 @@ export interface AuditComposition {
   // CONTRADICTIONS: checks whose persisted state is CONTRADICTED. Only
   // that state — never a gap dressed as one.
   contradictions: AuditContradiction[];
+  // THE VERIFICATION BOUNDARY, complete: every partly-established check
+  // with a stated reason, every unestablished one, every one that could
+  // not be checked — the derivation, before this page decides where each
+  // check appears.
   boundary: AuditBoundaryItem[];
+  // WHAT IS STILL OPEN: the boundary MINUS the checks shown under WHAT
+  // STOOD UP. A check is one thing on this page, and every count of open
+  // checks — the main gaps, "N more in full verification", "N further
+  // open checks" — is arithmetic over THIS list, never over `boundary`.
+  // On the first fresh run two partly-established checks stood in for
+  // "what stood up" (nothing was fully established), were rightly kept
+  // out of the main gaps, and were still counted among the open checks
+  // — so the page said a check both held and remained open. The rule:
+  //   open = boundary items whose component is not in stoodUp
+  // i.e. PARTLY_ESTABLISHED with a stated gap and not standing in for
+  // "what stood up", NOT_ESTABLISHED, and BLOCKED / not checked.
+  // CONTRADICTED is not open: it is resolved, against the claim, and has
+  // its own panel. Upstream states are untouched; only the accounting is.
+  open: AuditBoundaryItem[];
   // WHERE THE AUDIT STOPS: the single most important open boundary, chosen
   // by the priority the short answer already uses for its "main
   // limitation" — a BLOCKED check first (ATLAS could not look, which bears
@@ -179,7 +197,8 @@ export function composeAudit(args: {
   const checks = auditChecks(rows, codes);
   const stoodUp = auditStoodUp(checks);
   const standing = new Set(stoodUp.map((c) => c.component));
-  const gaps = auditGaps(boundary.filter((b) => !standing.has(b.component)));
+  const openBoundary = auditOpen(boundary, stoodUp);
+  const gaps = auditGaps(openBoundary);
   const contradictions = auditContradictions(checks, args.components, plan);
   const open = new Set([...gaps.map((g) => g.component), ...contradictions.map((c) => c.component)]);
   const selected = new Set([...open, ...standing]);
@@ -215,7 +234,8 @@ export function composeAudit(args: {
     gaps,
     contradictions,
     boundary,
-    gap: auditGap(rows, boundary),
+    open: openBoundary,
+    gap: auditGap(rows, openBoundary),
     chain: chain ?? null,
     analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type) && explains(b)),
     evidence:
@@ -337,16 +357,28 @@ export function auditBoundary(
   ];
 }
 
+// WHAT IS STILL OPEN — the boundary without the checks that stood up.
+// The one place the rule lives; `composeAudit` derives the main gaps, the
+// stopping boundary and every "more"/"further" count from this list.
+export function auditOpen(boundary: readonly AuditBoundaryItem[], stoodUp: readonly AuditCheck[]): AuditBoundaryItem[] {
+  const standing = new Set(stoodUp.map((c) => c.component));
+  return boundary.filter((b) => !standing.has(b.component));
+}
+
 // WHERE VERIFICATION STOPS — THE ONE BOUNDARY THAT MATTERS MOST, by the
 // priority the short answer already applies to its "main limitation": a
 // blocked check outranks an unestablished one, because ATLAS could not
 // look and that bears on how much the rest covers; an unestablished check
 // outranks a partly established one. Ladder order decides within a kind.
 // Nothing is scored, and nothing is chosen for how it reads.
+//
+// Only a check in the given list can be chosen — pass the OPEN list, so a
+// partly-established check that stands in for "what stood up" is never
+// also where verification stops; the next row of the same kind is.
 export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBoundaryItem[]): AuditBoundaryItem | null {
   const byComponent = new Map(boundary.map((b) => [b.component, b]));
   const first = (pred: (r: ResultRow) => boolean) => {
-    const r = rows.find(pred);
+    const r = rows.find((row) => pred(row) && byComponent.has(row.component));
     return r ? (byComponent.get(r.component) ?? null) : null;
   };
   return (

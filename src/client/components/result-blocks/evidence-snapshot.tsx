@@ -12,11 +12,16 @@ import { EVIDENCE_KIND_LABEL, type EvidenceKindMeta } from "./types";
 // THE FRAGMENT COMES BEFORE ANY PARAPHRASE. A reader should meet the
 // source's own words first and our reading of them second, so they can
 // disagree with us. That ordering is the point of the block.
+// The weaker classes are dim on purpose: a social post or a media piece
+// must not arrive wearing the colour of a document or a chain read.
 const KIND_ACCENT: Record<EvidenceKindMeta["kind"], string> = {
   DOCUMENTARY: "#c4b5fd",
   ON_CHAIN: "#5eead4",
   GOVERNANCE: "#22d3ee",
   QUANTITATIVE: "#fcd34d",
+  MEDIA: "#a1a1aa",
+  SOCIAL: "#a1a1aa",
+  OTHER: "#a1a1aa",
 };
 
 export function EvidenceSnapshotBlock({

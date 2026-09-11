@@ -118,6 +118,37 @@ describe("the result page carries Research | Verification", () => {
     expect(code).toMatch(/shown === "verification" && \(\s*<div data-testid="verification-view">\s*<JobVerification detail=\{detail\} \/>/);
   });
 
+  // RESEARCH-ONLY UI STAYS IN RESEARCH — BEFORE → AFTER. The "Full research
+  // audit" link and the Research process panel rendered under the
+  // Verification composition on the first fresh run. Every Research-only
+  // block is now gated on `shown === "research"`; Verification is the
+  // composition under the shared identity, question and switch.
+  it("Verification carries no Research-only panels: the audit entry, the research process, the briefing and the ladder are all gated on Research", () => {
+    // Each finished-result block that belongs to Research is rendered
+    // only in Research. The header (identity, question, switch) is shared.
+    expect(code).toMatch(/\{finished && shown === "research" && \(\s*<ResultBriefing/);
+    expect(code).toMatch(/\{finished && shown === "research" && \(\s*<ResultLadder/);
+    const auditSlot = code.indexOf('data-testid="progress-slot-finished"');
+    expect(auditSlot).toBeGreaterThan(0);
+    const gate = code.lastIndexOf('{finished && shown === "research" && (', auditSlot);
+    const priorVerificationGate = code.lastIndexOf('shown === "verification"', auditSlot);
+    expect(gate).toBeGreaterThan(priorVerificationGate);
+    // The audit entry and the progress panel are inside that gated slot.
+    const slot = code.slice(gate, code.indexOf("</div>", code.indexOf('data-testid="progress-slot-finished"')));
+    expect(slot).toContain('data-testid="audit-entry"');
+    expect(slot).toContain("<ResearchProgress job={job} />");
+    // No finished-result block renders unconditionally on `finished` alone
+    // except the answer panel, which carries the shared header.
+    const unconditional = code.match(/\{finished && \($/gm) ?? [];
+    expect(unconditional.length).toBe(1);
+    expect(code.indexOf('data-testid="answer-panel"')).toBeGreaterThan(code.indexOf("{finished && ("));
+    // ResearchProgress appears exactly twice: the live slot and the
+    // Research-gated finished slot. Never a third time.
+    expect((code.match(/<ResearchProgress job=\{job\} \/>/g) ?? []).length).toBe(2);
+    // The Verification branch itself holds only the composition.
+    expect(code).toMatch(/shown === "verification" && \(\s*<div data-testid="verification-view">\s*<JobVerification detail=\{detail\} \/>\s*<\/div>\s*\)\}/);
+  });
+
   it("view state is local and mirrored into ?view= with the History API — the switch never navigates and never fetches", () => {
     expect(code).toContain('get("view") === "verification"');
     expect(code).toContain("window.history.replaceState(");
@@ -143,7 +174,7 @@ describe("JobVerification is a pure projection of the detail payload", () => {
     expect(src).toContain("chooseAnalyticalBlocks(input)");
     expect(src).toContain("composeAudit(");
     const bridge = readFileSync(BRIDGE, "utf-8");
-    expect(bridge).toContain("<JobVerification detail={detail} historicalNote={false} />");
+    expect(bridge).toContain("<JobVerification detail={detail} />");
     expect(bridge).not.toContain("composeAudit(");
   });
 
@@ -188,14 +219,40 @@ describe("JobVerification is a pure projection of the detail payload", () => {
     expect(count(h, "block-verification-stops")).toBe(1);
   });
 
-  it("states the historical-semantics note on the product surface, and lets the dev bridge (which has its own banner) suppress it", () => {
-    const h = render(detailOf("A"));
-    expect(count(h, "verification-historical-note")).toBe(1);
-    expect(h).toContain("not");
-    expect(h).toContain("re-derived here");
+  // HISTORICAL WARNING — BEFORE → AFTER. The note was on by default, so the
+  // first fresh current-semantics run was labelled historical the minute it
+  // finished. The payload carries no semantics version and none is
+  // invented: the component states the note only when a caller that KNOWS
+  // the record is historical asks for it; the product route never asks,
+  // and no date cutoff decides.
+  it("does not claim a fresh product Verification is historical: the note is opt-in, absent by default, and the product page never opts in", () => {
+    const fresh = detailOf("A", { createdAt: new Date().toISOString(), finishedAt: new Date().toISOString() });
+    expect(count(render(fresh), "verification-historical-note")).toBe(0);
+    expect(render(fresh)).not.toContain("semantics in force when this research ran");
+    // Age is not a signal either way: an old finishedAt gets no note
+    // without the explicit flag — nothing here guesses from a date.
+    expect(count(render(detailOf("A")), "verification-historical-note")).toBe(0);
     expect(count(render(detailOf("A"), false), "verification-historical-note")).toBe(0);
+    // The product page passes no flag.
+    const page = codeOf(PAGE);
+    expect(page).toContain("<JobVerification detail={detail} />");
+    expect(page).not.toContain("historicalNote");
+    const src = codeOf(VERIFICATION);
+    expect(src).toContain("historicalNote = false");
+    expect(src).not.toMatch(/Date\.now|new Date|cutoff|CUTOFF/);
+  });
+
+  it("a route that knows its record is historical can still carry the explicit warning", () => {
+    const h = render(detailOf("A"), true);
+    expect(count(h, "verification-historical-note")).toBe(1);
+    expect(h).toContain("re-derived here");
     // The note precedes the composition.
     expect(h.indexOf('data-testid="verification-historical-note"')).toBeLessThan(h.indexOf('data-testid="audit-composition"'));
+    // The dev bridge states it through its own banner, once, on a route
+    // that renders only real earlier runs.
+    const devRoute = readFileSync("app/(app)/dev/output-plan/page.tsx", "utf-8");
+    expect(devRoute).toContain('data-testid="real-job-banner"');
+    expect(devRoute).toContain("historical record");
   });
 
   it("a terminal product state outranks a persisted verdict, the rule the Research view already applies", () => {

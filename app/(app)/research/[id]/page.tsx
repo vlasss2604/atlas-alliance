@@ -559,8 +559,15 @@ export default function ResearchDetailPage() {
        * It is not a second answer, and it is not renamed developer data:
        * the rows here are the same canonical component results, derived by
        * the same function, under the Pattern's own grouping.
+       *
+       * RESEARCH ONLY. The audit entry and the research process are how
+       * Research shows its work; Verification is the composition alone
+       * under the shared identity and question. On the first fresh run
+       * both rendered beneath the Verification composition, so the mode
+       * ended in Research's own panels and the two views were not two
+       * readings of one result but one view with an extra block on top.
        */}
-      {finished && (
+      {finished && shown === "research" && (
         // `group` + `group-open:` is native <details> state driving a CSS
         // rotation — no JS state added, the disclosure itself is untouched.
         // The custom chevron replaces the browser's default triangle

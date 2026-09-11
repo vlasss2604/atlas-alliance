@@ -11,6 +11,7 @@ import {
   auditCounts,
   auditGap,
   auditGaps,
+  auditOpen,
   auditStoodUp,
   composeAudit,
   MAX_GAPS,
@@ -20,6 +21,7 @@ import {
 } from "../src/client/audit-composition";
 import { AuditCompositionView, SHORT_REASON } from "../src/client/components/result-blocks/audit-composition";
 import { SelectedBlocks } from "../src/client/components/result-blocks/selected-blocks";
+import { EVIDENCE_KIND_LABEL, evidenceKindOf } from "../src/client/components/result-blocks/types";
 import { chooseAnalyticalBlocks, proofStateOf, type PlannedBlock } from "../src/client/output-plan";
 import { GOLDEN_AUDIT_FIXTURE, OUTPUT_PLAN_FIXTURES, outputPlanFixture } from "../src/client/output-plan-fixtures";
 import {
@@ -377,12 +379,195 @@ describe("contradictions", () => {
   });
 });
 
+/* ------------------------------------------------------------------ */
+/* WHAT STOOD UP IS NOT ALSO OPEN — the exact counting rule            */
+/* ------------------------------------------------------------------ */
+
+// On the first fresh current-semantics run nothing was fully established,
+// two partly-established checks stood in for WHAT STOOD UP, and the same
+// two were still counted under "N more in full verification" and "N
+// further open checks". The rule pinned here:
+//
+//   open = boundary − { components shown under WHAT STOOD UP }
+//
+// so open holds PARTLY_ESTABLISHED checks with a stated gap that are NOT
+// standing in above, NOT_ESTABLISHED checks, and BLOCKED / not-checked
+// ones. CONTRADICTED is never in it (its own panel). Every "more" and
+// "further" count is arithmetic over `open`. No upstream state changes.
+describe("a stood-up check is never also counted as open", () => {
+  // Nothing SUPPORTED: the two partly-supported checks stand in for
+  // "what stood up"; one unestablished check and one blocked check remain.
+  const FRESH = [
+    row("MECHANISM_SPEC", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
+    row("CURRENT_STATE", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]),
+    row("GOVERNANCE_BASIS", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"]),
+    row("EXECUTION_EVIDENCE", "INSUFFICIENT_EVIDENCE", ["NO_EVIDENCE_FOUND"], "BLOCKED"),
+  ];
+  const freshAudit = () =>
+    composeAudit({
+      input: {
+        ...fx("D").input,
+        components: FRESH.map((c, i) => ({ step: i + 1, component: c.component, status: c.status, reasonCodes: [...(c.reasonCodes ?? [])] as string[], supportingEvidenceIds: [...(c.supportingEvidenceIds ?? [])], contradictingEvidenceIds: [] })),
+      },
+      components: FRESH,
+      outcomeKind: "VERDICT",
+    });
+
+  it("the rule, exactly: open = boundary minus the stood-up components; kinds that remain are PARTLY (not standing in), NOT_ESTABLISHED, BLOCKED", () => {
+    const rows = rowsOf(FRESH);
+    const boundary = auditBoundary(rows, "VERDICT");
+    const stoodUp = auditStoodUp(auditChecks(rows));
+    expect(stoodUp.map((c) => c.component)).toEqual(["MECHANISM_SPEC", "CURRENT_STATE"]);
+    // The boundary derivation itself is unchanged: the partial checks are
+    // still boundaries, because the reason they are partial is real.
+    expect(boundary.map((b) => b.component)).toEqual(["MECHANISM_SPEC", "CURRENT_STATE", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"]);
+    const open = auditOpen(boundary, stoodUp);
+    expect(open.map((b) => [b.component, b.kind])).toEqual([
+      ["GOVERNANCE_BASIS", "NOT_ESTABLISHED"],
+      ["EXECUTION_EVIDENCE", "COULD_NOT_CHECK"],
+    ]);
+    // A partly-established check that did NOT stand in (a fourth one,
+    // beyond the cap) stays open, with its gap.
+    const five = [...FRESH, row("DESTINATION", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]), row("RECIPIENT", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"])];
+    const r5 = rowsOf(five);
+    const s5 = auditStoodUp(auditChecks(r5));
+    expect(s5).toHaveLength(MAX_STOOD_UP);
+    const o5 = auditOpen(auditBoundary(r5, "VERDICT"), s5);
+    const partlyOpen = o5.filter((b) => b.kind === "PARTLY_ESTABLISHED").map((b) => b.component);
+    expect(partlyOpen).toHaveLength(1);
+    expect(s5.map((c) => c.component)).not.toContain(partlyOpen[0]);
+    // A CONTRADICTED check is not in the boundary and so never "open".
+    const withContra = rowsOf([...FRESH, row("NET_EFFECT", "CONTRADICTED", ["CONTRADICTED_BY_EVIDENCE"])]);
+    expect(auditBoundary(withContra, "VERDICT").map((b) => b.component)).not.toContain("NET_EFFECT");
+  });
+
+  it("composeAudit exposes `open`, derives the main gaps, the stopping boundary and every count from it, and the components are disjoint from what stood up", () => {
+    const a = freshAudit();
+    expect(a.stoodUp.map((c) => c.component)).toEqual(["MECHANISM_SPEC", "CURRENT_STATE"]);
+    expect(a.boundary).toHaveLength(4);
+    expect(a.open.map((b) => b.component)).toEqual(["GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"]);
+    expect(a.gaps.map((g) => g.component).sort()).toEqual(["EXECUTION_EVIDENCE", "GOVERNANCE_BASIS"]);
+    expect(a.gap?.component).toBe("EXECUTION_EVIDENCE");
+    const standing = new Set(a.stoodUp.map((c) => c.component));
+    for (const b of a.open) expect(standing.has(b.component), b.component).toBe(false);
+    // The same holds on every fixture.
+    for (const f of ALL) {
+      const x = auditOf(f);
+      const st = new Set(x.stoodUp.map((c) => c.component));
+      expect(x.open.every((b) => !st.has(b.component))).toBe(true);
+      expect(x.open).toEqual(x.boundary.filter((b) => !st.has(b.component)));
+      if (x.gap) expect(st.has(x.gap.component)).toBe(false);
+    }
+  });
+
+  it("BEFORE → AFTER: the page no longer says '2 more in full verification' / '3 further open checks' for checks it shows as standing", () => {
+    const a = freshAudit();
+    const h = renderToStaticMarkup(createElement(AuditCompositionView, { audit: a, input: fx("D").input, asOf: "t" }));
+    // Two open checks, both shown as gaps: nothing "more".
+    const gaps = h.slice(h.indexOf('data-testid="block-main-gaps"'), h.indexOf('data-testid="block-contradictions"'));
+    expect(gaps).toContain("2 shown");
+    expect(gaps).not.toContain("more in full verification");
+    // One boundary named, ONE further open — not three.
+    const stops = h.slice(h.indexOf('data-testid="block-verification-stops"'), h.indexOf('data-testid="block-audit-trail"'));
+    expect(stops).toContain("1 further open check is listed");
+    expect(stops).not.toContain("3 further open");
+    // The view computes over `open`, never over `boundary`.
+    const view = codeOf(AUDIT_VIEW);
+    expect(view).not.toMatch(/audit\.boundary\.length\s*-/);
+    expect(view).toContain("audit.open.length - audit.gaps.length");
+    expect(view).toContain("audit.open.length - 1");
+  });
+
+  it("when every open boundary stood in for 'what stood up', nothing is open, nothing stops, and the gaps panel does not claim everything was established", () => {
+    const only = [row("MECHANISM_SPEC", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"]), row("CURRENT_STATE", "PARTIALLY_SUPPORTED", ["INSUFFICIENT_AUTHORITY"])];
+    const a = composeAudit({ input: { ...fx("D").input, components: only.map((c, i) => ({ step: i + 1, component: c.component, status: c.status, reasonCodes: [...(c.reasonCodes ?? [])] as string[], supportingEvidenceIds: ["e"], contradictingEvidenceIds: [] })) }, components: only, outcomeKind: "VERDICT" });
+    expect(a.boundary).toHaveLength(2);
+    expect(a.open).toEqual([]);
+    expect(a.gaps).toEqual([]);
+    expect(a.gap).toBeNull();
+    const h = renderToStaticMarkup(createElement(AuditCompositionView, { audit: a, input: fx("D").input, asOf: "t" }));
+    expect(count(h, "block-verification-stops")).toBe(0);
+    expect(h).toContain('data-testid="gaps-none"');
+    expect(h).not.toContain("Every check the research made was established.");
+    expect(h).toContain("No open check beyond what stood up");
+    // And the fully-established record keeps its own sentence.
+    const all = composeAudit({ input: { ...fx("A").input, components: fx("A").input.components.map((c) => ({ ...c, status: "SUPPORTED", reasonCodes: [] })) }, components: fx("A").input.components.map((c) => ({ ...c, status: "SUPPORTED", reasonCodes: [] })), outcomeKind: "VERDICT" });
+    expect(renderToStaticMarkup(createElement(AuditCompositionView, { audit: all, input: fx("A").input, asOf: "t" }))).toContain("Every check the research made was established.");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* EVIDENCE KIND PRESERVES THE UPSTREAM CLASS — no fallback to authority */
+/* ------------------------------------------------------------------ */
+
+// A third-party tokenomics aggregator stored as SOCIAL / merely claimed
+// rendered as "Documentary" on the first fresh run, because every class the
+// mapping did not name fell through to DOCUMENTARY. The rule pinned here:
+//
+//   ONCHAIN_VERIFIABLE → ON_CHAIN, GOVERNANCE → GOVERNANCE,
+//   DATA_PROVIDER → QUANTITATIVE, OFFICIAL_DOCS | OFFICIAL_REPORT → DOCUMENTARY,
+//   RESEARCH_MEDIA → MEDIA, SOCIAL → SOCIAL, anything else or null → OTHER.
+//
+// DOCUMENTARY is reachable only from the two official classes.
+describe("evidence kind preserves the persisted source class", () => {
+  it("the mapping, exactly — and the fallback is OTHER, never DOCUMENTARY", () => {
+    expect(evidenceKindOf("ONCHAIN_VERIFIABLE")).toBe("ON_CHAIN");
+    expect(evidenceKindOf("GOVERNANCE")).toBe("GOVERNANCE");
+    expect(evidenceKindOf("DATA_PROVIDER")).toBe("QUANTITATIVE");
+    expect(evidenceKindOf("OFFICIAL_DOCS")).toBe("DOCUMENTARY");
+    expect(evidenceKindOf("OFFICIAL_REPORT")).toBe("DOCUMENTARY");
+    expect(evidenceKindOf("RESEARCH_MEDIA")).toBe("MEDIA");
+    expect(evidenceKindOf("SOCIAL")).toBe("SOCIAL");
+    for (const unknown of [null, undefined, "", "FORUM", "documentary", "OFFICIAL"]) {
+      expect(evidenceKindOf(unknown), String(unknown)).toBe("OTHER");
+    }
+    expect(EVIDENCE_KIND_LABEL.SOCIAL).toBe("Social");
+    expect(EVIDENCE_KIND_LABEL.OTHER).toBe("Unclassified");
+    expect(EVIDENCE_KIND_LABEL.MEDIA).toBe("Research media");
+    // The old ternary chain with its "DOCUMENTARY" default is gone.
+    const blocks = codeOf("src/client/components/result-blocks/selected-blocks.tsx");
+    expect(blocks).not.toContain(': "DOCUMENTARY"');
+    expect(blocks).toContain("evidenceKindOf(e.sourceClass)");
+  });
+
+  it("BEFORE → AFTER: a SOCIAL evidence row renders with the Social band, and an unclassified one as Unclassified — neither as Documentary", () => {
+    const base = fx("A").input;
+    const ev = base.evidence[0];
+    for (const [sourceClass, kind, label] of [
+      ["SOCIAL", "SOCIAL", "Social"],
+      ["RESEARCH_MEDIA", "MEDIA", "Research media"],
+      [null, "OTHER", "Unclassified"],
+      ["SOMETHING_NEW", "OTHER", "Unclassified"],
+    ] as const) {
+      const input = { ...base, evidence: [{ ...ev, sourceClass, officiality: "CLAIMED" as const }, ...base.evidence.slice(1)] };
+      const plan = chooseAnalyticalBlocks(input);
+      const snapshot = plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT");
+      expect(snapshot, `fixture A plans an evidence snapshot (${String(sourceClass)})`).toBeDefined();
+      const ids = snapshot!.type === "EVIDENCE_SNAPSHOT" ? snapshot!.spec.evidenceIds : [];
+      const shown = ids.includes(ev.id) ? plan : { ...plan, orderedBlocks: plan.orderedBlocks.map((b) => (b.type === "EVIDENCE_SNAPSHOT" ? { ...b, spec: { evidenceIds: [ev.id, ...b.spec.evidenceIds.filter((x) => x !== ev.id)] } } : b)) };
+      const h = renderToStaticMarkup(createElement(SelectedBlocks, { plan: shown, input, answer: { short: "", paragraphs: [] }, asOf: "t" }));
+      const card = h.slice(h.indexOf(`data-kind="${kind}"`), h.indexOf("</article>", h.indexOf(`data-kind="${kind}"`)));
+      expect(card.length, `card for ${String(sourceClass)}`).toBeGreaterThan(0);
+      expect(card).toContain(escape(ev.sourceTitle ?? ev.retrievedUrl));
+      expect(card).toContain(`>${label}<`);
+      expect(card).not.toContain(">Documentary<");
+    }
+    // And through the Verification composition the same evidence keeps its class.
+    const social = { ...base, evidence: base.evidence.map((e) => ({ ...e, sourceClass: "SOCIAL" as const })) };
+    const a = composeAudit({ input: social, components: social.components, outcomeKind: "VERDICT" });
+    const v = renderToStaticMarkup(createElement(AuditCompositionView, { audit: a, input: social, asOf: "t" }));
+    expect(v).not.toContain('data-kind="DOCUMENTARY"');
+    expect(v).not.toContain(">Documentary<");
+    if (a.evidence) expect(v).toContain('data-kind="SOCIAL"');
+  });
+});
+
 describe("where verification stops", () => {
   it("is the single boundary the short answer already calls its main limitation, stated with the row's own sentence, and absent when nothing is open", () => {
     for (const f of ALL) {
       const a = auditOf(f);
       const rows = rowsOf(f.auditComponents ?? f.input.components);
-      expect(a.gap).toEqual(auditGap(rows, a.boundary));
+      expect(a.gap).toEqual(auditGap(rows, a.open));
       const h = htmlOf(f);
       if (a.gap) {
         expect(count(h, "block-verification-stops")).toBe(1);
@@ -392,7 +577,7 @@ describe("where verification stops", () => {
         expect(block).toContain(escape(a.gap.detail));
         // One boundary: exactly one detail sentence, and the rest counted.
         expect(count(block, "verification-stops-detail")).toBe(1);
-        if (a.boundary.length > 1) expect(block).toContain(`${a.boundary.length - 1} further open`);
+        if (a.open.length > 1) expect(block).toContain(`${a.open.length - 1} further open`);
       } else {
         expect(count(h, "block-verification-stops")).toBe(0);
       }

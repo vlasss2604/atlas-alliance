@@ -73,10 +73,26 @@ no request, no recomputation, no model. View state is local and mirrored
 into `?view=verification` with `window.history.replaceState`, so a link can
 open Verification and the switch never navigates. The verdict shown is
 `jobOutcome`'s (a terminal product state outranks a persisted verdict); a
-FAILED or CANCELLED run offers no switch and falls back to Research. Every
-Verification on the product surface carries the historical-semantics note
-(the payload records no semantics version, so it is stated for every job).
-The dev bridge renders the same component with its own banner.
+FAILED or CANCELLED run offers no switch and falls back to Research.
+Research-only blocks (briefing, ladder, the "Full research audit" entry,
+the Research process panel) render only in Research; Verification is the
+composition under the shared identity, question and switch. The
+historical-semantics note is opt-in on `JobVerification` (`historicalNote`)
+and the product route never opts in: the payload records no semantics
+version, none is invented and no date cutoff decides, so a fresh job is
+never called historical. The dev bridge renders the same component under
+its own explicit historical banner.
+
+Counting on the Verification page is over what is OPEN, not over the whole
+boundary: `open = boundary − components shown under WHAT STOOD UP` (a
+partly-established check standing in for "what stood up" is not also a
+gap, "N more in full verification" or "N further open"); CONTRADICTED has
+its own panel and is never open. Evidence-card kinds preserve the persisted
+source class (`evidenceKindOf`): ONCHAIN_VERIFIABLE → On-chain,
+GOVERNANCE → Governance, DATA_PROVIDER → Quantitative,
+OFFICIAL_DOCS / OFFICIAL_REPORT → Documentary, RESEARCH_MEDIA → Research
+media, SOCIAL → Social, anything else → Unclassified — never Documentary by
+default.
 `tests/ui-verification-tab.test.ts` pins the switch, the default, the
 gating, the purity and the sparse case.
 `tests/ui-audit-output.test.ts` pins the structure, the counts, the chain's
