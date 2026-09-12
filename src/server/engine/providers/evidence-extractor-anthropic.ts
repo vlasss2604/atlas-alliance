@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
+import { MECHANISM_STATES } from "../../domain/mechanism-state";
 import { classifyExtractionSchemaFailure, EvidenceExtractorUnavailableError } from "./evidence-extractor";
 import type {
   EvidenceExtractionInput,
@@ -49,7 +50,28 @@ const extractedFactSchema = z.object({
   component: z.string().min(1),
   statement: z.string().min(1),
   supportFragment: z.string().min(1),
-  mechanismState: z.string().nullable(),
+  // GOVERNANCE STATE EXTRACTION GUIDANCE V1 — the model is told, on the
+  // field itself and again in the system prompt, that the value is one of
+  // the reducer's OWN closed dictionary (domain/mechanism-state.ts,
+  // imported rather than restated, so the two cannot drift). Before this
+  // the field was bare text and the prompt never mentioned lifecycle at
+  // all, so a document that said "the vote passed" came back as prose the
+  // normalizer could only read as UNKNOWN.
+  //
+  // DELIBERATELY NOT z.enum. This SDK build serialises a zod enum into the
+  // output schema as a description hint, not a grammar keyword (the
+  // existing `directness` field shows the same shape), so an enum would
+  // not constrain generation — it would only make an off-vocabulary
+  // answer reject the whole fact on parse. The fact's statement and
+  // excerpt are still Evidence with an UNKNOWN state, so the wire stays a
+  // string and the ONE deterministic normalizer (normalizeMechanismState,
+  // exact match only) fails closed to UNKNOWN downstream exactly as
+  // before. Nullable: null and "UNKNOWN" mean the same thing there, and an
+  // honest empty answer must stay cheap to give.
+  mechanismState: z
+    .string()
+    .describe(`lifecycle state the excerpt DIRECTLY establishes — exactly one of: ${MECHANISM_STATES.join(", ")}; null or UNKNOWN when it does not establish one`)
+    .nullable(),
   directness: z.enum(["DIRECT", "INDIRECT", "INFERRED"]),
   publishedAt: z.string().nullable(), // ISO string over the wire; parsed to Date below
   doesNotProve: z.string().min(1),
@@ -64,6 +86,14 @@ const extractedFactSchema = z.object({
   onchainLocators: z.array(z.string()).max(10).nullable(),
 });
 const extractionResultSchema = z.object({ facts: z.array(extractedFactSchema).max(20) });
+
+// The ONE construction of the structured-output format, used by the real
+// request below and exposed for offline contract tests — so a test that
+// proves what vocabulary the model is constrained to proves it against the
+// exact object the generation call sends.
+export function evidenceExtractorOutputFormat() {
+  return zodOutputFormat(extractionResultSchema);
+}
 
 // D-153 — THE ENVELOPE AND THE ELEMENTS ARE VALIDATED SEPARATELY.
 //
@@ -143,7 +173,33 @@ about all of them — put every complete identifier in onchainLocators instead o
 onchainLocator to null. Do not invent separate facts to fit one identifier each, and do not include an identifier the
 document does not state in full. Set onchainLocators to null when the fact names at most one account.
 
+MECHANISM STATE. mechanismState records the lifecycle state of the mechanism that the cited excerpt DIRECTLY
+establishes, using exactly one of: ${MECHANISM_STATES.join(", ")}. Read the state off the excerpt's own words:
+  PROPOSED — the excerpt presents a proposal, RFC, draft, discussion, request for feedback, or a governance proposal
+    that has not been approved.
+  APPROVED — the excerpt states that a vote passed, that governance approved or formally authorised the mechanism,
+    or that a decision was taken — while saying nothing that establishes it is deployed or operating.
+  IMPLEMENTING — the excerpt states that an approved mechanism is being implemented, deployed or rolled out, and the
+    rollout is explicitly underway rather than complete.
+  LIVE — the excerpt directly states that the mechanism is active, in force or operating now.
+  PAUSED, DEPRECATED, REMOVED — only when the excerpt directly states that the mechanism is paused, deprecated or
+    superseded, or removed.
+  UNKNOWN (or null) — the excerpt does not directly establish a lifecycle state: the wording is ambiguous, it is
+    historical context with no clear present state, it describes the mechanism without saying where it stands, or you
+    would have to infer the state rather than read it.
+Each step of that ladder is a distinct fact and the excerpt must establish it on its own: a proposal is not an approval,
+an approval is not an implementation, and an implementation is not a live mechanism. Never move a fact up the ladder
+from anything other than the excerpt's own words — not from the kind of source this is, the site it comes from, the
+project, the component being researched, what the research task is looking for, or what you know or expect about the
+project. A post on a governance forum is not an approved decision because it appears there; a documentation page is not
+an operating mechanism because it documents one; an official page is not a live state because it is official. When the
+excerpt does not settle the state, UNKNOWN is the correct answer, never the most likely state.
+
 Output must be a JSON object matching the provided schema. No prose, no explanation.`;
+
+// Exposed for offline contract tests — the exact system prompt the
+// generation call sends, so guidance can be asserted against what runs.
+export const EVIDENCE_EXTRACTOR_SYSTEM_PROMPT = SYSTEM_PROMPT;
 
 export function buildEvidenceExtractorUserContent(input: EvidenceExtractionInput): string {
   // ACQUISITION MINIMUM SAFE V1 (A) — task/goal context is emitted only
@@ -214,7 +270,7 @@ async function doExtract(
     model,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user" as const, content: userContent }],
-    output_config: { format: zodOutputFormat(extractionResultSchema) },
+    output_config: { format: evidenceExtractorOutputFormat() },
   };
   // D-090 count-then-gate (S10, token-gate.ts): throws ModelInputOversizedError
   // or TokenCountUnavailableError before any generation call is made —

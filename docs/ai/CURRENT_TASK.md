@@ -2,50 +2,50 @@
 
 > Overwrite this file each round. Never append.
 
-## GOVERNANCE LIFECYCLE SAFETY V1 (done this round)
+## GOVERNANCE STATE EXTRACTION GUIDANCE V1 (done this round)
 
-Offline round. No live call, no Research job, no DB authority change, no
-schema, no new subsystem, no new source class. Founder decision: generic fix
-for PROPOSED != APPROVED; do not special-case any project or host.
+Offline round. No live call, no Research job, no DB change, no reducer
+change, no schema redesign, no new subsystem, no project-specific rule.
 
-The Lido authority review showed that a GOVERNANCE row of any
-`mechanism_state` fully established GOVERNANCE_BASIS, MECHANISM_SPEC,
-RECIPIENT and DURABILITY_BASIS — an official forum RFC would have read as an
-approved governance basis.
+GOVERNANCE LIFECYCLE SAFETY V1 (`a7ec578`) made S5 read `mechanism_state`
+honestly, but the extractor was never told the dictionary: the wire field
+was bare text and the prompt said nothing about lifecycle, so explicit
+approvals normalised to UNKNOWN and GOVERNANCE_BASIS read
+APPROVAL_NOT_ESTABLISHED even when the source said the vote passed.
 
-- **Rule (component-reconciler.ts, subtractive).** `PROPOSED_STATE_ONLY`
-  caps every component that does not itself evaluate state when an
-  establishing row positively declares PROPOSED and nothing establishing is
-  past it; `APPROVAL_NOT_ESTABLISHED` caps GOVERNANCE_BASIS unless an
-  establishing row carries APPROVED / IMPLEMENTING / LIVE (UNKNOWN and
-  terminal states fail closed). Rows stay in `supportingEvidenceIds`.
-- **Not changed.** EXECUTION_EVIDENCE / CURRENT_STATE / NET_EFFECT gates;
-  lifecycle computation; authority axis; SOURCE_ROUTE bootstrap and owner
-  workflow; Lido DB state (`research.lido.fi` still OBSERVED); providers.
-- **Consumers wired.** mechanism-assembler (node qualifications),
-  proof-confidence (LIMITED caps), research-model / audit-composition
-  (reader copy), ui-v2 vocabulary test.
+- **Change (evidence-extractor-anthropic.ts).** `mechanismState` keeps
+  `z.string().nullable()` but now carries `MECHANISM_STATES` (imported from
+  domain/mechanism-state.ts) as its schema description; the system prompt
+  gains a MECHANISM STATE section: the eight canonical states, the mapping
+  per rung, the ladder rule (proposal ≠ approval ≠ implementation ≠ live),
+  the non-inference rules (not from source kind, site, project, component,
+  task, world knowledge; forum ≠ decision; docs ≠ operating; official ≠
+  live), UNKNOWN when unsettled. `evidenceExtractorOutputFormat()` and
+  `EVIDENCE_EXTRACTOR_SYSTEM_PROMPT` are exported for contract tests.
+- **Why not `z.enum`.** This SDK build serialises zod enums as description
+  hints, not grammar keywords (`directness` shows the same), so an enum would
+  not constrain generation and would only reject a whole fact on parse. The
+  tolerant wire + the existing exact-match normalizer preserves the fact and
+  fails the state closed to UNKNOWN.
+- **Unchanged.** component-reconciler semantics from a7ec578, approval
+  thresholds, Proof/verdict, authority rules, Lido DB state (research.lido.fi
+  OBSERVED, blog.lido.fi unclassified), providers' network behaviour.
 
-Files: `src/server/engine/component-reconciler.ts`,
-`src/server/engine/mechanism-assembler.ts`,
-`src/server/engine/proof-confidence.ts`, `src/client/research-model.ts`,
-`src/client/components/result-blocks/audit-composition.tsx`,
-`tests/governance-lifecycle-safety-v1.test.ts` (new),
-`tests/ui-v2-answer-first.test.ts`, `docs/ai/CORE_RULES.md`,
-`docs/ai/ARCHITECTURE.md`, `docs/ai/CURRENT_STATE.md`, this file.
+Files: `src/server/engine/providers/evidence-extractor-anthropic.ts`,
+`src/server/engine/providers/types.ts` (doc comment),
+`tests/governance-state-extraction-guidance-v1.test.ts` (new),
+`docs/ai/CURRENT_STATE.md`, `docs/ai/ARCHITECTURE.md`, this file.
 
 ### Reported, not done
 
-- The extractor is given no `mechanism_state` vocabulary, so live rows
-  normalise to UNKNOWN; GOVERNANCE_BASIS will read APPROVAL_NOT_ESTABLISHED
-  until the state channel is guided (prompt change — separate decision).
-- PAUSED / DEPRECATED / REMOVED do not count as approval-bearing for
-  GOVERNANCE_BASIS (conservative false negative for historical mechanisms).
-- MECHANISM_SPEC with a PROPOSED row is PARTIALLY_SUPPORTED with the
-  qualification rather than SUPPORTED — the design is preserved and cited,
-  the node carries "proposed · not adopted".
+- Whether the model follows the guidance is a live property; the offline
+  tests pin the contract (what it is told, what the wire accepts, how the
+  normalizer reads it), not model behaviour. The next authorised live run
+  is the first observation.
+- Fixture executors and other producers still write null / prose; the
+  normalizer reads those as UNKNOWN, as before.
 
 ### Next
 
-- Founder decides on `research.lido.fi` GOVERNANCE classification now that
-  a forum RFC cannot establish authorisation, and on `blog.lido.fi`.
+- Founder decides on a bounded Lido retest and on research.lido.fi /
+  blog.lido.fi classification.

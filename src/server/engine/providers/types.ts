@@ -183,6 +183,13 @@ export interface ExtractedFact {
   // extraction, it is invention (§7 "A model assertion without traceable
   // fetched-source support must not become persisted Evidence").
   supportFragment: string;
+  // Free text at the contract and in evidence.mechanism_state (the
+  // dictionary is CORE's, not the schema's — S5 normalizes, exact match
+  // only, and anything unrecognised is UNKNOWN). The live Anthropic
+  // extractor constrains its wire value to that dictionary
+  // (MECHANISM_STATES, evidence-extractor-anthropic.ts) and is told how to
+  // read a state off an excerpt; fixtures and other producers may still
+  // write null or prose, which the same normalizer fails closed on.
   mechanismState: string | null;
   directness: "DIRECT" | "INDIRECT" | "INFERRED";
   // S4 review fix (BLOCKER-1, D-074, §7.2): sourceClass/officiality are

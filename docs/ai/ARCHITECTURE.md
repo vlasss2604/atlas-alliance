@@ -191,7 +191,12 @@ Two consequences worth knowing before you reason about outcomes:
   proposal never moves a flow toward `CURRENT`; execution and current state
   keep their own gates. Both codes are `LIMITED` confidence caps and node
   qualifications. `CURRENT_STATE` deliberately still reports `PROPOSED` as a
-  legitimate current state ("not yet started").
+  legitimate current state ("not yet started"). The live extractor is told
+  the same dictionary on the wire field's description and in its prompt,
+  with the rung-by-rung mapping and an explicit ban on inferring a state
+  from source kind, site, project, component or task; the wire stays a
+  tolerant string (the SDK renders zod enums as hints, not grammar) and
+  `normalizeMechanismState` remains the single fail-closed gate.
 
 **An owner may turn ONE bounded chain read into Evidence.**
 `scripts/onchain-observe-account.ts` is the persisting sibling of the

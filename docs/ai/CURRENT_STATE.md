@@ -466,11 +466,26 @@ them — a proposal cannot move a flow toward `CURRENT`. Snapshot/Tally/
 Commonwealth stay code-owned `GOVERNANCE`; their proposal-state rows are
 subject to the same caps beside the unchanged `INSUFFICIENT_AUTHORITY`.
 
-**Practical consequence.** The extractor prompt gives the model no
-`mechanism_state` vocabulary (evidence-extractor-anthropic.ts), so live rows
-mostly normalise to `UNKNOWN`; `GOVERNANCE_BASIS` will therefore usually be
-`PARTIALLY_SUPPORTED / APPROVAL_NOT_ESTABLISHED` until the state channel is
-vocabulary-guided — honest, and a separate decision.
+**The state channel is now vocabulary-guided (GOVERNANCE STATE EXTRACTION
+GUIDANCE V1).** Before it, the extractor's `mechanismState` was bare text and
+the prompt never mentioned lifecycle, so "the vote passed" came back as prose
+the normalizer could only read as `UNKNOWN`. Now the wire field carries the
+reducer's own dictionary (`MECHANISM_STATES`, imported — never restated) as
+its schema description, and the system prompt states the rung-by-rung
+mapping (proposal/RFC/draft → PROPOSED; vote passed/authorised, nothing
+about deployment → APPROVED; rollout underway → IMPLEMENTING; directly
+active now → LIVE; PAUSED/DEPRECATED/REMOVED only when stated) and the
+non-inference rules: never from source kind, site, project, component,
+task or world knowledge; a forum post is not a decision, a docs page is not
+an operating mechanism, an official page is not a live state; when unsettled
+the answer is UNKNOWN, never the likely state. Deliberately NOT `z.enum`:
+this SDK build serialises zod enums as description hints, not grammar
+keywords (see `directness`), so an enum would constrain nothing and would
+only reject the whole fact on parse. The wire stays a tolerant string and
+`normalizeMechanismState` (exact match only) remains the one gate, failing
+closed to `UNKNOWN` with the fact preserved.
+`tests/governance-state-extraction-guidance-v1.test.ts` (13 cases, stub
+client over the real `doExtract`). Reducer thresholds unchanged.
 
 `tests/governance-lifecycle-safety-v1.test.ts` (13 cases, A–K against the
 real Pattern data). Unchanged: SOURCE_ROUTE bootstrap, owner workflow, Lido
