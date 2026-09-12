@@ -39,6 +39,16 @@ describe("fake interpreter — known assets", () => {
     expect(r.related_entities).toEqual([]);
   });
 
+  it("recognizes Morpho, including the Founder's exact possessive wording (U+2019)", async () => {
+    const r = await classify(
+      "As of today, what is the actual status of Morpho\u2019s protocol fee mechanism \u2014 documented, approved, activated, or executing \u2014 and does any protocol-generated value currently reach MORPHO?",
+    );
+    expect(r.status).toBe("READY");
+    expect(r.route).toBe("DEEP_RESEARCH");
+    expect(r.project_or_asset).toBe("Morpho");
+    expect(r.related_entities).toEqual([]);
+  });
+
   it("keeps entity order when both live targets are compared", async () => {
     const r = await classify("Compare Raydium vs Pump.fun on value capture");
     expect(r.project_or_asset).toBe("Raydium");
@@ -72,6 +82,7 @@ describe("fake interpreter — canonical names resolve in the seeded catalog", (
   it.each([
     ["Pump.fun", "pump_fun"],
     ["Raydium", "raydium"],
+    ["Morpho", "morpho"],
   ])("%j resolves to slug %j with no adjustment", async (name, slug) => {
     const r = await resolveProjectSlug(ctx.db, name);
     expect(r.slug).toBe(slug);

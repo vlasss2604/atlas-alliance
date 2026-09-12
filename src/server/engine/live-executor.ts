@@ -60,4 +60,8 @@ export const INTERNAL_ALPHA_LIVE_PROJECT_SLUGS = new Set<string>([
   // the ONLY place a project slug appears in live-execution control: the
   // engine itself branches on capability and authority, never on identity.
   "raydium",
+  // Founder-approved 2026-09-12, the third live target: the first unseen
+  // validation project. Same rule as above — membership here is approval,
+  // nothing in the engine branches on the identity.
+  "morpho",
 ]);

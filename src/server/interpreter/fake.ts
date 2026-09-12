@@ -37,6 +37,7 @@ export function __failNextCalls(n: number): void {
 const KNOWN_ASSETS: Record<string, string[]> = {
   "Pump.fun": ["pump\\.fun", "pumpfun", "pump fun", "pump_fun"],
   Raydium: ["raydium"],
+  Morpho: ["morpho"],
   Hyperliquid: ["hyperliquid"],
   Uniswap: ["uniswap"],
   Aave: ["aave"],

@@ -36,6 +36,10 @@ export async function seed(db: Database): Promise<void> {
     // Тикер владельцем при заведении не задан: каталожная запись не
     // утверждает идентичность токена — её место PROJECT_IDENTITY.
     { slug: "raydium", name: "Raydium", ticker: null },
+    // Founder-approved 2026-09-12: the first UNSEEN validation project
+    // (scenario family APPROVED ≠ LIVE ≠ EXECUTING). Catalog entry only —
+    // no identity, no route, no resource: the engine discovers everything.
+    { slug: "morpho", name: "Morpho", ticker: null },
   ] as const;
 
   for (const p of catalogProjects) {

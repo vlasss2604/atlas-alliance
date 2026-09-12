@@ -172,7 +172,7 @@ describe("1/2/11. the internal-alpha live allowlist stays closed", () => {
   });
 
   it("it is an enumerated set, not a rule that could admit a project by shape", () => {
-    expect([...INTERNAL_ALPHA_LIVE_PROJECT_SLUGS].sort()).toEqual(["pump_fun", "raydium"]);
+    expect([...INTERNAL_ALPHA_LIVE_PROJECT_SLUGS].sort()).toEqual(["morpho", "pump_fun", "raydium"]);
   });
 });
 
