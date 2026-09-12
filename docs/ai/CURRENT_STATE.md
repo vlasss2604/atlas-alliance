@@ -402,10 +402,12 @@ reserved; its `fatal` outcome now carries `fatalCause`
 `detail`, so the caller decides on a typed discriminator, never by parsing
 text.
 
-**What stays immediately fatal.** `TOKEN_COUNT_UNAVAILABLE` after
-count_tokens' own internal retry (`EVIDENCE_EXTRACTOR_COUNT_TOKENS`), every
-preflight configuration failure (missing profile / credential / provider
-config), QueryProposer and SearchGateway transient exhaustion — untouched.
+**What stays immediately fatal.** A PERMANENT count_tokens failure
+(`EVIDENCE_EXTRACTOR_COUNT_TOKENS` — auth/config/request/unknown, never
+retried; a TRANSIENT one is covered by the section below since NETWORK
+TRANSIENT RESILIENCE V1), every preflight configuration failure (missing
+profile / credential / provider config), QueryProposer and SearchGateway
+transient exhaustion — untouched.
 
 **If nothing else survives the attempt** the existing semantics apply
 unchanged: attempt `FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE`, the
@@ -423,6 +425,63 @@ widened, no schema.
 `tests/transient-extractor-resilience-v1.test.ts` (10 cases);
 `generation-diagnostic` 14/16 and `s10-acceptance-closure` D re-pinned to
 the N=2 rule. No live run.
+
+## ONE SHORT NETWORK OUTAGE NO LONGER ENDS THE RESEARCH (NETWORK TRANSIENT RESILIENCE V1)
+
+The unseen Lido validation (`1f8e1a63-…`, 2026-09-12) failed for a reason
+that was not research semantics: ONE `count_tokens` `NETWORK_NO_RESPONSE`
+during a short Windows Happ tunnel outage (proven to recur for ~10–30 s),
+after substantial paid work had completed. Two gaps, both closed offline
+at the application level only (founder-approved; no Happ/Windows/VPN
+change, no provider fallback, no budget or retry-count change):
+
+**1. count_tokens transient exhaustion is now the same document-local
+event generation transient exhaustion already is.** `reserveAndCallWithRetry`
+splits the count_tokens fatal cause on the error's existing `transient`
+flag — the flag token-gate.ts set from the SAME classifier that decided
+whether to retry: `TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED` (two count_tokens
+attempts, both transient: 429/5xx/no-response) vs `TOKEN_COUNT_UNAVAILABLE`
+(one attempt, permanent: auth/config/request/unknown). The EvidenceExtractor
+loop softens the former exactly as `TRANSIENT_RETRY_EXHAUSTED`: the document
+is an `EXTRACT_FAILED` (`reason_code TOKEN_COUNT_UNAVAILABLE`,
+`diagnostic_code` the typed class), no Evidence, no contradiction, the attempt
+continues; the SAME consecutive-document counter and N = 2 apply — the two
+transient causes share one counter because they are one signal ("the
+provider could not be reached for this document, twice") against one
+provider, so count_tokens-then-generation or the reverse on two consecutive
+documents is fatal, and the fatal names whichever capability the second
+document failed on. Retries never count twice: the count_tokens retry runs
+inside the one extractor call, below the counter, so one document is one
+increment (test H proves it with the real `countThenGate`). A successful
+extraction resets; a permanent count_tokens failure is never softened, not
+even directly after a tolerated transient one (tests G/G2).
+
+**2. The one count_tokens retry waits out the outage.** `retryOnceIfTransient`
+takes an optional `delayBeforeRetryMs(firstAttemptError)` policy;
+`countThenGate` passes `countTokensRetryDelayMs`, which returns
+`NETWORK_NO_RESPONSE_RETRY_DELAY_MS` (15 s) only for the no-response class
+and 0 for everything else. Sequence: attempt 1 → `NETWORK_NO_RESPONSE` →
+one bounded wait → the ONE existing retry. No third attempt, no extra
+reservation, no delay for 429/5xx (retried at once as before), none for a
+permanent failure (never retried), none on success. The count_tokens probe
+script composes the same policy so it keeps mirroring production.
+
+**Not changed.** The executor-level generation retry
+(`reserveAndCallWithRetry`, attempt 1 → immediate attempt 2) does NOT wait —
+the approved change was scoped to the `retryOnceIfTransient` flow; if the
+founder wants the same bounded wait there, it is the same option threaded
+through one more call site. QueryProposer count_tokens transient exhaustion
+(no per-document loop) stays immediately fatal. Evidence admission,
+authority, SOURCE_ROUTE, reducers, routing, Research Memory, EVM/Solana
+scope: untouched.
+
+Files: `src/server/engine/providers/retry.ts`,
+`src/server/engine/providers/token-gate.ts`, `src/server/engine/s4-executor.ts`,
+`scripts/anthropic-count-tokens-probe.ts`;
+`tests/transient-extractor-resilience-v1.test.ts` (case 6 → D/D2/E/E2/E3/
+F/F2/G/G2/H), `tests/count-tokens-diagnostic.test.ts` (fake-timer gate helper,
+delay cases A/B/C + policy, 13 split into permanent 13 / transient 13b).
+No live run.
 
 ## CANDIDATE REACHABILITY IS PATH-INDEPENDENT, AND TARGETING FOLLOWS THE ADAPTER
 

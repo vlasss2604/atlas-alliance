@@ -6,10 +6,15 @@ import { CapabilityFatalError } from "../src/server/engine/capability-fatal-erro
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { ContentFetchError } from "../src/server/engine/providers/content-fetcher";
 import { RenderedDocsError } from "../src/server/engine/providers/rendered-docs-fetcher";
-import { isTransientAnthropicApiError, retryOnceIfTransient } from "../src/server/engine/providers/retry";
+import {
+  isTransientAnthropicApiError,
+  NETWORK_NO_RESPONSE_RETRY_DELAY_MS,
+  retryOnceIfTransient,
+} from "../src/server/engine/providers/retry";
 import {
   classifyTokenCountFailure,
   countThenGate,
+  countTokensRetryDelayMs,
   isTokenCountDiagnostic,
   ModelInputOversizedError,
   TOKEN_COUNT_DIAGNOSTICS,
@@ -101,15 +106,27 @@ function clientRejecting(e: unknown, calls: { n: number }): Anthropic {
   } as unknown as Anthropic;
 }
 
+// NETWORK TRANSIENT RESILIENCE V1: a no-response first attempt now waits
+// NETWORK_NO_RESPONSE_RETRY_DELAY_MS before its one retry, so the gate
+// runs under fake timers here — every pending wait is advanced
+// deterministically, never slept for real. Restored in `finally` so the
+// DB-backed suites below always run on real timers.
 async function gateFailure(e: unknown): Promise<{ err: TokenCountUnavailableError; calls: number }> {
   const calls = { n: 0 };
+  vi.useFakeTimers();
   try {
-    await countThenGate(clientRejecting(e, calls), "m", "sys", [{ role: "user", content: "hi" }], undefined, 4000);
-  } catch (thrown) {
+    const settled = countThenGate(clientRejecting(e, calls), "m", "sys", [{ role: "user", content: "hi" }], undefined, 4000).then(
+      () => null,
+      (thrown: unknown) => thrown,
+    );
+    await vi.runAllTimersAsync();
+    const thrown = await settled;
+    if (thrown === null) throw new Error("countThenGate unexpectedly resolved");
     expect(thrown).toBeInstanceOf(TokenCountUnavailableError);
     return { err: thrown as TokenCountUnavailableError, calls: calls.n };
+  } finally {
+    vi.useRealTimers();
   }
-  throw new Error("countThenGate unexpectedly resolved");
 }
 
 describe("countThenGate carries the diagnostic; retry semantics unchanged (items 14-16)", () => {
@@ -169,6 +186,156 @@ describe("countThenGate carries the diagnostic; retry semantics unchanged (items
     await expect(countThenGate(over, "m", "sys", [{ role: "user", content: "hi" }], undefined, 4000)).rejects.toBeInstanceOf(
       ModelInputOversizedError,
     );
+  });
+});
+
+// NETWORK TRANSIENT RESILIENCE V1 — the bounded wait before the ONE
+// count_tokens retry. Fake timers throughout: the ~15 s is advanced, never
+// slept. Each case restores real timers in `finally`.
+describe("NETWORK_NO_RESPONSE: one bounded wait, then the same single retry — never a third call", () => {
+  function stubClient(countTokens: ReturnType<typeof vi.fn>): Anthropic {
+    return { messages: { countTokens, create: vi.fn() } } as unknown as Anthropic;
+  }
+  const gate = (client: Anthropic) => countThenGate(client, "m", "sys", [{ role: "user", content: "hi" }], undefined, 4000);
+  const noResponse = () => new Anthropic.APIConnectionError({ message: `no response ${SECRET}` });
+
+  it("the delay policy: exactly the no-response class waits; every other class, transient or not, waits 0", () => {
+    expect(NETWORK_NO_RESPONSE_RETRY_DELAY_MS).toBe(15_000);
+    expect(countTokensRetryDelayMs(noResponse())).toBe(NETWORK_NO_RESPONSE_RETRY_DELAY_MS);
+    // An APIError with no status is the same "never heard from" class.
+    expect(countTokensRetryDelayMs(new Anthropic.APIError(undefined, undefined, "x", undefined, undefined))).toBe(
+      NETWORK_NO_RESPONSE_RETRY_DELAY_MS,
+    );
+    for (const status of [401, 403, 404, 400, 422, 429, 500, 503, 418]) {
+      expect(countTokensRetryDelayMs(apiError(status)), String(status)).toBe(0);
+    }
+    expect(countTokensRetryDelayMs(new Error("ECONNRESET"))).toBe(0);
+  });
+
+  it("A. a healthy request: one call, no timer is ever scheduled, resolves at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const countTokens = vi.fn(async () => ({ input_tokens: 100 }));
+      await expect(gate(stubClient(countTokens))).resolves.toBeUndefined();
+      expect(countTokens).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("B. no-response then success: the retry is not made before the wait elapses, is made exactly once after it, and the gate resolves", async () => {
+    vi.useFakeTimers();
+    try {
+      const countTokens = vi.fn().mockRejectedValueOnce(noResponse()).mockResolvedValueOnce({ input_tokens: 100 });
+      let settled = false;
+      const p = gate(stubClient(countTokens)).then(() => {
+        settled = true;
+      });
+      // The first attempt has failed and the wait is pending: one timer,
+      // one call so far, nothing resolved.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(countTokens).toHaveBeenCalledTimes(1);
+      expect(vi.getTimerCount()).toBe(1);
+      // One millisecond short of the bound: still no retry.
+      await vi.advanceTimersByTimeAsync(NETWORK_NO_RESPONSE_RETRY_DELAY_MS - 1);
+      expect(countTokens).toHaveBeenCalledTimes(1);
+      expect(settled).toBe(false);
+      // At the bound: exactly one retry, and it carries the result.
+      await vi.advanceTimersByTimeAsync(1);
+      await p;
+      expect(settled).toBe(true);
+      expect(countTokens).toHaveBeenCalledTimes(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("C. no-response twice: one wait, the one retry, then TokenCountUnavailableError(transient, NETWORK_NO_RESPONSE) — no second wait, no third call", async () => {
+    vi.useFakeTimers();
+    try {
+      const countTokens = vi.fn().mockRejectedValue(noResponse());
+      const settled = gate(stubClient(countTokens)).then(
+        () => null,
+        (e: unknown) => e,
+      );
+      await vi.advanceTimersByTimeAsync(NETWORK_NO_RESPONSE_RETRY_DELAY_MS);
+      const err = await settled;
+      expect(err).toBeInstanceOf(TokenCountUnavailableError);
+      expect((err as TokenCountUnavailableError).transient).toBe(true);
+      expect((err as TokenCountUnavailableError).diagnostic).toBe("NETWORK_NO_RESPONSE");
+      expect(countTokens).toHaveBeenCalledTimes(2);
+      // Nothing left pending: a further advance changes nothing.
+      expect(vi.getTimerCount()).toBe(0);
+      await vi.advanceTimersByTimeAsync(NETWORK_NO_RESPONSE_RETRY_DELAY_MS * 10);
+      expect(countTokens).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("other transient classes retry at once exactly as before (503, 429): no timer, two calls", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const status of [503, 429]) {
+        const countTokens = vi.fn().mockRejectedValueOnce(apiError(status)).mockResolvedValueOnce({ input_tokens: 100 });
+        await expect(gate(stubClient(countTokens))).resolves.toBeUndefined();
+        expect(countTokens, String(status)).toHaveBeenCalledTimes(2);
+        expect(vi.getTimerCount()).toBe(0);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("a permanent failure neither waits nor retries: one call, rejects at once", async () => {
+    vi.useFakeTimers();
+    try {
+      for (const status of [401, 400, 404]) {
+        const countTokens = vi.fn().mockRejectedValue(apiError(status));
+        await expect(gate(stubClient(countTokens))).rejects.toBeInstanceOf(TokenCountUnavailableError);
+        expect(countTokens, String(status)).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(0);
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("the shared loop: the delay hook is consulted only for a transient first failure, and a policy answering 0 retries at once", async () => {
+    vi.useFakeTimers();
+    try {
+      const consulted: unknown[] = [];
+      const policy = (e: unknown) => {
+        consulted.push(e);
+        return 0;
+      };
+      // Non-transient: rethrown before the hook is consulted.
+      await expect(
+        retryOnceIfTransient(async () => {
+          throw apiError(401);
+        }, isTransientAnthropicApiError, { delayBeforeRetryMs: policy }),
+      ).rejects.toBeInstanceOf(Anthropic.APIError);
+      expect(consulted).toHaveLength(0);
+      // Success: never consulted.
+      await expect(retryOnceIfTransient(async () => "ok", isTransientAnthropicApiError, { delayBeforeRetryMs: policy })).resolves.toBe("ok");
+      expect(consulted).toHaveLength(0);
+      // Transient, policy says 0: consulted once, retried at once, no timer.
+      let n = 0;
+      await expect(
+        retryOnceIfTransient(async () => {
+          n += 1;
+          if (n === 1) throw apiError(503);
+          return "ok";
+        }, isTransientAnthropicApiError, { delayBeforeRetryMs: policy }),
+      ).resolves.toBe("ok");
+      expect(consulted).toHaveLength(1);
+      expect(n).toBe(2);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
@@ -321,17 +488,30 @@ describe("end to end: the terminal error an operator actually sees", () => {
     });
   }
 
-  it("13. the capability stays EVIDENCE_EXTRACTOR_COUNT_TOKENS and the message now says WHY", async () => {
-    const { err } = await gateFailure(apiError(429));
+  it("13. a permanent count_tokens failure: the capability stays EVIDENCE_EXTRACTOR_COUNT_TOKENS and the message says WHY", async () => {
+    // NETWORK TRANSIENT RESILIENCE V1: the immediately-fatal path is now
+    // the PERMANENT one (a transient failure on a single document is a
+    // document-local EXTRACT_FAILED — see the case below and
+    // tests/transient-extractor-resilience-v1.test.ts). 401 here.
+    const { err } = await gateFailure(apiError(401));
     const rejection = runWithExtractorThrowing(err);
     await expect(rejection).rejects.toBeInstanceOf(CapabilityFatalError);
     await rejection.catch((thrown: CapabilityFatalError) => {
       expect(thrown.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS");
       expect(thrown.message).toBe(
-        "capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError:RATE_LIMITED:429",
+        "capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError:AUTHENTICATION_FAILED:401",
       );
       expect(thrown.message).not.toContain(SECRET);
     });
+  }, 30_000);
+
+  it("13b. a transient count_tokens failure on the run's only document is document-local: no throw, the classified WHY still persists, nothing leaks", async () => {
+    const { err } = await gateFailure(apiError(429));
+    const result = await runWithExtractorThrowing(err);
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
+    expect(result.reason).toContain("EXTRACT_FAILED:RATE_LIMITED:429");
+    expect(result.reason).not.toContain(SECRET);
   }, 30_000);
 
   it("a forged diagnostic never reaches the terminal message either", async () => {

@@ -58,6 +58,33 @@ export function isTransientAnthropicApiError(e: unknown): boolean {
   return status === 429 || status === undefined || (status >= 500 && status < 600);
 }
 
+// NETWORK TRANSIENT RESILIENCE V1 (founder-approved, application-level
+// only) — how long the ONE retry waits after a first attempt that the
+// provider never answered. The live run 1f8e1a63 died on a single
+// count_tokens NETWORK_NO_RESPONSE whose immediate retry landed inside the
+// same short tunnel outage (proven to last ~10–30 s) as the first attempt,
+// so "one retry" bought nothing. Waiting this long before that same
+// single retry gives the outage time to end. It is a delay, not an
+// attempt: the retry count stays exactly one, no third call is ever
+// made, nothing is reserved or billed for the wait, and a successful
+// first attempt never waits at all.
+export const NETWORK_NO_RESPONSE_RETRY_DELAY_MS = 15_000;
+
+export interface RetryOnceOptions {
+  // Milliseconds to wait between a transient attempt-1 failure and the
+  // ONE retry, decided from the failure itself. Omitted, or returning 0,
+  // means "retry at once" — the pre-existing behaviour, which every
+  // transient class other than NETWORK_NO_RESPONSE keeps (token-gate.ts's
+  // countTokensRetryDelayMs is the only policy in production). Never
+  // consulted for a non-transient failure (those are rethrown before it)
+  // and never for a successful first attempt.
+  delayBeforeRetryMs?: (firstAttemptError: unknown) => number;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // `isTransient` defaults to isTransientError (the pre-existing default
 // every caller except token-gate.ts still wants — retrying an already-
 // classified, already-wrapped typed error). token-gate.ts passes
@@ -67,11 +94,14 @@ export function isTransientAnthropicApiError(e: unknown): boolean {
 export async function retryOnceIfTransient<T>(
   fn: () => Promise<T>,
   isTransient: (e: unknown) => boolean = isTransientError,
+  options: RetryOnceOptions = {},
 ): Promise<T> {
   try {
     return await fn();
   } catch (e) {
     if (!isTransient(e)) throw e;
+    const delayMs = options.delayBeforeRetryMs?.(e) ?? 0;
+    if (delayMs > 0) await sleep(delayMs);
     return await fn();
   }
 }

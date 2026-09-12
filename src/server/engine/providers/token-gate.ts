@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { isTransientAnthropicApiError, retryOnceIfTransient } from "./retry";
+import { isTransientAnthropicApiError, NETWORK_NO_RESPONSE_RETRY_DELAY_MS, retryOnceIfTransient } from "./retry";
 
 // S10 (live-provider-enablement.md §5, D-118) — D-090's provable model-
 // input bound, implemented as COUNT-THEN-GATE: before every Anthropic
@@ -40,10 +40,14 @@ import { isTransientAnthropicApiError, retryOnceIfTransient } from "./retry";
 //     one retry) rather than going through s4-executor.ts's reservation-
 //     gated retry loop, since there is nothing to reserve for a non-
 //     billable call. An unresolved failure after that retry is
-//     classified consistently with other model-provider capability
-//     failures by s4-executor.ts's reserveAndCallWithRetry (BLOCKER-1:
-//     capability-fatal), never silently converted into "research still
-//     happened normally".
+//     classified by s4-executor.ts's reserveAndCallWithRetry on the
+//     error's `transient` flag (NETWORK TRANSIENT RESILIENCE V1): a
+//     permanent/config/auth/capability failure is capability-fatal at
+//     once (BLOCKER-1, unchanged); a transient one is fatal everywhere
+//     except the EvidenceExtractor per-document loop, which tolerates
+//     ONE such document as a local EXTRACT_FAILED and is fatal on the
+//     second consecutive one — never silently converted into "research
+//     still happened normally".
 
 export class ModelInputOversizedError extends Error {
   readonly transient = false;
@@ -145,6 +149,17 @@ export class TokenCountUnavailableError extends Error {
   }
 }
 
+// NETWORK TRANSIENT RESILIENCE V1 — the delay policy for the ONE
+// count_tokens retry, decided from the raw SDK exception with the same
+// closed classifier everything else uses. Only the class where the
+// provider was never heard from waits (the proven short tunnel-outage
+// shape of the live run 1f8e1a63); a 429/5xx answered by the provider
+// retries at once exactly as before, and a permanent failure never
+// reaches this (it is not transient, so it is not retried at all).
+export function countTokensRetryDelayMs(e: unknown): number {
+  return classifyTokenCountFailure(e).diagnostic === "NETWORK_NO_RESPONSE" ? NETWORK_NO_RESPONSE_RETRY_DELAY_MS : 0;
+}
+
 // Throws ModelInputOversizedError or TokenCountUnavailableError; resolves
 // (void) only when the exact count is within bound and generation may
 // proceed. `system`/`messages`/`outputConfig` must be the IDENTICAL
@@ -166,10 +181,13 @@ export async function countThenGate(
     // (.transient-field) classifier — a raw count_tokens exception never
     // carries that field, so the default would never retry a genuinely
     // transient 429/503/network failure. Exactly one retry, max 2 total
-    // count_tokens attempts.
+    // count_tokens attempts — a NETWORK_NO_RESPONSE first attempt waits
+    // NETWORK_NO_RESPONSE_RETRY_DELAY_MS before that one retry (see
+    // countTokensRetryDelayMs); nothing else changes the attempt count.
     result = await retryOnceIfTransient(
       () => client.messages.countTokens({ model, system, messages, output_config: outputConfig }),
       isTransientAnthropicApiError,
+      { delayBeforeRetryMs: countTokensRetryDelayMs },
     );
   } catch (e) {
     // The message is COMPOSED from closed values only — the diagnostic

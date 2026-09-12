@@ -2,55 +2,62 @@
 
 > Overwrite this file each round. Never append.
 
-## TRANSIENT EXTRACTOR RESILIENCE V1 (done this round)
+## NETWORK TRANSIENT RESILIENCE V1 (done this round)
 
 Offline round. No live call, no provider/model call, no new Research job, no
-budget change, no schema, no new subsystem, no provider fallback. Founder
-decision: option C through the existing caller-decides seam, N = 2.
+budget change, no retry-count change, no schema, no new subsystem, no
+provider fallback, no Happ/Windows/VPN change. Founder decision:
+application-level resilience only.
 
-The seed-injection validation run `06ade56b-…` selected, fetched and began
-extracting its approved documents, then died as
-`FAILED / SYSTEM_OR_PROVIDER_FAILURE / CapabilityFatalError` on ONE
-document's `NETWORK_NO_RESPONSE` — its first component's second document,
-right after the first had extracted OK — with two FAILED
-`MODEL_CALL_ATTEMPTED` rows that said only `PROVIDER_ERROR` (verified in
-the local `atlas_dev` trace, rows 53-64).
+The unseen Lido validation `1f8e1a63-…` did not fail on research semantics:
+it died `FAILED / SYSTEM_OR_PROVIDER_FAILURE / CapabilityFatalError` on ONE
+document's `count_tokens` `NETWORK_NO_RESPONSE` during a short Windows Happ
+tunnel outage, after substantial paid work had completed. Its one immediate
+count_tokens retry landed inside the same outage.
 
-- **Before → after.** Before: a document whose extractor generation call
-  failed transiently twice was by itself proof the capability was down —
-  `CapabilityFatalError` at once, job fatal. After: that document is a
-  document-local `EXTRACT_FAILED` carrying its typed `diagnostic_code`, no
-  Evidence, no contradiction, and the attempt continues to the next
-  document. Only the SECOND consecutive such document of the same job run
-  (no successful extraction between them) throws `CapabilityFatalError`,
-  exactly as before. A successful extraction resets the count.
-- **Unchanged.** At most 2 calls per document, each separately reserved.
-  `TOKEN_COUNT_UNAVAILABLE`, preflight configuration failures, QueryProposer
-  and SearchGateway retries stay immediately fatal. Budgets, SearchGateway,
-  QueryProposer, admission, reducers, verdicts, Verification, provider
-  configuration, latency architecture: untouched.
-- **Observability.** Both FAILED `MODEL_CALL_ATTEMPTED` rows and the
-  `EXTRACT_FAILED` row persist the same typed `diagnostic_code` through the
-  existing gate. No vocabulary widened, no schema.
+- **Part 1 — count_tokens transient exhaustion is document-local, N = 2.**
+  `reserveAndCallWithRetry` now splits the count_tokens fatal cause on the
+  error's existing `transient` flag: `TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED`
+  (two attempts, 429/5xx/no-response) vs `TOKEN_COUNT_UNAVAILABLE` (one
+  attempt, permanent). The EvidenceExtractor loop treats the former exactly
+  like generation `TRANSIENT_RETRY_EXHAUSTED`: `EXTRACT_FAILED`
+  (`reason_code TOKEN_COUNT_UNAVAILABLE`, typed `diagnostic_code`), no
+  Evidence, no contradiction, attempt continues; the SAME consecutive-
+  document counter and threshold apply (one increment per document — the
+  retry is inside the call); a successful extraction resets; the second
+  consecutive transient document (either cause) throws `CapabilityFatalError`
+  exactly as before. Permanent count_tokens failures stay immediately fatal.
+- **Part 2 — one bounded wait before the one count_tokens retry.**
+  `retryOnceIfTransient(fn, isTransient, { delayBeforeRetryMs })`;
+  `countThenGate` passes `countTokensRetryDelayMs`: 15 s
+  (`NETWORK_NO_RESPONSE_RETRY_DELAY_MS`) only for `NETWORK_NO_RESPONSE`,
+  0 for every other class. No third attempt, no delay on success, none for
+  429/5xx (unchanged immediate retry), none for permanent failures.
+- **Not changed.** The executor-level generation retry still retries at
+  once (out of the approved scope — same option, one more call site, if
+  wanted). QueryProposer count_tokens transient exhaustion stays fatal.
+  Evidence admission, authority, SOURCE_ROUTE, reducers, routing, Research
+  Memory, EVM/Solana scope: untouched.
 
-Files: `src/server/engine/s4-executor.ts`,
-`tests/transient-extractor-resilience-v1.test.ts` (new, 10 cases),
-`tests/generation-diagnostic.test.ts`, `tests/s10-acceptance-closure.test.ts`,
-`docs/ai/CURRENT_STATE.md`, `docs/ai/ARCHITECTURE.md`, this file.
+Files: `src/server/engine/providers/retry.ts`,
+`src/server/engine/providers/token-gate.ts`, `src/server/engine/s4-executor.ts`,
+`scripts/anthropic-count-tokens-probe.ts`,
+`tests/transient-extractor-resilience-v1.test.ts`,
+`tests/count-tokens-diagnostic.test.ts`, `docs/ai/CURRENT_STATE.md`,
+`docs/ai/ARCHITECTURE.md`, this file.
 
 ### Reported, not done
 
-- A non-transient document-local failure between two transient ones does
-  NOT reset the count (only a successful extraction does — the literal
-  approved rule). If the founder prefers "any answered document resets",
-  that is a one-line change in the extractor loop plus test 4b.
-- `tests/acquisition-candidate-reachability-v1.test.ts` shipped in 63d3776
-  with three `tsc --noEmit` errors (runtime-green under vitest, which does
-  not type-check): two `supersedeProjectMemoryItem` calls missing the
-  `replacedBy` successor id, one dead `"FETCH_OK"` branch in a ternary over
-  a two-member literal union. Fixed as test-fixture-only corrections in the
-  follow-up hygiene commit — same fixture shape as d148 TESTS 6/7; no
-  production file touched. `tsc --noEmit` is clean again.
+- The generation-path retry in `reserveAndCallWithRetry` has no pre-retry
+  wait: a tunnel flap that outlasts count_tokens' 15 s wait can still cost
+  that document its generation retry immediately (then tolerated once by
+  Part 1 / TRANSIENT EXTRACTOR RESILIENCE V1).
+- The tolerance class is the existing `transient` flag (429/5xx/no-response),
+  the same class the generation-side tolerance already uses — not
+  no-response only. One rule for both calls, deliberately.
+- A non-transient document-local failure between two transient documents
+  still does NOT reset the count (unchanged from TRANSIENT EXTRACTOR
+  RESILIENCE V1).
 
 ### Next
 

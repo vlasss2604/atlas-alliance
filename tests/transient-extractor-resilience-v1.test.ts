@@ -1,5 +1,6 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
   evidence,
@@ -20,7 +21,7 @@ import { EvidenceExtractorUnavailableError } from "../src/server/engine/provider
 import type { EvidenceExtractor } from "../src/server/engine/providers/evidence-extractor";
 import type { QueryProposer } from "../src/server/engine/providers/query-proposer";
 import type { SearchGateway } from "../src/server/engine/providers/search-gateway";
-import { ModelInputOversizedError, TokenCountUnavailableError } from "../src/server/engine/providers/token-gate";
+import { countThenGate, ModelInputOversizedError, TokenCountUnavailableError } from "../src/server/engine/providers/token-gate";
 import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
 import type { ModelCostProfile } from "../src/server/engine/model-cost-profile";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
@@ -42,7 +43,14 @@ import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./ph
 //   - N = 2 consecutive such documents, with no successful extraction
 //     between them, is CapabilityFatalError exactly as before;
 //   - a successful extraction resets the count to 0;
-//   - COUNT_TOKENS and configuration failures stay immediately fatal.
+//   - configuration failures stay immediately fatal.
+//
+// NETWORK TRANSIENT RESILIENCE V1 (the live run 1f8e1a63 died the same way
+// on ONE document's count_tokens NETWORK_NO_RESPONSE, during a short
+// tunnel outage): the SAME rule, counter and N=2 now cover a document
+// whose count_tokens exhausted ITS transient retry — cases D through H
+// below. A PERMANENT count_tokens failure (auth/config/request) is still
+// immediately fatal (case G).
 
 let ctx: TestContext;
 
@@ -165,7 +173,17 @@ function networkNoResponse(): EvidenceExtractorUnavailableError {
 // A scripted extractor: `plan` maps a document url to what EVERY call for
 // that document does. Records the per-document call count so "no extra
 // retry" is provable, not assumed.
-type DocBehaviour = "TRANSIENT" | "OK" | "PERMANENT_403" | "OVERSIZED" | "COUNT_TOKENS_DOWN";
+type DocBehaviour =
+  | "TRANSIENT"
+  | "OK"
+  | "PERMANENT_403"
+  | "OVERSIZED"
+  // count_tokens exhausted its own transient retry (what token-gate.ts
+  // throws after its 2 attempts): transient, NETWORK_NO_RESPONSE.
+  | "COUNT_TOKENS_DOWN"
+  // count_tokens refused permanently (what token-gate.ts throws after its
+  // 1 attempt): not transient, AUTHENTICATION_FAILED:401.
+  | "COUNT_TOKENS_PERMANENT_401";
 function scripted(plan: Record<string, DocBehaviour>) {
   const calls = new Map<string, number>();
   const extractor: EvidenceExtractor = {
@@ -184,6 +202,8 @@ function scripted(plan: Record<string, DocBehaviour>) {
           throw new ModelInputOversizedError(99_999, 8_000);
         case "COUNT_TOKENS_DOWN":
           throw new TokenCountUnavailableError("simulated count_tokens outage", true, "NETWORK_NO_RESPONSE", null);
+        case "COUNT_TOKENS_PERMANENT_401":
+          throw new TokenCountUnavailableError("simulated count_tokens 401", false, "AUTHENTICATION_FAILED", 401);
         default:
           throw new Error(`unscripted document ${url}`);
       }
@@ -384,23 +404,197 @@ describe("transient extractor resilience — one document is local, two consecut
     expect(await evidenceRows(p.jobId)).toHaveLength(0);
   });
 
-  it("6. COUNT_TOKENS unavailable stays immediately fatal on the FIRST document: one call, EVIDENCE_EXTRACTOR_COUNT_TOKENS, the next document never touched", async () => {
+  it("D. count_tokens: the FIRST document exhausting its transient retry is document-local — EXTRACT_FAILED persists TOKEN_COUNT_UNAVAILABLE/NETWORK_NO_RESPONSE, no CapabilityFatalError, the next document yields Evidence", async () => {
     const p = await makeJob();
     const urls = [U(1), U(2)];
     const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "OK" });
+    const result = await executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId));
+
+    expect(result.status).toBe("SUCCEEDED");
+    // count_tokens retried INSIDE the one extract call (token-gate.ts);
+    // the executor never re-calls the extractor for a count_tokens failure.
+    expect(s.calls(U(1))).toBe(1);
+    expect(s.calls(U(2))).toBe(1);
+    expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(2)]);
+
+    const rows = await trace(p.jobId);
+    const forDoc1 = rows.filter((r) => r.targetRef === U(1));
+    expect(forDoc1.filter((r) => r.operationType === "EXTRACT_ATTEMPTED")).toHaveLength(1);
+    const failedCalls = forDoc1.filter((r) => r.operationType === "MODEL_CALL_ATTEMPTED" && r.status === "FAILED");
+    expect(failedCalls).toHaveLength(1);
+    expect(failedCalls[0].diagnosticCode).toBe("NETWORK_NO_RESPONSE");
+    // The document-local record, with the count_tokens-specific reason code
+    // the trace vocabulary already distinguishes, and the typed WHY.
+    const failed = forDoc1.filter((r) => r.operationType === "EXTRACT_FAILED");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].status).toBe("FAILED");
+    expect(failed[0].reasonCode).toBe("TOKEN_COUNT_UNAVAILABLE");
+    expect(failed[0].diagnosticCode).toBe("NETWORK_NO_RESPONSE");
+    expect(forDoc1.filter((r) => r.operationType === "EXTRACT_OK")).toHaveLength(0);
+    expect(result.reason).not.toContain("CONTRADICTED");
+  });
+
+  it("D2. count_tokens: the run's only document fails transiently -> an ordinary FAILED attempt naming the typed WHY, never a thrown job", async () => {
+    const p = await makeJob();
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN" });
+    const result = await executorFor(p, [U(1)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
+    expect(result.reason).toContain("EXTRACT_FAILED:NETWORK_NO_RESPONSE");
+    expect(s.calls(U(1))).toBe(1);
+    expect(await evidenceRows(p.jobId)).toHaveLength(0);
+  });
+
+  it("E. count_tokens: the SECOND consecutive distinct document exhausting its transient retry is CapabilityFatalError('EVIDENCE_EXTRACTOR_COUNT_TOKENS'), the third document never touched", async () => {
+    const p = await makeJob();
+    const urls = [U(1), U(2), U(3)];
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "COUNT_TOKENS_DOWN", [U(3)]: "OK" });
     const outcome = executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId));
     await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
     await outcome.catch((e: CapabilityFatalError) => {
       expect(e.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS");
+      expect(e.message).toBe(
+        "capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError:NETWORK_NO_RESPONSE",
+      );
+    });
+    expect(s.calls(U(1))).toBe(1);
+    expect(s.calls(U(2))).toBe(1);
+    expect(s.calls(U(3))).toBe(0);
+    const rows = await trace(p.jobId);
+    // Both documents have their own EXTRACT_FAILED row — the first as the
+    // tolerated one, the second written before the throw.
+    const failed = rows.filter((r) => r.operationType === "EXTRACT_FAILED");
+    expect(failed.map((r) => r.targetRef)).toEqual([U(1), U(2)]);
+    expect(failed.every((r) => r.reasonCode === "TOKEN_COUNT_UNAVAILABLE" && r.diagnosticCode === "NETWORK_NO_RESPONSE")).toBe(true);
+    expect(await evidenceRows(p.jobId)).toHaveLength(0);
+  });
+
+  it("E2. the two transient causes share the one counter: a count_tokens document then a generation document (and the reverse) is two consecutive, fatal", async () => {
+    {
+      const p = await makeJob();
+      const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "TRANSIENT", [U(3)]: "OK" });
+      const outcome = executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+      await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+      await outcome.catch((e: CapabilityFatalError) => expect(e.capability).toBe("EVIDENCE_EXTRACTOR"));
+      expect(s.calls(U(1))).toBe(1);
+      expect(s.calls(U(2))).toBe(2);
+      expect(s.calls(U(3))).toBe(0);
+    }
+    {
+      const p = await makeJob();
+      const s = scripted({ [U(1)]: "TRANSIENT", [U(2)]: "COUNT_TOKENS_DOWN", [U(3)]: "OK" });
+      const outcome = executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+      await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+      await outcome.catch((e: CapabilityFatalError) => expect(e.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS"));
+      expect(s.calls(U(1))).toBe(2);
+      expect(s.calls(U(2))).toBe(1);
+      expect(s.calls(U(3))).toBe(0);
+    }
+  });
+
+  it("E3. job level: two consecutive count_tokens documents still end as FAILED / SYSTEM_OR_PROVIDER_FAILURE / CapabilityFatalError with no S7 conclusion", async () => {
+    const p = await makeJob();
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "COUNT_TOKENS_DOWN" });
+    const result = await handleResearchJobTask(ctx.db, p.jobId, executorFor(p, [U(1), U(2)], s.extractor));
+    expect(result.claimed).toBe(true);
+    const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId));
+    expect(job.state).toBe("FAILED");
+    expect(job.terminationReason).toBe("SYSTEM_OR_PROVIDER_FAILURE");
+    expect(job.errorCode).toBe("CapabilityFatalError");
+    expect(await ctx.db.select().from(researchClaimSupport).where(eq(researchClaimSupport.researchJobId, p.jobId))).toHaveLength(0);
+    expect(s.totalCalls()).toBe(2);
+  });
+
+  it("F. reset: a successful extraction between two count_tokens documents makes the later one the FIRST again — no false capability-fatal outcome", async () => {
+    const p = await makeJob();
+    const urls = [U(1), U(2), U(3)];
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "OK", [U(3)]: "COUNT_TOKENS_DOWN" });
+    const result = await executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("SUCCEEDED");
+    expect(s.calls(U(1))).toBe(1);
+    expect(s.calls(U(2))).toBe(1);
+    expect(s.calls(U(3))).toBe(1);
+    expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(2)]);
+    const failed = (await trace(p.jobId)).filter((r) => r.operationType === "EXTRACT_FAILED");
+    expect(failed.map((r) => r.targetRef)).toEqual([U(1), U(3)]);
+    expect(failed.every((r) => r.reasonCode === "TOKEN_COUNT_UNAVAILABLE")).toBe(true);
+  });
+
+  it("F2. only a SUCCESSFUL extraction resets: a permanent document-local failure between two count_tokens documents does not", async () => {
+    const p = await makeJob();
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "PERMANENT_403", [U(3)]: "COUNT_TOKENS_DOWN" });
+    await expect(executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
+    expect(s.calls(U(1))).toBe(1);
+    expect(s.calls(U(2))).toBe(1);
+    expect(s.calls(U(3))).toBe(1);
+  });
+
+  it("G. a PERMANENT count_tokens failure stays immediately fatal on the FIRST document: one call, EVIDENCE_EXTRACTOR_COUNT_TOKENS naming AUTHENTICATION_FAILED:401, no EXTRACT_FAILED row, the next document never touched", async () => {
+    const p = await makeJob();
+    const urls = [U(1), U(2)];
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_PERMANENT_401", [U(2)]: "OK" });
+    const outcome = executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId));
+    await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+    await outcome.catch((e: CapabilityFatalError) => {
+      expect(e.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS");
+      expect(e.message).toBe(
+        "capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — EVIDENCE_EXTRACTOR_FAILED:TokenCountUnavailableError:AUTHENTICATION_FAILED:401",
+      );
     });
     expect(s.calls(U(1))).toBe(1);
     expect(s.calls(U(2))).toBe(0);
     const rows = await trace(p.jobId);
     const failedCalls = rows.filter((r) => r.operationType === "MODEL_CALL_ATTEMPTED" && r.status === "FAILED");
     expect(failedCalls).toHaveLength(1);
-    expect(failedCalls[0].diagnosticCode).toBe("NETWORK_NO_RESPONSE");
+    expect(failedCalls[0].diagnosticCode).toBe("AUTHENTICATION_FAILED:401");
     // Not a document-local failure: no EXTRACT_FAILED row is written for it.
     expect(rows.filter((r) => r.operationType === "EXTRACT_FAILED")).toHaveLength(0);
+    expect(await evidenceRows(p.jobId)).toHaveLength(0);
+  });
+
+  it("G2. a permanent count_tokens failure is fatal even right after a tolerated transient one — the tolerance is never applied to it", async () => {
+    const p = await makeJob();
+    const s = scripted({ [U(1)]: "OK", [U(2)]: "COUNT_TOKENS_PERMANENT_401", [U(3)]: "OK" });
+    const outcome = executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+    await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+    await outcome.catch((e: CapabilityFatalError) => expect(e.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS"));
+    expect(s.calls(U(3))).toBe(0);
+    // The Evidence extracted before is persisted, never deleted.
+    expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(1)]);
+  });
+
+  it("H. same-document count_tokens retries count ONE distinct document: the real countThenGate makes 2 count_tokens calls for the document, the counter reads 1, and the next document carries the attempt", async () => {
+    const p = await makeJob();
+    // A real countThenGate against a stub SDK client: attempt 1 and its one
+    // retry both answer 503 (transient, answered by the provider — retried
+    // at once, no wait), so the extractor throws exactly what production
+    // throws after the internal retry is exhausted. If retries were counted
+    // as documents, U(1) alone would already be the second consecutive one
+    // and the job would be fatal before U(2) is reached.
+    const countTokens = vi.fn(async () => {
+      throw new Anthropic.APIError(503, undefined, "server error", undefined, undefined);
+    });
+    const client = { messages: { countTokens, create: vi.fn() } } as unknown as Anthropic;
+    const extractCalls = new Map<string, number>();
+    const extractor: EvidenceExtractor = {
+      name: "fixture",
+      async extract(input) {
+        const url = input.document.finalUrl;
+        extractCalls.set(url, (extractCalls.get(url) ?? 0) + 1);
+        if (url === U(1)) {
+          await countThenGate(client, "m", "sys", [{ role: "user", content: input.document.normalizedText }], undefined, 8_000);
+        }
+        return [validFact()];
+      },
+    };
+    const result = await executorFor(p, [U(1), U(2)], extractor).execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("SUCCEEDED");
+    expect(countTokens).toHaveBeenCalledTimes(2); // the unchanged internal allowance, no third call
+    expect(extractCalls.get(U(1))).toBe(1); // the executor never re-calls for a count_tokens failure
+    expect(extractCalls.get(U(2))).toBe(1);
+    expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(2)]);
+    const failed = (await trace(p.jobId)).filter((r) => r.operationType === "EXTRACT_FAILED");
+    expect(failed.map((r) => [r.targetRef, r.reasonCode, r.diagnosticCode])).toEqual([[U(1), "TOKEN_COUNT_UNAVAILABLE", "PROVIDER_SERVER_ERROR:503"]]);
   });
 
   // 6b. Configuration failures (missing exact role/model cost profile,

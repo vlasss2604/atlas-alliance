@@ -19,8 +19,10 @@
 // evidence-extractor-anthropic.ts constructs it ({ apiKey, maxRetries: 0 }),
 // the model id is the same product-config value the extractor resolves,
 // and the call is wrapped in the SAME retry composition countThenGate
-// uses — retryOnceIfTransient with isTransientAnthropicApiError — so a
-// transient failure retries exactly once, like production. countThenGate
+// uses — retryOnceIfTransient with isTransientAnthropicApiError and
+// countTokensRetryDelayMs — so a transient failure retries exactly once,
+// after the same bounded wait for a no-response first attempt, like
+// production. countThenGate
 // itself returns void, so this probe composes the same exported
 // primitives instead, to be able to REPORT the count; if countThenGate's
 // composition ever changes, this file must follow it.
@@ -53,7 +55,7 @@ import {
   isTransientAnthropicApiError,
   retryOnceIfTransient,
 } from "../src/server/engine/providers/retry";
-import { classifyTokenCountFailure } from "../src/server/engine/providers/token-gate";
+import { classifyTokenCountFailure, countTokensRetryDelayMs } from "../src/server/engine/providers/token-gate";
 
 async function main(): Promise<void> {
   console.log("--- anthropic count_tokens capability probe ---");
@@ -104,6 +106,7 @@ async function main(): Promise<void> {
         });
       },
       isTransientAnthropicApiError,
+      { delayBeforeRetryMs: countTokensRetryDelayMs },
     );
     console.log("");
     console.log("SUCCESS");

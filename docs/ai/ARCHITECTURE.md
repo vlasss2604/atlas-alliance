@@ -498,8 +498,13 @@ null), and a string cause now surfaces inside `CapabilityFatalError`'s
 message, so a terminal owner run says
 `capability unavailable: EVIDENCE_EXTRACTOR_COUNT_TOKENS — …:RATE_LIMITED:429`
 instead of only naming the capability. Raw provider messages, keys, bodies and
-stacks still never cross; the internal count_tokens retry (at most one, only
-for 429/5xx/no-status) is unchanged.
+stacks still never cross; the internal count_tokens retry stays at most one,
+only for 429/5xx/no-status — and (NETWORK TRANSIENT RESILIENCE V1) waits a
+bounded `NETWORK_NO_RESPONSE_RETRY_DELAY_MS` (15 s, retry.ts) before that one
+retry **only** when the first attempt was `NETWORK_NO_RESPONSE`, the proven
+short-tunnel-outage shape; 429/5xx retry at once as before, a permanent
+failure is never retried, and a successful first attempt never waits. It is a
+delay, not an attempt: no third call, nothing reserved or billed for the wait.
 
 **A generation failure names its cause from the same closed discipline.** The
 extractor's `messages.create` path used to collapse every failure — a 4xx
@@ -530,12 +535,19 @@ one caller allowed to decide this (the same seam D-120 gives
 `budget_exhausted`), throws `CapabilityFatalError` whose message reads
 `capability unavailable: EVIDENCE_EXTRACTOR — …:NETWORK_NO_RESPONSE` only
 when TWO consecutive documents of the same job run do so with no successful
-extraction between them; a successful extraction resets that count.
-`TOKEN_COUNT_UNAVAILABLE`, preflight configuration failures, and the
-QueryProposer / SearchGateway retries are not softened. Every FAILED
-`MODEL_CALL_ATTEMPTED` row and the `EXTRACT_FAILED` row persist the same
-typed `diagnostic_code`. The trace vocabulary is deliberately unwidened —
-same decision as the count_tokens fix.
+extraction between them; a successful extraction resets that count. The same
+seam, counter and N = 2 cover a document whose **count_tokens** exhausted its
+own transient retry (`fatalCause TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED`; its
+`EXTRACT_FAILED` row says `reason_code TOKEN_COUNT_UNAVAILABLE` and the typed
+class; the fatal message, when it comes, names
+`EVIDENCE_EXTRACTOR_COUNT_TOKENS`) — the two transient causes are one signal
+against one provider. A PERMANENT count_tokens failure
+(`fatalCause TOKEN_COUNT_UNAVAILABLE`: auth/config/request/unknown, never
+retried), preflight configuration failures, and the QueryProposer /
+SearchGateway retries are not softened. Every FAILED `MODEL_CALL_ATTEMPTED`
+row and the `EXTRACT_FAILED` row persist the same typed `diagnostic_code`.
+The trace vocabulary is deliberately unwidened — same decision as the
+count_tokens fix.
 Usage accounting is also deliberately unchanged: provider failures and
 `MAX_TOKENS_TRUNCATED` throw before the in-memory usage capture, while
 `OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID` capture usage first — but that

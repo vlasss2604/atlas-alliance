@@ -601,8 +601,13 @@ function resolveCostProfile(
 //                       only when TWO consecutive documents do so with
 //                       no successful extraction between them. See the
 //                       extractor section of createS4WorkExecutor for
-//                       the exact N=2 rule; a TOKEN_COUNT_UNAVAILABLE
-//                       fatal is never softened anywhere.
+//                       the exact N=2 rule. NETWORK TRANSIENT RESILIENCE
+//                       V1 extends that same seam, same counter, same
+//                       N=2, to a document whose count_tokens exhausted
+//                       ITS transient retry (TOKEN_COUNT_TRANSIENT_
+//                       RETRY_EXHAUSTED); a permanent count_tokens
+//                       failure (TOKEN_COUNT_UNAVAILABLE) is never
+//                       softened anywhere.
 interface RetryOutcome<T> {
   kind: "ok" | "budget_exhausted" | "local" | "fatal";
   value?: T;
@@ -610,9 +615,17 @@ interface RetryOutcome<T> {
   reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE" | "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED";
   capability?: string;
   // Present on every "fatal" outcome — the typed WHY, so a caller that is
-  // allowed to soften one of the two fatal causes decides on a closed
+  // allowed to soften the transient fatal causes decides on a closed
   // discriminator, never by parsing `reason` or `capability` text.
-  fatalCause?: "TRANSIENT_RETRY_EXHAUSTED" | "TOKEN_COUNT_UNAVAILABLE";
+  //   TRANSIENT_RETRY_EXHAUSTED             — the generation call failed
+  //                                           transiently on both attempts.
+  //   TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED — count_tokens failed transiently
+  //                                           on both of ITS attempts
+  //                                           (token-gate.ts's own retry).
+  //   TOKEN_COUNT_UNAVAILABLE               — count_tokens failed permanently
+  //                                           (auth/config/request/unknown):
+  //                                           one attempt, never softened.
+  fatalCause?: "TRANSIENT_RETRY_EXHAUSTED" | "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" | "TOKEN_COUNT_UNAVAILABLE";
   // The closed, membership-gated detail (safeFailureDetail product) of a
   // "local" or "fatal" failure, when one exists — null/absent otherwise.
   // Lets the caller SAY the classified WHY (in the observation channel
@@ -738,9 +751,15 @@ async function reserveAndCallWithRetry<T>(params: {
         // count_tokens already retried internally (token-gate.ts) before
         // this exception was thrown — an unresolved failure here means
         // the counting capability itself is unavailable, immediately.
+        // The typed cause says whether that retry was even attempted:
+        // `transient` is the flag token-gate.ts set from the SAME
+        // classifier that decided to retry (isTransientAnthropicApiError),
+        // so a permanent failure (one attempt, no retry) and an exhausted
+        // transient one (two attempts) are told apart on a closed field —
+        // the per-document caller may soften only the latter.
         return {
           kind: "fatal",
-          fatalCause: "TOKEN_COUNT_UNAVAILABLE",
+          fatalCause: e.transient ? "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" : "TOKEN_COUNT_UNAVAILABLE",
           reason: safeFailureReason(params.label, e),
           capability: `${params.capability}_COUNT_TOKENS`,
           detail: safeFailureDetail(e),
@@ -920,6 +939,18 @@ function observationCode(observation: "INVALID_ROUTE_CLASS" | "SOURCE_ROUTE_CONF
 // successful extraction in between. One document can be unlucky; two in a
 // row with nothing succeeding between them is the capability-wide signal
 // the fatal channel is reserved for.
+//
+// NETWORK TRANSIENT RESILIENCE V1 (founder-approved, application-level
+// only): the SAME rule, counter and threshold now also cover a document
+// whose count_tokens call exhausted its own transient retry (the live run
+// 1f8e1a63 died as SYSTEM_OR_PROVIDER_FAILURE on ONE such document, during
+// a short tunnel outage, after substantial paid work had completed). The
+// two transient causes share one counter because they are one signal —
+// "the provider could not be reached for this document, twice" — against
+// one provider; which of the two calls did not get through says nothing
+// more about whether the NEXT document will. Permanent count_tokens
+// failures (auth/config/request) are not transient and stay immediately
+// fatal, exactly as before.
 const CONSECUTIVE_TRANSIENT_DOCUMENTS_FATAL_THRESHOLD = 2;
 
 export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
@@ -932,11 +963,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
   // document failing the same way, is two consecutive documents. The
   // controller runs attempts strictly one after another, so no two
   // documents are ever in flight against this counter at once. It is
-  // incremented only by a document whose generation call exhausted the
-  // transient retry, reset only by a successful extraction (admitted or
-  // not — the extractor answered), and left untouched by every other
-  // outcome (oversized, non-transient, budget-denied), none of which says
-  // anything about whether the capability is reachable.
+  // incremented only by a document whose generation call — or, since
+  // NETWORK TRANSIENT RESILIENCE V1, whose count_tokens call — exhausted
+  // the transient retry (once per DOCUMENT: the retries happen inside
+  // that one call, below this counter, so a document can never count
+  // twice), reset only by a successful extraction (admitted or not — the
+  // extractor answered, which means count_tokens AND generation both got
+  // through), and left untouched by every other outcome (oversized,
+  // non-transient, budget-denied), none of which says anything about
+  // whether the capability is reachable.
   let consecutiveTransientlyFailedDocuments = 0;
   return {
     async execute(item: ComponentWorkItem, ctx): Promise<WorkExecutionResult> {
@@ -2566,26 +2601,36 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAmount: evidenceExtractorCostMicro,
             diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
           });
-          if (extractOutcome.fatalCause !== "TRANSIENT_RETRY_EXHAUSTED") {
-            // BLOCKER-1, unchanged: count_tokens unavailable after its own
-            // internal retry is proven capability unavailability — throw,
-            // never return an ordinary FAILED/SKIPPED result (see the
-            // QueryProposer section above for the full propagation note).
+          const transientCause =
+            extractOutcome.fatalCause === "TRANSIENT_RETRY_EXHAUSTED" ||
+            extractOutcome.fatalCause === "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED";
+          if (!transientCause) {
+            // BLOCKER-1, unchanged: a PERMANENT count_tokens failure
+            // (auth/config/request/unknown — not retried, not transient)
+            // is proven capability unavailability — throw, never return an
+            // ordinary FAILED/SKIPPED result (see the QueryProposer section
+            // above for the full propagation note).
             throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
           }
-          // TRANSIENT_RETRY_EXHAUSTED — the caller-decided case. This
-          // document's generation call failed transiently twice (its
-          // allowance; no third call is ever made). It is recorded as the
-          // same document-local EXTRACT_FAILED a non-transient failure
-          // gets, with the same typed diagnostic_code, it produces no
-          // Evidence and no contradiction, and the attempt moves to the
-          // next document. Should nothing else in the attempt survive, the
-          // existing resolution below yields FAILED /
-          // EVIDENCE_EXTRACTOR_UNAVAILABLE — a fact about the run, never
-          // about the project. Only when this is the SECOND consecutive
-          // such document (no successful extraction since the first) is
-          // it the capability-wide signal, thrown exactly as before.
-          await recordDocumentExtractionFailure({ reasonCode: "PROVIDER_ERROR", detail: extractOutcome.detail });
+          // TRANSIENT_RETRY_EXHAUSTED / TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED
+          // — the caller-decided case. This document's generation call, or
+          // its count_tokens call, failed transiently twice (its allowance;
+          // no third call is ever made). It is recorded as the same
+          // document-local EXTRACT_FAILED a non-transient failure gets,
+          // with the same typed diagnostic_code (and, for count_tokens, the
+          // TOKEN_COUNT_UNAVAILABLE reason code the row already
+          // distinguishes), it produces no Evidence and no contradiction,
+          // and the attempt moves to the next document. Should nothing
+          // else in the attempt survive, the existing resolution below
+          // yields FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE — a fact about
+          // the run, never about the project. Only when this is the SECOND
+          // consecutive such document (no successful extraction since the
+          // first) is it the capability-wide signal, thrown exactly as
+          // before.
+          await recordDocumentExtractionFailure({
+            reasonCode: extractOutcome.fatalCause === "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" ? "TOKEN_COUNT_UNAVAILABLE" : "PROVIDER_ERROR",
+            detail: extractOutcome.detail,
+          });
           consecutiveTransientlyFailedDocuments += 1;
           if (consecutiveTransientlyFailedDocuments >= CONSECUTIVE_TRANSIENT_DOCUMENTS_FATAL_THRESHOLD) {
             throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
