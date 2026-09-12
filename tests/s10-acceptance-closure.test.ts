@@ -206,7 +206,31 @@ describe("S10 closure — BLOCKER-1: capability-fatal execution channel", () => 
     expect(calls).toBe(2);
   });
 
-  it("D. persistent provider 429 (EvidenceExtractor) after retry -> CapabilityFatalError('EVIDENCE_EXTRACTOR')", async () => {
+  it("D. persistent provider 429 (EvidenceExtractor) after retry on TWO consecutive documents -> CapabilityFatalError('EVIDENCE_EXTRACTOR')", async () => {
+    const p = await makeJob();
+    const url1 = "https://example.com/d-429-1";
+    const url2 = "https://example.com/d-429-2";
+    let extractCalls = 0;
+    const evidenceExtractor: EvidenceExtractor = {
+      name: "fixture",
+      async extract() {
+        extractCalls++;
+        throw new EvidenceExtractorUnavailableError("api 429: rate limited", true);
+      },
+    };
+    const executor = createS4WorkExecutor(
+      depsFor(p, {
+        queryProposer: fixedQueryProposer(["q1"]),
+        searchGateway: fixedSearchGateway([url1, url2]),
+        contentFetcher: fixedContentFetcher({ [url1]: doc({ finalUrl: url1 }), [url2]: doc({ finalUrl: url2 }) }),
+        evidenceExtractor,
+      }),
+    );
+    await expect(executor.execute(ITEM, ctxFor(p.jobId))).rejects.toThrow(CapabilityFatalError);
+    expect(extractCalls).toBe(4); // 2 documents x the unchanged 2-call allowance, never a third call per document
+  });
+
+  it("D2. persistent provider 429 (EvidenceExtractor) after retry on ONE document -> local FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE, never fatal (transient extractor resilience)", async () => {
     const p = await makeJob();
     const url = "https://example.com/d-429";
     let extractCalls = 0;
@@ -225,8 +249,12 @@ describe("S10 closure — BLOCKER-1: capability-fatal execution channel", () => 
         evidenceExtractor,
       }),
     );
-    await expect(executor.execute(ITEM, ctxFor(p.jobId))).rejects.toThrow(CapabilityFatalError);
+    const result = await executor.execute(ITEM, ctxFor(p.jobId));
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
     expect(extractCalls).toBe(2);
+    const trace = await traceRowsFor(p.jobId);
+    expect(trace.filter((t) => t.operationType === "EXTRACT_FAILED" && t.targetRef === url)).toHaveLength(1);
   });
 
   it("E. one oversized document with another viable source -> local skip, research continues (never fatal)", async () => {

@@ -36,7 +36,10 @@ import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isTransientError } from "./providers/retry";
 import { isTokenCountDiagnostic, ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
-import { isExtractorFailureDiagnosticCode } from "./providers/extractor-failure-diagnostics";
+import {
+  isExtractorFailureDiagnosticCode,
+  type ExtractorFailureDiagnosticCode,
+} from "./providers/extractor-failure-diagnostics";
 import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from "./providers/types";
 import { isOnchainExplorerUrl, resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import {
@@ -490,6 +493,19 @@ function classifyTraceReasonCode(e: unknown): "MODEL_INPUT_OVERSIZED" | "TOKEN_C
   return "PROVIDER_ERROR";
 }
 
+// The extractor-side diagnostic_code for a trace row, from an already
+// classified detail (a safeFailureDetail product — either read straight
+// off a RetryOutcome, or computed here from the raw exception the retry
+// loop hands its onTransientRetry callback). Narrows to the persistable
+// vocabulary exactly as the EXTRACT_FAILED row always has; recordTraceEvent
+// re-checks membership independently. No closed detail -> null, never a
+// guess. One rule for every extractor MODEL_CALL_ATTEMPTED / EXTRACT_FAILED
+// row, so the two attempt rows and the document's terminal row can never
+// disagree about WHY.
+function extractorDiagnosticCode(detail: string | null | undefined): ExtractorFailureDiagnosticCode | null {
+  return isExtractorFailureDiagnosticCode(detail) ? detail : null;
+}
+
 async function callProvider<T>(
   label: string,
   fn: () => Promise<T>,
@@ -572,21 +588,38 @@ function resolveCostProfile(
 //                       transient failure survived through the allowed
 //                       retry, or count_tokens (which owns its own
 //                       internal retry, see token-gate.ts) could not be
-//                       obtained at all. The caller MUST throw
-//                       CapabilityFatalError for this case — never
-//                       return an ordinary WorkExecutionResult.
+//                       obtained at all. `fatalCause` says which. The
+//                       caller MUST throw CapabilityFatalError for this
+//                       case — never return an ordinary
+//                       WorkExecutionResult — with ONE caller-decided
+//                       exception (the same seam HIGH-1/D-120 already
+//                       gives "budget_exhausted"): the EvidenceExtractor
+//                       per-document loop treats ONE document whose
+//                       generation call exhausted the transient retry as
+//                       a local, continuable EXTRACT_FAILED and throws
+//                       only when TWO consecutive documents do so with
+//                       no successful extraction between them. See the
+//                       extractor section of createS4WorkExecutor for
+//                       the exact N=2 rule; a TOKEN_COUNT_UNAVAILABLE
+//                       fatal is never softened anywhere.
 interface RetryOutcome<T> {
   kind: "ok" | "budget_exhausted" | "local" | "fatal";
   value?: T;
   reason?: string;
   reasonCode?: "PROVIDER_ERROR" | "MODEL_INPUT_OVERSIZED" | "TOKEN_COUNT_UNAVAILABLE" | "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED";
   capability?: string;
+  // Present on every "fatal" outcome — the typed WHY, so a caller that is
+  // allowed to soften one of the two fatal causes decides on a closed
+  // discriminator, never by parsing `reason` or `capability` text.
+  fatalCause?: "TRANSIENT_RETRY_EXHAUSTED" | "TOKEN_COUNT_UNAVAILABLE";
   // The closed, membership-gated detail (safeFailureDetail product) of a
-  // "local" failure, when one exists — null/absent otherwise. Lets the
-  // caller SAY the classified WHY (e.g. in the observation channel)
-  // without ever holding the raw exception; "fatal" outcomes don't need
-  // it because their `reason` already embeds the same detail into the
-  // CapabilityFatalError message.
+  // "local" or "fatal" failure, when one exists — null/absent otherwise.
+  // Lets the caller SAY the classified WHY (in the observation channel
+  // and on the trace row's diagnostic_code) without ever holding the raw
+  // exception. For "fatal" it is the same detail `reason` already embeds
+  // into the CapabilityFatalError message, carried separately so the
+  // trace rows written before/instead of a throw persist the typed code
+  // rather than the bare PROVIDER_ERROR the live run was left with.
   detail?: string | null;
   attempts: number;
 }
@@ -704,14 +737,28 @@ async function reserveAndCallWithRetry<T>(params: {
         // count_tokens already retried internally (token-gate.ts) before
         // this exception was thrown — an unresolved failure here means
         // the counting capability itself is unavailable, immediately.
-        return { kind: "fatal", reason: safeFailureReason(params.label, e), capability: `${params.capability}_COUNT_TOKENS`, attempts };
+        return {
+          kind: "fatal",
+          fatalCause: "TOKEN_COUNT_UNAVAILABLE",
+          reason: safeFailureReason(params.label, e),
+          capability: `${params.capability}_COUNT_TOKENS`,
+          detail: safeFailureDetail(e),
+          attempts,
+        };
       }
       if (!isTransientError(e)) {
         return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", detail: safeFailureDetail(e), attempts };
       }
       if (attempt === 2) {
         // Transient on the retry too — the capability itself is down.
-        return { kind: "fatal", reason: safeFailureReason(params.label, e), capability: params.capability, attempts };
+        return {
+          kind: "fatal",
+          fatalCause: "TRANSIENT_RETRY_EXHAUSTED",
+          reason: safeFailureReason(params.label, e),
+          capability: params.capability,
+          detail: safeFailureDetail(e),
+          attempts,
+        };
       }
       // Transient on attempt 1 — loop continues, reserves again, retries.
       if (params.onTransientRetry) await params.onTransientRetry(e);
@@ -859,7 +906,37 @@ function observationCode(observation: "INVALID_ROUTE_CLASS" | "SOURCE_ROUTE_CONF
   return observation;
 }
 
+// TRANSIENT EXTRACTOR RESILIENCE (founder decision, option C via the
+// caller-decides seam): how many extractor generation calls are made per
+// document is unchanged (at most 2 — one transient retry). What changes is
+// what ONE document exhausting that retry means. Before: proof that the
+// capability is down, thrown as CapabilityFatalError at once, ending the
+// job as SYSTEM_OR_PROVIDER_FAILURE — the live run 06ade56b died this way
+// on a single NETWORK_NO_RESPONSE at its first component's SECOND document,
+// right after the first had extracted successfully (two EXTRACT_OK rows).
+// Now: a local EXTRACT_FAILED for that document, and the job is fatal only
+// when this many CONSECUTIVE documents each exhaust their retry with no
+// successful extraction in between. One document can be unlucky; two in a
+// row with nothing succeeding between them is the capability-wide signal
+// the fatal channel is reserved for.
+const CONSECUTIVE_TRANSIENT_DOCUMENTS_FATAL_THRESHOLD = 2;
+
 export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
+  // The consecutive-document counter. Held on the executor instance — one
+  // per job run in every production path (worker.ts / live-executor.ts /
+  // owner-alpha-routing.ts each build one per job) and never shared across
+  // jobs — so "consecutive" spans the documents of one attempt AND the
+  // documents of the attempts that follow it: an attempt whose only
+  // document failed transiently, followed by the next attempt's first
+  // document failing the same way, is two consecutive documents. The
+  // controller runs attempts strictly one after another, so no two
+  // documents are ever in flight against this counter at once. It is
+  // incremented only by a document whose generation call exhausted the
+  // transient retry, reset only by a successful extraction (admitted or
+  // not — the extractor answered), and left untouched by every other
+  // outcome (oversized, non-transient, budget-denied), none of which says
+  // anything about whether the capability is reachable.
+  let consecutiveTransientlyFailedDocuments = 0;
   return {
     async execute(item: ComponentWorkItem, ctx): Promise<WorkExecutionResult> {
       const target: ComponentTarget = {
@@ -2373,6 +2450,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               reasonCode: classifyTraceReasonCode(firstAttemptError),
               budgetAxis: "modelCostMicro",
               budgetAmount: evidenceExtractorCostMicro,
+              // The typed WHY of the failed first attempt (e.g.
+              // NETWORK_NO_RESPONSE, RATE_LIMITED:429), on the row itself.
+              // The live run 06ade56b persisted two FAILED attempt rows
+              // that said only PROVIDER_ERROR while the class sat in the
+              // thrown message — this is the proven gap.
+              diagnosticCode: extractorDiagnosticCode(safeFailureDetail(firstAttemptError)),
             });
           },
         });
@@ -2401,37 +2484,23 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           });
           throw new BudgetExhaustedError("modelCostMicro", extractOutcome.reason ?? "MODEL_COST_BUDGET_EXHAUSTED");
         }
-        if (extractOutcome.kind === "fatal") {
-          // BLOCKER-1: EvidenceExtractor unavailable after the approved
-          // retry — throw, never return an ordinary FAILED/SKIPPED
-          // result (see the QueryProposer section above for the full
-          // propagation note). §8/D-120: budgetAmount covers only THIS
-          // (final, still-failing) attempt — a prior transient attempt-1
-          // failure already has its own row from onTransientRetry above.
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "MODEL_CALL_ATTEMPTED",
-            providerKind: "EXTRACT",
-            providerName: evidenceExtractor.name,
-            patternStep: item.step,
-            component: item.component,
-            targetRef: doc.finalUrl,
-            status: "FAILED",
-            reasonCode: "PROVIDER_ERROR",
-            budgetAxis: "modelCostMicro",
-            budgetAmount: evidenceExtractorCostMicro,
-          });
-          throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
-        }
-        if (extractOutcome.kind === "local") {
+        // The document-local failure record, shared by a non-transient
+        // ("local") outcome and — new — by a document whose generation
+        // call exhausted the transient retry. One writer, so both paths
+        // persist the same row shape and the same typed diagnostic_code,
+        // and both count toward the attempt's own FAILED /
+        // EVIDENCE_EXTRACTOR_UNAVAILABLE resolution below.
+        const recordDocumentExtractionFailure = async (outcome: {
+          reasonCode?: RetryOutcome<unknown>["reasonCode"];
+          detail?: string | null;
+        }): Promise<void> => {
           extractionFailures += 1;
           // S10 acceptance closure (BLOCKER-1, D-119, "IMPORTANT OVERSIZED
           // INPUT RULE"): an oversized source is a local operational skip,
           // never evidence of the extractor being unavailable — a batch
           // where every failure is MODEL_INPUT_OVERSIZED must resolve to
           // SKIPPED below, not FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE.
-          if (extractOutcome.reasonCode !== "MODEL_INPUT_OVERSIZED") nonOversizedExtractionFailures += 1;
+          if (outcome.reasonCode !== "MODEL_INPUT_OVERSIZED") nonOversizedExtractionFailures += 1;
           // Generation-side closed diagnostic (BACKLOG: "Generation-side
           // extractor failures lose their class"): when the failure
           // carries a closed, membership-gated detail, say it in the
@@ -2440,7 +2509,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // failure collapses to the bare EVIDENCE_EXTRACTOR_UNAVAILABLE
           // terminal line while the classified WHY is dropped. A failure
           // with no closed detail adds nothing — never a guessed class.
-          if (extractOutcome.detail) observations.add(`EXTRACT_FAILED:${extractOutcome.detail}`);
+          if (outcome.detail) observations.add(`EXTRACT_FAILED:${outcome.detail}`);
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -2455,7 +2524,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             component: item.component,
             targetRef: doc.finalUrl,
             status: "FAILED",
-            reasonCode: extractOutcome.reasonCode ?? "PROVIDER_ERROR",
+            reasonCode: outcome.reasonCode ?? "PROVIDER_ERROR",
             // THE CLASSIFIED WHY, ON THE ROW ITSELF.
             //
             // The observation added just above says the same thing, and on
@@ -2472,13 +2541,63 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             // gates; this narrows it to the persistable vocabulary, and
             // recordTraceEvent re-checks membership independently. A
             // failure with no closed detail persists null — never a guess.
-            diagnosticCode: isExtractorFailureDiagnosticCode(extractOutcome.detail)
-              ? extractOutcome.detail
-              : null,
+            diagnosticCode: extractorDiagnosticCode(outcome.detail),
           });
+        };
+
+        if (extractOutcome.kind === "fatal") {
+          // §8/D-120: budgetAmount covers only THIS (final, still-failing)
+          // attempt — a prior transient attempt-1 failure already has its
+          // own row from onTransientRetry above. The typed WHY is on this
+          // row too, for the same reason it is on that one.
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "MODEL_CALL_ATTEMPTED",
+            providerKind: "EXTRACT",
+            providerName: evidenceExtractor.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "FAILED",
+            reasonCode: "PROVIDER_ERROR",
+            budgetAxis: "modelCostMicro",
+            budgetAmount: evidenceExtractorCostMicro,
+            diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
+          });
+          if (extractOutcome.fatalCause !== "TRANSIENT_RETRY_EXHAUSTED") {
+            // BLOCKER-1, unchanged: count_tokens unavailable after its own
+            // internal retry is proven capability unavailability — throw,
+            // never return an ordinary FAILED/SKIPPED result (see the
+            // QueryProposer section above for the full propagation note).
+            throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
+          }
+          // TRANSIENT_RETRY_EXHAUSTED — the caller-decided case. This
+          // document's generation call failed transiently twice (its
+          // allowance; no third call is ever made). It is recorded as the
+          // same document-local EXTRACT_FAILED a non-transient failure
+          // gets, with the same typed diagnostic_code, it produces no
+          // Evidence and no contradiction, and the attempt moves to the
+          // next document. Should nothing else in the attempt survive, the
+          // existing resolution below yields FAILED /
+          // EVIDENCE_EXTRACTOR_UNAVAILABLE — a fact about the run, never
+          // about the project. Only when this is the SECOND consecutive
+          // such document (no successful extraction since the first) is
+          // it the capability-wide signal, thrown exactly as before.
+          await recordDocumentExtractionFailure({ reasonCode: "PROVIDER_ERROR", detail: extractOutcome.detail });
+          consecutiveTransientlyFailedDocuments += 1;
+          if (consecutiveTransientlyFailedDocuments >= CONSECUTIVE_TRANSIENT_DOCUMENTS_FATAL_THRESHOLD) {
+            throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
+          }
           continue;
         }
-        // "ok"
+        if (extractOutcome.kind === "local") {
+          await recordDocumentExtractionFailure(extractOutcome);
+          continue;
+        }
+        // "ok" — the extractor answered: whatever happened to earlier
+        // documents, the capability is reachable now.
+        consecutiveTransientlyFailedDocuments = 0;
         const facts: ExtractedFact[] = extractOutcome.value!;
         // D-153 — a fact the canonical schema could not read is dropped
         // alone; its valid siblings in the same response survive. What is

@@ -608,10 +608,10 @@ const ITEM: ComponentWorkItem = {
 
 const DOC_URL = "https://docs.example-project.test/doc";
 
-function fixtureDoc(): FetchedDocument {
+function fixtureDoc(url: string = DOC_URL): FetchedDocument {
   return {
-    finalUrl: DOC_URL,
-    requestedUrl: DOC_URL,
+    finalUrl: url,
+    requestedUrl: url,
     httpStatus: 200,
     contentType: "text/html",
     normalizedText: "Fixture project: the protocol fee accrues directly to the treasury contract",
@@ -622,7 +622,10 @@ function fixtureDoc(): FetchedDocument {
 }
 
 describe("end to end: the terminal line an operator actually sees (items 14-18, 24)", () => {
-  async function runWithExtractor(extract: () => Promise<never>) {
+  // `urls` — the candidate documents this attempt fetches, in order; each
+  // is a distinct fetched document handed to the extractor one after
+  // another, which is what the N=2 consecutive-document rule counts.
+  async function runWithExtractor(extract: () => Promise<never>, urls: readonly string[] = [DOC_URL]) {
     const slug = uniq("gend");
     const [project] = await ctx.db
       .insert(projects)
@@ -654,13 +657,13 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
       searchGateway: {
         name: "fixture",
         async search() {
-          return [{ url: DOC_URL, title: "t", snippet: "s" }];
+          return urls.map((url) => ({ url, title: "t", snippet: "s" }));
         },
       },
       contentFetcher: {
         name: "fixture",
-        async fetch() {
-          return fixtureDoc();
+        async fetch(url: string) {
+          return fixtureDoc(url);
         },
       },
       evidenceExtractor: {
@@ -710,7 +713,7 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
     expect(failed[0].reasonCode).toBe("PROVIDER_ERROR");
   }, 30_000);
 
-  it("14/16. a transient failure retries exactly once, then CapabilityFatalError names capability EVIDENCE_EXTRACTOR (never _COUNT_TOKENS) and the closed class", async () => {
+  it("14/16. ONE document's transient failure retries exactly once, then stays document-local: FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE naming the closed class, never CapabilityFatalError, and every FAILED row carries the typed diagnostic_code", async () => {
     const { err } = await extractFailure(async () => {
       throw apiError(429);
     });
@@ -718,6 +721,44 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
     const { outcome, calls, jobId } = await runWithExtractor(async () => {
       throw err;
     });
+    // Transient extractor resilience: one document exhausting its retry is
+    // no longer job-fatal — the attempt resolves through the existing
+    // all-documents-failed path, and the terminal line names the class.
+    const result = await outcome;
+    expect(result.status).toBe("FAILED");
+    expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
+    expect(result.reason).toContain("EXTRACT_FAILED:RATE_LIMITED:429");
+    expect(result.reason).not.toContain(SECRET);
+    // Retry allowance unchanged: exactly two calls for the document.
+    expect(calls.extract).toBe(2);
+    const trace = await traceRowsFor(jobId);
+    expect(trace.filter((t) => t.operationType === "EXTRACT_ATTEMPTED")).toHaveLength(2);
+    // The proven diagnostic gap: both FAILED attempt rows AND the document's
+    // terminal EXTRACT_FAILED row persist the same typed code — before,
+    // the attempt rows said only PROVIDER_ERROR.
+    const failedCalls = trace.filter((t) => t.operationType === "MODEL_CALL_ATTEMPTED" && t.status === "FAILED");
+    expect(failedCalls).toHaveLength(2);
+    for (const row of failedCalls) {
+      expect(row.reasonCode).toBe("PROVIDER_ERROR");
+      expect(row.diagnosticCode).toBe("RATE_LIMITED:429");
+    }
+    const failed = trace.filter((t) => t.operationType === "EXTRACT_FAILED");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].reasonCode).toBe("PROVIDER_ERROR");
+    expect(failed[0].diagnosticCode).toBe("RATE_LIMITED:429");
+  }, 30_000);
+
+  it("14/16b. TWO consecutive documents each exhausting the retry -> CapabilityFatalError names capability EVIDENCE_EXTRACTOR (never _COUNT_TOKENS) and the closed class", async () => {
+    const { err } = await extractFailure(async () => {
+      throw apiError(429);
+    });
+    expect(err.transient).toBe(true);
+    const { outcome, calls, jobId } = await runWithExtractor(
+      async () => {
+        throw err;
+      },
+      [DOC_URL, "https://docs.example-project.test/doc-2"],
+    );
     await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
     await outcome.catch((thrown: CapabilityFatalError) => {
       expect(thrown.capability).toBe("EVIDENCE_EXTRACTOR");
@@ -726,9 +767,13 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
       );
       expect(thrown.message).not.toContain(SECRET);
     });
-    expect(calls.extract).toBe(2);
+    // Two documents x the unchanged two-call allowance — no extra retry.
+    expect(calls.extract).toBe(4);
     const trace = await traceRowsFor(jobId);
-    expect(trace.filter((t) => t.operationType === "EXTRACT_ATTEMPTED")).toHaveLength(2);
+    expect(trace.filter((t) => t.operationType === "EXTRACT_ATTEMPTED")).toHaveLength(4);
+    const failedCalls = trace.filter((t) => t.operationType === "MODEL_CALL_ATTEMPTED" && t.status === "FAILED");
+    expect(failedCalls).toHaveLength(4);
+    expect(failedCalls.every((t) => t.diagnosticCode === "RATE_LIMITED:429")).toBe(true);
   }, 30_000);
 
   it("17. MAX_TOKENS_TRUNCATED does not gain a retry: one attempt, named in the terminal reason", async () => {

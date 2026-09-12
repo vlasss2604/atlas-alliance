@@ -367,6 +367,63 @@ the one holding the retriever, so the distinction cannot be made there
 safely. The live run used the single-process executor, which is where the
 waste was measured.
 
+## ONE UNLUCKY DOCUMENT NO LONGER ENDS THE RESEARCH (TRANSIENT EXTRACTOR RESILIENCE V1)
+
+The seed-injection validation run (`06ade56b-…`, 2026-09-11) selected,
+fetched and began extracting its approved documents — and died as
+`FAILED / SYSTEM_OR_PROVIDER_FAILURE / CapabilityFatalError` on ONE
+document's `NETWORK_NO_RESPONSE` at its first component: trace rows 61-64,
+`ray-buybacks.md`, the SECOND document, after `protocol-fees.md` had
+produced two `EXTRACT_OK` rows (53-60). Under the old
+rule any document whose generation call failed transiently twice was, by
+itself, proof that the capability was down. Founder decision: option C via
+the existing caller-decides seam, N = 2.
+
+**What changed, at the EvidenceExtractor call site only.** A document that
+exhausts its transient retry is now a document-local `EXTRACT_FAILED`
+(`reason_code PROVIDER_ERROR`, `diagnostic_code` = the typed class, e.g.
+`NETWORK_NO_RESPONSE` or `RATE_LIMITED:429`), produces no Evidence and no
+contradiction, adds `EXTRACT_FAILED:<class>` to the attempt's observation
+channel, counts toward the attempt's existing all-documents-failed
+resolution, and the attempt moves to the next document. A consecutive-
+document counter on the executor instance (one per job run; the controller
+runs attempts strictly in sequence) is incremented by such a document,
+reset to 0 by ANY successful extraction (admitted or not — the extractor
+answered), and left untouched by every other outcome (oversized,
+non-transient, budget-denied — none says whether the capability is
+reachable). When it reaches 2 — two consecutive documents, across attempts
+of the same run, with no successful extraction between them — the second
+document's `EXTRACT_FAILED` is written and `CapabilityFatalError` is
+thrown exactly as before, so the job still ends
+`SYSTEM_OR_PROVIDER_FAILURE`. `reserveAndCallWithRetry` itself is
+unchanged in policy: at most 2 calls per document, each separately
+reserved; its `fatal` outcome now carries `fatalCause`
+(`TRANSIENT_RETRY_EXHAUSTED` | `TOKEN_COUNT_UNAVAILABLE`) and the closed
+`detail`, so the caller decides on a typed discriminator, never by parsing
+text.
+
+**What stays immediately fatal.** `TOKEN_COUNT_UNAVAILABLE` after
+count_tokens' own internal retry (`EVIDENCE_EXTRACTOR_COUNT_TOKENS`), every
+preflight configuration failure (missing profile / credential / provider
+config), QueryProposer and SearchGateway transient exhaustion — untouched.
+
+**If nothing else survives the attempt** the existing semantics apply
+unchanged: attempt `FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE`, the
+component's coverage `BLOCKED` (no SUCCEEDED attempt), read as `TECHNICAL`
+— a fact about the run, never about the project; missing Evidence is never
+`CONTRADICTED`.
+
+**The proven diagnostic gap is closed.** The run's two FAILED
+`MODEL_CALL_ATTEMPTED` rows said only `PROVIDER_ERROR`. Both attempt rows
+(the transient first attempt and the final one) and the document's
+`EXTRACT_FAILED` row now persist the same typed `diagnostic_code` through
+the existing `extractor-failure-diagnostics.ts` gate — no vocabulary
+widened, no schema.
+
+`tests/transient-extractor-resilience-v1.test.ts` (10 cases);
+`generation-diagnostic` 14/16 and `s10-acceptance-closure` D re-pinned to
+the N=2 rule. No live run.
+
 ## CANDIDATE REACHABILITY IS PATH-INDEPENDENT, AND TARGETING FOLLOWS THE ADAPTER
 
 The clean Raydium validation run (`5cc4a75a-…`, 2026-09-11,

@@ -520,13 +520,22 @@ diagnostic and claim nothing.
 The boundary admits the union of the two closed lists with the same two-gate
 rule (class identity + runtime membership; forged values and forged non-integer
 statuses return null). How it surfaces depends on the failure's own retry
-class, both unchanged: a transient failure that survives the one executor
-retry throws `CapabilityFatalError` whose message now reads
-`capability unavailable: EVIDENCE_EXTRACTOR — …:RATE_LIMITED:429`; a
-non-transient failure stays a local single-attempt event and the terminal
-FAILED reason now carries `EXTRACT_FAILED:<diagnostic>` through the existing
-observation channel (the same channel `DOCS_RENDER_FAILED` uses). The trace
-vocabulary is deliberately unwidened — same decision as the count_tokens fix.
+class: a non-transient failure stays a local single-attempt event and the
+terminal FAILED reason carries `EXTRACT_FAILED:<diagnostic>` through the
+existing observation channel (the same channel `DOCS_RENDER_FAILED` uses). A
+transient failure that survives the one executor retry (still at most 2 calls
+per document, each separately reserved) is ALSO a document-local
+`EXTRACT_FAILED` for that one document — and the EvidenceExtractor loop, the
+one caller allowed to decide this (the same seam D-120 gives
+`budget_exhausted`), throws `CapabilityFatalError` whose message reads
+`capability unavailable: EVIDENCE_EXTRACTOR — …:NETWORK_NO_RESPONSE` only
+when TWO consecutive documents of the same job run do so with no successful
+extraction between them; a successful extraction resets that count.
+`TOKEN_COUNT_UNAVAILABLE`, preflight configuration failures, and the
+QueryProposer / SearchGateway retries are not softened. Every FAILED
+`MODEL_CALL_ATTEMPTED` row and the `EXTRACT_FAILED` row persist the same
+typed `diagnostic_code`. The trace vocabulary is deliberately unwidened —
+same decision as the count_tokens fix.
 Usage accounting is also deliberately unchanged: provider failures and
 `MAX_TOKENS_TRUNCATED` throw before the in-memory usage capture, while
 `OUTPUT_NOT_JSON` / `OUTPUT_SCHEMA_INVALID` capture usage first — but that

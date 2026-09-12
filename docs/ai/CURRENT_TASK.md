@@ -2,52 +2,51 @@
 
 > Overwrite this file each round. Never append.
 
-## ACQUISITION CANDIDATE REACHABILITY ALIGNMENT V1 (done this round)
+## TRANSIENT EXTRACTOR RESILIENCE V1 (done this round)
 
 Offline round. No live call, no provider/model call, no new Research job, no
-budget change, no schema, no new subsystem. Two generic candidate-routing
-defects the clean Raydium validation run `5cc4a75a-e6e3-46cc-9670-c8ba462f185f`
-left standing after proving research semantics and showing the source-open
-budget was not the bottleneck.
+budget change, no schema, no new subsystem, no provider fallback. Founder
+decision: option C through the existing caller-decides seam, N = 2.
 
-- **A — D-148 seed injection is path-independent.** The selection policy
-  (D-148 eligibility, D-156 routing, D-150 provenance) is extracted
-  unchanged into `src/server/engine/source-resource-seeds.ts`
-  (`selectApprovedSeedTargets`) and consumed by both `loadFetchTargets`
-  (phased FETCH) and the single-process executor, which now admits every
-  seed routed to the component it is executing into its ordinary candidate
-  set — same reservation, same ceiling, same allowance, same transport,
-  same ranking, same dedupe, same authority resolution. Structurally
-  replayed read-only against the persisted rows: both approved Raydium
-  resources are eligible and rank first for the single-process path.
-  Whether they produce Evidence is NOT verified — no live fetch.
-- **B — D-133 explorer targeting follows on-chain reachability.**
-  `loadAcquisitionPlan.onchainLocators` is now gated by
-  `componentAdmitsOnchainAcquisition`, the gate the reserve, the intent
-  selector and the executor's explorer-open rule already share. A component
-  the adapter has no intent for (today: SOURCE_OF_VALUE) gets no
-  `site:<explorer> <address>` rewrite; general search, organic explorer
-  candidates, human-approved explorer resources and admitted locators are
-  untouched. On the run, all six SOURCE_OF_VALUE explorer opens came from
-  the two rewrites this removes.
+The seed-injection validation run `06ade56b-…` selected, fetched and began
+extracting its approved documents, then died as
+`FAILED / SYSTEM_OR_PROVIDER_FAILURE / CapabilityFatalError` on ONE
+document's `NETWORK_NO_RESPONSE` — its first component's second document,
+right after the first had extracted OK — with two FAILED
+`MODEL_CALL_ATTEMPTED` rows that said only `PROVIDER_ERROR` (verified in
+the local `atlas_dev` trace, rows 53-64).
 
-Job `5cc4a75a-…` was NOT mutated. `maxSourceOpens`, refunds, cross-job
-dead-url memory, OFFICIAL_DOCS pathPrefix rules, evidence authority,
-reducers/verdicts, Pattern semantics, the deterministic adapter, D-149,
-SSRF/IP pinning and the UI are all untouched.
+- **Before → after.** Before: a document whose extractor generation call
+  failed transiently twice was by itself proof the capability was down —
+  `CapabilityFatalError` at once, job fatal. After: that document is a
+  document-local `EXTRACT_FAILED` carrying its typed `diagnostic_code`, no
+  Evidence, no contradiction, and the attempt continues to the next
+  document. Only the SECOND consecutive such document of the same job run
+  (no successful extraction between them) throws `CapabilityFatalError`,
+  exactly as before. A successful extraction resets the count.
+- **Unchanged.** At most 2 calls per document, each separately reserved.
+  `TOKEN_COUNT_UNAVAILABLE`, preflight configuration failures, QueryProposer
+  and SearchGateway retries stay immediately fatal. Budgets, SearchGateway,
+  QueryProposer, admission, reducers, verdicts, Verification, provider
+  configuration, latency architecture: untouched.
+- **Observability.** Both FAILED `MODEL_CALL_ATTEMPTED` rows and the
+  `EXTRACT_FAILED` row persist the same typed `diagnostic_code` through the
+  existing gate. No vocabulary widened, no schema.
+
+Files: `src/server/engine/s4-executor.ts`,
+`tests/transient-extractor-resilience-v1.test.ts` (new, 10 cases),
+`tests/generation-diagnostic.test.ts`, `tests/s10-acceptance-closure.test.ts`,
+`docs/ai/CURRENT_STATE.md`, `docs/ai/ARCHITECTURE.md`, this file.
 
 ### Reported, not done
 
-- Explorer targeting is still issued for a component the adapter owns even
-  in a process where the adapter is available and the executor will then
-  skip the explorer HTTP opens it returns; those search units are the
-  remaining explorer-related spend and were deliberately not touched.
-- The `CLASS_REQUIRES_CONFIRMED_ROUTE:ONCHAIN_VERIFIABLE` observation now
-  also appears for a component with no adapter intent; it is observability
-  wording only.
-- Still open and deliberately out of scope: cross-job dead-url memory, a
-  second budget counter, refunds, repeated `WRONG_PROJECT` extraction,
-  `/ray/protocol-fees` vs `/ray/protocol-fees.md` pathPrefix disjointness.
+- A non-transient document-local failure between two transient ones does
+  NOT reset the count (only a successful extraction does — the literal
+  approved rule). If the founder prefers "any answered document resets",
+  that is a one-line change in the extractor loop plus test 4b.
+- `tests/acquisition-candidate-reachability-v1.test.ts` has three
+  pre-existing `tsc --noEmit` errors from 63d3776 (runtime-green under
+  vitest); not touched in this round.
 
 ### Next
 
