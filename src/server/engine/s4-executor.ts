@@ -42,6 +42,7 @@ import {
 } from "./providers/extractor-failure-diagnostics";
 import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from "./providers/types";
 import { isOnchainExplorerUrl, resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
+import { observeSourceRouteCandidate } from "./source-route-candidates";
 import {
   blendQueries,
   buildTargetedQueries,
@@ -2686,6 +2687,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // sourceClass/officiality.
         const entityBinding = computeEntityBinding(doc.finalUrl, sourceClass, plan.confirmedIdentity);
 
+        // Evidence rows genuinely NEW from THIS document — the strict
+        // eligibility input for the route-candidate observation below.
+        let insertedForDocument = 0;
         for (const fact of facts) {
           // D-070/D-072 structural containment: a fact for any OTHER
           // step/component is not "extra scope generously offered" — it
@@ -2808,6 +2812,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             .returning({ id: evidence.id });
           if (row) {
             insertedEvidenceIds.push(row.id);
+            insertedForDocument += 1;
             // Written only when the Evidence row is genuinely NEW — a
             // replayed extraction unit returns no row, and re-inserting
             // its locators would be writing children for a fact this
@@ -2834,6 +2839,38 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             // across every admitted fact — summing actual_cost_micro
             // over MODEL_CALL_ATTEMPTED alone gives the true cost.
           });
+        }
+
+        // UNSEEN PROJECT AUTHORITY BOOTSTRAP V1 — observe, never trust.
+        // This document passed containment and yielded Evidence this
+        // project can see; if its host is one no code-owned list knows and
+        // no human has confirmed (route resolved CLAIMED on finalUrl, the
+        // same resolution the Evidence rows above were sealed with), record
+        // the host as an OBSERVED route candidate for the owner to read.
+        // The candidate confers nothing — sourceClass/officiality above are
+        // already computed and persisted, and no authority consumer reads
+        // OBSERVED — and it never costs the attempt: a bookkeeping failure
+        // is an observation, not a research outcome.
+        if (insertedForDocument > 0) {
+          try {
+            const candidate = await observeSourceRouteCandidate(deps.db, {
+              projectId: deps.project.id,
+              jobId: ctx.jobId,
+              sourceId: sourceInfo.id,
+              finalUrl: doc.finalUrl,
+              component: item.component,
+              evidenceCount: insertedForDocument,
+              route,
+            });
+            if (candidate.outcome === "OBSERVED" || candidate.outcome === "UPDATED") {
+              observations.add(`SOURCE_ROUTE_CANDIDATE_OBSERVED:${candidate.domain}`);
+            } else if (candidate.reason === "CAP_REACHED") {
+              observations.add("SOURCE_ROUTE_CANDIDATE_CAP_REACHED");
+            }
+          } catch (e) {
+            console.error("[s4-executor] source route candidate observation failed", e);
+            observations.add("SOURCE_ROUTE_CANDIDATE_WRITE_FAILED");
+          }
         }
       }
 

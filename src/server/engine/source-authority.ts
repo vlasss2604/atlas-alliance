@@ -26,7 +26,11 @@ import type { EvidenceOfficiality, EvidenceSourceClass } from "./providers/types
 // route records — never from anything the model or the search provider
 // said about itself.
 
-function hostnameOf(url: string): string | null {
+// EXPORTED (UNSEEN PROJECT AUTHORITY BOOTSTRAP V1) so a route CANDIDATE is
+// recorded under exactly the host string resolveSourceRoute will later
+// compare — the same lowercase, the same "www." strip. A second spelling
+// of this normalization would be a second notion of "the same host".
+export function hostnameOf(url: string): string | null {
   try {
     return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
   } catch {
@@ -263,6 +267,31 @@ export function targetDomainsForClass(
   // it can never look like two independent sources — see D-129 note in
   // s4-executor about alias/domain duplication).
   return [...new Set([...confirmedRouteDomains, ...platform])];
+}
+
+// UNSEEN PROJECT AUTHORITY BOOTSTRAP V1 — "is this a host nobody has an
+// opinion about yet?" True only for a host that NO code-owned list above
+// recognizes (so resolveSourceClass would fall through to step 6 and, with
+// no routeClass, land on SOCIAL), that is not a test network, and that is
+// not the bare base domain of a shared multi-tenant platform (github.com,
+// gitbook.io — a tenant subdomain such as project.gitbook.io IS a specific
+// host and stays eligible, exactly as isBareSharedPlatformBase decides).
+//
+// This is the same kind of READ of the existing lists as
+// targetDomainsForClass: it adds no domain, grants no class, and says
+// nothing about who owns the host. Its only consumer records such a host
+// as an OBSERVED route candidate for a human to look at; it is deliberately
+// not consulted by resolveSourceClass or resolveSourceRoute, whose
+// behaviour is unchanged.
+export function isUnrecognizedDomain(url: string): boolean {
+  const host = hostnameOf(url);
+  if (!host) return false;
+  if (isTestNetworkHost(url)) return false;
+  for (const domains of Object.values(CLASS_OWNED_DOMAINS)) {
+    if (domains && hostMatchesAnyPlatform(host, domains)) return false;
+  }
+  if (isBareSharedPlatformBase(host)) return false;
+  return true;
 }
 
 // True when the class has NO code-owned domain list, i.e. it can only be
