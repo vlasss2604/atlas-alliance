@@ -44,9 +44,13 @@ Files: `src/server/engine/s4-executor.ts`,
   NOT reset the count (only a successful extraction does — the literal
   approved rule). If the founder prefers "any answered document resets",
   that is a one-line change in the extractor loop plus test 4b.
-- `tests/acquisition-candidate-reachability-v1.test.ts` has three
-  pre-existing `tsc --noEmit` errors from 63d3776 (runtime-green under
-  vitest); not touched in this round.
+- `tests/acquisition-candidate-reachability-v1.test.ts` shipped in 63d3776
+  with three `tsc --noEmit` errors (runtime-green under vitest, which does
+  not type-check): two `supersedeProjectMemoryItem` calls missing the
+  `replacedBy` successor id, one dead `"FETCH_OK"` branch in a ternary over
+  a two-member literal union. Fixed as test-fixture-only corrections in the
+  follow-up hygiene commit — same fixture shape as d148 TESTS 6/7; no
+  production file touched. `tsc --noEmit` is clean again.
 
 ### Next
 

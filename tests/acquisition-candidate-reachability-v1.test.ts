@@ -344,7 +344,12 @@ describe("A — an ACTIVE approved SOURCE_RESOURCE is a single-process candidate
     const item = await workItem(jobId, "SOURCE_OF_VALUE");
     const seed = `https://${project.host}/docs/fees.md`;
     const registered = await register(project.slug, seed, [item.component]);
-    await supersedeProjectMemoryItem(ctx.db, registered.itemId);
+    // Superseded IN FAVOUR of a real replacement, the way the lifecycle is
+    // meant to be used (same fixture shape as d148 TEST 6). The successor is
+    // routed to a component this attempt does not run, so it cannot itself
+    // be injected here and the scenario stays "the withdrawn seed alone".
+    const replacement = await register(project.slug, `https://${project.host}/docs/fees.md?v=2`, ["MECHANISM_SPEC"]);
+    await supersedeProjectMemoryItem(ctx.db, registered.itemId, replacement.itemId);
 
     const other = `https://${project.host}/other/page`;
     const { run, calls } = await runOneComponent({ project, jobId, item, searchResults: [other], fetchable: [seed, other] });
@@ -359,8 +364,12 @@ describe("A — an ACTIVE approved SOURCE_RESOURCE is a single-process candidate
     const item = await workItem(jobId, "SOURCE_OF_VALUE");
     const seed = `https://${project.host}/docs/fees.md`;
     await register(project.slug, seed, [item.component]);
-    // The approval outlives nothing: the classified route is withdrawn.
-    await supersedeProjectMemoryItem(ctx.db, project.routeIds.get("/docs")!);
+    // The approval outlives nothing: the classified route is withdrawn in
+    // favour of a successor on another prefix (same fixture shape as d148
+    // TEST 7), so /docs grants nothing and /docs/fees.md borrows nothing.
+    const successor = await confirmSourceRoute(ctx.db, { projectSlug: project.slug, domain: project.host, pathPrefix: "/elsewhere" });
+    if (!successor.ok) throw new Error("successor route fixture failed");
+    await supersedeProjectMemoryItem(ctx.db, project.routeIds.get("/docs")!, successor.itemId);
 
     const other = `https://${project.host}/other/page`;
     const { run, calls } = await runOneComponent({ project, jobId, item, searchResults: [other], fetchable: [seed, other] });
@@ -483,7 +492,7 @@ describe("A — an ACTIVE approved SOURCE_RESOURCE is a single-process candidate
         patternStep: 3,
         component: "MECHANISM_SPEC",
         targetRef: seed,
-        status: operationType === "FETCH_OK" ? "OK" : operationType === "FETCH_FAILED" ? "FAILED" : "OK",
+        status: operationType === "FETCH_FAILED" ? "FAILED" : "OK",
         reasonCode: operationType === "FETCH_FAILED" ? "PROVIDER_ERROR" : "NONE",
       });
     }
