@@ -40,6 +40,10 @@ export async function seed(db: Database): Promise<void> {
     // (scenario family APPROVED ≠ LIVE ≠ EXECUTING). Catalog entry only —
     // no identity, no route, no resource: the engine discovers everything.
     { slug: "morpho", name: "Morpho", ticker: null },
+    // Founder-approved 2026-09-12: the second UNSEEN validation project
+    // (scenario family REVENUE ≠ TOKEN VALUE CAPTURE). Catalog entry only —
+    // no identity, no route, no resource: the engine discovers everything.
+    { slug: "lido", name: "Lido", ticker: null },
   ] as const;
 
   for (const p of catalogProjects) {

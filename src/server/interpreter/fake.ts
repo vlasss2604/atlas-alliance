@@ -38,6 +38,7 @@ const KNOWN_ASSETS: Record<string, string[]> = {
   "Pump.fun": ["pump\\.fun", "pumpfun", "pump fun", "pump_fun"],
   Raydium: ["raydium"],
   Morpho: ["morpho"],
+  Lido: ["lido"],
   Hyperliquid: ["hyperliquid"],
   Uniswap: ["uniswap"],
   Aave: ["aave"],
