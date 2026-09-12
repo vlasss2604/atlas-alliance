@@ -131,6 +131,12 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   INDIRECT_ONLY: CONFIDENCE_BANDS.STRONG,
   STATE_NOT_FULLY_LIVE: CONFIDENCE_BANDS.STRONG,
   STALE_CURRENT_STATE: CONFIDENCE_BANDS.STRONG,
+  // GOVERNANCE LIFECYCLE SAFETY V1 — MISSING STRUCTURE, like the D-158 and
+  // B1 codes, not weak authority: the record describes a proposal (or an
+  // authorisation with no approval-bearing state), so what is absent is
+  // the decision itself, not a stronger source for one already taken.
+  PROPOSED_STATE_ONLY: CONFIDENCE_BANDS.LIMITED,
+  APPROVAL_NOT_ESTABLISHED: CONFIDENCE_BANDS.LIMITED,
 };
 
 // Why a band ended where it did. Closed vocabulary: every member is

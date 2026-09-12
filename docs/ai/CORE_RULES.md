@@ -56,6 +56,9 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Transfer ≠ buyback.** Transfer ≠ burn.
 - **Buyback ≠ burn.**
 - **Burn claim ≠ actual on-chain Burn/BurnChecked.**
+- **Proposal made ≠ proposal passed.** An official governance venue is not a
+  decision; a post on it establishes what was proposed, never that governance
+  approved it. `PROPOSED` ≠ `APPROVED` ≠ `ACTIVATED` ≠ `EXECUTING`.
 - **Proposal passed ≠ proposal executed.**
 - **Same transaction ≠ causality.** Co-occurrence is structure, never exchange.
   Two unrelated transfers batched together produce an identical picture.

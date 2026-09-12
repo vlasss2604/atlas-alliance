@@ -1109,6 +1109,13 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
     "The sources refer to this indirectly, without stating it.",
   STATE_NOT_FULLY_LIVE:
     "What is described is implementation or preparation, not a fully live state.",
+  // GOVERNANCE LIFECYCLE SAFETY V1 — both sentences describe the RECORD:
+  // what the sources say the mechanism is, and what they do not say was
+  // decided. Neither says a proposal was rejected or that nothing exists.
+  PROPOSED_STATE_ONLY:
+    "The sources describe this as a proposal, not as something adopted or in force.",
+  APPROVAL_NOT_ESTABLISHED:
+    "The sources show governance discussing or describing this, but nothing checked shows a decision approving it.",
   CONFLICTING_STATE: "The sources disagree about the current state.",
   TOKEN_STATE_UNQUALIFIED:
     "Token state is mentioned, but not precisely enough to settle the effect in question.",

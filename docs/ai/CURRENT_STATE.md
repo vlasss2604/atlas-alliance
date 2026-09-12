@@ -426,6 +426,57 @@ widened, no schema.
 `generation-diagnostic` 14/16 and `s10-acceptance-closure` D re-pinned to
 the N=2 rule. No live run.
 
+## A PROPOSAL IS NOT AN APPROVAL (GOVERNANCE LIFECYCLE SAFETY V1)
+
+The Lido human-owner authority review (2026-09-12) found a generic gap
+before any route was classified `GOVERNANCE`: S5 had no lifecycle gate on
+`GOVERNANCE_BASIS`, `MECHANISM_SPEC`, `RECIPIENT`, `DURABILITY_BASIS` (or
+`SOURCE_OF_VALUE`, `FLOW_PATH`, `DESTINATION`), so a GOVERNANCE row of ANY
+`mechanism_state` — including `PROPOSED` — fully established them. An RFC
+on a project's official forum, once that host carried the class, would have
+read as "governance authorises this mechanism". `research.lido.fi` was left
+unactivated for exactly this reason; it remains unactivated.
+
+**The rule, generic and subtractive (component-reconciler.ts).** Two new
+closed reason codes, both keeping the rows as support and capping the
+conclusion at `PARTIALLY_SUPPORTED`:
+
+- `PROPOSED_STATE_ONLY` — an establishing row positively declares
+  `PROPOSED` and no establishing row carries a post-proposal state
+  (`APPROVED`/`IMPLEMENTING`/`LIVE`/`PAUSED`/`DEPRECATED`/`REMOVED`).
+  Applied to every component that does not itself evaluate state: not
+  `EXECUTION_EVIDENCE` (already refuses `PROPOSED`), not `CURRENT_STATE`
+  (`PROPOSED` is a legitimate answer there), not `NET_EFFECT` (typed rule).
+  Class-independent — an official docs page saying "proposed" is capped
+  the same way. `UNKNOWN` is untouched, so evidence with no stated state
+  behaves exactly as before.
+- `APPROVAL_NOT_ESTABLISHED` — `GOVERNANCE_BASIS` only
+  (`requiresGovernanceApproval`, the same code-owned component-predicate
+  convention as `NET_EFFECT`'s supply rule): `SUPPORTED` requires an
+  establishing row with `APPROVED`, `IMPLEMENTING` or `LIVE`. `PROPOSED`,
+  `UNKNOWN` (null or unrecognised free text) and `PAUSED`/`DEPRECATED`/
+  `REMOVED` fail closed.
+
+Order is specific-first (`PROPOSED_STATE_ONLY` before
+`APPROVAL_NOT_ESTABLISHED`) because `reasonExplanation` renders the first
+code. Both are `LIMITED` confidence caps (proof-confidence.ts), both are
+node qualifications (mechanism-assembler.ts), both have reader copy
+(research-model.ts, audit-composition.tsx). `computeLifecycle` never reads
+them — a proposal cannot move a flow toward `CURRENT`. Snapshot/Tally/
+Commonwealth stay code-owned `GOVERNANCE`; their proposal-state rows are
+subject to the same caps beside the unchanged `INSUFFICIENT_AUTHORITY`.
+
+**Practical consequence.** The extractor prompt gives the model no
+`mechanism_state` vocabulary (evidence-extractor-anthropic.ts), so live rows
+mostly normalise to `UNKNOWN`; `GOVERNANCE_BASIS` will therefore usually be
+`PARTIALLY_SUPPORTED / APPROVAL_NOT_ESTABLISHED` until the state channel is
+vocabulary-guided — honest, and a separate decision.
+
+`tests/governance-lifecycle-safety-v1.test.ts` (13 cases, A–K against the
+real Pattern data). Unchanged: SOURCE_ROUTE bootstrap, owner workflow, Lido
+DB authority state, EVM/Solana, Research Memory, providers, budgets. No
+live run.
+
 ## ONE SHORT NETWORK OUTAGE NO LONGER ENDS THE RESEARCH (NETWORK TRANSIENT RESILIENCE V1)
 
 The unseen Lido validation (`1f8e1a63-…`, 2026-09-12) failed for a reason

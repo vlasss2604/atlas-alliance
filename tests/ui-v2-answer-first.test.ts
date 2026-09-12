@@ -58,6 +58,11 @@ const ENGINE_REASON_CODES = [
   "MECHANICAL_PROVENANCE_NOT_ESTABLISHED",
   "INDIRECT_ONLY",
   "STATE_NOT_FULLY_LIVE",
+  // GOVERNANCE LIFECYCLE SAFETY V1 — the two lifecycle caps. Listed here
+  // for the same reason as the codes below: a reader must never see a
+  // proposal-capped step with no stated reason.
+  "PROPOSED_STATE_ONLY",
+  "APPROVAL_NOT_ESTABLISHED",
   "CONFLICTING_STATE",
   "TOKEN_STATE_UNQUALIFIED",
   // B1 — NET_EFFECT supply qualification. Listed here deliberately:

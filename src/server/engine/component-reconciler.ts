@@ -78,6 +78,26 @@ export type ResultReasonCode =
   | "MECHANICAL_PROVENANCE_NOT_ESTABLISHED"
   | "INDIRECT_ONLY"
   | "STATE_NOT_FULLY_LIVE"
+  // GOVERNANCE LIFECYCLE SAFETY V1 — two lifecycle caps, both SUBTRACTIVE:
+  // the rows stay in supportingEvidenceIds and the conclusion is capped,
+  // never the evidence discarded. PROPOSED != APPROVED != EXECUTING.
+  //
+  // PROPOSED_STATE_ONLY: an establishing row positively declares the
+  // mechanism is merely PROPOSED, and no establishing row carries any
+  // post-proposal state. A proposal from an authoritative venue is valid
+  // Evidence of what was proposed; it cannot by itself establish a
+  // structural fact about a mechanism (its source, spec, destination,
+  // recipient, durability) as if that mechanism existed. Applied only to
+  // components that do not themselves evaluate mechanism state — see
+  // proposedStateOnly below.
+  //
+  // APPROVAL_NOT_ESTABLISHED: the component claims governance
+  // AUTHORISATION (requiresGovernanceApproval) and no establishing row
+  // carries an approval-bearing state (APPROVED, IMPLEMENTING, LIVE).
+  // UNKNOWN fails closed: a record that does not say a decision was taken
+  // has not established that one was.
+  | "PROPOSED_STATE_ONLY"
+  | "APPROVAL_NOT_ESTABLISHED"
   | "CONFLICTING_STATE"
   | "TOKEN_STATE_UNQUALIFIED"
   // B1 — supply qualification for NET_EFFECT. Two codes, deliberately, for
@@ -201,6 +221,73 @@ export function requiresSupplyEffectQualification(component: string): boolean {
 // a reader finds, and so a second such component has one place to be added.
 export function componentOwnsTypedEstablishmentQualification(component: string): boolean {
   return requiresSupplyEffectQualification(component);
+}
+
+// WHICH COMPONENT CLAIMS GOVERNANCE AUTHORISATION.
+//
+// GOVERNANCE LIFECYCLE SAFETY V1. Same named-predicate convention as
+// requiresSupplyEffectQualification above: one greppable home, branching on
+// a COMPONENT name and never on a project or a host.
+//
+// GOVERNANCE_BASIS's evidenceGoal is "the governing decision, vote,
+// proposal or charter that AUTHORISES the mechanism". Before this rule, a
+// GOVERNANCE row of any lifecycle state fully established it — so an RFC
+// posted on a project's official forum, once that host carried the
+// GOVERNANCE class, would have made "governance authorises this" SUPPORTED
+// with nothing in the record saying anyone voted. An authorisation claim
+// needs an approval-bearing state on the record. Widening this set is a
+// Pattern-semantics decision, not an implementation liberty.
+export function requiresGovernanceApproval(component: string): boolean {
+  return component === "GOVERNANCE_BASIS";
+}
+
+// The normalized states that carry an approval. IMPLEMENTING and LIVE are
+// stronger than APPROVED — a mechanism being built or running was
+// authorised. PAUSED / DEPRECATED / REMOVED are deliberately NOT here: they
+// describe what became of a mechanism, not the decision that authorised
+// it, and the safe reading of a terminal state for an authorisation claim
+// is "not established", never "implicitly approved once".
+export const APPROVAL_BEARING_STATES: ReadonlySet<MechanismState> = new Set<MechanismState>([
+  "APPROVED",
+  "IMPLEMENTING",
+  "LIVE",
+]);
+
+// Every normalized state that is past "merely proposed" — the states a
+// PROPOSED row would CONFLICT with if it appeared beside them (Step 6), and
+// the states whose presence means the record is not proposal-only.
+const POST_PROPOSAL_STATES: ReadonlySet<MechanismState> = new Set<MechanismState>([
+  "APPROVED",
+  "IMPLEMENTING",
+  "LIVE",
+  "PAUSED",
+  "DEPRECATED",
+  "REMOVED",
+]);
+
+// Does this component's establishing set describe a merely PROPOSED
+// mechanism and nothing stronger? Asked only of a component that does not
+// itself evaluate mechanism state: EXECUTION_EVIDENCE already refuses
+// PROPOSED outright (requiresLiveMechanismState), CURRENT_STATE reports
+// whatever the current state IS — "not yet started" is a legitimate answer
+// there, not a cap — and NET_EFFECT owns its typed supply rule. Everything
+// else (SOURCE_OF_VALUE, FLOW_PATH, MECHANISM_SPEC, GOVERNANCE_BASIS,
+// DESTINATION, RECIPIENT, DURABILITY_BASIS) claims a structural fact about
+// a mechanism, and a proposal is not yet a mechanism.
+//
+// UNKNOWN is untouched here on purpose: a row that says nothing about
+// lifecycle is exactly as establishing as it was before this rule, so
+// documentary evidence with no stated state behaves unchanged. Only a
+// POSITIVE declaration of PROPOSED, unaccompanied by anything past it,
+// caps the component.
+function proposedStateOnly(
+  component: string,
+  requirements: ComponentRequirements,
+  states: readonly MechanismState[],
+): boolean {
+  if (requirements.requiresCurrentState || requirements.requiresLiveMechanismState) return false;
+  if (componentOwnsTypedEstablishmentQualification(component)) return false;
+  return states.includes("PROPOSED") && !states.some((s) => POST_PROPOSAL_STATES.has(s));
 }
 
 // §11.1 — Pattern/CORE data (D-095), never invented in this file.
@@ -955,6 +1042,26 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       establishing.some((r) => verdictByRowId.get(r.id)!.normalizedState === "IMPLEMENTING") &&
       !establishing.some((r) => verdictByRowId.get(r.id)!.normalizedState === "LIVE");
     if (anyImplementingOnly) reasonCodes.push("STATE_NOT_FULLY_LIVE");
+  }
+
+  // GOVERNANCE LIFECYCLE SAFETY V1 — DOCUMENTED != APPROVED != ACTIVATED !=
+  // EXECUTING, applied where the generic rule above left a hole: the
+  // components with no state gate at all. Both caps read the SAME
+  // normalized state the contradiction and live-state rules read, and
+  // both are subtractive — the rows stay in the supporting set below.
+  //
+  // Order matters for the reader: reasonExplanation renders the FIRST
+  // recognised code, and "described only as a proposal" is the specific
+  // reason where both apply; "approval not established" is the general one.
+  const establishingStates = establishing.map((r) => verdictByRowId.get(r.id)!.normalizedState);
+  if (proposedStateOnly(item.component, requirements, establishingStates)) {
+    reasonCodes.push("PROPOSED_STATE_ONLY");
+  }
+  if (
+    requiresGovernanceApproval(item.component) &&
+    !establishingStates.some((s) => APPROVAL_BEARING_STATES.has(s))
+  ) {
+    reasonCodes.push("APPROVAL_NOT_ESTABLISHED");
   }
 
   // §9.1 — token-state qualification. Detection ALWAYS runs over the

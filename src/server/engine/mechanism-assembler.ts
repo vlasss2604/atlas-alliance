@@ -110,6 +110,13 @@ export type NodeQualification =
   | "INSUFFICIENT_AUTHORITY"
   | "INDIRECT_ONLY"
   | "STATE_NOT_FULLY_LIVE"
+  // GOVERNANCE LIFECYCLE SAFETY V1 — genuine bases for partial support: the
+  // component has admissible evidence that describes a proposal (or, for
+  // GOVERNANCE_BASIS, no approval-bearing state), a stated limitation of
+  // the node rather than an unexplained downgrade. Neither is read by
+  // computeLifecycle: a proposal never moves a flow toward CURRENT.
+  | "PROPOSED_STATE_ONLY"
+  | "APPROVAL_NOT_ESTABLISHED"
   | "TOKEN_STATE_UNQUALIFIED";
 
 const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
@@ -117,6 +124,8 @@ const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
   "INSUFFICIENT_AUTHORITY",
   "INDIRECT_ONLY",
   "STATE_NOT_FULLY_LIVE",
+  "PROPOSED_STATE_ONLY",
+  "APPROVAL_NOT_ESTABLISHED",
   "TOKEN_STATE_UNQUALIFIED",
 ]);
 

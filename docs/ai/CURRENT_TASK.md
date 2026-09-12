@@ -2,63 +2,50 @@
 
 > Overwrite this file each round. Never append.
 
-## NETWORK TRANSIENT RESILIENCE V1 (done this round)
+## GOVERNANCE LIFECYCLE SAFETY V1 (done this round)
 
-Offline round. No live call, no provider/model call, no new Research job, no
-budget change, no retry-count change, no schema, no new subsystem, no
-provider fallback, no Happ/Windows/VPN change. Founder decision:
-application-level resilience only.
+Offline round. No live call, no Research job, no DB authority change, no
+schema, no new subsystem, no new source class. Founder decision: generic fix
+for PROPOSED != APPROVED; do not special-case any project or host.
 
-The unseen Lido validation `1f8e1a63-…` did not fail on research semantics:
-it died `FAILED / SYSTEM_OR_PROVIDER_FAILURE / CapabilityFatalError` on ONE
-document's `count_tokens` `NETWORK_NO_RESPONSE` during a short Windows Happ
-tunnel outage, after substantial paid work had completed. Its one immediate
-count_tokens retry landed inside the same outage.
+The Lido authority review showed that a GOVERNANCE row of any
+`mechanism_state` fully established GOVERNANCE_BASIS, MECHANISM_SPEC,
+RECIPIENT and DURABILITY_BASIS — an official forum RFC would have read as an
+approved governance basis.
 
-- **Part 1 — count_tokens transient exhaustion is document-local, N = 2.**
-  `reserveAndCallWithRetry` now splits the count_tokens fatal cause on the
-  error's existing `transient` flag: `TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED`
-  (two attempts, 429/5xx/no-response) vs `TOKEN_COUNT_UNAVAILABLE` (one
-  attempt, permanent). The EvidenceExtractor loop treats the former exactly
-  like generation `TRANSIENT_RETRY_EXHAUSTED`: `EXTRACT_FAILED`
-  (`reason_code TOKEN_COUNT_UNAVAILABLE`, typed `diagnostic_code`), no
-  Evidence, no contradiction, attempt continues; the SAME consecutive-
-  document counter and threshold apply (one increment per document — the
-  retry is inside the call); a successful extraction resets; the second
-  consecutive transient document (either cause) throws `CapabilityFatalError`
-  exactly as before. Permanent count_tokens failures stay immediately fatal.
-- **Part 2 — one bounded wait before the one count_tokens retry.**
-  `retryOnceIfTransient(fn, isTransient, { delayBeforeRetryMs })`;
-  `countThenGate` passes `countTokensRetryDelayMs`: 15 s
-  (`NETWORK_NO_RESPONSE_RETRY_DELAY_MS`) only for `NETWORK_NO_RESPONSE`,
-  0 for every other class. No third attempt, no delay on success, none for
-  429/5xx (unchanged immediate retry), none for permanent failures.
-- **Not changed.** The executor-level generation retry still retries at
-  once (out of the approved scope — same option, one more call site, if
-  wanted). QueryProposer count_tokens transient exhaustion stays fatal.
-  Evidence admission, authority, SOURCE_ROUTE, reducers, routing, Research
-  Memory, EVM/Solana scope: untouched.
+- **Rule (component-reconciler.ts, subtractive).** `PROPOSED_STATE_ONLY`
+  caps every component that does not itself evaluate state when an
+  establishing row positively declares PROPOSED and nothing establishing is
+  past it; `APPROVAL_NOT_ESTABLISHED` caps GOVERNANCE_BASIS unless an
+  establishing row carries APPROVED / IMPLEMENTING / LIVE (UNKNOWN and
+  terminal states fail closed). Rows stay in `supportingEvidenceIds`.
+- **Not changed.** EXECUTION_EVIDENCE / CURRENT_STATE / NET_EFFECT gates;
+  lifecycle computation; authority axis; SOURCE_ROUTE bootstrap and owner
+  workflow; Lido DB state (`research.lido.fi` still OBSERVED); providers.
+- **Consumers wired.** mechanism-assembler (node qualifications),
+  proof-confidence (LIMITED caps), research-model / audit-composition
+  (reader copy), ui-v2 vocabulary test.
 
-Files: `src/server/engine/providers/retry.ts`,
-`src/server/engine/providers/token-gate.ts`, `src/server/engine/s4-executor.ts`,
-`scripts/anthropic-count-tokens-probe.ts`,
-`tests/transient-extractor-resilience-v1.test.ts`,
-`tests/count-tokens-diagnostic.test.ts`, `docs/ai/CURRENT_STATE.md`,
-`docs/ai/ARCHITECTURE.md`, this file.
+Files: `src/server/engine/component-reconciler.ts`,
+`src/server/engine/mechanism-assembler.ts`,
+`src/server/engine/proof-confidence.ts`, `src/client/research-model.ts`,
+`src/client/components/result-blocks/audit-composition.tsx`,
+`tests/governance-lifecycle-safety-v1.test.ts` (new),
+`tests/ui-v2-answer-first.test.ts`, `docs/ai/CORE_RULES.md`,
+`docs/ai/ARCHITECTURE.md`, `docs/ai/CURRENT_STATE.md`, this file.
 
 ### Reported, not done
 
-- The generation-path retry in `reserveAndCallWithRetry` has no pre-retry
-  wait: a tunnel flap that outlasts count_tokens' 15 s wait can still cost
-  that document its generation retry immediately (then tolerated once by
-  Part 1 / TRANSIENT EXTRACTOR RESILIENCE V1).
-- The tolerance class is the existing `transient` flag (429/5xx/no-response),
-  the same class the generation-side tolerance already uses — not
-  no-response only. One rule for both calls, deliberately.
-- A non-transient document-local failure between two transient documents
-  still does NOT reset the count (unchanged from TRANSIENT EXTRACTOR
-  RESILIENCE V1).
+- The extractor is given no `mechanism_state` vocabulary, so live rows
+  normalise to UNKNOWN; GOVERNANCE_BASIS will read APPROVAL_NOT_ESTABLISHED
+  until the state channel is guided (prompt change — separate decision).
+- PAUSED / DEPRECATED / REMOVED do not count as approval-bearing for
+  GOVERNANCE_BASIS (conservative false negative for historical mechanisms).
+- MECHANISM_SPEC with a PROPOSED row is PARTIALLY_SUPPORTED with the
+  qualification rather than SUPPORTED — the design is preserved and cited,
+  the node carries "proposed · not adopted".
 
 ### Next
 
-- Founder decides whether to spend one bounded validation run.
+- Founder decides on `research.lido.fi` GOVERNANCE classification now that
+  a forum RFC cannot establish authorisation, and on `blog.lido.fi`.

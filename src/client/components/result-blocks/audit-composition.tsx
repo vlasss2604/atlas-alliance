@@ -38,6 +38,8 @@ export const SHORT_REASON: Record<string, string> = {
   MECHANICAL_PROVENANCE_NOT_ESTABLISHED: "Documented · on-chain link missing",
   INDIRECT_ONLY: "Only indirect references",
   STATE_NOT_FULLY_LIVE: "Preparation · not fully live",
+  PROPOSED_STATE_ONLY: "Proposed · not adopted",
+  APPROVAL_NOT_ESTABLISHED: "Discussed · no approval seen",
   CONFLICTING_STATE: "Sources disagree on state",
   TOKEN_STATE_UNQUALIFIED: "Token state imprecise",
   SUPPLY_REDUCTION_NOT_ESTABLISHED: "No burn seen in checked sources",

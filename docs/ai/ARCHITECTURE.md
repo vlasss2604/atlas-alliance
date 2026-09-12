@@ -172,6 +172,26 @@ Two consequences worth knowing before you reason about outcomes:
   NULL and a standalone artifact has no source row, so it is unrepresentable
   rather than merely disallowed. Evidence is written only by
   `persistOnchainArtifactAndFacts`, which requires a job.
+- **A proposal is not a mechanism, and a governance venue is not a decision
+  (GOVERNANCE LIFECYCLE SAFETY V1).** Two subtractive lifecycle caps read the
+  same normalized `mechanism_state` the contradiction and live-state rules
+  read, and both keep the rows in `supportingEvidenceIds` — the conclusion is
+  capped, the evidence is never discarded. `PROPOSED_STATE_ONLY`: on every
+  component that does not itself evaluate state (all but `EXECUTION_EVIDENCE`,
+  `CURRENT_STATE` and `NET_EFFECT`), an establishing row that positively
+  declares `PROPOSED`, with no establishing row past it, caps the component at
+  `PARTIALLY_SUPPORTED` — a proposed source, spec, destination, recipient or
+  durability is what was proposed, not a fact about a mechanism. `UNKNOWN` is
+  untouched, so evidence with no stated state behaves exactly as before.
+  `APPROVAL_NOT_ESTABLISHED`: `GOVERNANCE_BASIS` (`requiresGovernanceApproval`,
+  a code-owned component predicate like `NET_EFFECT`'s supply rule) claims
+  *authorisation* and reaches `SUPPORTED` only when an establishing row carries
+  `APPROVED`, `IMPLEMENTING` or `LIVE`; `PROPOSED`, `UNKNOWN` and the terminal
+  states fail closed. Neither cap is read by the lifecycle computation, so a
+  proposal never moves a flow toward `CURRENT`; execution and current state
+  keep their own gates. Both codes are `LIMITED` confidence caps and node
+  qualifications. `CURRENT_STATE` deliberately still reports `PROPOSED` as a
+  legitimate current state ("not yet started").
 
 **An owner may turn ONE bounded chain read into Evidence.**
 `scripts/onchain-observe-account.ts` is the persisting sibling of the
