@@ -129,6 +129,16 @@ exact key, one intent, the production `persistOnchainArtifactAndFacts` in an
 owner-attributed never-enqueued job, then job-scoped reconciliation. It names
 no chain and writes no Research Memory.
 
+**Owner observation is not Research acquisition.** Every persisting owner
+script creates its job with `origin = OWNER_OBSERVATION`. The historical
+total-supply loader (`onchain-supply-candidate-store.ts`) inner-joins the
+producing job and admits only origins in the positive allowlist
+`REAL_RESEARCH_ACQUISITION_ORIGINS` (`engine/research-acquisition-origin.ts`:
+PRODUCT, OWNER_MANUAL_ALPHA). That query is the one boundary for cross-job
+candidate eligibility; an owner reading is persisted, inspectable and
+reconciled inside its own job, and never another job's t0. A future origin
+fails closed until admitted there.
+
 The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
 Associated Token. An instruction from any other program is **preserved, not
 decoded**: its program id, account list (in order) and opaque data blob are kept

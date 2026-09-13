@@ -170,6 +170,9 @@ async function main(): Promise<void> {
         idempotencyKey: `acquire-document-${user.id}-${createdAt.getTime()}`,
         entitlement,
         demoLifetimeProofLimit: config.demo_lifetime_proof_limit,
+        // An operator acquisition, not a Research acquisition
+        // (engine/research-acquisition-origin.ts).
+        origin: "OWNER_OBSERVATION",
       },
       { skipEnqueue: true },
     );

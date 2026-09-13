@@ -2362,7 +2362,10 @@ but unconstructible environment fails startup; no environment stands in for
 another. A generic persisting operator probe exists
 (`scripts/onchain-observe-token-supply.ts --project=<slug>`): identity →
 exact-environment retriever → one TOKEN_SUPPLY → production persistence, for
-whichever implemented chain the identity names. Not yet live:
+whichever implemented chain the identity names; its job is
+`origin = OWNER_OBSERVATION`, which the historical supply loader excludes by
+positive allowlist (`REAL_RESEARCH_ACQUISITION_ORIGINS`), so an operator
+reading never becomes a later Research's t0. Not yet live:
 `ETHEREUM_MAINNET_RPC_URL` is configured nowhere and `lido` has no
 PROJECT_IDENTITY.
 

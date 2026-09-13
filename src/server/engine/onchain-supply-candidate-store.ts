@@ -1,7 +1,8 @@
 import { and, desc, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { evidence, onchainArtifacts } from "../db/schema";
+import { evidence, onchainArtifacts, researchJobs } from "../db/schema";
+import { REAL_RESEARCH_ACQUISITION_ORIGINS } from "./research-acquisition-origin";
 import type { PersistedObservation } from "./onchain-event-anchored-supply-interval";
 import { buildCanonicalOnchainUri } from "./onchain-uri";
 import { brandOnchainArtifact } from "./providers/onchain-types";
@@ -36,6 +37,14 @@ import type { AnchorBurnEvent } from "./onchain-event-anchored-supply-interval";
 //                    again over what comes back. Belt and braces on purpose:
 //                    a standalone row must not travel this far.
 //   not this job     t0 must come from a PRIOR Research.
+//   acquired by a    the PRODUCING JOB's origin is in the code-owned
+//   real Research    positive allowlist REAL_RESEARCH_ACQUISITION_ORIGINS.
+//                    A RESEARCH_JOB-origin artifact is not enough on its
+//                    own: the persisting owner scripts create a job because
+//                    Evidence requires one, and such an OWNER_OBSERVATION
+//                    job is not a Research. This query is the ONE boundary
+//                    where cross-job candidate eligibility is decided; the
+//                    pure selectors never re-derive it.
 //
 // It never orders by value, never aggregates, never picks a "best", and
 // returns every row it retrieved. The one ordering it applies is by slot
@@ -107,9 +116,15 @@ export async function loadHistoricalSupplyCandidates(
     subject: query.projectAnchor,
   });
 
+  // INNER JOIN on the producing job, and the origin allowlist applied in
+  // the query: an artifact whose job row is missing, or whose job's origin
+  // is not an admitted Research-acquisition origin, is not a candidate and
+  // is not returned. `inArray` over the allowlist is the positive form —
+  // a future origin is excluded until it is added to the set.
   const rows = await db
-    .select()
+    .select({ artifact: onchainArtifacts })
     .from(onchainArtifacts)
+    .innerJoin(researchJobs, eq(researchJobs.id, onchainArtifacts.researchJobId))
     .where(
       and(
         eq(onchainArtifacts.canonicalUri, canonicalUri),
@@ -117,13 +132,14 @@ export async function loadHistoricalSupplyCandidates(
         eq(onchainArtifacts.originKind, "RESEARCH_JOB"),
         isNotNull(onchainArtifacts.researchJobId),
         ne(onchainArtifacts.researchJobId, query.currentResearchJobId),
+        inArray(researchJobs.origin, [...REAL_RESEARCH_ACQUISITION_ORIGINS]),
       ),
     )
     .orderBy(desc(onchainArtifacts.slot))
     .limit(Math.max(1, query.limit ?? MAX_HISTORICAL_SUPPLY_CANDIDATES));
 
   const out: LoadedSupplyObservation[] = [];
-  for (const row of rows) {
+  for (const { artifact: row } of rows) {
     const loaded = toSupplyObservation(row);
     if (loaded !== null) out.push(loaded);
   }

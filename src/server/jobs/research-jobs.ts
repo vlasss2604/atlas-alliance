@@ -38,8 +38,11 @@ export interface CreateResearchJobInput {
   demoLifetimeProofLimit: number;
   // Owner Manual Alpha App Test (D-123) — defaults to "PRODUCT" for every
   // existing caller (start-research.ts never sets this). Only
-  // start-owner-alpha-research.ts passes "OWNER_MANUAL_ALPHA".
-  origin?: "PRODUCT" | "OWNER_MANUAL_ALPHA";
+  // start-owner-alpha-research.ts passes "OWNER_MANUAL_ALPHA". The
+  // persisting owner scripts pass "OWNER_OBSERVATION": their job exists
+  // because Evidence requires one, and it is not a Research acquisition
+  // (engine/research-acquisition-origin.ts).
+  origin?: "PRODUCT" | "OWNER_MANUAL_ALPHA" | "OWNER_OBSERVATION";
 }
 
 export interface CreateResearchJobResult {

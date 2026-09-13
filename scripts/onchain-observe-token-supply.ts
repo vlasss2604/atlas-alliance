@@ -39,8 +39,9 @@
 //
 // WHAT IT WRITES, and nothing else — the same rows the persisting sibling
 // writes, through the same production functions:
-//   research_jobs        ONE owner-attributed job describing exactly this
-//                        observation (see JOB HONESTY), never enqueued
+//   research_jobs        ONE owner-attributed job, origin OWNER_OBSERVATION,
+//                        describing exactly this observation (see JOB
+//                        HONESTY), never enqueued
 //   users                one row, the job's owner-side subject
 //   sources              the canonical atlas-onchain:// URI's identity row,
 //                        created by the production artifact path
@@ -53,9 +54,13 @@
 // the operation: one owner-authorized bounded on-chain observation, budget
 // one sourceOpen, zero searches, zero model spend, skipEnqueue so no worker
 // ever picks it up. Its originalQuestion and normalizedTask say exactly that
-// and claim no broader research. Nothing here writes Research Memory
-// (project_memory_items): promotion to memory remains the separate,
-// VERIFIED-only owner path it always was.
+// and claim no broader research. Its origin is OWNER_OBSERVATION, which is
+// what keeps the observation out of every later Research: the historical
+// supply loader admits only jobs whose origin is a Research acquisition
+// (engine/research-acquisition-origin.ts), so an operator reading can be
+// inspected and reconciled within its own job and never becomes another
+// job's t0. Nothing here writes Research Memory (project_memory_items):
+// promotion to memory remains the separate, VERIFIED-only owner path.
 //
 // WHAT THE ANSWER IS NOT. A total-supply reading says what the token's
 // on-chain supply was at one finalized position. It is not circulating
@@ -300,6 +305,10 @@ export async function observeTokenSupply(
       idempotencyKey: `onchain-observe-token-supply-${user.id}-${createdAt.getTime()}`,
       entitlement,
       demoLifetimeProofLimit: config.demo_lifetime_proof_limit,
+      // An operator observation, not a Research acquisition: never an
+      // automatic historical observation for another job
+      // (engine/research-acquisition-origin.ts).
+      origin: "OWNER_OBSERVATION",
     },
     { skipEnqueue: true },
   );

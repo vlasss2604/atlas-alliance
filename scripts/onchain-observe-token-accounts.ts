@@ -251,6 +251,10 @@ async function main(): Promise<void> {
         idempotencyKey: `onchain-observe-token-accounts-${user.id}-${createdAt.getTime()}`,
         entitlement,
         demoLifetimeProofLimit: config.demo_lifetime_proof_limit,
+        // An operator observation, not a Research acquisition: never an
+        // automatic historical observation for another job
+        // (engine/research-acquisition-origin.ts).
+        origin: "OWNER_OBSERVATION",
       },
       { skipEnqueue: true },
     );

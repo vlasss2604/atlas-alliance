@@ -109,9 +109,18 @@ export const userRole = pgEnum("user_role", ["USER", "ADMIN"]);
 // job may be picked up by the worker long after the admin's session
 // ended. PRODUCT is the default for every existing/normal job; this
 // column never widens what a normal PRODUCT job can do.
+//
+// OWNER_OBSERVATION — an operator-run bounded acquisition or observation
+// job (the persisting owner scripts), which must exist because Evidence
+// requires a job, and which is NOT a Research acquisition: its artifacts
+// are persisted and inspectable and never become automatic historical
+// observations for another job. Which origins DO count as Research
+// acquisition is the positive allowlist in
+// engine/research-acquisition-origin.ts, never "anything but this one".
 export const researchJobOrigin = pgEnum("research_job_origin", [
   "PRODUCT",
   "OWNER_MANUAL_ALPHA",
+  "OWNER_OBSERVATION",
 ]);
 
 // D-136 — the acquisition phase a research job is currently in. A CLOSED

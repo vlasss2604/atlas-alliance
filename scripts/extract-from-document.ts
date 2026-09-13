@@ -312,6 +312,9 @@ async function main(): Promise<void> {
         idempotencyKey: `extract-from-document-${interp.id}-${createdAt.getTime()}`,
         entitlement,
         demoLifetimeProofLimit: config.demo_lifetime_proof_limit,
+        // An operator extraction, not a Research acquisition
+        // (engine/research-acquisition-origin.ts).
+        origin: "OWNER_OBSERVATION",
       },
       { skipEnqueue: true },
     );
