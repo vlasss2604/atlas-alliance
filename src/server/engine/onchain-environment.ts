@@ -63,6 +63,16 @@ export function onchainEnvironmentImplemented(chain: string, network: string): b
 // caller treats it exactly as it always treated a non-Solana identity —
 // no intents, no reservation, no chain read — and never substitutes
 // another chain's environment.
+// Every implemented environment with the env var that supplies its
+// endpoint, in table order. For the capability installer, which decides
+// per environment whether this deployment configured it.
+export function implementedOnchainEnvironments(): { environment: OnchainEnvironment; endpointEnvVar: string }[] {
+  return [...IMPLEMENTED_ENVIRONMENTS.values()].map((e) => ({
+    environment: { ...e.environment },
+    endpointEnvVar: e.endpointEnvVar,
+  }));
+}
+
 export function onchainEnvironmentFor(chain: OnchainChain): OnchainEnvironment | null {
   for (const entry of IMPLEMENTED_ENVIRONMENTS.values()) {
     if (entry.environment.chain === chain) return { ...entry.environment };

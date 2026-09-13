@@ -2354,8 +2354,12 @@ acquisition; in a process with no Ethereum retriever it records
 `ONCHAIN_RETRIEVER_NOT_CONFIGURED`. The generic layer names no chain — gates,
 intents, provenance, identifier shape (`domain/identifier-shape.ts`, base58
 and EVM hex) and chain position (`ChainPosition` over the persisted `slot`)
-are environment-aware. Not yet live: `ETHEREUM_MAINNET_RPC_URL` is configured
-nowhere and `jobs/onchain-capability.ts` declares only `solana/mainnet`.
+are environment-aware. The runtime installer (`jobs/onchain-capability.ts`)
+installs every implemented environment whose endpoint variable is set
+(`SOLANA_MAINNET_RPC_URL`, `ETHEREUM_MAINNET_RPC_URL`) under its own key, once
+the role and `ONCHAIN_RESEARCH_ENABLED=1` declare the capability; a configured
+but unconstructible environment fails startup; no environment stands in for
+another. Not yet live: `ETHEREUM_MAINNET_RPC_URL` is configured nowhere.
 
 Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
 `hyperliquid`, `uniswap` and `raydium` — the latter three with **0 jobs,

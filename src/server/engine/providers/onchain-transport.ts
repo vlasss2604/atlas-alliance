@@ -179,14 +179,19 @@ const IMPLEMENTATION_BY_ENVIRONMENT: ReadonlyMap<string, (deps: AdapterDeps) => 
 // configuration, or returns null when this deployment has not enabled it.
 // Returning null rather than throwing keeps an unconfigured environment a
 // configuration boundary, not a research failure.
+//
+// `env` is the environment the endpoint is read from — the process's own
+// by default. The capability installer passes the environment it decided
+// from, so presence and value are read from one place.
 export function createProductionOnchainRetriever(
   chain: string,
   network: string,
   opts: OnchainTransportOptions = {},
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): OnchainRetriever | null {
   const envVar = endpointEnvVarFor(chain, network);
   if (!envVar) return null; // unlisted (chain, network) — structurally unreachable
-  const endpoint = process.env[envVar];
+  const endpoint = env[envVar];
   if (!endpoint || !isAcceptableEndpoint(endpoint)) return null;
 
   // The label that reaches provenance and trace. Derived from the

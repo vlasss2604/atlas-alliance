@@ -112,6 +112,15 @@ decoding live only there; the Research Core has no EVM branch. Both adapters
 share one JSON-RPC envelope rule and one artifact encoding
 (`providers/onchain-jsonrpc.ts`).
 
+Installation (`jobs/onchain-capability.ts`): the worker ROLE and
+`ONCHAIN_RESEARCH_ENABLED=1` decide whether a process may reach a chain at
+all; which environments it installs is the set of implemented
+`(chain, network)` pairs whose allowlisted endpoint variable is set, each
+constructed by the transport factory and registered under its exact key. A
+configured environment that cannot construct fails startup naming its
+variable, never its value, and leaves nothing installed. Flag on with no
+endpoint configured fails closed on the default `solana/mainnet`.
+
 The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
 Associated Token. An instruction from any other program is **preserved, not
 decoded**: its program id, account list (in order) and opaque data blob are kept

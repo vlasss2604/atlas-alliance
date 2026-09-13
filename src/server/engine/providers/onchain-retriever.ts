@@ -8,6 +8,7 @@ import type {
 import { onchainEnvironmentKey } from "./onchain-types";
 import {
   endpointEnvVarFor,
+  implementedOnchainEnvironments,
   onchainEnvironmentFor,
   onchainEnvironmentImplemented,
 } from "../onchain-environment";
@@ -41,7 +42,12 @@ export type { OnchainEnvironment };
 // The static environment table lives in engine/onchain-environment.ts so a
 // module that imports no provider can still consult it; it is re-exported
 // here because this is where every retriever-facing caller already looks.
-export { endpointEnvVarFor, onchainEnvironmentFor, onchainEnvironmentImplemented };
+export {
+  endpointEnvVarFor,
+  implementedOnchainEnvironments,
+  onchainEnvironmentFor,
+  onchainEnvironmentImplemented,
+};
 
 export class OnchainRetrieverUnavailableError extends Error {
   constructor(

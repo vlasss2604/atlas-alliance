@@ -2,68 +2,61 @@
 
 > Overwrite this file each round. Never append.
 
-## EVM TOKEN_SUPPLY V1 (done this round)
+## EVM CAPABILITY INSTALL V1 (done this round)
 
 Offline round. No live RPC, no Research job, no Lido run, no DB change, no
-migration, no new Evidence concept, no project-specific rule.
+new Evidence primitive, no Research Core change, no TOKEN_SUPPLY change.
 
-The first deterministic EVM primitive, and the first proof that the
-evidence-environment seam (9e01fe1) carries a second implementation without
-touching the Research Core: **TOKEN_SUPPLY on Ethereum mainnet**, producing
-the SAME semantic observation Solana produces (token + total supply +
-decimals + canonical chain position + finality/provenance).
+The last blocker before a live Ethereum observation: the runtime capability
+installer declared and installed only `solana/mainnet`. Now the installer
+covers every implemented environment this deployment configured.
 
-- **Adapter (`providers/onchain-evm.ts`, new).** Serves exactly one intent
-  kind, `TOKEN_SUPPLY`, for exactly one environment, `ethereum/mainnet`.
-  Four bounded calls per observation, fixed order, closed parameters:
-  `eth_chainId` (must be 1 — a wrong chain id fails closed before any read),
-  `eth_getBlockByNumber ["finalized", false]` (null or error fails closed —
-  never `latest`), `eth_call totalSupply()` (`0x18160ddd`) and `eth_call
-  decimals()` (`0x313ce567`), both pinned to the SAME finalized block by
-  explicit number. Decimals are read, never assumed 18. BigInt decoding of
-  exactly-32-byte return words; an empty return (no code) fails closed.
-  Hex validation of anchor and subject happens before any request.
-- **Chain position.** Finalized block number is the environment's ordinal
-  (persisted `slot`, column name unchanged); block hash, block timestamp
-  and `finality: "finalized"` travel in provenance. `rawResponseHash`
-  covers all four raw responses; `artifactHash` is the canonical result.
-- **Shared JSON-RPC rule (`providers/onchain-jsonrpc.ts`, new).** Envelope
-  parsing, `OnchainRpcError`, `sha256` and `canonicalJson` moved out of the
-  Solana adapter so both implementations agree on what a node error is and
-  what the artifact hash is a hash of. The Solana adapter re-exports
-  `OnchainRpcError`; its artifacts are byte-identical.
-- **Environment table.** `ethereum/mainnet` → `ETHEREUM_MAINNET_RPC_URL`
-  added to `engine/onchain-environment.ts`; the transport's implementation
-  map gains the EVM factory. An Ethereum identity now admits acquisition,
-  produces `TOKEN_SUPPLY` intents addressed to `ethereum/mainnet`, and — in a
-  process holding only a Solana retriever — takes the existing bounded
-  `ONCHAIN_RETRIEVER_NOT_CONFIGURED` path. Other EVM chains remain
-  unimplemented (null environment).
-- **Research Core unchanged.** Binding, containment, persistence, facts,
-  supply-delta, NET_EFFECT, reconciliation and Proof have no EVM branch;
-  the persistence test proves an Ethereum artifact lands in the same rows
-  with `entityBinding CONFIRMED` through the same path.
+- **Installer (`jobs/onchain-capability.ts`).** The role (SEARCH_EXTRACT)
+  and the flag (`ONCHAIN_RESEARCH_ENABLED=1`) still decide WHETHER this
+  process may reach a chain — unchanged. WHICH environments it installs is
+  now `configuredOnchainEnvironments(env)`: every implemented
+  `(chain, network)` whose allowlisted endpoint variable is set (presence
+  only; the value is never read here). Each is constructed through the
+  existing factory and installed under its own exact key. Any configured
+  environment that cannot construct (absent, not https, credential in the
+  URL) fails startup naming its env var, and nothing is left installed.
+  Flag on with no endpoint configured at all attempts the default
+  `solana/mainnet` and fails closed naming `SOLANA_MAINNET_RPC_URL`, exactly
+  as before. `OnchainInstallResult.installed` lists every installed
+  environment; `providerId` stays the first label.
+- **Factory (`providers/onchain-transport.ts`).** `createProductionOnchainRetriever`
+  takes an optional `env` (default `process.env`) so the installer reads
+  presence and value from one place.
+- **Environment table.** `implementedOnchainEnvironments()` enumerates the
+  table (re-exported from `onchain-retriever.ts`).
+- **Config hygiene.** `ETHEREUM_MAINNET_RPC_URL` added to the renderer's
+  `FORBIDDEN_ENV_KEYS` tripwire and documented empty in `.env.local.example`.
+  Worker startup logs the installed labels (never an endpoint).
+- **alpha-run** is untouched: its live pre-flight still requires the Solana
+  endpoint, because the alpha live target is a Solana project.
 
-Not implemented, by design: balanceOf, logs, receipts, transfers, event
-decoding, proxy resolution, EVM burn, governance execution, archive reads,
-any generic contract call, any other EVM chain. `jobs/onchain-capability.ts`
-still declares only `solana/mainnet` — a live Ethereum run needs a
-deployment declaration for the second environment (next step, after review).
+Behaviour: Solana-only config installs Solana as before; Ethereum-only
+config installs `ethereum/mainnet` (TOKEN_SUPPLY only); both coexist and
+resolve independently; no Ethereum URL leaves `ethereum/mainnet`
+unavailable; an Ethereum identity in a Solana-only process (and the
+reverse) records `ONCHAIN_RETRIEVER_NOT_CONFIGURED`; unsupported networks
+stay unavailable; no environment stands in for another.
 
-Tests: `tests/evm-token-supply-v1.test.ts` (new, offline, 22 cases, A–L,
-N–Q) and `tests/evm-token-supply-persistence-v1.test.ts` (new, DB-backed,
-M); three existing test blocks that encoded "Ethereum is unimplemented" now
-use `bsc` for that role.
+Tests: `tests/evm-capability-install-v1.test.ts` (new, offline, 12 cases,
+A–H); existing capability, parity, seam, EVM adapter and Solana suites
+green; one source-string pin in `onchain-research-capability.test.ts`
+updated for the per-environment factory call.
 
 ### Reported, not done
 
-- No live Ethereum validation. `ETHEREUM_MAINNET_RPC_URL` is not configured
-  anywhere; live validation is a separate Founder-approved step.
-- Four RPC requests per TOKEN_SUPPLY observation against one sourceOpen
-  (Solana needs one). Bounded and closed; a per-process chain-id cache
-  could remove one, deliberately not done this round.
+- No live Ethereum observation. `ETHEREUM_MAINNET_RPC_URL` is configured
+  nowhere in this repository.
+- "Declared, never discovered" now reads: the flag declares the capability;
+  the endpoint variables declare which environments — a deployment that
+  sets `ETHEREUM_MAINNET_RPC_URL` has declared Ethereum. There is no
+  separate per-chain enable flag; adding one is a Founder decision.
 
 ### Next
 
-- ChatGPT review. Then a deployment declaration for `ethereum/mainnet` in
-  the capability installer, then Founder-approved live validation.
+- Founder-approved live validation of one Ethereum `TOKEN_SUPPLY`
+  observation, after ChatGPT review.

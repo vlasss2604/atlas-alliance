@@ -1,6 +1,7 @@
 import {
   __setOnchainRetriever,
   endpointEnvVarFor,
+  implementedOnchainEnvironments,
   type OnchainEnvironment,
   type OnchainRetriever,
 } from "../engine/providers/onchain-retriever";
@@ -27,11 +28,22 @@ import { workerServesPhase, type PhaseCapability } from "./worker-capabilities";
 //   1. the worker ROLE (ATLAS_WORKER_CAPABILITIES serves EXTRACTING), and
 //   2. the explicit flag (ONCHAIN_RESEARCH_ENABLED=1).
 //
-// Nothing else is consulted. Not reachability, not a probe, not whether an
-// RPC URL happens to be present in the environment, not a project, not a
-// document. A process that has not been told to reach a chain does not
-// reach one, and a process that HAS been told either gets a retriever or
-// fails to start.
+// Nothing else decides WHETHER this process may reach a chain. Not
+// reachability, not a probe, not a project, not a document. A process that
+// has not been told to reach a chain does not reach one, and a process
+// that HAS been told either gets a retriever or fails to start.
+//
+// WHICH ENVIRONMENTS the declared capability covers is the deployment's
+// configuration: every implemented (chain, network) whose allowlisted
+// endpoint variable is set is installed under its own exact key, and one
+// that is set but unconstructible fails startup exactly as the first
+// environment always has. A declaration with no endpoint configured at
+// all is treated as the historical default — Solana mainnet, declared and
+// unconstructible — and fails startup naming that variable, so the flag
+// can never be satisfied by an empty configuration. No environment ever
+// stands in for another: a Solana endpoint installs Solana and nothing
+// else, and an Ethereum identity in a Solana-only process takes the
+// bounded ONCHAIN_RETRIEVER_NOT_CONFIGURED path.
 //
 // WHY THE EXTRACT ROLE. On-chain acquisition runs inside `s4-executor`,
 // which the EXTRACTING phase invokes — and EXTRACTING is served by
@@ -66,12 +78,15 @@ import { workerServesPhase, type PhaseCapability } from "./worker-capabilities";
 
 export const ONCHAIN_RESEARCH_ENV = "ONCHAIN_RESEARCH_ENABLED";
 
-// THE ONE ENVIRONMENT THIS DEPLOYMENT DECLARES. A deployment declaration,
-// not an engine assumption: the engine resolves retrievers by the
-// identity's own (chain, network) through the registry, and this module
-// says which environment the declared capability installs. v1 declares
-// Solana mainnet; a second environment is a second declaration here and
-// nothing generic changes.
+// THE DEFAULT ENVIRONMENT. A deployment declaration, not an engine
+// assumption: the engine resolves retrievers by the identity's own
+// (chain, network) through the registry. This is the environment the
+// declared capability is REQUIRED to construct when no endpoint variable
+// is configured at all — which keeps "flag on, nothing configured" a
+// startup failure naming SOLANA_MAINNET_RPC_URL, as it always was — and
+// it is the environment alpha-run's live pre-flight checks for. Every
+// other implemented environment is installed when its own variable is
+// set.
 export const ONCHAIN_CHAIN = "solana";
 export const ONCHAIN_NETWORK = "mainnet";
 
@@ -88,11 +103,23 @@ export type OnchainInstallOutcome =
   // structured chain reads and says so in the trace.
   | "NOT_ENABLED";
 
+export interface InstalledOnchainEnvironment {
+  chain: string;
+  network: string;
+  // The allowlist-derived label. Never the endpoint: the endpoint can be
+  // the credential.
+  providerId: string;
+}
+
 export interface OnchainInstallResult {
   outcome: OnchainInstallOutcome;
-  // The allowlist-derived label, present only on INSTALLED. Never the
-  // endpoint: the endpoint can be the credential.
+  // The first installed environment's label, present only on INSTALLED.
+  // Kept for the callers that read one label; `installed` is the whole
+  // answer.
   providerId: string | null;
+  // Every environment this process installed, in table order. Empty
+  // unless INSTALLED.
+  installed: InstalledOnchainEnvironment[];
 }
 
 // Thrown to stop worker startup. Carries the (chain, network) and the name
@@ -127,8 +154,10 @@ export interface OnchainInstallDeps {
   // documents for its launch plan.
   env?: Readonly<Record<string, string | undefined>>;
   // Seams, so the decision above is testable without a network. Production
-  // passes none of them.
-  create?: () => OnchainRetriever | null;
+  // passes none of them. `create` is asked once per environment this
+  // deployment configured; a seam that ignores its arguments answers for
+  // every environment alike.
+  create?: (chain: string, network: string) => OnchainRetriever | null;
   install?: (r: OnchainRetriever | null, environment?: OnchainEnvironment) => void;
 }
 
@@ -147,35 +176,71 @@ export function onchainEndpointEnvVar(): string {
   return envVar;
 }
 
+// The environments this deployment configured: every implemented one whose
+// endpoint variable is set. Presence only — the VALUE is never read here,
+// never compared, never returned; whether it is an acceptable endpoint is
+// the transport factory's decision, and an unacceptable one surfaces as
+// "unconstructible", never as its text. Empty means "nothing configured",
+// and the caller treats that as the default environment.
+export function configuredOnchainEnvironments(
+  env: Readonly<Record<string, string | undefined>>,
+): { environment: OnchainEnvironment; endpointEnvVar: string }[] {
+  return implementedOnchainEnvironments().filter((e) => {
+    const value = env[e.endpointEnvVar];
+    return typeof value === "string" && value.length > 0;
+  });
+}
+
 export function installOnchainResearchCapability(
   deps: OnchainInstallDeps,
 ): OnchainInstallResult {
   const env = deps.env ?? process.env;
   const install = deps.install ?? __setOnchainRetriever;
+  // The factory reads the endpoint from the SAME environment this decision
+  // read presence from, so an injected environment and the process's own
+  // can never disagree about which variable held the endpoint.
+  const create =
+    deps.create ?? ((chain: string, network: string) => createProductionOnchainRetriever(chain, network, {}, env));
 
   if (!workerServesPhase(deps.capabilities, "EXTRACTING")) {
-    return { outcome: "NOT_EXTRACT_ROLE", providerId: null };
+    return { outcome: "NOT_EXTRACT_ROLE", providerId: null, installed: [] };
   }
   if (env[ONCHAIN_RESEARCH_ENV] !== "1") {
-    return { outcome: "NOT_ENABLED", providerId: null };
+    return { outcome: "NOT_ENABLED", providerId: null, installed: [] };
   }
 
-  const retriever =
-    (deps.create ?? (() => createProductionOnchainRetriever(ONCHAIN_CHAIN, ONCHAIN_NETWORK)))();
+  const configured = configuredOnchainEnvironments(env);
+  const targets =
+    configured.length > 0
+      ? configured
+      : [
+          {
+            environment: { chain: ONCHAIN_CHAIN, network: ONCHAIN_NETWORK } as OnchainEnvironment,
+            endpointEnvVar: onchainEndpointEnvVar(),
+          },
+        ];
 
-  if (!retriever) {
-    // Declared and unconstructible. Uninstall unconditionally first: a
-    // supervisor restart must never inherit a half-installed capability.
-    install(null);
-    throw new OnchainCapabilityUnavailableError(
-      ONCHAIN_CHAIN,
-      ONCHAIN_NETWORK,
-      onchainEndpointEnvVar(),
-    );
+  // Every configured environment must construct, or none is installed.
+  // Uninstall unconditionally first: a supervisor restart must never
+  // inherit a half-installed capability, and a second environment that
+  // fails must not leave the first one quietly serving.
+  install(null);
+  const installed: InstalledOnchainEnvironment[] = [];
+  for (const { environment, endpointEnvVar } of targets) {
+    const retriever = create(environment.chain, environment.network);
+    if (!retriever) {
+      install(null);
+      throw new OnchainCapabilityUnavailableError(environment.chain, environment.network, endpointEnvVar);
+    }
+    install(retriever, environment);
+    installed.push({
+      chain: environment.chain,
+      network: environment.network,
+      providerId: `${environment.chain}-${environment.network}-rpc`,
+    });
   }
 
-  install(retriever, { chain: ONCHAIN_CHAIN, network: ONCHAIN_NETWORK });
-  return { outcome: "INSTALLED", providerId: `${ONCHAIN_CHAIN}-${ONCHAIN_NETWORK}-rpc` };
+  return { outcome: "INSTALLED", providerId: installed[0].providerId, installed };
 }
 
 // Shutdown. The retriever holds no long-lived connection of its own —

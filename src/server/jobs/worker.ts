@@ -726,7 +726,7 @@ export async function startWorker() {
   console.log(
     "[worker] on-chain capability:",
     onchain.outcome,
-    onchain.providerId ?? "",
+    onchain.installed.map((i) => i.providerId).join(","),
   );
 
   await sweepStaleRunningJobs(db);

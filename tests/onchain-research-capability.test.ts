@@ -83,7 +83,7 @@ describe("on-chain capability — disabled unless explicitly declared", () => {
     expect(src).toContain(
       'import { createProductionOnchainRetriever } from "../engine/providers/onchain-transport"',
     );
-    expect(src).toContain("createProductionOnchainRetriever(ONCHAIN_CHAIN, ONCHAIN_NETWORK)");
+    expect(src).toContain("createProductionOnchainRetriever(chain, network, {}, env)");
     // No fixture, no fallback, no second transport anywhere in the path.
     expect(src).not.toMatch(/fixture|fallback|stub|mock/i);
     // And the worker installs it — through the shared runtime bootstrap —
