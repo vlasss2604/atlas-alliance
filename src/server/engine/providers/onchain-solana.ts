@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
 import { buildCanonicalOnchainUri } from "../onchain-uri";
@@ -18,6 +16,7 @@ import {
   type OnchainResult,
 } from "./onchain-types";
 import { OnchainRetrieverUnavailableError, type OnchainRpcTransport } from "./onchain-retriever";
+import { canonicalJson, jsonRpcResult, OnchainRpcError, sha256 } from "./onchain-jsonrpc";
 
 // Solana adapter — the ONLY place Solana-specific encoding, RPC method
 // names and response shapes live. The core contract knows about chains,
@@ -40,29 +39,11 @@ const SPL_TOKEN_PROGRAM_IDS = new Set([
 const BASE58_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const BASE58_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
 
-// A node answered, parsed our request, and refused it. Distinct from a
-// transport failure (the request never completed) and from a schema
-// failure (the response was not the shape we expect): this one means WE
-// asked for something the node would not serve, which is almost always our
-// bug, not theirs.
-//
-// Carries the numeric JSON-RPC code and nothing else. -32602 (invalid
-// params) is the code the first live smoke produced, and preserving it is
-// what turns "something went wrong" into a one-line diagnosis.
-export class OnchainRpcError extends OnchainRetrieverUnavailableError {
-  constructor(
-    public readonly method: string,
-    public readonly rpcCode: number | null,
-  ) {
-    super(
-      `rpc returned error code ${rpcCode ?? "unknown"} for ${method}`,
-      // -32005 is a node-defined rate limit; treat only that as transient.
-      // Nothing here retries automatically — the flag is classification.
-      rpcCode === -32005,
-    );
-    this.name = "OnchainRpcError";
-  }
-}
+// The JSON-RPC envelope rule, the node-error class and the artifact
+// encoding are shared with every other adapter (onchain-jsonrpc.ts); the
+// error class is re-exported here because this module is where callers
+// have always imported it from.
+export { OnchainRpcError };
 
 // Exported so research logic can ask "is this account program-owned by an
 // SPL Token program?" without an address literal of its own. The constants
@@ -106,23 +87,6 @@ export const MAX_SIGNATURES_PER_INTENT = 25;
 // JSON-RPC 2.0 envelope. `result` may legitimately be null (an account or
 // transaction that does not exist), so its presence is not required — the
 // discriminator is the absence of `error`.
-const envelopeSchema = z.object({
-  jsonrpc: z.literal("2.0"),
-  result: z.unknown().optional(),
-  // The numeric CODE is preserved; the message is not. A JSON-RPC code is
-  // a small integer from a defined range (-32700..-32000 plus
-  // implementation-defined values) — it carries no provider text and
-  // cannot contain an endpoint, a key, or response content, so it is safe
-  // to surface and is exactly what makes a failed call diagnosable. The
-  // accompanying `message` is provider-controlled free text and stays
-  // discarded. `.loose()` tolerates the extra fields real nodes attach
-  // (e.g. `data`) without reading any of them.
-  error: z
-    .object({ code: z.number().optional() })
-    .loose()
-    .optional(),
-});
-
 const uiAmount = z.object({
   amount: z.string().regex(/^\d+$/),
   decimals: z.number().int().min(0).max(32),
@@ -684,21 +648,6 @@ function decodeRawInstruction(
   };
 }
 
-function sha256(value: string): string {
-  return `sha256:${createHash("sha256").update(value).digest("hex")}`;
-}
-
-// Canonical JSON: key-sorted, so the same observation always serializes
-// byte-identically and the artifact hash is reproducible.
-function canonicalJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  const entries = Object.entries(value as Record<string, unknown>)
-    .filter(([, v]) => v !== undefined)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-  return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
-}
-
 export interface SolanaAdapterDeps {
   transport: OnchainRpcTransport;
   providerId: string;
@@ -1014,25 +963,9 @@ export function createSolanaOnchainAdapter(deps: SolanaAdapterDeps) {
       const retrievedAt = new Date();
 
       const rawText = await deps.transport.call(method, params);
-      let envelope: unknown;
-      try {
-        envelope = JSON.parse(rawText);
-      } catch {
-        throw new OnchainRetrieverUnavailableError("rpc response is not valid JSON");
-      }
-      // JSON-RPC 2.0 envelope. A node answers {jsonrpc,id,result} on
-      // success and {jsonrpc,id,error} on failure — an `error` body is a
-      // provider failure, never a result, and must not be normalized into
-      // a fact. The error's own message is deliberately not interpolated:
-      // it is provider-controlled text.
-      const rpc = envelopeSchema.safeParse(envelope);
-      if (!rpc.success) {
-        throw new OnchainRetrieverUnavailableError("rpc response is not a JSON-RPC 2.0 envelope");
-      }
-      if (rpc.data.error !== undefined) {
-        throw new OnchainRpcError(method, rpc.data.error.code ?? null);
-      }
-      const raw = rpc.data.result;
+      // JSON-RPC 2.0 envelope, decided by the shared rule: an `error` body
+      // is a provider failure, never a result.
+      const raw = jsonRpcResult(method, rawText);
 
       let normalized: { result: OnchainResult; slot: number };
       try {

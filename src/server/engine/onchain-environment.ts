@@ -16,9 +16,9 @@ import type { OnchainChain, OnchainEnvironment } from "./providers/onchain-types
 // enforced structurally rather than by filtering later: no test network
 // appears here, so no test-network endpoint can be configured even if
 // someone sets a variable. And a chain the project identity admits but
-// this table does not (every EVM chain today) has NO environment: an
-// Ethereum identity produces no intent, reserves no chain budget and can
-// never be routed to the Solana implementation.
+// this table does not (every EVM chain except Ethereum mainnet today) has
+// NO environment: such an identity produces no intent, reserves no chain
+// budget and can never be routed to another chain's implementation.
 //
 // EXACTLY ONE PRODUCTION NETWORK PER CHAIN. That is what lets a confirmed
 // identity — which names a chain and nothing more — resolve to an
@@ -32,6 +32,17 @@ const IMPLEMENTED_ENVIRONMENTS: ReadonlyMap<
     {
       environment: { chain: "solana", network: "mainnet" },
       endpointEnvVar: "SOLANA_MAINNET_RPC_URL",
+    },
+  ],
+  // Implementation #2: Ethereum mainnet, TOKEN_SUPPLY only
+  // (providers/onchain-evm.ts). Listed here so an Ethereum identity admits
+  // acquisition and resolves to this environment; whether a process can
+  // reach it is still the runtime registry's question.
+  [
+    "ethereum/mainnet",
+    {
+      environment: { chain: "ethereum", network: "mainnet" },
+      endpointEnvVar: "ETHEREUM_MAINNET_RPC_URL",
     },
   ],
 ]);

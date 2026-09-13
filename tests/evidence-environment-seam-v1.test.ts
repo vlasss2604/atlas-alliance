@@ -172,8 +172,11 @@ describe("implemented environments — code-owned, one production network per ch
     expect(endpointEnvVarFor("solana", "mainnet")).toBe("SOLANA_MAINNET_RPC_URL");
   });
 
-  it("an EVM chain has NO environment yet — null, never another chain's", () => {
-    for (const chain of ["ethereum", "bsc", "polygon", "arbitrum", "base", "optimism", "avalanche"] as const) {
+  it("Ethereum mainnet is implementation #2; every other EVM chain has NO environment — null, never another chain's", () => {
+    expect(onchainEnvironmentFor("ethereum")).toEqual(ETHEREUM_MAINNET);
+    expect(onchainEnvironmentImplemented("ethereum", "mainnet")).toBe(true);
+    expect(endpointEnvVarFor("ethereum", "mainnet")).toBe("ETHEREUM_MAINNET_RPC_URL");
+    for (const chain of ["bsc", "polygon", "arbitrum", "base", "optimism", "avalanche"] as const) {
       expect(onchainEnvironmentFor(chain), chain).toBeNull();
       expect(onchainEnvironmentImplemented(chain, "mainnet"), chain).toBe(false);
       expect(endpointEnvVarFor(chain, "mainnet"), chain).toBeNull();
@@ -229,9 +232,9 @@ describe("retriever registry — keyed by (chain, network), fail closed", () => 
     // No default environment.
     expect(() => __setOnchainRetriever(fixtureRetriever("anonymous"))).toThrow(/explicit \(chain, network\)/);
     // No capability the codebase has no adapter for.
-    expect(() => __setOnchainRetriever(fixtureRetriever("evm"), ETHEREUM_MAINNET)).toThrow(
-      /not an implemented on-chain environment/,
-    );
+    expect(() =>
+      __setOnchainRetriever(fixtureRetriever("bsc"), { chain: "bsc", network: "mainnet" }),
+    ).toThrow(/not an implemented on-chain environment/);
     expect(onchainRetrievalAvailable()).toBe(false);
   });
 
@@ -312,17 +315,16 @@ describe("acquisition gates — environment-aware, Solana unchanged, EVM fails c
     ).toBe(true);
   });
 
-  it("C. an Ethereum identity with no retriever admits nothing, creates nothing, routes nowhere", async () => {
-    // Even with a Solana retriever installed — the exact situation a real
-    // deployment is in today.
-    __setOnchainRetriever(fixtureRetriever("solana-fixture"), SOLANA_MAINNET);
+  it("C. an Ethereum identity with no Ethereum retriever takes the bounded not-configured path, never Solana", async () => {
+    // Ethereum mainnet is an implemented environment, so the identity
+    // admits acquisition and its intents are addressed to ethereum/mainnet.
     expect(
       componentAdmitsOnchainAcquisition({
         component: "CURRENT_STATE",
         establishingClasses: ESTABLISHING,
         identity: ETHEREUM_IDENTITY,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       selectOnchainIntents({
         component: "NET_EFFECT",
@@ -330,18 +332,22 @@ describe("acquisition gates — environment-aware, Solana unchanged, EVM fails c
         identity: ETHEREUM_IDENTITY,
         maxIntents: 2,
       }),
-    ).toEqual([]);
-    expect(
-      planHasActionableOnchainWork({
-        identity: ETHEREUM_IDENTITY,
-        components: [{ component: "NET_EFFECT", establishingClasses: [...ESTABLISHING] }],
-      }),
-    ).toBe(false);
-    // The acquisition leaf returns before it can touch a database, a
-    // retriever or a budget: no evidence, nothing spent, no fake
-    // observation. The bounded not-configured path is what an implemented
-    // environment without a retriever takes; an unimplemented one never
-    // gets as far as asking.
+    ).toEqual([
+      {
+        kind: "TOKEN_SUPPLY",
+        chain: "ethereum",
+        network: "mainnet",
+        projectAnchor: EVM_ADDRESS,
+        subjectKind: "token",
+        subject: EVM_ADDRESS,
+      },
+    ]);
+    // With ONLY a Solana retriever installed — the exact situation a
+    // Solana-only deployment is in — the acquisition leaf records the
+    // existing closed observation and returns before it can touch a
+    // database, a retriever or a budget: no evidence, nothing spent, no
+    // fake observation, and no route to the Solana implementation.
+    __setOnchainRetriever(fixtureRetriever("solana-fixture"), SOLANA_MAINNET);
     const outcome = await runStructuredOnchainAcquisition({
       db: null as never,
       jobId: "job",
@@ -350,7 +356,22 @@ describe("acquisition gates — environment-aware, Solana unchanged, EVM fails c
       plan: { establishingClasses: [...ESTABLISHING], confirmedIdentity: ETHEREUM_IDENTITY },
       maxSourceOpens: 24,
     });
-    expect(outcome).toEqual({ evidenceIds: [], sourceOpensSpent: 0, observations: [] });
+    expect(outcome).toEqual({
+      evidenceIds: [],
+      sourceOpensSpent: 0,
+      observations: ["ONCHAIN_RETRIEVER_NOT_CONFIGURED"],
+    });
+    // An identity on an EVM chain with NO implementation admits nothing.
+    const bsc: ConfirmedProjectIdentity = { chain: "bsc", tokenAddress: EVM_ADDRESS, ticker: "X" };
+    expect(
+      selectOnchainIntents({ component: "NET_EFFECT", establishingClasses: ESTABLISHING, identity: bsc, maxIntents: 2 }),
+    ).toEqual([]);
+    expect(
+      planHasActionableOnchainWork({
+        identity: bsc,
+        components: [{ component: "NET_EFFECT", establishingClasses: [...ESTABLISHING] }],
+      }),
+    ).toBe(false);
   });
 
   it("the gate names no chain: the literal Solana check is gone from the generic layer", () => {

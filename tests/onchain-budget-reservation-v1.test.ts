@@ -230,7 +230,7 @@ describe("2/8. capacity is Pattern semantics; ACTION still needs a subject", () 
     );
     expect(
       planHasActionableOnchainWork({
-        identity: { chain: "ethereum", tokenAddress: MINT, ticker: null },
+        identity: { chain: "bsc", tokenAddress: MINT, ticker: null },
         components: [ANCHOR_COMPONENT],
       }),
     ).toBe(false);

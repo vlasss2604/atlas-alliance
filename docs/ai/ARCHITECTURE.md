@@ -101,6 +101,17 @@ implementation #1. Token accounts, SPL decoding, instructions, Anchor
 discriminators, wrapped SOL, `getSignaturesForAddress`, account lifecycle and
 owner-flow semantics stay inside the Solana implementation.
 
+Ethereum mainnet is implementation #2 (`providers/onchain-evm.ts`), serving
+**TOKEN_SUPPLY only**: `eth_chainId` (must be 1, else fail closed), the
+`finalized` block by tag (null or error fails closed — never `latest`), then
+`eth_call totalSupply()` and `eth_call decimals()` pinned to that block by
+explicit number, decoded as exactly-32-byte words through BigInt. The
+finalized block number is the ordinal, hash and timestamp ride in provenance,
+finality is `finalized`. Hex validation, chain-id verification and ABI word
+decoding live only there; the Research Core has no EVM branch. Both adapters
+share one JSON-RPC envelope rule and one artifact encoding
+(`providers/onchain-jsonrpc.ts`).
+
 The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
 Associated Token. An instruction from any other program is **preserved, not
 decoded**: its program id, account list (in order) and opaque data blob are kept

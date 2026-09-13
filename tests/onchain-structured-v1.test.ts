@@ -343,7 +343,9 @@ describe("adapter safety", () => {
     expect(endpointEnvVarFor("solana", "mainnet")).toBe("SOLANA_MAINNET_RPC_URL");
     // No test network is addressable at all.
     expect(endpointEnvVarFor("solana", "devnet")).toBeNull();
-    expect(endpointEnvVarFor("ethereum", "mainnet")).toBeNull();
+    expect(endpointEnvVarFor("ethereum", "sepolia")).toBeNull();
+    // An EVM chain with no implementation has no endpoint variable either.
+    expect(endpointEnvVarFor("bsc", "mainnet")).toBeNull();
     // Credential-bearing or non-https endpoints are refused.
     expect(isAcceptableEndpoint("https://rpc.example.test")).toBe(true);
     expect(isAcceptableEndpoint("http://rpc.example.test")).toBe(false);
@@ -614,12 +616,12 @@ describe("intent selection and mechanism locators (AMENDMENT D)", () => {
     ).toEqual([]);
   });
 
-  it("a non-Solana identity selects nothing in v1", () => {
+  it("an identity on a chain with no implemented environment selects nothing", () => {
     expect(
       selectOnchainIntents({
         component: "NET_EFFECT",
         establishingClasses: ["ONCHAIN_VERIFIABLE"],
-        identity: { chain: "ethereum", tokenAddress: "0x1", ticker: "X" } as ConfirmedProjectIdentity,
+        identity: { chain: "bsc", tokenAddress: "0x1", ticker: "X" } as ConfirmedProjectIdentity,
         maxIntents: 2,
       }),
     ).toEqual([]);

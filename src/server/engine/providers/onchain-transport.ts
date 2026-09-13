@@ -7,6 +7,7 @@ import {
   type OnchainRetriever,
   type OnchainRpcTransport,
 } from "./onchain-retriever";
+import { createEvmOnchainAdapter } from "./onchain-evm";
 import { createSolanaOnchainAdapter, type SolanaAdapterDeps } from "./onchain-solana";
 
 // Production HTTPS JSON-RPC transport for structured on-chain retrieval.
@@ -161,13 +162,17 @@ export function createHttpsRpcTransport(
 // one factory per implemented (chain, network), keyed exactly as the
 // retriever registry's allowlist is. A key present in the allowlist but
 // absent here is a programming error surfaced as "no retriever" — never
-// as another chain's adapter. Solana mainnet is implementation #1; an EVM
-// implementation registers under its own key and this function does not
-// change.
+// as another chain's adapter. Solana mainnet is implementation #1;
+// Ethereum mainnet (TOKEN_SUPPLY only) is implementation #2, registered
+// under its own key.
 type AdapterDeps = Pick<SolanaAdapterDeps, "transport" | "providerId">;
 const IMPLEMENTATION_BY_ENVIRONMENT: ReadonlyMap<string, (deps: AdapterDeps) => OnchainRetriever> =
   new Map([
     ["solana/mainnet", (deps) => createSolanaOnchainAdapter({ ...deps, finality: "finalized" })],
+    [
+      "ethereum/mainnet",
+      (deps) => createEvmOnchainAdapter({ ...deps, environment: { chain: "ethereum", network: "mainnet" } }),
+    ],
   ]);
 
 // Resolves a production retriever for (chain, network) from server-side
