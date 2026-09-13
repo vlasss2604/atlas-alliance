@@ -2359,7 +2359,12 @@ installs every implemented environment whose endpoint variable is set
 (`SOLANA_MAINNET_RPC_URL`, `ETHEREUM_MAINNET_RPC_URL`) under its own key, once
 the role and `ONCHAIN_RESEARCH_ENABLED=1` declare the capability; a configured
 but unconstructible environment fails startup; no environment stands in for
-another. Not yet live: `ETHEREUM_MAINNET_RPC_URL` is configured nowhere.
+another. A generic persisting operator probe exists
+(`scripts/onchain-observe-token-supply.ts --project=<slug>`): identity →
+exact-environment retriever → one TOKEN_SUPPLY → production persistence, for
+whichever implemented chain the identity names. Not yet live:
+`ETHEREUM_MAINNET_RPC_URL` is configured nowhere and `lido` has no
+PROJECT_IDENTITY.
 
 Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
 `hyperliquid`, `uniswap` and `raydium` — the latter three with **0 jobs,

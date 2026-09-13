@@ -121,6 +121,14 @@ configured environment that cannot construct fails startup naming its
 variable, never its value, and leaves nothing installed. Flag on with no
 endpoint configured fails closed on the default `solana/mainnet`.
 
+The bounded operator path for one persisted TOKEN_SUPPLY observation is
+`scripts/onchain-observe-token-supply.ts --project=<slug>`: identity through
+`resolveConfirmedIdentity` (refusing ambiguity), environment through
+`onchainEnvironmentFor`, retriever through the transport factory for that
+exact key, one intent, the production `persistOnchainArtifactAndFacts` in an
+owner-attributed never-enqueued job, then job-scoped reconciliation. It names
+no chain and writes no Research Memory.
+
 The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
 Associated Token. An instruction from any other program is **preserved, not
 decoded**: its program id, account list (in order) and opaque data blob are kept

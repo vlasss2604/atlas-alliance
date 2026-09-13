@@ -2,61 +2,63 @@
 
 > Overwrite this file each round. Never append.
 
-## EVM CAPABILITY INSTALL V1 (done this round)
+## GENERIC PERSISTING TOKEN_SUPPLY PROBE V1 (done this round)
 
-Offline round. No live RPC, no Research job, no Lido run, no DB change, no
-new Evidence primitive, no Research Core change, no TOKEN_SUPPLY change.
+Offline round. No live RPC, no Research job, no model/search call, no DB
+schema change, no new primitive, no Research Core change, no Memory
+eligibility change, no project- or chain-specific rule.
 
-The last blocker before a live Ethereum observation: the runtime capability
-installer declared and installed only `solana/mainnet`. Now the installer
-covers every implemented environment this deployment configured.
+The stopped live validation exposed a generic operational gap: the
+deterministic TOKEN_SUPPLY path (identity → exact-environment retriever →
+canonical artifact → binding → Evidence) lived only inside the Research
+executor. The standalone owner scripts were Solana-literal (observe-account,
+observe-token-accounts, observe-signatures) or non-persisting (onchain-smoke).
 
-- **Installer (`jobs/onchain-capability.ts`).** The role (SEARCH_EXTRACT)
-  and the flag (`ONCHAIN_RESEARCH_ENABLED=1`) still decide WHETHER this
-  process may reach a chain — unchanged. WHICH environments it installs is
-  now `configuredOnchainEnvironments(env)`: every implemented
-  `(chain, network)` whose allowlisted endpoint variable is set (presence
-  only; the value is never read here). Each is constructed through the
-  existing factory and installed under its own exact key. Any configured
-  environment that cannot construct (absent, not https, credential in the
-  URL) fails startup naming its env var, and nothing is left installed.
-  Flag on with no endpoint configured at all attempts the default
-  `solana/mainnet` and fails closed naming `SOLANA_MAINNET_RPC_URL`, exactly
-  as before. `OnchainInstallResult.installed` lists every installed
-  environment; `providerId` stays the first label.
-- **Factory (`providers/onchain-transport.ts`).** `createProductionOnchainRetriever`
-  takes an optional `env` (default `process.env`) so the installer reads
-  presence and value from one place.
-- **Environment table.** `implementedOnchainEnvironments()` enumerates the
-  table (re-exported from `onchain-retriever.ts`).
-- **Config hygiene.** `ETHEREUM_MAINNET_RPC_URL` added to the renderer's
-  `FORBIDDEN_ENV_KEYS` tripwire and documented empty in `.env.local.example`.
-  Worker startup logs the installed labels (never an endpoint).
-- **alpha-run** is untouched: its live pre-flight still requires the Solana
-  endpoint, because the alpha live target is a Solana project.
+- **Entry point (`scripts/onchain-observe-token-supply.ts`, new).**
+  `npx tsx scripts/onchain-observe-token-supply.ts --project=<slug>
+  [--component=<C>]`. No chain, network or address flag exists. The logic is
+  the exported `observeTokenSupply(deps)`; `main` only parses flags.
+- **Identity.** `resolveConfirmedIdentity` (the executor's resolver) plus an
+  operator-strict ambiguity gate: more than one ACTIVE PROJECT_IDENTITY row
+  is refused. Missing, non-ACTIVE, or token-less identities refuse before
+  anything is constructed. No SOURCE_ROUTE, document or ticker is read.
+- **Environment / retriever.** `onchainEnvironmentFor(identity.chain)` →
+  `createProductionOnchainRetriever(env.chain, env.network)`, exact key,
+  then `supports(chain, network, TOKEN_SUPPLY)`. Neither chain is named in
+  the script's code (asserted by test). An Ethereum identity in a
+  Solana-only process is `RETRIEVER_NOT_CONFIGURED`; nothing is called.
+- **Observation.** One intent, `TOKEN_SUPPLY`, a module constant; one
+  `retriever.retrieve`; no retry. Owner gates kept: live allowlist
+  (`INTERNAL_ALPHA_LIVE_PROJECT_SLUGS`), `internal_alpha_enabled`, and the
+  component must be ONCHAIN_VERIFIABLE-establishable per the Pattern; its
+  step comes from the Pattern (default CURRENT_STATE, step 5).
+- **Persistence.** The production `persistOnchainArtifactAndFacts` in an
+  owner-attributed, never-enqueued job (skipEnqueue, budget 1 sourceOpen /
+  0 searches / 0 model) — the same job discipline as observe-account. Then
+  `reconcileAndPersistComponent` for the one component, job-scoped. Binding
+  is `validateOnchainBinding(artifact, identity)` and containment refusal
+  writes nothing (`NOT_PERSISTED`, detail carries the reason).
+- **Memory.** Writes no `project_memory_items`. The artifact is
+  RESEARCH_JOB-origin under the owner job — exactly what observe-account
+  produces — so existing job-scoped eligibility rules apply unchanged;
+  promotion to Research Memory stays the separate VERIFIED-only owner path.
 
-Behaviour: Solana-only config installs Solana as before; Ethereum-only
-config installs `ethereum/mainnet` (TOKEN_SUPPLY only); both coexist and
-resolve independently; no Ethereum URL leaves `ethereum/mainnet`
-unavailable; an Ethereum identity in a Solana-only process (and the
-reverse) records `ONCHAIN_RETRIEVER_NOT_CONFIGURED`; unsupported networks
-stay unavailable; no environment stands in for another.
-
-Tests: `tests/evm-capability-install-v1.test.ts` (new, offline, 12 cases,
-A–H); existing capability, parity, seam, EVM adapter and Solana suites
-green; one source-string pin in `onchain-research-capability.test.ts`
-updated for the per-environment factory call.
+Tests: `tests/onchain-observe-token-supply.test.ts` (new, DB-backed, 20
+cases, A–M): both chains end to end with fixture transports; the Ethereum
+rows equal what Research writes for the same artifact (all columns except
+ids, job, timestamps and the job-scoped extractionUnitKey); wrong-chain
+artifact refused at the production gate with nothing written; source scan
+pins one intent, no chain literal, no second writer.
 
 ### Reported, not done
 
-- No live Ethereum observation. `ETHEREUM_MAINNET_RPC_URL` is configured
-  nowhere in this repository.
-- "Declared, never discovered" now reads: the flag declares the capability;
-  the endpoint variables declare which environments — a deployment that
-  sets `ETHEREUM_MAINNET_RPC_URL` has declared Ethereum. There is no
-  separate per-chain enable flag; adding one is a Founder decision.
+- Not run live. `ETHEREUM_MAINNET_RPC_URL` is configured nowhere. Lido has
+  no PROJECT_IDENTITY in `atlas_dev`.
+- The three older persisting owner scripts remain Solana-literal; bringing
+  them through the seam is a separate housekeeping round.
 
 ### Next
 
-- Founder-approved live validation of one Ethereum `TOKEN_SUPPLY`
-  observation, after ChatGPT review.
+- Founder: confirm the Lido identity through
+  `scripts/confirm-project-identity.ts`, set `ETHEREUM_MAINNET_RPC_URL`,
+  then authorize one run of the probe.
