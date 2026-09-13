@@ -114,8 +114,10 @@ export async function runS4ResearchJob(
     // Deliberately NARROW in two independent ways:
     //
     //  1. Only BudgetExhaustedError. A CapabilityFatalError or any other
-    //     exception still propagates immediately, untouched — a broken
-    //     capability is not an evidentiary outcome.
+    //     exception still propagates untouched — a broken capability is
+    //     not an evidentiary outcome. The `else` branch below runs the
+    //     zero-spend S5 sweep for it and nothing else: no S6, no S7, no
+    //     Proof.
     //
     //  2. Only when the S5 sweep actually produced component results.
     //     A job whose budget was refused before ANY component reached a
@@ -216,6 +218,48 @@ export async function runS4ResearchJob(
         // budget has a projectable result, and its Proof will honestly
         // carry whatever gaps the exhausted budget left behind.
         await buildAndPersistProof(db, jobId);
+      }
+    } else {
+      // TECHNICAL FAILURE != PROJECT REALITY.
+      //
+      // Any other exception — a capability down, a rejected database
+      // write, an internal invariant — is a fault of the RUN, and the job
+      // ends FAILED/SYSTEM_OR_PROVIDER_FAILURE at the worker's boundary.
+      // Nothing substantive may be derived from it: S6/S7/S8 do NOT run
+      // here, because claim support over a queue that was never walked to
+      // its end would grade every unexecuted component as a gap and write
+      // a Proof whose INSUFFICIENT_EVIDENCE speaks about the project when
+      // only the run broke. Absence of completed research is not evidence
+      // of absence. The continuation stages do not run either: they may
+      // spend an on-chain read, and a job that just failed for an unknown
+      // reason is not licensed to spend anything further.
+      //
+      // ONE THING DOES RUN, AND IT SPENDS NOTHING: the same S5 sweep the
+      // ordinary path runs after the controller, over components whose
+      // S4 attempt is already terminal. The per-attempt hook cannot
+      // survive a crash between an attempt's terminal UPDATE and its own
+      // persistence (HIGH-2, see the module comment) — the sweep is the
+      // designed repair for that, and it ran on every path except this
+      // one. A FAILED job is never picked up again, so this catch is the
+      // last moment its finished work can be reconciled at all. The sweep
+      // is a derived-projection upsert over Evidence already persisted for
+      // components S4 actually finished: no executor, no provider, no
+      // reservation, idempotent for a component the hook already wrote.
+      //
+      // DELIBERATELY NOT `acquisitionStopped`. The component whose attempt
+      // was cut off mid-way keeps no result row: the closed S5 vocabulary
+      // has no NOT_EVALUATED, and a status computed from a truncated
+      // Evidence set would be indistinguishable from an honest one. "Work
+      // never finished" stays a missing row, which the result screen
+      // already renders as not assessed rather than as insufficient.
+      //
+      // The sweep's own failure is reported, never allowed to replace `e`:
+      // the job stopped because of the first fault, and that stays the
+      // answer. `e` is re-thrown unchanged either way.
+      try {
+        await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
+      } catch (sweep) {
+        console.error("[run-job] S5 sweep after technical failure did not complete:", sweep);
       }
     }
     throw e;
