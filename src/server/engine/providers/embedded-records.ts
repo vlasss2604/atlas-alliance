@@ -4,6 +4,7 @@ import {
   type EmbeddedPayloadOptions,
 } from "./embedded-payload";
 import { parseFlightFrames } from "./flight-frames";
+import { identifierShapeOfAnyFamily } from "../../domain/identifier-shape";
 
 // RECORD-PRESERVING EMBEDDED PAYLOAD RECOVERY.
 //
@@ -31,18 +32,14 @@ import { parseFlightFrames } from "./flight-frames";
 // here is an observational candidate until it passes the provenance path
 // that actually admits identifiers.
 
-// Complete base58 identifier shapes. Same alphabet and ranges the rest of
-// the codebase uses; a shape is a claim about length and alphabet, never
-// about which chain or project a value belongs to.
-const SIGNATURE_LIKE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
-const ADDRESS_LIKE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-
+// Complete identifier shapes, shared with every other identifier surface
+// (domain/identifier-shape.ts): base58 exactly as before, plus the EVM 0x
+// families. A shape is a claim about length and alphabet, never about
+// which chain or project a value belongs to.
 export type IdentifierShape = "SIGNATURE_LIKE" | "ADDRESS_LIKE";
 
 export function classifyIdentifier(value: string): IdentifierShape | null {
-  if (SIGNATURE_LIKE.test(value)) return "SIGNATURE_LIKE";
-  if (ADDRESS_LIKE.test(value)) return "ADDRESS_LIKE";
-  return null;
+  return identifierShapeOfAnyFamily(value);
 }
 
 export interface RecordIdentifier {

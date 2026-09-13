@@ -7,6 +7,7 @@ import {
   researchJobs,
   sources,
 } from "../db/schema";
+import type { SupportedChain } from "../domain/project-identity";
 import {
   validateDocumentaryLocator,
   type DocumentaryLocatorOutcome,
@@ -81,6 +82,9 @@ export const MAX_LOCATORS_PER_FACT = 10;
 export function validateFactLocators(input: {
   claimed: readonly (string | null | undefined)[];
   documentText: string;
+  // The project's confirmed chain, when one exists — passed through to the
+  // validator unchanged so the family rule is decided in one place.
+  chain?: SupportedChain | null;
 }): LocatorValidationOutcome {
   const confirmed: ConfirmedLocator[] = [];
   const rejected: RejectedLocator[] = [];
@@ -91,6 +95,7 @@ export function validateFactLocators(input: {
     const outcome: DocumentaryLocatorOutcome = validateDocumentaryLocator({
       claimedLocator: claimed,
       documentText: input.documentText,
+      chain: input.chain ?? null,
     });
     if (outcome.locator === "CONFIRMED") {
       if (seen.has(outcome.value)) continue;

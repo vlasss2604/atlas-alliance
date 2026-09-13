@@ -8,13 +8,39 @@
 // Nothing here is chain-specific beyond the chain enum; per-chain address
 // encoding, RPC method mapping and response decoding live in adapters.
 
-export type OnchainChain = "solana";
+import type { SupportedChain } from "../../domain/project-identity";
+
+// ONE RESEARCH CORE, MULTIPLE EVIDENCE ENVIRONMENTS. The chain vocabulary
+// here is the SAME one a confirmed project identity uses, so an intent can
+// be addressed to whichever chain a human confirmed. Which of those chains
+// actually has a retriever is a separate, code-owned question answered by
+// the retriever registry (onchain-retriever.ts) — a chain being nameable
+// here confers no capability, and nothing here guesses one.
+export type OnchainChain = SupportedChain;
 
 // D-131 — production networks only. A test network is not weaker
 // authority, it is a DIFFERENT asset universe, so v1 does not model one
 // at all: there is no enum member for it and no endpoint configured, which
 // makes testnet data structurally unreachable rather than filtered later.
 export type OnchainNetwork = "mainnet";
+
+// The (chain, network) pair an observation was made in. Everything
+// deterministic — retriever resolution, canonical URIs, provenance, and
+// every temporal comparison — is scoped to exactly one of these.
+export interface OnchainEnvironment {
+  chain: OnchainChain;
+  network: OnchainNetwork;
+}
+
+export function onchainEnvironmentKey(env: OnchainEnvironment): string {
+  return `${env.chain}/${env.network}`;
+}
+
+export function sameOnchainEnvironment(a: OnchainEnvironment, b: OnchainEnvironment): boolean {
+  return a.chain === b.chain && a.network === b.network;
+}
+
+export type OnchainFinality = "finalized" | "confirmed";
 
 export type OnchainIntentKind =
   | "TOKEN_SUPPLY"
@@ -363,11 +389,18 @@ export interface OnchainProvenance {
   projectAnchor: string;
   subjectKind: OnchainSubjectKind;
   subject: string;
-  // Chain position of the observation.
+  // CHAIN POSITION of the observation: the canonical monotonic ordinal the
+  // chain itself provides inside this (chain, network). On Solana that is
+  // the slot; on an EVM chain it will be the block number. The field (and
+  // the persisted column) keeps its Solana name — renaming stored data for
+  // vocabulary is not a change this seam makes — and generic code that
+  // needs to reason about ordering reads it through `chainPositionOf` /
+  // `compareChainPositions` below, which refuse to compare across
+  // environments.
   slot: number;
   blockTime: number | null;
   blockHash: string | null;
-  finality: "finalized" | "confirmed";
+  finality: OnchainFinality;
   // How it was obtained. providerId identifies the endpoint by a
   // code-owned LABEL, never a URL and never a credential.
   retrievalMethod: "RPC";
@@ -380,6 +413,61 @@ export interface OnchainProvenance {
   retrievedAt: Date;
   rawResponseHash: string;
   artifactHash: string;
+}
+
+// ---- chain position --------------------------------------------------
+// What generic code may know about WHERE in a chain an observation sits,
+// without assuming Solana terminology. An ordinal is meaningful only
+// inside one environment: slot 200 on Solana and block 200 on Ethereum are
+// not before, after, or equal to one another — they are incomparable, and
+// a comparison across environments fails closed rather than ordering them.
+
+export interface ChainPosition {
+  // The chain's own monotonic ordinal (Solana slot, EVM block number).
+  ordinal: number;
+  blockTime: number | null;
+  blockHash: string | null;
+  finality: OnchainFinality;
+}
+
+// The minimum an observation must carry to be placed: its environment and
+// its ordinal. OnchainProvenance satisfies it directly.
+export type PositionedObservation = Pick<OnchainProvenance, "chain" | "network" | "slot">;
+
+export function chainPositionOf(p: OnchainProvenance): ChainPosition {
+  return {
+    ordinal: p.slot,
+    blockTime: p.blockTime,
+    blockHash: p.blockHash,
+    finality: p.finality,
+  };
+}
+
+export type ChainPositionComparison =
+  | { comparable: true; order: "BEFORE" | "SAME" | "AFTER" }
+  // The two positions are not in one environment, or one of them carries
+  // no usable ordinal. Neither is an ordering; both are refusals.
+  | { comparable: false; reason: "CHAIN_MISMATCH" | "NETWORK_MISMATCH" | "INVALID_POSITION" };
+
+function isUsableOrdinal(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+// Where `a` stands relative to `b`, or why the question has no answer.
+// Chain is checked before network so a cross-chain pair is named as such
+// even when the network labels happen to coincide.
+export function compareChainPositions(
+  a: PositionedObservation,
+  b: PositionedObservation,
+): ChainPositionComparison {
+  if (a.chain !== b.chain) return { comparable: false, reason: "CHAIN_MISMATCH" };
+  if (a.network !== b.network) return { comparable: false, reason: "NETWORK_MISMATCH" };
+  if (!isUsableOrdinal(a.slot) || !isUsableOrdinal(b.slot)) {
+    return { comparable: false, reason: "INVALID_POSITION" };
+  }
+  if (a.slot < b.slot) return { comparable: true, order: "BEFORE" };
+  if (a.slot > b.slot) return { comparable: true, order: "AFTER" };
+  return { comparable: true, order: "SAME" };
 }
 
 // ---- the trusted artifact -------------------------------------------

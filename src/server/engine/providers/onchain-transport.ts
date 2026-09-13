@@ -7,7 +7,7 @@ import {
   type OnchainRetriever,
   type OnchainRpcTransport,
 } from "./onchain-retriever";
-import { createSolanaOnchainAdapter } from "./onchain-solana";
+import { createSolanaOnchainAdapter, type SolanaAdapterDeps } from "./onchain-solana";
 
 // Production HTTPS JSON-RPC transport for structured on-chain retrieval.
 //
@@ -157,6 +157,19 @@ export function createHttpsRpcTransport(
   };
 }
 
+// WHICH IMPLEMENTATION SERVES WHICH ENVIRONMENT. Code-owned and explicit:
+// one factory per implemented (chain, network), keyed exactly as the
+// retriever registry's allowlist is. A key present in the allowlist but
+// absent here is a programming error surfaced as "no retriever" — never
+// as another chain's adapter. Solana mainnet is implementation #1; an EVM
+// implementation registers under its own key and this function does not
+// change.
+type AdapterDeps = Pick<SolanaAdapterDeps, "transport" | "providerId">;
+const IMPLEMENTATION_BY_ENVIRONMENT: ReadonlyMap<string, (deps: AdapterDeps) => OnchainRetriever> =
+  new Map([
+    ["solana/mainnet", (deps) => createSolanaOnchainAdapter({ ...deps, finality: "finalized" })],
+  ]);
+
 // Resolves a production retriever for (chain, network) from server-side
 // configuration, or returns null when this deployment has not enabled it.
 // Returning null rather than throwing keeps an unconfigured environment a
@@ -177,8 +190,7 @@ export function createProductionOnchainRetriever(
   const providerId = `${chain}-${network}-rpc`;
   const transport = createHttpsRpcTransport(endpoint, providerId, opts);
 
-  if (chain === "solana") {
-    return createSolanaOnchainAdapter({ transport, providerId, finality: "finalized" });
-  }
-  return null; // v1: Solana only
+  const implementation = IMPLEMENTATION_BY_ENVIRONMENT.get(`${chain}/${network}`);
+  if (!implementation) return null; // allowlisted but unimplemented — never another chain's adapter
+  return implementation({ transport, providerId });
 }

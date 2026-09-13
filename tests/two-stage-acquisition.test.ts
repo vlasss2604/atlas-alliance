@@ -248,7 +248,7 @@ async function evidenceCountFor(jobId: string): Promise<number> {
 describe("Stage A — acquire and persist, and NOTHING else exists afterwards", () => {
   it("1/2/3/4/5/6/12. fetches through the transport seam, captures, persists; zero model, zero RPC, zero Evidence, chain locked", async () => {
     const { calls, retriever } = spyRetriever();
-    __setOnchainRetriever(retriever);
+    __setOnchainRetriever(retriever, { chain: "solana", network: "mainnet" });
     const project = await makeClassifiedProject();
 
     const { jobId, captured, fetchCalls } = await runStageA(project);
@@ -460,7 +460,7 @@ describe("Stage B — resume against the stored document, through the ordinary p
   it("21. documentary-only chain mode still guarantees zero retriever calls on resume, even with admitted locators present", async () => {
     // Admitted locators exist in this database by now (earlier suites).
     const { calls, retriever } = spyRetriever();
-    __setOnchainRetriever(retriever);
+    __setOnchainRetriever(retriever, { chain: "solana", network: "mainnet" });
     const project = await makeClassifiedProject();
     const { captured } = await runStageA(project);
     const jobId = await makeJob(project.id);
@@ -589,7 +589,7 @@ describe("resumed path — S5 -> S6 -> S7 -> S8, the production functions", () =
 
   it("10/11/12/13/14. the projections add zero fetch, render, search, RPC and model calls", async () => {
     const retriever = spyRetriever();
-    __setOnchainRetriever(retriever.retriever as unknown as OnchainRetriever);
+    __setOnchainRetriever(retriever.retriever as unknown as OnchainRetriever, { chain: "solana", network: "mainnet" });
     try {
       const { jobId, counters } = await stageBWithEvidence();
       const afterStageB = { ...counters };

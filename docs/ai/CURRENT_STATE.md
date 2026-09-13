@@ -2339,11 +2339,18 @@ CONFIRMED`**. It works; it has simply never succeeded end to end. (Which also
 proves the 53 existing `ONCHAIN_VERIFIABLE` rows, `entityBinding UNVERIFIED` with
 null artifact id, did not come from it.)
 
-**The blocker is chain coverage.** `onchain-transport.ts` returns `null` —
-`v1: Solana only` — and every intent is gated on `chain === "solana" && network
-=== "mainnet"`. `SUPPORTED_CHAINS` admits ethereum and six other EVM chains **for
-identity only**, so a confirmed Ethereum project degrades silently to
-documentary-only. Not a defect; a capability boundary.
+**The blocker is chain coverage.** The deterministic layer implements exactly
+one evidence environment, `solana/mainnet`, declared in the code-owned table in
+`engine/onchain-environment.ts`; the retriever registry
+(`providers/onchain-retriever.ts`) is keyed by `(chain, network)` and resolves
+that key only, with no cross-chain fallback. `SUPPORTED_CHAINS` admits ethereum
+and six other EVM chains **for identity only**: `onchainEnvironmentFor` returns
+null for them, so a confirmed Ethereum project produces no intent and degrades
+to documentary-only. Not a defect; a capability boundary. The generic layer no
+longer names Solana — gates, intents, provenance, identifier shape
+(`domain/identifier-shape.ts`, base58 and EVM hex) and chain position
+(`ChainPosition` over the persisted `slot`) are environment-aware, and an EVM
+adapter registers as implementation #2 under its own key.
 
 Repository memory holds four projects: `pump_fun` (26 jobs, 401 evidence),
 `hyperliquid`, `uniswap` and `raydium` — the latter three with **0 jobs,

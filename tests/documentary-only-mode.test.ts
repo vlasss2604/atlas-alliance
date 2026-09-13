@@ -226,7 +226,7 @@ describe("5-10. the structural guarantee, proved in both directions", () => {
     // Without this half the zero below would prove nothing — it could be
     // an artefact of the fixture rather than of the guard.
     const { calls, retriever } = spyRetriever();
-    __setOnchainRetriever(retriever);
+    __setOnchainRetriever(retriever, { chain: "solana", network: "mainnet" });
     const project = await projectWithConfirmedIdentity();
     const jobId = await queueJob(project.id, await activeTopicId(), coreEntitlement());
 
@@ -236,7 +236,7 @@ describe("5-10. the structural guarantee, proved in both directions", () => {
 
   it("6/7/8/9. WITH documentary-only, the retriever is never touched — RPC count is exactly zero", async () => {
     const { calls, retriever } = spyRetriever();
-    __setOnchainRetriever(retriever);
+    __setOnchainRetriever(retriever, { chain: "solana", network: "mainnet" });
     const project = await projectWithConfirmedIdentity();
     const jobId = await queueJob(project.id, await activeTopicId(), coreEntitlement());
 
@@ -258,11 +258,11 @@ describe("5-10. the structural guarantee, proved in both directions", () => {
     const topicId = await activeTopicId();
 
     const ordinary = spyRetriever();
-    __setOnchainRetriever(ordinary.retriever);
+    __setOnchainRetriever(ordinary.retriever, { chain: "solana", network: "mainnet" });
     await run(project, await queueJob(project.id, topicId, coreEntitlement()));
 
     const guarded = spyRetriever();
-    __setOnchainRetriever(guarded.retriever);
+    __setOnchainRetriever(guarded.retriever, { chain: "solana", network: "mainnet" });
     await run(project, await queueJob(project.id, topicId, coreEntitlement()), "DOCUMENTARY_ONLY");
 
     expect(ordinary.calls.supports + ordinary.calls.retrieve).toBeGreaterThan(0);
@@ -271,7 +271,7 @@ describe("5-10. the structural guarantee, proved in both directions", () => {
 
   it("5. documentary-only does NOT disable the documentary path — it still runs and reports", async () => {
     const { retriever } = spyRetriever();
-    __setOnchainRetriever(retriever);
+    __setOnchainRetriever(retriever, { chain: "solana", network: "mainnet" });
     const project = await projectWithConfirmedIdentity();
     const jobId = await queueJob(project.id, await activeTopicId(), coreEntitlement());
 

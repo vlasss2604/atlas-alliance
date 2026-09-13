@@ -1,4 +1,4 @@
-import type { ConfirmedProjectIdentity } from "../domain/project-identity";
+import { chainAddressesEqual, type ConfirmedProjectIdentity, type SupportedChain } from "../domain/project-identity";
 import type { OnchainArtifact, OnchainProvenance, OnchainResult } from "./providers/onchain-types";
 
 // AMENDMENT C — entity binding for a structured artifact is decided by the
@@ -35,12 +35,12 @@ export type OnchainBindingFailure =
   | "RESPONSE_SUBJECT_MISMATCH"
   | "PROVENANCE_INCOMPLETE";
 
-// Solana base58 is case-significant; an EVM adapter would compare
-// case-insensitively (EIP-55). Kept here so the rule is stated once and
-// the future adapter has an obvious place to extend rather than a hidden
-// assumption to discover.
-function addressesEqual(chain: string, a: string, b: string): boolean {
-  return chain === "solana" ? a === b : a.toLowerCase() === b.toLowerCase();
+// Address equality is a property of the chain family — base58 is
+// case-significant, EVM (EIP-55) is not — and it is stated ONCE, in the
+// domain module the identity record already uses. Binding applies that
+// same rule rather than a second copy of it.
+function addressesEqual(chain: SupportedChain, a: string, b: string): boolean {
+  return chainAddressesEqual(chain, a, b);
 }
 
 // Complete provenance is an ELIGIBILITY prerequisite, not a nicety: an

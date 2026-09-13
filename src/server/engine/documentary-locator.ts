@@ -33,20 +33,29 @@
 // containment check here is exact, unlike D-076's traceability check,
 // which lowercases because it compares human-readable prose.
 //
-// NO PROJECT KNOWLEDGE. There is no chain, no host, no project and no
-// mechanism in this file. It decides shape and literal presence, nothing
-// else. Whether a well-formed identifier is the RIGHT account, on the
-// right chain, for the right project remains D-134's question, and this
-// module deliberately cannot answer it — passing here means "the document
-// states this identifier", never "this identifier is what it claims".
+// NO PROJECT KNOWLEDGE. There is no host, no project and no mechanism in
+// this file. It decides shape and literal presence, nothing else. Whether
+// a well-formed identifier is the RIGHT account, on the right chain, for
+// the right project remains D-134's question, and this module deliberately
+// cannot answer it — passing here means "the document states this
+// identifier", never "this identifier is what it claims".
+//
+// ENVIRONMENT-AWARE SHAPE. What counts as a complete identifier depends
+// on the chain family (base58 for Solana, 0x-hex for EVM), and the family
+// rules live in ONE place — domain/identifier-shape.ts. A caller that
+// knows the project's confirmed chain passes it, and only that chain's
+// family is recognised: an 0x address proposed for a Solana project is
+// "not an identifier" here, exactly as it always was. A caller with no
+// confirmed chain gets the union of families — still a shape check, and
+// still never a chain attribution.
 
-// Base58 (no 0, O, I, l). A Solana address is 32 bytes -> 32-44 chars; a
-// signature is 64 bytes -> 87-88 chars. Same alphabet as document-links,
-// stated independently here because this module must not depend on how a
-// document was parsed.
-const BASE58_CHAR = /[1-9A-HJ-NP-Za-km-z]/;
-const COMPLETE_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const COMPLETE_SIGNATURE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
+import {
+  identifierBoundaryCharOfFamily,
+  identifierFamilyOfValue,
+  identifierShapeForChain,
+  identifierShapeOfAnyFamily,
+} from "../domain/identifier-shape";
+import type { SupportedChain } from "../domain/project-identity";
 
 // The elision markers a page uses when it abbreviates an identifier for
 // display. A complete base58 identifier can contain none of them, so any
@@ -77,30 +86,35 @@ export function isTruncatedDisplayForm(value: string): boolean {
   return TRUNCATION_MARKERS.some((marker) => value.includes(marker));
 }
 
-export function completeIdentifierShape(value: string): LocatorShape | null {
-  // Checked longest-first: the signature range and the address range do
-  // not overlap, but ordering states the intent rather than relying on it.
-  if (COMPLETE_SIGNATURE.test(value)) return "SIGNATURE_LIKE";
-  if (COMPLETE_ADDRESS.test(value)) return "ADDRESS_LIKE";
-  return null;
+// The shape of a value FOR A CHAIN when one is known, or in whichever
+// family it structurally fits when none is. Solana base58 recognition is
+// exactly what it always was in both forms.
+export function completeIdentifierShape(
+  value: string,
+  chain: SupportedChain | null = null,
+): LocatorShape | null {
+  return chain === null ? identifierShapeOfAnyFamily(value) : identifierShapeForChain(chain, value);
 }
 
-// Exact, case-sensitive containment with a base58 boundary on both sides.
+// Exact, case-sensitive containment with an identifier boundary on both
+// sides, where "identifier character" is decided by the value's own family
+// (base58 for a base58 value, hex for an 0x value).
 //
 // The boundary is not decoration. Without it a 44-character address would
 // "appear literally" inside an 88-character signature that merely happens
 // to contain those characters, and a fact could claim an account the
-// document never names. A neighbouring base58 character means the match
-// is part of a longer identifier, so it is not this identifier.
+// document never names. A neighbouring identifier character means the
+// match is part of a longer identifier, so it is not this identifier.
 export function literallyPresent(documentText: string, value: string): boolean {
   if (value.length === 0) return false;
+  const boundaryChar = identifierBoundaryCharOfFamily(identifierFamilyOfValue(value) ?? "BASE58");
   let from = documentText.indexOf(value);
   while (from >= 0) {
     const before = from === 0 ? "" : documentText[from - 1];
     const afterIndex = from + value.length;
     const after = afterIndex >= documentText.length ? "" : documentText[afterIndex];
-    const boundedLeft = before === "" || !BASE58_CHAR.test(before);
-    const boundedRight = after === "" || !BASE58_CHAR.test(after);
+    const boundedLeft = before === "" || !boundaryChar.test(before);
+    const boundedRight = after === "" || !boundaryChar.test(after);
     if (boundedLeft && boundedRight) return true;
     from = documentText.indexOf(value, from + 1);
   }
@@ -114,6 +128,10 @@ export interface DocumentaryLocatorInput {
   // The EXACT text the extractor was given — the same value D-076's
   // traceability check runs against, so "the document" means one thing.
   documentText: string;
+  // The project's confirmed chain, when one exists. Decides which
+  // identifier family a proposal must fit. Absent means "no confirmed
+  // chain": any family's complete shape is accepted, none is attributed.
+  chain?: SupportedChain | null;
 }
 
 export function validateDocumentaryLocator(
@@ -129,7 +147,7 @@ export function validateDocumentaryLocator(
   if (isTruncatedDisplayForm(value)) {
     return { locator: "NONE", reason: "TRUNCATED_DISPLAY_FORM" };
   }
-  const shape = completeIdentifierShape(value);
+  const shape = completeIdentifierShape(value, input.chain ?? null);
   if (!shape) return { locator: "NONE", reason: "NOT_A_COMPLETE_IDENTIFIER" };
   if (!literallyPresent(input.documentText, value)) {
     return { locator: "NONE", reason: "NOT_LITERAL_IN_DOCUMENT" };

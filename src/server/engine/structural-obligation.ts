@@ -4,6 +4,7 @@ import type {
 } from "../domain/project-identity";
 import type { EvidenceProvenanceMetadata } from "./onchain-invocation-provenance";
 import {
+  isInstructionRegistryChain,
   proofApprovalForMethod,
   resolveValueRecipients,
 } from "./onchain-instruction-registry";
@@ -193,6 +194,13 @@ function evaluateMechanicalProvenance(
   if (identity === null || programs.length === 0) {
     return { met: false, reason: "MECHANICAL_PROVENANCE_NOT_ESTABLISHED" };
   }
+  // The approval registry is consulted for the identity's OWN chain. A
+  // chain the registry does not decode has no approvals, so the obligation
+  // is unmet there — it is never answered from another chain's registry.
+  const registryChain = identity.chain;
+  if (!isInstructionRegistryChain(registryChain)) {
+    return { met: false, reason: "MECHANICAL_PROVENANCE_NOT_ESTABLISHED" };
+  }
   const projectMint = identity.tokenAddress;
 
   // STEP 1 — WHICH ACTIVITY IS THE ORDINARY SUPPORT ACTUALLY ABOUT?
@@ -249,7 +257,7 @@ function evaluateMechanicalProvenance(
     // protocol value. Resolved HERE from the code-owned registry rather
     // than read off the row, so a change of approval never depends on
     // rewriting stored Evidence.
-    const approval = proofApprovalForMethod("solana", p.callerProgramId, p.callerMethod);
+    const approval = proofApprovalForMethod(registryChain, p.callerProgramId, p.callerMethod);
     if (approval === null || approval.role !== "PROTOCOL_VALUE_INFLOW") return false;
     // (5b) SAME QUALIFYING METHOD IS NOT THE SAME ECONOMIC LEG.
     //

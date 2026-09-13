@@ -83,6 +83,24 @@ Chain reads use **typed intents only** — no arbitrary RPC. Intents:
 `SIGNATURES_FOR_ADDRESS`, `TRANSACTION_DETAIL`, `TOKEN_ACCOUNT_BALANCE`.
 See `providers/onchain-*.ts`.
 
+**One Research Core, multiple evidence environments.** Chain-specific code
+answers "how do I deterministically obtain and normalise this observation?";
+the Research Core answers "what does this evidence prove?" and never asks
+which chain served it. The seam between them: `engine/onchain-environment.ts`
+(the code-owned table of implemented `(chain, network)` pairs; a confirmed
+identity resolves to its environment through `onchainEnvironmentFor`, null
+when none is implemented), `providers/onchain-retriever.ts` (a registry of
+installed retrievers keyed by environment — exact key, no fallback, fail
+closed), `domain/identifier-shape.ts` (identifier families per chain: base58
+for Solana, `0x` hex for EVM; the locator validator and the acquisition subject
+gate ask for the identity's chain, discovery asks for any family and attributes
+none), and `ChainPosition` in `providers/onchain-types.ts` (the chain's own
+ordinal — Solana slot, EVM block number — comparable only inside one
+environment; the persisted column is still `slot`). Solana mainnet is
+implementation #1. Token accounts, SPL decoding, instructions, Anchor
+discriminators, wrapped SOL, `getSignaturesForAddress`, account lifecycle and
+owner-flow semantics stay inside the Solana implementation.
+
 The adapter decodes a CLOSED SET of programs — System, SPL Token, Token-2022,
 Associated Token. An instruction from any other program is **preserved, not
 decoded**: its program id, account list (in order) and opaque data blob are kept

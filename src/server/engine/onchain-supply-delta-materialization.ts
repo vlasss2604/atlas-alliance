@@ -1,5 +1,6 @@
 import type { Database, Transaction } from "../db/client";
 import { resolveConfirmedIdentity } from "../domain/project-identity";
+import { onchainEnvironmentFor } from "./onchain-environment";
 import {
   selectBurnSpanningSupplyInterval,
   type BurnEventSpan,
@@ -110,7 +111,12 @@ export async function runSupplyDeltaMaterialization(
   // historical observation: an old mint's readings stay comparable with each
   // other and stop being about this project.
   const identity = await resolveConfirmedIdentity(db, input.projectId);
-  if (!identity?.tokenAddress || identity.chain !== "solana") return none;
+  if (!identity?.tokenAddress) return none;
+  // The identity's own deterministic environment, from the static table —
+  // no provider, no retriever. A chain with no implementation has no
+  // observations to materialize from and returns exactly as before.
+  const environment = onchainEnvironmentFor(identity.chain);
+  if (environment === null) return none;
   const anchor = identity.tokenAddress;
 
   const events = await loadCurrentJobBurnEvents(db, {
@@ -122,8 +128,8 @@ export async function runSupplyDeltaMaterialization(
   const current = await loadCurrentJobSupplyObservations(db, {
     currentResearchJobId: input.jobId,
     projectAnchor: anchor,
-    chain: "solana",
-    network: "mainnet",
+    chain: environment.chain,
+    network: environment.network,
   });
 
   // The historical query is bounded by the EARLIEST burn, because a reading
@@ -133,8 +139,8 @@ export async function runSupplyDeltaMaterialization(
   const historicalLoaded = await loadHistoricalSupplyCandidates(db, {
     currentResearchJobId: input.jobId,
     projectAnchor: anchor,
-    chain: "solana",
-    network: "mainnet",
+    chain: environment.chain,
+    network: environment.network,
     beforeSlot: earliestBurnSlotOf(events, input.jobId, anchor),
   });
 

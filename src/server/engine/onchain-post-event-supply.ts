@@ -17,8 +17,9 @@ import {
   loadCurrentJobSupplyObservations,
   loadHistoricalSupplyCandidates,
 } from "./onchain-supply-candidate-store";
-import { buildCanonicalOnchainUri, parseCanonicalOnchainUri } from "./onchain-uri";
+import { buildCanonicalOnchainUri, onchainIntentPath, parseCanonicalOnchainUri } from "./onchain-uri";
 import {
+  onchainEnvironmentFor,
   onchainRetrievalAvailable,
   resolveOnchainRetriever,
   type OnchainRetriever,
@@ -119,14 +120,7 @@ export interface PostEventSupplyCompletion {
 // makes it a genuine one-shot rather than a retry gate: a failure spends the
 // opportunity exactly as a success does.
 const ONE_SHOT_OPERATIONS = ["FETCH_ATTEMPTED", "CANDIDATE_SKIPPED_BUDGET"] as const;
-const TOKEN_SUPPLY_INTENT_PATH = buildCanonicalOnchainUri({
-  kind: "TOKEN_SUPPLY",
-  chain: "solana",
-  network: "mainnet",
-  projectAnchor: "A",
-  subjectKind: "token",
-  subject: "A",
-}).split("/").pop()!;
+const TOKEN_SUPPLY_INTENT_PATH = onchainIntentPath("TOKEN_SUPPLY");
 
 export async function postEventSupplyOpportunityConsumed(
   db: Database | Transaction,
@@ -185,7 +179,12 @@ export async function runPostEventSupplyCompletion(
   // arithmetically comparable with each other and are not about this project
   // any more.
   const identity = await resolveConfirmedIdentity(db, input.projectId);
-  if (!identity?.tokenAddress || identity.chain !== "solana") return none;
+  if (!identity?.tokenAddress) return none;
+  // The identity's own deterministic environment, from the registry. A
+  // chain with no implementation has none, and this completion — like
+  // every other chain read — simply does not exist for it.
+  const environment = onchainEnvironmentFor(identity.chain);
+  if (environment === null) return none;
   const anchor = identity.tokenAddress;
 
   // --- the events this Research established ------------------------------
@@ -201,8 +200,8 @@ export async function runPostEventSupplyCompletion(
     await loadCurrentJobSupplyObservations(db, {
       currentResearchJobId: input.jobId,
       projectAnchor: anchor,
-      chain: "solana",
-      network: "mainnet",
+      chain: environment.chain,
+      network: environment.network,
     })
   ).map((o) => o.observation);
 
@@ -221,8 +220,8 @@ export async function runPostEventSupplyCompletion(
     await loadHistoricalSupplyCandidates(db, {
       currentResearchJobId: input.jobId,
       projectAnchor: anchor,
-      chain: "solana",
-      network: "mainnet",
+      chain: environment.chain,
+      network: environment.network,
       beforeSlot: watermark.eventSlot,
     })
   ).map((o) => o.observation);
@@ -244,8 +243,8 @@ export async function runPostEventSupplyCompletion(
 
   const intent: OnchainIntent = {
     kind: "TOKEN_SUPPLY",
-    chain: "solana",
-    network: "mainnet",
+    chain: environment.chain,
+    network: environment.network,
     projectAnchor: anchor,
     subjectKind: "token",
     subject: anchor,
@@ -258,7 +257,9 @@ export async function runPostEventSupplyCompletion(
   let retriever: OnchainRetriever;
   if (input.retriever) retriever = input.retriever;
   else if (input.retriever === null) return { ...none, ...base, outcome: "ACQUISITION_UNAVAILABLE" };
-  else if (onchainRetrievalAvailable()) retriever = resolveOnchainRetriever();
+  else if (onchainRetrievalAvailable(environment.chain, environment.network)) {
+    retriever = resolveOnchainRetriever(environment.chain, environment.network);
+  }
   else return { ...none, ...base, outcome: "ACQUISITION_UNAVAILABLE" };
   if (!retriever.supports(intent.chain, intent.network, intent.kind)) {
     return { ...none, ...base, outcome: "ACQUISITION_UNAVAILABLE" };

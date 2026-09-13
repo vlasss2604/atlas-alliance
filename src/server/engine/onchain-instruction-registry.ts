@@ -43,6 +43,15 @@ function anchorGlobal(method: string): Buffer {
 
 export type OnchainInstructionChain = "solana";
 
+// Does this registry decode instructions for the given chain at all? The
+// registry is Solana-shaped (Anchor discriminators, base58 data) and says
+// so here, so a generic caller holding a confirmed identity asks rather
+// than assumes: an identity on a chain the registry does not cover reaches
+// no approval, which is unmet — never a lookup under some other chain.
+export function isInstructionRegistryChain(chain: string): chain is OnchainInstructionChain {
+  return chain === "solana";
+}
+
 // D-158 PHASE 2 — WHAT A KNOWN METHOD IS APPROVED TO HELP PROVE.
 //
 // WHY A ROLE IS NEEDED AT ALL. Phase 1 can prove "program P invoked the

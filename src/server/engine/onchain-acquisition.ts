@@ -12,7 +12,8 @@ import type {
   OnchainIntentKind,
   OnchainSubjectKind,
 } from "./providers/onchain-types";
-import { completeIdentifierShape, type LocatorShape } from "./documentary-locator";
+import { identifierShapeForChain } from "../domain/identifier-shape";
+import type { LocatorShape } from "./documentary-locator";
 import { brandOnchainArtifact, isOnchainArtifact } from "./providers/onchain-types";
 import { validateOnchainBinding } from "./onchain-binding";
 import { synthesizeOnchainFacts } from "./onchain-facts";
@@ -30,6 +31,7 @@ import {
   PROMOTION_ONLY_INTENTS,
 } from "./onchain-subject-promotion";
 import {
+  onchainEnvironmentFor,
   onchainRetrievalAvailable,
   resolveOnchainRetriever,
   type OnchainRetriever,
@@ -94,18 +96,18 @@ function subjectKindOfLocator(shape: LocatorShape): OnchainSubjectKind {
 
 // DOES THIS SUBJECT'S IDENTIFIER SHAPE MATCH THE INTENT ADDRESSED TO IT?
 //
-// Asked from the SAME authority that classified the locator in the first
-// place — `completeIdentifierShape` — rather than from a second copy of the
-// base58 length rules. There are already four such copies in the tree
-// (documentary-locator, document-links, embedded-records, onchain-solana);
-// a fifth written here is one more place for them to drift.
+// Asked from the SAME authority that classifies every locator — the
+// per-chain identifier families in domain/identifier-shape.ts — rather
+// than from a second copy of the length rules, and asked FOR THE INTENT'S
+// OWN CHAIN: an EVM-shaped subject under a Solana intent has no shape here,
+// and a base58 subject under an EVM intent has none either.
 //
 // FAIL CLOSED. An identifier of no recognised shape matches nothing, so an
 // unrecognisable subject is refused rather than sent to an endpoint to find
 // out. A `token` subject is an address like an `account` one — the anchor is
 // a mint — so the two share a case rather than pretending to differ.
 export function subjectShapeMatchesIntent(intent: OnchainIntent): boolean {
-  const shape = completeIdentifierShape(intent.subject);
+  const shape = identifierShapeForChain(intent.chain, intent.subject);
   if (shape === null) return false;
   return subjectKindOf(intent.kind) === "tx"
     ? shape === "SIGNATURE_LIKE"
@@ -249,7 +251,11 @@ export function componentAdmitsOnchainAcquisition(input: {
   // The Pattern decides admissibility; acquisition never overrides it.
   if (!input.establishingClasses.includes("ONCHAIN_VERIFIABLE")) return false;
   if (!input.identity?.tokenAddress) return false;
-  if (input.identity.chain !== "solana") return false; // v1: Solana only
+  // THE ENVIRONMENT GATE. Asked of the retriever registry, not of a chain
+  // name: a chain the codebase implements no deterministic environment for
+  // admits nothing here — no intents, no reservation — and is never routed
+  // to another chain's implementation.
+  if (onchainEnvironmentFor(input.identity.chain) === null) return false;
   return (INTENTS_BY_COMPONENT[input.component] ?? []).length > 0;
 }
 
@@ -346,6 +352,10 @@ export function selectOnchainIntents(input: {
   if (!componentAdmitsOnchainAcquisition(input)) return [];
   const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
 
+  // The identity's OWN environment — the gate above already established
+  // that one exists. Every intent this call creates is addressed to it;
+  // nothing here names a chain or a network.
+  const environment = onchainEnvironmentFor(input.identity!.chain)!;
   const subjects = eligibleSubjects(input.identity!, input.locators ?? []);
   const intents: OnchainIntent[] = [];
   for (const kind of kinds) {
@@ -372,8 +382,8 @@ export function selectOnchainIntents(input: {
       if (wants !== s.kind) continue;
       intents.push({
         kind,
-        chain: "solana",
-        network: "mainnet",
+        chain: environment.chain,
+        network: environment.network,
         projectAnchor: input.identity!.tokenAddress!,
         subjectKind: wants,
         subject: s.subject,
@@ -734,9 +744,19 @@ export async function runStructuredOnchainAcquisition(
 
   // An unconfigured environment must not fail the attempt — it simply has
   // no structured capability, and the normal path continues.
+  //
+  // RESOLVED FOR THE INTENTS' OWN ENVIRONMENT. Every intent of one attempt
+  // shares the identity's (chain, network), so the first names it for all.
+  // The registry answers for that exact key and nothing else: a process
+  // holding only a Solana retriever has no capability for an Ethereum
+  // identity, and records that honestly rather than reaching for the wrong
+  // chain.
+  const environment = { chain: intents[0].chain, network: intents[0].network };
   let retriever: OnchainRetriever;
   if (deps.retriever) retriever = deps.retriever;
-  else if (onchainRetrievalAvailable()) retriever = resolveOnchainRetriever();
+  else if (onchainRetrievalAvailable(environment.chain, environment.network)) {
+    retriever = resolveOnchainRetriever(environment.chain, environment.network);
+  }
   else return { ...empty, observations: ["ONCHAIN_RETRIEVER_NOT_CONFIGURED"] };
 
   const reserve =

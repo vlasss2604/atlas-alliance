@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import type { Database, Transaction } from "../db/client";
 import { projectMemoryItems } from "../db/schema";
+import { identifierShapeForChain } from "./identifier-shape";
 
 // D-133 — confirmed project identity and locators.
 //
@@ -71,10 +72,8 @@ const CHAIN_EXPLORERS: Record<SupportedChain, readonly string[]> = {
 
 // Address shapes are validated only for OBVIOUS structural sanity, never
 // for ownership: a well-formed address is not a confirmed one. Confirmation
-// is exclusively the human ACTIVE-row decision.
-const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-// Base58, no 0/O/I/l — Solana mints are 32-44 chars.
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+// is exclusively the human ACTIVE-row decision. The shapes themselves are
+// stated once, per chain family, in identifier-shape.ts.
 
 export const projectIdentityContentSchema = z
   .object({
@@ -134,8 +133,7 @@ export type ProjectIdentityContent = z.infer<typeof projectIdentityContentSchema
 // reject an obviously cross-chain record (an 0x… address filed under
 // solana), never to infer or confirm ownership.
 export function addressShapeMatchesChain(chain: SupportedChain, address: string): boolean {
-  if (chain === "solana") return SOLANA_ADDRESS.test(address);
-  return EVM_ADDRESS.test(address);
+  return identifierShapeForChain(chain, address) === "ADDRESS_LIKE";
 }
 
 export interface ConfirmedProgram {
@@ -220,7 +218,11 @@ export function explorerLocatorsForIdentity(
 // case-significant). EVM addresses are compared case-insensitively,
 // because checksummed (EIP-55) and lowercase forms of the SAME address
 // are both valid and appear interchangeably across explorers.
-function chainAddressesEqual(chain: SupportedChain, a: string, b: string): boolean {
+//
+// EXPORTED so the deterministic binding layer applies the same rule rather
+// than a second copy of it: address equality is a property of the chain
+// family, stated once.
+export function chainAddressesEqual(chain: SupportedChain, a: string, b: string): boolean {
   return chain === "solana" ? a === b : a.toLowerCase() === b.toLowerCase();
 }
 

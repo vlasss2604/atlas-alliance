@@ -20,6 +20,8 @@
 // pass on their own terms. This module deliberately has no way to express
 // approval.
 
+import { identifierShapeOfAnyFamily } from "../../domain/identifier-shape";
+
 export interface DocumentLink {
   href: string;
   // Visible text of the anchor, trimmed and bounded — useful for telling
@@ -108,15 +110,12 @@ function isSafeHref(href: string): boolean {
   return scheme[1] === "http" || scheme[1] === "https";
 }
 
-// Base58 (no 0, O, I, l). Solana signatures are 64 bytes -> 87-88 chars;
-// addresses are 32 bytes -> 32-44 chars.
-const SIGNATURE_LIKE = /^[1-9A-HJ-NP-Za-km-z]{64,88}$/;
-const ADDRESS_LIKE = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-
+// Shape recognition is shared with every other identifier surface
+// (domain/identifier-shape.ts): base58 exactly as before, plus the EVM
+// 0x families. Discovery knows no chain, so it asks for ANY family — a
+// shape, never a chain attribution.
 function classifyShape(value: string): DocumentIdentifier["shape"] | null {
-  if (SIGNATURE_LIKE.test(value)) return "SIGNATURE_LIKE";
-  if (ADDRESS_LIKE.test(value)) return "ADDRESS_LIKE";
-  return null;
+  return identifierShapeOfAnyFamily(value);
 }
 
 // Named entities are a long tail; NUMERIC references are not, and both

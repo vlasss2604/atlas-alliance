@@ -208,7 +208,7 @@ function installUnproductiveRetriever() {
     retrieve: async () => {
       throw new Error("fixture: chain read produced nothing");
     },
-  });
+  }, { chain: "solana", network: "mainnet" });
 }
 
 interface RunOpts {

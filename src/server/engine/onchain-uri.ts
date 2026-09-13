@@ -42,6 +42,12 @@ const INTENT_PATH: Record<OnchainIntent["kind"], string> = {
   TOKEN_ACCOUNTS_BY_OWNER: "token-accounts",
 };
 
+// The URI path segment for an intent kind, for callers that recognise a
+// canonical URI by intent without composing a whole intent to do it.
+export function onchainIntentPath(kind: OnchainIntent["kind"]): string {
+  return INTENT_PATH[kind];
+}
+
 export function buildCanonicalOnchainUri(intent: OnchainIntent): string {
   return [
     `${SCHEME}//${intent.chain}`,

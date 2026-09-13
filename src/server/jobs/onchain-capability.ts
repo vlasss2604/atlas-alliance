@@ -1,5 +1,7 @@
 import {
   __setOnchainRetriever,
+  endpointEnvVarFor,
+  type OnchainEnvironment,
   type OnchainRetriever,
 } from "../engine/providers/onchain-retriever";
 import { createProductionOnchainRetriever } from "../engine/providers/onchain-transport";
@@ -64,8 +66,12 @@ import { workerServesPhase, type PhaseCapability } from "./worker-capabilities";
 
 export const ONCHAIN_RESEARCH_ENV = "ONCHAIN_RESEARCH_ENABLED";
 
-// v1 is Solana mainnet only — the same bound `selectOnchainIntents`
-// already enforces (`identity.chain !== "solana"` returns no intents).
+// THE ONE ENVIRONMENT THIS DEPLOYMENT DECLARES. A deployment declaration,
+// not an engine assumption: the engine resolves retrievers by the
+// identity's own (chain, network) through the registry, and this module
+// says which environment the declared capability installs. v1 declares
+// Solana mainnet; a second environment is a second declaration here and
+// nothing generic changes.
 export const ONCHAIN_CHAIN = "solana";
 export const ONCHAIN_NETWORK = "mainnet";
 
@@ -123,13 +129,22 @@ export interface OnchainInstallDeps {
   // Seams, so the decision above is testable without a network. Production
   // passes none of them.
   create?: () => OnchainRetriever | null;
-  install?: (r: OnchainRetriever | null) => void;
+  install?: (r: OnchainRetriever | null, environment?: OnchainEnvironment) => void;
 }
 
-// The env var this deployment must set for the declared target. Exported
-// so the operator message and the error name the same thing.
+// The env var this deployment must set for the declared target, read from
+// the registry's own allowlist so the operator message, the error and the
+// transport name the same variable. Exported so alpha-run's preflight and
+// the startup error agree.
 export function onchainEndpointEnvVar(): string {
-  return "SOLANA_MAINNET_RPC_URL";
+  const envVar = endpointEnvVarFor(ONCHAIN_CHAIN, ONCHAIN_NETWORK);
+  if (envVar === null) {
+    // The declared environment is not one the codebase implements. A
+    // declaration that names nothing reachable must not be silently
+    // unreachable.
+    throw new OnchainCapabilityUnavailableError(ONCHAIN_CHAIN, ONCHAIN_NETWORK, "(unimplemented environment)");
+  }
+  return envVar;
 }
 
 export function installOnchainResearchCapability(
@@ -159,14 +174,15 @@ export function installOnchainResearchCapability(
     );
   }
 
-  install(retriever);
+  install(retriever, { chain: ONCHAIN_CHAIN, network: ONCHAIN_NETWORK });
   return { outcome: "INSTALLED", providerId: `${ONCHAIN_CHAIN}-${ONCHAIN_NETWORK}-rpc` };
 }
 
 // Shutdown. The retriever holds no long-lived connection of its own —
 // each bounded call opens and closes its own request — so what is removed
 // here is the capability object, exactly once, so a stopped worker cannot
-// still answer `onchainRetrievalAvailable()` with true.
+// still answer `onchainRetrievalAvailable()` with true. Unqualified: a
+// stopping worker removes every environment it installed.
 export function uninstallOnchainResearchCapability(
   install: (r: OnchainRetriever | null) => void = __setOnchainRetriever,
 ): void {

@@ -351,7 +351,7 @@ describe("adapter safety", () => {
   });
 
   it("an unconfigured environment throws rather than silently faking", () => {
-    expect(() => resolveOnchainRetriever()).toThrow(OnchainRetrieverUnavailableError);
+    expect(() => resolveOnchainRetriever("solana", "mainnet")).toThrow(OnchainRetrieverUnavailableError);
   });
 
   it("signature pagination is bounded", async () => {

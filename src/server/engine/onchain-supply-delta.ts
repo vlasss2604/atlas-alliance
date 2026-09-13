@@ -3,6 +3,7 @@ import type {
   OnchainProvenance,
   TokenSupplyResult,
 } from "./providers/onchain-types";
+import { compareChainPositions } from "./providers/onchain-types";
 import { isProvenanceComplete } from "./onchain-binding";
 
 // TOTAL SUPPLY DELTA — the pure arithmetic over two deterministic
@@ -252,7 +253,20 @@ export function deriveTotalSupplyDelta(
     supplyMeasurementDomain(t1)!,
   );
   if (domainMismatch !== null) return { comparable: false, reason: domainMismatch };
-  if (!(t1.provenance.slot > t0.provenance.slot)) {
+  // The ordering is the chain's own position, asked through the generic
+  // chain-position comparison so it is stated once: a position is only
+  // ever ordered against another position in the SAME environment (the
+  // domain check above already guarantees that; the comparison refuses
+  // independently rather than trusting it), and "later" means a strictly
+  // greater ordinal — equal positions are one moment, not a span of zero.
+  const order = compareChainPositions(t0.provenance, t1.provenance);
+  if (!order.comparable) {
+    return {
+      comparable: false,
+      reason: order.reason === "INVALID_POSITION" ? "MISSING_OR_INVALID_SLOT" : order.reason,
+    };
+  }
+  if (order.order !== "BEFORE") {
     return { comparable: false, reason: "NON_INCREASING_SLOT" };
   }
 

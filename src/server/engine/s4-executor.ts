@@ -2795,9 +2795,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // good one, and a good entry never launders a bad one. The
           // scalar proposal and the array are merged here so a model using
           // either shape reaches the same check.
+          //
+          // FOR THE PROJECT'S OWN CHAIN. The confirmed identity decides which
+          // identifier family a proposal must fit; without one, any complete
+          // family is accepted and none is attributed.
           const locatorOutcome = validateFactLocators({
             claimed: [fact.onchainLocator, ...(fact.onchainLocators ?? [])],
             documentText: doc.normalizedText,
+            chain: plan.confirmedIdentity?.chain ?? null,
           });
           for (const refused of locatorOutcome.rejected) {
             await recordTraceEvent(deps.db, {
