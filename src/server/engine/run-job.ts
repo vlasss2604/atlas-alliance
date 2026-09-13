@@ -7,6 +7,7 @@ import { runResearchController } from "./controller";
 import type { ControllerRunResult, WorkExecutor } from "./controller";
 import { MissingActivePatternError } from "./active-pattern";
 import { loadJobContractView } from "./job-contract-view";
+import { adoptReusedMemory } from "./memory-evidence-adoption";
 import { reconcileAndPersistComponent, reconcileOutstandingComponents } from "./component-reconciliation-store";
 import { runOnchainReactivationPass } from "./onchain-reactivation";
 import { runPostEventSupplyCompletion } from "./onchain-post-event-supply";
@@ -72,7 +73,28 @@ export async function runS4ResearchJob(
   // Lifted verbatim into job-contract-view.ts (D-136) so the search
   // phase derives the SAME work queue this controller run will walk.
   // Identical reads, identical order, identical failure messages.
-  const { job, view } = await loadJobContractView(db, jobId);
+  const { job, view: plannedView } = await loadJobContractView(db, jobId);
+
+  // RESEARCH MEMORY -> EVIDENCE ADOPTION V1 — before any work is claimed.
+  //
+  // A component the planner closed from ACTIVE Research Memory is not in
+  // the planned work queue, and until this step nothing took its place:
+  // no Evidence of this job, no S5 result, and the assembly reported it
+  // MISSING. Adoption materializes one ordinary current-job Evidence row
+  // per reused memory observation (authority re-resolved under today's
+  // routes, provenance copied, an explicit pointer to the memory row) and
+  // runs the ordinary S5 reducer over it. A component the reduced Evidence
+  // establishes stays out of the queue; any other outcome — a fresh-only
+  // component, a refused memory row, incomplete provenance, an inadmissible
+  // class, INSUFFICIENT_EVIDENCE — puts the component BACK on the queue as
+  // ordinary fresh work. Memory can therefore save acquisition, and can
+  // never suppress it. Idempotent: a redelivery adopts nothing twice.
+  //
+  // The search phase (acquisition-phase-worker.ts) derives the same
+  // effective queue through the same call, so a phased job searches for
+  // exactly the components this controller will walk.
+  const adoption = await adoptReusedMemory(db, jobId, plannedView, now);
+  const view = { ...plannedView, workQueue: adoption.workQueue };
 
   let result: ControllerRunResult;
   try {

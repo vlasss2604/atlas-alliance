@@ -18,6 +18,7 @@ import {
 } from "../engine/acquisition-phases";
 import type { ComponentWorkItem } from "../engine/contract-view";
 import { loadJobContractView } from "../engine/job-contract-view";
+import { adoptReusedMemory } from "../engine/memory-evidence-adoption";
 import type { ContentFetcher } from "../engine/providers/content-fetcher";
 import type { ModelCostProfile } from "../engine/model-cost-profile";
 import type { QueryProposer } from "../engine/providers/query-proposer";
@@ -260,10 +261,17 @@ export async function handleSearchingPhase(
   const { job, view } = await loadJobContractView(ctx.db, jobId);
   const project = await loadProject(ctx.db, job);
 
+  // RESEARCH MEMORY -> EVIDENCE ADOPTION V1 — the SAME effective queue the
+  // controller will walk in EXTRACTING (run-job.ts). A component that
+  // adoption returns to fresh work needs its search done here, or the
+  // replay providers would have nothing for it. Idempotent, so the second
+  // derivation at EXTRACTING re-reads what this one wrote.
+  const adoption = await adoptReusedMemory(ctx.db, jobId, view, new Date());
+
   const search = await runSearchPhase({
     db: ctx.db,
     jobId,
-    items: view.workQueue,
+    items: adoption.workQueue,
     target: targetFor(project),
     queryProposer: providers.queryProposer,
     searchGateway: providers.searchGateway,

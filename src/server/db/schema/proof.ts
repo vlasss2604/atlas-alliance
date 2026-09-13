@@ -257,6 +257,13 @@ export const evidence = pgTable(
     // (onConflictDoNothing) without requiring every Evidence writer to
     // participate in this scheme.
     extractionUnitKey: text("extraction_unit_key"),
+    // RESEARCH MEMORY -> EVIDENCE ADOPTION V1 — the exact research_memory
+    // row this Evidence was materialized from, or NULL for every freshly
+    // acquired row. The FK (ON DELETE SET NULL) and the partial unique index
+    // on (research_job_id, reused_from_memory_id) live in migration 0050;
+    // the reference is deliberately not declared here to keep the schema
+    // modules acyclic (memory.ts already imports `sources` from this file).
+    reusedFromMemoryId: uuid("reused_from_memory_id"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

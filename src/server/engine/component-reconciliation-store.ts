@@ -33,7 +33,10 @@ import { applicableFactKindsForComponent } from "./onchain-facts";
 // here since S5 can run at a different moment than plan-time. Either
 // disagreement is a hard, typed configuration failure — never a silent
 // fallback to some other row.
-async function loadActivePatternContentForJob(db: Database | Transaction, jobId: string) {
+// Exported for the Memory adoption path (memory-evidence-adoption.ts), which
+// must resolve component requirements against exactly the Pattern S5 will
+// reconcile under — the same row, the same cross-check, no second loader.
+export async function loadActivePatternContentForJob(db: Database | Transaction, jobId: string) {
   const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
   if (!job) throw new Error(`research job not found: ${jobId}`);
   if (!job.topicId) throw new Error(`research job ${jobId} has no topicId`);
