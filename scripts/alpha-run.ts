@@ -81,7 +81,11 @@ import {
 } from "../src/server/jobs/renderer-capability";
 import { installRuntimeCapabilities } from "../src/server/jobs/runtime-capabilities";
 import { PHASE_CAPABILITIES } from "../src/server/jobs/worker-capabilities";
-import { createTraceFixtureExecutor, type TraceFixtureScenario } from "../src/server/engine/trace-fixture-executor";
+import {
+  createNonLiveQuestionProjector,
+  createTraceFixtureExecutor,
+  type TraceFixtureScenario,
+} from "../src/server/engine/trace-fixture-executor";
 import { createLiveS4WorkExecutor, INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
 import { loadModelCostProfile, ModelCostProfileMissingError } from "../src/server/engine/model-cost-profile";
 import { createInterpretation } from "../src/server/interpreter/interpret";
@@ -500,7 +504,16 @@ async function main() {
       mode === "live"
         ? createLiveS4WorkExecutor({ db, project, internalAlphaEnabled: config.internal_alpha_enabled })
         : createTraceFixtureExecutor({ db, project, defaultScenario: scenario });
-    const result = await handleResearchJobTask(db, job.id, executor);
+    // Fixture mode is non-live END TO END, presentation included: the
+    // post-terminal question projection gets the non-live projector, so a
+    // real ANTHROPIC_API_KEY in the environment cannot be spent by a
+    // fixture run. Live mode passes nothing and keeps the real projector.
+    const result = await handleResearchJobTask(
+      db,
+      job.id,
+      executor,
+      mode === "live" ? undefined : { questionProjector: createNonLiveQuestionProjector() },
+    );
 
     if (!result.claimed) {
       // Never print success/"executor ran" for an invocation that did not

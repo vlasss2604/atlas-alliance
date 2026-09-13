@@ -13,6 +13,7 @@ import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
 import { generateQuestionProjectionSafely } from "../engine/question-projection-store";
+import type { QuestionProjectionProvider } from "../engine/providers/question-projection-anthropic";
 import { runMemoryPlanningStage } from "../memory/plan-job";
 import {
   finishPhasedJob,
@@ -286,10 +287,17 @@ export type HandleResearchJobTaskResult =
   | { claimed: true }
   | { claimed: false; reason: "NOT_FOUND" | "NOT_QUEUED" };
 
+// `options.questionProjector` — the same admin/test-only seam as
+// executorOverride, for the post-terminal question projection: when
+// supplied it replaces the real projector for this one call; omitted
+// (every production caller) the store resolves the real one exactly as
+// before. alpha-run's fixture mode passes createNonLiveQuestionProjector so
+// a non-live run can never spend a model call on presentation.
 export async function handleResearchJobTask(
   db: Database,
   jobId: string,
   executorOverride?: WorkExecutor,
+  options?: { questionProjector?: QuestionProjectionProvider },
 ): Promise<HandleResearchJobTaskResult> {
   // Atomic claim (research-jobs.ts) replaces the former check-then-act
   // (SELECT, then unconditional transitionJobState(..., "RUNNING")) —
@@ -446,7 +454,11 @@ export async function handleResearchJobTask(
   // delivery that reaches here, changes nothing about the job. A FAILED
   // job is refused by the store's own guard: a broken run has nothing to
   // arrange. Presentation, never Research reality.
-  await generateQuestionProjectionSafely(db, jobId);
+  await generateQuestionProjectionSafely(
+    db,
+    jobId,
+    options?.questionProjector ? { provider: options.questionProjector } : undefined,
+  );
   return { claimed: true };
 }
 

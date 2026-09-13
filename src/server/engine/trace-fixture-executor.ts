@@ -6,6 +6,10 @@ import { ContentFetchError } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
 import type { EvidenceExtractor } from "./providers/evidence-extractor";
 import type { QueryProposer } from "./providers/query-proposer";
+import {
+  QuestionProjectionUnavailableError,
+  type QuestionProjectionProvider,
+} from "./providers/question-projection-anthropic";
 import type { SearchGateway } from "./providers/search-gateway";
 import type { ExtractedFact, FetchedDocument } from "./providers/types";
 import { createS4WorkExecutor } from "./s4-executor";
@@ -224,6 +228,37 @@ export function createTraceFixtureExecutor(deps: TraceFixtureExecutorDeps): Work
       const scenario = deps.scenarioByItem?.[key] ?? deps.defaultScenario ?? "ZERO_CANDIDATES";
       const executor = buildScenarioExecutor(scenario, { db: deps.db, project: deps.project }, item.step, item.component);
       return executor.execute(item, ctx);
+    },
+  };
+}
+
+// THE NON-LIVE QUESTION PROJECTOR — a provider that never calls anything.
+//
+// The post-terminal question projection (worker.ts) resolves the REAL
+// Anthropic projector unless a caller hands it one, and it runs after
+// every SUCCEEDED / BUDGET_LIMIT_REACHED job, fixture jobs included. A
+// fixture run with a real ANTHROPIC_API_KEY in the environment would
+// therefore spend one real model call on presentation — the one thing a
+// "non-live" run must not do. This provider is what alpha-run's fixture
+// mode passes instead.
+//
+// IT REFUSES, IT DOES NOT PRETEND. It throws the provider's own
+// unavailability error, so the store persists exactly the terminal
+// FAILED_MODEL row it persists whenever no model output was obtained —
+// the same outcome the credential-free test environment already produces
+// — with no findings, and the result screen falls back to the canonical
+// ladder. No synthetic "AI answer" is written that a later reader could
+// mistake for a projection a model actually made. The (job, version) slot
+// is occupied, so nothing retries it either.
+export function createNonLiveQuestionProjector(): QuestionProjectionProvider {
+  return {
+    name: NON_LIVE_FIXTURE_PROVIDER_NAME,
+    async project(): Promise<unknown> {
+      throw new QuestionProjectionUnavailableError(
+        "non-live fixture: no question-projection model is ever called",
+        false,
+        "PROVIDER_ERROR",
+      );
     },
   };
 }

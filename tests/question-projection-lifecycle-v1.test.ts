@@ -295,7 +295,7 @@ describe("question projection — the lifecycle point is the terminal state", ()
     // The worker gates nothing itself — the store's guard is the only
     // policy, so both worker paths call the same function unconditionally
     // after their terminal write.
-    const single = worker.indexOf("generateQuestionProjectionSafely(db, jobId)");
+    const single = worker.indexOf("generateQuestionProjectionSafely(\n    db,\n    jobId,");
     const phased = worker.indexOf("generateQuestionProjectionSafely(ctx.db, jobId)");
     expect(single).toBeGreaterThan(-1);
     expect(phased).toBeGreaterThan(-1);

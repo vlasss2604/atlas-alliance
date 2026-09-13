@@ -465,7 +465,7 @@ describe("projection — the boundaries that keep it presentation", () => {
     const worker = readFileSync("src/server/jobs/worker.ts", "utf-8");
     // Single-process path: the call follows the terminal transaction of
     // handleResearchJobTask.
-    const single = worker.indexOf("generateQuestionProjectionSafely(db, jobId)");
+    const single = worker.indexOf("generateQuestionProjectionSafely(\n    db,\n    jobId,");
     expect(single).toBeGreaterThan(-1);
     expect(worker.lastIndexOf("transitionJobState(tx, jobId, resolvedOutcome.state", single)).toBeLessThan(single);
     // Phased path: the call follows finishPhasedJob inside the engine
