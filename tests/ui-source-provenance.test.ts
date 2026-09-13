@@ -273,10 +273,17 @@ describe("presentation only", () => {
     // canonical research table.
     const newest = journal.entries[journal.entries.length - 1];
     const sql = readFileSync(`src/server/db/migrations/${newest.tag}.sql`, "utf-8");
-    expect(sql).not.toMatch(
-      /ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/,
-    );
-    expect(sql).not.toMatch(/DROP (TABLE|COLUMN)/i);
+    // The same durable form its sibling guards state: a canonical table
+    // may be ADDED TO (a nullable column, or a CHECK backstop rebuilt over
+    // rows Postgres validates first) but never destroyed or redefined.
+    expect(sql).not.toMatch(/DROP (TABLE|COLUMN|TYPE)/i);
+    expect(sql).not.toMatch(/ALTER COLUMN/i);
+    expect(sql).not.toMatch(/SET NOT NULL/i);
+    expect(sql).not.toMatch(/RENAME/i);
+    for (const stmt of sql.split("--> statement-breakpoint")) {
+      if (!/ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/.test(stmt)) continue;
+      expect(stmt).toMatch(/ADD COLUMN|DROP CONSTRAINT IF EXISTS|ADD CONSTRAINT "[a-z_]+"\s+CHECK/i);
+    }
     // The projection added one already-persisted column to a read. It did
     // not touch admission, authority or the evidence link.
     const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");

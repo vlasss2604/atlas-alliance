@@ -385,9 +385,13 @@ export const evidenceDocumentaryLocators = pgTable(
     index("ix_evidence_locators_value").on(t.value),
     uniqueIndex("uq_evidence_locators_value").on(t.evidenceId, t.value),
     uniqueIndex("uq_evidence_locators_ordinal").on(t.evidenceId, t.ordinal),
+    // A positive union of the identifier families domain/identifier-shape.ts
+    // admits — base58 address, base58 signature, EVM address, EVM
+    // transaction hash — and nothing wider (migration 0049). The rule is
+    // stated per family, never per chain.
     check(
       "ck_evidence_locators_complete",
-      sql`${t.value} ~ '^[1-9A-HJ-NP-Za-km-z]{32,88}$'`,
+      sql`${t.value} ~ '^([1-9A-HJ-NP-Za-km-z]{32,44}|[1-9A-HJ-NP-Za-km-z]{64,88}|0x[0-9a-fA-F]{40}|0x[0-9a-fA-F]{64})$'`,
     ),
     check(
       "ck_evidence_locators_validated",

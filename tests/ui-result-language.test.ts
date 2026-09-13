@@ -440,10 +440,15 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
     expect(sql).not.toMatch(/ALTER COLUMN/i);
     expect(sql).not.toMatch(/SET NOT NULL/i);
     expect(sql).not.toMatch(/RENAME/i);
-    // Any ALTER TABLE on a canonical table must be an ADD COLUMN.
+    // Any ALTER TABLE on a canonical table must be an ADD COLUMN, or a
+    // CHECK-constraint rebuild — a shape backstop Postgres validates
+    // against every existing row before accepting, so it can no more
+    // destroy or redefine data than an added nullable column can
+    // (0049 realigned the documentary-locator backstop with the
+    // application's identifier families this way).
     for (const stmt of sql.split("--> statement-breakpoint")) {
       if (!/ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/.test(stmt)) continue;
-      expect(stmt).toMatch(/ADD COLUMN/i);
+      expect(stmt).toMatch(/ADD COLUMN|DROP CONSTRAINT IF EXISTS|ADD CONSTRAINT "[a-z_]+"\s+CHECK/i);
     }
   });
 });
