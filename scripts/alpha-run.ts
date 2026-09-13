@@ -69,7 +69,12 @@ import {
   onchainEndpointEnvVar,
   OnchainCapabilityUnavailableError,
   ONCHAIN_RESEARCH_ENV,
+  type OnchainInstallResult,
 } from "../src/server/jobs/onchain-capability";
+import { resolveConfirmedIdentity, type ConfirmedProjectIdentity } from "../src/server/domain/project-identity";
+import { endpointEnvVarFor, onchainEnvironmentFor } from "../src/server/engine/onchain-environment";
+import { onchainRetrievalAvailable } from "../src/server/engine/providers/onchain-retriever";
+import type { OnchainChain, OnchainEnvironment, OnchainNetwork } from "../src/server/engine/providers/onchain-types";
 import {
   RendererCapabilityUnavailableError,
   RENDERED_DOCS_ENV,
@@ -99,6 +104,75 @@ function parseArgs(argv: string[]): Record<string, string> {
 // malformed value must be refused as a refusal, never reach Postgres as a
 // uuid cast and surface as a driver error.
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// ---- live pre-flight: WHICH evidence environment must this process reach? --
+//
+// ONE RESEARCH CORE, MULTIPLE EVIDENCE ENVIRONMENTS. The retriever a live
+// run needs is the one for the PROJECT'S OWN confirmed (chain, network) —
+// the same environment `selectOnchainIntents` will address, resolved
+// through the same registry (`onchainEnvironmentFor`) and the same
+// code-owned env-var table (`endpointEnvVarFor`). This script names no
+// chain and no variable of its own: an Ethereum identity is answered by
+// ETHEREUM's variable, a Solana one by Solana's, and a chain the codebase
+// implements no environment for admits no chain read at all — so nothing
+// is required for it and nothing would be reached by requiring something.
+//
+// NO CONFIRMED IDENTITY keeps the behaviour this script always had: the
+// installer's declared default environment (`onchainEndpointEnvVar`) is
+// required, exactly as before this pre-flight became environment-aware.
+// A project without an identity cannot plan a chain read, so this is the
+// unchanged fail-closed floor, not a new capability.
+export interface OnchainPreflightRequirement {
+  // The project's own environment, or null when no confirmed identity
+  // (or no implemented environment for its chain) says which one.
+  environment: OnchainEnvironment | null;
+  // The variable that must hold that environment's endpoint.
+  endpointEnvVar: string;
+}
+
+export function onchainPreflightRequirement(
+  identity: ConfirmedProjectIdentity | null,
+): OnchainPreflightRequirement {
+  const environment = identity === null ? null : onchainEnvironmentFor(identity.chain);
+  if (environment === null) return { environment: null, endpointEnvVar: onchainEndpointEnvVar() };
+  const endpointEnvVar = endpointEnvVarFor(environment.chain, environment.network);
+  // Every implemented environment has a variable by construction of the
+  // table; a null here is a table defect, not a configuration one.
+  if (endpointEnvVar === null) throw new Error(`no endpoint variable for implemented environment ${environment.chain}/${environment.network}`);
+  return { environment, endpointEnvVar };
+}
+
+// After the shared installer ran: is the project's own environment among
+// what THIS process installed? NO CROSS-CHAIN FALLBACK — a process holding
+// only another chain's retriever is "not configured" for this project,
+// exactly as the engine's registry answers it (`onchainRetrievalAvailable`
+// for the exact key), and the refusal names the variable that would fix it.
+export function onchainPreflightVerdict(
+  requirement: OnchainPreflightRequirement,
+  installed: OnchainInstallResult,
+  available: (chain: OnchainChain, network: OnchainNetwork) => boolean = onchainRetrievalAvailable,
+): { ok: true; providerId: string; environment: string } | { ok: false; problem: string } {
+  if (installed.outcome !== "INSTALLED") {
+    return { ok: false, problem: `on-chain capability did not install (outcome: ${installed.outcome})` };
+  }
+  const env = requirement.environment;
+  if (env === null) {
+    // Unchanged default-environment semantics.
+    return { ok: true, providerId: installed.providerId ?? "(unknown)", environment: "(default)" };
+  }
+  const key = `${env.chain}/${env.network}`;
+  const entry = installed.installed.find((e) => e.chain === env.chain && e.network === env.network);
+  if (!entry || !available(env.chain, env.network)) {
+    const others = installed.installed.map((e) => `${e.chain}/${e.network}`).join(", ") || "nothing";
+    return {
+      ok: false,
+      problem:
+        `on-chain capability is installed for ${others}, but not for the project's confirmed environment ${key} — ` +
+        `${requirement.endpointEnvVar} must be set; another chain's retriever is never used in its place`,
+    };
+  }
+  return { ok: true, providerId: entry.providerId, environment: key };
+}
 
 function usage(): never {
   console.error(
@@ -176,6 +250,7 @@ async function main() {
   if (mode === "live") {
     const problems: string[] = [];
     let onchainProviderId: string | null = null;
+    let onchainEnvironmentLabel: string | null = null;
     let rendererOutcome: string | null = null;
     if (!config.internal_alpha_enabled) problems.push("internal_alpha_enabled is false (product_config)");
     if (!process.env.BRAVE_SEARCH_API_KEY) problems.push("BRAVE_SEARCH_API_KEY is not set");
@@ -205,10 +280,13 @@ async function main() {
     // rather than depending on ATLAS_WORKER_CAPABILITIES being set in a
     // developer's shell.
     //
-    // REQUIRED IN LIVE MODE, and failing here is the point. The internal
-    // alpha live target is a Solana project whose entire question is the
-    // deterministic chain; a live run that cannot reach one spends real
-    // money to produce a documentary-only answer that looks like a finding.
+    // REQUIRED IN LIVE MODE, and failing here is the point. A live target
+    // whose question is the deterministic chain must be able to reach ITS
+    // OWN chain; a live run that cannot spends real money to produce a
+    // documentary-only answer that looks like a finding. Which environment
+    // that is comes from the project's confirmed identity, through the
+    // same registry the engine resolves intents with — see
+    // onchainPreflightRequirement / onchainPreflightVerdict above.
     //
     // EVERY runtime capability this process needs, through the ONE
     // bootstrap the worker uses. Installing only the on-chain retriever
@@ -216,23 +294,34 @@ async function main() {
     // RENDERED_DOCS_ENABLED was 1 and the browser started fine — enabled,
     // capable, and never installed. A short list is exactly the defect the
     // bootstrap exists to make impossible.
+    // The project's confirmed identity, read the way the engine reads it.
+    // A project row that does not exist yet (it is created further down,
+    // exactly as before) has no identity and takes the default path.
+    const [liveProject] = await db.select({ id: projects.id }).from(projects).where(eq(projects.slug, projectSlug));
+    const liveIdentity = await resolveConfirmedIdentity(db, liveProject?.id ?? null);
+    const requirement = onchainPreflightRequirement(liveIdentity);
     if (process.env[ONCHAIN_RESEARCH_ENV] !== "1") {
       problems.push(
         `${ONCHAIN_RESEARCH_ENV} is not "1" — structured on-chain retrieval is not declared for this process`,
       );
-    } else if (!process.env[onchainEndpointEnvVar()]) {
-      problems.push(`${onchainEndpointEnvVar()} is not set`);
+    } else if (!process.env[requirement.endpointEnvVar]) {
+      problems.push(
+        `${requirement.endpointEnvVar} is not set` +
+          (requirement.environment
+            ? ` — the project's confirmed identity is on ${requirement.environment.chain}/${requirement.environment.network}`
+            : ""),
+      );
     } else {
       try {
         const installed = await installRuntimeCapabilities({
           capabilities: new Set(PHASE_CAPABILITIES),
         });
-        if (installed.onchain.outcome === "INSTALLED") {
-          onchainProviderId = installed.onchain.providerId;
+        const verdict = onchainPreflightVerdict(requirement, installed.onchain);
+        if (verdict.ok) {
+          onchainProviderId = verdict.providerId;
+          onchainEnvironmentLabel = verdict.environment;
         } else {
-          problems.push(
-            `on-chain capability did not install (outcome: ${installed.onchain.outcome})`,
-          );
+          problems.push(verdict.problem);
         }
         // DECLARED MEANS REQUIRED. A renderer that is switched on and does
         // not install is a silent downgrade: the oversized-document chain
@@ -290,7 +379,7 @@ async function main() {
     console.log("  real internet:      YES");
     console.log("  real provider cost: YES");
     console.log("  search provider:    brave");
-    console.log(`  on-chain retrieval: INSTALLED (${onchainProviderId})`);
+    console.log(`  on-chain retrieval: INSTALLED (${onchainProviderId}) for ${onchainEnvironmentLabel}`);
     console.log(`  rendered docs:      ${rendererOutcome}`);
     console.log(`  query proposer:     anthropic ${config.query_proposer_model} (cost profile ${queryProposerProfile!.priceVersion})`);
     console.log(`  evidence extractor: anthropic ${config.evidence_extractor_model} (cost profile ${evidenceExtractorProfile!.priceVersion})`);
@@ -456,7 +545,11 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Guarded so the pre-flight helpers above are importable by tests without
+// running a job — the same convention the other owner scripts follow.
+if (process.argv[1] && process.argv[1].endsWith("alpha-run.ts")) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
