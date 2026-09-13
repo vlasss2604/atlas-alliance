@@ -12,6 +12,7 @@ import { BudgetExhaustedError } from "../engine/budget-exhausted-error";
 import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import { createNonLiveS4WorkExecutor } from "../engine/non-live-executor";
 import { runS4ResearchJob } from "../engine/run-job";
+import { generateQuestionProjectionSafely } from "../engine/question-projection-store";
 import { runMemoryPlanningStage } from "../memory/plan-job";
 import {
   finishPhasedJob,
@@ -427,6 +428,25 @@ export async function handleResearchJobTask(
       await resolveDemoReservation(tx, jobId, "RELEASED");
     }
   });
+
+  // QUESTION-DRIVEN PROJECTION — AFTER THE TERMINAL STATE, NEVER BEFORE.
+  //
+  // The projection store admits only a job whose persisted state is
+  // SUCCEEDED or BUDGET_LIMIT_REACHED, so this is the earliest moment it
+  // can run: the transaction above has committed, and the state it reads
+  // is the state the reader will see. It used to be called from inside
+  // runS4ResearchJob, while the job was still RUNNING, and answered
+  // NOT_PROJECTABLE on every normal run.
+  //
+  // OUTSIDE the terminal transaction, and after it, on purpose. The
+  // Research result is already final when this line runs; the store never
+  // throws (generateQuestionProjectionSafely returns every outcome, its own
+  // failures included), writes only its own table, and is idempotent by the
+  // (job, version) unique index — so a projection that fails, or a second
+  // delivery that reaches here, changes nothing about the job. A FAILED
+  // job is refused by the store's own guard: a broken run has nothing to
+  // arrange. Presentation, never Research reality.
+  await generateQuestionProjectionSafely(db, jobId);
   return { claimed: true };
 }
 
@@ -655,6 +675,10 @@ export async function dispatchExtractQueueMessage(
         job.entitlementAtStart,
         "engine: " + outcome.terminationReason,
       );
+      // The SAME post-terminal projection the single-process path runs
+      // (handleResearchJobTask) — after the terminal write, outside it,
+      // never able to change it.
+      await generateQuestionProjectionSafely(ctx.db, jobId);
     }
   } else {
     await finishPhasedJobOnRefusal(ctx, jobId, result);

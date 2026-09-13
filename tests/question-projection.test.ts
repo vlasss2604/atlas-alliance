@@ -454,14 +454,27 @@ describe("projection — the boundaries that keep it presentation", () => {
     expect(store).toContain("ALREADY_EXISTS");
     expect(store).toContain("projectionVersion, PROJECTION_VERSION");
 
-    // run-job.ts generates, exactly once, after the Proof is built.
+    // THE WORKER generates, exactly once, AFTER the terminal state is
+    // committed — never run-job.ts. The store admits only SUCCEEDED /
+    // BUDGET_LIMIT_REACHED, and inside runS4ResearchJob the job is still
+    // RUNNING, so a call there could only ever answer NOT_PROJECTABLE
+    // (which is what happened on every live run until the call moved).
     const runJob = readFileSync("src/server/engine/run-job.ts", "utf-8");
-    expect(runJob).toContain("generateQuestionProjectionSafely(db, jobId)");
-    // The CALL, not the import at the top of the file: the projection is
-    // the last thing the job does, strictly after the Proof it arranges.
-    expect(runJob.lastIndexOf("buildAndPersistProof(db, jobId)")).toBeLessThan(
-      runJob.indexOf("generateQuestionProjectionSafely(db, jobId)"),
-    );
+    expect(runJob).not.toContain("generateQuestionProjectionSafely(");
+    expect(runJob).not.toContain('from "./question-projection-store"');
+    const worker = readFileSync("src/server/jobs/worker.ts", "utf-8");
+    // Single-process path: the call follows the terminal transaction of
+    // handleResearchJobTask.
+    const single = worker.indexOf("generateQuestionProjectionSafely(db, jobId)");
+    expect(single).toBeGreaterThan(-1);
+    expect(worker.lastIndexOf("transitionJobState(tx, jobId, resolvedOutcome.state", single)).toBeLessThan(single);
+    // Phased path: the call follows finishPhasedJob inside the engine
+    // outcome branch of dispatchExtractQueueMessage.
+    const phased = worker.indexOf("generateQuestionProjectionSafely(ctx.db, jobId)");
+    expect(phased).toBeGreaterThan(-1);
+    expect(worker.lastIndexOf('"engine: " + outcome.terminationReason', phased)).toBeLessThan(phased);
+    // Exactly these two call sites, and nowhere else in src/.
+    expect((worker.match(/generateQuestionProjectionSafely\(/g) ?? []).length).toBe(2);
 
     // The result route READS and never generates.
     const route = readFileSync("app/api/research-jobs/[id]/route.ts", "utf-8");

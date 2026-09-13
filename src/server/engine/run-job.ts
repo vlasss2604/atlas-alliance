@@ -14,7 +14,6 @@ import { runSupplyDeltaMaterialization } from "./onchain-supply-delta-materializ
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 import { buildAndPersistProof } from "./proof-store";
-import { generateQuestionProjectionSafely } from "./question-projection-store";
 
 // Phase 6, S4 — the actual production wiring point: given a jobId, load
 // its frozen entitlement/budget, its persisted Research Boundary
@@ -386,26 +385,19 @@ export async function runS4ResearchJob(
   // result is unchanged by it.
   await buildAndPersistProof(db, jobId);
 
-  // QUESTION-DRIVEN PROJECTION — presentation, after the fact, isolated.
+  // QUESTION-DRIVEN PROJECTION — NOT HERE ANY MORE.
   //
-  // The ONLY place a projection model call originates. It runs here, once,
-  // after canonical research has finished and its Proof exists; no read
-  // path can reach it, which is what makes "one model call per Proof" a
-  // structural property of the system rather than a convention.
-  //
-  // It is deliberately the LAST thing this function does, and it cannot
-  // throw: `generateQuestionProjectionSafely` returns every outcome,
-  // including its own failures, and persists terminal failure so a later
-  // page load never becomes a reason to call the model again.
-  //
-  // Nothing above this line can be changed by what happens below it. The
-  // job's state, the S7 verdict, the Proof and every component result are
-  // already written and are not revisited. That separation is the point:
-  // a projection decides how an answer is ARRANGED, never what it says, so
-  // a projection that fails must mean nothing whatsoever about the project
-  // — the reader simply gets the canonical result without the
-  // question-shaped breakdown.
-  await generateQuestionProjectionSafely(db, jobId);
+  // It used to be the last call of this function, and it never produced a
+  // row on the worker path: the projection store admits only a job whose
+  // persisted state is SUCCEEDED or BUDGET_LIMIT_REACHED, and at this point
+  // the job is still RUNNING — the worker writes the terminal state only
+  // after this function returns. Every normal run answered NOT_PROJECTABLE
+  // (two live Lido jobs, dd092896 and a118fb74, both with a Proof and no
+  // projection row). The call now lives in the worker, immediately after
+  // its terminal transaction commits (worker.ts), where the state the store
+  // guards on is already the state the reader will see. Nothing above this
+  // line changed: the projection still runs strictly after the Proof, still
+  // once per (job, version), still through the one store that owns it.
 
   return result;
 }

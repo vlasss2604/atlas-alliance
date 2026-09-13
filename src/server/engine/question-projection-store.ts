@@ -46,8 +46,11 @@ import type { ModelUsage } from "./providers/types";
 //
 // FAILURE IS ISOLATED, BY CONSTRUCTION.
 //
-// Every path in this module returns rather than throws. The caller
-// (run-job.ts) invokes it after the Proof is built, and a projection that
+// Every path in this module returns rather than throws. The caller (the
+// worker, worker.ts) invokes it after the job's terminal state has been
+// committed — the guard below admits only SUCCEEDED / BUDGET_LIMIT_REACHED,
+// so a call made while the job is still RUNNING is refused, which is why
+// the call cannot live inside runS4ResearchJob — and a projection that
 // fails leaves the job state, the S7 verdict, the Proof and every
 // component result exactly as canonical research left them. A projection
 // is how an answer is ARRANGED; it can never be part of what the answer
