@@ -15,13 +15,24 @@ async function main() {
   }
   const { db, pool } = createDatabase();
   try {
-    const row =
-      mode === "reviewed"
-        ? await markProofReviewed(db, proofId, adminUserId)
-        : await markProofVerified(db, proofId, adminUserId);
-    console.log(
-      `[verify-proof] ${row.verificationStatus} proof=${row.id} by admin=${adminUserId} at=${new Date().toISOString()}`,
-    );
+    if (mode === "reviewed") {
+      const row = await markProofReviewed(db, proofId, adminUserId);
+      console.log(
+        `[verify-proof] ${row.verificationStatus} proof=${row.id} by admin=${adminUserId} at=${new Date().toISOString()}`,
+      );
+    } else {
+      const row = await markProofVerified(db, proofId, adminUserId);
+      console.log(
+        `[verify-proof] ${row.verificationStatus} proof=${row.id} by admin=${adminUserId} at=${new Date().toISOString()}`,
+      );
+      const c = row.memoryCandidates;
+      console.log(
+        `[verify-proof] research memory OBSERVED candidates: created=${c.created.length} deduplicated=${c.deduplicated.length} refused=${c.refused.length}`,
+      );
+      for (const x of c.created) console.log(`  created  ${x.step}:${x.component} memory=${x.memoryId} evidence=${x.evidenceId}`);
+      for (const x of c.deduplicated) console.log(`  existing ${x.step}:${x.component} memory=${x.memoryId} evidence=${x.evidenceId}`);
+      for (const x of c.refused) console.log(`  refused  ${x.step}:${x.component} evidence=${x.evidenceId} reason=${x.reason}`);
+    }
   } finally {
     await pool.end();
   }

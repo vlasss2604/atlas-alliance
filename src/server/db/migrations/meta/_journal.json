@@ -358,6 +358,13 @@
       "when": 1788894000000,
       "tag": "0050_evidence_reused_from_memory",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "7",
+      "when": 1789344000000,
+      "tag": "0051_research_memory_observation_key",
+      "breakpoints": true
     }
   ]
 }

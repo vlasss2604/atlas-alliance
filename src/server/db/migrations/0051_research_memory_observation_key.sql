@@ -1,0 +1,24 @@
+-- VERIFIED RESEARCH -> OBSERVED MEMORY CANDIDATES V1 — THE OBSERVATION KEY.
+--
+-- The first production-path writer into research_memory (memory/observed-
+-- candidates.ts) turns the supporting documentary Evidence of a Proof a
+-- human marked VERIFIED into OBSERVED candidates. What makes two candidates
+-- the same LOGICAL observation must be the observation itself — the source
+-- row, the Pattern step and component, and the normalized passage — never a
+-- current Evidence row id, a Proof id, a Research Memory row id or the event
+-- that wrote it. That is the job-independent core of the canonical
+-- extraction unit identity (engine/extraction-unit-key.ts), so a candidate
+-- adopted into a later job recomputes exactly the unit key a fresh
+-- extraction of the same passage would.
+--
+-- ONE LIVE ROW PER (project, topic, observation). Enforced here, not only by
+-- the writer's own pre-check: a re-verification of the same Proof, or a
+-- second VERIFIED Research that establishes the same passage, adds nothing.
+-- Scoped to OBSERVED / CANDIDATE / ACTIVE so a DEPRECATED or SUPERSEDED
+-- observation can be re-observed by a later verification — a lifecycle
+-- that ended is not a claim that the passage may never be verified again.
+--
+-- NULLABLE, ADDITIVE, NEVER REWRITTEN. Rows written by the golden-set
+-- harness or by manual promotion keep NULL and are untouched by the index.
+ALTER TABLE "research_memory" ADD COLUMN "observation_key" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "uq_research_memory_live_observation" ON "research_memory" ("project_id", "topic_id", "observation_key") WHERE "observation_key" IS NOT NULL AND "lifecycle_state" IN ('OBSERVED', 'CANDIDATE', 'ACTIVE');

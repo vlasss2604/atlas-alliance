@@ -80,11 +80,22 @@ export const researchMemory = pgTable(
     promotedAt: timestamp("promoted_at", { withTimezone: true }),
     // Откуда взялся кандидат: 'PROOF_TRACE' | 'ADMIN_SEED' | … — справочное.
     originKind: text("origin_kind").notNull(),
+    // VERIFIED RESEARCH -> OBSERVED CANDIDATES V1. The canonical identity of
+    // the underlying observation (engine/extraction-unit-key.ts
+    // `observationKey`: source row, step, component, normalized passage) —
+    // never a row id, a Proof id or an event. One LIVE row per (project,
+    // topic, observation) is enforced below, so a second VERIFIED Research
+    // establishing the same passage adds no second logical observation.
+    // NULL on rows written by other paths (golden set, manual promotion).
+    observationKey: text("observation_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
   },
   (t) => [
+    uniqueIndex("uq_research_memory_live_observation")
+      .on(t.projectId, t.topicId, t.observationKey)
+      .where(sql`${t.observationKey} IS NOT NULL AND ${t.lifecycleState} IN ('OBSERVED', 'CANDIDATE', 'ACTIVE')`),
     index("ix_research_memory_project_topic_step").on(
       t.projectId,
       t.topicId,

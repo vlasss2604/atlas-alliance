@@ -38,3 +38,26 @@ export function extractionUnitKey(
     .update(`${jobId}|${sourceId}|${step}|${component}|${normalizeForContainment(supportFragment)}`)
     .digest("hex");
 }
+
+// THE JOB-INDEPENDENT CORE OF THAT IDENTITY — what a verified observation
+// IS across Research jobs: the same source row, step, component and
+// normalized passage. Research Memory keys an OBSERVED candidate on it
+// (research_memory.observation_key), so a second VERIFIED Research that
+// establishes the same passage from the same source adds no second logical
+// observation, while a different passage is a different observation. It
+// deliberately omits the job: the unit key above is per job by design
+// (replay within one job), this one names the observation itself. The two
+// are related, never interchangeable: adopting a memory row into a later
+// job recomputes `extractionUnitKey(thatJob, source, step, component,
+// fragment)` from the copied provenance, which is exactly the key a fresh
+// extraction of the same passage in that job would compute.
+export function observationKey(
+  sourceId: string,
+  step: number,
+  component: string,
+  supportFragment: string,
+): string {
+  return createHash("sha256")
+    .update(`observation|${sourceId}|${step}|${component}|${normalizeForContainment(supportFragment)}`)
+    .digest("hex");
+}
