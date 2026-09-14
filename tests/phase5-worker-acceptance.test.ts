@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   memoryRetrievals,
+  productConfig,
   projects,
   researchJobs,
   researchPlans,
@@ -20,6 +21,12 @@ let ctx: TestContext;
 
 beforeAll(async () => {
   ctx = await setupTestDatabase();
+  // Research Memory fails closed by default; this end-to-end scenario is a
+  // controlled path that opts in explicitly, as the memory suites do.
+  await ctx.db
+    .insert(productConfig)
+    .values({ key: "memory_enabled", value: true })
+    .onConflictDoUpdate({ target: productConfig.key, set: { value: true } });
 });
 
 afterAll(async () => {

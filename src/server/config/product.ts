@@ -12,7 +12,7 @@ const jobBudgetSchema = z.object({
   reservedRecoverySteps: z.number().int().min(0),
 });
 
-const productConfigSchema = z.object({
+export const productConfigSchema = z.object({
   // Калитка запуска исследований (phase-3-plan §2). Аварийное отключение
   // без деплоя; включается только с появлением Interpreter (Фаза 4).
   research_enabled: z.boolean(),
@@ -71,7 +71,12 @@ const productConfigSchema = z.object({
   budget_core: jobBudgetSchema,
   // Фаза 5 (D-043): оценка Memory OFF vs ON — штатный режим, не хак в
   // тестах. Планировщик читает этот ключ на каждый job.
-  memory_enabled: z.boolean(),
+  //
+  // FAILS CLOSED. Research Memory is not approved for production
+  // activation: a database with no persisted row parses as OFF, and the
+  // seeded default is OFF. Turning it on is an explicit persisted opt-in
+  // (a product_config row set to true) — never an absence.
+  memory_enabled: z.boolean().default(false),
   // Пороги retrieval — в конфиг, не в код (phase-5-plan.md §5.5).
   memory_retrieval_top_k: z.number().int().positive(),
   memory_min_confidence_reuse: z.number().int().min(0).max(100),
@@ -123,7 +128,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
     maxWallClockSec: 1200,
     reservedRecoverySteps: 3,
   },
-  memory_enabled: true,
+  memory_enabled: false,
   memory_retrieval_top_k: 5,
   memory_min_confidence_reuse: 70,
   memory_stale_after_days: {

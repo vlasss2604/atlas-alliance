@@ -1,5 +1,4 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
-import { createHash } from "node:crypto";
 
 import type { Database, Transaction } from "../db/client";
 import {
@@ -19,6 +18,7 @@ import {
   reconcileAndPersistComponent,
 } from "./component-reconciliation-store";
 import type { ComponentWorkItem, ContractView, ReusedComponent } from "./contract-view";
+import { extractionUnitKey } from "./extraction-unit-key";
 import { loadJobContractView, type ResearchJobRow } from "./job-contract-view";
 import { applicableFactKindsForComponent } from "./onchain-facts";
 import { resolveSourceClass, resolveSourceRoute } from "./source-authority";
@@ -52,13 +52,23 @@ import { resolveSourceClass, resolveSourceRoute } from "./source-authority";
 //      the like taken from the origin row (they are properties of the
 //      observation, not conclusions); sourceClass / officiality / entity
 //      binding RE-RESOLVED under today's routes and identity, never copied;
-//      an explicit `reused_from_memory_id` pointer; a deterministic
-//      extraction_unit_key so a second run adopts nothing twice;
+//      an explicit `reused_from_memory_id` pointer; and the CANONICAL
+//      extraction_unit_key of that source fragment (extraction-unit-key.ts)
+//      — the very key a fresh extraction of the same fragment from the
+//      same source would receive — so the unit is one unit in this job
+//      whichever path wrote it: a second run adopts nothing twice, a fresh
+//      re-acquisition of the same fragment is the index's no-op rather
+//      than a second row, and S5/S6 see one slot, not a fork;
 //   3. run the ordinary S5 reducer over the component — the SAME reducer,
 //      the same exclusions, the same obligations fresh Evidence faces;
 //   4. keep the component out of the work queue ONLY if that reduction
 //      establishes it; otherwise return it to the queue as ordinary fresh
-//      work, with the reason as a machine-readable blocker.
+//      work in EXACTLY the shape a component memory never touched has
+//      (state NO_MEMORY, no blockers), so the executor's proposer hint and
+//      every other acquisition input are the control's. The reason stays
+//      machine-readable on the adoption outcome this function returns and
+//      on the persisted rows (the adopted Evidence's memory pointer, the S5
+//      row), never on the acquisition path.
 //
 // NOTHING IS COPIED THAT IS A CONCLUSION: not the old component status, not
 // the old Proof verdict or confidence, not any delta or NET_EFFECT reading.
@@ -219,13 +229,6 @@ export function isFreshOnlyComponent(
   );
 }
 
-// Deterministic per (job, memory row): the idempotency key the unique
-// extraction_unit_key index enforces, in a namespace no fresh extraction
-// can produce (fresh keys are hashes of job|source|step|component|fragment).
-export function memoryAdoptionUnitKey(jobId: string, memoryId: string): string {
-  return createHash("sha256").update(`memory-adoption|${jobId}|${memoryId}`).digest("hex");
-}
-
 export async function adoptReusedMemory(
   db: Database | Transaction,
   jobId: string,
@@ -253,32 +256,28 @@ export async function adoptReusedMemory(
     (outcome.adopted ? adopted : fallback).push(outcome);
   }
 
-  const workQueue = buildEffectiveWorkQueue(
-    view,
-    pattern,
-    fallback.map((f) => ({
-      step: f.step,
-      component: f.component,
-      memoryIds: f.memoryIds,
-      blockers: [...new Set(f.refusals.map((r) => `MEMORY_ADOPTION_${r.reason}`))].sort(),
-    })),
-  );
+  const workQueue = buildEffectiveWorkQueue(view, pattern, fallback);
   return { workQueue, adopted, fallback };
 }
 
-// THE EFFECTIVE WORK QUEUE, BUILT ONE WAY. Fallback components become
-// ordinary fresh work: `UNUSABLE` is the contract's own state for "memory
-// exists but cannot close this", and the blockers say why in machine-
-// readable form — the same shape every planned work item carries, so the
-// controller, the executor's proposer hint, the search phase, the seed
-// selection and the source-open reserve need no new case. Planned items
-// keep their order; a fallback item joins its step after them; a
-// (step, component) the plan already lists is never listed twice (the
-// controller would otherwise claim it a second time as a recovery attempt).
+// THE EFFECTIVE WORK QUEUE, BUILT ONE WAY. A fallback component becomes
+// ordinary fresh work in the CONTROL'S OWN SHAPE — the work item a
+// component gets when memory never held anything for it: state NO_MEMORY,
+// no blockers, no memory ids. Nothing downstream can tell the two apart,
+// which is the invariant: the executor composes its proposer hint from
+// `state` and `blockers`, and a fallback that read "UNUSABLE /
+// MEMORY_ADOPTION_*" there steered the model differently from the
+// no-memory control. Why the adoption failed is not lost — it is on the
+// adoption outcome (`fallback[].refusals`, `memoryIds`, `status`) and on
+// the persisted rows — it simply never enters the acquisition path.
+// Planned items keep their order; a fallback item joins its step after
+// them; a (step, component) the plan already lists is never listed twice
+// (the controller would otherwise claim it a second time as a recovery
+// attempt).
 function buildEffectiveWorkQueue(
   view: ContractView,
   pattern: PatternContent,
-  fallback: readonly { step: number; component: string; memoryIds: string[]; blockers: string[] }[],
+  fallback: readonly { step: number; component: string }[],
 ): ComponentWorkItem[] {
   const plannedKeys = new Set(view.workQueue.map((w) => `${w.step}:${w.component}`));
   const items: ComponentWorkItem[] = fallback
@@ -287,9 +286,9 @@ function buildEffectiveWorkQueue(
       step: f.step,
       stepName: pattern.steps.find((s) => s.step === f.step)?.name ?? `step ${f.step}`,
       component: f.component,
-      state: "UNUSABLE",
-      blockers: f.blockers,
-      memoryIds: f.memoryIds,
+      state: "NO_MEMORY",
+      blockers: [],
+      memoryIds: [],
       conflictingMemoryIds: [],
     }));
   return [...view.workQueue, ...items]
@@ -344,14 +343,14 @@ export async function loadEffectiveJobContractView(
         .where(eq(researchAttempts.researchJobId, jobId))
     ).map((a) => `${a.patternStep}:${a.component}`),
   );
-  const fallback: { step: number; component: string; memoryIds: string[]; blockers: string[] }[] = [];
+  const fallback: { step: number; component: string }[] = [];
   for (const reused of view.reused) {
     if (isFreshOnlyComponent(pattern, reused.component)) {
-      fallback.push({ ...reused, blockers: ["MEMORY_ADOPTION_FRESH_ONLY_COMPONENT"] });
+      fallback.push(reused);
       continue;
     }
     if (attempted.has(`${reused.step}:${reused.component}`)) {
-      fallback.push({ ...reused, blockers: ["MEMORY_ADOPTION_NOT_ESTABLISHED"] });
+      fallback.push(reused);
       continue;
     }
     const adoptedRows = reused.memoryIds.length === 0
@@ -391,7 +390,7 @@ export async function loadEffectiveJobContractView(
         },
         adoptedRows.map((r) => r.id),
       );
-    if (!sufficient) fallback.push({ ...reused, blockers: ["MEMORY_ADOPTION_NOT_ESTABLISHED"] });
+    if (!sufficient) fallback.push(reused);
   }
   return { job, view: { ...view, workQueue: buildEffectiveWorkQueue(view, pattern, fallback) } };
 }
@@ -482,18 +481,17 @@ async function materializeOne(
   }
 
   // Already adopted by an earlier run or phase of this job: the pointer is
-  // the record, and the unit key makes the insert below a no-op anyway.
-  // Checked AFTER scope, and the existing row must be filed at this very
-  // (step, component): the key is per (job, memory row), so a contract
-  // that named the same row under another component must not inherit it.
-  const unitKey = memoryAdoptionUnitKey(jobId, memoryId);
-  const [existing] = await db
+  // the record (the partial unique index on (job, reused_from_memory_id)
+  // guarantees at most one). Checked AFTER scope, and the existing row must
+  // be filed at this very (step, component): a contract that named the same
+  // row under another component must not inherit it.
+  const [pointed] = await db
     .select({ id: evidence.id, patternStep: evidence.patternStep, component: evidence.component })
     .from(evidence)
-    .where(eq(evidence.extractionUnitKey, unitKey));
-  if (existing) {
-    return existing.patternStep === step && existing.component === component
-      ? { ok: true, evidenceId: existing.id }
+    .where(and(eq(evidence.researchJobId, jobId), eq(evidence.reusedFromMemoryId, memoryId)));
+  if (pointed) {
+    return pointed.patternStep === step && pointed.component === component
+      ? { ok: true, evidenceId: pointed.id }
       : { ok: false, reason: "MEMORY_SCOPE_MISMATCH" };
   }
 
@@ -516,6 +514,28 @@ async function materializeOne(
   if (!prov.originEvidenceId) return { ok: false, reason: "ORIGIN_EVIDENCE_MISSING" };
   const [origin] = await db.select().from(evidence).where(eq(evidence.id, prov.originEvidenceId));
   if (!origin) return { ok: false, reason: "ORIGIN_EVIDENCE_MISSING" };
+
+  // THE CANONICAL UNIT IDENTITY, NOT AN ADOPTION IDENTITY. The key a fresh
+  // extraction of this same fragment from this same source row would
+  // compute in this job (extraction-unit-key.ts): the source row is global
+  // per url, the fragment is the observation's own literal passage, so a
+  // later fresh re-acquisition of the same passage is the same unit — the
+  // index makes it a no-op and S5/S6 see one slot. Anything that differs
+  // (another url, another passage) is another unit and stays distinct.
+  const fragment = prov.fragment ?? origin.fragment;
+  const unitKey = extractionUnitKey(jobId, prov.sourceId, step, component, fragment);
+  const [existing] = await db
+    .select({ id: evidence.id, patternStep: evidence.patternStep, component: evidence.component })
+    .from(evidence)
+    .where(eq(evidence.extractionUnitKey, unitKey));
+  if (existing) {
+    // This job already holds this exact unit (the key embeds job, step and
+    // component, so a hit is this job's row for this pair by construction;
+    // the pair is still re-checked rather than assumed).
+    return existing.patternStep === step && existing.component === component
+      ? { ok: true, evidenceId: existing.id }
+      : { ok: false, reason: "MEMORY_SCOPE_MISMATCH" };
+  }
 
   const [source] = await db.select().from(sources).where(eq(sources.id, prov.sourceId));
   if (!source) return { ok: false, reason: "SOURCE_MISSING" };
@@ -541,7 +561,7 @@ async function materializeOne(
       component,
       relationship: origin.relationship,
       directness: origin.directness,
-      fragment: prov.fragment ?? origin.fragment,
+      fragment,
       summary: memory.statement,
       doesNotProve: origin.doesNotProve,
       mechanismState: memory.mechanismState ?? origin.mechanismState,

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { INTERNAL_ALPHA_V1 } from "../src/server/config/product";
@@ -19,6 +19,7 @@ import {
 import { loadFetchTargets, runSearchPhase } from "../src/server/engine/acquisition-phases";
 import type { WorkExecutor } from "../src/server/engine/controller";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
+import { extractionUnitKey } from "../src/server/engine/extraction-unit-key";
 import { loadJobContractView } from "../src/server/engine/job-contract-view";
 import {
   MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS,
@@ -171,35 +172,46 @@ async function newJob(projectId: string, opts: { plan: boolean }): Promise<strin
 
 // The fixture acquisition: every worked component yields one admitted
 // OFFICIAL_DOCS / CONFIRMED row from the project's documentation, with the
-// directness the caller chooses.
-function fixtureExecutor(sourceId: string, worked: string[], directness: "DIRECT" | "INDIRECT"): WorkExecutor {
+// directness and passage the caller chooses, persisted under the SAME
+// canonical unit identity and conflict rule the real executor uses.
+function fixtureExecutor(
+  sourceId: string,
+  worked: string[],
+  directness: "DIRECT" | "INDIRECT",
+  fragment: string = FRAGMENT,
+): WorkExecutor {
   return {
     async execute(item, c) {
       worked.push(`${item.step}:${item.component}`);
-      await ctx.db.insert(evidence).values({
-        researchJobId: c.jobId,
-        proofId: null,
-        sourceId,
-        patternStep: item.step,
-        component: item.component,
-        relationship: "SUPPORTS",
-        directness,
-        fragment: FRAGMENT,
-        summary: "router fees are forwarded to the protocol vault",
-        mechanismState: null,
-        sourceClass: "OFFICIAL_DOCS",
-        officiality: "CONFIRMED",
-        fetchedAt: new Date(),
-        publishedAt: new Date(),
-        doesNotProve: "does not prove the vault distributes anything",
-        retrievedUrl: DOC_URL,
-        contentHash: `sha256:${uniq("content")}`,
-        extractionUnitKey: uniq("unit"),
-      });
+      await ctx.db
+        .insert(evidence)
+        .values({
+          researchJobId: c.jobId,
+          proofId: null,
+          sourceId,
+          patternStep: item.step,
+          component: item.component,
+          relationship: "SUPPORTS",
+          directness,
+          fragment,
+          summary: "router fees are forwarded to the protocol vault",
+          mechanismState: null,
+          sourceClass: "OFFICIAL_DOCS",
+          officiality: "CONFIRMED",
+          fetchedAt: new Date(),
+          publishedAt: new Date(),
+          doesNotProve: "does not prove the vault distributes anything",
+          retrievedUrl: DOC_URL,
+          contentHash: `sha256:${uniq("content")}`,
+          extractionUnitKey: extractionUnitKey(c.jobId, sourceId, item.step, item.component, fragment),
+        })
+        .onConflictDoNothing({ target: evidence.extractionUnitKey, where: sql`${evidence.extractionUnitKey} IS NOT NULL` });
       return { status: "SUCCEEDED", reason: "fixture component completed" };
     },
   };
 }
+
+const FRESH_FRAGMENT = "after the swap completes the router transfers the collected fee to the vault account";
 
 async function evidenceOf(jobId: string, component: string) {
   return ctx.db
@@ -458,12 +470,14 @@ describe("ISSUE 2 — control-vs-fallback fresh acquisition parity", () => {
     // 1. WORK QUEUE — membership AND position equal the control's.
     expect(keysOf(adoptionF.workQueue)).toEqual(keysOf(adoptionC.workQueue));
     expect(keysOf(adoptionF.workQueue)).toEqual(keysOf(plannedC.workQueue));
+    // The fallback item IS the control's item: nothing downstream (the
+    // executor's proposer hint included) can tell them apart. The reason
+    // lives on the adoption outcome, not on the acquisition path.
     const itemF = adoptionF.workQueue.find((w) => w.component === COMPONENT)!;
-    expect(itemF.stepName).toBe(plannedC.workQueue.find((w) => w.component === COMPONENT)!.stepName);
-    // The contract's own vocabulary for "memory exists but cannot close
-    // this", with the reason machine-readable.
-    expect(itemF.state).toBe("UNUSABLE");
-    expect(itemF.blockers).toEqual(["MEMORY_ADOPTION_NOT_ESTABLISHED"]);
+    expect(itemF).toEqual(plannedC.workQueue.find((w) => w.component === COMPONENT));
+    expect(itemF.state).toBe("NO_MEMORY");
+    expect(itemF.blockers).toEqual([]);
+    expect(adoptionF.fallback[0].memoryIds).toEqual([memoryId]);
 
     // The read-back the downstream preparation steps use derives the SAME
     // effective queue from persisted state alone.
@@ -530,18 +544,19 @@ describe("ISSUE 2 — control-vs-fallback fresh acquisition parity", () => {
     expect(await attemptsOf(jobF)).toEqual([]);
     expect((await evidenceOf(jobF, COMPONENT)).length).toBe(1);
 
-    // 5. LIFETIME MEMBERSHIP — run the whole Research in both projects. The
-    //    fallback component is freshly acquired; its fresh DIRECT row and
-    //    the adopted INDIRECT row now reduce to SUPPORTED with the adopted
-    //    row among the support — the sufficiency rule alone would now call
-    //    it adopted — and the effective queue STILL lists it, as the
-    //    control's does, because it was handed to fresh work.
+    // 5. LIFETIME MEMBERSHIP — run the whole Research in both projects,
+    //    with fresh work finding a genuinely NEW passage (a distinct unit).
+    //    The fallback component is freshly acquired; its fresh DIRECT row
+    //    and the adopted INDIRECT row now reduce to SUPPORTED with the
+    //    adopted row among the support — the sufficiency rule alone would
+    //    now call it adopted — and the effective queue STILL lists it, as
+    //    the control's does, because it was handed to fresh work.
     const workedC: string[] = [];
     const workedF: string[] = [];
     const runC = await newJob(control.id, { plan: false });
     const runF = await newJob(fb.id, { plan: false });
-    await handleResearchJobTask(ctx.db, runC, fixtureExecutor(src.id, workedC, "DIRECT"));
-    await handleResearchJobTask(ctx.db, runF, fixtureExecutor(src.id, workedF, "DIRECT"));
+    await handleResearchJobTask(ctx.db, runC, fixtureExecutor(src.id, workedC, "DIRECT", FRESH_FRAGMENT));
+    await handleResearchJobTask(ctx.db, runF, fixtureExecutor(src.id, workedF, "DIRECT", FRESH_FRAGMENT));
     expect(workedF).toEqual(workedC);
     expect(workedF).toContain(KEY);
     expect(await attemptsOf(runF)).toEqual(await attemptsOf(runC));
@@ -568,13 +583,10 @@ describe("ISSUE 2 — control-vs-fallback fresh acquisition parity", () => {
     ).toEqual(await resolveOnchainSourceOpenReserve(ctx.db, { ...reserveArgs(runC, control.id), documentaryAcquisitionFinished: true }));
     expect((await s5Of(runC, COMPONENT)).status).toBe("SUPPORTED");
     expect(await gapsOf(runF)).not.toContain(`MISSING_COMPONENT@${COMPONENT}`);
-    // NOT asserted: whole-assembly equality with the control. The adopted
-    // row stays as honest Evidence beside the fresh one (old observations +
-    // new observations -> new Proof), and the assembler partitions a
-    // component's support into structural slots by extraction unit key —
-    // so the two rows of the same observation fork the lineage where the
-    // control's single row does not. That is S6 semantics downstream of
-    // acquisition, outside this hardening; see the round report.
+    // NOT asserted: whole-assembly equality with the control — by design
+    // here, since fresh work found a genuinely different passage, the two
+    // units are two lineage slots. Same-passage re-acquisition collapsing
+    // to one slot is proven in research-memory-fallback-parity-v1.test.ts.
 
     // And where memory genuinely closed the component, it stays closed for
     // the job's lifetime too: never worked, never attempted, never MISSING.

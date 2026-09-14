@@ -95,6 +95,9 @@ import {
 } from "./providers/rendered-docs-fetcher";
 import { componentSearchAllowance } from "./budget-fairness";
 import { loadAcquisitionPlan } from "./acquisition-plan";
+// The canonical unit identity, shared with Research Memory adoption so the
+// same source fragment is one unit whichever path wrote it.
+import { extractionUnitKey, normalizeForContainment } from "./extraction-unit-key";
 import { seedRoutedForComponent, selectApprovedSeedTargets } from "./source-resource-seeds";
 import { computeEntityBinding } from "../domain/project-identity";
 import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-store";
@@ -218,10 +221,6 @@ function hashUrl(url: string): string {
   return createHash("sha256").update(url).digest("hex");
 }
 
-function normalizeForContainment(s: string): string {
-  return s.replace(/\s+/g, " ").trim().toLowerCase();
-}
-
 // D-076/§7: a fact is only traceable Evidence if its quoted excerpt
 // actually appears in the document it claims to come from. A model
 // asserting something the document does not contain is invention, not
@@ -300,18 +299,6 @@ function documentNamesProject(
   const documentTokens = tokenize(documentText);
   const candidates = [project.name, project.slug, project.ticker ?? ""].filter((c) => c.trim().length > 0);
   return candidates.some((c) => containsIdentityPhrase(documentTokens, c));
-}
-
-function extractionUnitKey(
-  jobId: string,
-  sourceId: string,
-  step: number,
-  component: string,
-  supportFragment: string,
-): string {
-  return createHash("sha256")
-    .update(`${jobId}|${sourceId}|${step}|${component}|${normalizeForContainment(supportFragment)}`)
-    .digest("hex");
 }
 
 async function findOrCreateSource(

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
@@ -21,11 +21,11 @@ import {
 import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import type { WorkExecutor } from "../src/server/engine/controller";
 import { loadJobContractView } from "../src/server/engine/job-contract-view";
+import { extractionUnitKey } from "../src/server/engine/extraction-unit-key";
 import {
   MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS,
   adoptReusedMemory,
   isFreshOnlyComponent,
-  memoryAdoptionUnitKey,
 } from "../src/server/engine/memory-evidence-adoption";
 import {
   copyProvenanceFromEvidence,
@@ -140,31 +140,38 @@ async function newJob(projectId: string): Promise<string> {
 }
 
 // The fixture acquisition: every worked component yields one admitted
-// OFFICIAL_DOCS / CONFIRMED row from the project's documentation.
-function fixtureExecutor(sourceId: string, worked: string[]): WorkExecutor {
+// OFFICIAL_DOCS / CONFIRMED row from the project's documentation, persisted
+// with the SAME canonical unit identity and the same conflict rule the real
+// executor uses — a re-extraction of a unit this job already holds is a
+// no-op, never a second row.
+function fixtureExecutor(sourceId: string, worked: string[], opts: { fragment?: string } = {}): WorkExecutor {
+  const fragment = opts.fragment ?? FRAGMENT;
   return {
     async execute(item, c) {
       worked.push(`${item.step}:${item.component}`);
-      await ctx.db.insert(evidence).values({
-        researchJobId: c.jobId,
-        proofId: null,
-        sourceId,
-        patternStep: item.step,
-        component: item.component,
-        relationship: "SUPPORTS",
-        directness: "DIRECT",
-        fragment: FRAGMENT,
-        summary: "protocol fees accrue to the treasury",
-        mechanismState: null,
-        sourceClass: "OFFICIAL_DOCS",
-        officiality: "CONFIRMED",
-        fetchedAt: new Date(),
-        publishedAt: new Date(),
-        doesNotProve: "does not prove distribution to holders",
-        retrievedUrl: DOC_URL,
-        contentHash: `sha256:${uniq("content")}`,
-        extractionUnitKey: uniq("unit"),
-      });
+      await ctx.db
+        .insert(evidence)
+        .values({
+          researchJobId: c.jobId,
+          proofId: null,
+          sourceId,
+          patternStep: item.step,
+          component: item.component,
+          relationship: "SUPPORTS",
+          directness: "DIRECT",
+          fragment,
+          summary: "protocol fees accrue to the treasury",
+          mechanismState: null,
+          sourceClass: "OFFICIAL_DOCS",
+          officiality: "CONFIRMED",
+          fetchedAt: new Date(),
+          publishedAt: new Date(),
+          doesNotProve: "does not prove distribution to holders",
+          retrievedUrl: DOC_URL,
+          contentHash: `sha256:${uniq("content")}`,
+          extractionUnitKey: extractionUnitKey(c.jobId, sourceId, item.step, item.component, fragment),
+        })
+        .onConflictDoNothing({ target: evidence.extractionUnitKey, where: sql`${evidence.extractionUnitKey} IS NOT NULL` });
       return { status: "SUCCEEDED", reason: "fixture component completed" };
     },
   };
@@ -258,7 +265,7 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     const adopted = rows[0];
     expect(adopted.researchJobId).toBe(jobB);
     expect(adopted.reusedFromMemoryId).toBe(memoryId);
-    expect(adopted.extractionUnitKey).toBe(memoryAdoptionUnitKey(jobB, memoryId));
+    expect(adopted.extractionUnitKey).toBe(extractionUnitKey(jobB, adopted.sourceId, 2, "FLOW_PATH", FRAGMENT));
     expect(adopted.proofId).toBeNull();
 
     // 2/3. Provenance survives, and the chain back to the origin is intact:
@@ -310,7 +317,7 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     expect(proofB.researchJobId).toBe(jobB);
   });
 
-  it("1b. a PARTIALLY_SUPPORTED adoption FAILS CLOSED: SOURCE_OF_VALUE's mechanical-provenance cap is off the allowlist, so the component is freshly acquired and the S5 row rests on the adopted AND the fresh row", async () => {
+  it("1b. a PARTIALLY_SUPPORTED adoption FAILS CLOSED: SOURCE_OF_VALUE's mechanical-provenance cap is off the allowlist, so the component is freshly acquired — and re-acquiring the same fragment is the same unit, so S5/S6/S7/S8 equal the control's", async () => {
     const p = await makeProject();
     const src = await makeSource();
     const { memoryId } = await researchAThenPromote(p.id, src.id, 1, "SOURCE_OF_VALUE");
@@ -319,11 +326,12 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     const jobB = await newJob(p.id);
     await handleResearchJobTask(ctx.db, jobB, fixtureExecutor(src.id, worked));
 
-    // Adoption ran and wrote ordinary Evidence of this job from the memory row.
+    // Adoption ran and wrote ordinary Evidence of this job from the memory
+    // row, under the canonical unit identity of its source fragment.
     const rows = await evidenceOf(jobB, "SOURCE_OF_VALUE");
     const adopted = rows.find((r) => r.reusedFromMemoryId === memoryId);
     expect(adopted).toBeDefined();
-    expect(adopted!.extractionUnitKey).toBe(memoryAdoptionUnitKey(jobB, memoryId));
+    expect(adopted!.extractionUnitKey).toBe(extractionUnitKey(jobB, src.id, 1, "SOURCE_OF_VALUE", FRAGMENT));
 
     // The reducer capped it for a reason the audit refused to allowlist —
     // fresh work for this very component can name the activity and admit
@@ -332,8 +340,11 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     expect(worked).toContain("1:SOURCE_OF_VALUE");
     expect(worked.length).toBe(10);
     expect(await attemptsOf(jobB)).toContain("1:SOURCE_OF_VALUE");
-    const fresh = rows.find((r) => r.reusedFromMemoryId === null);
-    expect(fresh).toBeDefined();
+
+    // Fresh work re-acquired the SAME fragment from the SAME source: one
+    // unit, one row (the adopted one, pointer intact), one lineage slot.
+    expect(rows.length).toBe(1);
+    expect(rows.every((r) => r.extractionUnitKey === adopted!.extractionUnitKey)).toBe(true);
 
     const s5B = await s5Of(jobB, "SOURCE_OF_VALUE");
     expect(s5B.status).toBe("PARTIALLY_SUPPORTED");
@@ -341,19 +352,22 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     for (const code of s5B.reasonCodes as string[]) {
       expect(MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS.has(code as never), code).toBe(false);
     }
-    // Old observation + new observation -> the new result rests on both.
-    expect([...(s5B.supportingEvidenceIds as string[])].sort()).toEqual([adopted!.id, fresh!.id].sort());
-    expect(await gapsOf(jobB)).not.toContain("MISSING_COMPONENT@SOURCE_OF_VALUE");
+    expect(s5B.supportingEvidenceIds).toEqual([adopted!.id]);
 
-    // The control: a project with no memory reaches the same component
-    // result, and the same component-level gap kind.
+    // The control: a project with no memory. Same S5, same assembly (no
+    // false branch), same claim support, same Proof verdict and confidence.
     const q = await makeProject();
     const jobC = await newJob(q.id);
     await handleResearchJobTask(ctx.db, jobC, fixtureExecutor(src.id, []));
-    expect((await s5Of(jobC, "SOURCE_OF_VALUE")).status).toBe(s5B.status);
-    expect(await gapsOf(jobC)).toContain("PARTIAL_COMPONENT@SOURCE_OF_VALUE");
-    expect(await gapsOf(jobB)).toContain("PARTIAL_COMPONENT@SOURCE_OF_VALUE");
-    expect(await gapsOf(jobB)).not.toContain("MISSING_COMPONENT@SOURCE_OF_VALUE");
+    const s5C = await s5Of(jobC, "SOURCE_OF_VALUE");
+    expect(s5B.status).toBe(s5C.status);
+    expect(s5B.reasonCodes).toEqual(s5C.reasonCodes);
+    expect(await gapsOf(jobB)).toEqual(await gapsOf(jobC));
+    expect((await gapsOf(jobB)).some((g) => g.startsWith("BRANCH_ATTRIBUTION_UNRESOLVED@"))).toBe(false);
+    const proofB = await proofOf(jobB);
+    const proofC = await proofOf(jobC);
+    expect(proofB.verdict).toBe(proofC.verdict);
+    expect(proofB.confidence).toBe(proofC.confidence);
   });
 
   it("7/8. nothing conclusive is copied: a corrupted old S5 row and a corrupted old Proof leave the new job's result exactly what its own Evidence says", async () => {
@@ -394,9 +408,12 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     // lifecycle move). The memory row is untouched and still ACTIVE.
     await ctx.db.update(projectMemoryItems).set({ lifecycleState: "DEPRECATED" }).where(eq(projectMemoryItems.id, p.routeId!));
 
+    // Fresh acquisition finds a genuinely different passage (a
+    // re-extraction of the identical passage would be the same unit and
+    // the adopted row would simply stand for it, with the same authority).
     const worked: string[] = [];
     const jobB = await newJob(p.id);
-    await handleResearchJobTask(ctx.db, jobB, fixtureExecutor(src.id, worked));
+    await handleResearchJobTask(ctx.db, jobB, fixtureExecutor(src.id, worked, { fragment: "the treasury contract receives the protocol fees on every trade" }));
 
     // Adoption happened — and resolved to today's weakest authority.
     const rows = await evidenceOf(jobB, "SOURCE_OF_VALUE");
@@ -545,7 +562,8 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     // MECHANISM_SPEC was already planned work; the refusal adds no second copy.
     expect(forgedComponent.workQueue.filter((w) => w.component === "MECHANISM_SPEC").length).toBe(1);
     // And a refused component that was NOT planned work joins the queue in
-    // the contract's own shape, with the reason as a blocker.
+    // the CONTROL'S shape (nothing downstream may tell it apart), with the
+    // reason on the adoption outcome.
     const forgedSov = await adoptReusedMemory(
       ctx.db,
       jobQ2,
@@ -553,8 +571,8 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
       new Date(),
     );
     const item = forgedSov.workQueue.find((w) => w.component === "FLOW_PATH");
-    expect(item?.state).toBe("UNUSABLE");
-    expect(item?.blockers).toEqual(["MEMORY_ADOPTION_MEMORY_SCOPE_MISMATCH"]);
+    expect(item).toEqual({ step: 2, stepName: "Revenue Waterfall", component: "FLOW_PATH", state: "NO_MEMORY", blockers: [], memoryIds: [], conflictingMemoryIds: [] });
+    expect(forgedSov.fallback[0].refusals).toEqual([{ memoryId, reason: "MEMORY_SCOPE_MISMATCH" }]);
     expect(forgedSov.workQueue.filter((w) => w.component === "FLOW_PATH").length).toBe(1);
   });
 
