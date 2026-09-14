@@ -70,6 +70,49 @@ export function isTransientAnthropicApiError(e: unknown): boolean {
 // first attempt never waits at all.
 export const NETWORK_NO_RESPONSE_RETRY_DELAY_MS = 15_000;
 
+// NETWORK TRANSIENT RESILIENCE V2 — the SAME single delay, for the SAME
+// class of failure, at the executor's one transient retry
+// (s4-executor.ts reserveAndCallWithRetry). V1 gave count_tokens a wait
+// before its retry; the query proposer, the search gateway and the
+// extractor's generation call still retried at once, so a tunnel outage
+// of the proven 10–30 s length turned one no-response failure into two
+// and the two into CapabilityFatalError — the whole paid job FAILED on
+// the proposer or the search, which have no per-document softening at
+// all. This policy is consulted ONLY after the executor has already
+// decided to retry (the failure is transient, the retry's own reservation
+// still has to succeed), so it changes no attempt count, no reservation
+// and no classification: it only says how long the one retry waits.
+//
+// WHICH failures wait: a transient failure the provider never answered —
+// no HTTP status at all (a connection error, a timeout, a reset). A
+// transient failure WITH a status (429, 5xx) keeps the pre-existing
+// immediate retry: the provider is reachable, and the founder-approved
+// scope of V1/V2 is the transport, not rate limiting. The typed provider
+// errors carry `httpStatus` (null when there was no response) exactly for
+// this classification; an error without the field is treated as
+// "no response" too, since a transient error that could not say what
+// the provider answered has, for this purpose, not been answered.
+export interface MaybeWithHttpStatus {
+  httpStatus?: number | null;
+}
+
+let noResponseRetryDelayOverrideMs: number | null = null;
+
+// Offline test seam ONLY (tests/setup-provider-env.ts sets 0 so no
+// offline suite ever sleeps on a network backoff; the resilience suite
+// sets a small positive value to prove the wait happens). null restores
+// the production constant. Never called from production code.
+export function __setNoResponseRetryDelayMs(ms: number | null): void {
+  noResponseRetryDelayOverrideMs = ms;
+}
+
+export function noResponseRetryDelayMs(firstAttemptError: unknown): number {
+  if (!isTransientError(firstAttemptError)) return 0;
+  const status = (firstAttemptError as Error & MaybeWithHttpStatus).httpStatus;
+  if (typeof status === "number") return 0;
+  return noResponseRetryDelayOverrideMs ?? NETWORK_NO_RESPONSE_RETRY_DELAY_MS;
+}
+
 export interface RetryOnceOptions {
   // Milliseconds to wait between a transient attempt-1 failure and the
   // ONE retry, decided from the failure itself. Omitted, or returning 0,
@@ -81,7 +124,7 @@ export interface RetryOnceOptions {
   delayBeforeRetryMs?: (firstAttemptError: unknown) => number;
 }
 
-function sleep(ms: number): Promise<void> {
+export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 

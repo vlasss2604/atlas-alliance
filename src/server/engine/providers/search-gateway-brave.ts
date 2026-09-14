@@ -55,7 +55,7 @@ async function doSearch(
 
   if (!res.ok) {
     const transient = res.status === 429 || res.status >= 500;
-    throw new SearchProviderUnavailableError(`Brave Search returned HTTP ${res.status}`, transient);
+    throw new SearchProviderUnavailableError(`Brave Search returned HTTP ${res.status}`, transient, res.status);
   }
 
   let body: unknown;

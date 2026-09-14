@@ -28,6 +28,10 @@ export class SearchProviderUnavailableError extends Error {
   constructor(
     message: string,
     public readonly transient = false,
+    // The HTTP status the provider answered with, or null when it never
+    // answered — the same field, for the same retry delay policy, as
+    // QueryProposerUnavailableError.httpStatus.
+    public readonly httpStatus: number | null = null,
   ) {
     super(message);
     this.name = "SearchProviderUnavailableError";

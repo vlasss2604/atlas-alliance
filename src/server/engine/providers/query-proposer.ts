@@ -27,6 +27,11 @@ export class QueryProposerUnavailableError extends Error {
   constructor(
     message: string,
     public readonly transient = false,
+    // The HTTP status the provider answered with, or null when it never
+    // answered (connection error, timeout). Read by the executor's retry
+    // delay policy (providers/retry.ts noResponseRetryDelayMs): only a
+    // transient failure with NO status waits before its one retry.
+    public readonly httpStatus: number | null = null,
   ) {
     super(message);
     this.name = "QueryProposerUnavailableError";

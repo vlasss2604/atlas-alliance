@@ -136,7 +136,7 @@ async function doProposeQueries(
     // S10 final pre-smoke closure (MEDIUM-1, D-120): shared with
     // token-gate.ts's raw count_tokens retry — one classifier, never a
     // second, independently-drifting copy of this rule.
-    throw new QueryProposerUnavailableError(detail, isTransientAnthropicApiError(e));
+    throw new QueryProposerUnavailableError(detail, isTransientAnthropicApiError(e), typeof status === "number" ? status : null);
   }
   if (message.stop_reason === "max_tokens") {
     throw new QueryProposerUnavailableError("model output truncated (max_tokens)");
