@@ -1,3 +1,4 @@
+import { retryAfterMsFromHeaders } from "./retry";
 import { SearchProviderUnavailableError } from "./search-gateway";
 import type { SearchGateway } from "./search-gateway";
 import type { ComponentTarget, SourceCandidate } from "./types";
@@ -55,7 +56,7 @@ async function doSearch(
 
   if (!res.ok) {
     const transient = res.status === 429 || res.status >= 500;
-    throw new SearchProviderUnavailableError(`Brave Search returned HTTP ${res.status}`, transient, res.status);
+    throw new SearchProviderUnavailableError(`Brave Search returned HTTP ${res.status}`, transient, res.status, retryAfterMsFromHeaders(res.headers));
   }
 
   let body: unknown;

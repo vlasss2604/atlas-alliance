@@ -195,6 +195,9 @@ export class EvidenceExtractorUnavailableError extends Error {
     // (default keeps every existing constructor call valid), and the
     // boundary refuses it unless the diagnostic really is the schema one.
     public readonly schemaField: ExtractorSchemaField | null = null,
+    // The provider's Retry-After, parsed at the throw site (ms), or null.
+    // The retry delay policy honours it only inside RETRY_AFTER_MAX_MS.
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "EvidenceExtractorUnavailableError";

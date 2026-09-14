@@ -1,6 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 
-import { isTransientAnthropicApiError, NETWORK_NO_RESPONSE_RETRY_DELAY_MS, retryOnceIfTransient } from "./retry";
+import { isTransientAnthropicApiError, retryOnceIfTransient, transientRetryDelayMs } from "./retry";
 
 // S10 (live-provider-enablement.md §5, D-118) — D-090's provable model-
 // input bound, implemented as COUNT-THEN-GATE: before every Anthropic
@@ -157,7 +157,10 @@ export class TokenCountUnavailableError extends Error {
 // retries at once exactly as before, and a permanent failure never
 // reaches this (it is not transient, so it is not retried at all).
 export function countTokensRetryDelayMs(e: unknown): number {
-  return classifyTokenCountFailure(e).diagnostic === "NETWORK_NO_RESPONSE" ? NETWORK_NO_RESPONSE_RETRY_DELAY_MS : 0;
+  // The ONE shared policy (providers/retry.ts), over the raw SDK
+  // exception: no response, 429 (Retry-After inside the cap) and 5xx all
+  // wait; a permanent failure is never retried, so never waits.
+  return transientRetryDelayMs(e);
 }
 
 // Throws ModelInputOversizedError or TokenCountUnavailableError; resolves

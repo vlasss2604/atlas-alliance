@@ -70,47 +70,115 @@ export function isTransientAnthropicApiError(e: unknown): boolean {
 // first attempt never waits at all.
 export const NETWORK_NO_RESPONSE_RETRY_DELAY_MS = 15_000;
 
-// NETWORK TRANSIENT RESILIENCE V2 — the SAME single delay, for the SAME
-// class of failure, at the executor's one transient retry
-// (s4-executor.ts reserveAndCallWithRetry). V1 gave count_tokens a wait
-// before its retry; the query proposer, the search gateway and the
-// extractor's generation call still retried at once, so a tunnel outage
-// of the proven 10–30 s length turned one no-response failure into two
-// and the two into CapabilityFatalError — the whole paid job FAILED on
-// the proposer or the search, which have no per-document softening at
-// all. This policy is consulted ONLY after the executor has already
-// decided to retry (the failure is transient, the retry's own reservation
-// still has to succeed), so it changes no attempt count, no reservation
-// and no classification: it only says how long the one retry waits.
+// TRANSIENT RETRY DELAY POLICY (V2 + V3) — the ONE policy for how long
+// the single retry waits, wherever the retry lives: the executor's
+// reserveAndCallWithRetry (proposer, search, extractor generation) and
+// token-gate.ts's non-billable count_tokens retry. Consulted ONLY after a
+// caller has already decided to retry, so it changes no attempt count
+// (two, total), no reservation and no classification: it only says how
+// long the one retry waits, and it is bounded on every path.
 //
-// WHICH failures wait: a transient failure the provider never answered —
-// no HTTP status at all (a connection error, a timeout, a reset). A
-// transient failure WITH a status (429, 5xx) keeps the pre-existing
-// immediate retry: the provider is reachable, and the founder-approved
-// scope of V1/V2 is the transport, not rate limiting. The typed provider
-// errors carry `httpStatus` (null when there was no response) exactly for
-// this classification; an error without the field is treated as
-// "no response" too, since a transient error that could not say what
-// the provider answered has, for this purpose, not been answered.
-export interface MaybeWithHttpStatus {
+//   no response (transient, no HTTP status)   DEFAULT_TRANSIENT_RETRY_DELAY_MS
+//   429 with Retry-After                      the header, clamped to
+//                                             [0, RETRY_AFTER_MAX_MS]
+//   429 without Retry-After                   DEFAULT_TRANSIENT_RETRY_DELAY_MS
+//   retryable 5xx (Retry-After honoured too)  DEFAULT_TRANSIENT_RETRY_DELAY_MS
+//   any non-transient failure                 never retried, so never waits
+//
+// V2 covered only the first line — a 429 retried at once, which with the
+// SDK at maxRetries: 0 meant the retry usually met the same limit. V3 makes
+// every transient class wait, and honours Retry-After only inside a cap:
+// an absurd or unparsable header never makes a paid job sleep for it.
+//
+// The facts come from the typed provider errors — `transient`,
+// `httpStatus` (null when the provider never answered) and `retryAfterMs`
+// (the header parsed at the throw site, null when absent) — or, for the
+// raw SDK exception count_tokens retries before wrapping, from the SDK
+// error itself. An error without `httpStatus` is treated as "no response":
+// a transient error that could not say what the provider answered has,
+// for this purpose, not been answered.
+export const DEFAULT_TRANSIENT_RETRY_DELAY_MS = NETWORK_NO_RESPONSE_RETRY_DELAY_MS;
+export const RETRY_AFTER_MAX_MS = 60_000;
+
+export interface RetryDelayFacts {
+  transient: boolean;
+  httpStatus: number | null;
+  retryAfterMs: number | null;
+}
+
+interface MaybeRetryFacts {
+  transient?: boolean;
   httpStatus?: number | null;
+  retryAfterMs?: number | null;
 }
 
-let noResponseRetryDelayOverrideMs: number | null = null;
-
-// Offline test seam ONLY (tests/setup-provider-env.ts sets 0 so no
-// offline suite ever sleeps on a network backoff; the resilience suite
-// sets a small positive value to prove the wait happens). null restores
-// the production constant. Never called from production code.
-export function __setNoResponseRetryDelayMs(ms: number | null): void {
-  noResponseRetryDelayOverrideMs = ms;
+// RFC 9110 Retry-After: delay-seconds or an HTTP-date. Anything else, or
+// a negative value, is null — "no usable header", never "wait forever".
+export function parseRetryAfterMs(value: string | null | undefined, now: Date = new Date()): number | null {
+  if (typeof value !== "string") return null;
+  const v = value.trim();
+  if (v.length === 0) return null;
+  if (/^\d+$/.test(v)) return Number(v) * 1000;
+  // An HTTP-date names a weekday and a month; a bare number that is not
+  // delay-seconds (a negative, a float) is not a date and is refused.
+  if (!/[A-Za-z]/.test(v)) return null;
+  const at = Date.parse(v);
+  if (Number.isNaN(at)) return null;
+  return Math.max(0, at - now.getTime());
 }
 
-export function noResponseRetryDelayMs(firstAttemptError: unknown): number {
-  if (!isTransientError(firstAttemptError)) return 0;
-  const status = (firstAttemptError as Error & MaybeWithHttpStatus).httpStatus;
-  if (typeof status === "number") return 0;
-  return noResponseRetryDelayOverrideMs ?? NETWORK_NO_RESPONSE_RETRY_DELAY_MS;
+// The header off a Fetch `Headers`, a plain record, or nothing. Only the
+// standard name; only the parser above.
+export function retryAfterMsFromHeaders(headers: unknown, now: Date = new Date()): number | null {
+  if (headers === null || typeof headers !== "object") return null;
+  const h = headers as { get?: (name: string) => string | null } & Record<string, unknown>;
+  let raw: unknown = null;
+  if (typeof h.get === "function") raw = h.get("retry-after");
+  else raw = h["retry-after"] ?? h["Retry-After"] ?? null;
+  return parseRetryAfterMs(typeof raw === "string" ? raw : null, now);
+}
+
+// The facts a wrapped provider error or a raw SDK exception carries.
+export function retryDelayFactsOf(e: unknown): RetryDelayFacts {
+  if (e instanceof Anthropic.APIError) {
+    const status = typeof e.status === "number" ? e.status : null;
+    return {
+      transient: isTransientAnthropicApiError(e),
+      httpStatus: status,
+      retryAfterMs: retryAfterMsFromHeaders((e as { headers?: unknown }).headers),
+    };
+  }
+  if (e instanceof Error) {
+    const f = e as Error & MaybeRetryFacts;
+    return {
+      transient: f.transient === true,
+      httpStatus: typeof f.httpStatus === "number" ? f.httpStatus : null,
+      retryAfterMs: typeof f.retryAfterMs === "number" ? f.retryAfterMs : null,
+    };
+  }
+  return { transient: false, httpStatus: null, retryAfterMs: null };
+}
+
+let transientRetryDelayCapOverrideMs: number | null = null;
+
+// Offline test seam ONLY: a CEILING on every wait this policy returns.
+// tests/setup-provider-env.ts sets 0 so no offline suite ever sleeps on a
+// backoff; the resilience suites set a small positive value to prove the
+// wait happens. null restores production behaviour. Never called from
+// production code.
+export function __setTransientRetryDelayCapMs(ms: number | null): void {
+  transientRetryDelayCapOverrideMs = ms;
+}
+
+export function transientRetryDelayMs(firstAttemptError: unknown): number {
+  const facts = retryDelayFactsOf(firstAttemptError);
+  if (!facts.transient) return 0;
+  let delay = DEFAULT_TRANSIENT_RETRY_DELAY_MS;
+  if (facts.httpStatus !== null && facts.retryAfterMs !== null) {
+    delay = Math.min(Math.max(0, facts.retryAfterMs), RETRY_AFTER_MAX_MS);
+  }
+  if (transientRetryDelayCapOverrideMs !== null) delay = Math.min(delay, transientRetryDelayCapOverrideMs);
+  return delay;
 }
 
 export interface RetryOnceOptions {

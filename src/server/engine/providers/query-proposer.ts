@@ -32,6 +32,9 @@ export class QueryProposerUnavailableError extends Error {
     // delay policy (providers/retry.ts noResponseRetryDelayMs): only a
     // transient failure with NO status waits before its one retry.
     public readonly httpStatus: number | null = null,
+    // The provider's Retry-After, parsed at the throw site (ms), or null.
+    // The retry delay policy honours it only inside RETRY_AFTER_MAX_MS.
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "QueryProposerUnavailableError";

@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { projects, users } from "../src/server/db/schema";
 import { CapabilityFatalError } from "../src/server/engine/capability-fatal-error";
@@ -8,6 +8,7 @@ import { ContentFetchError } from "../src/server/engine/providers/content-fetche
 import { RenderedDocsError } from "../src/server/engine/providers/rendered-docs-fetcher";
 import {
   isTransientAnthropicApiError,
+  __setTransientRetryDelayCapMs,
   NETWORK_NO_RESPONSE_RETRY_DELAY_MS,
   retryOnceIfTransient,
 } from "../src/server/engine/providers/retry";
@@ -39,10 +40,10 @@ import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./ph
 // A secret that must NEVER appear in any operator-facing string.
 const SECRET = "sk-ant-SECRET_DO_NOT_LEAK";
 
-function apiError(status: number) {
+function apiError(status: number, headers?: Record<string, string>) {
   // The 5-arg construction the existing S10 suites already use — the raw
   // message deliberately carries the secret so leak assertions are real.
-  return new Anthropic.APIError(status, { detail: SECRET }, `boom ${SECRET}`, undefined, undefined);
+  return new Anthropic.APIError(status, { detail: SECRET }, `boom ${SECRET}`, headers ? new Headers(headers) : undefined, undefined);
 }
 
 describe("classification: SDK signal -> closed diagnostic (items 1-8)", () => {
@@ -193,23 +194,39 @@ describe("countThenGate carries the diagnostic; retry semantics unchanged (items
 // count_tokens retry. Fake timers throughout: the ~15 s is advanced, never
 // slept. Each case restores real timers in `finally`.
 describe("NETWORK_NO_RESPONSE: one bounded wait, then the same single retry — never a third call", () => {
+  // These run under fake timers and prove the PRODUCTION wait, so the
+  // offline cap tests/setup-provider-env.ts installs is lifted here and
+  // restored after each case. Nothing sleeps for real.
+  beforeEach(() => __setTransientRetryDelayCapMs(null));
+  afterEach(() => __setTransientRetryDelayCapMs(0));
   function stubClient(countTokens: ReturnType<typeof vi.fn>): Anthropic {
     return { messages: { countTokens, create: vi.fn() } } as unknown as Anthropic;
   }
   const gate = (client: Anthropic) => countThenGate(client, "m", "sys", [{ role: "user", content: "hi" }], undefined, 4000);
   const noResponse = () => new Anthropic.APIConnectionError({ message: `no response ${SECRET}` });
 
-  it("the delay policy: exactly the no-response class waits; every other class, transient or not, waits 0", () => {
-    expect(NETWORK_NO_RESPONSE_RETRY_DELAY_MS).toBe(15_000);
-    expect(countTokensRetryDelayMs(noResponse())).toBe(NETWORK_NO_RESPONSE_RETRY_DELAY_MS);
-    // An APIError with no status is the same "never heard from" class.
-    expect(countTokensRetryDelayMs(new Anthropic.APIError(undefined, undefined, "x", undefined, undefined))).toBe(
-      NETWORK_NO_RESPONSE_RETRY_DELAY_MS,
-    );
-    for (const status of [401, 403, 404, 400, 422, 429, 500, 503, 418]) {
-      expect(countTokensRetryDelayMs(apiError(status)), String(status)).toBe(0);
+  it("the delay policy (shared with the executor): every transient class waits the bound; a permanent failure waits 0", () => {
+    __setTransientRetryDelayCapMs(null);
+    try {
+      expect(NETWORK_NO_RESPONSE_RETRY_DELAY_MS).toBe(15_000);
+      expect(countTokensRetryDelayMs(noResponse())).toBe(NETWORK_NO_RESPONSE_RETRY_DELAY_MS);
+      // An APIError with no status is the same "never heard from" class.
+      expect(countTokensRetryDelayMs(new Anthropic.APIError(undefined, undefined, "x", undefined, undefined))).toBe(
+        NETWORK_NO_RESPONSE_RETRY_DELAY_MS,
+      );
+      // 429 and 5xx are transient (the same classifier that decides to
+      // retry them) and now wait the bound too, Retry-After inside the cap.
+      for (const status of [429, 500, 503]) {
+        expect(countTokensRetryDelayMs(apiError(status)), String(status)).toBe(NETWORK_NO_RESPONSE_RETRY_DELAY_MS);
+      }
+      // Permanent failures are never retried, so never wait.
+      for (const status of [401, 403, 404, 400, 422, 418]) {
+        expect(countTokensRetryDelayMs(apiError(status)), String(status)).toBe(0);
+      }
+      expect(countTokensRetryDelayMs(new Error("ECONNRESET"))).toBe(0);
+    } finally {
+      __setTransientRetryDelayCapMs(0);
     }
-    expect(countTokensRetryDelayMs(new Error("ECONNRESET"))).toBe(0);
   });
 
   it("A. a healthy request: one call, no timer is ever scheduled, resolves at once", async () => {
@@ -275,15 +292,28 @@ describe("NETWORK_NO_RESPONSE: one bounded wait, then the same single retry — 
     }
   });
 
-  it("other transient classes retry at once exactly as before (503, 429): no timer, two calls", async () => {
+  it("the other transient classes (503, 429) now wait the same bound before their one retry — one timer, two calls, never a third", async () => {
     vi.useFakeTimers();
     try {
       for (const status of [503, 429]) {
         const countTokens = vi.fn().mockRejectedValueOnce(apiError(status)).mockResolvedValueOnce({ input_tokens: 100 });
-        await expect(gate(stubClient(countTokens))).resolves.toBeUndefined();
+        const p = gate(stubClient(countTokens));
+        await vi.advanceTimersByTimeAsync(0);
+        expect(countTokens, String(status)).toHaveBeenCalledTimes(1);
+        expect(vi.getTimerCount()).toBe(1);
+        await vi.advanceTimersByTimeAsync(NETWORK_NO_RESPONSE_RETRY_DELAY_MS);
+        await expect(p).resolves.toBeUndefined();
         expect(countTokens, String(status)).toHaveBeenCalledTimes(2);
         expect(vi.getTimerCount()).toBe(0);
       }
+      // A 429 carrying Retry-After waits exactly that (inside the cap).
+      const countTokens = vi.fn().mockRejectedValueOnce(apiError(429, { "retry-after": "5" })).mockResolvedValueOnce({ input_tokens: 100 });
+      const p = gate(stubClient(countTokens));
+      await vi.advanceTimersByTimeAsync(4_999);
+      expect(countTokens).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(p).resolves.toBeUndefined();
+      expect(countTokens).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }

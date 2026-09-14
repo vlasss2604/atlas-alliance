@@ -33,7 +33,7 @@
 // Every variable that can make a resolver reach a live provider, or change
 // which provider branch is selected. Scrubbing the selector vars too keeps
 // the default branch deterministic instead of ambient-dependent.
-import { __setNoResponseRetryDelayMs } from "../src/server/engine/providers/retry";
+import { __setTransientRetryDelayCapMs } from "../src/server/engine/providers/retry";
 
 const PROVIDER_ENV_KEYS = [
   "ANTHROPIC_API_KEY",
@@ -50,10 +50,11 @@ if (process.env.ATLAS_ALLOW_LIVE_PROVIDER_ENV !== "1") {
   }
 }
 
-// NETWORK TRANSIENT RESILIENCE V2: the executor waits
-// NETWORK_NO_RESPONSE_RETRY_DELAY_MS (15 s) before its one retry of a
-// no-response transient failure. Offline suites simulate such failures
-// dozens of times and must not sleep for them; the wait itself is proven
-// by tests/network-transient-retry-delay-v1.test.ts, which sets its own
-// small positive value and restores this default.
-__setNoResponseRetryDelayMs(0);
+// TRANSIENT RETRY DELAY POLICY: the executor and the count_tokens gate
+// wait a bounded delay (15 s by default, Retry-After inside a cap) before
+// their one retry of a transient failure. Offline suites simulate such
+// failures dozens of times and must not sleep for them: this caps every
+// wait at 0. The wait itself is proven by
+// tests/network-transient-retry-delay-v1.test.ts, which sets its own small
+// positive cap and restores this default.
+__setTransientRetryDelayCapMs(0);

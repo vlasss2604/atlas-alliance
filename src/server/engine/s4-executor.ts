@@ -34,7 +34,7 @@ import { resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
-import { isTransientError, noResponseRetryDelayMs, sleep } from "./providers/retry";
+import { isTransientError, sleep, transientRetryDelayMs } from "./providers/retry";
 import { isTokenCountDiagnostic, ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
 import {
   isExtractorFailureDiagnosticCode,
@@ -769,13 +769,13 @@ async function reserveAndCallWithRetry<T>(params: {
       }
       // Transient on attempt 1 — loop continues, reserves again, retries.
       if (params.onTransientRetry) await params.onTransientRetry(e);
-      // NETWORK TRANSIENT RESILIENCE V2: a failure the provider never
-      // answered waits the one bounded delay before that single retry,
-      // so the retry is not made inside the same short outage as the
-      // first attempt. Nothing is reserved or billed for the wait, the
-      // attempt count stays two, and an answered transient failure
-      // (429/5xx) retries at once as before. See providers/retry.ts.
-      const delayMs = noResponseRetryDelayMs(e);
+      // TRANSIENT RETRY DELAY (providers/retry.ts): the one bounded wait
+      // before that single retry — so a no-response retry is not made
+      // inside the same short outage as the first attempt, and a 429 is
+      // not retried into the same limit (Retry-After honoured inside a
+      // cap). Nothing is reserved or billed for the wait; the attempt
+      // count stays two.
+      const delayMs = transientRetryDelayMs(e);
       if (delayMs > 0) await sleep(delayMs);
     }
   }

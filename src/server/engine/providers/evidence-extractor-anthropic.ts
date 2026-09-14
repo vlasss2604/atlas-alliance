@@ -9,7 +9,7 @@ import type {
   EvidenceExtractor,
   RejectedFactReport,
 } from "./evidence-extractor";
-import { isTransientAnthropicApiError } from "./retry";
+import { isTransientAnthropicApiError, retryAfterMsFromHeaders } from "./retry";
 import { classifyTokenCountFailure, countThenGate } from "./token-gate";
 import type { ModelUsage } from "./types";
 
@@ -299,6 +299,8 @@ async function doExtract(
       isTransientAnthropicApiError(e),
       diagnostic,
       httpStatus,
+      null,
+      e instanceof Anthropic.APIError ? retryAfterMsFromHeaders(e.headers) : null,
     );
   }
   if (message.stop_reason === "max_tokens") {

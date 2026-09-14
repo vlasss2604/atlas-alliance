@@ -1,0 +1,341 @@
+{
+    "steps": [
+        {
+            "name": "Economic Source",
+            "step": 1,
+            "question": "Where does the economic value the project claims come from?"
+        },
+        {
+            "name": "Revenue Waterfall",
+            "step": 2,
+            "question": "How does that value flow through the protocol before it reaches anyone?"
+        },
+        {
+            "name": "Allocation Mechanism",
+            "step": 3,
+            "question": "What mechanism decides how much of that value goes to the token?"
+        },
+        {
+            "name": "Actual Execution",
+            "step": 4,
+            "question": "Has that mechanism actually been executed, not just specified?"
+        },
+        {
+            "name": "Current Status + Freshness",
+            "step": 5,
+            "question": "Is the mechanism currently active, and how recently was that verified?"
+        },
+        {
+            "name": "Token Destination + Recipient",
+            "step": 6,
+            "question": "Where does the value land once it reaches the token \u2014 burn, buyback, staking, treasury?"
+        },
+        {
+            "name": "Net Token Effect",
+            "step": 7,
+            "question": "What is the net effect on the token after accounting for emissions and dilution?"
+        },
+        {
+            "name": "Durability",
+            "step": 8,
+            "question": "Is this mechanism durable, or contingent on conditions that could reverse it?"
+        }
+    ],
+    "intentRequirements": {
+        "REWARD_SOURCE": {
+            "requirements": [
+                {
+                    "kind": "COMPONENT_ESTABLISHED",
+                    "components": [
+                        "SOURCE_OF_VALUE"
+                    ],
+                    "optionality": "REQUIRED",
+                    "requirementId": "RS-1"
+                },
+                {
+                    "kind": "FLOW_RELATIONSHIP",
+                    "optionality": "REQUIRED",
+                    "requirementId": "RS-2",
+                    "relationshipTo": "DESTINATION",
+                    "relationshipFrom": "SOURCE_OF_VALUE"
+                }
+            ]
+        },
+        "TOKEN_UTILITY": {
+            "requirements": [
+                {
+                    "kind": "COMPONENT_ESTABLISHED",
+                    "components": [
+                        "SOURCE_OF_VALUE"
+                    ],
+                    "optionality": "REQUIRED",
+                    "requirementId": "TU-1"
+                },
+                {
+                    "kind": "FLOW_ATTRIBUTE",
+                    "attribute": "recipientKind",
+                    "optionality": "OPTIONAL",
+                    "requirementId": "TU-2",
+                    "expectedValues": [
+                        "PASSIVE_HOLDER",
+                        "STAKER",
+                        "NODE_OPERATOR",
+                        "TREASURY",
+                        "LP",
+                        "EXTERNAL"
+                    ]
+                }
+            ]
+        },
+        "VALUE_CAPTURE": {
+            "requirements": [
+                {
+                    "kind": "COMPONENT_ESTABLISHED",
+                    "components": [
+                        "SOURCE_OF_VALUE"
+                    ],
+                    "optionality": "REQUIRED",
+                    "requirementId": "VC-1"
+                },
+                {
+                    "kind": "FLOW_RELATIONSHIP",
+                    "optionality": "REQUIRED",
+                    "requirementId": "VC-2",
+                    "relationshipTo": "DESTINATION",
+                    "relationshipFrom": "SOURCE_OF_VALUE"
+                },
+                {
+                    "kind": "NET_EFFECT_ESTABLISHED",
+                    "optionality": "REQUIRED",
+                    "requirementId": "VC-3"
+                }
+            ]
+        },
+        "BURN_OR_SUPPLY_EFFECT": {
+            "requirements": [
+                {
+                    "kind": "NET_EFFECT_ESTABLISHED",
+                    "optionality": "REQUIRED",
+                    "requirementId": "BSE-1"
+                }
+            ]
+        },
+        "PASSIVE_HOLDER_OUTCOME": {
+            "requirements": [
+                {
+                    "kind": "FLOW_ATTRIBUTE",
+                    "attribute": "recipientKind",
+                    "optionality": "REQUIRED",
+                    "requirementId": "PHO-1",
+                    "expectedValues": [
+                        "PASSIVE_HOLDER"
+                    ]
+                }
+            ]
+        },
+        "USAGE_TO_TOKEN_LINKAGE": {
+            "requirements": [
+                {
+                    "kind": "COMPONENT_ESTABLISHED",
+                    "components": [
+                        "SOURCE_OF_VALUE"
+                    ],
+                    "optionality": "REQUIRED",
+                    "requirementId": "UTL-1"
+                },
+                {
+                    "kind": "FLOW_RELATIONSHIP",
+                    "optionality": "REQUIRED",
+                    "requirementId": "UTL-2",
+                    "relationshipTo": "DESTINATION",
+                    "relationshipFrom": "SOURCE_OF_VALUE"
+                }
+            ]
+        },
+        "MECHANISM_CURRENT_STATE": {
+            "requirements": [
+                {
+                    "kind": "LIFECYCLE",
+                    "optionality": "REQUIRED",
+                    "requirementId": "MCS-1",
+                    "expectedLifecycle": "CURRENT"
+                }
+            ]
+        },
+        "PROTOCOL_REVENUE_TO_TOKEN": {
+            "requirements": [
+                {
+                    "kind": "COMPONENT_ESTABLISHED",
+                    "components": [
+                        "SOURCE_OF_VALUE"
+                    ],
+                    "optionality": "REQUIRED",
+                    "requirementId": "PRT-1"
+                },
+                {
+                    "kind": "FLOW_RELATIONSHIP",
+                    "optionality": "REQUIRED",
+                    "requirementId": "PRT-2",
+                    "relationshipTo": "DESTINATION",
+                    "relationshipFrom": "SOURCE_OF_VALUE"
+                }
+            ]
+        }
+    },
+    "requiredComponents": {
+        "1": [
+            "SOURCE_OF_VALUE"
+        ],
+        "2": [
+            "FLOW_PATH"
+        ],
+        "3": [
+            "MECHANISM_SPEC",
+            "GOVERNANCE_BASIS"
+        ],
+        "4": [
+            "EXECUTION_EVIDENCE"
+        ],
+        "5": [
+            "CURRENT_STATE"
+        ],
+        "6": [
+            "DESTINATION",
+            "RECIPIENT"
+        ],
+        "7": [
+            "NET_EFFECT"
+        ],
+        "8": [
+            "DURABILITY_BASIS"
+        ]
+    },
+    "componentRequirements": {
+        "FLOW_PATH": {
+            "evidenceGoal": "trace each hop the value takes from where it is produced to where it ends up, identifying the specific accounts, contracts, or entities it passes through at every step",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "OFFICIAL_DOCS",
+                "ONCHAIN_VERIFIABLE"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "RECIPIENT": {
+            "evidenceGoal": "identify who ultimately receives the economic benefit, and whether that party is the token holder, the protocol treasury, the team, liquidity providers or another party",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "ONCHAIN_VERIFIABLE",
+                "OFFICIAL_DOCS",
+                "GOVERNANCE"
+            ],
+            "tokenStateSensitive": true,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "NET_EFFECT": {
+            "evidenceGoal": "determine what happened to the relevant tokens or assets after the mechanism executed, and whether circulating supply, total supply, holder ownership or another economically relevant state actually changed as a result",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "ONCHAIN_VERIFIABLE",
+                "OFFICIAL_REPORT",
+                "DATA_PROVIDER"
+            ],
+            "tokenStateSensitive": true,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "DESTINATION": {
+            "evidenceGoal": "identify where the assets end up after the mechanism executes - the specific destination account, contract, address or pool - and whether that destination retains, redistributes or retires them",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "ONCHAIN_VERIFIABLE",
+                "OFFICIAL_DOCS"
+            ],
+            "tokenStateSensitive": true,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "CURRENT_STATE": {
+            "evidenceGoal": "determine whether the mechanism is operating right now, and if not whether it is paused, deprecated, superseded or not yet started, with evidence current enough to prove present state",
+            "freshnessClass": "HIGH_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "ONCHAIN_VERIFIABLE",
+                "OFFICIAL_DOCS",
+                "OFFICIAL_REPORT"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": true,
+            "requiresLiveMechanismState": false
+        },
+        "MECHANISM_SPEC": {
+            "evidenceGoal": "find the specification of how the mechanism is defined to work - its rules, triggers, formulas, rates and conditions - as stated by the project itself or its governing documents",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "OFFICIAL_DOCS",
+                "GOVERNANCE"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "SOURCE_OF_VALUE": {
+            "evidenceGoal": "identify the concrete economic activity that produces the value or cash flow in question, and the evidence that this activity actually generates it rather than being an aspiration",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "OFFICIAL_DOCS",
+                "GOVERNANCE",
+                "ONCHAIN_VERIFIABLE"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": false,
+            "structuralObligations": [
+                "SOV.MECHANICAL_PROVENANCE"
+            ],
+            "requiresLiveMechanismState": false
+        },
+        "DURABILITY_BASIS": {
+            "evidenceGoal": "determine how durable the mechanism is - whether it is permanent, time-limited, discretionary or revocable - and what could change or end it",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "GOVERNANCE",
+                "OFFICIAL_DOCS"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "GOVERNANCE_BASIS": {
+            "evidenceGoal": "find the governing decision, vote, proposal or charter that authorises the mechanism, and what it permits, requires or constrains",
+            "freshnessClass": "LOW_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "GOVERNANCE"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": false
+        },
+        "EXECUTION_EVIDENCE": {
+            "evidenceGoal": "find evidence that the mechanism has actually executed in practice - real transactions, operations or reported executions - not merely that it is specified or announced",
+            "freshnessClass": "MEDIUM_CHANGE",
+            "requiredTokenState": null,
+            "establishingClasses": [
+                "ONCHAIN_VERIFIABLE",
+                "OFFICIAL_REPORT"
+            ],
+            "tokenStateSensitive": false,
+            "requiresCurrentState": false,
+            "requiresLiveMechanismState": true
+        }
+    }
+}

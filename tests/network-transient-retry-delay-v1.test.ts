@@ -1,3 +1,4 @@
+import AnthropicNS from "@anthropic-ai/sdk";
 import { eq } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -9,9 +10,13 @@ import type { ContentFetcher } from "../src/server/engine/providers/content-fetc
 import { EvidenceExtractorUnavailableError, type EvidenceExtractor } from "../src/server/engine/providers/evidence-extractor";
 import { QueryProposerUnavailableError, type QueryProposer } from "../src/server/engine/providers/query-proposer";
 import {
-  __setNoResponseRetryDelayMs,
+  __setTransientRetryDelayCapMs,
+  DEFAULT_TRANSIENT_RETRY_DELAY_MS,
   NETWORK_NO_RESPONSE_RETRY_DELAY_MS,
-  noResponseRetryDelayMs,
+  parseRetryAfterMs,
+  RETRY_AFTER_MAX_MS,
+  retryAfterMsFromHeaders,
+  transientRetryDelayMs,
 } from "../src/server/engine/providers/retry";
 import { SearchProviderUnavailableError, type SearchGateway } from "../src/server/engine/providers/search-gateway";
 import { TokenCountUnavailableError } from "../src/server/engine/providers/token-gate";
@@ -20,21 +25,18 @@ import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
 
-// NETWORK TRANSIENT RESILIENCE V2 — the executor's ONE transient retry
-// waits the same bounded delay count_tokens already waits, when the first
-// attempt was never answered.
-//
-// The defect: the tunnel on the live path flaps for 10–30 s. A query
-// proposer, search or extractor generation call made inside a flap failed
-// with no response, its immediate retry failed inside the same flap, and
-// the executor — correctly — classified two consecutive transient failures
-// as a capability outage: CapabilityFatalError, the paid job FAILED.
+// TRANSIENT RETRY DELAY POLICY — the executor's ONE transient retry (and
+// the count_tokens gate's) waits a bounded delay decided by ONE shared
+// policy: no response 15 s; 429 the Retry-After header inside a 60 s cap,
+// 15 s without one; retryable 5xx 15 s; a non-transient failure never
+// retried. The tunnel on the live path flaps for 10–30 s, and a 429
+// retried at once meets the same limit.
 //
 // What must NOT change, and is held below: exactly two attempts, one
 // reservation per attempt, nothing reserved or billed for the wait, no
-// third call ever, an answered transient failure (429) still retried at
-// once, a non-transient failure never retried, and one Evidence row per
-// extracted unit however many attempts it took.
+// third call ever, a non-transient failure never retried, offline suites
+// never actually sleeping, and one Evidence row per extracted unit however
+// many attempts it took.
 
 let ctx: TestContext;
 
@@ -48,7 +50,7 @@ afterAll(async () => {
 
 afterEach(() => {
   // tests/setup-provider-env.ts's offline default for every other suite.
-  __setNoResponseRetryDelayMs(0);
+  __setTransientRetryDelayCapMs(0);
 });
 
 // Small enough to keep the suite fast, large enough that a wait is
@@ -176,51 +178,97 @@ async function jobRow(jobId: string) {
 }
 
 const noResponse = () => new QueryProposerUnavailableError("api call failed: connect ETIMEDOUT", true, null);
-const rateLimited = () => new QueryProposerUnavailableError("api 429 RateLimitError", true, 429);
+const rateLimited = (retryAfterMs: number | null = null) => new QueryProposerUnavailableError("api 429 RateLimitError", true, 429, retryAfterMs);
 
-describe("1. the policy — which transient failures wait, and for how long", () => {
-  it("a transient failure with no HTTP status waits the production delay; an answered one, or a non-transient one, does not", () => {
-    __setNoResponseRetryDelayMs(null);
-    expect(NETWORK_NO_RESPONSE_RETRY_DELAY_MS).toBe(15_000);
-    // The three provider roles the executor retries, no response:
-    expect(noResponseRetryDelayMs(new QueryProposerUnavailableError("timeout", true, null))).toBe(15_000);
-    expect(noResponseRetryDelayMs(new SearchProviderUnavailableError("Brave Search request failed: fetch failed", true))).toBe(15_000);
-    expect(noResponseRetryDelayMs(new EvidenceExtractorUnavailableError("generation failed: NETWORK_NO_RESPONSE", true, "NETWORK_NO_RESPONSE", null))).toBe(15_000);
-    // A typed error that predates the field is a no-response failure too.
-    expect(noResponseRetryDelayMs(new QueryProposerUnavailableError("legacy", true))).toBe(15_000);
-    // Answered transient failures keep the immediate retry.
-    expect(noResponseRetryDelayMs(new QueryProposerUnavailableError("429", true, 429))).toBe(0);
-    expect(noResponseRetryDelayMs(new SearchProviderUnavailableError("Brave Search returned HTTP 503", true, 503))).toBe(0);
-    expect(noResponseRetryDelayMs(new EvidenceExtractorUnavailableError("generation failed: RATE_LIMITED:429", true, "RATE_LIMITED", 429))).toBe(0);
-    // Non-transient failures are never retried, so they never wait.
-    expect(noResponseRetryDelayMs(new QueryProposerUnavailableError("model output is not valid JSON", false, null))).toBe(0);
-    expect(noResponseRetryDelayMs(new SearchProviderUnavailableError("not JSON", false))).toBe(0);
-    expect(noResponseRetryDelayMs(new TokenCountUnavailableError("permanent", false))).toBe(0);
-    expect(noResponseRetryDelayMs(new Error("plain"))).toBe(0);
-    expect(noResponseRetryDelayMs(null)).toBe(0);
-    // The offline seam.
-    __setNoResponseRetryDelayMs(0);
-    expect(noResponseRetryDelayMs(noResponse())).toBe(0);
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
-    expect(noResponseRetryDelayMs(noResponse())).toBe(TEST_DELAY_MS);
-    expect(noResponseRetryDelayMs(rateLimited())).toBe(0);
+function apiError(status: number, headers?: Record<string, string>): InstanceType<typeof AnthropicNS.APIError> {
+  return new AnthropicNS.APIError(status, { type: "error" }, `api ${status}`, headers ? new Headers(headers) : undefined);
+}
+
+describe("1. the policy — every transient class waits a bounded delay, decided in one place", () => {
+  it("no response, 429 without Retry-After and retryable 5xx wait the default; non-transient failures never wait", () => {
+    __setTransientRetryDelayCapMs(null);
+    expect(DEFAULT_TRANSIENT_RETRY_DELAY_MS).toBe(15_000);
+    expect(NETWORK_NO_RESPONSE_RETRY_DELAY_MS).toBe(DEFAULT_TRANSIENT_RETRY_DELAY_MS);
+    // no response, the three provider roles the executor retries:
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("timeout", true, null))).toBe(15_000);
+    expect(transientRetryDelayMs(new SearchProviderUnavailableError("Brave Search request failed: fetch failed", true))).toBe(15_000);
+    expect(transientRetryDelayMs(new EvidenceExtractorUnavailableError("generation failed: NETWORK_NO_RESPONSE", true, "NETWORK_NO_RESPONSE", null))).toBe(15_000);
+    // a typed error that predates the field is a no-response failure too
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("legacy", true))).toBe(15_000);
+    // 429 without Retry-After
+    expect(transientRetryDelayMs(rateLimited())).toBe(15_000);
+    expect(transientRetryDelayMs(new EvidenceExtractorUnavailableError("generation failed: RATE_LIMITED:429", true, "RATE_LIMITED", 429))).toBe(15_000);
+    // retryable 5xx
+    expect(transientRetryDelayMs(new SearchProviderUnavailableError("Brave Search returned HTTP 503", true, 503))).toBe(15_000);
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("529 overloaded", true, 529))).toBe(15_000);
+    // non-transient: never retried, so never waits
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("model output is not valid JSON", false, null))).toBe(0);
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("401", false, 401))).toBe(0);
+    expect(transientRetryDelayMs(new SearchProviderUnavailableError("not JSON", false))).toBe(0);
+    expect(transientRetryDelayMs(new TokenCountUnavailableError("permanent", false))).toBe(0);
+    expect(transientRetryDelayMs(new Error("plain"))).toBe(0);
+    expect(transientRetryDelayMs(null)).toBe(0);
   });
 
-  it("the provider throw sites carry the status: Brave passes its HTTP status, a transport failure carries none", () => {
-    // The Brave and Anthropic primitives construct these exact shapes at
-    // their catch sites; the classes must keep both readings distinct.
+  it("Retry-After is honoured only inside the cap: seconds and HTTP-dates parse, absurd or unparsable values fall back", () => {
+    __setTransientRetryDelayCapMs(null);
+    expect(RETRY_AFTER_MAX_MS).toBe(60_000);
+    expect(parseRetryAfterMs("7")).toBe(7_000);
+    expect(parseRetryAfterMs(" 0 ")).toBe(0);
+    const now = new Date("2026-09-14T12:00:00Z");
+    expect(parseRetryAfterMs("Mon, 14 Sep 2026 12:00:30 GMT", now)).toBe(30_000);
+    expect(parseRetryAfterMs("Mon, 14 Sep 2026 11:00:00 GMT", now)).toBe(0);
+    expect(parseRetryAfterMs("soon")).toBeNull();
+    expect(parseRetryAfterMs("-5")).toBeNull();
+    expect(parseRetryAfterMs("")).toBeNull();
+    expect(parseRetryAfterMs(null)).toBeNull();
+    expect(retryAfterMsFromHeaders(new Headers({ "Retry-After": "12" }))).toBe(12_000);
+    expect(retryAfterMsFromHeaders({ "retry-after": "3" })).toBe(3_000);
+    expect(retryAfterMsFromHeaders(undefined)).toBeNull();
+    // typed errors carrying the parsed header
+    expect(transientRetryDelayMs(rateLimited(7_000))).toBe(7_000);
+    expect(transientRetryDelayMs(rateLimited(0))).toBe(0);
+    expect(transientRetryDelayMs(rateLimited(600_000))).toBe(RETRY_AFTER_MAX_MS);
+    expect(transientRetryDelayMs(new SearchProviderUnavailableError("503", true, 503, 20_000))).toBe(20_000);
+    expect(transientRetryDelayMs(new EvidenceExtractorUnavailableError("429", true, "RATE_LIMITED", 429, null, 4_000))).toBe(4_000);
+    // a no-response failure has no answering headers, so nothing to honour
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("timeout", true, null, 1_000))).toBe(15_000);
+    // the raw SDK exception count_tokens retries before wrapping
+    expect(transientRetryDelayMs(new AnthropicNS.APIConnectionError({ message: "no response" }))).toBe(15_000);
+    expect(transientRetryDelayMs(apiError(429))).toBe(15_000);
+    expect(transientRetryDelayMs(apiError(429, { "retry-after": "9" }))).toBe(9_000);
+    expect(transientRetryDelayMs(apiError(429, { "retry-after": "3600" }))).toBe(RETRY_AFTER_MAX_MS);
+    expect(transientRetryDelayMs(apiError(503))).toBe(15_000);
+    expect(transientRetryDelayMs(apiError(401))).toBe(0);
+    expect(transientRetryDelayMs(apiError(400))).toBe(0);
+  });
+
+  it("the offline seam is a ceiling on every wait, never a floor", () => {
+    __setTransientRetryDelayCapMs(0);
+    expect(transientRetryDelayMs(noResponse())).toBe(0);
+    expect(transientRetryDelayMs(rateLimited(7_000))).toBe(0);
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
+    expect(transientRetryDelayMs(noResponse())).toBe(TEST_DELAY_MS);
+    expect(transientRetryDelayMs(rateLimited(7_000))).toBe(TEST_DELAY_MS);
+    expect(transientRetryDelayMs(rateLimited(50))).toBe(50);
+    expect(transientRetryDelayMs(new QueryProposerUnavailableError("permanent", false, 400))).toBe(0);
+  });
+
+  it("the provider throw sites carry the status and the header: Brave and Anthropic shapes", () => {
     const transport = new SearchProviderUnavailableError("Brave Search request failed: fetch failed", true);
-    const answered = new SearchProviderUnavailableError("Brave Search returned HTTP 503", true, 503);
+    const answered = new SearchProviderUnavailableError("Brave Search returned HTTP 503", true, 503, 2_000);
     expect(transport.httpStatus).toBeNull();
+    expect(transport.retryAfterMs).toBeNull();
     expect(answered.httpStatus).toBe(503);
-    expect(new QueryProposerUnavailableError("x", true, null).httpStatus).toBeNull();
-    expect(new QueryProposerUnavailableError("x", true, 529).httpStatus).toBe(529);
+    expect(answered.retryAfterMs).toBe(2_000);
+    expect(new QueryProposerUnavailableError("x", true, 529, 1_000).retryAfterMs).toBe(1_000);
+    expect(new EvidenceExtractorUnavailableError("x", true, "RATE_LIMITED", 429, null, 1_500).retryAfterMs).toBe(1_500);
   });
 });
 
 describe("2. the executor — one bounded wait before the single retry, nothing else changes", () => {
   it("query proposer: no-response first attempt waits, retries once with its own reservation, succeeds; two attempts, no third", async () => {
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
     const { jobId, project } = await makeJob();
     const proposer = failing([noResponse()], ["q1"]);
     const executor = executorWith(project, { queryProposer: { name: "fixture", proposeQueries: proposer.fn } });
@@ -234,20 +282,35 @@ describe("2. the executor — one bounded wait before the single retry, nothing 
     expect((await jobRow(jobId)).modelCostMicroReserved).toBe(2 * PER_ATTEMPT_MICRO);
   });
 
-  it("query proposer: an answered transient failure (429) still retries at once", async () => {
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
+  it("query proposer: a 429 no longer retries at once — it waits its Retry-After (inside the cap), then retries once", async () => {
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
+    const { jobId, project } = await makeJob();
+    const retryAfter = 120;
+    const proposer = failing([rateLimited(retryAfter)], ["q1"]);
+    const executor = executorWith(project, { queryProposer: { name: "fixture", proposeQueries: proposer.fn } });
+    const started = Date.now();
+    await executor.execute(ITEM, ctxFor(jobId));
+    const elapsed = Date.now() - started;
+    expect(elapsed).toBeGreaterThanOrEqual(retryAfter - 5);
+    expect(elapsed).toBeLessThan(TEST_DELAY_MS);
+    expect(proposer.calls.n).toBe(2);
+    expect((await jobRow(jobId)).modelCostMicroReserved).toBe(2 * PER_ATTEMPT_MICRO);
+  });
+
+  it("query proposer: a 429 without Retry-After waits the default (capped here), then retries once", async () => {
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
     const { jobId, project } = await makeJob();
     const proposer = failing([rateLimited()], ["q1"]);
     const executor = executorWith(project, { queryProposer: { name: "fixture", proposeQueries: proposer.fn } });
     const started = Date.now();
     await executor.execute(ITEM, ctxFor(jobId));
-    expect(Date.now() - started).toBeLessThan(TEST_DELAY_MS);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(TEST_DELAY_MS - 5);
     expect(proposer.calls.n).toBe(2);
     expect((await jobRow(jobId)).modelCostMicroReserved).toBe(2 * PER_ATTEMPT_MICRO);
   });
 
   it("query proposer: no response twice is still fatal after exactly two attempts and one wait — bounded, never a loop", async () => {
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
     const { jobId, project } = await makeJob();
     const proposer = failing([noResponse(), noResponse(), noResponse()], ["never"]);
     const executor = executorWith(project, { queryProposer: { name: "fixture", proposeQueries: proposer.fn } });
@@ -261,7 +324,7 @@ describe("2. the executor — one bounded wait before the single retry, nothing 
   });
 
   it("query proposer: a non-transient failure never waits and never retries", async () => {
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
     const { jobId, project } = await makeJob();
     const proposer = failing([new QueryProposerUnavailableError("model output is not valid JSON", false, null)], ["never"]);
     const executor = executorWith(project, { queryProposer: { name: "fixture", proposeQueries: proposer.fn } });
@@ -274,7 +337,7 @@ describe("2. the executor — one bounded wait before the single retry, nothing 
   });
 
   it("search gateway: a transport failure waits before its one retry; a fresh searchQueries reservation per attempt", async () => {
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
     const { jobId, project } = await makeJob();
     const search = failing([new SearchProviderUnavailableError("Brave Search request failed: fetch failed", true)], []);
     const executor = executorWith(project, { searchGateway: { name: "fixture", search: search.fn } });
@@ -286,7 +349,7 @@ describe("2. the executor — one bounded wait before the single retry, nothing 
   });
 
   it("evidence extractor: a no-response generation waits before its one retry, and the retried extraction writes exactly ONE Evidence row", async () => {
-    __setNoResponseRetryDelayMs(TEST_DELAY_MS);
+    __setTransientRetryDelayCapMs(TEST_DELAY_MS);
     const { jobId, project } = await makeJob();
     const extract = failing([new EvidenceExtractorUnavailableError("generation failed: NETWORK_NO_RESPONSE", true, "NETWORK_NO_RESPONSE", null)], [fact]);
     const executor = executorWith(project, {

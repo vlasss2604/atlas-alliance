@@ -32,6 +32,8 @@ export class SearchProviderUnavailableError extends Error {
     // answered — the same field, for the same retry delay policy, as
     // QueryProposerUnavailableError.httpStatus.
     public readonly httpStatus: number | null = null,
+    // The provider's Retry-After, parsed at the throw site (ms), or null.
+    public readonly retryAfterMs: number | null = null,
   ) {
     super(message);
     this.name = "SearchProviderUnavailableError";
