@@ -5,7 +5,7 @@ import { researchTraceEvents } from "../db/schema";
 import { and, eq, inArray } from "drizzle-orm";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { admittedLocatorsForJob } from "./documentary-locator-store";
-import { loadJobContractView } from "./job-contract-view";
+import { loadEffectiveJobContractView } from "./memory-evidence-adoption";
 import {
   MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
   accountBaseReadDemand,
@@ -475,7 +475,10 @@ export async function resolveOnchainSourceOpenReserve(
   const none = (): OnchainSourceOpenReserve =>
     computeOnchainSourceOpenReserve({ maxSourceOpens: input.maxSourceOpens, demands: [] });
   try {
-    const { view } = await loadJobContractView(db, input.jobId);
+    // The EFFECTIVE queue (memory-evidence-adoption.ts): a component a
+    // failed memory adoption returned to fresh work holds exactly the
+    // protection it would have held had memory never closed it.
+    const { view } = await loadEffectiveJobContractView(db, input.jobId);
     const consumed = await onchainOpportunityConsumedComponents(db, input.jobId);
     const candidates = view.workQueue.filter((i) => !consumed.has(i.component));
     if (candidates.length === 0) return none();

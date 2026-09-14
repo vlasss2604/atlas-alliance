@@ -22,6 +22,7 @@ import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import type { WorkExecutor } from "../src/server/engine/controller";
 import { loadJobContractView } from "../src/server/engine/job-contract-view";
 import {
+  MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS,
   adoptReusedMemory,
   isFreshOnlyComponent,
   memoryAdoptionUnitKey,
@@ -237,22 +238,22 @@ async function researchAThenPromote(
 }
 
 describe("Research Memory -> Evidence adoption — the two-job scenario", () => {
-  it("1/2/3/4/5/6. ACTIVE memory is adopted as current-job Evidence, reconciled by ordinary S5, and the component is neither freshly acquired nor MISSING", async () => {
+  it("1/2/3/4/5/6. ACTIVE memory is adopted as current-job Evidence, reconciled by ordinary S5 to SUPPORTED, and the component is neither freshly acquired nor MISSING", async () => {
     const p = await makeProject();
     const src = await makeSource();
-    const { jobA, originEvidenceId, memoryId } = await researchAThenPromote(p.id, src.id, 1, "SOURCE_OF_VALUE");
+    const { jobA, originEvidenceId, memoryId } = await researchAThenPromote(p.id, src.id, 2, "FLOW_PATH");
 
     const worked: string[] = [];
     const jobB = await newJob(p.id);
     await handleResearchJobTask(ctx.db, jobB, fixtureExecutor(src.id, worked));
 
     // The planner closed it and adoption held: no fresh acquisition.
-    expect(worked).not.toContain("1:SOURCE_OF_VALUE");
-    expect(await attemptsOf(jobB)).not.toContain("1:SOURCE_OF_VALUE");
+    expect(worked).not.toContain("2:FLOW_PATH");
+    expect(await attemptsOf(jobB)).not.toContain("2:FLOW_PATH");
     expect(worked.length).toBe(9);
 
     // 1. Exactly one current-job Evidence row, from that memory row.
-    const rows = await evidenceOf(jobB, "SOURCE_OF_VALUE");
+    const rows = await evidenceOf(jobB, "FLOW_PATH");
     expect(rows.length).toBe(1);
     const adopted = rows[0];
     expect(adopted.researchJobId).toBe(jobB);
@@ -285,19 +286,20 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     expect(adopted.entityBinding).toBeNull();
 
     // 5. Ordinary S5: a result row of job B, resting on the adopted row,
-    //    with the SAME status the same observation earned freshly in job A.
-    const s5B = await s5Of(jobB, "SOURCE_OF_VALUE");
-    const s5A = await s5Of(jobA, "SOURCE_OF_VALUE");
+    //    with the SAME status the same observation earned freshly in job A
+    //    — SUPPORTED, the one status that is sufficient on its own.
+    const s5B = await s5Of(jobB, "FLOW_PATH");
+    const s5A = await s5Of(jobA, "FLOW_PATH");
     expect(s5B).toBeDefined();
     expect(s5B.supportingEvidenceIds).toEqual([adopted.id]);
     expect(s5B.status).toBe(s5A.status);
-    expect(s5B.status).toBe("PARTIALLY_SUPPORTED");
+    expect(s5B.status).toBe("SUPPORTED");
 
     // 6. No MISSING_COMPONENT for the reused component; the assembly sees
     //    exactly what it sees for a freshly researched one.
     const gapsB = await gapsOf(jobB);
     const gapsA = await gapsOf(jobA);
-    expect(gapsB).not.toContain("MISSING_COMPONENT@SOURCE_OF_VALUE");
+    expect(gapsB).not.toContain("MISSING_COMPONENT@FLOW_PATH");
     expect(gapsB).toEqual(gapsA);
 
     // A NEW Proof, of this job.
@@ -306,6 +308,52 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     expect(proofB).toBeDefined();
     expect(proofB.id).not.toBe(proofA.id);
     expect(proofB.researchJobId).toBe(jobB);
+  });
+
+  it("1b. a PARTIALLY_SUPPORTED adoption FAILS CLOSED: SOURCE_OF_VALUE's mechanical-provenance cap is off the allowlist, so the component is freshly acquired and the S5 row rests on the adopted AND the fresh row", async () => {
+    const p = await makeProject();
+    const src = await makeSource();
+    const { memoryId } = await researchAThenPromote(p.id, src.id, 1, "SOURCE_OF_VALUE");
+
+    const worked: string[] = [];
+    const jobB = await newJob(p.id);
+    await handleResearchJobTask(ctx.db, jobB, fixtureExecutor(src.id, worked));
+
+    // Adoption ran and wrote ordinary Evidence of this job from the memory row.
+    const rows = await evidenceOf(jobB, "SOURCE_OF_VALUE");
+    const adopted = rows.find((r) => r.reusedFromMemoryId === memoryId);
+    expect(adopted).toBeDefined();
+    expect(adopted!.extractionUnitKey).toBe(memoryAdoptionUnitKey(jobB, memoryId));
+
+    // The reducer capped it for a reason the audit refused to allowlist —
+    // fresh work for this very component can name the activity and admit
+    // the locator the obligation's chain half needs — so the component was
+    // NOT suppressed: it entered fresh acquisition exactly like a control.
+    expect(worked).toContain("1:SOURCE_OF_VALUE");
+    expect(worked.length).toBe(10);
+    expect(await attemptsOf(jobB)).toContain("1:SOURCE_OF_VALUE");
+    const fresh = rows.find((r) => r.reusedFromMemoryId === null);
+    expect(fresh).toBeDefined();
+
+    const s5B = await s5Of(jobB, "SOURCE_OF_VALUE");
+    expect(s5B.status).toBe("PARTIALLY_SUPPORTED");
+    expect(s5B.reasonCodes).toContain("MECHANICAL_PROVENANCE_NOT_ESTABLISHED");
+    for (const code of s5B.reasonCodes as string[]) {
+      expect(MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS.has(code as never), code).toBe(false);
+    }
+    // Old observation + new observation -> the new result rests on both.
+    expect([...(s5B.supportingEvidenceIds as string[])].sort()).toEqual([adopted!.id, fresh!.id].sort());
+    expect(await gapsOf(jobB)).not.toContain("MISSING_COMPONENT@SOURCE_OF_VALUE");
+
+    // The control: a project with no memory reaches the same component
+    // result, and the same component-level gap kind.
+    const q = await makeProject();
+    const jobC = await newJob(q.id);
+    await handleResearchJobTask(ctx.db, jobC, fixtureExecutor(src.id, []));
+    expect((await s5Of(jobC, "SOURCE_OF_VALUE")).status).toBe(s5B.status);
+    expect(await gapsOf(jobC)).toContain("PARTIAL_COMPONENT@SOURCE_OF_VALUE");
+    expect(await gapsOf(jobB)).toContain("PARTIAL_COMPONENT@SOURCE_OF_VALUE");
+    expect(await gapsOf(jobB)).not.toContain("MISSING_COMPONENT@SOURCE_OF_VALUE");
   });
 
   it("7/8. nothing conclusive is copied: a corrupted old S5 row and a corrupted old Proof leave the new job's result exactly what its own Evidence says", async () => {
@@ -444,15 +492,15 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
   it("12/13. another project's memory, or a row for another step/component, is never adopted — fail closed at the point of materialization", async () => {
     const src = await makeSource();
     const p = await makeProject();
-    const { memoryId } = await researchAThenPromote(p.id, src.id, 1, "SOURCE_OF_VALUE");
+    const { memoryId } = await researchAThenPromote(p.id, src.id, 2, "FLOW_PATH");
 
     // Another project never even retrieves it (planner scope)…
     const q = await makeProject();
     const worked: string[] = [];
     const jobQ = await newJob(q.id);
     await handleResearchJobTask(ctx.db, jobQ, fixtureExecutor(src.id, worked));
-    expect(worked).toContain("1:SOURCE_OF_VALUE");
-    expect((await evidenceOf(jobQ, "SOURCE_OF_VALUE")).every((r) => r.reusedFromMemoryId === null)).toBe(true);
+    expect(worked).toContain("2:FLOW_PATH");
+    expect((await evidenceOf(jobQ, "FLOW_PATH")).every((r) => r.reusedFromMemoryId === null)).toBe(true);
 
     // …and a contract that CLAIMED it would be refused by adoption itself.
     // Planned but not run, so the only Evidence in play is what adoption
@@ -463,12 +511,12 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     const forgedCrossProject = await adoptReusedMemory(
       ctx.db,
       jobQ2,
-      { ...view, reused: [{ step: 1, component: "SOURCE_OF_VALUE", memoryIds: [memoryId] }] },
+      { ...view, reused: [{ step: 2, component: "FLOW_PATH", memoryIds: [memoryId] }] },
       new Date(),
     );
     expect(forgedCrossProject.adopted).toEqual([]);
     expect(forgedCrossProject.fallback[0].refusals).toEqual([{ memoryId, reason: "MEMORY_SCOPE_MISMATCH" }]);
-    expect((await evidenceOf(jobQ2, "SOURCE_OF_VALUE")).length).toBe(0);
+    expect((await evidenceOf(jobQ2, "FLOW_PATH")).length).toBe(0);
 
     // Same project, wrong component for the row.
     const jobP = await newJob(p.id);
@@ -477,46 +525,46 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     const forgedComponent = await adoptReusedMemory(
       ctx.db,
       jobP,
-      { ...viewP, reused: [{ step: 2, component: "FLOW_PATH", memoryIds: [memoryId] }] },
+      { ...viewP, reused: [{ step: 3, component: "MECHANISM_SPEC", memoryIds: [memoryId] }] },
       new Date(),
     );
     expect(forgedComponent.fallback[0].refusals).toEqual([{ memoryId, reason: "MEMORY_SCOPE_MISMATCH" }]);
-    expect((await evidenceOf(jobP, "FLOW_PATH")).length).toBe(0);
+    expect((await evidenceOf(jobP, "MECHANISM_SPEC")).length).toBe(0);
     // Even after the row has legitimately been adopted for its own
     // component, it cannot be inherited by another one.
     const legit = await adoptReusedMemory(ctx.db, jobP, viewP, new Date());
-    expect(legit.adopted.map((a) => a.component)).toEqual(["SOURCE_OF_VALUE"]);
+    expect(legit.adopted.map((a) => a.component)).toEqual(["FLOW_PATH"]);
     const forgedAfter = await adoptReusedMemory(
       ctx.db,
       jobP,
-      { ...viewP, reused: [{ step: 2, component: "FLOW_PATH", memoryIds: [memoryId] }] },
+      { ...viewP, reused: [{ step: 3, component: "MECHANISM_SPEC", memoryIds: [memoryId] }] },
       new Date(),
     );
     expect(forgedAfter.fallback[0].refusals).toEqual([{ memoryId, reason: "MEMORY_SCOPE_MISMATCH" }]);
-    expect((await evidenceOf(jobP, "FLOW_PATH")).length).toBe(0);
-    // FLOW_PATH was already planned work; the refusal adds no second copy.
-    expect(forgedComponent.workQueue.filter((w) => w.component === "FLOW_PATH").length).toBe(1);
+    expect((await evidenceOf(jobP, "MECHANISM_SPEC")).length).toBe(0);
+    // MECHANISM_SPEC was already planned work; the refusal adds no second copy.
+    expect(forgedComponent.workQueue.filter((w) => w.component === "MECHANISM_SPEC").length).toBe(1);
     // And a refused component that was NOT planned work joins the queue in
     // the contract's own shape, with the reason as a blocker.
     const forgedSov = await adoptReusedMemory(
       ctx.db,
       jobQ2,
-      { ...view, reused: [{ step: 1, component: "SOURCE_OF_VALUE", memoryIds: [memoryId] }], workQueue: view.workQueue.filter((w) => w.component !== "SOURCE_OF_VALUE") },
+      { ...view, reused: [{ step: 2, component: "FLOW_PATH", memoryIds: [memoryId] }], workQueue: view.workQueue.filter((w) => w.component !== "FLOW_PATH") },
       new Date(),
     );
-    const item = forgedSov.workQueue.find((w) => w.component === "SOURCE_OF_VALUE");
+    const item = forgedSov.workQueue.find((w) => w.component === "FLOW_PATH");
     expect(item?.state).toBe("UNUSABLE");
     expect(item?.blockers).toEqual(["MEMORY_ADOPTION_MEMORY_SCOPE_MISMATCH"]);
-    expect(forgedSov.workQueue.filter((w) => w.component === "SOURCE_OF_VALUE").length).toBe(1);
+    expect(forgedSov.workQueue.filter((w) => w.component === "FLOW_PATH").length).toBe(1);
   });
 
   it("15. idempotent: re-running adoption for the same job adopts nothing twice", async () => {
     const p = await makeProject();
     const src = await makeSource();
-    const { memoryId } = await researchAThenPromote(p.id, src.id, 1, "SOURCE_OF_VALUE");
+    const { memoryId } = await researchAThenPromote(p.id, src.id, 2, "FLOW_PATH");
     const jobB = await newJob(p.id);
     await handleResearchJobTask(ctx.db, jobB, fixtureExecutor(src.id, []));
-    const before = await evidenceOf(jobB, "SOURCE_OF_VALUE");
+    const before = await evidenceOf(jobB, "FLOW_PATH");
     expect(before.length).toBe(1);
 
     const { view } = await loadJobContractView(ctx.db, jobB);
@@ -524,8 +572,8 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     const twice = await adoptReusedMemory(ctx.db, jobB, view, new Date());
     expect(again.adopted[0].evidenceIds).toEqual([before[0].id]);
     expect(twice.adopted[0].evidenceIds).toEqual([before[0].id]);
-    expect((await evidenceOf(jobB, "SOURCE_OF_VALUE")).length).toBe(1);
-    expect(again.workQueue.map((w) => w.component)).not.toContain("SOURCE_OF_VALUE");
+    expect((await evidenceOf(jobB, "FLOW_PATH")).length).toBe(1);
+    expect(again.workQueue.map((w) => w.component)).not.toContain("FLOW_PATH");
 
     // And the database itself refuses a second adopted row for the pair.
     await expect(
@@ -533,8 +581,8 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
         researchJobId: jobB,
         proofId: null,
         sourceId: src.id,
-        patternStep: 1,
-        component: "SOURCE_OF_VALUE",
+        patternStep: 2,
+        component: "FLOW_PATH",
         relationship: "SUPPORTS",
         directness: "DIRECT",
         fragment: FRAGMENT,

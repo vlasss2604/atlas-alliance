@@ -5,7 +5,7 @@ import { researchTraceEvents } from "../db/schema";
 import { loadEligibleSourceResourcesWithCoverage } from "../memory/source-resource";
 import type { RouteClass } from "./source-authority";
 import { componentsAdmittingClass } from "./acquisition-plan";
-import { loadJobContractView } from "./job-contract-view";
+import { loadEffectiveJobContractView } from "./memory-evidence-adoption";
 import { deriveSourceType, resolveSourceClass } from "./source-authority";
 import { canonicalTargetRef, recordTraceEvent } from "./trace-store";
 
@@ -75,7 +75,10 @@ async function neededWorkItems(
   jobId: string,
 ): Promise<Array<{ step: number; component: string }>> {
   try {
-    const { view } = await loadJobContractView(db, jobId);
+    // The EFFECTIVE queue (memory-evidence-adoption.ts): a component a
+    // failed memory adoption returned to fresh work is seeded exactly as
+    // if memory had never closed it; a component memory did close is not.
+    const { view } = await loadEffectiveJobContractView(db, jobId);
     // The step travels with the component because provenance must record
     // BOTH: the extraction replay is keyed by (step, component), and the
     // canonical mapping between them belongs to the ACTIVE pattern the

@@ -1,9 +1,11 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { createHash } from "node:crypto";
 
 import type { Database, Transaction } from "../db/client";
 import {
   evidence,
+  researchAttempts,
+  researchComponentResults,
   researchJobs,
   researchMemory,
   researchMemoryProvenance,
@@ -11,12 +13,13 @@ import {
 } from "../db/schema";
 import { componentRequirementsFor, type PatternContent } from "../domain/pattern";
 import { resolveConfirmedIdentity, computeEntityBinding } from "../domain/project-identity";
-import type { ComponentReconciliationStatus } from "./component-reconciler";
+import type { ComponentReconciliationStatus, ResultReasonCode } from "./component-reconciler";
 import {
   loadActivePatternContentForJob,
   reconcileAndPersistComponent,
 } from "./component-reconciliation-store";
 import type { ComponentWorkItem, ContractView, ReusedComponent } from "./contract-view";
+import { loadJobContractView, type ResearchJobRow } from "./job-contract-view";
 import { applicableFactKindsForComponent } from "./onchain-facts";
 import { resolveSourceClass, resolveSourceRoute } from "./source-authority";
 
@@ -82,10 +85,94 @@ import { resolveSourceClass, resolveSourceRoute } from "./source-authority";
 // NO SPEND. No provider, no search, no fetch, no model, no reservation.
 // Two selects, one insert and one S5 reduction per reused memory row.
 
-export const MEMORY_ADOPTION_SUFFICIENT_STATUSES: ReadonlySet<ComponentReconciliationStatus> = new Set([
-  "SUPPORTED",
-  "PARTIALLY_SUPPORTED",
-]);
+// SUFFICIENCY — WHEN MAY AN ADOPTED OBSERVATION SUPPRESS FRESH ACQUISITION?
+//
+// SUPPORTED: yes. The reused observation, under today's authority, carries
+// the component on its own.
+//
+// PARTIALLY_SUPPORTED: only when EVERY reason code on the persisted S5 row
+// is on the positive allowlist below, and the allowlist admits a code only
+// when it is PROVEN to be a stable, structural ceiling — one that another
+// ordinary search / fetch / extract / chain attempt for the SAME component
+// cannot reasonably resolve. A mixed set is judged as a set: one code off
+// the list fails the whole set. An unknown or future code is off the list
+// by construction, so it fails closed to fresh work. An empty reason set on
+// a partial row is malformed and fails closed too.
+//
+// THE AUDIT (2026-09-14), over every code the reducer can attach to a
+// PARTIALLY_SUPPORTED row that adopted documentary memory produced (a row
+// with no chain kind, for a component that is not fresh-only):
+//   INSUFFICIENT_AUTHORITY        any component — the best establishing row
+//                                 is CLAIMED under today's routes; a fresh
+//                                 fetch may find a CONFIRMED-route source.
+//   INDIRECT_ONLY                 any component — no DIRECT establishing
+//                                 row; a fresh extraction may be DIRECT.
+//   PROPOSED_STATE_ONLY /
+//   APPROVAL_NOT_ESTABLISHED      structural and GOVERNANCE_BASIS-class
+//                                 components — lifecycle caps; fresh
+//                                 governance records may carry the later
+//                                 (APPROVED / IMPLEMENTING / LIVE) state.
+//   TOKEN_STATE_UNQUALIFIED       token-state-sensitive components — the
+//                                 Pattern states no required token state,
+//                                 so any mention downgrades; fresh rows
+//                                 change the establishing set and the
+//                                 supersession picture. Not proven stable.
+//   MECHANICAL_PROVENANCE_NOT_ESTABLISHED (SOURCE_OF_VALUE, D-158) — the
+//                                 obligation joins TWO things: an ordinary
+//                                 establishing row whose LITERAL passage
+//                                 names a human-confirmed activity, and a
+//                                 machine-owned chain row (an attributed
+//                                 external-value transfer) for that same
+//                                 activity, readable by this component
+//                                 through the typed applicability map.
+//                                 Fresh acquisition of the same component
+//                                 can supply the first (a passage naming an
+//                                 activity the reused fragment never named)
+//                                 and admit the documentary locator that
+//                                 lets the promotion chain and the bounded
+//                                 reactivation pass acquire the second. It
+//                                 is common, and it is NOT a ceiling.
+//   STATE_NOT_FULLY_LIVE          needs requiresLiveMechanismState, which
+//                                 makes the component fresh-only; never
+//                                 reached through adoption.
+//   SUPPLY_* / NET_SUPPLY_* /
+//   CONFLICTING_SUPPLY_DELTA      NET_EFFECT only, fresh-only; unreachable.
+//   CONFLICTING_STATE, NO_EVIDENCE_FOUND, ALL_EVIDENCE_EXCLUDED,
+//   MISSING_* / STALE_CURRENT_STATE
+//                                 never accompany PARTIALLY_SUPPORTED.
+// No reason survives the audit, so the allowlist is EMPTY and every partial
+// result returns the component to fresh work. Adding a code here requires
+// an audit-backed test proving why fresh acquisition cannot improve it.
+export const MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS: ReadonlySet<ResultReasonCode> = new Set<ResultReasonCode>([]);
+
+export interface MemoryAdoptionReconciliation {
+  status: ComponentReconciliationStatus;
+  reasonCodes: readonly string[];
+  supportingEvidenceIds: readonly string[];
+}
+
+// The one rule. Reads the persisted S5 row, so the write path and the
+// read-only re-derivation below cannot disagree about what "sufficient" is.
+// The allowlist is a parameter only so the rule's set semantics can be
+// proven with a non-empty list; production callers never pass one.
+export function isMemoryAdoptionSufficient(
+  result: MemoryAdoptionReconciliation,
+  adoptedEvidenceIds: readonly string[],
+  sufficientPartialReasons: ReadonlySet<string> = MEMORY_ADOPTION_SUFFICIENT_PARTIAL_REASONS,
+): boolean {
+  // Established BY the adopted rows themselves: a status earned by other
+  // Evidence of this job says nothing about the memory, and memory the
+  // reducer excluded has satisfied nothing.
+  if (!result.supportingEvidenceIds.some((id) => adoptedEvidenceIds.includes(id))) return false;
+  if (result.status === "SUPPORTED") return true;
+  if (result.status === "PARTIALLY_SUPPORTED") {
+    return (
+      result.reasonCodes.length > 0 &&
+      result.reasonCodes.every((code) => sufficientPartialReasons.has(code))
+    );
+  }
+  return false;
+}
 
 // Closed. Every value is a reason the component went BACK to fresh work.
 export type MemoryAdoptionRefusal =
@@ -166,32 +253,147 @@ export async function adoptReusedMemory(
     (outcome.adopted ? adopted : fallback).push(outcome);
   }
 
-  // Fallback components become ordinary fresh work. `UNUSABLE` is the
-  // contract's own state for "memory exists but cannot close this", and
-  // the blockers say why in machine-readable form — the same shape every
-  // planned work item already carries, so the controller, the executor's
-  // proposer hint and the search phase need no new case.
-  const fallbackItems: ComponentWorkItem[] = fallback.map((f) => ({
-    step: f.step,
-    stepName: pattern.steps.find((s) => s.step === f.step)?.name ?? `step ${f.step}`,
-    component: f.component,
-    state: "UNUSABLE",
-    blockers: [...new Set(f.refusals.map((r) => `MEMORY_ADOPTION_${r.reason}`))].sort(),
-    memoryIds: f.memoryIds,
-    conflictingMemoryIds: [],
-  }));
+  const workQueue = buildEffectiveWorkQueue(
+    view,
+    pattern,
+    fallback.map((f) => ({
+      step: f.step,
+      component: f.component,
+      memoryIds: f.memoryIds,
+      blockers: [...new Set(f.refusals.map((r) => `MEMORY_ADOPTION_${r.reason}`))].sort(),
+    })),
+  );
+  return { workQueue, adopted, fallback };
+}
 
-  // Planned items keep their order; a fallback item joins its step after
-  // them. A (step, component) the plan already lists as work is never
-  // listed twice — the controller would otherwise claim it a second time
-  // as a recovery attempt. Stable sort by step, nothing else.
+// THE EFFECTIVE WORK QUEUE, BUILT ONE WAY. Fallback components become
+// ordinary fresh work: `UNUSABLE` is the contract's own state for "memory
+// exists but cannot close this", and the blockers say why in machine-
+// readable form — the same shape every planned work item carries, so the
+// controller, the executor's proposer hint, the search phase, the seed
+// selection and the source-open reserve need no new case. Planned items
+// keep their order; a fallback item joins its step after them; a
+// (step, component) the plan already lists is never listed twice (the
+// controller would otherwise claim it a second time as a recovery attempt).
+function buildEffectiveWorkQueue(
+  view: ContractView,
+  pattern: PatternContent,
+  fallback: readonly { step: number; component: string; memoryIds: string[]; blockers: string[] }[],
+): ComponentWorkItem[] {
   const plannedKeys = new Set(view.workQueue.map((w) => `${w.step}:${w.component}`));
-  const workQueue = [...view.workQueue, ...fallbackItems.filter((f) => !plannedKeys.has(`${f.step}:${f.component}`))]
+  const items: ComponentWorkItem[] = fallback
+    .filter((f) => !plannedKeys.has(`${f.step}:${f.component}`))
+    .map((f) => ({
+      step: f.step,
+      stepName: pattern.steps.find((s) => s.step === f.step)?.name ?? `step ${f.step}`,
+      component: f.component,
+      state: "UNUSABLE",
+      blockers: f.blockers,
+      memoryIds: f.memoryIds,
+      conflictingMemoryIds: [],
+    }));
+  return [...view.workQueue, ...items]
     .map((item, index) => ({ item, index }))
     .sort((a, b) => a.item.step - b.item.step || a.index - b.index)
     .map((x) => x.item);
+}
 
-  return { workQueue, adopted, fallback };
+// THE SAME EFFECTIVE QUEUE, READ BACK FROM PERSISTED STATE — for every
+// acquisition-preparation step that runs AFTER adoption and used to read
+// the planned queue: approved source-resource seeding and the on-chain
+// source-open reserve, on both the single-process path (per attempt) and
+// the phased path (the FETCH role, a different process). A component a
+// failed adoption returned to fresh work must meet exactly the conditions
+// it would have met had memory never closed it, so those steps must see it
+// in the queue — for the whole life of the job.
+//
+// Reads, writes nothing. A reused component is fallback when ANY of:
+//
+//   1. it is fresh-only — adoption refuses it before reading anything;
+//   2. this job holds a research_attempts row for it — the controller
+//      claims attempts only for items of the effective queue, so an attempt
+//      row is the durable record that the component WAS handed to fresh
+//      work. Membership is for the job's lifetime, exactly as a planned
+//      item's is: the fresh attempt's own S5 hook may later rewrite the row
+//      to SUPPORTED with the adopted Evidence among its support, and that
+//      must not drop the component out of the reserve or the seed routing
+//      mid-job, where a control job would still list it;
+//   3. its persisted S5 row is not sufficient BY an Evidence row of this job
+//      that points at one of the memory rows the planner selected — the
+//      very facts adoptReusedMemory persisted, judged by the same rule.
+//      Before any attempt exists, that row can only have been written by
+//      adoption itself (no other stage writes S5 for an unclaimed
+//      component), so it is adoption's own verdict being read back.
+//
+// Any other state (adoption never ran, refused, excluded, insufficient)
+// reads as fallback, which is the safe direction: a component prepared for
+// fresh work that is then skipped costs nothing; one skipped by preparation
+// and then researched would run under-prepared.
+export async function loadEffectiveJobContractView(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<{ job: ResearchJobRow; view: ContractView }> {
+  const { job, view } = await loadJobContractView(db, jobId);
+  if (view.reused.length === 0) return { job, view };
+  const pattern = await loadActivePatternContentForJob(db, jobId);
+  const attempted = new Set(
+    (
+      await db
+        .select({ patternStep: researchAttempts.patternStep, component: researchAttempts.component })
+        .from(researchAttempts)
+        .where(eq(researchAttempts.researchJobId, jobId))
+    ).map((a) => `${a.patternStep}:${a.component}`),
+  );
+  const fallback: { step: number; component: string; memoryIds: string[]; blockers: string[] }[] = [];
+  for (const reused of view.reused) {
+    if (isFreshOnlyComponent(pattern, reused.component)) {
+      fallback.push({ ...reused, blockers: ["MEMORY_ADOPTION_FRESH_ONLY_COMPONENT"] });
+      continue;
+    }
+    if (attempted.has(`${reused.step}:${reused.component}`)) {
+      fallback.push({ ...reused, blockers: ["MEMORY_ADOPTION_NOT_ESTABLISHED"] });
+      continue;
+    }
+    const adoptedRows = reused.memoryIds.length === 0
+      ? []
+      : await db
+          .select({ id: evidence.id })
+          .from(evidence)
+          .where(
+            and(
+              eq(evidence.researchJobId, jobId),
+              eq(evidence.patternStep, reused.step),
+              eq(evidence.component, reused.component),
+              inArray(evidence.reusedFromMemoryId, reused.memoryIds),
+            ),
+          );
+    const [s5] = await db
+      .select({
+        status: researchComponentResults.status,
+        reasonCodes: researchComponentResults.reasonCodes,
+        supportingEvidenceIds: researchComponentResults.supportingEvidenceIds,
+      })
+      .from(researchComponentResults)
+      .where(
+        and(
+          eq(researchComponentResults.researchJobId, jobId),
+          eq(researchComponentResults.patternStep, reused.step),
+          eq(researchComponentResults.component, reused.component),
+        ),
+      );
+    const sufficient =
+      s5 !== undefined &&
+      isMemoryAdoptionSufficient(
+        {
+          status: s5.status as ComponentReconciliationStatus,
+          reasonCodes: Array.isArray(s5.reasonCodes) ? (s5.reasonCodes as string[]) : [],
+          supportingEvidenceIds: Array.isArray(s5.supportingEvidenceIds) ? (s5.supportingEvidenceIds as string[]) : [],
+        },
+        adoptedRows.map((r) => r.id),
+      );
+    if (!sufficient) fallback.push({ ...reused, blockers: ["MEMORY_ADOPTION_NOT_ESTABLISHED"] });
+  }
+  return { job, view: { ...view, workQueue: buildEffectiveWorkQueue(view, pattern, fallback) } };
 }
 
 async function adoptComponent(
@@ -231,11 +433,7 @@ async function adoptComponent(
   // directness, freshness, obligations, supersession. If the same
   // observation would be excluded when fresh, it is excluded here.
   const result = await reconcileAndPersistComponent(db, jobId, { step: reused.step, component: reused.component }, now);
-  // Established, AND established by the adopted rows themselves: a status
-  // earned by other Evidence of this job says nothing about the memory,
-  // and memory that the reducer excluded has not satisfied anything.
-  const establishedByMemory = result.supportingEvidenceIds.some((id) => evidenceIds.includes(id));
-  if (MEMORY_ADOPTION_SUFFICIENT_STATUSES.has(result.status) && establishedByMemory) {
+  if (isMemoryAdoptionSufficient(result, evidenceIds)) {
     return { ...base, adopted: true, evidenceIds, status: result.status, refusals };
   }
   // Not established from memory: the adopted rows stay (they are honest
