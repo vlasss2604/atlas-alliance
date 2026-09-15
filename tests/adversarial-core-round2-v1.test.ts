@@ -524,3 +524,93 @@ describe("X. cross-stage contracts and idempotency of the pure chain", () => {
     expect(fewer.proof.verdict).toBe(all.proof.verdict);
   });
 });
+
+// =====================================================================
+// FINAL FRESH ATTACK PASS — seams neither round had touched.
+import type { ClaimRequirement, PatternContent } from "../src/server/domain/pattern";
+import { observedCandidateRefusal } from "../src/server/memory/observed-candidates";
+import { validateProjection } from "../src/server/engine/question-projection";
+
+describe("Z. fresh pass — Pattern -> S7 contract, memory candidate admission, projection labels", () => {
+  function patternWith(intent: string, requirements: ClaimRequirement[]): PatternContent {
+    return { ...PATTERN_V1_CONTENT, intentRequirements: { ...PATTERN_V1_CONTENT.intentRequirements, [intent]: { requirements } } };
+  }
+  const evaluate = (pattern: PatternContent, intent: string, pool: EvidenceRow[]) => {
+    const results = ALL_COMPONENTS.map((component) => reconcile(component, pool.filter((r) => r.component === component)));
+    const admitted = new Set(results.flatMap((r) => [...r.supportingEvidenceIds, ...r.contradictingEvidenceIds]));
+    const assembly = assembleMechanism({ researchJobId: JOB, patternVersion: 1, pattern, contractView: { patternVersion: 1 }, componentResults: results, admittedEvidence: pool.filter((r) => admitted.has(r.id)).map(projection) });
+    return evaluateClaimSupport({ researchJobId: JOB, patternVersion: 1, pattern, intent, taskType: null, requirementSetVersion: 1, assembly });
+  };
+
+  it("Z1. a requirement set with nothing REQUIRED can never make a claim SUPPORTED — not with a satisfied optional atom, not with a contradicted one, not with no flow at all", () => {
+    const optionalOnly = patternWith("PASSIVE_HOLDER_OUTCOME", [
+      { requirementId: "OPT-1", kind: "FLOW_ATTRIBUTE", optionality: "OPTIONAL", attribute: "recipientKind", expectedValues: ["PASSIVE_HOLDER"] },
+    ]);
+    const satisfiedOptional = evaluate(optionalOnly, "PASSIVE_HOLDER_OUTCOME", [row("RECIPIENT", { fragment: "token holders receive fees" })]);
+    expect(satisfiedOptional.status).not.toBe("SUPPORTED");
+    const contradictedOptional = evaluate(optionalOnly, "PASSIVE_HOLDER_OUTCOME", [row("RECIPIENT", { fragment: "all fees accrue to the treasury" })]);
+    expect(contradictedOptional.status).not.toBe("SUPPORTED");
+    const nothing = evaluate(optionalOnly, "PASSIVE_HOLDER_OUTCOME", []);
+    expect(nothing.status).not.toBe("SUPPORTED");
+    expect(nothing.reasonCodes).toContain("CLAIM_PROPOSITION_NOT_STRUCTURED");
+  });
+
+  it("Z2. an intent with no CORE requirement set is a configuration failure, never a quiet verdict", () => {
+    expect(() => evaluate(PATTERN_V1_CONTENT, "VALUE_CAPTURE_V9", [])).toThrow();
+  });
+
+  it("Z3. memory candidate admission refuses every row that was only PARTIALLY the basis of a verified Proof for a weak reason, and every adopted, chain, unconfirmed or fresh-only row", () => {
+    const base = {
+      patternStep: 3,
+      component: "MECHANISM_SPEC",
+      reusedFromMemoryId: null,
+      onchainFactKind: null,
+      onchainArtifactId: null,
+      onchainProvenance: null,
+      sourceClass: "OFFICIAL_DOCS",
+      officiality: "CONFIRMED",
+      entityBinding: null,
+      relationship: "SUPPORTS",
+      directness: "DIRECT",
+      extractionUnitKey: "unit",
+      fragment: "the mechanism is specified",
+      sourceId: "src",
+      retrievedUrl: "https://docs.example-project.test/spec",
+      contentHash: "hash",
+    };
+    const refusal = (o: Record<string, unknown>) => observedCandidateRefusal({ ...base, ...o } as never, PATTERN_V1_CONTENT);
+    expect(refusal({})).toBeNull();
+    expect(refusal({ directness: "INDIRECT" })).toBe("DIRECTNESS_NOT_DIRECT");
+    expect(refusal({ officiality: "CLAIMED" })).toBe("OFFICIALITY_NOT_CONFIRMED");
+    expect(refusal({ sourceClass: "SOCIAL", officiality: "CLAIMED" })).toBe("SOURCE_CLASS_NOT_DOCUMENTARY");
+    expect(refusal({ sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN" })).toBe("ONCHAIN_FAMILY");
+    expect(refusal({ reusedFromMemoryId: "m1" })).toBe("REUSED_FROM_MEMORY");
+    expect(refusal({ relationship: "CONTEXT" })).toBe("RELATIONSHIP_NOT_SUPPORTS");
+    expect(refusal({ entityBinding: "UNVERIFIED" })).toBe("ENTITY_BINDING_UNVERIFIED");
+    expect(refusal({ extractionUnitKey: null })).toBe("NO_UNIT_IDENTITY");
+    expect(refusal({ fragment: "  " })).toBe("PROVENANCE_INCOMPLETE");
+    for (const [step, component] of [[4, "EXECUTION_EVIDENCE"], [5, "CURRENT_STATE"], [7, "NET_EFFECT"]] as const) {
+      expect(refusal({ patternStep: step, component }), component).toBe("FRESH_ONLY_COMPONENT");
+    }
+  });
+
+  it("Z4. a user-facing finding label can never be a verdict word, and can never point at a component the job did not reconcile", () => {
+    const input = { components: [{ step: 1, component: "SOURCE_OF_VALUE" }, { step: 6, component: "RECIPIENT" }] } as never;
+    const recipient = { userFacingLabel: "Who receives the fees", primaryRef: { kind: "COMPONENT", step: 6, component: "RECIPIENT" }, supportingRefs: [] };
+    const ok = validateProjection(
+      { findings: [{ userFacingLabel: "Where the fees come from", primaryRef: { kind: "COMPONENT", step: 1, component: "SOURCE_OF_VALUE" }, supportingRefs: [] }, recipient] },
+      input,
+    );
+    expect(ok.ok).toBe(true);
+    const verdictWord = validateProjection(
+      { findings: [{ userFacingLabel: "Fee sharing is supported", primaryRef: { kind: "COMPONENT", step: 1, component: "SOURCE_OF_VALUE" }, supportingRefs: [] }, recipient] },
+      input,
+    );
+    expect(verdictWord).toEqual({ ok: false, rejection: "LABEL_UNUSABLE" });
+    const invented = validateProjection(
+      { findings: [{ userFacingLabel: "Where the fees go", primaryRef: { kind: "COMPONENT", step: 7, component: "NET_EFFECT" }, supportingRefs: [] }, recipient] },
+      input,
+    );
+    expect(invented).toEqual({ ok: false, rejection: "UNKNOWN_REF" });
+  });
+});

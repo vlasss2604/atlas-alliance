@@ -669,6 +669,25 @@ export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportR
   const relevantFlowIds = new Set(requirementResults.flatMap((r) => r.matchedFlowIds));
   const contextGaps = contextGapsFor(assembly, relevantFlowIds);
 
+  // A CLAIM WITH NOTHING REQUIRED IS NOT A PROPOSITION. The schema demands
+  // at least one requirement but not that any be REQUIRED, and the
+  // compound rule below reads an empty required set as vacuously
+  // satisfied — so an all-OPTIONAL set would have made any question
+  // SUPPORTED with no flow, no evidence and no citation, even with its
+  // optional atom positively contradicted. That is the one false
+  // SUPPORTED no reducer downstream could catch (S8 copies the verdict).
+  // Treated exactly as an unstructurable claim: the atoms are still
+  // evaluated and reported, the verdict is INSUFFICIENT_EVIDENCE.
+  if (required.length === 0) {
+    return {
+      ...baseResult(input),
+      status: "INSUFFICIENT_EVIDENCE",
+      reasonCodes: ["CLAIM_PROPOSITION_NOT_STRUCTURED"],
+      requirementResults,
+      contextGaps,
+    };
+  }
+
   let status: ClaimSupportStatus;
   const reasonCodes = new Set<ClaimReasonCode>();
 
