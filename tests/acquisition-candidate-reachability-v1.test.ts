@@ -692,7 +692,7 @@ describe("B — D-133 explorer targeting is issued only where an on-chain path o
     expect(rows.filter((r) => r.operationType === "QUERY_PROPOSED" && (r.targetRef ?? "").startsWith("site:"))).toHaveLength(0);
   });
 
-  it("B2: a component with a deterministic adapter intent still receives explorer targeting by confirmed address", async () => {
+  it("B2: a component with a deterministic adapter intent carries explorer locators by confirmed address, issued only where the documentary path could open the results", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project.id);
     const item = await workItem(jobId, "DESTINATION");
@@ -708,7 +708,13 @@ describe("B — D-133 explorer targeting is issued only where an on-chain path o
     expect(plan.onchainLocators.length).toBeGreaterThan(0);
     for (const locator of plan.onchainLocators) expect(locator).toMatch(new RegExp(`^site:\\S+ ${MINT}$`));
 
-    const { run, queries } = await runOneComponent({
+    // ACQUISITION GRACEFUL DEGRADATION V1 — the retriever is installed, so
+    // the on-chain path owns this fact and the executor refuses every
+    // explorer result by HTTP (A1 above proves that half). A locator whose
+    // results cannot be bought is not a documentary search opportunity:
+    // it is withheld from the query list, and the search unit it used to
+    // take goes to a query the documentary path can follow through on.
+    const owned = await runOneComponent({
       project,
       jobId,
       item,
@@ -716,8 +722,33 @@ describe("B — D-133 explorer targeting is issued only where an on-chain path o
       fetchable: [`https://${project.host}/docs/buybacks.md`],
       retriever: true,
     });
-    await run();
-    expect(queries.some((q) => q === plan.onchainLocators[0])).toBe(true);
+    const ownedResult = await owned.run();
+    for (const locator of plan.onchainLocators) expect(owned.queries).not.toContain(locator);
+    expect(owned.queries.length).toBeGreaterThan(0);
+    expect(ownedResult.reason).toContain("ONCHAIN_LOCATORS_WITHHELD_FROM_DOCUMENTARY_SEARCH");
+    // Withholding is not "no confirmed route": the class is reachable
+    // through the path that owns it, so the route observation is not made.
+    expect(ownedResult.reason).not.toContain("CLASS_REQUIRES_CONFIRMED_ROUTE:ONCHAIN_VERIFIABLE");
+
+    // When the deterministic path cannot act in this process (the owner's
+    // documentary-only instruction — the same condition the explorer rule's
+    // own suite uses), the explorer open IS the mechanism, and the locator
+    // is issued by confirmed address exactly as before.
+    __setOnchainRetriever(null);
+    const bareJob = await makeJob(project.id);
+    const bareItem = await workItem(bareJob, "DESTINATION");
+    const unowned = await runOneComponent({
+      project,
+      jobId: bareJob,
+      item: bareItem,
+      searchResults: [`https://${project.host}/docs/buybacks.md`],
+      fetchable: [`https://${project.host}/docs/buybacks.md`],
+      retriever: false,
+      chainAcquisition: "DOCUMENTARY_ONLY",
+    });
+    const unownedResult = await unowned.run();
+    expect(unowned.queries.some((q) => q === plan.onchainLocators[0])).toBe(true);
+    expect(unownedResult.reason).not.toContain("ONCHAIN_LOCATORS_WITHHELD_FROM_DOCUMENTARY_SEARCH");
   });
 
   it("B3: general search is not filtered — an explorer url it returns is still a candidate and still opened", async () => {

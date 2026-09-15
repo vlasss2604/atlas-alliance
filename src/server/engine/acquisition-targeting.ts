@@ -201,6 +201,50 @@ export function buildTargetedQueries(input: TargetingInput): TargetingResult {
   return { targetedQueries, unreachableClasses };
 }
 
+// ACQUISITION GRACEFUL DEGRADATION V1 — A DOCUMENTARY SEARCH OPPORTUNITY
+// MUST BE EXECUTABLE BY THE DOCUMENTARY PATH.
+//
+// THE DEFECT THIS CLOSES, measured on the first controlled live Memory
+// acceptance run (job b5395f96-…): a non-intent-required component held ONE
+// search unit under fair share. Its plan carried a self-contained explorer
+// locator (`site:<explorer> <confirmed address>`), so modelQueriesCanBeUsed
+// counted the slot as already filled, the QueryProposer was skipped as
+// provably useless, and the one unit was spent on the locator. The same
+// executor then refused every result that search returned — by design:
+// when the deterministic on-chain adapter owns this component's chain fact
+// and could act in this process, an HTTP open of an explorer page is not the
+// mechanism that establishes it. One allowed search, zero fetchable
+// documentary source, a proposer that never ran, and the component ended
+// NO_EVIDENCE_FOUND. Three components in one run, deterministically, and
+// identically in the run before it.
+//
+// THE RULE: a self-contained locator is a DOCUMENTARY opportunity only when
+// the documentary executor may open what it finds. When the caller's own
+// admissibility rule guarantees the executor will refuse the explorer
+// results (the same predicate it applies at the source-open boundary — the
+// on-chain path owns the fact and is available), the locator is not a
+// documentary target at all: it must not fill the proposer-skip
+// calculation, must not enter the targeted query list, and must not spend
+// the component's search allowance. The allowance itself is unchanged; the
+// normal proposer simply receives the opportunity that was already
+// authorised.
+//
+// Nothing about ownership moves: the on-chain path still owns the fact
+// (it has already run for this component by the time search is planned),
+// the explorer is still not bought by HTTP, and a documentary open never
+// duplicates the chain fact. When the explorer open IS the mechanism (no
+// retriever in this process, or a documentary-only instruction), every
+// locator is executable and is passed through untouched. No project,
+// chain, token or explorer appears in the rule; the caller decides the
+// predicate from its shared ownership gate and this function only applies
+// the consequence.
+export function documentaryExecutableLocators(
+  onchainLocators: readonly string[],
+  explorerHttpOpenIsNotTheMechanism: boolean,
+): readonly string[] {
+  return explorerHttpOpenIsNotTheMechanism ? [] : onchainLocators;
+}
+
 // Blends targeted and model queries into the attempt's final, budget-
 // bounded query list. Targeted queries go FIRST (the scarce searchQueries
 // axis should buy admissible-class coverage before generic coverage), and

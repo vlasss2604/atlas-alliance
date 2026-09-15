@@ -3,10 +3,15 @@ import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
 import { MECHANISM_STATES } from "../../domain/mechanism-state";
-import { classifyExtractionSchemaFailure, EvidenceExtractorUnavailableError } from "./evidence-extractor";
+import {
+  classifyExtractionSchemaFailure,
+  COMPACT_EXTRACTION_MAX_FACTS,
+  EvidenceExtractorUnavailableError,
+} from "./evidence-extractor";
 import type {
   EvidenceExtractionInput,
   EvidenceExtractor,
+  ExtractionMode,
   RejectedFactReport,
 } from "./evidence-extractor";
 import { isTransientAnthropicApiError, retryAfterMsFromHeaders } from "./retry";
@@ -85,14 +90,27 @@ const extractedFactSchema = z.object({
   // array is a shape, never an approval.
   onchainLocators: z.array(z.string()).max(10).nullable(),
 });
-const extractionResultSchema = z.object({ facts: z.array(extractedFactSchema).max(20) });
+const FULL_EXTRACTION_MAX_FACTS = 20;
+
+// ACQUISITION GRACEFUL DEGRADATION V1 — the fact-list cap is the ONE thing
+// that differs between the two extractions' output schemas. The element
+// schema is identical: a compact fact is a fact, validated by the same
+// rules, and the compact mode changes only how many the model may return
+// and how it is asked to choose them.
+function maxFactsFor(mode: ExtractionMode): number {
+  return mode === "COMPACT" ? COMPACT_EXTRACTION_MAX_FACTS : FULL_EXTRACTION_MAX_FACTS;
+}
+
+function extractionResultSchemaFor(mode: ExtractionMode) {
+  return z.object({ facts: z.array(extractedFactSchema).max(maxFactsFor(mode)) });
+}
 
 // The ONE construction of the structured-output format, used by the real
 // request below and exposed for offline contract tests — so a test that
 // proves what vocabulary the model is constrained to proves it against the
 // exact object the generation call sends.
-export function evidenceExtractorOutputFormat() {
-  return zodOutputFormat(extractionResultSchema);
+export function evidenceExtractorOutputFormat(mode: ExtractionMode = "FULL") {
+  return zodOutputFormat(extractionResultSchemaFor(mode));
 }
 
 // D-153 — THE ENVELOPE AND THE ELEMENTS ARE VALIDATED SEPARATELY.
@@ -114,7 +132,9 @@ export function evidenceExtractorOutputFormat() {
 // Nothing is repaired, completed or guessed. A rejected fact is dropped whole
 // — never partially admitted, never given a synthesised `doesNotProve`, and
 // never allowed to become Evidence.
-const extractionEnvelopeSchema = z.object({ facts: z.array(z.unknown()).max(20) });
+function extractionEnvelopeSchemaFor(mode: ExtractionMode) {
+  return z.object({ facts: z.array(z.unknown()).max(maxFactsFor(mode)) });
+}
 
 // D-128 — publishedAt arrives as untrusted model text. The schema only
 // proves it is A string, never that it is a PARSEABLE date: a real live
@@ -201,6 +221,29 @@ Output must be a JSON object matching the provided schema. No prose, no explanat
 // generation call sends, so guidance can be asserted against what runs.
 export const EVIDENCE_EXTRACTOR_SYSTEM_PROMPT = SYSTEM_PROMPT;
 
+// ACQUISITION GRACEFUL DEGRADATION V1 — what the compact extraction is
+// asked to do differently. Emitted as task context, BEFORE the untrusted
+// DOCUMENT block, exactly like the goal it narrows. It asks for LESS, never
+// for anything different in kind: the same step, component, project and
+// literal-excerpt discipline the system prompt already imposes, restricted
+// to the few most direct observations on the component's Evidence goal and
+// cited as briefly as the excerpt allows. A page summary is refused by
+// instruction, and a list longer than the cap is refused at the envelope
+// parse.
+export function compactExtractionDirective(maxFacts: number): string {
+  return [
+    `COMPACT EXTRACTION. A previous extraction of this exact document produced more output than the limit allows.`,
+    `Report AT MOST ${maxFacts} facts, and ONLY the most DIRECT factual observations that bear on the Evidence goal for this component.`,
+    `Prefer facts with directness DIRECT. Do not report CONTEXT, background, indirect or inferred facts, and do not summarize the page.`,
+    `For each fact, keep statement short and set supportFragment to the SHORTEST literal excerpt that establishes it — one or two sentences, never a paragraph.`,
+    `If the document contains no direct fact for this component, return an empty facts array.`,
+  ].join("\n");
+}
+
+// Exposed for offline contract tests — the exact directive the compact
+// request carries, so bounds can be asserted against what runs.
+export const COMPACT_EXTRACTION_DIRECTIVE = compactExtractionDirective(COMPACT_EXTRACTION_MAX_FACTS);
+
 export function buildEvidenceExtractorUserContent(input: EvidenceExtractionInput): string {
   // ACQUISITION MINIMUM SAFE V1 (A) — task/goal context is emitted only
   // when supplied, and always BEFORE the untrusted DOCUMENT block so no
@@ -210,6 +253,9 @@ export function buildEvidenceExtractorUserContent(input: EvidenceExtractionInput
   if (input.target.evidenceGoal) {
     context.push(`Evidence goal for this component: ${input.target.evidenceGoal}`);
   }
+  // The compact directive follows the goal it narrows and precedes the
+  // document, for the same reason the goal does.
+  if ((input.mode ?? "FULL") === "COMPACT") context.push(COMPACT_EXTRACTION_DIRECTIVE);
   return [
     `Project: ${input.target.projectName} (${input.target.projectSlug})`,
     `Pattern step: ${input.target.stepName} (step ${input.target.step})`,
@@ -261,16 +307,20 @@ async function doExtract(
   onUsage?: (usage: ModelUsage) => void,
   onRejectedFacts?: (rejected: readonly RejectedFactReport[]) => void,
 ) {
+  const mode: ExtractionMode = input.mode ?? "FULL";
   const userContent = buildEvidenceExtractorUserContent(input);
   // S10 acceptance closure (HIGH-1, D-119): ONE shared base request
   // object — model/system/messages/output_config — used for BOTH the
   // count and the generation call, so the two structurally cannot drift
   // apart. max_tokens is generation-only, added separately below.
+  // The compact fallback differs ONLY in the fact cap of the output
+  // format and the directive inside the user content: same model, same
+  // system prompt, same document, same input gate, same output ceiling.
   const baseRequest = {
     model,
     system: SYSTEM_PROMPT,
     messages: [{ role: "user" as const, content: userContent }],
-    output_config: { format: evidenceExtractorOutputFormat() },
+    output_config: { format: evidenceExtractorOutputFormat(mode) },
   };
   // D-090 count-then-gate (S10, token-gate.ts): throws ModelInputOversizedError
   // or TokenCountUnavailableError before any generation call is made —
@@ -330,7 +380,7 @@ async function doExtract(
   // THE ENVELOPE. Still strict, still fail-closed: output that is not the
   // result object at all, or whose facts array is missing, not an array, or
   // over the length cap, is refused exactly as before.
-  const envelope = extractionEnvelopeSchema.safeParse(raw);
+  const envelope = extractionEnvelopeSchemaFor(mode).safeParse(raw);
   if (!envelope.success) {
     // Emitted ONLY from the actual schema-validation failure. The zod
     // error message is DERIVED FROM MODEL OUTPUT (received values) —

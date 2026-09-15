@@ -776,7 +776,12 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
     expect(failedCalls.every((t) => t.diagnosticCode === "RATE_LIMITED:429")).toBe(true);
   }, 30_000);
 
-  it("17. MAX_TOKENS_TRUNCATED does not gain a retry: one attempt, named in the terminal reason", async () => {
+  it("17. MAX_TOKENS_TRUNCATED gains exactly ONE compact retry, never the transient retry: a second truncation fails closed and is named", async () => {
+    // ACQUISITION GRACEFUL DEGRADATION V1 — the full extraction's
+    // truncation is followed by one compact extraction of the same
+    // document (tests/acquisition-graceful-degradation-v1.test.ts owns the
+    // full contract). Here the compact pass truncates too: no third call,
+    // FAILED, and the terminal reason still names the closed class.
     const { err } = await extractFailure(async () => modelResponse("x", "max_tokens"));
     const { outcome, calls } = await runWithExtractor(async () => {
       throw err;
@@ -785,7 +790,8 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
     expect(result.status).toBe("FAILED");
     expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
     expect(result.reason).toContain("EXTRACT_FAILED:MAX_TOKENS_TRUNCATED");
-    expect(calls.extract).toBe(1);
+    expect(result.reason).toContain("EXTRACT_COMPACT_RETRY_FAILED");
+    expect(calls.extract).toBe(2);
   }, 30_000);
 
   it("18. OUTPUT_NOT_JSON / OUTPUT_SCHEMA_INVALID stay single-attempt and are named", async () => {

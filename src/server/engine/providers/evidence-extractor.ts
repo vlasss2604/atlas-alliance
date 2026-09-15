@@ -19,7 +19,47 @@ import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from
 export interface EvidenceExtractionInput {
   target: ComponentTarget;
   document: FetchedDocument;
+  // ACQUISITION GRACEFUL DEGRADATION V1 — which extraction is being asked
+  // for. Omitted (or "FULL") is the ordinary extraction every existing
+  // call site and fixture already performs; "COMPACT" is the ONE bounded
+  // fallback s4-executor.ts issues over the SAME already-fetched document
+  // after a FULL extraction truncated at the output ceiling. See
+  // COMPACT_EXTRACTION_MAX_FACTS for what "compact" bounds.
+  mode?: ExtractionMode;
 }
+
+// THE TWO EXTRACTIONS A DOCUMENT MAY RECEIVE, AND NOTHING IN BETWEEN.
+//
+// THE DEFECT THIS CLOSES, measured on the first controlled live Memory
+// acceptance run (job b5395f96-…) and identically on the run before it: a
+// rich official documentation page (94,584 normalized characters, well
+// inside the input gate) was fetched, sealed and handed to extraction; the
+// model tried to report so much that its output hit the approved 1536-token
+// ceiling; the response was correctly refused as MAX_TOKENS_TRUNCATED; and
+// the whole document contributed ZERO facts — the component ended
+// EVIDENCE_EXTRACTOR_UNAVAILABLE with a useful source paid for and unread.
+// A page that says too much was treated exactly like a page that says
+// nothing.
+//
+// The COMPACT extraction is the smallest bounded answer: the same document,
+// no new search, no new fetch, ONE further model call, asking only for the
+// few most DIRECT observations that bear on the component's Evidence goal,
+// each cited by its shortest establishing excerpt. The cap below is the
+// bound the compact request is built around: it is the number the compact
+// directive asks for, it is declared on the compact output schema (which
+// this SDK build serialises as a description hint, as it does every other
+// bound here), and it is ENFORCED at the envelope parse — a compact
+// response carrying more facts is refused whole. Deliberately small: a
+// fallback exists to
+// make a truncated page contribute SOMETHING admissible, never to recover
+// everything the page says. Nothing about what counts as a fact moves — a
+// compact fact passes the identical canonical schema, the identical
+// per-fact validation, and the identical downstream admission as a full
+// one, and a compact response that truncates or fails to parse fails
+// closed exactly as the full one did.
+export type ExtractionMode = "FULL" | "COMPACT";
+
+export const COMPACT_EXTRACTION_MAX_FACTS = 5;
 
 export interface EvidenceExtractor {
   readonly name: string;

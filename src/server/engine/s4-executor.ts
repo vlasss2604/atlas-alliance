@@ -46,6 +46,7 @@ import { observeSourceRouteCandidate } from "./source-route-candidates";
 import {
   blendQueries,
   buildTargetedQueries,
+  documentaryExecutableLocators,
   genericSearchMayEstablish,
   modelQueriesCanBeUsed,
   orderCandidatesForComponent,
@@ -699,13 +700,23 @@ async function reserveAndCallWithRetry<T>(params: {
   // external-call cardinality instead of collapsing two real attempts
   // into one row.
   onTransientRetry?: (firstAttemptError: unknown) => Promise<void>;
+  // ACQUISITION GRACEFUL DEGRADATION V1 — how many REAL external attempts
+  // this invocation may make. Omitted means the existing allowance of two
+  // (one call plus its single transient retry), so every existing call
+  // site is unchanged. The compact extraction fallback passes 1: it is
+  // bounded to ONE additional model call by contract, so a transient
+  // failure on that one call is a local, continuable failure of the
+  // document (it is never retried) and never proof that the capability
+  // is unavailable — one unretried attempt cannot prove that.
+  maxAttempts?: 1 | 2;
 }): Promise<RetryOutcome<T>> {
   const budgetReasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED" =
     params.budgetAxis === "searchQueries" ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "MODEL_COST_BUDGET_EXHAUSTED";
+  const maxAttempts = params.maxAttempts ?? 2;
   let attempts = 0;
   let lastError: unknown = null;
   const meter = params.meter !== false;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     const reserved = meter
       ? await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget)
       : true;
@@ -756,7 +767,14 @@ async function reserveAndCallWithRetry<T>(params: {
       if (!isTransientError(e)) {
         return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", detail: safeFailureDetail(e), attempts };
       }
-      if (attempt === 2) {
+      if (maxAttempts === 1) {
+        // A single-attempt invocation has no retry to exhaust: one
+        // transient failure is a local failure of this call, classified
+        // exactly like a non-transient one, and proves nothing about the
+        // capability.
+        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", detail: safeFailureDetail(e), attempts };
+      }
+      if (attempt === maxAttempts) {
         // Transient on the retry too — the capability itself is down.
         return {
           kind: "fatal",
@@ -1150,6 +1168,88 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         }
       }
 
+      // AN EXPLORER PAGE IS NOT THE MECHANISM THAT ESTABLISHES A CHAIN FACT.
+      //
+      // THE DEFECT THIS CLOSES, measured on the fresh post-fix Raydium run
+      // (job 8eb1e920-…): of 17 paid documentary opens, five bought an
+      // explorer SPA shell that was then correctly rejected as another
+      // project's, and several more failed in transport. Every one of them
+      // was a url from the code-owned ONCHAIN_EXPLORER_DOMAINS list, ranked
+      // FIRST precisely because its predicted class (ONCHAIN_VERIFIABLE) is
+      // one the component admits — the strongest rank there is — and then
+      // opened through the ordinary documentary HTTP path, which is not the
+      // mechanism this repository uses to read a chain.
+      //
+      // THE RULE IS GENERIC, and states one thing only: when a component's
+      // on-chain facts are the DEDICATED deterministic adapter's
+      // responsibility and that adapter could actually act in this process,
+      // an HTTP documentary open of an explorer host cannot establish what
+      // the adapter is responsible for — so it is not bought.
+      //
+      // Both halves are required, and neither is restated here:
+      //   * `componentAdmitsOnchainAcquisition` is the SAME shared gate the
+      //     on-chain source-open reserve already uses to decide what to
+      //     protect capacity for — the Pattern's establishingClasses, the
+      //     project's human-confirmed identity, the supported chain, and the
+      //     component -> intent map, in one place so the two answers cannot
+      //     drift. It says exactly what is needed here: the deterministic
+      //     adapter has real, addressable work for THIS component. A
+      //     component it has no intent for is untouched, and so is a project
+      //     with no confirmed identity;
+      //   * `onchainAcquisitionUnavailable` is false — the deterministic
+      //     path is installed and permitted here, so it is a real
+      //     alternative and not a promise nothing can keep. A
+      //     DOCUMENTARY_ONLY job, or a process with no retriever, changes
+      //     nothing: every explorer candidate stays openable exactly as
+      //     before.
+      //
+      // By the time this line is reached, the deterministic path has ALREADY
+      // run for this component and produced no evidence (a success returns
+      // at step 0b) — so this is never "instead of trying"; it is "the one
+      // mechanism that can answer this has been tried, and buying the SPA
+      // shell of the same explorer is not a second attempt at it".
+      //
+      // WHAT THIS IS NOT. Not a blacklist: nothing is removed from any
+      // domain list, no class is lowered, and the explorer is skipped ONLY
+      // as a documentary HTTP purchase. Its CANDIDATE_RETURNED provenance
+      // stays in the trace, admitted locators still address explorers, the
+      // deterministic adapter still reaches them, and every non-documentary
+      // role an explorer url plays (provenance, transaction locator,
+      // user-visible link) is untouched. No project, chain or token appears
+      // in the condition.
+      //
+      // ACQUISITION GRACEFUL DEGRADATION V1 — decided HERE, before a single
+      // query is planned, because the same predicate has TWO consumers that
+      // must not disagree: the source-open filter below (which explorer
+      // candidates are bought) and the query planning just after this
+      // (which locators may count as this component's documentary search
+      // opportunity). The live Memory acceptance run (job b5395f96-…)
+      // proved what disagreement costs: three one-slot components spent
+      // their only search unit on an explorer locator this very rule then
+      // refused every result of, with the proposer skipped as "provably
+      // unusable" on the strength of that same locator.
+      const explorerHttpOpenIsNotTheMechanism =
+        !onchainAcquisitionUnavailable &&
+        componentAdmitsOnchainAcquisition({
+          component: item.component,
+          establishingClasses: plan.establishingClasses,
+          identity: plan.confirmedIdentity,
+        });
+      // THE LOCATORS THE DOCUMENTARY PATH MAY ACTUALLY ACT ON. When the
+      // explorer open is not the mechanism, the plan's explorer locators
+      // are withheld from documentary query planning entirely: they fill no
+      // slot in the proposer-skip calculation, enter no targeted query, and
+      // spend no search unit. The on-chain path that owns the fact has
+      // already run for this component; the documentary allowance goes to a
+      // query the documentary executor can actually follow through on.
+      const documentaryLocators = documentaryExecutableLocators(
+        plan.onchainLocators,
+        explorerHttpOpenIsNotTheMechanism,
+      );
+      if (documentaryLocators.length < plan.onchainLocators.length) {
+        observations.add("ONCHAIN_LOCATORS_WITHHELD_FROM_DOCUMENTARY_SEARCH");
+      }
+
       // D-130: how many search units this component may spend, so that a
       // later component the job's INTENT actually requires cannot be
       // starved by earlier Pattern steps walking the queue first. Reads
@@ -1193,9 +1293,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // it skips, deterministic targeting alone already fills every slot,
       // so the attempt searches exactly what it would have searched anyway
       // — minus one paid model call that produced discarded output.
+      // Counts only locators the documentary path can execute: a locator
+      // whose every result this executor would refuse fills no slot.
       const canUseModelQueries = modelQueriesCanBeUsed({
         establishingClasses: plan.establishingClasses,
-        onchainLocators: plan.onchainLocators,
+        onchainLocators: documentaryLocators,
         maxTotal: effectiveAllowance,
       });
       if (!canUseModelQueries) {
@@ -1390,10 +1492,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const { targetedQueries, unreachableClasses } = buildTargetedQueries({
         establishingClasses: plan.establishingClasses,
         confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
-        onchainLocators: plan.onchainLocators,
+        onchainLocators: documentaryLocators,
         baseQueries: modelQueries,
       });
       for (const cls of unreachableClasses) {
+        // A withheld explorer locator is not a missing confirmed identity:
+        // the class IS reachable for this component — through the on-chain
+        // path that owns it and has already run — so the route observation
+        // would be false. The withholding has its own observation above.
+        if (cls === "ONCHAIN_VERIFIABLE" && plan.onchainLocators.length > 0) continue;
         // Honest, bounded observability: a required class that can only
         // come from a human-confirmed SOURCE_ROUTE this project does not
         // have. Never silently ignored — it is the real reason such a
@@ -1766,63 +1873,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
       let opensAttempted = 0;
       let lastFetchFailureReason: string | null = null;
-      // AN EXPLORER PAGE IS NOT THE MECHANISM THAT ESTABLISHES A CHAIN FACT.
-      //
-      // THE DEFECT THIS CLOSES, measured on the fresh post-fix Raydium run
-      // (job 8eb1e920-…): of 17 paid documentary opens, five bought an
-      // explorer SPA shell that was then correctly rejected as another
-      // project's, and several more failed in transport. Every one of them
-      // was a url from the code-owned ONCHAIN_EXPLORER_DOMAINS list, ranked
-      // FIRST precisely because its predicted class (ONCHAIN_VERIFIABLE) is
-      // one the component admits — the strongest rank there is — and then
-      // opened through the ordinary documentary HTTP path, which is not the
-      // mechanism this repository uses to read a chain.
-      //
-      // THE RULE IS GENERIC, and states one thing only: when a component's
-      // on-chain facts are the DEDICATED deterministic adapter's
-      // responsibility and that adapter could actually act in this process,
-      // an HTTP documentary open of an explorer host cannot establish what
-      // the adapter is responsible for — so it is not bought.
-      //
-      // Both halves are required, and neither is restated here:
-      //   * `componentAdmitsOnchainAcquisition` is the SAME shared gate the
-      //     on-chain source-open reserve already uses to decide what to
-      //     protect capacity for — the Pattern's establishingClasses, the
-      //     project's human-confirmed identity, the supported chain, and the
-      //     component -> intent map, in one place so the two answers cannot
-      //     drift. It says exactly what is needed here: the deterministic
-      //     adapter has real, addressable work for THIS component. A
-      //     component it has no intent for is untouched, and so is a project
-      //     with no confirmed identity;
-      //   * `onchainAcquisitionUnavailable` is false — the deterministic
-      //     path is installed and permitted here, so it is a real
-      //     alternative and not a promise nothing can keep. A
-      //     DOCUMENTARY_ONLY job, or a process with no retriever, changes
-      //     nothing: every explorer candidate stays openable exactly as
-      //     before.
-      //
-      // By the time this line is reached, the deterministic path has ALREADY
-      // run for this component and produced no evidence (a success returns
-      // at step 0b) — so this is never "instead of trying"; it is "the one
-      // mechanism that can answer this has been tried, and buying the SPA
-      // shell of the same explorer is not a second attempt at it".
-      //
-      // WHAT THIS IS NOT. Not a blacklist: nothing is removed from any
-      // domain list, no class is lowered, and the explorer is skipped ONLY
-      // as a documentary HTTP purchase. Its CANDIDATE_RETURNED provenance
-      // stays in the trace, D-133 targeting still aims search at explorers
-      // by confirmed address, admitted locators still address them, the
-      // deterministic adapter still reaches them, and every non-documentary
-      // role an explorer url plays (provenance, transaction locator,
-      // user-visible link) is untouched. No project, chain or token appears
-      // in the condition.
-      const explorerHttpOpenIsNotTheMechanism =
-        !onchainAcquisitionUnavailable &&
-        componentAdmitsOnchainAcquisition({
-          component: item.component,
-          establishingClasses: plan.establishingClasses,
-          identity: plan.confirmedIdentity,
-        });
+      // The explorer rule (`explorerHttpOpenIsNotTheMechanism`) is decided
+      // once, above step 1, and applied at the source-open filter below —
+      // the same predicate that already withheld the plan's explorer
+      // locators from this attempt's documentary query planning.
 
       // D-154's approved-resource tie-break input, read once. Resolved HERE
       // rather than at the call below because the explorer rule above also
@@ -2435,7 +2489,25 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // as the report array instead of being narrowed to the null this
         // statement just wrote.
         clearRejectedFacts(usage);
-        const extractOutcome = await reserveAndCallWithRetry({
+        // ONE EXTRACT_ATTEMPTED ROW PER REAL, RESERVED EXTRACTION CALL —
+        // the full extraction's attempts and, when one is made, the compact
+        // fallback's single attempt, through the same writer.
+        const recordExtractAttempted = async () => {
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "EXTRACT_ATTEMPTED",
+            providerKind: "EXTRACT",
+            providerName: evidenceExtractor.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "OK",
+            budgetAxis: "modelCostMicro",
+            budgetAmount: evidenceExtractorCostMicro,
+          });
+        };
+        let extractOutcome = await reserveAndCallWithRetry({
           db: deps.db,
           jobId: ctx.jobId,
           budgetAxis: "modelCostMicro",
@@ -2448,21 +2520,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // model-cost-profile.ts's module comment for why a chars/token
           // heuristic was removed rather than kept as a claimed guarantee.
           fn: () => evidenceExtractor.extract({ target, document: doc }),
-          onAttempt: async () => {
-            await recordTraceEvent(deps.db, {
-              researchJobId: ctx.jobId,
-              researchAttemptId: attemptId,
-              operationType: "EXTRACT_ATTEMPTED",
-              providerKind: "EXTRACT",
-              providerName: evidenceExtractor.name,
-              patternStep: item.step,
-              component: item.component,
-              targetRef: doc.finalUrl,
-              status: "OK",
-              budgetAxis: "modelCostMicro",
-              budgetAmount: evidenceExtractorCostMicro,
-            });
-          },
+          onAttempt: recordExtractAttempted,
           // §8/D-120: same MODEL_CALL attempt-cardinality tightening as
           // QueryProposer above — one FAILED row for the transient
           // attempt-1 failure, distinct from the row written below for
@@ -2491,6 +2549,91 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           },
         });
         spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+
+        // ACQUISITION GRACEFUL DEGRADATION V1 — A PAGE THAT SAYS TOO MUCH IS
+        // NOT A PAGE THAT SAYS NOTHING.
+        //
+        // THE DEFECT THIS CLOSES, measured on the first controlled live
+        // Memory acceptance run (job b5395f96-…) and identically on the run
+        // before it: the ONE documentary open a component made fetched a
+        // rich official page (94,584 normalized characters, inside the
+        // input gate), the model tried to report so much of it that the
+        // output hit the approved ceiling, the response was correctly
+        // refused as MAX_TOKENS_TRUNCATED — and the whole paid-for document
+        // contributed zero facts. The component ended
+        // EVIDENCE_EXTRACTOR_UNAVAILABLE with its best source unread. A
+        // second component lost a document the same way in the same run.
+        //
+        // THE FALLBACK, and its bounds, all of which are visible right here:
+        //   * the SAME already-fetched document (`doc`) — no new search, no
+        //     new fetch, no new source open, no new reservation on either
+        //     of those axes;
+        //   * ONE further model extraction call, never more — `maxAttempts:
+        //     1`, so not even the transient retry every other model call is
+        //     allowed. That one call is reserved and traced exactly like any
+        //     other (its own EXTRACT_ATTEMPTED row, its own modelCostMicro
+        //     reservation, counted into spent.authorizedModelCostMicro);
+        //   * a COMPACT request (evidence-extractor-anthropic.ts): the same
+        //     system prompt and input gate, asking only for the few most
+        //     direct observations on this component's Evidence goal, with
+        //     the fact cap enforced at the output schema;
+        //   * whatever the compact call returns takes the place of the full
+        //     outcome and flows through the IDENTICAL admission below —
+        //     the same per-fact validation, wrong-project/wrong-component
+        //     rejection, traceability check and canonical extraction-unit
+        //     key (job, source, step, component, fragment), so a compact
+        //     fact is the same Evidence identity a full extraction of the
+        //     same passage would have produced;
+        //   * fail closed, again: a compact response that truncates again,
+        //     fails to parse, fails the schema, is oversized, or fails
+        //     transiently is this document's failure exactly as it always
+        //     was — the existing "local" handling records it and moves on.
+        //     No truncated JSON prefix is ever salvaged, from either call.
+        //
+        // The truncated FULL pass is still recorded as its own EXTRACT_FAILED
+        // row with its MAX_TOKENS_TRUNCATED diagnostic: it happened and it
+        // was paid for. What it no longer does is decide the document's
+        // fate by itself — that is the compact pass's to decide — so it is
+        // not counted into this attempt's document-failure tally here.
+        // Only the closed, membership-gated detail is consulted: the detail
+        // is exactly the diagnostic string when it carries no status, which
+        // is the only shape MAX_TOKENS_TRUNCATED ever has.
+        if (extractOutcome.kind === "local" && extractOutcome.detail === "MAX_TOKENS_TRUNCATED") {
+          observations.add("EXTRACT_FAILED:MAX_TOKENS_TRUNCATED");
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: "EXTRACT_FAILED",
+            providerKind: "EXTRACT",
+            providerName: evidenceExtractor.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: doc.finalUrl,
+            status: "FAILED",
+            reasonCode: extractOutcome.reasonCode ?? "PROVIDER_ERROR",
+            diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
+          });
+          observations.add("EXTRACT_COMPACT_RETRY");
+          clearRejectedFacts(usage);
+          extractOutcome = await reserveAndCallWithRetry({
+            db: deps.db,
+            jobId: ctx.jobId,
+            budgetAxis: "modelCostMicro",
+            reserveAmount: evidenceExtractorCostMicro,
+            maxBudget: ctx.budget.maxModelCostMicro,
+            label: "EVIDENCE_EXTRACTOR",
+            capability: "EVIDENCE_EXTRACTOR",
+            fn: () => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT" }),
+            onAttempt: recordExtractAttempted,
+            maxAttempts: 1,
+          });
+          spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+          if (extractOutcome.kind === "ok") {
+            observations.add("EXTRACT_COMPACT_RETRY_OK");
+          } else {
+            observations.add("EXTRACT_COMPACT_RETRY_FAILED");
+          }
+        }
 
         if (extractOutcome.kind === "budget_exhausted") {
           // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): throw AT the denial

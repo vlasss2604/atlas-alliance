@@ -307,6 +307,80 @@ true.** Historical reuse may return only through an explicit future design
 carrying provenance, freshness, revalidation, revocation and transparent
 historical reuse.
 
+## ACQUISITION DEGRADES GRACEFULLY: A REFUSED LOCATOR IS NOT AN OPPORTUNITY, A TRUNCATED PAGE IS NOT AN EMPTY ONE (ACQUISITION GRACEFUL DEGRADATION V1)
+
+Two generic acquisition defects proven from the persisted trace of the
+first controlled live Memory acceptance run (A2, job `b5395f96-…`,
+2026-09-14; identical in the run before it), fixed offline. No budget is
+raised, no admission, authority or Research Memory rule moves, no live
+call was made.
+
+**1. The documentary search opportunity must be executable by the
+documentary path.** `FLOW_PATH`, `RECIPIENT` and `EXECUTION_EVIDENCE`
+each held ONE search unit under fair share. Their plan carried the
+project's explorer locator (`site:<explorer> <confirmed address>`), so
+`modelQueriesCanBeUsed` counted the slot as filled, the QueryProposer was
+skipped (`MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER`), the unit was spent
+on the locator — and the executor's own explorer rule then refused every
+result (`SKIPPED_EXPLORER_HTTP_ONCHAIN_PATH_OWNS_FACT`):
+`NO_SOURCE_COULD_BE_FETCHED`. The rule (`documentaryExecutableLocators`,
+`acquisition-targeting.ts`): a self-contained locator is a documentary
+target only when the explorer open IS the mechanism. `s4-executor.ts` now
+decides `explorerHttpOpenIsNotTheMechanism` ONCE, right after the on-chain
+step and before any query is planned, and the same predicate feeds both
+consumers — the source-open filter (unchanged) and query planning (new):
+when the on-chain path owns the fact and can act here, the plan's
+locators are withheld from `modelQueriesCanBeUsed` and
+`buildTargetedQueries`, the proposer runs, and the one authorised unit
+buys a documentary query (`site:<confirmed docs domain> <topic>` where a
+route is confirmed). Observation
+`ONCHAIN_LOCATORS_WITHHELD_FROM_DOCUMENTARY_SEARCH`; the
+`CLASS_REQUIRES_CONFIRMED_ROUTE:ONCHAIN_VERIFIABLE` observation is NOT
+emitted for a withheld locator (the class is reachable, through the path
+that owns it). When the explorer open is the mechanism (DOCUMENTARY_ONLY,
+or no retriever reported by the on-chain step), nothing changes: the
+locator fills the slot, the proposer is skipped, the explorer is bought.
+Allowances, ceilings and ownership are untouched; `plan.onchainLocators`
+still reflects the adapter gate exactly as before.
+
+**2. MAX_TOKENS_TRUNCATED gets ONE compact retry over the same document.**
+`MECHANISM_SPEC` opened one rich official page (94,584 normalized
+characters, inside the input gate); the FULL extraction hit the 1536-token
+output ceiling and the document contributed zero facts
+(`EVIDENCE_EXTRACTOR_UNAVAILABLE`). Now: `EvidenceExtractionInput.mode`
+(`"FULL"` default / `"COMPACT"`). On a `local` outcome whose closed detail
+is exactly `MAX_TOKENS_TRUNCATED`, the executor records that pass as its
+own `EXTRACT_FAILED` row (diagnostic `MAX_TOKENS_TRUNCATED`) and issues
+ONE compact extraction of the SAME fetched document — no new search, no
+new fetch, no new source open; its own `modelCostMicro` reservation and
+`EXTRACT_ATTEMPTED` row; `maxAttempts: 1` on `reserveAndCallWithRetry`,
+so not even the transient retry (a transient failure there is a local
+document failure, never a capability verdict). The compact request
+(`evidence-extractor-anthropic.ts`) is the same system prompt, input gate,
+output ceiling and DOCUMENT block, plus `COMPACT_EXTRACTION_DIRECTIVE`
+before the document: at most `COMPACT_EXTRACTION_MAX_FACTS` (5) DIRECT
+facts on the Evidence goal, shortest establishing excerpts, no page
+summary; the cap is declared on the compact output schema and ENFORCED at
+the envelope parse (a longer list is `OUTPUT_SCHEMA_INVALID:FACTS`). A
+compact response that truncates, fails to parse or fails the schema fails
+closed — the document is lost exactly as before, no JSON prefix is ever
+salvaged. Admitted compact facts flow through the identical admission and
+land on the identical `extraction_unit_key`. Observations
+`EXTRACT_COMPACT_RETRY`, `EXTRACT_COMPACT_RETRY_OK` /
+`EXTRACT_COMPACT_RETRY_FAILED`. Cost: a normal document is unchanged (one
+extraction call); a truncated document costs at most +1 model call.
+Chunking was NOT built: the demonstrated failure is output over-production
+on an in-gate input, which the compact ask addresses in principle.
+
+`tests/acquisition-graceful-degradation-v1.test.ts` (17 cases) pins both
+rules on the real executor with fixture providers, the A2 budget shape
+(12-query budget, 10-component queue → fair share 1), accounting, unit-key
+identity and idempotency, and the compact request against the real
+`doExtract` path with a stubbed client. Two prior assertions that encoded
+the defects were updated: reachability B2 (locator issued only where the
+documentary path could open the results) and generation-diagnostic 17
+(one compact retry, second truncation fails closed).
+
 ## AN EXPLORER PAGE IS NOT THE MECHANISM THAT ESTABLISHES A CHAIN FACT
 
 The fresh post-fix Raydium run (`8eb1e920-…`, 2026-09-11) proved D1/D2/D3
