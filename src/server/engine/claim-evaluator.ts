@@ -152,10 +152,29 @@ const ATTRIBUTE_BASIS_COMPONENTS: Record<string, readonly string[]> = {
   direction: ["SOURCE_OF_VALUE", "FLOW_PATH", "EXECUTION_EVIDENCE"],
   tokenState: ["RECIPIENT", "DESTINATION"],
 };
-const LIFECYCLE_BASIS_COMPONENTS: readonly string[] = ["CURRENT_STATE"];
+// Lifecycle CURRENT rests on CURRENT_STATE alone; HISTORICAL additionally
+// needs an established execution (S6 computeLifecycle).
+function lifecycleBasisComponents(lifecycle: MechanismFlow["lifecycle"]): readonly string[] {
+  return lifecycle === "HISTORICAL" ? ["EXECUTION_EVIDENCE", "CURRENT_STATE"] : ["CURRENT_STATE"];
+}
 
 function anyBasisComponentPartial(flow: MechanismFlow, components: readonly string[]): boolean {
   return components.some((c) => lineageComponentStatus(flow, c) === "PARTIALLY_SUPPORTED");
+}
+
+// The component result keys an attribute or lifecycle verdict rests on —
+// the basis components that are actually established on this flow. S8
+// cites Evidence ONLY through these keys (proof-builder.ts intersects a
+// requirement's evidence ids with the named components' supporting ids),
+// so a verdict that named none was a Proof with no citation at all: a
+// NOT_SUPPORTED "holders do not receive value" that could not point at the
+// row saying the treasury does. The keys are the same code-owned basis
+// map the partial check reads; nothing here widens what S7 asserts.
+function basisResultKeys(flow: MechanismFlow, components: readonly string[]): { step: number; component: string }[] {
+  return components
+    .filter((c) => flow.lineage.some((s) => s.component === c))
+    .map((c) => ({ step: stepOfComponent(flow, c), component: c }))
+    .filter((k) => k.step !== -1);
 }
 
 function gapsForComponentOnFlow(flow: MechanismFlow, component: string): MechanismGapRef[] {
@@ -365,17 +384,19 @@ function evaluateFlowAttribute(req: ClaimRequirement, flow: MechanismFlow): Flow
       componentResultKeys: [],
     };
   }
+  const basis = ATTRIBUTE_BASIS_COMPONENTS[attribute] ?? [];
+  const componentResultKeys = basisResultKeys(flow, basis);
   if (expected.has(value.toLowerCase())) {
     // A match classified from a partially supported component is a
     // partial match — see ATTRIBUTE_BASIS_COMPONENTS. A positive
     // incompatibility below stays CONTRADICTED regardless: partial
     // authority is a confidence matter, not a reason to soften a finding.
-    if (anyBasisComponentPartial(flow, ATTRIBUTE_BASIS_COMPONENTS[attribute] ?? [])) {
-      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys: [] };
+    if (anyBasisComponentPartial(flow, basis)) {
+      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys };
     }
-    return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys: [] };
+    return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys };
   }
-  return { status: "CONTRADICTED", reasonCodes: [code], blockingGaps: [], evidenceIds, componentResultKeys: [] };
+  return { status: "CONTRADICTED", reasonCodes: [code], blockingGaps: [], evidenceIds, componentResultKeys };
 }
 
 // NET_EFFECT_ESTABLISHED — consumed verbatim from S6/S5; never
@@ -425,10 +446,12 @@ function evaluateLifecycle(req: ClaimRequirement, flow: MechanismFlow): FlowVerd
     // Lifecycle CURRENT rests on CURRENT_STATE (S6 computeLifecycle). When
     // that component is only PARTIALLY_SUPPORTED — every chain read is
     // CLAIMED by design (D-074) — the lifecycle is exactly as partial.
-    if (anyBasisComponentPartial(flow, LIFECYCLE_BASIS_COMPONENTS)) {
-      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys: [{ step: 5, component: "CURRENT_STATE" }] };
+    const basis = lifecycleBasisComponents(actual);
+    const componentResultKeys = basisResultKeys(flow, basis);
+    if (anyBasisComponentPartial(flow, basis)) {
+      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys };
     }
-    return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys: [] };
+    return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys };
   }
   if (expected === "CURRENT" && actual === "HISTORICAL") {
     return {
@@ -436,7 +459,7 @@ function evaluateLifecycle(req: ClaimRequirement, flow: MechanismFlow): FlowVerd
       reasonCodes: ["TEMPORAL_SCOPE_MISMATCH"],
       blockingGaps: [],
       evidenceIds,
-      componentResultKeys: [{ step: 5, component: "CURRENT_STATE" }],
+      componentResultKeys: basisResultKeys(flow, lifecycleBasisComponents(actual)),
     };
   }
   return {
