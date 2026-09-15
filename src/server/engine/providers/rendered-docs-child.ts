@@ -73,6 +73,27 @@ export type ChildRenderResponse =
       inspection?: unknown;
     };
 
+// THE ONLY WAY AN ENVELOPE LEAVES THIS PROCESS — and the only way it
+// exits after one.
+//
+// `process.stdout.write(payload); process.exit(code)` is NOT flush-safe
+// when stdout is a pipe: on the current Node runtime anything past the
+// first ~64 KB is cut off at exit, measured directly — a 200 KB envelope
+// arrived as 182,720 bytes, a 1 MB one as 146,176. A small failure
+// envelope always fit, so a page that DEFEATED the browser was reported
+// faithfully while a large page the browser rendered PERFECTLY came back
+// to the parent as CHILD_OUTPUT_MALFORMED. The parent's own 8 MB stdout
+// bound is far above where this bit.
+//
+// So the exit is scheduled from the write's completion callback: it runs
+// once the whole payload has been handed to the OS, and it runs on a
+// write error too (the callback receives the error; exiting is still the
+// right response, since there is no one left to tell). No timer, no
+// sleep, no second write — the envelope is still exactly one.
+export function emitEnvelopeAndExit(response: ChildRenderResponse, exitCode: 0 | 1): void {
+  process.stdout.write(JSON.stringify(response), () => process.exit(exitCode));
+}
+
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
@@ -120,7 +141,7 @@ export async function runChild(): Promise<void> {
     const parsed = JSON.parse(await readStdin()) as ChildRenderRequest | ChildSelfTestRequest;
     if ((parsed as { selfTest?: unknown }).selfTest === true) {
       response = await runSelfTest(parsed as ChildSelfTestRequest);
-      process.stdout.write(JSON.stringify(response));
+      emitEnvelopeAndExit(response, 0);
       return;
     }
     const request = parsed as ChildRenderRequest;
@@ -157,13 +178,16 @@ export async function runChild(): Promise<void> {
       response = { ok: false, reason: "RENDER_FAILED" };
     }
   }
-  process.stdout.write(JSON.stringify(response));
+  emitEnvelopeAndExit(response, 0);
 }
 
 // Only runs when executed as a process, never on import.
+//
+// Exit 0 is scheduled by the envelope write itself (see
+// emitEnvelopeAndExit), so the success side has nothing left to do here.
+// A rejection means no envelope was ever written — malformed stdin, or
+// the request failed before the try above — and exits 1 exactly as
+// before, which the parent reports as CHILD_EXIT_NONZERO.
 if (process.argv[1] && process.argv[1].endsWith("rendered-docs-child.ts")) {
-  void runChild().then(
-    () => process.exit(0),
-    () => process.exit(1),
-  );
+  void runChild().catch(() => process.exit(1));
 }
