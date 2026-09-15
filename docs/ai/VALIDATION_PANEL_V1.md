@@ -260,7 +260,131 @@ per scenario from `research_jobs`, `research_attempts` and
 - Wall-clock per phase and the count of transient retries/waits, to separate
   provider latency from ATLAS orchestration.
 
-## 10. Status
+## 10. Execution readiness (2026-09-15, Founder decisions applied)
+
+Founder decisions: (1) the panel does NOT let the fake interpreter choose the
+intent — the owner supplies it explicitly with `alpha-run --intent=<X>`
+(commit `5eef1b9`: validated against the code contract's in-scope intents,
+recorded on the interpretation row as `owner_intent_override`, printed in
+the audit banner, absent from every product path); (2) GOVERNANCE keeps its
+existing admissibility; an official governance route may be CONFIRMED only
+through the ordinary lifecycle after owner verification; (3) allowlist /
+known-asset enablement only AFTER identity is confirmed; (4) M1 stays
+conditional on human verification + controlled promotion of S1.
+
+### 10.1 Frozen intent per scenario (existing intents only)
+
+| Scenario | `--intent` | Requirement set (S7) | Intent-required components |
+|---|---|---|---|
+| S1 Raydium | `VALUE_CAPTURE` | VC-1 SOURCE_OF_VALUE, VC-2 flow SOURCE_OF_VALUE→DESTINATION, VC-3 NET_EFFECT | SOURCE_OF_VALUE, DESTINATION, NET_EFFECT |
+| S2 Pump.fun | `PROTOCOL_REVENUE_TO_TOKEN` | PRT-1, PRT-2 | SOURCE_OF_VALUE, DESTINATION |
+| S3 Jupiter | `VALUE_CAPTURE` | VC-1..3 | SOURCE_OF_VALUE, DESTINATION, NET_EFFECT |
+| E1 Morpho | `PROTOCOL_REVENUE_TO_TOKEN` | PRT-1, PRT-2 | SOURCE_OF_VALUE, DESTINATION |
+| E2 Uniswap | `MECHANISM_CURRENT_STATE` | MCS-1 LIFECYCLE=CURRENT | CURRENT_STATE |
+| E3 Aave | `VALUE_CAPTURE` | VC-1..3 | SOURCE_OF_VALUE, DESTINATION, NET_EFFECT |
+| M1 Raydium repeat | `BURN_OR_SUPPLY_EFFECT` | BSE-1 NET_EFFECT_ESTABLISHED | NET_EFFECT (fresh-only — Memory may inform, never satisfy) |
+
+Every value is a key of `intentRequirements` in `domain/pattern.ts`; no new
+intent. The full 10-component Pattern still runs for every scenario; the
+intent decides S7's requirement set and which components are
+intent-required for fair-share budgeting.
+
+### 10.2 Identity table
+
+| Project | Key / network | Symbol | Token mint / contract | Official domain | Identity | Allowlist | Fake-interpreter asset | Catalog row |
+|---|---|---|---|---|---|---|---|---|
+| Raydium | `raydium` / solana-mainnet | RAY | `4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R` (stored, ACTIVE identity) | docs.raydium.io (confirmed routes) | **CONFIRMED** | yes | yes | yes |
+| Pump.fun | `pump_fun` / solana-mainnet | PUMP | `pumpCmXqMfrsAkQ5r49WcJnRayYRqmXz6ae8H7H9Dfn` (stored, ACTIVE identity) | pump.fun (confirmed routes) | **CONFIRMED** | yes | yes | yes |
+| Jupiter | — | JUP | **OWNER CONFIRMATION REQUIRED** (nothing stored) | **OWNER CONFIRMATION REQUIRED** | none | no | **no** | no |
+| Morpho | `morpho` / ethereum-mainnet | MORPHO | **OWNER CONFIRMATION REQUIRED.** The already-sealed official page docs.morpho.org/learn/governance/morpho-token/ (hash `71ecbd74…`) names a *legacy* MORPHO token contract `0x9994E35Db50125E0DF82e4c2dde62496CE330999` and a *wrapper* contract `0x9D03bb2092270648d7480049d0E58d2FcF0E5123`, and points to `/get-started/resources/addresses/#morpho-token` for the canonical list. Which contract is "the MORPHO token" for identity (legacy vs wrapped) is the owner's call, verified on that addresses page. | docs.morpho.org (candidate; no route yet) | none | yes | yes | yes (ticker null) |
+| Uniswap | `uniswap` / ethereum-mainnet | UNI | **OWNER CONFIRMATION REQUIRED** (nothing stored) | **OWNER CONFIRMATION REQUIRED** (docs + governance surfaces) | none | no | yes | yes (ticker UNI) |
+| Aave | — / ethereum-mainnet | AAVE | **OWNER CONFIRMATION REQUIRED** (nothing stored) | **OWNER CONFIRMATION REQUIRED** | none | no | yes | no |
+
+No address or host above is asserted by ATLAS; the two Morpho addresses are
+quoted from the project's own stored documentation with their provenance.
+
+### 10.3 Route readiness
+
+| Project | ACTIVE classified routes today | Needed for its scenario | Owner action |
+|---|---|---|---|
+| Raydium | docs.raydium.io `/ray/ray-buybacks.md`, `/ray/protocol-fees.md` (OFFICIAL_DOCS); 2 approved resources | none | — |
+| Pump.fun | pump.fun `/docs`, `/pump-token` (OFFICIAL_DOCS); fees.pump.fun `/` confirmed, unclassified; 1 approved resource | optional: classify fees.pump.fun | `classify-source-route` if the owner deems it OFFICIAL_DOCS |
+| Morpho | none (26 docs.morpho.org rows in the orphaned run were SOCIAL/CLAIMED for exactly this reason) | OFFICIAL_DOCS route on docs.morpho.org (prefix e.g. `/learn`) | `confirm-source-route` + `classify-source-route OFFICIAL_DOCS` after owner verification |
+| Uniswap | none | OFFICIAL_DOCS route on the docs host; GOVERNANCE route on the official governance surface (see 10.4) | confirm + classify after owner verification |
+| Aave | none | OFFICIAL_DOCS route; optional GOVERNANCE route | confirm + classify after owner verification |
+| Jupiter | none | OFFICIAL_DOCS route | confirm + classify after owner verification |
+
+### 10.4 E2 Uniswap governance readiness
+
+No Uniswap route of any class exists. Candidate official governance
+surfaces the owner would verify (a forum, an on-chain voting portal, a
+Snapshot space) are NOT named here as facts and are NOT confirmed by ATLAS.
+What the existing lifecycle allows once the owner has verified a surface:
+`confirm-source-route --project=uniswap --domain=<host> --prefix=<path>` then
+`classify-source-route --route=<id> --class=GOVERNANCE`. Only then does a
+page under that prefix resolve OFFICIAL/CONFIRMED with class GOVERNANCE;
+until then a governance-portal page classifies GOVERNANCE with officiality
+CLAIMED (existing semantics, unchanged) and can only cap, never strengthen.
+Discovery of candidate surfaces during a run lands as OBSERVED route
+candidates for the owner — route discovery ≠ Evidence; documented ≠
+approved ≠ activated ≠ executing stays with the reducer's lifecycle caps.
+
+### 10.5 Readiness verdict
+
+- **READY now:** S1 Raydium (`VALUE_CAPTURE`), S2 Pump.fun
+  (`PROTOCOL_REVENUE_TO_TOKEN`), M1 Raydium repeat
+  (`BURN_OR_SUPPLY_EFFECT`; conditional on S1's verification + promotion).
+- **NOT READY — owner confirmation only, no code:** E1 Morpho (identity from
+  the stored official page + OFFICIAL_DOCS route); E2 Uniswap (identity,
+  allowlist entry, docs route, governance route); E3 Aave (catalog row,
+  identity, allowlist, routes).
+- **NOT READY — confirmation + one fixture line:** S3 Jupiter (everything
+  above plus the fake interpreter known-asset entry, permitted only after
+  identity is confirmed).
+- No scenario lacks an existing intent; no scenario depends on the fake
+  interpreter's choice.
+
+### 10.6 First live batch
+
+Preferred (unchanged): **E1 Morpho + S1 Raydium**. S1 can run today. E1 can
+run as soon as the owner confirms the Morpho identity (from the stored
+addresses reference) and one OFFICIAL_DOCS route on docs.morpho.org — two
+zero-spend commands. If E1 is not confirmed when the batch is approved, the
+smallest substitute is **S2 Pump.fun** (READY, Solana, different question
+shape); S3 is not a substitute (unresolved identity + fixture work).
+
+Launch commands (owner, Windows live path, Memory OFF):
+`alpha-run --mode=live --project=raydium --asset=Raydium --intent=VALUE_CAPTURE --question="<S1 frozen question>"`,
+`alpha-run --mode=live --project=morpho --asset=Morpho --intent=PROTOCOL_REVENUE_TO_TOKEN --question="<E1 frozen question>"`.
+
+Cost from persisted traces (current code): S1 $0.25 / **$0.35** / $0.50;
+E1 $0.20 / **$0.32** / $0.45; combined expected **≈ $0.67**, upper ≈ $0.95.
+**Recommended hard Founder cap for the first batch: $1.00** (two runs, each
+stopped if its own actual exceeds $0.50). The full panel is not to be funded
+yet.
+
+### 10.7 Stop rules (first batch)
+
+CRITICAL → stop immediately (wrong entity/chain, false SUPPORTED,
+inadmissible Evidence admitted, Proof/verdict leakage, technical failure
+reported as reality, Memory suppressing fresh-only work). MAJOR → pause the
+panel, diagnose offline, rerun only that scenario after a fix with new
+approval. MINOR → record and continue. Never rerun a failed scenario
+automatically.
+
+### 10.8 Interpreter beta blocker (recorded, not started)
+
+**Final Research Core validation ≠ product Interpreter validation.** Before
+private beta a separate acceptance task must prove, with the real
+Interpreter (Anthropic gateway, §1 provider approval) on ordinary user
+questions: normal user question → correct project resolution → correct
+`normalized_intent` → correct Pattern/requirement set — over a frozen set
+of user-shaped questions (including clarification and out-of-scope cases),
+compared against the same intents this panel supplies by hand. Smallest
+shape: an offline golden set for the interpreter schema + one bounded live
+Interpreter run per question class, no Research spend.
+
+## 11. Status
 
 Preparation only. No scenario has been run, no credit spent, no product
-semantics changed. Tree is clean apart from this document.
+semantics changed. Memory stays disabled by default.
