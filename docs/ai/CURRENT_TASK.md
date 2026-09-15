@@ -2,35 +2,38 @@
 
 > Overwrite this file each round. Never append.
 
-## DOCUMENTARY CANDIDATE CONTINUATION V1 (done this round)
+## BOUNDED SEARCH FINALIZATION + ROUTE-AWARE ACQUISITION V1 (done this round)
 
-Offline round. No live/API/RPC call, no rerun, no Memory change, no
-budget change, no schema change.
+Offline round. Two Founder-approved semantics (2026-09-15). No live/API/RPC
+call, no rerun, no Memory change, no budget change, no schema change.
 
-**Proven from A2-prime's persisted trace (job `58eeba58-…`):**
-MECHANISM_SPEC → one search → five confirmed OFFICIAL_DOCS candidates →
-fair share allowed one open → first document extracted cleanly with an
-empty facts array → component stopped → INSUFFICIENT_EVIDENCE with 11
-global source opens unused.
+**1. Search-budget exhaustion finalizes boundedly.** `s4-executor.ts`: the
+search axis no longer throws. Allowance 0 → proposer skipped
+(`SEARCH_QUERY_BUDGET_EXHAUSTED`, amount 0), no query; a mid-attempt refusal
+→ recorded, search stage ends, paid candidates still read; close
+`SKIPPED / SEARCH_BUDGET_EXHAUSTED` when nothing was established. Job
+finalizes WORK_QUEUE_EXHAUSTED on the ordinary path. Model-cost and
+source-open denials unchanged (still thrown).
 
-**Fixed generically** (see the DOCUMENTARY CANDIDATE CONTINUATION V1
-section of `CURRENT_STATE.md`): the open→extract sequence in
-`s4-executor.ts` runs in at most two rounds over the same ordered
-candidate list; the second round is entered only when the single opened
-document completed acquisition and admitted zero facts, an un-opened
-candidate remains, and live ledgers show room for one more open and one
-more extraction. Maximum extra work: +1 open, +1 extraction. No proposer,
-no search, no reopen, no ceiling change.
+**2. Route-aware documentary acquisition.** `documentaryReachability`
+(`acquisition-targeting.ts`) over `CONFIRMED_ROUTE_ONLY_CLASSES`
+(`source-authority.ts`: OFFICIAL_DOCS, OFFICIAL_REPORT). Unreachable
+component → no proposer, no search, no fetch, close
+`SKIPPED / NO_ADMISSIBLE_ROUTE`; seeds still read; mixed components keep
+their reachable class; phased search phase applies the same rule.
 
-**Search-budget audit** (reported, not fixed): (a) the last component's
-refused search throws before its already-paid candidates are opened;
-(b) components with no reachable admissible documentary class
-(GOVERNANCE-only / OFFICIAL_REPORT-only without a confirmed route) spend
-searches S5 must exclude. Both need a Founder decision.
+**S5.** New reason codes `SEARCH_BUDGET_EXHAUSTED` / `NO_ADMISSIBLE_ROUTE`
+at the zero-Evidence return only, read off the latest attempt
+(`acquisitionBoundaryFromAttempt`); confidence cap = NO_EVIDENCE_FOUND;
+UI short forms added.
 
-Tests: `tests/documentary-candidate-continuation-v1.test.ts` (new, 13).
+Tests: `tests/bounded-search-finalization-v1.test.ts` (new, 15);
+phase6-s4-executor / s10-final-pre-smoke-closure / post-raydium-cleanup /
+acquisition-graceful-degradation updated to the approved semantics.
 
 ### Next
 
-- Founder decision on audit items (a)/(b); then, with new approval, ONE
-  A2-double-prime + ONE B.
+- Founder decision whether GOVERNANCE should also count as route-only
+  (today snapshot.org-class pages classify GOVERNANCE without a route, so
+  GOVERNANCE_BASIS / DURABILITY_BASIS still search).
+- With new approval: ONE A2-next + ONE B.

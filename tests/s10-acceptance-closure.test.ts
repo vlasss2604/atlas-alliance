@@ -392,14 +392,14 @@ describe("S10 closure — BLOCKER-2: retry reserves per real external attempt", 
     const executor = createS4WorkExecutor(depsFor(p, { queryProposer: fixedQueryProposer(["q1"]), searchGateway }));
     // maxSearchQueries=1 — the retry's reservation must be denied. A
     // denied retry reservation is a budget constraint, not proven
-    // capability unavailability (BLOCKER-1 classification) — but since
-    // zero candidates end up possible, S10 final pre-smoke closure
-    // (HIGH-1, D-120) requires this to throw BudgetExhaustedError, never
-    // an ordinary FAILED result the controller could fold into
-    // WORK_QUEUE_EXHAUSTED -> SUCCEEDED.
-    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 1 }))).rejects.toBeInstanceOf(
-      BudgetExhaustedError,
-    );
+    // capability unavailability (BLOCKER-1 classification). BOUNDED SEARCH
+    // FINALIZATION V1 (Founder decision 2026-09-15): the search axis
+    // closes the component SKIPPED / SEARCH_BUDGET_EXHAUSTED instead of
+    // throwing, and the reducer reads that boundary. What this test exists
+    // to prove is unchanged: exactly one real call, exactly one unit.
+    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 1 }));
+    expect(result.status).toBe("SKIPPED");
+    expect(result.reason).toMatch(/^SEARCH_BUDGET_EXHAUSTED/);
     expect(calls).toBe(1);
     const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
     expect(jobRow.searchQueriesReserved).toBe(1);

@@ -1,4 +1,9 @@
-import { deriveSourceType, resolveSourceClass, targetDomainsForClass } from "./source-authority";
+import {
+  CONFIRMED_ROUTE_ONLY_CLASSES,
+  deriveSourceType,
+  resolveSourceClass,
+  targetDomainsForClass,
+} from "./source-authority";
 import type { RouteClass } from "./source-authority";
 import type { EvidenceSourceClass } from "./providers/types";
 import { canonicalTargetRef } from "./trace-store";
@@ -243,6 +248,74 @@ export function documentaryExecutableLocators(
   explorerHttpOpenIsNotTheMechanism: boolean,
 ): readonly string[] {
   return explorerHttpOpenIsNotTheMechanism ? [] : onchainLocators;
+}
+
+// ROUTE-AWARE DOCUMENTARY ACQUISITION V1 — IS THERE ANY DOCUMENTARY PATH
+// S5 COULD ADMIT FOR THIS COMPONENT, RIGHT NOW, FOR THIS PROJECT?
+//
+// THE DEFECT THIS CLOSES, measured on the live Memory acceptance retry
+// (job 58eeba58-…): EXECUTION_EVIDENCE admits ONCHAIN_VERIFIABLE and
+// OFFICIAL_REPORT. The on-chain path owned the chain fact (so explorer
+// pages were, correctly, not bought), and the project had no confirmed
+// OFFICIAL_REPORT route. Nothing an Evidence search could return was
+// admissible — and it still paid a proposer call, a search unit, a source
+// open and an extraction, and S5 then excluded all three rows as
+// CLASS_NOT_ADMISSIBLE, exactly as it had to.
+//
+// THE RULE, asked of the existing admissibility model and nothing else: a
+// class is DOCUMENTARILY REACHABLE when a document of that class can be
+// found by ordinary search AND classified as that class for this project —
+//   * a class only a confirmed route can assign
+//     (CONFIRMED_ROUTE_ONLY_CLASSES, owned by source-authority.ts) is
+//     reachable iff the project holds a confirmed ACTIVE route carrying
+//     that class;
+//   * ONCHAIN_VERIFIABLE is reachable by the documentary path iff an
+//     explorer HTTP open is the mechanism here (the caller decides that
+//     from its shared ownership gate; when the deterministic adapter owns
+//     the fact, explorer pages are refused and the class is the adapter's,
+//     which has already had its opportunity);
+//   * every other class has a public, code-owned recognition rule and is
+//     reachable by generic search.
+// A component is reachable when at least one of its admissible classes is.
+// A component that admits NO class at all is not decided here: an empty
+// contract is a Pattern configuration matter S5 already reports on its own,
+// not an acquisition boundary, so acquisition for it is left exactly as it
+// was.
+//
+// A MIXED COMPONENT KEEPS ITS REACHABLE CLASS: OFFICIAL_DOCS + GOVERNANCE
+// with a confirmed docs route is reachable through the docs route, and
+// nothing about the missing governance route suppresses it.
+//
+// WHAT AN UNREACHABLE ANSWER MEANS, AND DOES NOT MEAN: "ATLAS currently has
+// no admissible Evidence path for this obligation". Never "the mechanism
+// does not exist". No route is created or confirmed here, no result is
+// promoted to a route, and route-candidate discovery is untouched.
+export interface DocumentaryReachability {
+  reachable: boolean;
+  reachableClasses: EvidenceSourceClass[];
+  unreachableClasses: EvidenceSourceClass[];
+}
+
+export function documentaryReachability(input: {
+  establishingClasses: readonly EvidenceSourceClass[];
+  confirmedRouteDomainsByClass?: Partial<Record<EvidenceSourceClass, readonly string[]>>;
+  explorerOpenIsTheMechanism: boolean;
+}): DocumentaryReachability {
+  const reachableClasses: EvidenceSourceClass[] = [];
+  const unreachableClasses: EvidenceSourceClass[] = [];
+  for (const cls of input.establishingClasses) {
+    let reachable: boolean;
+    if (cls === "ONCHAIN_VERIFIABLE") reachable = input.explorerOpenIsTheMechanism;
+    else if (CONFIRMED_ROUTE_ONLY_CLASSES.has(cls)) {
+      reachable = (input.confirmedRouteDomainsByClass?.[cls] ?? []).length > 0;
+    } else reachable = true;
+    (reachable ? reachableClasses : unreachableClasses).push(cls);
+  }
+  return {
+    reachable: input.establishingClasses.length === 0 || reachableClasses.length > 0,
+    reachableClasses,
+    unreachableClasses,
+  };
 }
 
 // Blends targeted and model queries into the attempt's final, budget-

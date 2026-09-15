@@ -1090,6 +1090,13 @@ export function relativeAge(iso: string | null | undefined, now = Date.now()): s
 export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
   NO_EVIDENCE_FOUND:
     "The sources checked here carried nothing on this point.",
+  // BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — the two
+  // acquisition boundaries. Each says where the checking stopped, and
+  // neither says anything about whether the thing exists.
+  SEARCH_BUDGET_EXHAUSTED:
+    "This research reached its search limit before this point could be checked.",
+  NO_ADMISSIBLE_ROUTE:
+    "No confirmed source route exists yet through which this point could be checked.",
   ALL_EVIDENCE_EXCLUDED:
     "Sources discussed this, but none met the standard this claim requires.",
   MISSING_EXECUTION_EVIDENCE:

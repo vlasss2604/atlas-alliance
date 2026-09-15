@@ -11,7 +11,13 @@ import { componentRequirementsFor, patternContentSchema } from "../domain/patter
 import { parseContract } from "../memory/contract";
 import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
 import type { ComponentWorkItem } from "./contract-view";
-import { reconcileComponent, type ComponentReconciliationResult, type EvidenceRow } from "./component-reconciler";
+import {
+  acquisitionBoundaryFromAttempt,
+  reconcileComponent,
+  type AcquisitionBoundary,
+  type ComponentReconciliationResult,
+  type EvidenceRow,
+} from "./component-reconciler";
 import { applicableFactKindsForComponent } from "./onchain-facts";
 
 // Phase 6, S5 — persistence boundary (phase-6-s5-plan.md §11.3, §17). This
@@ -294,11 +300,12 @@ export async function reconcileAndPersistComponent(
   item: Pick<ComponentWorkItem, "step" | "component">,
   now: Date,
 ): Promise<ComponentReconciliationResult> {
-  const [pattern, config, evidenceRows, confirmedIdentity] = await Promise.all([
+  const [pattern, config, evidenceRows, confirmedIdentity, acquisitionBoundary] = await Promise.all([
     loadActivePatternContentForJob(db, jobId),
     loadProductConfig(db),
     loadEvidenceRows(db, jobId, item.step, item.component),
     loadConfirmedIdentityForJob(db, jobId),
+    loadAcquisitionBoundary(db, jobId, item),
   ]);
   const requirements = { component: item.component, ...componentRequirementsFor(pattern, item.component) };
   // A SECOND READ ONLY WHEN THE CONTRACT NAMES AN OBLIGATION. A component
@@ -321,11 +328,46 @@ export async function reconcileAndPersistComponent(
     // identity-dependent obligation must then be UNMET, which is a
     // different and stronger statement than "not evaluated".
     confirmedIdentity,
+    // The boundary the component's own latest S4 attempt closed on, if any
+    // — read, never inferred. See loadAcquisitionBoundary.
+    acquisitionBoundary,
     now,
     freshnessPolicyDays: config.memory_stale_after_days,
   });
   await persistResult(db, jobId, result, now);
   return result;
+}
+
+// BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — WHERE THE
+// ATTEMPT STOPPED, read from the attempt record the product already keeps.
+//
+// The reducer sees Evidence rows and nothing else, so on its own it cannot
+// tell "the record is silent" from "this run was never allowed to look" —
+// the API's coverage projection already reads research_attempts for the
+// same reason. This reads the LATEST attempt for the (job, step, component)
+// and reduces it through the reducer's own closed rule
+// (`acquisitionBoundaryFromAttempt`): only a SKIPPED attempt whose reason
+// starts with one of the two boundary codes yields a value. A missing
+// attempt row, any other status, or any other reason is null, and the
+// reducer runs exactly as before. Nothing here is spent or written.
+async function loadAcquisitionBoundary(
+  db: Database | Transaction,
+  jobId: string,
+  item: Pick<ComponentWorkItem, "step" | "component">,
+): Promise<AcquisitionBoundary | null> {
+  const [latest] = await db
+    .select({ status: researchAttempts.status, reason: researchAttempts.reason })
+    .from(researchAttempts)
+    .where(
+      and(
+        eq(researchAttempts.researchJobId, jobId),
+        eq(researchAttempts.patternStep, item.step),
+        eq(researchAttempts.component, item.component),
+      ),
+    )
+    .orderBy(desc(researchAttempts.attemptNumber))
+    .limit(1);
+  return acquisitionBoundaryFromAttempt(latest);
 }
 
 // HIGH-2 (deep audit) fix — the smallest deterministic recovery

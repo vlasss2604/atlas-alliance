@@ -385,28 +385,33 @@ describe("1 — the documentary search opportunity goes to a query the documenta
     expect(ev).toHaveLength(1);
   });
 
-  it("A. the same shape for every A2 component that lost its slot: RECIPIENT and EXECUTION_EVIDENCE receive the proposer too", async () => {
-    for (const component of ["RECIPIENT", "EXECUTION_EVIDENCE"]) {
-      const project = await makeProject();
-      const jobId = await makeJob(project.id);
-      const item = await workItem(jobId, component);
-      const docs = `https://${project.host}/docs/${component.toLowerCase()}.md`;
-      const { run, queries, proposerCalls } = await runOneComponent({
-        project,
-        jobId,
-        item,
-        searchResults: [docs],
-        fetchable: { [docs]: `${project.name}: ${FRAGMENT}` },
-        extract: async (_call, input) => [factFor(input.target, FRAGMENT)],
-        retriever: true,
-        maxSearchQueries: A2_SEARCH_BUDGET,
-        queue: A2_QUEUE,
-      });
-      await run();
-      expect(proposerCalls, component).toHaveLength(1);
-      expect(queries, component).toHaveLength(1);
-      expect(queries[0], component).not.toContain(MINT);
-    }
+  it("A. the same shape for the other A2 component that lost its slot: RECIPIENT receives the proposer too", async () => {
+    const component = "RECIPIENT";
+    const project = await makeProject();
+    const jobId = await makeJob(project.id);
+    const item = await workItem(jobId, component);
+    const docs = `https://${project.host}/docs/${component.toLowerCase()}.md`;
+    const { run, queries, proposerCalls } = await runOneComponent({
+      project,
+      jobId,
+      item,
+      searchResults: [docs],
+      fetchable: { [docs]: `${project.name}: ${FRAGMENT}` },
+      extract: async (_call, input) => [factFor(input.target, FRAGMENT)],
+      retriever: true,
+      maxSearchQueries: A2_SEARCH_BUDGET,
+      queue: A2_QUEUE,
+    });
+    await run();
+    expect(proposerCalls, component).toHaveLength(1);
+    expect(queries, component).toHaveLength(1);
+    expect(queries[0], component).not.toContain(MINT);
+    // EXECUTION_EVIDENCE (ONCHAIN_VERIFIABLE + OFFICIAL_REPORT) is the
+    // other A2 shape — with the on-chain path owning the chain fact and no
+    // confirmed OFFICIAL_REPORT route it has NO admissible documentary path,
+    // and ROUTE-AWARE ACQUISITION V1 now closes it without spending the
+    // slot at all. tests/bounded-search-finalization-v1.test.ts owns that
+    // contract, including the confirmed-route case where it searches.
   });
 
   it("B. an executable locator keeps the existing efficient path: no deterministic path here -> the proposer is still skipped and the locator is searched", async () => {

@@ -20,6 +20,8 @@ import { recordTraceEvent } from "../src/server/engine/trace-store";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
+import { classifySourceRoute } from "../src/server/memory/source-route-classification";
+import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
 import { coreEntitlement, setupTestDatabase, TEST_DATABASE_URL, uniq, type TestContext } from "./phase1-setup";
 
 // POST-RAYDIUM ACQUISITION CLEANUP V1 — three defects the fresh post-fix
@@ -153,6 +155,14 @@ async function makeProject(opts: { identity: boolean }) {
     const ok = await confirmProjectIdentity(ctx.db, { projectSlug: slug, chain: "solana", tokenAddress: MINT });
     if (!ok.ok) throw new Error("fixture identity failed");
   }
+  // ROUTE-AWARE ACQUISITION V1: the docs host is a confirmed, classified
+  // OFFICIAL_DOCS route, so the component under test has an admissible
+  // documentary path and its search runs — the explorer rule is then
+  // exercised on the candidates exactly as before.
+  const confirmed = await confirmSourceRoute(ctx.db, { projectSlug: slug, domain: new URL(DOCS_URL).hostname, pathPrefix: "/mechanism" });
+  if (!confirmed.ok) throw new Error(`fixture route failed: ${confirmed.refusal}`);
+  const classified = await classifySourceRoute(ctx.db, { routeId: confirmed.itemId, routeClass: "OFFICIAL_DOCS" });
+  if (!classified.ok) throw new Error(`fixture route class failed: ${classified.refusal}`);
   return { id: project.id, name: project.name, slug, ticker: null as string | null };
 }
 

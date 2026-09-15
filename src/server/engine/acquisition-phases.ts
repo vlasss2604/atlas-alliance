@@ -11,6 +11,7 @@ import {
   strategyAlreadyAttempted,
 } from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
+import { documentaryReachability } from "./acquisition-targeting";
 import { selectApprovedSeedTargets } from "./source-resource-seeds";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
@@ -98,6 +99,12 @@ export interface SearchPhaseResult {
   // no proposer call was made and no query was generated for them. This
   // is bounded coverage, not a failure: the axis is genuinely spent.
   budgetRefusedComponents: string[];
+  // ROUTE-AWARE DOCUMENTARY ACQUISITION V1 — components for which no
+  // documentary path S5 could admit currently exists (every admissible
+  // class needs a confirmed route the project lacks), so no proposer call
+  // was made and no query generated. Bounded acquisition, not a finding
+  // about the project.
+  routeRefusedComponents: string[];
   // Components whose proposer call could not be authorized against the
   // job's model budget. Also no call, also no queries.
   modelRefusedComponents: string[];
@@ -179,6 +186,7 @@ export async function runSearchPhase(input: {
 }): Promise<SearchPhaseResult> {
   const out: SearchPhaseResult = {
     budgetRefusedComponents: [],
+    routeRefusedComponents: [],
     modelRefusedComponents: [],
     proposerCalls: 0,
     proposerReservedMicro: 0,
@@ -214,6 +222,34 @@ export async function runSearchPhase(input: {
     // components still pending AFTER this one, and whether the job's
     // intent requires this component per the Pattern's own data.
     const plan = await loadAcquisitionPlan(input.db, input.jobId, item.component, input.projectId);
+
+    // ROUTE-AWARE DOCUMENTARY ACQUISITION V1 — asked BEFORE the allowance,
+    // because an unreachable obligation must not consume a share either.
+    // The same rule the executor asks (acquisition-targeting.ts). This
+    // phase runs in a process that may not hold the retriever and opens
+    // explorer candidates as ordinary documents, so ONCHAIN_VERIFIABLE is
+    // reachable here by construction; only the route-only classes decide.
+    const reach = documentaryReachability({
+      establishingClasses: plan.establishingClasses,
+      confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
+      explorerOpenIsTheMechanism: true,
+    });
+    if (!reach.reachable) {
+      out.routeRefusedComponents.push(item.component);
+      await recordTraceEvent(input.db, {
+        researchJobId: input.jobId,
+        operationType: "MODEL_CALL_SKIPPED",
+        providerKind: "QUERY_PROPOSE",
+        patternStep: item.step,
+        component: item.component,
+        status: "SKIPPED",
+        reasonCode: "NONE",
+        budgetAxis: "modelCostMicro",
+        budgetAmount: 0,
+      });
+      continue;
+    }
+
     const othersPending = input.items.slice(index + 1);
     const allowance = componentSearchAllowance({
       maxSearchQueries: input.maxSearchQueries,

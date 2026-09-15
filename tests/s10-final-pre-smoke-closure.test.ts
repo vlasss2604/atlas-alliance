@@ -176,7 +176,7 @@ function fixedEvidenceExtractor(facts: ExtractedFact[]): EvidenceExtractor {
 // via the FULL worker path (proves propagation, not just the throw).
 // ============================================================
 describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion (E2E propagation)", () => {
-  it("A. searchQueries=1 remaining, first Brave attempt transient failure, retry denied -> HTTP calls=1, job=BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED", async () => {
+  it("A. searchQueries=1 remaining, first Brave attempt transient failure, retry denied -> HTTP calls=1, the search axis closes bounded and the job finalizes", async () => {
     const p = await makeJob();
     // CORE envelope's maxSearchQueries is 40 (budget_core) — leave exactly
     // 1 unit remaining so the retry's own reservation is denied.
@@ -196,14 +196,23 @@ describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion 
     expect(result.claimed).toBe(true);
     expect(calls).toBe(1);
 
+    // BOUNDED SEARCH FINALIZATION V1 (Founder decision 2026-09-15): the
+    // refused retry reservation is the configured search boundary, not a
+    // technical failure. The component closes SKIPPED /
+    // SEARCH_BUDGET_EXHAUSTED, every later component sees a spent axis and
+    // closes the same way without a call, and the job finalizes on the
+    // ordinary path: WORK_QUEUE_EXHAUSTED, S5/S7 written as
+    // INSUFFICIENT_EVIDENCE on that boundary. The ceiling is still hard —
+    // exactly one HTTP call, exactly 40 units reserved.
     const jobRow = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
-    expect(jobRow.state).toBe("BUDGET_LIMIT_REACHED");
-    expect(jobRow.terminationReason).toBe("BUDGET_EXHAUSTED");
+    expect(jobRow.state).toBe("SUCCEEDED");
+    expect(jobRow.terminationReason).toBe("WORK_QUEUE_EXHAUSTED");
     expect(jobRow.errorCode).toBeNull();
     expect(jobRow.searchQueriesReserved).toBe(40);
 
     const s7 = await ctx.db.select().from(researchClaimSupport).where(eq(researchClaimSupport.researchJobId, p.jobId));
-    expect(s7.length).toBe(0); // execution stopped before S7 — acceptable, never fabricated
+    expect(s7.length).toBe(1);
+    expect(s7[0].status).toBe("INSUFFICIENT_EVIDENCE");
   });
 
   it("B. modelCostMicro exactly one QP reservation remaining, first generation transient failure, retry denied -> generation calls=1, job=BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED", async () => {
@@ -252,7 +261,8 @@ describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion 
     expect(first.claimed).toBe(true);
     const traceAfterFirst = await traceRowsFor(p.jobId);
     const jobAfterFirst = (await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, p.jobId)))[0];
-    expect(jobAfterFirst.state).toBe("BUDGET_LIMIT_REACHED");
+    // Bounded search finalization: the stop is terminal and ordinary.
+    expect(jobAfterFirst.state).toBe("SUCCEEDED");
 
     // Replay: the job is no longer QUEUED — claimResearchJob (D-116) must
     // refuse to re-claim it, exactly like any other terminal state.
@@ -273,7 +283,7 @@ describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion 
 // (unit) level — same throw mechanism A/B already proved end-to-end.
 // ============================================================
 describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion (unit-level scope)", () => {
-  it("C. ordinary searchQueries budget already fully exhausted mid-job -> BudgetExhaustedError('searchQueries')", async () => {
+  it("C. ordinary searchQueries budget already fully exhausted mid-job -> zero calls, the component closes SKIPPED / SEARCH_BUDGET_EXHAUSTED", async () => {
     const p = await makeJob();
     await ctx.db.update(researchJobs).set({ searchQueriesReserved: 5 }).where(eq(researchJobs.id, p.jobId));
     let calls = 0;
@@ -287,11 +297,13 @@ describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion 
     const executor = createS4WorkExecutor(
       depsFor(p, { queryProposer: fixedQueryProposer(["q1"]), searchGateway }),
     );
-    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 5 }))).rejects.toMatchObject({
-      name: "BudgetExhaustedError",
-      axis: "searchQueries",
-    });
-    expect(calls).toBe(0); // the FIRST reservation was already refused
+    // BOUNDED SEARCH FINALIZATION V1: the search axis is the one axis whose
+    // exhaustion closes the component instead of throwing (D/E below keep
+    // the throw for the model and source-open axes).
+    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 5 }));
+    expect(result.status).toBe("SKIPPED");
+    expect(result.reason).toMatch(/^SEARCH_BUDGET_EXHAUSTED/);
+    expect(calls).toBe(0); // nothing was searched and nothing reserved
   });
 
   it("D. modelCostMicro too small for the first QueryProposer call -> 0 generation calls, BudgetExhaustedError('modelCostMicro')", async () => {

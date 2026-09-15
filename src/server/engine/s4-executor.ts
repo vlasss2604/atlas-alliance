@@ -47,6 +47,7 @@ import {
   blendQueries,
   buildTargetedQueries,
   documentaryExecutableLocators,
+  documentaryReachability,
   genericSearchMayEstablish,
   modelQueriesCanBeUsed,
   orderCandidatesForComponent,
@@ -1271,15 +1272,62 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           plan.intentRequired.has(c),
         ).length,
       });
-      // An allowance of 0 means the JOB's searchQueries axis is already
-      // exhausted, not that this component is being throttled. That case
-      // must keep its existing, accepted behaviour exactly: fall through
-      // with one query so reserveJobBudget refuses it and
-      // BudgetExhaustedError is thrown (D-120's terminal contract), never
-      // silently degraded into a SKIPPED result the controller could fold
-      // into WORK_QUEUE_EXHAUSTED -> SUCCEEDED. This module never decides
-      // budget exhaustion itself; the atomic reservation does.
+      // BOUNDED SEARCH FINALIZATION V1 — AN ALLOWANCE OF 0 IS THE JOB'S
+      // SEARCH AXIS ALREADY SPENT, and that is now closed here, not thrown.
+      //
+      // This used to fall through with one query so the atomic reservation
+      // would refuse it and BudgetExhaustedError would end the job
+      // BUDGET_LIMIT_REACHED (D-120's terminal contract). The Founder
+      // decided otherwise (2026-09-15): the configured search budget being
+      // spent is a BOUNDED RESEARCH EXHAUSTION — ATLAS reached its
+      // acquisition boundary and stops making stronger claims — not a
+      // technical failure, and it must not leave the current attempt
+      // STARTED or turn every completed component's work into a
+      // BUDGET_LIMIT_REACHED job. The component closes deterministically
+      // as SKIPPED / SEARCH_BUDGET_EXHAUSTED, the reducer reads that
+      // boundary (INSUFFICIENT_EVIDENCE with the same reason, never
+      // NO_EVIDENCE_FOUND, never CONTRADICTED), and the job finalizes on the
+      // ordinary path from what it actually established. The cap itself is
+      // untouched: nothing is searched, nothing is reserved, and the atomic
+      // reservation below remains the authority for a refusal that happens
+      // mid-attempt (see the search loop).
+      //
+      // Deliberately search-axis only. Model-cost and source-open denials
+      // keep exactly the semantics they have (D-121 / D3): a required model
+      // reservation refused is still thrown, and the source-open axis keeps
+      // its own read-then-throw contract.
+      const searchAxisSpent = searchAllowance === 0;
       const effectiveAllowance = Math.max(1, searchAllowance);
+      let searchBudgetExhausted = searchAxisSpent;
+
+      // ROUTE-AWARE DOCUMENTARY ACQUISITION V1 — before any Evidence-search
+      // opportunity is spent, is there ANY documentary path S5 could admit?
+      // Asked of the existing admissibility model (acquisition-targeting.ts
+      // `documentaryReachability`, over source-authority.ts's own
+      // route-only class set): a route-only class needs a confirmed route
+      // carrying it, ONCHAIN_VERIFIABLE needs the explorer open to be the
+      // mechanism here, every other class is reachable by generic search.
+      // When nothing is reachable, no proposer call and no search is spent
+      // on results S5 is guaranteed to exclude; a human-approved
+      // SOURCE_RESOURCE seed still goes through the ordinary candidate path
+      // below, because an approval is never overruled by an acquisition
+      // rule. An unreachable component closes as
+      // SKIPPED / NO_ADMISSIBLE_ROUTE: "no admissible Evidence path exists
+      // for this obligation right now", never "the mechanism does not
+      // exist". No route is created, confirmed, or inferred here.
+      const reach = documentaryReachability({
+        establishingClasses: plan.establishingClasses,
+        confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
+        explorerOpenIsTheMechanism: !explorerHttpOpenIsNotTheMechanism,
+      });
+      const noAdmissibleRoute = !reach.reachable;
+      if (noAdmissibleRoute) {
+        observations.add("NO_ADMISSIBLE_DOCUMENTARY_ROUTE");
+        for (const cls of reach.unreachableClasses) {
+          if (cls === "ONCHAIN_VERIFIABLE") continue; // the adapter's, already attempted
+          observations.add(`CLASS_REQUIRES_CONFIRMED_ROUTE:${cls}`);
+        }
+      }
 
       // --- 1. QueryProposer -----------------------------------------------
       // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
@@ -1287,29 +1335,47 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // reservation can never authorize two real calls.
       const queryProposerCostMicro = calculateMaxAuthorizedCostMicro(queryProposerProfile);
 
-      // D: skip the call entirely when the blend below provably cannot use
-      // a single model query. Deterministic (blendQueries is), conservative
-      // (counts only self-contained on-chain locators), and zero-risk: when
-      // it skips, deterministic targeting alone already fills every slot,
-      // so the attempt searches exactly what it would have searched anyway
-      // — minus one paid model call that produced discarded output.
-      // Counts only locators the documentary path can execute: a locator
-      // whose every result this executor would refuse fills no slot.
-      const canUseModelQueries = modelQueriesCanBeUsed({
-        establishingClasses: plan.establishingClasses,
-        onchainLocators: documentaryLocators,
-        maxTotal: effectiveAllowance,
-      });
-      if (!canUseModelQueries) {
+      // WHY THE PROPOSER IS NOT CALLED, when it is not — one closed
+      // decision, in precedence order, so exactly one skip row and one
+      // observation are written:
+      //   NO_ADMISSIBLE_ROUTE      nothing a search returns could be admitted;
+      //   SEARCH_BUDGET_EXHAUSTED  the job's search axis is spent, so no
+      //                            query could be run;
+      //   MODEL_QUERIES_UNUSABLE   (D) the blend below provably cannot use a
+      //                            single model query — deterministic
+      //                            targeting alone already fills every slot,
+      //                            so the attempt searches exactly what it
+      //                            would have searched anyway, minus one paid
+      //                            model call that produced discarded output.
+      //                            Counts only locators the documentary path
+      //                            can execute: a locator whose every result
+      //                            this executor would refuse fills no slot.
+      const proposerSkip: "NO_ADMISSIBLE_ROUTE" | "SEARCH_BUDGET_EXHAUSTED" | "MODEL_QUERIES_UNUSABLE" | null =
+        noAdmissibleRoute
+          ? "NO_ADMISSIBLE_ROUTE"
+          : searchAxisSpent
+            ? "SEARCH_BUDGET_EXHAUSTED"
+            : modelQueriesCanBeUsed({
+                  establishingClasses: plan.establishingClasses,
+                  onchainLocators: documentaryLocators,
+                  maxTotal: effectiveAllowance,
+                })
+              ? null
+              : "MODEL_QUERIES_UNUSABLE";
+      const canUseModelQueries = proposerSkip === null;
+      if (proposerSkip !== null) {
         // The trace vocabulary is closed and deliberately not extended
         // here. Among MODEL_CALL_SKIPPED rows the reason code is already
         // discriminating: MODEL_INPUT_OVERSIZED / TOKEN_COUNT_UNAVAILABLE
-        // / MODEL_COST_BUDGET_EXHAUSTED each mark a real failure, so NONE
-        // uniquely marks this case — nothing failed, the call was simply
-        // not worth making. budgetAmount 0 records that nothing was
-        // reserved. The human-readable detail rides the existing
-        // observations channel below.
-        observations.add("MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER");
+        // / MODEL_COST_BUDGET_EXHAUSTED each mark a real failure, and a
+        // spent search axis carries SEARCH_QUERY_BUDGET_EXHAUSTED on the
+        // searchQueries axis exactly as the phased search phase records it
+        // (D-140). NONE marks the two cases where nothing failed and the
+        // call was simply not worth making. budgetAmount 0 records that
+        // nothing was reserved. The human-readable detail rides the
+        // existing observations channel.
+        if (proposerSkip === "MODEL_QUERIES_UNUSABLE") observations.add("MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER");
+        if (proposerSkip === "SEARCH_BUDGET_EXHAUSTED") observations.add("SEARCH_BUDGET_EXHAUSTED");
         await recordTraceEvent(deps.db, {
           researchJobId: ctx.jobId,
           researchAttemptId: attemptId,
@@ -1318,8 +1384,8 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           patternStep: item.step,
           component: item.component,
           status: "SKIPPED",
-          reasonCode: "NONE",
-          budgetAxis: "modelCostMicro",
+          reasonCode: proposerSkip === "SEARCH_BUDGET_EXHAUSTED" ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "NONE",
+          budgetAxis: proposerSkip === "SEARCH_BUDGET_EXHAUSTED" ? "searchQueries" : "modelCostMicro",
           budgetAmount: 0,
         });
       }
@@ -1517,9 +1583,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // there is no model output to bound by, so the deterministic
       // targeted queries bound it instead — still inside the same
       // fair-share allowance, so no component can spend more than before.
-      const queryCountBound = canUseModelQueries
-        ? Math.min(effectiveAllowance, modelQueries.length)
-        : Math.min(effectiveAllowance, targetedQueries.length);
+      // A closed obligation (no admissible route) or a spent search axis
+      // plans NO query at all — not even a self-contained locator — so no
+      // reservation is attempted and no provider is called.
+      const queryCountBound =
+        proposerSkip === "NO_ADMISSIBLE_ROUTE" || proposerSkip === "SEARCH_BUDGET_EXHAUSTED"
+          ? 0
+          : canUseModelQueries
+            ? Math.min(effectiveAllowance, modelQueries.length)
+            : Math.min(effectiveAllowance, targetedQueries.length);
       const queries = blendQueries(
         targetedQueries,
         modelQueries,
@@ -1642,15 +1714,19 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         spent.searchQueries += searchMetered ? searchOutcome.attempts : 0;
 
         if (searchOutcome.kind === "budget_exhausted") {
-          // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): a required reservation
-          // could not be authorized — never proven capability
-          // unavailability, but budget denial is itself the terminal
-          // execution fact. Throw AT the denial boundary, regardless of
-          // whether earlier queries in this same loop already produced
-          // candidate URLs — a non-empty partial result is not research
-          // completion, and S4 is not the sufficiency adjudicator (owner
-          // instruction, explicit). Anything already recorded/persisted
-          // before this point (candidate/trace rows) is left in place.
+          // BOUNDED SEARCH FINALIZATION V1 — the atomic reservation refused
+          // this query because the job's search axis is spent. This used to
+          // throw AT the denial boundary (HIGH-1, D-121), which left this
+          // attempt STARTED, discarded every candidate the earlier PAID
+          // queries of this same loop had returned, and ended the whole job
+          // BUDGET_LIMIT_REACHED. Now the refusal is recorded exactly as
+          // before (the SKIPPED row says the query was never executed and
+          // nothing was reserved), the search stage ends here — no further
+          // query is planned, since each would be refused the same way —
+          // and the attempt continues to READ what its paid searches already
+          // returned, then closes: SUCCEEDED if that yields Evidence,
+          // SKIPPED / SEARCH_BUDGET_EXHAUSTED if not. The cap is unchanged:
+          // no query ran, no unit was reserved, and no later query is tried.
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -1664,7 +1740,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             budgetAxis: "searchQueries",
             budgetAmount: searchMetered ? searchOutcome.attempts : 0,
           });
-          throw new BudgetExhaustedError("searchQueries", searchOutcome.reason ?? "SEARCH_QUERY_BUDGET_EXHAUSTED");
+          observations.add("SEARCH_BUDGET_EXHAUSTED");
+          searchBudgetExhausted = true;
+          break;
         }
         if (searchOutcome.kind === "fatal") {
           // BLOCKER-1: SearchGateway unavailable after the approved
@@ -1788,11 +1866,21 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         observations.add("SOURCE_RESOURCE_SEED_ADMITTED");
       }
       if (candidateUrls.size === 0) {
-        // A budget denial for this axis already threw above, at the
-        // point of denial — reaching here with zero candidates means
-        // every query failed for a non-budget (local/capability-already-
-        // handled) reason. LOW-A: prefer the actual typed provider
-        // failure reason over the generic label when one exists.
+        // THE TWO BOUNDED CLOSES, before the technical one. No admissible
+        // documentary route, or a spent search axis, with no approved seed
+        // to read either: the component closes conservatively — SKIPPED,
+        // with the reason the reducer reads as "not established within
+        // this bounded Research", never FAILED, never "no evidence exists".
+        if (noAdmissibleRoute) {
+          return { status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent };
+        }
+        if (searchBudgetExhausted) {
+          return { status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent };
+        }
+        // Reaching here with zero candidates means every query failed for
+        // a non-budget (local/capability-already-handled) reason. LOW-A:
+        // prefer the actual typed provider failure reason over the generic
+        // label when one exists.
         const reason = lastSearchFailureReason ?? "NO_SEARCH_CANDIDATES";
         return { status: "FAILED", reason, spent };
       }
@@ -3181,6 +3269,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // either had zero admitted facts or failed for a non-budget reason.
       if (extractionFailures > 0 && extractionFailures === fetchedDocs.length && nonOversizedExtractionFailures > 0) {
         return { status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent };
+      }
+      // A technical failure above keeps its name. Otherwise, an attempt
+      // whose acquisition was cut short by the search boundary — or that
+      // had no admissible route and read only an approved seed that said
+      // nothing — closes on the bounded reason, not on "nothing was found":
+      // what it did not get to search cannot be called silent.
+      if (noAdmissibleRoute) {
+        return { status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent };
+      }
+      if (searchBudgetExhausted) {
+        return { status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent };
       }
       return { status: "SKIPPED", reason: withObservations("NO_TRACEABLE_FACTS_FOR_COMPONENT"), spent };
     },

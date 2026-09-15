@@ -67,6 +67,35 @@ export type ExclusionReason =
 // §10 — closed.
 export type ResultReasonCode =
   | "NO_EVIDENCE_FOUND"
+  // BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — the two
+  // ACQUISITION BOUNDARIES, each a distinct finding from bare absence.
+  //
+  // REALITY STOPS WHERE THE EVIDENCE STOPS, and these say where it stopped:
+  //
+  //   SEARCH_BUDGET_EXHAUSTED  the component's acquisition was cut short by
+  //                            the configured search budget — ATLAS reached
+  //                            its bounded acquisition boundary before the
+  //                            obligation could be searched. "Not
+  //                            established within this bounded Research",
+  //                            never "the record is silent".
+  //   NO_ADMISSIBLE_ROUTE      no documentary path S5 could admit currently
+  //                            exists for this obligation and this project
+  //                            (every admissible class needs a confirmed
+  //                            route the project lacks, or belongs to the
+  //                            on-chain path that already had its
+  //                            opportunity). "ATLAS currently lacks an
+  //                            admissible Evidence path", never "the
+  //                            mechanism does not exist".
+  //
+  // Both are emitted ONLY where the reducer has NO Evidence at all for the
+  // component and the S4 attempt itself closed on that boundary — the
+  // caller reads the boundary off the persisted attempt and passes it in
+  // (`acquisitionBoundary`); the reducer invents neither. Where Evidence
+  // exists it is evaluated exactly as before, whatever the boundary.
+  // Neither is ever a contradiction, and neither strengthens confidence
+  // (proof-confidence.ts caps both at the same floor as bare absence).
+  | "SEARCH_BUDGET_EXHAUSTED"
+  | "NO_ADMISSIBLE_ROUTE"
   | "ALL_EVIDENCE_EXCLUDED"
   | "MISSING_EXECUTION_EVIDENCE"
   | "MISSING_CURRENT_STATE"
@@ -334,6 +363,13 @@ export interface ComponentReconciliationInput {
   // is treated as "no confirmed identity", which makes an identity-
   // dependent obligation unmet rather than skipped.
   confirmedIdentity?: ConfirmedProjectIdentity | null;
+  // BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — the
+  // acquisition boundary the component's own S4 attempt closed on, read by
+  // the caller from the persisted attempt row (see
+  // `acquisitionBoundaryFromAttempt`). Consulted at exactly ONE point: the
+  // zero-Evidence return, where it replaces NO_EVIDENCE_FOUND with the
+  // boundary's own reason. Absent or null is the ordinary case.
+  acquisitionBoundary?: AcquisitionBoundary | null;
   now: Date;
   freshnessPolicyDays: Record<"LOW_CHANGE" | "MEDIUM_CHANGE" | "HIGH_CHANGE", number>;
 }
@@ -673,6 +709,25 @@ function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict): boolean {
   return v.eligibleCore && row.relationship === "SUPPORTS" && row.directness === "DIRECT";
 }
 
+// The two reasons an S4 attempt may close on that the reducer must not
+// paraphrase as "nothing was found". `acquisitionBoundaryFromAttempt` is
+// the ONE reduction from a persisted attempt to this value: the attempt
+// must have closed SKIPPED and its reason must START with the boundary's
+// own code (the executor writes the code first and appends observations
+// after a semicolon). Anything else — a SUCCEEDED, FAILED or STARTED
+// attempt, an ordinary SKIPPED reason, free text — is null, and the
+// reducer behaves exactly as it always did.
+export type AcquisitionBoundary = "SEARCH_BUDGET_EXHAUSTED" | "NO_ADMISSIBLE_ROUTE";
+
+export function acquisitionBoundaryFromAttempt(
+  attempt: { status: string; reason: string | null } | null | undefined,
+): AcquisitionBoundary | null {
+  if (!attempt || attempt.status !== "SKIPPED" || !attempt.reason) return null;
+  const head = attempt.reason.split(";")[0].trim();
+  if (head === "SEARCH_BUDGET_EXHAUSTED" || head === "NO_ADMISSIBLE_ROUTE") return head;
+  return null;
+}
+
 export function reconcileComponent(input: ComponentReconciliationInput): ComponentReconciliationResult {
   const { jobId, item, requirements, evidence, now, freshnessPolicyDays } = input;
 
@@ -681,7 +736,10 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       step: item.step,
       component: item.component,
       status: "INSUFFICIENT_EVIDENCE",
-      reasonCodes: ["NO_EVIDENCE_FOUND"],
+      // The boundary the attempt closed on, when it closed on one: a
+      // search the budget never allowed, or an obligation with no
+      // admissible route, is not a silent record.
+      reasonCodes: [input.acquisitionBoundary ?? "NO_EVIDENCE_FOUND"],
       supportingEvidenceIds: [],
       contradictingEvidenceIds: [],
       excludedEvidence: [],

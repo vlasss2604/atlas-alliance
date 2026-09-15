@@ -75,6 +75,15 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // Bare absence. We cannot distinguish "nothing exists" from "we did not
   // look in the right place", which is the weakest possible footing.
   NO_EVIDENCE_FOUND: CONFIDENCE_BANDS.LOW,
+  // BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — the two
+  // acquisition boundaries. Both are STILL absence of Evidence for the
+  // component, only with the reason for the absence named honestly, so
+  // both sit exactly where bare absence sits: a budget that ran out, or a
+  // route nobody has confirmed, must never read as stronger footing than
+  // "nothing found", and never as weaker footing for the rest of the Proof
+  // than the gap it leaves.
+  SEARCH_BUDGET_EXHAUSTED: CONFIDENCE_BANDS.LOW,
+  NO_ADMISSIBLE_ROUTE: CONFIDENCE_BANDS.LOW,
   // Reasoned exclusion is NOT blind absence: every candidate was examined
   // and rejected for a recorded reason, so the insufficiency is itself
   // established. No cap of its own — an accompanying blocking gap still

@@ -479,15 +479,16 @@ describe("Фаза 6, S4 — BLOCKER-2: maxSearchQueries — реальный п
         searchGateway: { name: "fixture", async search() { realCalls += 1; return []; } },
       }),
     );
-    // S10 final pre-smoke closure (HIGH-1, D-120, test C/G3): the search
-    // budget is already fully exhausted before this attempt even starts
-    // — zero candidates possible, zero real calls made — throws
-    // BudgetExhaustedError rather than returning an ordinary FAILED
-    // result the controller could fold into WORK_QUEUE_EXHAUSTED ->
-    // SUCCEEDED.
-    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }))).rejects.toBeInstanceOf(
-      BudgetExhaustedError,
-    );
+    // BOUNDED SEARCH FINALIZATION V1 (Founder decision 2026-09-15): the
+    // search budget is already fully exhausted before this attempt even
+    // starts — zero candidates possible, zero real calls made — and the
+    // component now CLOSES on the bounded reason instead of throwing
+    // BudgetExhaustedError: SKIPPED / SEARCH_BUDGET_EXHAUSTED, which the
+    // reducer reads as INSUFFICIENT_EVIDENCE on that same boundary. The
+    // ceiling itself is untouched: no call, no reservation.
+    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }));
+    expect(result.status).toBe("SKIPPED");
+    expect(result.reason).toMatch(/^SEARCH_BUDGET_EXHAUSTED/);
     expect(realCalls).toBe(0);
   });
 
@@ -501,14 +502,14 @@ describe("Фаза 6, S4 — BLOCKER-2: maxSearchQueries — реальный п
         searchGateway: { name: "fixture", async search() { realCalls += 1; return []; } },
       }),
     );
-    // S10 final pre-smoke closure (HIGH-1, D-120): the fixture always
-    // returns zero results, so once the 2 remaining units are spent and
-    // budget is exhausted for the rest, zero candidates were ever found
-    // -> BudgetExhaustedError, not an ordinary result. The real call
-    // ceiling assertion is what this test exists to prove.
-    await expect(executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }))).rejects.toBeInstanceOf(
-      BudgetExhaustedError,
-    );
+    // The fixture always returns zero results, so once the 2 remaining
+    // units are spent the next reservation is refused and the attempt
+    // closes bounded (BOUNDED SEARCH FINALIZATION V1): SKIPPED /
+    // SEARCH_BUDGET_EXHAUSTED, never a throw. The real call ceiling
+    // assertion is what this test exists to prove, and it is unchanged.
+    const result = await executor.execute(ITEM, ctxFor(p.jobId, { maxSearchQueries: 8 }));
+    expect(result.status).toBe("SKIPPED");
+    expect(result.reason).toMatch(/^SEARCH_BUDGET_EXHAUSTED/);
     expect(realCalls).toBeLessThanOrEqual(2); // only 2 units remained (8-6)
   });
 });

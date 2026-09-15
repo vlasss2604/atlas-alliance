@@ -30,6 +30,8 @@ import { PROOF_STATE, type ProofState } from "./types";
 // did not do anything.
 export const SHORT_REASON: Record<string, string> = {
   NO_EVIDENCE_FOUND: "Nothing found in checked sources",
+  SEARCH_BUDGET_EXHAUSTED: "Not reached within the search limit",
+  NO_ADMISSIBLE_ROUTE: "No admitted source route to check yet",
   ALL_EVIDENCE_EXCLUDED: "Discussed · no admissible source",
   MISSING_EXECUTION_EVIDENCE: "Described · not seen running",
   MISSING_CURRENT_STATE: "Current state not stated",

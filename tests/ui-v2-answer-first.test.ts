@@ -47,6 +47,11 @@ const RESULT_PAGE = "app/(app)/research/[id]/page.tsx";
 // the first place.
 const ENGINE_REASON_CODES = [
   "NO_EVIDENCE_FOUND",
+  // BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — the two
+  // acquisition boundaries. Listed here for the reason every code below
+  // is: a reader must never meet a bounded step with no stated reason.
+  "SEARCH_BUDGET_EXHAUSTED",
+  "NO_ADMISSIBLE_ROUTE",
   "ALL_EVIDENCE_EXCLUDED",
   "MISSING_EXECUTION_EVIDENCE",
   "MISSING_CURRENT_STATE",

@@ -313,6 +313,29 @@ export type RouteClass = "OFFICIAL_DOCS" | "GOVERNANCE" | "OFFICIAL_REPORT";
 // rather than growing a second opinion about what a route class is.
 export const VALID_ROUTE_CLASSES: readonly RouteClass[] = ["OFFICIAL_DOCS", "GOVERNANCE", "OFFICIAL_REPORT"];
 
+// ROUTE-AWARE ACQUISITION V1 — THE CLASSES ONLY A CONFIRMED ROUTE CAN GIVE.
+//
+// Read straight off resolveSourceClass below: every other class has a
+// public, project-independent recognition rule (explorer hosts, social
+// platforms, data providers, governance portals, research/news media, or
+// the SOCIAL fallback), so a document of that class can be reached by an
+// ordinary search and classified without anyone confirming anything. These
+// two cannot. They are assigned at exactly one place — the step-6
+// `activeRouteClass` fall-through — and that value exists only where a
+// human confirmed an ACTIVE SOURCE_ROUTE for THIS project and set the
+// class on it. A component whose every admissible class is in this set,
+// for a project with no confirmed route carrying one of them, therefore
+// has NO documentary path that S5 could admit: whatever search returns, its
+// class will be something else and CLASS_NOT_ADMISSIBLE follows by
+// construction. Exported so acquisition asks this fact of the classifier
+// that owns it, never of a second list. GOVERNANCE is deliberately NOT
+// here: snapshot.org and its peers classify as GOVERNANCE from the
+// code-owned portal list, route or no route (officiality stays CLAIMED).
+export const CONFIRMED_ROUTE_ONLY_CLASSES: ReadonlySet<EvidenceSourceClass> = new Set<EvidenceSourceClass>([
+  "OFFICIAL_DOCS",
+  "OFFICIAL_REPORT",
+]);
+
 // `sourceType` mirrors the `sources` table's own enum
 // (OFFICIAL_DOCS/GOVERNANCE/ONCHAIN/SECURITY/RESEARCH/NEWS/OTHER) — the
 // "type" half of §7.2's "детерминирован, из URL и типа". It is populated

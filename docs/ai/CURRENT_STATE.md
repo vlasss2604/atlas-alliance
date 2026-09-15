@@ -307,6 +307,86 @@ true.** Historical reuse may return only through an explicit future design
 carrying provenance, freshness, revalidation, revocation and transparent
 historical reuse.
 
+## REALITY STOPS WHERE THE EVIDENCE STOPS (BOUNDED SEARCH FINALIZATION + ROUTE-AWARE ACQUISITION V1)
+
+Two semantics the Founder approved on 2026-09-15, fixed offline with zero
+spend, after the live retry A2-prime (job `58eeba58-…`) used all 12 search
+units — three of them on obligations whose results S5 was guaranteed to
+exclude — and then ended BUDGET_LIMIT_REACHED at DURABILITY_BASIS with its
+attempt left STARTED and its ten paid candidates unread.
+
+**1. Search-budget exhaustion is a BOUNDED RESEARCH EXHAUSTION, not a
+technical failure.** In `s4-executor.ts` the search axis — and only the
+search axis — no longer throws. An allowance of 0 (the job's axis already
+spent, per the live reserved read) skips the proposer
+(`MODEL_CALL_SKIPPED` / `SEARCH_QUERY_BUDGET_EXHAUSTED`, amount 0, exactly
+as the phased search phase records it) and plans no query; a reservation
+refused mid-attempt is recorded as before (`SEARCH_EXECUTED` SKIPPED), ends
+the search stage, and the attempt still READS the candidates its paid
+searches returned. The attempt then closes SUCCEEDED if that yielded
+Evidence, otherwise `SKIPPED / SEARCH_BUDGET_EXHAUSTED`. The controller
+writes the terminal attempt row, the reducer runs, the job walks the rest
+of its queue (every later component sees a spent axis and closes the same
+way without a call) and finalizes on the ordinary path: WORK_QUEUE_EXHAUSTED
+→ S5/S6/S7/S8. The cap is unchanged: nothing is searched, nothing reserved
+beyond it. Model-cost and source-open denials keep exactly their D-121 / D3
+contracts (still thrown); technical failures keep their names.
+
+**2. No Evidence search through a provably unavailable route.**
+`documentaryReachability` (`acquisition-targeting.ts`), asked of the
+existing admissibility model: a class only a confirmed route can assign —
+`CONFIRMED_ROUTE_ONLY_CLASSES = {OFFICIAL_DOCS, OFFICIAL_REPORT}`, exported
+by `source-authority.ts` and read straight off `resolveSourceClass` (they
+are assigned only at the `activeRouteClass` fall-through) — is reachable iff
+the project holds a confirmed ACTIVE route carrying it; ONCHAIN_VERIFIABLE
+is documentarily reachable iff the explorer open is the mechanism here
+(otherwise the adapter owns it and has already had its opportunity); every
+other class (GOVERNANCE via the code-owned portal list, SOCIAL,
+DATA_PROVIDER, RESEARCH_MEDIA) is reachable by generic search. A component
+is reachable when ANY admissible class is (a mixed OFFICIAL_DOCS +
+GOVERNANCE component with a docs route keeps its docs path); an empty
+contract is not decided here. When nothing is reachable the executor skips
+the proposer and every query (`MODEL_CALL_SKIPPED` reason NONE, observation
+`NO_ADMISSIBLE_DOCUMENTARY_ROUTE` + `CLASS_REQUIRES_CONFIRMED_ROUTE:<cls>`),
+still lets a human-approved SOURCE_RESOURCE seed through the ordinary
+candidate path, and closes `SKIPPED / NO_ADMISSIBLE_ROUTE`. The phased
+search phase applies the same rule (`routeRefusedComponents`, explorer open
+treated as the mechanism there). No route is created, confirmed or inferred;
+route-candidate discovery is untouched. **Consequence to know:** under the
+existing model GOVERNANCE is NOT route-only (snapshot.org & peers classify
+GOVERNANCE, officiality CLAIMED), so GOVERNANCE_BASIS / DURABILITY_BASIS
+still search without a governance route; on the Lido v3 shape the skip
+fires for EXECUTION_EVIDENCE (ONCHAIN owned + OFFICIAL_REPORT unconfirmed)
+— one proposer, one search, one open, one extraction saved.
+
+**The reducer names the boundary.** Two new closed `ResultReasonCode`s,
+`SEARCH_BUDGET_EXHAUSTED` and `NO_ADMISSIBLE_ROUTE`, emitted ONLY at the
+zero-Evidence return of `reconcileComponent` and only when
+`reconcileAndPersistComponent` read the boundary off the component's latest
+persisted attempt (`acquisitionBoundaryFromAttempt`: SKIPPED status, reason
+starting with the code). Where Evidence exists it is evaluated exactly as
+before. Both cap confidence at the same floor as NO_EVIDENCE_FOUND
+(`proof-confidence.ts`), neither is a contradiction, and the UI short forms
+say "Not reached within this research's search budget" / "No confirmed
+source route to check yet". "Not established within the bounded Research"
+≠ "Evidence does not exist"; "missing route" ≠ "mechanism absent".
+
+**Before → after on search denial.** Before: job BUDGET_LIMIT_REACHED /
+BUDGET_EXHAUSTED, the refused component's attempt STARTED forever, no S5
+row for it, later components never attempted, S6/S7/S8 run only on the
+D-127 catch path. After: job SUCCEEDED / WORK_QUEUE_EXHAUSTED, the
+component's attempt SKIPPED / SEARCH_BUDGET_EXHAUSTED, S5
+INSUFFICIENT_EVIDENCE [SEARCH_BUDGET_EXHAUSTED], later components attempted
+and closed the same way at zero cost, S6/S7/S8 on the ordinary path.
+`tests/bounded-search-finalization-v1.test.ts` (15 cases) pins the pure
+rules, the executor on both parts, and the whole Research through the
+worker handler in the A2-prime shape (production EVM adapter over a
+scripted transport, alpha envelope, live interpretation): 12 searches,
+8 opens, 7 proposer calls (live: 8), EXECUTION_EVIDENCE 0, one refused
+search at DURABILITY_BASIS that no longer ends the job. Prior assertions
+pinning the old throw-at-boundary search contract (phase6-s4-executor,
+s10-final-pre-smoke-closure A/C/J) were updated to the approved semantics.
+
 ## ONE EMPTY DOCUMENT IS NOT THE END OF THE CANDIDATE LIST (DOCUMENTARY CANDIDATE CONTINUATION V1)
 
 Measured on the live Memory acceptance retry (A2-prime, job `58eeba58-…`,
