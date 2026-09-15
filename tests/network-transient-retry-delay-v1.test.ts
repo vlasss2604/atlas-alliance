@@ -139,13 +139,17 @@ const fact: ExtractedFact = {
 };
 
 // A provider that fails the first N calls with the given error, then
-// answers. Records every call.
-function failing<T>(errors: unknown[], answer: T): { calls: { n: number }; fn: () => Promise<T> } {
-  const calls = { n: 0 };
+// answers. Records every call, and WHEN each call arrived, so a test can
+// measure the wait between two attempts directly instead of inferring it
+// from the whole execute() — which also contains database work whose
+// duration under load is not the retry policy's.
+function failing<T>(errors: unknown[], answer: T): { calls: { n: number; at: number[] }; fn: () => Promise<T> } {
+  const calls = { n: 0, at: [] as number[] };
   return {
     calls,
     fn: async () => {
       calls.n += 1;
+      calls.at.push(Date.now());
       const e = errors[calls.n - 1];
       if (e !== undefined) throw e;
       return answer;
@@ -314,12 +318,20 @@ describe("2. the executor — one bounded wait before the single retry, nothing 
     const { jobId, project } = await makeJob();
     const proposer = failing([noResponse(), noResponse(), noResponse()], ["never"]);
     const executor = executorWith(project, { queryProposer: { name: "fixture", proposeQueries: proposer.fn } });
-    const started = Date.now();
     await expect(executor.execute(ITEM, ctxFor(jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
-    const elapsed = Date.now() - started;
+    const rejectedAt = Date.now();
+    // Exactly two attempts: termination is structural, not a timing guess.
     expect(proposer.calls.n).toBe(2);
-    expect(elapsed).toBeGreaterThanOrEqual(TEST_DELAY_MS - 5);
-    expect(elapsed).toBeLessThan(2 * TEST_DELAY_MS);
+    // ONE wait, and it sits between the two attempts: measured on the
+    // attempt timestamps themselves. The old assertion bounded the whole
+    // execute() — contract-view loads, reservations and trace writes
+    // included — under 2x the delay, and flaked under full-suite database
+    // load while the retry semantics were intact. The wait-before-retry
+    // is the policy; the tail after the final failure holds no retry and
+    // therefore no wait, which the short post-attempt span proves.
+    const gapBetweenAttempts = proposer.calls.at[1] - proposer.calls.at[0];
+    expect(gapBetweenAttempts).toBeGreaterThanOrEqual(TEST_DELAY_MS - 5);
+    expect(rejectedAt - proposer.calls.at[1]).toBeLessThan(TEST_DELAY_MS);
     expect((await jobRow(jobId)).modelCostMicroReserved).toBe(2 * PER_ATTEMPT_MICRO);
   });
 

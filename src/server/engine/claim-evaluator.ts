@@ -313,7 +313,11 @@ function evaluateFlowRelationship(req: ClaimRequirement, flow: MechanismFlow): F
       reasonCodes: ["REQUIRED_PATH_CONTRADICTED"],
       blockingGaps: [...fromGaps, ...toGaps].filter((g) => g.kind === "CONTRADICTED_COMPONENT"),
       evidenceIds: gapEvidenceIds(flow, ["CONTRADICTED_COMPONENT"]),
-      componentResultKeys: [],
+      // The refuted endpoints, so S8 can cite whatever support S5 kept on
+      // them (a measured non-decrease keeps its burn as support).
+      componentResultKeys: [from, to]
+        .map((c) => ({ step: stepOfComponent(flow, c), component: c }))
+        .filter((k) => k.step !== -1),
     };
   }
   if (branchUnresolved) {
@@ -420,7 +424,11 @@ function evaluateNetEffectEstablished(_req: ClaimRequirement, flow: MechanismFlo
     reasonCodes: [contradicted ? "REQUIRED_PATH_CONTRADICTED" : "NET_EFFECT_NOT_ESTABLISHED"],
     blockingGaps: gaps,
     evidenceIds: contradicted ? gapEvidenceIds(flow, ["CONTRADICTED_COMPONENT"], "NET_EFFECT") : [],
-    componentResultKeys: [],
+    // A CONTRADICTED NET_EFFECT is the one refutation that KEEPS support
+    // (B2: the burn stays established while the measured interval refutes
+    // net reduction). Naming the component lets S8 cite that burn; without
+    // it a NOT_SUPPORTED supply verdict cited nothing at all.
+    componentResultKeys: contradicted ? [{ step: 7, component: "NET_EFFECT" }] : [],
   };
 }
 
