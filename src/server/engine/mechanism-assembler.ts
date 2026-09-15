@@ -117,8 +117,27 @@ export type NodeQualification =
   // computeLifecycle: a proposal never moves a flow toward CURRENT.
   | "PROPOSED_STATE_ONLY"
   | "APPROVAL_NOT_ESTABLISHED"
-  | "TOKEN_STATE_UNQUALIFIED";
+  | "TOKEN_STATE_UNQUALIFIED"
+  // B1/B2 — NET_EFFECT's typed supply qualifications. Each is a genuine
+  // basis for partial support: the component has admissible evidence and
+  // the supply effect is not (fully) established. They were absent from
+  // this set while S5 could emit them ALONE — a CONFIRMED official report
+  // asserting a supply reduction carries no authority code and no typed
+  // kind, so S5 wrote PARTIALLY_SUPPORTED with exactly one supply code and
+  // the step-2 invariant below threw "PARTIALLY_SUPPORTED without a basis
+  // code", turning a valid bounded research outcome into a job-killing
+  // technical failure. TECHNICAL FAILURE != PROJECT REALITY runs in both
+  // directions: a real finding must not be reported as a crash either.
+  | "SUPPLY_REDUCTION_NOT_ESTABLISHED"
+  | "NET_SUPPLY_CHANGE_NOT_ESTABLISHED"
+  | "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"
+  | "CONFLICTING_SUPPLY_DELTA";
 
+// EVERY code S5 can attach to a PARTIALLY_SUPPORTED result, and nothing
+// else. The step-2 invariant in assembleMechanism reads "a partial result
+// carries at least one of these", so this set must track the reducer's
+// partial-basis vocabulary exactly: a code missing here is not "no
+// qualification", it is a crash on a legitimate outcome.
 const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
   "MECHANICAL_PROVENANCE_NOT_ESTABLISHED",
   "INSUFFICIENT_AUTHORITY",
@@ -127,6 +146,10 @@ const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
   "PROPOSED_STATE_ONLY",
   "APPROVAL_NOT_ESTABLISHED",
   "TOKEN_STATE_UNQUALIFIED",
+  "SUPPLY_REDUCTION_NOT_ESTABLISHED",
+  "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",
+  "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED",
+  "CONFLICTING_SUPPLY_DELTA",
 ]);
 
 export interface Provenance {

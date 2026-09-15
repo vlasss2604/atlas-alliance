@@ -151,10 +151,20 @@ function extractionEnvelopeSchemaFor(mode: ExtractionMode) {
 // guessed, back-filled, or substituted with fetch time — inventing a date
 // would fabricate provenance, and provenance is what published_at exists
 // to record.
-export function parseModelPublishedAt(raw: string | null): Date | null {
+//
+// A date AFTER `notAfter` (the document's own fetch time) is refused the
+// same way. A page cannot have been published after it was fetched, so
+// such a value is not a date the document stated — it is model text that
+// would, if kept, pass S5's freshness gate with a negative age and
+// supersede every honestly dated row for the same component. Refusing it
+// keeps the row (the fact is still admitted on its own merits) and drops
+// only the impossible provenance.
+export function parseModelPublishedAt(raw: string | null, notAfter?: Date): Date | null {
   if (!raw) return null;
   const parsed = new Date(raw);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+  if (Number.isNaN(parsed.getTime())) return null;
+  if (notAfter !== undefined && parsed.getTime() > notAfter.getTime()) return null;
+  return parsed;
 }
 
 const SYSTEM_PROMPT = `You extract factual candidate Evidence from ONE already-fetched document for ONE bounded research task.
@@ -442,7 +452,7 @@ async function doExtract(
 
   return admitted.map((f) => ({
     ...f,
-    publishedAt: parseModelPublishedAt(f.publishedAt),
+    publishedAt: parseModelPublishedAt(f.publishedAt, input.document.fetchedAt),
   }));
 }
 

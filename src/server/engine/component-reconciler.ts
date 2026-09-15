@@ -570,7 +570,17 @@ function detectTokenStateMentions(text: string, requiredTokenState: string | nul
 }
 
 function temporalBasisOf(row: EvidenceRow): { basisField: "published_at" | "fetched_at"; at: Date } | null {
-  if (row.publishedAt !== null) return { basisField: "published_at", at: row.publishedAt };
+  // A publication date AFTER the row was fetched is impossible provenance:
+  // the document existed before it was "published". published_at is model
+  // text (D-128), and a fabricated future date would otherwise pass the
+  // freshness gate (negative age) and supersede every honestly dated row.
+  // It is read exactly as an unparseable date is — no usable basis — never
+  // clamped to fetch time, which would invent provenance. The extractor
+  // refuses such a date at its own boundary; this is the reducer's guard
+  // for rows written by any other path or before that boundary existed.
+  if (row.publishedAt !== null && row.publishedAt.getTime() <= row.fetchedAt.getTime()) {
+    return { basisField: "published_at", at: row.publishedAt };
+  }
   // §6.2 — the one narrow exception: an on-chain observation fixes the
   // state at load time, so fetched_at stands in for publication.
   if (row.sourceClass === "ONCHAIN_VERIFIABLE") return { basisField: "fetched_at", at: row.fetchedAt };

@@ -119,9 +119,43 @@ function lineageComponentStatus(flow: MechanismFlow, component: string): "SUPPOR
   if (component === "DURABILITY_BASIS" && flow.durability) return flow.durability.componentStatus === "PARTIALLY_SUPPORTED" ? "PARTIALLY_SUPPORTED" : "SUPPORTED";
   // GOVERNANCE_BASIS / RECIPIENT / FLOW_PATH / EXECUTION_EVIDENCE /
   // CURRENT_STATE are not their own node in S6's model (§4) — check the
-  // lineage step directly for a positional match instead.
+  // lineage step directly for a positional match instead. A lineage step
+  // carries no status of its own; S6 records a PARTIALLY_SUPPORTED
+  // component it attached as a positioned PARTIAL_COMPONENT gap, and that
+  // is read here so a partial non-node component is never reported as
+  // fully established. Read verbatim from S6, never re-adjudicated.
   const step = flow.lineage.find((s) => s.component === component);
-  return step ? "SUPPORTED" : null;
+  if (!step) return null;
+  const partial = flow.gaps.some((g) => g.kind === "PARTIAL_COMPONENT" && g.component === component);
+  return partial ? "PARTIALLY_SUPPORTED" : "SUPPORTED";
+}
+
+// WHICH ESTABLISHED COMPONENTS AN ATTRIBUTE OR LIFECYCLE VALUE RESTS ON.
+//
+// S6 classifies each FlowAttribute over the admitted text of specific
+// established components (mechanism-assembler.ts buildFlow: valueSource
+// from SOURCE_OF_VALUE, destinationKind from DESTINATION, recipientKind
+// from RECIPIENT, direction from SOURCE_OF_VALUE + FLOW_PATH +
+// EXECUTION_EVIDENCE, tokenState from RECIPIENT + DESTINATION) and derives
+// lifecycle CURRENT from CURRENT_STATE. A value classified from a
+// PARTIALLY_SUPPORTED component is exactly as partial as that component:
+// an INDIRECT-only recipient row that names "holders" does not make
+// "holders receive" fully SUPPORTED, any more than the same row would
+// under COMPONENT_ESTABLISHED. Every other atom kind already propagates
+// REQUIRED_PATH_PARTIAL from a partial component; these two did not, and
+// were the one route by which a component the reducer capped could reach
+// a fully SUPPORTED claim. Code-owned mirror of buildFlow, never a model.
+const ATTRIBUTE_BASIS_COMPONENTS: Record<string, readonly string[]> = {
+  valueSource: ["SOURCE_OF_VALUE"],
+  destinationKind: ["DESTINATION"],
+  recipientKind: ["RECIPIENT"],
+  direction: ["SOURCE_OF_VALUE", "FLOW_PATH", "EXECUTION_EVIDENCE"],
+  tokenState: ["RECIPIENT", "DESTINATION"],
+};
+const LIFECYCLE_BASIS_COMPONENTS: readonly string[] = ["CURRENT_STATE"];
+
+function anyBasisComponentPartial(flow: MechanismFlow, components: readonly string[]): boolean {
+  return components.some((c) => lineageComponentStatus(flow, c) === "PARTIALLY_SUPPORTED");
 }
 
 function gapsForComponentOnFlow(flow: MechanismFlow, component: string): MechanismGapRef[] {
@@ -332,6 +366,13 @@ function evaluateFlowAttribute(req: ClaimRequirement, flow: MechanismFlow): Flow
     };
   }
   if (expected.has(value.toLowerCase())) {
+    // A match classified from a partially supported component is a
+    // partial match — see ATTRIBUTE_BASIS_COMPONENTS. A positive
+    // incompatibility below stays CONTRADICTED regardless: partial
+    // authority is a confidence matter, not a reason to soften a finding.
+    if (anyBasisComponentPartial(flow, ATTRIBUTE_BASIS_COMPONENTS[attribute] ?? [])) {
+      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys: [] };
+    }
     return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys: [] };
   }
   return { status: "CONTRADICTED", reasonCodes: [code], blockingGaps: [], evidenceIds, componentResultKeys: [] };
@@ -381,6 +422,12 @@ function evaluateLifecycle(req: ClaimRequirement, flow: MechanismFlow): FlowVerd
   if (evidenceIds.length === 0) return null; // nothing established on this flow at all — not a candidate
   const satisfied = expected === "CURRENT" ? actual === "CURRENT" : actual === "CURRENT" || actual === "HISTORICAL";
   if (satisfied) {
+    // Lifecycle CURRENT rests on CURRENT_STATE (S6 computeLifecycle). When
+    // that component is only PARTIALLY_SUPPORTED — every chain read is
+    // CLAIMED by design (D-074) — the lifecycle is exactly as partial.
+    if (anyBasisComponentPartial(flow, LIFECYCLE_BASIS_COMPONENTS)) {
+      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys: [{ step: 5, component: "CURRENT_STATE" }] };
+    }
     return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys: [] };
   }
   if (expected === "CURRENT" && actual === "HISTORICAL") {
