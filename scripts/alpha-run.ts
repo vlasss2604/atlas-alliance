@@ -60,7 +60,8 @@
 import { eq, sql } from "drizzle-orm";
 
 import { DEFAULT_PRODUCT_CONFIG, INTERNAL_ALPHA_V1, loadProductConfig } from "../src/server/config/product";
-import { createDatabase } from "../src/server/db/client";
+import { createDatabase, type Database } from "../src/server/db/client";
+import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import { interpretations, projects, researchJobs, researchTraceEvents, topics, users } from "../src/server/db/schema";
 import { createBoss, RESEARCH_QUEUE } from "../src/server/jobs/queue";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
@@ -180,9 +181,82 @@ export function onchainPreflightVerdict(
 
 function usage(): never {
   console.error(
-    'usage: tsx scripts/alpha-run.ts --mode=fixture|live --actor=<name> [--owner=<existing-user-id>] [--asset=<name>] [--project=<slug>] [--question="..."] [--scenario=<name> (fixture only)]',
+    'usage: tsx scripts/alpha-run.ts --mode=fixture|live --actor=<name> [--owner=<existing-user-id>] [--asset=<name>] [--project=<slug>] [--question="..."] [--intent=<research-intent>] [--scenario=<name> (fixture only)]',
   );
   process.exit(1);
+}
+
+// OWNER-ONLY INTENT OVERRIDE (FINAL VALIDATION PANEL, Founder decision
+// 2026-09-15) — `--intent=<EXISTING_INTENT>`.
+//
+// WHY. This script classifies the question with the NON-LIVE fake
+// interpreter (see main), which routes every question naming a known asset
+// to PROTOCOL_REVENUE_TO_TOKEN. That is fine for a smoke run and wrong for a
+// validation panel whose frozen questions are meant to exercise the other
+// in-scope requirement sets (BURN_OR_SUPPLY_EFFECT, MECHANISM_CURRENT_STATE,
+// VALUE_CAPTURE, …). The panel is a validation harness for the Research
+// Core, NOT a validation of the product Interpreter — that remains a
+// separate capability with its own acceptance before private beta.
+//
+// WHAT IT IS. An explicit, owner-supplied value that REPLACES the fake
+// interpreter's normalized_intent on the persisted interpretation row of
+// this one run, and is recorded on that same row under
+// OWNER_INTENT_OVERRIDE_FIELD with what it replaced, who supplied it and
+// when — so the Research record says, in the row S7 and acquisition read
+// the intent from, that a human chose the intent. The audit banner prints
+// it. Nothing else about the interpretation (project resolution, route,
+// task text) is touched.
+//
+// WHAT IT IS NOT. Not an interpreter: no model, no inference, no new
+// vocabulary — the value must be one of the ACTIVE CODE CONTRACT's own
+// in-scope intents (the keys of `intentRequirements`), so an intent S7 has
+// no requirement set for (UNKNOWN, SCENARIO_CAUSAL_IMPACT,
+// CLAIM_FACT_CHECK) is refused, as is anything else. Not a product path:
+// only this owner CLI reads the flag; start-research.ts / interpret.ts
+// have no such input (pinned by tests/owner-intent-override-v1.test.ts).
+// Refused BEFORE the interpretation, the job, any reservation or any
+// provider call, so a bad value costs nothing.
+export const OWNER_INTENT_OVERRIDE_FIELD = "owner_intent_override";
+
+export function resolveOwnerIntentOverride(
+  raw: string | undefined,
+): { ok: true; intent: string | null } | { ok: false; reason: string } {
+  if (raw === undefined) return { ok: true, intent: null };
+  const value = raw.trim();
+  const inScope = Object.keys(PATTERN_V1_CONTENT.intentRequirements ?? {});
+  if (!inScope.includes(value)) {
+    return {
+      ok: false,
+      reason: `--intent="${value}" is not an in-scope Research intent of the code contract; allowed: ${inScope.join(", ")}`,
+    };
+  }
+  return { ok: true, intent: value };
+}
+
+// Applies the override to ONE persisted interpretation row. Reads the row,
+// rewrites `normalized_intent`, and records the override on the same row.
+// Returns what was replaced. Throws if the row does not exist — a missing
+// interpretation is a broken run, never something to create here.
+export async function applyOwnerIntentOverride(
+  db: Database,
+  interpretationId: string,
+  intent: string,
+  actor: string,
+  at: Date = new Date(),
+): Promise<{ from: string | null; to: string }> {
+  const [row] = await db.select({ result: interpretations.result }).from(interpretations).where(eq(interpretations.id, interpretationId));
+  if (!row || !row.result || typeof row.result !== "object") {
+    throw new Error(`owner intent override: interpretation ${interpretationId} has no structured result`);
+  }
+  const result = row.result as Record<string, unknown>;
+  const from = typeof result.normalized_intent === "string" ? result.normalized_intent : null;
+  const updated = {
+    ...result,
+    normalized_intent: intent,
+    [OWNER_INTENT_OVERRIDE_FIELD]: { from, to: intent, actor, at: at.toISOString() },
+  };
+  await db.update(interpretations).set({ result: updated }).where(eq(interpretations.id, interpretationId));
+  return { from, to: intent };
 }
 
 async function main() {
@@ -190,6 +264,12 @@ async function main() {
   const actor = args.actor;
   const mode = args.mode;
   if (!actor || (mode !== "fixture" && mode !== "live")) usage();
+  // Refused here, before the interpretation, the job and any spend.
+  const intentOverride = resolveOwnerIntentOverride(args.intent);
+  if (!intentOverride.ok) {
+    console.error(`[alpha-run] refusing ${intentOverride.reason}. No Research was created and nothing was spent.`);
+    process.exit(1);
+  }
 
   // Non-live guarantee for the Interpreter call below, in BOTH modes:
   // explicit, not dependent on the MODEL_GATEWAY environment variable
@@ -449,6 +529,12 @@ async function main() {
       console.error("[alpha-run] interpretation classified DEEP_RESEARCH but resolved no project_slug — refusing to fabricate one");
       process.exit(1);
     }
+    // OWNER-ONLY INTENT OVERRIDE — applied to the persisted row the engine
+    // reads the intent from, before the job exists, recorded on that row.
+    let appliedIntentOverride: { from: string | null; to: string } | null = null;
+    if (intentOverride.intent !== null) {
+      appliedIntentOverride = await applyOwnerIntentOverride(db, interp.id, intentOverride.intent, actor);
+    }
 
     const entitlement: EntitlementSnapshot = {
       level: "ARI_CORE",
@@ -542,6 +628,9 @@ async function main() {
     console.log(`  jobId:              ${job.id}`);
     console.log(`  createdAt:          ${createdAt.toISOString()}`);
     console.log(`  interpretation:     normalized_intent=${normalizedIntent ?? "null"} task_type=${interp.understood.taskType ?? "null"} project_slug=${interp.understood.projectSlug}`);
+    if (appliedIntentOverride) {
+      console.log(`  intent override:    OWNER (${actor}) set ${appliedIntentOverride.to}, replacing ${appliedIntentOverride.from ?? "null"} from the non-live interpreter — recorded on the interpretation row`);
+    }
     console.log(
       mode === "live"
         ? "  providers:          search=brave fetch=native query_proposer=anthropic evidence_extractor=anthropic (interpreter=fake, non-live)"
