@@ -45,6 +45,11 @@ overclaims get in.
   establish nothing, without being reclassified.
 - **Documentary locators** — addresses recovered from documents — are one-to-many
   per fact and carry their own provenance: `documentary-locator*.ts`.
+- **A publication date is model text (D-128) and is bounded by the fetch.**
+  Unparseable, or later than the document's own `fetchedAt`, it is no date:
+  refused at the extractor (`parseModelPublishedAt(raw, notAfter)`) and
+  ignored by S5's temporal basis for rows written by any other path. Never
+  clamped to fetch time — that would invent provenance.
 - Document recovery is staged: embedded structured payloads first
   (`__NEXT_DATA__`, JSON-LD, RSC flight frames, `application/json`), then isolated
   rendering only for official docs. The renderer is a scrubbed child process
@@ -346,6 +351,23 @@ untouched by a later chain read.
 Downstream: `mechanism-assembler.ts` (S6) composes the chain,
 `claim-evaluator.ts` (S7) evaluates claim requirements, and **`S8` writes the
 Proof**.
+
+**S7 never lets a capped component reach a fully SUPPORTED claim.** Every
+atom kind propagates `REQUIRED_PATH_PARTIAL` from a `PARTIALLY_SUPPORTED`
+component: COMPONENT_ESTABLISHED, FLOW_RELATIONSHIP, NET_EFFECT and
+DURABILITY read the component status directly; FLOW_ATTRIBUTE and LIFECYCLE
+read the status of the code-owned basis components their value was
+classified from (recipientKind → RECIPIENT, destinationKind → DESTINATION,
+valueSource → SOURCE_OF_VALUE, direction → SOURCE_OF_VALUE/FLOW_PATH/
+EXECUTION_EVIDENCE, tokenState → RECIPIENT/DESTINATION; lifecycle CURRENT →
+CURRENT_STATE, HISTORICAL → EXECUTION_EVIDENCE + CURRENT_STATE). A positive
+incompatibility stays CONTRADICTED. The same basis components are named in
+the atom's `componentResultKeys`, which is the only route by which S8 cites
+Evidence — so an attribute or lifecycle verdict cites the rows it rests on.
+The S6 node-qualification set is exactly the set of codes S5 can attach to
+a partial result (NET_EFFECT's supply codes included); a partial result is
+never an S6 invariant error. Adversarial coverage and the pinned policy
+boundaries live in `RESEARCH_CORE_HARDENING_V1.md`.
 
 **S9 — the product boundary — is where the Proof leaves the engine.**
 `services/proof-view.ts` is the ONE canonical projection from persisted S8
