@@ -307,6 +307,61 @@ true.** Historical reuse may return only through an explicit future design
 carrying provenance, freshness, revalidation, revocation and transparent
 historical reuse.
 
+## ONE EMPTY DOCUMENT IS NOT THE END OF THE CANDIDATE LIST (DOCUMENTARY CANDIDATE CONTINUATION V1)
+
+Measured on the live Memory acceptance retry (A2-prime, job `58eeba58-…`,
+2026-09-15, $0.27): the two ACQUISITION GRACEFUL DEGRADATION V1 fixes held
+live (FLOW_PATH SUPPORTED; 4/4 compact retries OK), but MECHANISM_SPEC ran
+one search, got five confirmed OFFICIAL_DOCS candidates, was rationed to
+ONE source open by fair share, fetched and extracted the first cleanly —
+and the model returned an empty facts array. The component stopped with
+four admissible candidates never opened and 11 of 24 source opens unused:
+INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND. Fixed offline, no live call.
+
+**The rule (`s4-executor.ts`).** The open→extract sequence runs in at most
+TWO rounds over the SAME ordered candidate list, resumed by a cursor that
+never rewinds. Round 1 is exactly what ran before. Round 2 happens only
+when ALL of: round 1 opened exactly one candidate under its ration and
+read it; that document completed acquisition (no fetch/extraction
+failure, passed project containment) and admitted zero facts for this
+component through the existing local gates (wrong component /
+traceability — the existing definition of usable, counted, not
+re-judged); an already-discovered candidate remains; a live
+`readJobBudgetReserved` shows room for one more open under the
+documentary ceiling AND one more extraction under `maxModelCostMicro`.
+It then raises the ration by exactly one (`openAllowance = opensAttempted
++ 1`) and opens the next candidate through the identical path (replay from
+the sealed set if this job already fetched it; the explorer rule, dead-url
+skip, ordering and admission untouched). Never a proposer call, a search,
+a reopened url, a raised ceiling, or a third round. NOT a continuation: a
+fetch failure, an extraction failure (any diagnostic), a wrong-project
+document, a source-open denial, a replay executor, or a round 1 that
+opened more than one candidate. Observations
+`DOCUMENTARY_CANDIDATE_CONTINUATION` /
+`DOCUMENTARY_CANDIDATE_CONTINUATION_SKIPPED_BUDGET`. Cost: useful first
+document → nothing extra; empty first document → at most +1 source open
+and +1 extraction call (plus the compact fallback's own +1 if that second
+document truncates). `tests/documentary-candidate-continuation-v1.test.ts`
+(13 cases) pins the A2-prime shape, the bounds A–H and the accounting.
+
+**Search-budget audit of A2-prime (12/12 units; reported, NOT changed).**
+SOURCE_OF_VALUE 3 (2 targeted + 1 generic), FLOW_PATH 1, MECHANISM_SPEC 1,
+GOVERNANCE_BASIS 1, EXECUTION_EVIDENCE 1, DESTINATION 2, RECIPIENT 1,
+DURABILITY_BASIS 2 (+1 refused → BUDGET_EXHAUSTED). Two generic wastes
+stand, both semantic-register decisions left for a bounded task: (a) the
+refused 3rd search of the LAST component throws before its 10 already-paid
+candidates are opened — the D3 shape on the search axis (fix would mirror
+D3: remember the denial, read the paid candidates, throw after); (b) under
+Pattern v3, GOVERNANCE_BASIS, DURABILITY_BASIS (GOVERNANCE-only) and
+EXECUTION_EVIDENCE (OFFICIAL_REPORT unconfirmed, explorer withheld) have NO
+reachable admissible documentary class for this project, yet spend 1+2+1
+searches whose every row S5 must exclude — the same "provably unusable"
+shape the explorer rule closes, but the generic search is also the only
+route-candidate discovery path (research.lido.fi was observed this way),
+so skipping it is a Founder decision (confirm a GOVERNANCE route, or
+skip). The +3 proposer calls after 7178065 are FLOW_PATH and RECIPIENT
+(productive) and EXECUTION_EVIDENCE (case b).
+
 ## ACQUISITION DEGRADES GRACEFULLY: A REFUSED LOCATOR IS NOT AN OPPORTUNITY, A TRUNCATED PAGE IS NOT AN EMPTY ONE (ACQUISITION GRACEFUL DEGRADATION V1)
 
 Two generic acquisition defects proven from the persisted trace of the

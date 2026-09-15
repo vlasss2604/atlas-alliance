@@ -5,7 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { loadProductConfig } from "../config/product";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
-import { reserveJobBudget } from "./budget-reservation";
+import { readJobBudgetReserved, reserveJobBudget } from "./budget-reservation";
 import { isReplayProvider } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
@@ -1857,7 +1857,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // applies, and extraction is still bounded by the axis that actually
       // pays for it — modelCostMicro — which reserves per extraction call
       // and is untouched here.
-      const openAllowance = fetchMetered
+      let openAllowance = fetchMetered
         ? Math.max(
             1,
             componentSearchAllowance({
@@ -1985,330 +1985,310 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED, no ceiling moves, no unit is
       // refunded, and no further source open is made.
       let sourceOpenExhaustion: BudgetExhaustedError | null = null;
-      for (const url of orderedCandidates) {
-        if (opensAttempted >= openAllowance) break;
-        if (fetchMetered && isAlreadyFetchedUrl(url, ledger)) {
-          sealedByUrl ??= (await sealedDocumentsForJob(deps.db, ctx.jobId)).byUrl;
-          const sealed = sealedByUrl.get(canonicalTargetRef(url));
-          if (sealed) {
-            opensAttempted += 1;
-            observations.add("REUSED_ACQUIRED_DOCUMENT");
-            for (const operationType of ["FETCH_ATTEMPTED", "FETCH_OK"] as const) {
-              await recordTraceEvent(deps.db, {
-                researchJobId: ctx.jobId,
-                researchAttemptId: attemptId,
-                operationType,
-                providerKind: "FETCH",
-                providerName: ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
-                patternStep: item.step,
-                component: item.component,
-                targetRef: url,
-                status: "OK",
-              });
+
+      // --- 4. EvidenceExtractor (state) --------------------------------------
+      // Declared above the acquisition rounds because the continuation
+      // decision below reads them across rounds.
+      const evidenceExtractorCostMicro = calculateMaxAuthorizedCostMicro(evidenceExtractorProfile);
+      const insertedEvidenceIds: string[] = [];
+      let extractionFailures = 0;
+      let nonOversizedExtractionFailures = 0;
+
+      // DOCUMENTARY CANDIDATE CONTINUATION V1 — ONE EMPTY DOCUMENT IS NOT
+      // THE END OF THE CANDIDATE LIST.
+      //
+      // THE DEFECT THIS CLOSES, measured on the live Memory acceptance
+      // retry (job 58eeba58-…): MECHANISM_SPEC ran its one search, search
+      // returned five confirmed OFFICIAL_DOCS candidates, fair share allowed
+      // ONE source open, the first candidate was fetched and extracted
+      // cleanly — and the model reported an empty facts array. The
+      // component stopped there with four discovered, admissible,
+      // never-opened candidates and eleven unused source opens on the
+      // job, and ended INSUFFICIENT_EVIDENCE / NO_EVIDENCE_FOUND.
+      //
+      // THE RULE: acquisition runs in at most TWO rounds over the SAME
+      // ordered candidate list. Round 1 is exactly what ran before. A
+      // second round happens only when round 1 opened exactly ONE
+      // candidate under its ration, that document COMPLETED acquisition —
+      // fetched, extracted without failure, and contained the project —
+      // and yet admitted no fact for this component (empty, or every fact
+      // rejected by the existing local gates), and un-opened candidates
+      // remain, and a live read of the job's ledgers shows room for one
+      // more open and one more extraction. It then opens exactly ONE more
+      // already-discovered candidate — the next in the same order — and
+      // extracts it through the identical path. No proposer call, no
+      // search, no widening of any list, no ceiling touched, no candidate
+      // opened twice (the cursor never rewinds), and never a third round.
+      //
+      // Deliberately NOT a continuation: a fetch or extraction FAILURE
+      // (transport, refusal, provider, malformed output), a wrong-project
+      // document, a source-open denial, or a round 1 that already opened
+      // more than one candidate. Those keep exactly the semantics they had.
+      let candidateCursor = 0;
+      let extractedDocCount = 0;
+      // Facts that passed every local admission gate this attempt (wrong
+      // component, traceability) — the existing definition of "usable",
+      // counted here rather than re-judged.
+      let usableFacts = 0;
+      // Documents whose extraction completed and passed project
+      // containment, and which admitted no fact for this component.
+      let documentsYieldingNothing = 0;
+      for (let acquisitionRound = 1; ; acquisitionRound += 1) {
+        for (; candidateCursor < orderedCandidates.length; candidateCursor += 1) {
+          const url = orderedCandidates[candidateCursor];
+          if (opensAttempted >= openAllowance) break;
+          if (fetchMetered && isAlreadyFetchedUrl(url, ledger)) {
+            sealedByUrl ??= (await sealedDocumentsForJob(deps.db, ctx.jobId)).byUrl;
+            const sealed = sealedByUrl.get(canonicalTargetRef(url));
+            if (sealed) {
+              opensAttempted += 1;
+              observations.add("REUSED_ACQUIRED_DOCUMENT");
+              for (const operationType of ["FETCH_ATTEMPTED", "FETCH_OK"] as const) {
+                await recordTraceEvent(deps.db, {
+                  researchJobId: ctx.jobId,
+                  researchAttemptId: attemptId,
+                  operationType,
+                  providerKind: "FETCH",
+                  providerName: ACQUIRED_DOCUMENT_REPLAY_PROVIDER,
+                  patternStep: item.step,
+                  component: item.component,
+                  targetRef: url,
+                  status: "OK",
+                });
+              }
+              fetchedDocs.push(sealed);
+              continue;
             }
-            fetchedDocs.push(sealed);
-            continue;
+            observations.add("ACQUIRED_DOCUMENT_UNAVAILABLE");
           }
-          observations.add("ACQUIRED_DOCUMENT_UNAVAILABLE");
-        }
-        const reserved = fetchMetered
-          ? await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, documentaryMaxSourceOpens)
-          : true;
-        if (!reserved) {
-          // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
-          // dimensional budget axis — the denial is terminal regardless of
-          // whether an earlier candidate in this same loop was already
-          // fetched. A non-empty partial result (one document already
-          // fetched) is not proof that the planned source-open work was
-          // complete — S4 is not the sufficiency adjudicator. What changes
-          // (D3, above) is only WHEN the error leaves this function: after
-          // the documents already opened have been extracted, never before.
+          const reserved = fetchMetered
+            ? await reserveJobBudget(deps.db, ctx.jobId, "sourceOpens", 1, documentaryMaxSourceOpens)
+            : true;
+          if (!reserved) {
+            // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): the third authoritative
+            // dimensional budget axis — the denial is terminal regardless of
+            // whether an earlier candidate in this same loop was already
+            // fetched. A non-empty partial result (one document already
+            // fetched) is not proof that the planned source-open work was
+            // complete — S4 is not the sufficiency adjudicator. What changes
+            // (D3, above) is only WHEN the error leaves this function: after
+            // the documents already opened have been extracted, never before.
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "CANDIDATE_SKIPPED_BUDGET",
+              patternStep: item.step,
+              component: item.component,
+              targetRef: url,
+              status: "SKIPPED",
+              reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
+              budgetAxis: "sourceOpens",
+              budgetAmount: 1,
+            });
+            sourceOpenExhaustion = new BudgetExhaustedError(
+              "sourceOpens",
+              lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED",
+            );
+            observations.add("SOURCE_OPENS_EXHAUSTED_MID_ATTEMPT");
+            break;
+          }
+          opensAttempted += 1;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
-            operationType: "CANDIDATE_SKIPPED_BUDGET",
+            operationType: "FETCH_ATTEMPTED",
+            providerKind: "FETCH",
+            providerName: contentFetcher.name,
             patternStep: item.step,
             component: item.component,
             targetRef: url,
-            status: "SKIPPED",
-            reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
-            budgetAxis: "sourceOpens",
-            budgetAmount: 1,
+            status: "OK",
           });
-          sourceOpenExhaustion = new BudgetExhaustedError(
-            "sourceOpens",
-            lastFetchFailureReason ?? "SOURCE_OPEN_BUDGET_EXHAUSTED",
+          // Stage 0 gate. Resolved BEFORE the fetch because the recovery
+          // flag has to be decided up front, and deliberately re-resolved
+          // on doc.finalUrl at persist time below — a redirect must not let
+          // a pre-fetch decision speak for where we actually landed. This
+          // read is a cheap local query over the project's own confirmed
+          // routes; it consults no provider.
+          // D-155 — already resolved above, for ordering, by the same canonical
+          // resolver on the same url. Reused rather than re-queried, so the
+          // gate below and the ordering above can never disagree about what
+          // this project's routes say. Still deliberately re-resolved on
+          // doc.finalUrl at persist time: a redirect must not let a pre-fetch
+          // decision speak for where we actually landed.
+          const preFetchRoute =
+            routeByCandidate.get(canonicalTargetRef(url)) ??
+            (await resolveSourceRoute(deps.db, deps.project.id, url));
+          const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
+          let fetchResult = await callProvider("CONTENT_FETCHER", () =>
+            contentFetcher.fetch(url, recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : undefined),
           );
-          observations.add("SOURCE_OPENS_EXHAUSTED_MID_ATTEMPT");
-          break;
-        }
-        opensAttempted += 1;
-        await recordTraceEvent(deps.db, {
-          researchJobId: ctx.jobId,
-          researchAttemptId: attemptId,
-          operationType: "FETCH_ATTEMPTED",
-          providerKind: "FETCH",
-          providerName: contentFetcher.name,
-          patternStep: item.step,
-          component: item.component,
-          targetRef: url,
-          status: "OK",
-        });
-        // Stage 0 gate. Resolved BEFORE the fetch because the recovery
-        // flag has to be decided up front, and deliberately re-resolved
-        // on doc.finalUrl at persist time below — a redirect must not let
-        // a pre-fetch decision speak for where we actually landed. This
-        // read is a cheap local query over the project's own confirmed
-        // routes; it consults no provider.
-        // D-155 — already resolved above, for ordering, by the same canonical
-        // resolver on the same url. Reused rather than re-queried, so the
-        // gate below and the ordering above can never disagree about what
-        // this project's routes say. Still deliberately re-resolved on
-        // doc.finalUrl at persist time: a redirect must not let a pre-fetch
-        // decision speak for where we actually landed.
-        const preFetchRoute =
-          routeByCandidate.get(canonicalTargetRef(url)) ??
-          (await resolveSourceRoute(deps.db, deps.project.id, url));
-        const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
-        let fetchResult = await callProvider("CONTENT_FETCHER", () =>
-          contentFetcher.fetch(url, recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : undefined),
-        );
-        await recordTraceEvent(deps.db, {
-          researchJobId: ctx.jobId,
-          researchAttemptId: attemptId,
-          operationType: fetchResult.ok ? "FETCH_OK" : "FETCH_FAILED",
-          providerKind: "FETCH",
-          providerName: contentFetcher.name,
-          patternStep: item.step,
-          component: item.component,
-          targetRef: url,
-          status: fetchResult.ok ? "OK" : "FAILED",
-          reasonCode: fetchResult.ok ? "NONE" : "PROVIDER_ERROR",
-        });
-        // Which bounded strategy finally produced the document, recorded as
-        // provenance on the sealed copy (D-146: a strategy alters nothing
-        // about authority or admissibility).
-        let acquiredVia: AcquisitionStrategy = "DIRECT_HTTP";
-        if (!fetchResult.ok) {
-          lastFetchFailureReason = fetchResult.reason;
+          await recordTraceEvent(deps.db, {
+            researchJobId: ctx.jobId,
+            researchAttemptId: attemptId,
+            operationType: fetchResult.ok ? "FETCH_OK" : "FETCH_FAILED",
+            providerKind: "FETCH",
+            providerName: contentFetcher.name,
+            patternStep: item.step,
+            component: item.component,
+            targetRef: url,
+            status: fetchResult.ok ? "OK" : "FAILED",
+            reasonCode: fetchResult.ok ? "NONE" : "PROVIDER_ERROR",
+          });
+          // Which bounded strategy finally produced the document, recorded as
+          // provenance on the sealed copy (D-146: a strategy alters nothing
+          // about authority or admissibility).
+          let acquiredVia: AcquisitionStrategy = "DIRECT_HTTP";
+          if (!fetchResult.ok) {
+            lastFetchFailureReason = fetchResult.reason;
 
-          // THE SHARED FALLBACK CHAIN, ASKED HERE FOR THE FIRST TIME.
-          //
-          // This path had no fallback of any kind, so a confirmed
-          // OFFICIAL_DOCS page whose html exceeds the transport cap ended
-          // the attempt permanently — while the phased path would have
-          // negotiated a smaller representation and, failing that,
-          // rendered one. Same document, same policy, opposite outcome,
-          // decided only by which executor happened to run.
-          //
-          // NO POLICY IS RESTATED HERE. `plannedFallbacks` is the one
-          // decision module, now imported by both paths; this loop only
-          // executes what it returns. The render gates are the same two
-          // the phased path asks, chosen the same way: the refusal policy
-          // when a status exists, the shared route gate when the message
-          // never completed and there is none. No third notion of
-          // renderability is introduced and no bar is lowered.
-          //
-          // Bounded exactly as the phased chain is: each strategy at most
-          // once, at most MAX_FALLBACK_ATTEMPTS_PER_URL of them, every
-          // attempt taking its own reservation against the SAME
-          // documentary ceiling, and no cap raised anywhere.
-          let fbDiagnostic = fetchResult.fetchFailure?.reason ?? null;
-          let fbHttpStatus = fetchResult.fetchFailure?.httpStatus ?? null;
-          let fbFailedStrategy: AcquisitionStrategy = "DIRECT_HTTP";
-          const fbTried = new Set<AcquisitionStrategy>(["DIRECT_HTTP"]);
-          let fbUsed = 0;
-          // AN HTTP REFUSAL IS ALREADY OWNED, and must stay owned.
-          //
-          // For HTTP_ERROR the planner's only answer is ISOLATED_RENDER,
-          // and the render-on-refusal block below is this executor's
-          // long-standing implementation of exactly that branch — same
-          // renderer, same gate, its own owner-visible reasons
-          // (DOCS_RENDER_AFTER_REFUSAL_*). Running the chain there would
-          // not add a fallback, it would rename one, and the terminal line
-          // an owner reads would change for a case whose behaviour is not
-          // in question. The chain therefore covers only the diagnostics
-          // that previously had NO fallback at all — the transport and
-          // representation failures — and a status-bearing refusal falls
-          // through untouched.
-          const fbChainApplies = fbHttpStatus === null;
-          while (fbChainApplies && fbUsed < MAX_FALLBACK_ATTEMPTS_PER_URL) {
-            const nextStrategy: AcquisitionStrategy | undefined = plannedFallbacks(
-              fbDiagnostic,
-              fbHttpStatus,
-              fbFailedStrategy,
-            ).find(
-              (strategy) => !fbTried.has(strategy),
-            );
-            if (nextStrategy === undefined) break;
-            fbTried.add(nextStrategy);
-            fbUsed += 1;
+            // THE SHARED FALLBACK CHAIN, ASKED HERE FOR THE FIRST TIME.
+            //
+            // This path had no fallback of any kind, so a confirmed
+            // OFFICIAL_DOCS page whose html exceeds the transport cap ended
+            // the attempt permanently — while the phased path would have
+            // negotiated a smaller representation and, failing that,
+            // rendered one. Same document, same policy, opposite outcome,
+            // decided only by which executor happened to run.
+            //
+            // NO POLICY IS RESTATED HERE. `plannedFallbacks` is the one
+            // decision module, now imported by both paths; this loop only
+            // executes what it returns. The render gates are the same two
+            // the phased path asks, chosen the same way: the refusal policy
+            // when a status exists, the shared route gate when the message
+            // never completed and there is none. No third notion of
+            // renderability is introduced and no bar is lowered.
+            //
+            // Bounded exactly as the phased chain is: each strategy at most
+            // once, at most MAX_FALLBACK_ATTEMPTS_PER_URL of them, every
+            // attempt taking its own reservation against the SAME
+            // documentary ceiling, and no cap raised anywhere.
+            let fbDiagnostic = fetchResult.fetchFailure?.reason ?? null;
+            let fbHttpStatus = fetchResult.fetchFailure?.httpStatus ?? null;
+            let fbFailedStrategy: AcquisitionStrategy = "DIRECT_HTTP";
+            const fbTried = new Set<AcquisitionStrategy>(["DIRECT_HTTP"]);
+            let fbUsed = 0;
+            // AN HTTP REFUSAL IS ALREADY OWNED, and must stay owned.
+            //
+            // For HTTP_ERROR the planner's only answer is ISOLATED_RENDER,
+            // and the render-on-refusal block below is this executor's
+            // long-standing implementation of exactly that branch — same
+            // renderer, same gate, its own owner-visible reasons
+            // (DOCS_RENDER_AFTER_REFUSAL_*). Running the chain there would
+            // not add a fallback, it would rename one, and the terminal line
+            // an owner reads would change for a case whose behaviour is not
+            // in question. The chain therefore covers only the diagnostics
+            // that previously had NO fallback at all — the transport and
+            // representation failures — and a status-bearing refusal falls
+            // through untouched.
+            const fbChainApplies = fbHttpStatus === null;
+            while (fbChainApplies && fbUsed < MAX_FALLBACK_ATTEMPTS_PER_URL) {
+              const nextStrategy: AcquisitionStrategy | undefined = plannedFallbacks(
+                fbDiagnostic,
+                fbHttpStatus,
+                fbFailedStrategy,
+              ).find(
+                (strategy) => !fbTried.has(strategy),
+              );
+              if (nextStrategy === undefined) break;
+              fbTried.add(nextStrategy);
+              fbUsed += 1;
 
-            if (nextStrategy === "CONTENT_NEGOTIATION") {
-              const negotiationReserved = await reserveJobBudget(
+              if (nextStrategy === "CONTENT_NEGOTIATION") {
+                const negotiationReserved = await reserveJobBudget(
+                  deps.db,
+                  ctx.jobId,
+                  "sourceOpens",
+                  1,
+                  documentaryMaxSourceOpens,
+                );
+                if (!negotiationReserved) {
+                  observations.add("DOCS_FALLBACK_SKIPPED_BUDGET");
+                  break;
+                }
+                spent.sourceOpens += 1;
+                // ONE RESERVATION, ONE ATTEMPT ROW. This is a real request to
+                // the origin with a different Accept, and it spends a source
+                // open — so it is an ATTEMPT, and the trace has to say so
+                // before the call rather than only reporting how it ended.
+                // Without this row the reservation is invisible and documentary
+                // spend cannot be reconstructed from the attempt stream. The
+                // strategy is carried in providerName, the same identity the
+                // outcome row below already uses.
+                await recordTraceEvent(deps.db, {
+                  researchJobId: ctx.jobId,
+                  researchAttemptId: attemptId,
+                  operationType: "FETCH_ATTEMPTED",
+                  providerKind: "FETCH",
+                  providerName: "content-negotiation",
+                  patternStep: item.step,
+                  component: item.component,
+                  targetRef: url,
+                  status: "OK",
+                });
+                const negotiated = await callProvider("CONTENT_FETCHER", () =>
+                  contentFetcher.fetch(url, {
+                    ...(recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : {}),
+                    acceptPreference: "TEXT_REPRESENTATION" as const,
+                  }),
+                );
+                await recordTraceEvent(deps.db, {
+                  researchJobId: ctx.jobId,
+                  researchAttemptId: attemptId,
+                  operationType: negotiated.ok ? "FETCH_OK" : "FETCH_FAILED",
+                  providerKind: "FETCH",
+                  providerName: "content-negotiation",
+                  patternStep: item.step,
+                  component: item.component,
+                  targetRef: url,
+                  status: negotiated.ok ? "OK" : "FAILED",
+                  reasonCode: negotiated.ok ? "NONE" : "PROVIDER_ERROR",
+                });
+                if (negotiated.ok) {
+                  observations.add("DOCS_NEGOTIATED_AFTER_FETCH_FAILURE");
+                  fetchResult = negotiated;
+                  acquiredVia = "CONTENT_NEGOTIATION";
+                  break;
+                }
+                lastFetchFailureReason = negotiated.reason;
+                fbDiagnostic = negotiated.fetchFailure?.reason ?? null;
+                fbHttpStatus = negotiated.fetchFailure?.httpStatus ?? null;
+                fbFailedStrategy = nextStrategy;
+                continue;
+              }
+
+              // ISOLATED_RENDER — the same renderer, the same one-navigation
+              // isolated child, and the same gates the phased path asks.
+              const renderGate =
+                fbHttpStatus !== null
+                  ? evaluateRefusalRenderEligibility({
+                      url,
+                      route: preFetchRoute,
+                      rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
+                      httpStatus: fbHttpStatus,
+                    })
+                  : routeEligibility(
+                      url,
+                      preFetchRoute,
+                      renderedDocsEnabled() && renderedDocsAvailable(),
+                    );
+              if (!renderGate.eligible) break;
+              const fallbackRenderReserved = await reserveJobBudget(
                 deps.db,
                 ctx.jobId,
                 "sourceOpens",
                 1,
                 documentaryMaxSourceOpens,
               );
-              if (!negotiationReserved) {
-                observations.add("DOCS_FALLBACK_SKIPPED_BUDGET");
+              if (!fallbackRenderReserved) {
+                observations.add("DOCS_RENDER_SKIPPED_BUDGET");
                 break;
               }
               spent.sourceOpens += 1;
-              // ONE RESERVATION, ONE ATTEMPT ROW. This is a real request to
-              // the origin with a different Accept, and it spends a source
-              // open — so it is an ATTEMPT, and the trace has to say so
-              // before the call rather than only reporting how it ended.
-              // Without this row the reservation is invisible and documentary
-              // spend cannot be reconstructed from the attempt stream. The
-              // strategy is carried in providerName, the same identity the
-              // outcome row below already uses.
-              await recordTraceEvent(deps.db, {
-                researchJobId: ctx.jobId,
-                researchAttemptId: attemptId,
-                operationType: "FETCH_ATTEMPTED",
-                providerKind: "FETCH",
-                providerName: "content-negotiation",
-                patternStep: item.step,
-                component: item.component,
-                targetRef: url,
-                status: "OK",
-              });
-              const negotiated = await callProvider("CONTENT_FETCHER", () =>
-                contentFetcher.fetch(url, {
-                  ...(recoverEmbeddedPayloads ? { recoverEmbeddedPayloads: true } : {}),
-                  acceptPreference: "TEXT_REPRESENTATION" as const,
-                }),
-              );
-              await recordTraceEvent(deps.db, {
-                researchJobId: ctx.jobId,
-                researchAttemptId: attemptId,
-                operationType: negotiated.ok ? "FETCH_OK" : "FETCH_FAILED",
-                providerKind: "FETCH",
-                providerName: "content-negotiation",
-                patternStep: item.step,
-                component: item.component,
-                targetRef: url,
-                status: negotiated.ok ? "OK" : "FAILED",
-                reasonCode: negotiated.ok ? "NONE" : "PROVIDER_ERROR",
-              });
-              if (negotiated.ok) {
-                observations.add("DOCS_NEGOTIATED_AFTER_FETCH_FAILURE");
-                fetchResult = negotiated;
-                acquiredVia = "CONTENT_NEGOTIATION";
-                break;
-              }
-              lastFetchFailureReason = negotiated.reason;
-              fbDiagnostic = negotiated.fetchFailure?.reason ?? null;
-              fbHttpStatus = negotiated.fetchFailure?.httpStatus ?? null;
-              fbFailedStrategy = nextStrategy;
-              continue;
-            }
-
-            // ISOLATED_RENDER — the same renderer, the same one-navigation
-            // isolated child, and the same gates the phased path asks.
-            const renderGate =
-              fbHttpStatus !== null
-                ? evaluateRefusalRenderEligibility({
-                    url,
-                    route: preFetchRoute,
-                    rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
-                    httpStatus: fbHttpStatus,
-                  })
-                : routeEligibility(
-                    url,
-                    preFetchRoute,
-                    renderedDocsEnabled() && renderedDocsAvailable(),
-                  );
-            if (!renderGate.eligible) break;
-            const fallbackRenderReserved = await reserveJobBudget(
-              deps.db,
-              ctx.jobId,
-              "sourceOpens",
-              1,
-              documentaryMaxSourceOpens,
-            );
-            if (!fallbackRenderReserved) {
-              observations.add("DOCS_RENDER_SKIPPED_BUDGET");
-              break;
-            }
-            spent.sourceOpens += 1;
-            // A render is a browser navigation to the origin. It reserved,
-            // so it attempts — and it used to emit no trace row at all, which
-            // is how the one open that produced the only usable document in a
-            // live run became invisible.
-            await recordTraceEvent(deps.db, {
-              researchJobId: ctx.jobId,
-              researchAttemptId: attemptId,
-              operationType: "FETCH_ATTEMPTED",
-              providerKind: "FETCH",
-              providerName: "isolated-render",
-              patternStep: item.step,
-              component: item.component,
-              targetRef: url,
-              status: "OK",
-            });
-            try {
-              const rendered = await resolveRenderedDocsFetcher().render(url, {
-                confirmedHost: renderGate.confirmedHost,
-                matchedPathPrefix: renderGate.matchedPathPrefix,
-              });
-              // No static text existed to fall short of — the transport
-              // never delivered one. An absence, not a shortfall.
-              rendered.staticTextLength = 0;
-              fetchedDocs.push(rendered);
-              observations.add("DOCS_RENDERED_AFTER_FETCH_FAILURE");
-            } catch (e) {
-              // Fail closed and stop. A failed render is never evidence
-              // and never fails the attempt; it only says which stage
-              // failed.
-              observations.add(
-                renderFailureObservation("DOCS_RENDER_AFTER_FETCH_FAILURE_FAILED", e),
-              );
-            }
-            break;
-          }
-          if (!fetchResult.ok && fbTried.size > 1) {
-            continue; // the shared chain ran and ended — next candidate
-          }
-        }
-        if (!fetchResult.ok) {
-          // RENDER ON REFUSAL.
-          //
-          // Rendering used to be reachable only as an upgrade to a fetch
-          // that had already succeeded, which left a page that refuses
-          // ordinary clients permanently unreadable — the renderer exists
-          // for exactly that page and could never be asked.
-          //
-          // This is the same renderer, the same route gates, the same
-          // host and prefix, and the same one-navigation isolated child
-          // process. What differs is only that no document exists to
-          // measure, so the static-shortfall test is replaced by a
-          // narrow, code-owned set of refusal statuses. A blocked
-          // address, a DNS failure, a timeout or a malformed URL carries
-          // no status at all and cannot reach here.
-          const refusal = evaluateRefusalRenderEligibility({
-            url,
-            route: preFetchRoute,
-            rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
-            httpStatus: fetchResult.fetchFailure?.httpStatus ?? null,
-          });
-          if (refusal.eligible) {
-            // Its own reservation, exactly like the upgrade path. The
-            // refused static request spent nothing, and no ceiling moves.
-            const refusalReserved = await reserveJobBudget(
-              deps.db,
-              ctx.jobId,
-              "sourceOpens",
-              1,
-              documentaryMaxSourceOpens,
-            );
-            if (refusalReserved) {
-              spent.sourceOpens += 1;
-              // Same rule as the two above: reserved, so it attempts, so the
-              // trace says so before the navigation.
+              // A render is a browser navigation to the origin. It reserved,
+              // so it attempts — and it used to emit no trace row at all, which
+              // is how the one open that produced the only usable document in a
+              // live run became invisible.
               await recordTraceEvent(deps.db, {
                 researchJobId: ctx.jobId,
                 researchAttemptId: attemptId,
@@ -2322,210 +2302,476 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               });
               try {
                 const rendered = await resolveRenderedDocsFetcher().render(url, {
-                  confirmedHost: refusal.confirmedHost,
-                  matchedPathPrefix: refusal.matchedPathPrefix,
+                  confirmedHost: renderGate.confirmedHost,
+                  matchedPathPrefix: renderGate.matchedPathPrefix,
                 });
-                // Honest provenance: the static request was refused, so
-                // there was no static text — not a shortfall, an absence.
+                // No static text existed to fall short of — the transport
+                // never delivered one. An absence, not a shortfall.
                 rendered.staticTextLength = 0;
                 fetchedDocs.push(rendered);
-                observations.add("DOCS_RENDERED_AFTER_REFUSAL");
-                continue;
+                observations.add("DOCS_RENDERED_AFTER_FETCH_FAILURE");
               } catch (e) {
-                // Fail closed and stop. One attempt, no retry — a failed
-                // render is never evidence and never fails the attempt.
-                // It does, however, say which stage failed.
+                // Fail closed and stop. A failed render is never evidence
+                // and never fails the attempt; it only says which stage
+                // failed.
                 observations.add(
-                  renderFailureObservation("DOCS_RENDER_AFTER_REFUSAL_FAILED", e),
+                  renderFailureObservation("DOCS_RENDER_AFTER_FETCH_FAILURE_FAILED", e),
                 );
+              }
+              break;
+            }
+            if (!fetchResult.ok && fbTried.size > 1) {
+              continue; // the shared chain ran and ended — next candidate
+            }
+          }
+          if (!fetchResult.ok) {
+            // RENDER ON REFUSAL.
+            //
+            // Rendering used to be reachable only as an upgrade to a fetch
+            // that had already succeeded, which left a page that refuses
+            // ordinary clients permanently unreadable — the renderer exists
+            // for exactly that page and could never be asked.
+            //
+            // This is the same renderer, the same route gates, the same
+            // host and prefix, and the same one-navigation isolated child
+            // process. What differs is only that no document exists to
+            // measure, so the static-shortfall test is replaced by a
+            // narrow, code-owned set of refusal statuses. A blocked
+            // address, a DNS failure, a timeout or a malformed URL carries
+            // no status at all and cannot reach here.
+            const refusal = evaluateRefusalRenderEligibility({
+              url,
+              route: preFetchRoute,
+              rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
+              httpStatus: fetchResult.fetchFailure?.httpStatus ?? null,
+            });
+            if (refusal.eligible) {
+              // Its own reservation, exactly like the upgrade path. The
+              // refused static request spent nothing, and no ceiling moves.
+              const refusalReserved = await reserveJobBudget(
+                deps.db,
+                ctx.jobId,
+                "sourceOpens",
+                1,
+                documentaryMaxSourceOpens,
+              );
+              if (refusalReserved) {
+                spent.sourceOpens += 1;
+                // Same rule as the two above: reserved, so it attempts, so the
+                // trace says so before the navigation.
+                await recordTraceEvent(deps.db, {
+                  researchJobId: ctx.jobId,
+                  researchAttemptId: attemptId,
+                  operationType: "FETCH_ATTEMPTED",
+                  providerKind: "FETCH",
+                  providerName: "isolated-render",
+                  patternStep: item.step,
+                  component: item.component,
+                  targetRef: url,
+                  status: "OK",
+                });
+                try {
+                  const rendered = await resolveRenderedDocsFetcher().render(url, {
+                    confirmedHost: refusal.confirmedHost,
+                    matchedPathPrefix: refusal.matchedPathPrefix,
+                  });
+                  // Honest provenance: the static request was refused, so
+                  // there was no static text — not a shortfall, an absence.
+                  rendered.staticTextLength = 0;
+                  fetchedDocs.push(rendered);
+                  observations.add("DOCS_RENDERED_AFTER_REFUSAL");
+                  continue;
+                } catch (e) {
+                  // Fail closed and stop. One attempt, no retry — a failed
+                  // render is never evidence and never fails the attempt.
+                  // It does, however, say which stage failed.
+                  observations.add(
+                    renderFailureObservation("DOCS_RENDER_AFTER_REFUSAL_FAILED", e),
+                  );
+                }
+              } else {
+                observations.add("DOCS_RENDER_SKIPPED_BUDGET");
+              }
+            }
+            continue; // typed/unexpected fetch failure — try the next candidate
+          }
+          // Bounded, safe-to-persist observability: WHICH payload kinds were
+          // recovered and that recovery happened at all — never the text.
+          // Without this, a document's text could silently have two very
+          // different provenances with no way to tell them apart later.
+          const recovered = fetchResult.value.embeddedPayload;
+          if (recovered) {
+            observations.add(`DOCS_PAYLOAD_RECOVERED:${recovered.kinds.join("+")}`);
+          }
+          let acquiredDoc = fetchResult.value;
+          if (fetchMetered) spent.sourceOpens += 1;
+
+          // --- Stage 1: rendered docs -------------------------------------
+          // Static-first, always. Rendering runs only when the STATIC
+          // extraction (before Stage 0 recovery) shows an SPA shell on a
+          // confirmed, path-scoped OFFICIAL_DOCS page. Judging this on the
+          // Stage 0 merged text would suppress rendering on exactly the
+          // pages that need it — a measured page produced 134 static chars
+          // and 57,640 recovered chars of CSS tokens and React internals.
+          const eligibility = evaluateRenderEligibility({
+            url: acquiredDoc.finalUrl,
+            route: preFetchRoute,
+            staticHtmlBytes: acquiredDoc.byteLength,
+            staticTextLength: acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length,
+            rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
+          });
+          if (eligibility.eligible) {
+            // A render is its own bounded external action, so it takes its
+            // own reservation. The static fetch above keeps the one it
+            // already spent; no ceiling is raised.
+            const renderReserved = await reserveJobBudget(
+              deps.db,
+              ctx.jobId,
+              "sourceOpens",
+              1,
+              documentaryMaxSourceOpens,
+            );
+            if (renderReserved) {
+              spent.sourceOpens += 1;
+              // The static fetch already has its own attempt row and keeps the
+              // open it spent; this is a SECOND external action with a second
+              // reservation, so it gets its own row rather than being folded
+              // into the fetch that justified it.
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "FETCH_ATTEMPTED",
+                providerKind: "FETCH",
+                providerName: "isolated-render",
+                patternStep: item.step,
+                component: item.component,
+                targetRef: acquiredDoc.finalUrl,
+                status: "OK",
+              });
+              try {
+                const rendered = await resolveRenderedDocsFetcher().render(acquiredDoc.finalUrl, {
+                  confirmedHost: eligibility.confirmedHost,
+                  matchedPathPrefix: eligibility.matchedPathPrefix,
+                });
+                // The renderer does not know the static measurement that
+                // justified it; the caller does, so it is stamped here.
+                rendered.staticTextLength =
+                  acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length;
+                acquiredDoc = rendered;
+                acquiredVia = "ISOLATED_RENDER";
+                observations.add("DOCS_RENDERED");
+              } catch (e) {
+                // Fail closed: a failed render is never evidence, and never
+                // fails the attempt — the static document stands as-is.
+                // Same sanitizer as the refusal path: two ways in, one set
+                // of gates, and now one way of saying what went wrong.
+                observations.add(renderFailureObservation("DOCS_RENDER_FAILED", e));
               }
             } else {
               observations.add("DOCS_RENDER_SKIPPED_BUDGET");
             }
           }
-          continue; // typed/unexpected fetch failure — try the next candidate
+          // SEAL WHAT WAS PAID FOR, so a later component meets it in storage
+          // rather than at the origin. Same door the phased FETCH phase uses
+          // (`persistAcquiredDocument`, PRODUCT_ACQUISITION): the seal is a
+          // statement about the transport only — authority is recorded as
+          // resolved on the final url, never granted, and extraction below
+          // and in every later attempt re-resolves it live. A refused seal
+          // (the size bound) or a storage error changes nothing about this
+          // attempt: the document is extracted from memory as before, and the
+          // next encounter simply pays for its own fetch.
+          if (fetchMetered) {
+            try {
+              const sealRoute = await resolveSourceRoute(deps.db, deps.project.id, acquiredDoc.finalUrl);
+              const sealed = await persistAcquiredDocument(deps.db, {
+                projectId: deps.project.id,
+                acquiringJobId: ctx.jobId,
+                doc: acquiredDoc,
+                route: sealRoute,
+                renderMode: acquiredVia === "ISOLATED_RENDER" ? "RENDERED" : "STATIC",
+                acquisitionStrategy: acquiredVia,
+                admission: "PRODUCT_ACQUISITION",
+              });
+              if (!sealed.ok) observations.add(`ACQUIRED_DOCUMENT_NOT_SEALED:${sealed.refusal}`);
+            } catch {
+              observations.add("ACQUIRED_DOCUMENT_NOT_SEALED:STORE_ERROR");
+            }
+          }
+          fetchedDocs.push(acquiredDoc);
         }
-        // Bounded, safe-to-persist observability: WHICH payload kinds were
-        // recovered and that recovery happened at all — never the text.
-        // Without this, a document's text could silently have two very
-        // different provenances with no way to tell them apart later.
-        const recovered = fetchResult.value.embeddedPayload;
-        if (recovered) {
-          observations.add(`DOCS_PAYLOAD_RECOVERED:${recovered.kinds.join("+")}`);
+        if (fetchedDocs.length === 0 && sourceOpenExhaustion !== null) {
+          // Nothing was opened before the axis was refused, so there is
+          // nothing to read first: the denial is terminal exactly as it was
+          // at the boundary.
+          throw sourceOpenExhaustion;
         }
-        let acquiredDoc = fetchResult.value;
-        if (fetchMetered) spent.sourceOpens += 1;
+        if (fetchedDocs.length === 0) {
+          // No source-open budget denial occurred (one would have thrown just
+          // above) — reaching here with zero documents means every candidate
+          // failed for a non-budget reason.
+          // Folded into the SAME observation channel every other terminal
+          // return here already uses. This path was the one exception, and
+          // it is precisely the path a render-after-refusal ends on — so a
+          // renderer failure was classified correctly and then had nowhere
+          // to be said. For a run executed directly (owner tooling writes no
+          // research_attempts row) this string is the only place it appears
+          // at all. Everything appended is code-owned: the sanitized fetch
+          // reason, plus observation codes this function itself authored.
+          return {
+            status: "FAILED",
+            reason: withObservations(lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED"),
+            spent,
+          };
+        }
 
-        // --- Stage 1: rendered docs -------------------------------------
-        // Static-first, always. Rendering runs only when the STATIC
-        // extraction (before Stage 0 recovery) shows an SPA shell on a
-        // confirmed, path-scoped OFFICIAL_DOCS page. Judging this on the
-        // Stage 0 merged text would suppress rendering on exactly the
-        // pages that need it — a measured page produced 134 static chars
-        // and 57,640 recovered chars of CSS tokens and React internals.
-        const eligibility = evaluateRenderEligibility({
-          url: acquiredDoc.finalUrl,
-          route: preFetchRoute,
-          staticHtmlBytes: acquiredDoc.byteLength,
-          staticTextLength: acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length,
-          rendererEnabled: renderedDocsEnabled() && renderedDocsAvailable(),
-        });
-        if (eligibility.eligible) {
-          // A render is its own bounded external action, so it takes its
-          // own reservation. The static fetch above keeps the one it
-          // already spent; no ceiling is raised.
-          const renderReserved = await reserveJobBudget(
-            deps.db,
-            ctx.jobId,
-            "sourceOpens",
-            1,
-            documentaryMaxSourceOpens,
-          );
-          if (renderReserved) {
-            spent.sourceOpens += 1;
-            // The static fetch already has its own attempt row and keeps the
-            // open it spent; this is a SECOND external action with a second
-            // reservation, so it gets its own row rather than being folded
-            // into the fetch that justified it.
+        // --- 4. EvidenceExtractor ----------------------------------------------
+        // Only the documents THIS round opened; an earlier round's documents
+        // were already read.
+        for (const doc of fetchedDocs.slice(extractedDocCount)) {
+          // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
+          // BEFORE every real extraction attempt, including a retry —
+          // EXTRACT_ATTEMPTED fires once per real attempt via onAttempt.
+          // D-153 — cleared before every call, so a rejection reported for an
+          // earlier document can never be attributed to this one. Cleared
+          // through a helper rather than inline, so the read below stays typed
+          // as the report array instead of being narrowed to the null this
+          // statement just wrote.
+          clearRejectedFacts(usage);
+          // ONE EXTRACT_ATTEMPTED ROW PER REAL, RESERVED EXTRACTION CALL —
+          // the full extraction's attempts and, when one is made, the compact
+          // fallback's single attempt, through the same writer.
+          const recordExtractAttempted = async () => {
             await recordTraceEvent(deps.db, {
               researchJobId: ctx.jobId,
               researchAttemptId: attemptId,
-              operationType: "FETCH_ATTEMPTED",
-              providerKind: "FETCH",
-              providerName: "isolated-render",
+              operationType: "EXTRACT_ATTEMPTED",
+              providerKind: "EXTRACT",
+              providerName: evidenceExtractor.name,
               patternStep: item.step,
               component: item.component,
-              targetRef: acquiredDoc.finalUrl,
+              targetRef: doc.finalUrl,
               status: "OK",
+              budgetAxis: "modelCostMicro",
+              budgetAmount: evidenceExtractorCostMicro,
             });
-            try {
-              const rendered = await resolveRenderedDocsFetcher().render(acquiredDoc.finalUrl, {
-                confirmedHost: eligibility.confirmedHost,
-                matchedPathPrefix: eligibility.matchedPathPrefix,
-              });
-              // The renderer does not know the static measurement that
-              // justified it; the caller does, so it is stamped here.
-              rendered.staticTextLength =
-                acquiredDoc.staticTextLength ?? acquiredDoc.normalizedText.length;
-              acquiredDoc = rendered;
-              acquiredVia = "ISOLATED_RENDER";
-              observations.add("DOCS_RENDERED");
-            } catch (e) {
-              // Fail closed: a failed render is never evidence, and never
-              // fails the attempt — the static document stands as-is.
-              // Same sanitizer as the refusal path: two ways in, one set
-              // of gates, and now one way of saying what went wrong.
-              observations.add(renderFailureObservation("DOCS_RENDER_FAILED", e));
-            }
-          } else {
-            observations.add("DOCS_RENDER_SKIPPED_BUDGET");
-          }
-        }
-        // SEAL WHAT WAS PAID FOR, so a later component meets it in storage
-        // rather than at the origin. Same door the phased FETCH phase uses
-        // (`persistAcquiredDocument`, PRODUCT_ACQUISITION): the seal is a
-        // statement about the transport only — authority is recorded as
-        // resolved on the final url, never granted, and extraction below
-        // and in every later attempt re-resolves it live. A refused seal
-        // (the size bound) or a storage error changes nothing about this
-        // attempt: the document is extracted from memory as before, and the
-        // next encounter simply pays for its own fetch.
-        if (fetchMetered) {
-          try {
-            const sealRoute = await resolveSourceRoute(deps.db, deps.project.id, acquiredDoc.finalUrl);
-            const sealed = await persistAcquiredDocument(deps.db, {
-              projectId: deps.project.id,
-              acquiringJobId: ctx.jobId,
-              doc: acquiredDoc,
-              route: sealRoute,
-              renderMode: acquiredVia === "ISOLATED_RENDER" ? "RENDERED" : "STATIC",
-              acquisitionStrategy: acquiredVia,
-              admission: "PRODUCT_ACQUISITION",
-            });
-            if (!sealed.ok) observations.add(`ACQUIRED_DOCUMENT_NOT_SEALED:${sealed.refusal}`);
-          } catch {
-            observations.add("ACQUIRED_DOCUMENT_NOT_SEALED:STORE_ERROR");
-          }
-        }
-        fetchedDocs.push(acquiredDoc);
-      }
-      if (fetchedDocs.length === 0 && sourceOpenExhaustion !== null) {
-        // Nothing was opened before the axis was refused, so there is
-        // nothing to read first: the denial is terminal exactly as it was
-        // at the boundary.
-        throw sourceOpenExhaustion;
-      }
-      if (fetchedDocs.length === 0) {
-        // No source-open budget denial occurred (one would have thrown just
-        // above) — reaching here with zero documents means every candidate
-        // failed for a non-budget reason.
-        // Folded into the SAME observation channel every other terminal
-        // return here already uses. This path was the one exception, and
-        // it is precisely the path a render-after-refusal ends on — so a
-        // renderer failure was classified correctly and then had nowhere
-        // to be said. For a run executed directly (owner tooling writes no
-        // research_attempts row) this string is the only place it appears
-        // at all. Everything appended is code-owned: the sanitized fetch
-        // reason, plus observation codes this function itself authored.
-        return {
-          status: "FAILED",
-          reason: withObservations(lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED"),
-          spent,
-        };
-      }
-
-      // --- 4. EvidenceExtractor ----------------------------------------------
-      const evidenceExtractorCostMicro = calculateMaxAuthorizedCostMicro(evidenceExtractorProfile);
-      const insertedEvidenceIds: string[] = [];
-      let extractionFailures = 0;
-      let nonOversizedExtractionFailures = 0;
-      for (const doc of fetchedDocs) {
-        // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
-        // BEFORE every real extraction attempt, including a retry —
-        // EXTRACT_ATTEMPTED fires once per real attempt via onAttempt.
-        // D-153 — cleared before every call, so a rejection reported for an
-        // earlier document can never be attributed to this one. Cleared
-        // through a helper rather than inline, so the read below stays typed
-        // as the report array instead of being narrowed to the null this
-        // statement just wrote.
-        clearRejectedFacts(usage);
-        // ONE EXTRACT_ATTEMPTED ROW PER REAL, RESERVED EXTRACTION CALL —
-        // the full extraction's attempts and, when one is made, the compact
-        // fallback's single attempt, through the same writer.
-        const recordExtractAttempted = async () => {
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "EXTRACT_ATTEMPTED",
-            providerKind: "EXTRACT",
-            providerName: evidenceExtractor.name,
-            patternStep: item.step,
-            component: item.component,
-            targetRef: doc.finalUrl,
-            status: "OK",
+          };
+          let extractOutcome = await reserveAndCallWithRetry({
+            db: deps.db,
+            jobId: ctx.jobId,
             budgetAxis: "modelCostMicro",
-            budgetAmount: evidenceExtractorCostMicro,
+            reserveAmount: evidenceExtractorCostMicro,
+            maxBudget: ctx.budget.maxModelCostMicro,
+            label: "EVIDENCE_EXTRACTOR",
+            capability: "EVIDENCE_EXTRACTOR",
+            // Item 6 (S4 final acceptance fix): no input bounding — the
+            // extractor is given the document text exactly as fetched. See
+            // model-cost-profile.ts's module comment for why a chars/token
+            // heuristic was removed rather than kept as a claimed guarantee.
+            fn: () => evidenceExtractor.extract({ target, document: doc }),
+            onAttempt: recordExtractAttempted,
+            // §8/D-120: same MODEL_CALL attempt-cardinality tightening as
+            // QueryProposer above — one FAILED row for the transient
+            // attempt-1 failure, distinct from the row written below for
+            // the resolved (ok/fatal) attempt-2 outcome.
+            onTransientRetry: async (firstAttemptError) => {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "MODEL_CALL_ATTEMPTED",
+                providerKind: "EXTRACT",
+                providerName: evidenceExtractor.name,
+                patternStep: item.step,
+                component: item.component,
+                targetRef: doc.finalUrl,
+                status: "FAILED",
+                reasonCode: classifyTraceReasonCode(firstAttemptError),
+                budgetAxis: "modelCostMicro",
+                budgetAmount: evidenceExtractorCostMicro,
+                // The typed WHY of the failed first attempt (e.g.
+                // NETWORK_NO_RESPONSE, RATE_LIMITED:429), on the row itself.
+                // The live run 06ade56b persisted two FAILED attempt rows
+                // that said only PROVIDER_ERROR while the class sat in the
+                // thrown message — this is the proven gap.
+                diagnosticCode: extractorDiagnosticCode(safeFailureDetail(firstAttemptError)),
+              });
+            },
           });
-        };
-        let extractOutcome = await reserveAndCallWithRetry({
-          db: deps.db,
-          jobId: ctx.jobId,
-          budgetAxis: "modelCostMicro",
-          reserveAmount: evidenceExtractorCostMicro,
-          maxBudget: ctx.budget.maxModelCostMicro,
-          label: "EVIDENCE_EXTRACTOR",
-          capability: "EVIDENCE_EXTRACTOR",
-          // Item 6 (S4 final acceptance fix): no input bounding — the
-          // extractor is given the document text exactly as fetched. See
-          // model-cost-profile.ts's module comment for why a chars/token
-          // heuristic was removed rather than kept as a claimed guarantee.
-          fn: () => evidenceExtractor.extract({ target, document: doc }),
-          onAttempt: recordExtractAttempted,
-          // §8/D-120: same MODEL_CALL attempt-cardinality tightening as
-          // QueryProposer above — one FAILED row for the transient
-          // attempt-1 failure, distinct from the row written below for
-          // the resolved (ok/fatal) attempt-2 outcome.
-          onTransientRetry: async (firstAttemptError) => {
+          spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+
+          // ACQUISITION GRACEFUL DEGRADATION V1 — A PAGE THAT SAYS TOO MUCH IS
+          // NOT A PAGE THAT SAYS NOTHING.
+          //
+          // THE DEFECT THIS CLOSES, measured on the first controlled live
+          // Memory acceptance run (job b5395f96-…) and identically on the run
+          // before it: the ONE documentary open a component made fetched a
+          // rich official page (94,584 normalized characters, inside the
+          // input gate), the model tried to report so much of it that the
+          // output hit the approved ceiling, the response was correctly
+          // refused as MAX_TOKENS_TRUNCATED — and the whole paid-for document
+          // contributed zero facts. The component ended
+          // EVIDENCE_EXTRACTOR_UNAVAILABLE with its best source unread. A
+          // second component lost a document the same way in the same run.
+          //
+          // THE FALLBACK, and its bounds, all of which are visible right here:
+          //   * the SAME already-fetched document (`doc`) — no new search, no
+          //     new fetch, no new source open, no new reservation on either
+          //     of those axes;
+          //   * ONE further model extraction call, never more — `maxAttempts:
+          //     1`, so not even the transient retry every other model call is
+          //     allowed. That one call is reserved and traced exactly like any
+          //     other (its own EXTRACT_ATTEMPTED row, its own modelCostMicro
+          //     reservation, counted into spent.authorizedModelCostMicro);
+          //   * a COMPACT request (evidence-extractor-anthropic.ts): the same
+          //     system prompt and input gate, asking only for the few most
+          //     direct observations on this component's Evidence goal, with
+          //     the fact cap enforced at the output schema;
+          //   * whatever the compact call returns takes the place of the full
+          //     outcome and flows through the IDENTICAL admission below —
+          //     the same per-fact validation, wrong-project/wrong-component
+          //     rejection, traceability check and canonical extraction-unit
+          //     key (job, source, step, component, fragment), so a compact
+          //     fact is the same Evidence identity a full extraction of the
+          //     same passage would have produced;
+          //   * fail closed, again: a compact response that truncates again,
+          //     fails to parse, fails the schema, is oversized, or fails
+          //     transiently is this document's failure exactly as it always
+          //     was — the existing "local" handling records it and moves on.
+          //     No truncated JSON prefix is ever salvaged, from either call.
+          //
+          // The truncated FULL pass is still recorded as its own EXTRACT_FAILED
+          // row with its MAX_TOKENS_TRUNCATED diagnostic: it happened and it
+          // was paid for. What it no longer does is decide the document's
+          // fate by itself — that is the compact pass's to decide — so it is
+          // not counted into this attempt's document-failure tally here.
+          // Only the closed, membership-gated detail is consulted: the detail
+          // is exactly the diagnostic string when it carries no status, which
+          // is the only shape MAX_TOKENS_TRUNCATED ever has.
+          if (extractOutcome.kind === "local" && extractOutcome.detail === "MAX_TOKENS_TRUNCATED") {
+            observations.add("EXTRACT_FAILED:MAX_TOKENS_TRUNCATED");
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "EXTRACT_FAILED",
+              providerKind: "EXTRACT",
+              providerName: evidenceExtractor.name,
+              patternStep: item.step,
+              component: item.component,
+              targetRef: doc.finalUrl,
+              status: "FAILED",
+              reasonCode: extractOutcome.reasonCode ?? "PROVIDER_ERROR",
+              diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
+            });
+            observations.add("EXTRACT_COMPACT_RETRY");
+            clearRejectedFacts(usage);
+            extractOutcome = await reserveAndCallWithRetry({
+              db: deps.db,
+              jobId: ctx.jobId,
+              budgetAxis: "modelCostMicro",
+              reserveAmount: evidenceExtractorCostMicro,
+              maxBudget: ctx.budget.maxModelCostMicro,
+              label: "EVIDENCE_EXTRACTOR",
+              capability: "EVIDENCE_EXTRACTOR",
+              fn: () => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT" }),
+              onAttempt: recordExtractAttempted,
+              maxAttempts: 1,
+            });
+            spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+            if (extractOutcome.kind === "ok") {
+              observations.add("EXTRACT_COMPACT_RETRY_OK");
+            } else {
+              observations.add("EXTRACT_COMPACT_RETRY_FAILED");
+            }
+          }
+
+          if (extractOutcome.kind === "budget_exhausted") {
+            // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): throw AT the denial
+            // boundary, regardless of whether an earlier document in this
+            // same loop already produced admitted Evidence — a non-empty
+            // partial result is not proof the planned extraction work was
+            // complete. Evidence already inserted for prior documents
+            // stays persisted (never deleted); only the terminal execution
+            // outcome for THIS attempt changes from "succeeded" to
+            // "budget-constrained", honestly.
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "CANDIDATE_SKIPPED_BUDGET",
+              patternStep: item.step,
+              component: item.component,
+              targetRef: doc.finalUrl,
+              status: "SKIPPED",
+              reasonCode: extractOutcome.reasonCode ?? "MODEL_COST_BUDGET_EXHAUSTED",
+              budgetAxis: "modelCostMicro",
+              budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
+            });
+            throw new BudgetExhaustedError("modelCostMicro", extractOutcome.reason ?? "MODEL_COST_BUDGET_EXHAUSTED");
+          }
+          // The document-local failure record, shared by a non-transient
+          // ("local") outcome and — new — by a document whose generation
+          // call exhausted the transient retry. One writer, so both paths
+          // persist the same row shape and the same typed diagnostic_code,
+          // and both count toward the attempt's own FAILED /
+          // EVIDENCE_EXTRACTOR_UNAVAILABLE resolution below.
+          const recordDocumentExtractionFailure = async (outcome: {
+            reasonCode?: RetryOutcome<unknown>["reasonCode"];
+            detail?: string | null;
+          }): Promise<void> => {
+            extractionFailures += 1;
+            // S10 acceptance closure (BLOCKER-1, D-119, "IMPORTANT OVERSIZED
+            // INPUT RULE"): an oversized source is a local operational skip,
+            // never evidence of the extractor being unavailable — a batch
+            // where every failure is MODEL_INPUT_OVERSIZED must resolve to
+            // SKIPPED below, not FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE.
+            if (outcome.reasonCode !== "MODEL_INPUT_OVERSIZED") nonOversizedExtractionFailures += 1;
+            // Generation-side closed diagnostic (BACKLOG: "Generation-side
+            // extractor failures lose their class"): when the failure
+            // carries a closed, membership-gated detail, say it in the
+            // observation channel — the same channel DOCS_RENDER_FAILED
+            // already uses. Without this, every non-transient generation
+            // failure collapses to the bare EVIDENCE_EXTRACTOR_UNAVAILABLE
+            // terminal line while the classified WHY is dropped. A failure
+            // with no closed detail adds nothing — never a guessed class.
+            if (outcome.detail) observations.add(`EXTRACT_FAILED:${outcome.detail}`);
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              // S10 (D-090 count-then-gate, §5/§17): reasonCode now
+              // distinguishes MODEL_INPUT_OVERSIZED/TOKEN_COUNT_UNAVAILABLE
+              // from the generic PROVIDER_ERROR catch-all — previously
+              // hardcoded to PROVIDER_ERROR for every EXTRACT_FAILED.
+              operationType: "EXTRACT_FAILED",
+              providerKind: "EXTRACT",
+              providerName: evidenceExtractor.name,
+              patternStep: item.step,
+              component: item.component,
+              targetRef: doc.finalUrl,
+              status: "FAILED",
+              reasonCode: outcome.reasonCode ?? "PROVIDER_ERROR",
+              // THE CLASSIFIED WHY, ON THE ROW ITSELF.
+              //
+              // The observation added just above says the same thing, and on
+              // the D3 flow it is lost: source opens are exhausted, the
+              // documents already paid for are extracted here, and the SAME
+              // budget error is then thrown — so this attempt returns no
+              // result and its observation string is never persisted
+              // anywhere. The live run that proved D3 works ended with
+              // exactly that shape and recorded only PROVIDER_ERROR.
+              //
+              // The trace row is written before any of that, in its own
+              // committed transaction, so the diagnostic survives the throw.
+              // `detail` is already the product of safeFailureDetail's two
+              // gates; this narrows it to the persistable vocabulary, and
+              // recordTraceEvent re-checks membership independently. A
+              // failure with no closed detail persists null — never a guess.
+              diagnosticCode: extractorDiagnosticCode(outcome.detail),
+            });
+          };
+
+          if (extractOutcome.kind === "fatal") {
+            // §8/D-120: budgetAmount covers only THIS (final, still-failing)
+            // attempt — a prior transient attempt-1 failure already has its
+            // own row from onTransientRetry above. The typed WHY is on this
+            // row too, for the same reason it is on that one.
             await recordTraceEvent(deps.db, {
               researchJobId: ctx.jobId,
               researchAttemptId: attemptId,
@@ -2536,194 +2782,79 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               component: item.component,
               targetRef: doc.finalUrl,
               status: "FAILED",
-              reasonCode: classifyTraceReasonCode(firstAttemptError),
+              reasonCode: "PROVIDER_ERROR",
               budgetAxis: "modelCostMicro",
               budgetAmount: evidenceExtractorCostMicro,
-              // The typed WHY of the failed first attempt (e.g.
-              // NETWORK_NO_RESPONSE, RATE_LIMITED:429), on the row itself.
-              // The live run 06ade56b persisted two FAILED attempt rows
-              // that said only PROVIDER_ERROR while the class sat in the
-              // thrown message — this is the proven gap.
-              diagnosticCode: extractorDiagnosticCode(safeFailureDetail(firstAttemptError)),
+              diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
             });
-          },
-        });
-        spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
-
-        // ACQUISITION GRACEFUL DEGRADATION V1 — A PAGE THAT SAYS TOO MUCH IS
-        // NOT A PAGE THAT SAYS NOTHING.
-        //
-        // THE DEFECT THIS CLOSES, measured on the first controlled live
-        // Memory acceptance run (job b5395f96-…) and identically on the run
-        // before it: the ONE documentary open a component made fetched a
-        // rich official page (94,584 normalized characters, inside the
-        // input gate), the model tried to report so much of it that the
-        // output hit the approved ceiling, the response was correctly
-        // refused as MAX_TOKENS_TRUNCATED — and the whole paid-for document
-        // contributed zero facts. The component ended
-        // EVIDENCE_EXTRACTOR_UNAVAILABLE with its best source unread. A
-        // second component lost a document the same way in the same run.
-        //
-        // THE FALLBACK, and its bounds, all of which are visible right here:
-        //   * the SAME already-fetched document (`doc`) — no new search, no
-        //     new fetch, no new source open, no new reservation on either
-        //     of those axes;
-        //   * ONE further model extraction call, never more — `maxAttempts:
-        //     1`, so not even the transient retry every other model call is
-        //     allowed. That one call is reserved and traced exactly like any
-        //     other (its own EXTRACT_ATTEMPTED row, its own modelCostMicro
-        //     reservation, counted into spent.authorizedModelCostMicro);
-        //   * a COMPACT request (evidence-extractor-anthropic.ts): the same
-        //     system prompt and input gate, asking only for the few most
-        //     direct observations on this component's Evidence goal, with
-        //     the fact cap enforced at the output schema;
-        //   * whatever the compact call returns takes the place of the full
-        //     outcome and flows through the IDENTICAL admission below —
-        //     the same per-fact validation, wrong-project/wrong-component
-        //     rejection, traceability check and canonical extraction-unit
-        //     key (job, source, step, component, fragment), so a compact
-        //     fact is the same Evidence identity a full extraction of the
-        //     same passage would have produced;
-        //   * fail closed, again: a compact response that truncates again,
-        //     fails to parse, fails the schema, is oversized, or fails
-        //     transiently is this document's failure exactly as it always
-        //     was — the existing "local" handling records it and moves on.
-        //     No truncated JSON prefix is ever salvaged, from either call.
-        //
-        // The truncated FULL pass is still recorded as its own EXTRACT_FAILED
-        // row with its MAX_TOKENS_TRUNCATED diagnostic: it happened and it
-        // was paid for. What it no longer does is decide the document's
-        // fate by itself — that is the compact pass's to decide — so it is
-        // not counted into this attempt's document-failure tally here.
-        // Only the closed, membership-gated detail is consulted: the detail
-        // is exactly the diagnostic string when it carries no status, which
-        // is the only shape MAX_TOKENS_TRUNCATED ever has.
-        if (extractOutcome.kind === "local" && extractOutcome.detail === "MAX_TOKENS_TRUNCATED") {
-          observations.add("EXTRACT_FAILED:MAX_TOKENS_TRUNCATED");
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "EXTRACT_FAILED",
-            providerKind: "EXTRACT",
-            providerName: evidenceExtractor.name,
-            patternStep: item.step,
-            component: item.component,
-            targetRef: doc.finalUrl,
-            status: "FAILED",
-            reasonCode: extractOutcome.reasonCode ?? "PROVIDER_ERROR",
-            diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
-          });
-          observations.add("EXTRACT_COMPACT_RETRY");
-          clearRejectedFacts(usage);
-          extractOutcome = await reserveAndCallWithRetry({
-            db: deps.db,
-            jobId: ctx.jobId,
-            budgetAxis: "modelCostMicro",
-            reserveAmount: evidenceExtractorCostMicro,
-            maxBudget: ctx.budget.maxModelCostMicro,
-            label: "EVIDENCE_EXTRACTOR",
-            capability: "EVIDENCE_EXTRACTOR",
-            fn: () => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT" }),
-            onAttempt: recordExtractAttempted,
-            maxAttempts: 1,
-          });
-          spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
-          if (extractOutcome.kind === "ok") {
-            observations.add("EXTRACT_COMPACT_RETRY_OK");
-          } else {
-            observations.add("EXTRACT_COMPACT_RETRY_FAILED");
+            const transientCause =
+              extractOutcome.fatalCause === "TRANSIENT_RETRY_EXHAUSTED" ||
+              extractOutcome.fatalCause === "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED";
+            if (!transientCause) {
+              // BLOCKER-1, unchanged: a PERMANENT count_tokens failure
+              // (auth/config/request/unknown — not retried, not transient)
+              // is proven capability unavailability — throw, never return an
+              // ordinary FAILED/SKIPPED result (see the QueryProposer section
+              // above for the full propagation note).
+              throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
+            }
+            // TRANSIENT_RETRY_EXHAUSTED / TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED
+            // — the caller-decided case. This document's generation call, or
+            // its count_tokens call, failed transiently twice (its allowance;
+            // no third call is ever made). It is recorded as the same
+            // document-local EXTRACT_FAILED a non-transient failure gets,
+            // with the same typed diagnostic_code (and, for count_tokens, the
+            // TOKEN_COUNT_UNAVAILABLE reason code the row already
+            // distinguishes), it produces no Evidence and no contradiction,
+            // and the attempt moves to the next document. Should nothing
+            // else in the attempt survive, the existing resolution below
+            // yields FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE — a fact about
+            // the run, never about the project. Only when this is the SECOND
+            // consecutive such document (no successful extraction since the
+            // first) is it the capability-wide signal, thrown exactly as
+            // before.
+            await recordDocumentExtractionFailure({
+              reasonCode: extractOutcome.fatalCause === "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" ? "TOKEN_COUNT_UNAVAILABLE" : "PROVIDER_ERROR",
+              detail: extractOutcome.detail,
+            });
+            consecutiveTransientlyFailedDocuments += 1;
+            if (consecutiveTransientlyFailedDocuments >= CONSECUTIVE_TRANSIENT_DOCUMENTS_FATAL_THRESHOLD) {
+              throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
+            }
+            continue;
           }
-        }
-
-        if (extractOutcome.kind === "budget_exhausted") {
-          // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): throw AT the denial
-          // boundary, regardless of whether an earlier document in this
-          // same loop already produced admitted Evidence — a non-empty
-          // partial result is not proof the planned extraction work was
-          // complete. Evidence already inserted for prior documents
-          // stays persisted (never deleted); only the terminal execution
-          // outcome for THIS attempt changes from "succeeded" to
-          // "budget-constrained", honestly.
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "CANDIDATE_SKIPPED_BUDGET",
-            patternStep: item.step,
-            component: item.component,
-            targetRef: doc.finalUrl,
-            status: "SKIPPED",
-            reasonCode: extractOutcome.reasonCode ?? "MODEL_COST_BUDGET_EXHAUSTED",
-            budgetAxis: "modelCostMicro",
-            budgetAmount: extractOutcome.attempts * evidenceExtractorCostMicro,
-          });
-          throw new BudgetExhaustedError("modelCostMicro", extractOutcome.reason ?? "MODEL_COST_BUDGET_EXHAUSTED");
-        }
-        // The document-local failure record, shared by a non-transient
-        // ("local") outcome and — new — by a document whose generation
-        // call exhausted the transient retry. One writer, so both paths
-        // persist the same row shape and the same typed diagnostic_code,
-        // and both count toward the attempt's own FAILED /
-        // EVIDENCE_EXTRACTOR_UNAVAILABLE resolution below.
-        const recordDocumentExtractionFailure = async (outcome: {
-          reasonCode?: RetryOutcome<unknown>["reasonCode"];
-          detail?: string | null;
-        }): Promise<void> => {
-          extractionFailures += 1;
-          // S10 acceptance closure (BLOCKER-1, D-119, "IMPORTANT OVERSIZED
-          // INPUT RULE"): an oversized source is a local operational skip,
-          // never evidence of the extractor being unavailable — a batch
-          // where every failure is MODEL_INPUT_OVERSIZED must resolve to
-          // SKIPPED below, not FAILED/EVIDENCE_EXTRACTOR_UNAVAILABLE.
-          if (outcome.reasonCode !== "MODEL_INPUT_OVERSIZED") nonOversizedExtractionFailures += 1;
-          // Generation-side closed diagnostic (BACKLOG: "Generation-side
-          // extractor failures lose their class"): when the failure
-          // carries a closed, membership-gated detail, say it in the
-          // observation channel — the same channel DOCS_RENDER_FAILED
-          // already uses. Without this, every non-transient generation
-          // failure collapses to the bare EVIDENCE_EXTRACTOR_UNAVAILABLE
-          // terminal line while the classified WHY is dropped. A failure
-          // with no closed detail adds nothing — never a guessed class.
-          if (outcome.detail) observations.add(`EXTRACT_FAILED:${outcome.detail}`);
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            // S10 (D-090 count-then-gate, §5/§17): reasonCode now
-            // distinguishes MODEL_INPUT_OVERSIZED/TOKEN_COUNT_UNAVAILABLE
-            // from the generic PROVIDER_ERROR catch-all — previously
-            // hardcoded to PROVIDER_ERROR for every EXTRACT_FAILED.
-            operationType: "EXTRACT_FAILED",
-            providerKind: "EXTRACT",
-            providerName: evidenceExtractor.name,
-            patternStep: item.step,
-            component: item.component,
-            targetRef: doc.finalUrl,
-            status: "FAILED",
-            reasonCode: outcome.reasonCode ?? "PROVIDER_ERROR",
-            // THE CLASSIFIED WHY, ON THE ROW ITSELF.
-            //
-            // The observation added just above says the same thing, and on
-            // the D3 flow it is lost: source opens are exhausted, the
-            // documents already paid for are extracted here, and the SAME
-            // budget error is then thrown — so this attempt returns no
-            // result and its observation string is never persisted
-            // anywhere. The live run that proved D3 works ended with
-            // exactly that shape and recorded only PROVIDER_ERROR.
-            //
-            // The trace row is written before any of that, in its own
-            // committed transaction, so the diagnostic survives the throw.
-            // `detail` is already the product of safeFailureDetail's two
-            // gates; this narrows it to the persistable vocabulary, and
-            // recordTraceEvent re-checks membership independently. A
-            // failure with no closed detail persists null — never a guess.
-            diagnosticCode: extractorDiagnosticCode(outcome.detail),
-          });
-        };
-
-        if (extractOutcome.kind === "fatal") {
-          // §8/D-120: budgetAmount covers only THIS (final, still-failing)
-          // attempt — a prior transient attempt-1 failure already has its
-          // own row from onTransientRetry above. The typed WHY is on this
-          // row too, for the same reason it is on that one.
+          if (extractOutcome.kind === "local") {
+            await recordDocumentExtractionFailure(extractOutcome);
+            continue;
+          }
+          // "ok" — the extractor answered: whatever happened to earlier
+          // documents, the capability is reachable now.
+          consecutiveTransientlyFailedDocuments = 0;
+          const facts: ExtractedFact[] = extractOutcome.value!;
+          // D-153 — a fact the canonical schema could not read is dropped
+          // alone; its valid siblings in the same response survive. What is
+          // recorded is the closed, code-owned schema field that rejected it
+          // and this code's own position counter — never the model's text and
+          // never the rejected value. The observation lands on the attempt,
+          // which already carries the step and component this happened under.
+          for (const r of usage.rejectedFacts ?? []) {
+            observations.add(`FACT_SCHEMA_REJECTED:${r.field}:${r.index}`);
+          }
+          // S10 (§7) — audit-only actual usage/cost for THIS document's
+          // extraction call, priced with the SAME approved profile that
+          // sized the reservation above. Captured immediately after this
+          // call (not before the per-document loop) since evidenceExtractor
+          // is resolved once per attempt but called once per document —
+          // the onUsage callback overwrites usage.evidenceExtractor on
+          // every call, so it must be read fresh for each document. MEDIUM-1
+          // (D-119): exactly ONE MODEL_CALL_ATTEMPTED row per document's
+          // successful call — EXTRACT_OK (below, per admitted fact) never
+          // carries usage, avoiding the N-rows-overstate-cost defect.
+          const evidenceExtractorUsage = usage.evidenceExtractor;
+          const evidenceExtractorActualCostMicro =
+            evidenceExtractorUsage && !evidenceExtractorUsage.unsupportedBillingUsage
+              ? calculateActualCostMicro(evidenceExtractorProfile, evidenceExtractorUsage)
+              : null;
           await recordTraceEvent(deps.db, {
             researchJobId: ctx.jobId,
             researchAttemptId: attemptId,
@@ -2733,334 +2864,298 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             patternStep: item.step,
             component: item.component,
             targetRef: doc.finalUrl,
-            status: "FAILED",
-            reasonCode: "PROVIDER_ERROR",
-            budgetAxis: "modelCostMicro",
-            budgetAmount: evidenceExtractorCostMicro,
-            diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
-          });
-          const transientCause =
-            extractOutcome.fatalCause === "TRANSIENT_RETRY_EXHAUSTED" ||
-            extractOutcome.fatalCause === "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED";
-          if (!transientCause) {
-            // BLOCKER-1, unchanged: a PERMANENT count_tokens failure
-            // (auth/config/request/unknown — not retried, not transient)
-            // is proven capability unavailability — throw, never return an
-            // ordinary FAILED/SKIPPED result (see the QueryProposer section
-            // above for the full propagation note).
-            throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
-          }
-          // TRANSIENT_RETRY_EXHAUSTED / TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED
-          // — the caller-decided case. This document's generation call, or
-          // its count_tokens call, failed transiently twice (its allowance;
-          // no third call is ever made). It is recorded as the same
-          // document-local EXTRACT_FAILED a non-transient failure gets,
-          // with the same typed diagnostic_code (and, for count_tokens, the
-          // TOKEN_COUNT_UNAVAILABLE reason code the row already
-          // distinguishes), it produces no Evidence and no contradiction,
-          // and the attempt moves to the next document. Should nothing
-          // else in the attempt survive, the existing resolution below
-          // yields FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE — a fact about
-          // the run, never about the project. Only when this is the SECOND
-          // consecutive such document (no successful extraction since the
-          // first) is it the capability-wide signal, thrown exactly as
-          // before.
-          await recordDocumentExtractionFailure({
-            reasonCode: extractOutcome.fatalCause === "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" ? "TOKEN_COUNT_UNAVAILABLE" : "PROVIDER_ERROR",
-            detail: extractOutcome.detail,
-          });
-          consecutiveTransientlyFailedDocuments += 1;
-          if (consecutiveTransientlyFailedDocuments >= CONSECUTIVE_TRANSIENT_DOCUMENTS_FATAL_THRESHOLD) {
-            throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
-          }
-          continue;
-        }
-        if (extractOutcome.kind === "local") {
-          await recordDocumentExtractionFailure(extractOutcome);
-          continue;
-        }
-        // "ok" — the extractor answered: whatever happened to earlier
-        // documents, the capability is reachable now.
-        consecutiveTransientlyFailedDocuments = 0;
-        const facts: ExtractedFact[] = extractOutcome.value!;
-        // D-153 — a fact the canonical schema could not read is dropped
-        // alone; its valid siblings in the same response survive. What is
-        // recorded is the closed, code-owned schema field that rejected it
-        // and this code's own position counter — never the model's text and
-        // never the rejected value. The observation lands on the attempt,
-        // which already carries the step and component this happened under.
-        for (const r of usage.rejectedFacts ?? []) {
-          observations.add(`FACT_SCHEMA_REJECTED:${r.field}:${r.index}`);
-        }
-        // S10 (§7) — audit-only actual usage/cost for THIS document's
-        // extraction call, priced with the SAME approved profile that
-        // sized the reservation above. Captured immediately after this
-        // call (not before the per-document loop) since evidenceExtractor
-        // is resolved once per attempt but called once per document —
-        // the onUsage callback overwrites usage.evidenceExtractor on
-        // every call, so it must be read fresh for each document. MEDIUM-1
-        // (D-119): exactly ONE MODEL_CALL_ATTEMPTED row per document's
-        // successful call — EXTRACT_OK (below, per admitted fact) never
-        // carries usage, avoiding the N-rows-overstate-cost defect.
-        const evidenceExtractorUsage = usage.evidenceExtractor;
-        const evidenceExtractorActualCostMicro =
-          evidenceExtractorUsage && !evidenceExtractorUsage.unsupportedBillingUsage
-            ? calculateActualCostMicro(evidenceExtractorProfile, evidenceExtractorUsage)
-            : null;
-        await recordTraceEvent(deps.db, {
-          researchJobId: ctx.jobId,
-          researchAttemptId: attemptId,
-          operationType: "MODEL_CALL_ATTEMPTED",
-          providerKind: "EXTRACT",
-          providerName: evidenceExtractor.name,
-          patternStep: item.step,
-          component: item.component,
-          targetRef: doc.finalUrl,
-          status: "OK",
-          // MEDIUM-2: never invent a price for a billable usage category
-          // the approved profile can't safely price.
-          reasonCode: evidenceExtractorUsage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
-          budgetAxis: "modelCostMicro",
-          // §8/D-120: this row covers only THIS (successful) attempt's
-          // cost — a prior transient attempt-1 failure, if any, already
-          // has its own row from onTransientRetry above.
-          budgetAmount: evidenceExtractorCostMicro,
-          actualInputTokens: evidenceExtractorUsage?.inputTokens ?? null,
-          actualOutputTokens: evidenceExtractorUsage?.outputTokens ?? null,
-          actualCostMicro: evidenceExtractorActualCostMicro,
-        });
-
-        // HIGH-2: this document is only eligible to produce Evidence for
-        // THIS project if it literally names the project, OR its source
-        // domain is a human-CONFIRMED SOURCE_ROUTE for the project
-        // (computed below, per-source — a confirmed domain IS the
-        // project's own domain by definition, so text-mention is not
-        // additionally required in that case).
-        const sourceInfo = await findOrCreateSource(deps.db, doc.finalUrl);
-        const route = await resolveSourceRoute(deps.db, deps.project.id, doc.finalUrl);
-        if (route.observation) observations.add(observationCode(route.observation));
-        const projectContained =
-          route.officiality === "CONFIRMED" || documentNamesProject(doc.normalizedText, deps.project);
-        if (!projectContained) {
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "REJECTED_WRONG_PROJECT",
-            patternStep: item.step,
-            component: item.component,
-            targetRef: doc.finalUrl,
-            status: "SKIPPED",
-            reasonCode: "WRONG_PROJECT",
-            sourceId: sourceInfo.id,
-          });
-          continue; // wrong-project document — never persisted, regardless of what the extractor claims
-        }
-
-        // D-089/§7.2a: exact locked precedence — routeClass only supplies
-        // the class at step 6, after every public/project-independent
-        // class (and every shared multi-tenant platform base domain) has
-        // had a chance to positively recognize/exclude the domain.
-        const sourceClass = resolveSourceClass(doc.finalUrl, sourceInfo.sourceType, route.routeClass);
-        // D-134 (RISK 2) — computed once per document, exactly like
-        // sourceClass/officiality above: whether this ONCHAIN_VERIFIABLE
-        // URL is deterministically attributable to the project's
-        // confirmed (chain, tokenAddress). null for every other class —
-        // the axis simply does not apply. Never re-derived by S5; S5 only
-        // ever reads this precomputed column, same discipline as
-        // sourceClass/officiality.
-        const entityBinding = computeEntityBinding(doc.finalUrl, sourceClass, plan.confirmedIdentity);
-
-        // Evidence rows genuinely NEW from THIS document — the strict
-        // eligibility input for the route-candidate observation below.
-        let insertedForDocument = 0;
-        for (const fact of facts) {
-          // D-070/D-072 structural containment: a fact for any OTHER
-          // step/component is not "extra scope generously offered" — it
-          // is discarded outright. The model has no path from here to
-          // the controller, the work queue, or any other component.
-          if (fact.step !== target.step || fact.component !== target.component) {
-            await recordTraceEvent(deps.db, {
-              researchJobId: ctx.jobId,
-              researchAttemptId: attemptId,
-              operationType: "REJECTED_WRONG_COMPONENT",
-              patternStep: fact.step,
-              component: fact.component,
-              targetRef: doc.finalUrl,
-              status: "SKIPPED",
-              reasonCode: "WRONG_COMPONENT",
-              sourceId: sourceInfo.id,
-            });
-            continue;
-          }
-          // §7/D-076/item 12.D: no traceable excerpt in the EXACT document
-          // text the extractor was given -> not Evidence, regardless of
-          // how confident the model sounds. A project name or a support
-          // fragment that exists only OUTSIDE what the model actually saw
-          // must never silently validate model Evidence.
-          if (!isTraceable(doc.normalizedText, fact.supportFragment)) {
-            await recordTraceEvent(deps.db, {
-              researchJobId: ctx.jobId,
-              researchAttemptId: attemptId,
-              operationType: "REJECTED_NOT_TRACEABLE",
-              patternStep: fact.step,
-              component: fact.component,
-              targetRef: doc.finalUrl,
-              status: "SKIPPED",
-              reasonCode: "NOT_TRACEABLE",
-              sourceId: sourceInfo.id,
-            });
-            continue;
-          }
-
-          // EXACT DOCUMENTARY LOCATOR. The model may PROPOSE a concrete
-          // on-chain identifier; this is where the proposal is checked,
-          // and the check — not the prompt — is what decides. A truncated
-          // display form ("99mRw3…pm4F3c") is refused outright, because
-          // the elided characters are not recoverable from it by any
-          // means we would be willing to use. So is an incomplete shape,
-          // and so is a value that does not appear literally in the exact
-          // document text the extractor was given, which is what makes a
-          // reconstructed identifier structurally impossible to admit.
-          //
-          // A refused locator NEVER costs the fact. The fact is still
-          // ordinary documentary evidence and is admitted on its own
-          // merits with the column left NULL: "the page says tokens go to
-          // an address it displays as 99mRw3…pm4F3c" is true, useful, and
-          // simply not a locator.
-          //
-          // ONE FACT MAY IDENTIFY SEVERAL ACCOUNTS, and every one of them
-          // is validated INDEPENDENTLY: a bad entry never contaminates a
-          // good one, and a good entry never launders a bad one. The
-          // scalar proposal and the array are merged here so a model using
-          // either shape reaches the same check.
-          //
-          // FOR THE PROJECT'S OWN CHAIN. The confirmed identity decides which
-          // identifier family a proposal must fit; without one, any complete
-          // family is accepted and none is attributed.
-          const locatorOutcome = validateFactLocators({
-            claimed: [fact.onchainLocator, ...(fact.onchainLocators ?? [])],
-            documentText: doc.normalizedText,
-            chain: plan.confirmedIdentity?.chain ?? null,
-          });
-          for (const refused of locatorOutcome.rejected) {
-            await recordTraceEvent(deps.db, {
-              researchJobId: ctx.jobId,
-              researchAttemptId: attemptId,
-              operationType: "LOCATOR_REJECTED",
-              patternStep: fact.step,
-              component: fact.component,
-              targetRef: doc.finalUrl,
-              status: "SKIPPED",
-              reasonCode: LOCATOR_TRACE_REASON[refused.reason],
-              sourceId: sourceInfo.id,
-            });
-          }
-
-          // MEDIUM-1: deterministic identity for THIS extracted unit —
-          // a replayed identical (job, source, step, component, fragment)
-          // extraction is a no-op, not a duplicate row.
-          const unitKey = extractionUnitKey(ctx.jobId, sourceInfo.id, fact.step, fact.component, fact.supportFragment);
-          const [row] = await deps.db
-            .insert(evidence)
-            .values({
-              researchJobId: ctx.jobId,
-              proofId: null, // JOB_ONLY (D-088) — no Proof exists yet; S5+ territory
-              sourceId: sourceInfo.id,
-              patternStep: fact.step,
-              component: fact.component,
-              relationship: fact.relationship,
-              directness: fact.directness,
-              fragment: fact.supportFragment,
-              summary: fact.statement,
-              mechanismState: fact.mechanismState,
-              // BLOCKER-1: never fact.sourceClass/fact.officiality — those
-              // fields don't exist on ExtractedFact. Computed above,
-              // deterministically, by source-authority.ts.
-              sourceClass,
-              officiality: route.officiality,
-              entityBinding,
-              // Never fact.onchainLocator — only the validator's own
-              // output can reach this column. Now a COMPATIBILITY
-              // PROJECTION of ordinal 0: every locator lives in
-              // evidence_documentary_locators, and this column keeps
-              // showing the first one so existing readers and historical
-              // rows behave identically.
-              documentaryLocator: locatorOutcome.confirmed[0]?.value ?? null,
-              fetchedAt: doc.fetchedAt,
-              publishedAt: fact.publishedAt,
-              doesNotProve: fact.doesNotProve,
-              retrievedUrl: doc.finalUrl,
-              contentHash: doc.contentHash,
-              extractionUnitKey: unitKey,
-            })
-            .onConflictDoNothing({
-              target: evidence.extractionUnitKey,
-              where: sql`${evidence.extractionUnitKey} IS NOT NULL`,
-            })
-            .returning({ id: evidence.id });
-          if (row) {
-            insertedEvidenceIds.push(row.id);
-            insertedForDocument += 1;
-            // Written only when the Evidence row is genuinely NEW — a
-            // replayed extraction unit returns no row, and re-inserting
-            // its locators would be writing children for a fact this
-            // attempt did not create.
-            await persistFactLocators(deps.db, row.id, locatorOutcome.confirmed);
-          }
-          // §J item 18 — links trace to the resulting source/evidence ids
-          // without making the trace table itself readable as Evidence
-          // (no fragment/statement/provenance is copied here, only ids).
-          await recordTraceEvent(deps.db, {
-            researchJobId: ctx.jobId,
-            researchAttemptId: attemptId,
-            operationType: "EXTRACT_OK",
-            providerKind: "EXTRACT",
-            providerName: evidenceExtractor.name,
-            patternStep: fact.step,
-            component: fact.component,
-            targetRef: doc.finalUrl,
             status: "OK",
-            sourceId: sourceInfo.id,
-            evidenceId: row?.id ?? null,
-            // MEDIUM-1 (D-119): usage/cost lives on the ONE MODEL_CALL_ATTEMPTED
-            // row for this document's call (above), never duplicated
-            // across every admitted fact — summing actual_cost_micro
-            // over MODEL_CALL_ATTEMPTED alone gives the true cost.
+            // MEDIUM-2: never invent a price for a billable usage category
+            // the approved profile can't safely price.
+            reasonCode: evidenceExtractorUsage?.unsupportedBillingUsage ? "UNSUPPORTED_BILLING_USAGE" : "NONE",
+            budgetAxis: "modelCostMicro",
+            // §8/D-120: this row covers only THIS (successful) attempt's
+            // cost — a prior transient attempt-1 failure, if any, already
+            // has its own row from onTransientRetry above.
+            budgetAmount: evidenceExtractorCostMicro,
+            actualInputTokens: evidenceExtractorUsage?.inputTokens ?? null,
+            actualOutputTokens: evidenceExtractorUsage?.outputTokens ?? null,
+            actualCostMicro: evidenceExtractorActualCostMicro,
           });
-        }
 
-        // UNSEEN PROJECT AUTHORITY BOOTSTRAP V1 — observe, never trust.
-        // This document passed containment and yielded Evidence this
-        // project can see; if its host is one no code-owned list knows and
-        // no human has confirmed (route resolved CLAIMED on finalUrl, the
-        // same resolution the Evidence rows above were sealed with), record
-        // the host as an OBSERVED route candidate for the owner to read.
-        // The candidate confers nothing — sourceClass/officiality above are
-        // already computed and persisted, and no authority consumer reads
-        // OBSERVED — and it never costs the attempt: a bookkeeping failure
-        // is an observation, not a research outcome.
-        if (insertedForDocument > 0) {
-          try {
-            const candidate = await observeSourceRouteCandidate(deps.db, {
-              projectId: deps.project.id,
-              jobId: ctx.jobId,
-              sourceId: sourceInfo.id,
-              finalUrl: doc.finalUrl,
+          // HIGH-2: this document is only eligible to produce Evidence for
+          // THIS project if it literally names the project, OR its source
+          // domain is a human-CONFIRMED SOURCE_ROUTE for the project
+          // (computed below, per-source — a confirmed domain IS the
+          // project's own domain by definition, so text-mention is not
+          // additionally required in that case).
+          const sourceInfo = await findOrCreateSource(deps.db, doc.finalUrl);
+          const route = await resolveSourceRoute(deps.db, deps.project.id, doc.finalUrl);
+          if (route.observation) observations.add(observationCode(route.observation));
+          const projectContained =
+            route.officiality === "CONFIRMED" || documentNamesProject(doc.normalizedText, deps.project);
+          if (!projectContained) {
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "REJECTED_WRONG_PROJECT",
+              patternStep: item.step,
               component: item.component,
-              evidenceCount: insertedForDocument,
-              route,
+              targetRef: doc.finalUrl,
+              status: "SKIPPED",
+              reasonCode: "WRONG_PROJECT",
+              sourceId: sourceInfo.id,
             });
-            if (candidate.outcome === "OBSERVED" || candidate.outcome === "UPDATED") {
-              observations.add(`SOURCE_ROUTE_CANDIDATE_OBSERVED:${candidate.domain}`);
-            } else if (candidate.reason === "CAP_REACHED") {
-              observations.add("SOURCE_ROUTE_CANDIDATE_CAP_REACHED");
+            continue; // wrong-project document — never persisted, regardless of what the extractor claims
+          }
+
+          // D-089/§7.2a: exact locked precedence — routeClass only supplies
+          // the class at step 6, after every public/project-independent
+          // class (and every shared multi-tenant platform base domain) has
+          // had a chance to positively recognize/exclude the domain.
+          const sourceClass = resolveSourceClass(doc.finalUrl, sourceInfo.sourceType, route.routeClass);
+          // D-134 (RISK 2) — computed once per document, exactly like
+          // sourceClass/officiality above: whether this ONCHAIN_VERIFIABLE
+          // URL is deterministically attributable to the project's
+          // confirmed (chain, tokenAddress). null for every other class —
+          // the axis simply does not apply. Never re-derived by S5; S5 only
+          // ever reads this precomputed column, same discipline as
+          // sourceClass/officiality.
+          const entityBinding = computeEntityBinding(doc.finalUrl, sourceClass, plan.confirmedIdentity);
+
+          // Evidence rows genuinely NEW from THIS document — the strict
+          // eligibility input for the route-candidate observation below.
+          let insertedForDocument = 0;
+          let usableForDocument = 0;
+          for (const fact of facts) {
+            // D-070/D-072 structural containment: a fact for any OTHER
+            // step/component is not "extra scope generously offered" — it
+            // is discarded outright. The model has no path from here to
+            // the controller, the work queue, or any other component.
+            if (fact.step !== target.step || fact.component !== target.component) {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "REJECTED_WRONG_COMPONENT",
+                patternStep: fact.step,
+                component: fact.component,
+                targetRef: doc.finalUrl,
+                status: "SKIPPED",
+                reasonCode: "WRONG_COMPONENT",
+                sourceId: sourceInfo.id,
+              });
+              continue;
             }
-          } catch (e) {
-            console.error("[s4-executor] source route candidate observation failed", e);
-            observations.add("SOURCE_ROUTE_CANDIDATE_WRITE_FAILED");
+            // §7/D-076/item 12.D: no traceable excerpt in the EXACT document
+            // text the extractor was given -> not Evidence, regardless of
+            // how confident the model sounds. A project name or a support
+            // fragment that exists only OUTSIDE what the model actually saw
+            // must never silently validate model Evidence.
+            if (!isTraceable(doc.normalizedText, fact.supportFragment)) {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "REJECTED_NOT_TRACEABLE",
+                patternStep: fact.step,
+                component: fact.component,
+                targetRef: doc.finalUrl,
+                status: "SKIPPED",
+                reasonCode: "NOT_TRACEABLE",
+                sourceId: sourceInfo.id,
+              });
+              continue;
+            }
+            // Past both local gates: this is a usable fact for this component
+            // whether or not the insert below turns out to be a replay no-op.
+            usableFacts += 1;
+            usableForDocument += 1;
+
+            // EXACT DOCUMENTARY LOCATOR. The model may PROPOSE a concrete
+            // on-chain identifier; this is where the proposal is checked,
+            // and the check — not the prompt — is what decides. A truncated
+            // display form ("99mRw3…pm4F3c") is refused outright, because
+            // the elided characters are not recoverable from it by any
+            // means we would be willing to use. So is an incomplete shape,
+            // and so is a value that does not appear literally in the exact
+            // document text the extractor was given, which is what makes a
+            // reconstructed identifier structurally impossible to admit.
+            //
+            // A refused locator NEVER costs the fact. The fact is still
+            // ordinary documentary evidence and is admitted on its own
+            // merits with the column left NULL: "the page says tokens go to
+            // an address it displays as 99mRw3…pm4F3c" is true, useful, and
+            // simply not a locator.
+            //
+            // ONE FACT MAY IDENTIFY SEVERAL ACCOUNTS, and every one of them
+            // is validated INDEPENDENTLY: a bad entry never contaminates a
+            // good one, and a good entry never launders a bad one. The
+            // scalar proposal and the array are merged here so a model using
+            // either shape reaches the same check.
+            //
+            // FOR THE PROJECT'S OWN CHAIN. The confirmed identity decides which
+            // identifier family a proposal must fit; without one, any complete
+            // family is accepted and none is attributed.
+            const locatorOutcome = validateFactLocators({
+              claimed: [fact.onchainLocator, ...(fact.onchainLocators ?? [])],
+              documentText: doc.normalizedText,
+              chain: plan.confirmedIdentity?.chain ?? null,
+            });
+            for (const refused of locatorOutcome.rejected) {
+              await recordTraceEvent(deps.db, {
+                researchJobId: ctx.jobId,
+                researchAttemptId: attemptId,
+                operationType: "LOCATOR_REJECTED",
+                patternStep: fact.step,
+                component: fact.component,
+                targetRef: doc.finalUrl,
+                status: "SKIPPED",
+                reasonCode: LOCATOR_TRACE_REASON[refused.reason],
+                sourceId: sourceInfo.id,
+              });
+            }
+
+            // MEDIUM-1: deterministic identity for THIS extracted unit —
+            // a replayed identical (job, source, step, component, fragment)
+            // extraction is a no-op, not a duplicate row.
+            const unitKey = extractionUnitKey(ctx.jobId, sourceInfo.id, fact.step, fact.component, fact.supportFragment);
+            const [row] = await deps.db
+              .insert(evidence)
+              .values({
+                researchJobId: ctx.jobId,
+                proofId: null, // JOB_ONLY (D-088) — no Proof exists yet; S5+ territory
+                sourceId: sourceInfo.id,
+                patternStep: fact.step,
+                component: fact.component,
+                relationship: fact.relationship,
+                directness: fact.directness,
+                fragment: fact.supportFragment,
+                summary: fact.statement,
+                mechanismState: fact.mechanismState,
+                // BLOCKER-1: never fact.sourceClass/fact.officiality — those
+                // fields don't exist on ExtractedFact. Computed above,
+                // deterministically, by source-authority.ts.
+                sourceClass,
+                officiality: route.officiality,
+                entityBinding,
+                // Never fact.onchainLocator — only the validator's own
+                // output can reach this column. Now a COMPATIBILITY
+                // PROJECTION of ordinal 0: every locator lives in
+                // evidence_documentary_locators, and this column keeps
+                // showing the first one so existing readers and historical
+                // rows behave identically.
+                documentaryLocator: locatorOutcome.confirmed[0]?.value ?? null,
+                fetchedAt: doc.fetchedAt,
+                publishedAt: fact.publishedAt,
+                doesNotProve: fact.doesNotProve,
+                retrievedUrl: doc.finalUrl,
+                contentHash: doc.contentHash,
+                extractionUnitKey: unitKey,
+              })
+              .onConflictDoNothing({
+                target: evidence.extractionUnitKey,
+                where: sql`${evidence.extractionUnitKey} IS NOT NULL`,
+              })
+              .returning({ id: evidence.id });
+            if (row) {
+              insertedEvidenceIds.push(row.id);
+              insertedForDocument += 1;
+              // Written only when the Evidence row is genuinely NEW — a
+              // replayed extraction unit returns no row, and re-inserting
+              // its locators would be writing children for a fact this
+              // attempt did not create.
+              await persistFactLocators(deps.db, row.id, locatorOutcome.confirmed);
+            }
+            // §J item 18 — links trace to the resulting source/evidence ids
+            // without making the trace table itself readable as Evidence
+            // (no fragment/statement/provenance is copied here, only ids).
+            await recordTraceEvent(deps.db, {
+              researchJobId: ctx.jobId,
+              researchAttemptId: attemptId,
+              operationType: "EXTRACT_OK",
+              providerKind: "EXTRACT",
+              providerName: evidenceExtractor.name,
+              patternStep: fact.step,
+              component: fact.component,
+              targetRef: doc.finalUrl,
+              status: "OK",
+              sourceId: sourceInfo.id,
+              evidenceId: row?.id ?? null,
+              // MEDIUM-1 (D-119): usage/cost lives on the ONE MODEL_CALL_ATTEMPTED
+              // row for this document's call (above), never duplicated
+              // across every admitted fact — summing actual_cost_micro
+              // over MODEL_CALL_ATTEMPTED alone gives the true cost.
+            });
+          }
+
+          if (usableForDocument === 0) documentsYieldingNothing += 1;
+
+          // UNSEEN PROJECT AUTHORITY BOOTSTRAP V1 — observe, never trust.
+          // This document passed containment and yielded Evidence this
+          // project can see; if its host is one no code-owned list knows and
+          // no human has confirmed (route resolved CLAIMED on finalUrl, the
+          // same resolution the Evidence rows above were sealed with), record
+          // the host as an OBSERVED route candidate for the owner to read.
+          // The candidate confers nothing — sourceClass/officiality above are
+          // already computed and persisted, and no authority consumer reads
+          // OBSERVED — and it never costs the attempt: a bookkeeping failure
+          // is an observation, not a research outcome.
+          if (insertedForDocument > 0) {
+            try {
+              const candidate = await observeSourceRouteCandidate(deps.db, {
+                projectId: deps.project.id,
+                jobId: ctx.jobId,
+                sourceId: sourceInfo.id,
+                finalUrl: doc.finalUrl,
+                component: item.component,
+                evidenceCount: insertedForDocument,
+                route,
+              });
+              if (candidate.outcome === "OBSERVED" || candidate.outcome === "UPDATED") {
+                observations.add(`SOURCE_ROUTE_CANDIDATE_OBSERVED:${candidate.domain}`);
+              } else if (candidate.reason === "CAP_REACHED") {
+                observations.add("SOURCE_ROUTE_CANDIDATE_CAP_REACHED");
+              }
+            } catch (e) {
+              console.error("[s4-executor] source route candidate observation failed", e);
+              observations.add("SOURCE_ROUTE_CANDIDATE_WRITE_FAILED");
+            }
           }
         }
-      }
+        extractedDocCount = fetchedDocs.length;
+
+        // THE CONTINUATION DECISION (see the rule above the rounds). Every
+        // clause is a fact this attempt already established; nothing here
+        // judges usefulness, relevance or authority.
+        if (
+          acquisitionRound === 1 &&
+          // A replay executor is not rationed by the metered axis and already
+          // reads every sealed document; there is nothing to continue to.
+          fetchMetered &&
+          sourceOpenExhaustion === null &&
+          // Exactly one candidate opened under the ration, and it was read.
+          opensAttempted === 1 &&
+          fetchedDocs.length === 1 &&
+          // It completed acquisition (no fetch/extraction failure, passed
+          // containment) and admitted nothing for this component.
+          extractionFailures === 0 &&
+          documentsYieldingNothing === 1 &&
+          usableFacts === 0 &&
+          // An already-discovered candidate remains, never re-searched.
+          candidateCursor < orderedCandidates.length
+        ) {
+          // Room for one more open AND one more extraction, read live from
+          // the same ledgers the reservations below are made against, so a
+          // continuation can never be the reservation that ends the job.
+          const reservedNow = await readJobBudgetReserved(deps.db, ctx.jobId);
+          const roomToOpen = reservedNow !== null && reservedNow.sourceOpens < documentaryMaxSourceOpens;
+          const roomToExtract =
+            reservedNow !== null &&
+            reservedNow.modelCostMicro + evidenceExtractorCostMicro <= ctx.budget.maxModelCostMicro;
+          if (roomToOpen && roomToExtract) {
+            observations.add("DOCUMENTARY_CANDIDATE_CONTINUATION");
+            // Exactly one more open: the ration is raised by one, once.
+            openAllowance = opensAttempted + 1;
+            continue;
+          }
+          observations.add("DOCUMENTARY_CANDIDATE_CONTINUATION_SKIPPED_BUDGET");
+        }
+        break;
+        }
 
       // D3 — THE PAID-FOR DOCUMENTS HAVE NOW BEEN READ. Every Evidence row
       // and every admitted locator they yielded is persisted above; the

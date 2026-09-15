@@ -2,42 +2,35 @@
 
 > Overwrite this file each round. Never append.
 
-## ACQUISITION GRACEFUL DEGRADATION V1 (done this round)
+## DOCUMENTARY CANDIDATE CONTINUATION V1 (done this round)
 
-Offline round. No live/API/RPC call, no A2 rerun, no Research B, no Memory
-enabled, no schema change, no budget change.
+Offline round. No live/API/RPC call, no rerun, no Memory change, no
+budget change, no schema change.
 
-**Proven from A2's persisted trace (job `b5395f96-…`):**
+**Proven from A2-prime's persisted trace (job `58eeba58-…`):**
+MECHANISM_SPEC → one search → five confirmed OFFICIAL_DOCS candidates →
+fair share allowed one open → first document extracted cleanly with an
+empty facts array → component stopped → INSUFFICIENT_EVIDENCE with 11
+global source opens unused.
 
-1. `FLOW_PATH` / `RECIPIENT` / `EXECUTION_EVIDENCE`: one fair-share search
-   unit → `MODEL_CALL_SKIPPED` (proposer) → the only query was the
-   explorer locator → every candidate
-   `SKIPPED_EXPLORER_HTTP_ONCHAIN_PATH_OWNS_FACT` →
-   `NO_SOURCE_COULD_BE_FETCHED`.
-2. `MECHANISM_SPEC`: one open of a 94,584-character sealed page →
-   `EXTRACT_FAILED` diagnostic `MAX_TOKENS_TRUNCATED` →
-   `EVIDENCE_EXTRACTOR_UNAVAILABLE`.
+**Fixed generically** (see the DOCUMENTARY CANDIDATE CONTINUATION V1
+section of `CURRENT_STATE.md`): the open→extract sequence in
+`s4-executor.ts` runs in at most two rounds over the same ordered
+candidate list; the second round is entered only when the single opened
+document completed acquisition and admitted zero facts, an un-opened
+candidate remains, and live ledgers show room for one more open and one
+more extraction. Maximum extra work: +1 open, +1 extraction. No proposer,
+no search, no reopen, no ceiling change.
 
-**Fixed generically** — see the ACQUISITION GRACEFUL DEGRADATION V1 section
-of `CURRENT_STATE.md`:
+**Search-budget audit** (reported, not fixed): (a) the last component's
+refused search throws before its already-paid candidates are opened;
+(b) components with no reachable admissible documentary class
+(GOVERNANCE-only / OFFICIAL_REPORT-only without a confirmed route) spend
+searches S5 must exclude. Both need a Founder decision.
 
-- `documentaryExecutableLocators` (`acquisition-targeting.ts`): a locator is
-  a documentary search opportunity only when the explorer open is the
-  mechanism. `s4-executor.ts` decides `explorerHttpOpenIsNotTheMechanism`
-  once, before query planning, and feeds both the source-open filter and
-  the proposer-skip / targeting inputs from it.
-- `EvidenceExtractionInput.mode = "COMPACT"`: one bounded compact
-  extraction of the same document after `MAX_TOKENS_TRUNCATED`, at most
-  `COMPACT_EXTRACTION_MAX_FACTS` (5) direct facts, `maxAttempts: 1`, fail
-  closed on a second truncation or invalid output.
-
-Tests: `tests/acquisition-graceful-degradation-v1.test.ts` (new, 17 cases);
-`acquisition-candidate-reachability-v1` B2 and `generation-diagnostic` 17
-updated to the new invariants.
+Tests: `tests/documentary-candidate-continuation-v1.test.ts` (new, 13).
 
 ### Next
 
-- Request Founder approval for ONE A2′ + ONE B (same frozen question, same
-  alpha budget). Expected cost per run ≈ A2's $0.17 plus at most one
-  compact extraction per truncated document; the search-target fix adds no
-  spend (it redirects an already-authorised unit).
+- Founder decision on audit items (a)/(b); then, with new approval, ONE
+  A2-double-prime + ONE B.
