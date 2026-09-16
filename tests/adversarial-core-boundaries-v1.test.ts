@@ -189,14 +189,16 @@ describe("H. documented boundaries — current behaviour, Founder decision pendi
     expect(r.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
   });
 
-  it("H5. reasoned exclusion carries no confidence cap: a SUPPORTED single-atom claim sits at STRONG while every unrelated component holds only excluded (SOCIAL) evidence", () => {
+  it("H5 (DECIDED, Round 6.5): reasoned exclusion is exclusion-shaped absence and caps like absence — a SUPPORTED single-atom claim sits at LOW while every unrelated component holds only excluded (SOCIAL) evidence, exactly where it sits with those components empty", () => {
     // PASSIVE_HOLDER_OUTCOME asks only recipientKind. RECIPIENT is a
     // CONFIRMED official statement; execution and current state are fresh
     // chain reads (CLAIMED, so STRONG cap). Every other component saw only
-    // a SOCIAL page, so it is ALL_EVIDENCE_EXCLUDED — which, unlike bare
-    // absence (NO_EVIDENCE_FOUND, LOW), deliberately caps nothing. The
-    // gaps on the claim's own flow block no atom and are not counted as a
-    // context gap either, so nothing pulls the band below STRONG.
+    // a SOCIAL page, so it is ALL_EVIDENCE_EXCLUDED — which used to cap
+    // nothing (this test pinned STRONG / 60) and, by Founder decision 2
+    // (2026-09-16, EXCLUDED EVIDENCE != CONFIDENCE), now caps exactly as
+    // bare absence does: the control with those SOCIAL rows removed is
+    // NO_EVIDENCE_FOUND on the same components, and an inadmissible
+    // addition may never leave the Proof stronger than that control.
     const social = (component: string) => row(component, { sourceClass: "SOCIAL", officiality: "CLAIMED" });
     const pool = [
       row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
@@ -207,10 +209,16 @@ describe("H. documented boundaries — current behaviour, Founder decision pendi
     const { claim, proof, byComponent } = runChain("PASSIVE_HOLDER_OUTCOME", pool);
     expect(claim.status).toBe("SUPPORTED");
     expect(byComponent.get("SOURCE_OF_VALUE")!.reasonCodes).toEqual(["ALL_EVIDENCE_EXCLUDED"]);
-    expect(proof.confidenceScore).toBe(60);
+    expect(proof.confidenceScore).toBe(20);
+    expect(proof.confidenceBindingReasons).toContain("ALL_EVIDENCE_EXCLUDED");
     // The unestablished components ARE on the record — as layer-6 gaps.
     expect(proof.gaps.some((g) => g.component === "SOURCE_OF_VALUE")).toBe(true);
     expect(proof.gaps.some((g) => g.component === "MECHANISM_SPEC")).toBe(true);
+    // The control: the same claim with those components EMPTY.
+    const control = runChain("PASSIVE_HOLDER_OUTCOME", pool.filter((r) => r.sourceClass !== "SOCIAL"));
+    expect(control.claim.status).toBe("SUPPORTED");
+    expect(control.proof.confidenceScore).toBe(20);
+    expect(proof.citedEvidenceIds).toEqual(control.proof.citedEvidenceIds);
   });
 
   it("H6. an established DEPRECATED current state with no execution record is NOT_ESTABLISHED lifecycle, so 'is it current?' is INSUFFICIENT rather than answered 'no'", () => {

@@ -372,30 +372,33 @@ describe("F1. adding weak, foreign, inadmissible or irrelevant evidence must not
     }
   });
 
-  it("F1c. BOUNDARY D-101 (accepted limitation v1) IN METAMORPHIC FORM — a SECOND agreeing admissible row at a fork point (another official page for SOURCE_OF_VALUE or FLOW_PATH; a weak CLAIMED governance row for SOURCE_OF_VALUE; four more distinct burn observations at EXECUTION_EVIDENCE) splits the lineage, downstream rows become BRANCH_ATTRIBUTION_UNRESOLVED, and the claim WEAKENS (PARTIAL -> UNSATISFIED). Never stronger; the error direction is over-splitting, never false merging", () => {
+  it("F1c. DECIDED (Round 6.5, Founder decision 3) — a SECOND agreeing admissible row at a fork point (another official page for SOURCE_OF_VALUE or FLOW_PATH; a weak CLAIMED governance row for SOURCE_OF_VALUE; four more distinct burn observations at EXECUTION_EVIDENCE) still splits the lineage (D-101 slot identity untouched), but the rows after the fork name no branch and continue the trunk on every branch: no BRANCH_ATTRIBUTION_UNRESOLVED, and the claim is exactly the control's. The full pin is founder-semantics-round6-5-v1 (F, G, G2)", () => {
     const base = world();
-    const cases: { label: string; intent: string; rows: EvidenceRow[]; gapAt: string }[] = [
-      { label: "second official SOURCE_OF_VALUE page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { fragment: "protocol fees paid by users generate the revenue", sourceId: "another-official-page" })], gapAt: "DESTINATION" },
-      { label: "second official FLOW_PATH page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("FLOW_PATH", { sourceId: "another-official-page" })], gapAt: "DESTINATION" },
-      { label: "weak CLAIMED governance row for SOURCE_OF_VALUE", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", publishedAt: older(2) })], gapAt: "DESTINATION" },
-      { label: "four more distinct burns at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null })), gapAt: "NET_EFFECT" },
+    const cases: { label: string; intent: string; rows: EvidenceRow[]; downstream: string }[] = [
+      { label: "second official SOURCE_OF_VALUE page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { fragment: "protocol fees paid by users generate the revenue", sourceId: "another-official-page" })], downstream: "DESTINATION" },
+      { label: "second official FLOW_PATH page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("FLOW_PATH", { sourceId: "another-official-page" })], downstream: "DESTINATION" },
+      { label: "weak CLAIMED governance row for SOURCE_OF_VALUE", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", publishedAt: older(2) })], downstream: "DESTINATION" },
+      { label: "four more distinct burns at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null })), downstream: "NET_EFFECT" },
     ];
     for (const k of cases) {
       const control = runChain(k.intent, base);
       const t = runChain(k.intent, [...base, ...k.rows]);
       noStrongerThan(t, control, k.label);
       provenanceHolds(t);
-      // THE BOUNDARY: the lineage forks at the added slot and the rows after
-      // the fork (from other sources) cannot be attributed to a branch.
+      // The structure still forks — and every branch carries the row after
+      // the fork.
       expect(t.assembly.flows.length, k.label).toBeGreaterThan(control.assembly.flows.length);
-      expect(t.proof.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === k.gapAt), k.label).toBe(true);
-      expect(t.claim.requirementResults.some((r) => r.status === "UNSATISFIED"), k.label).toBe(true);
-      expect(t.proof.verdict).not.toBe("SUPPORTED");
+      expect(t.proof.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED"), k.label).toBe(false);
+      for (const f of t.assembly.flows) expect(f.lineage.some((s) => s.component === k.downstream), k.label).toBe(true);
+      // The conclusion is the control's: verdict, band, requirements, S5.
+      expect(t.proof.verdict, k.label).toBe(control.proof.verdict);
+      expect(t.proof.confidenceScore, k.label).toBe(control.proof.confidenceScore);
+      expect(t.claim.requirementResults.map((r) => `${r.requirementId}:${r.status}`), k.label).toEqual(control.claim.requirementResults.map((r) => `${r.requirementId}:${r.status}`));
+      expect(t.results.map((r) => [r.component, r.status, r.reasonCodes]), k.label).toEqual(control.results.map((r) => [r.component, r.status, r.reasonCodes]));
       nonNegative(t);
     }
     // The same addition at a slot that is NOT upstream of anything the
-    // claim needs (a second official DESTINATION page) forks without
-    // breaking attribution: the conclusion is identical.
+    // claim needs (a second official DESTINATION page): identical too.
     const control = runChain("PROTOCOL_REVENUE_TO_TOKEN", base);
     const t = runChain("PROTOCOL_REVENUE_TO_TOKEN", [...base, row("DESTINATION", { sourceId: "another-official-page" })]);
     expect(t.claim.requirementResults.map((r) => r.status)).toEqual(control.claim.requirementResults.map((r) => r.status));
@@ -888,7 +891,7 @@ describe("F12. confidence invariants", () => {
     }
   });
 
-  it("F12b. BOUNDARY H5 IN METAMORPHIC FORM — adding ONLY inadmissible rows (social posts) to components that had nothing raises the band from LOW to VERY_STRONG on a SUPPORTED verdict, with the same admissible evidence: reasoned exclusion carries no cap while bare absence caps at LOW (pinned pending the Founder's H5 decision)", () => {
+  it("F12b. DECIDED (Round 6.5, Founder decision 2) — adding ONLY inadmissible rows (social posts) to components that had nothing leaves the band exactly where bare absence leaves it: 20 -> 20 on a SUPPORTED verdict, the exclusion recorded, nothing new cited. The full pin is founder-semantics-round6-5-v1 (C, D, E)", () => {
     const supported = [
       row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
       confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
@@ -902,9 +905,9 @@ describe("F12. confidence invariants", () => {
     expect(withTweets.proof.verdict).toBe("SUPPORTED");
     expect(withTweets.proof.citedEvidenceIds).toEqual(empty.proof.citedEvidenceIds);
     for (const t of tweets) expect(withTweets.byComponent.get(t.component!)!.reasonCodes).toEqual(["ALL_EVIDENCE_EXCLUDED"]);
-    // THE BOUNDARY (H5): 20 -> 80 on inadmissible rows alone.
-    expect(withTweets.proof.confidenceScore).toBe(80);
-    expect(withTweets.proof.confidenceBindingReasons).toEqual(["VERDICT_CEILING"]);
+    // Excluded evidence is confidence-neutral: the same band as absence.
+    expect(withTweets.proof.confidenceScore).toBe(20);
+    expect(withTweets.proof.confidenceBindingReasons).toEqual(["ALL_EVIDENCE_EXCLUDED"]);
     // The gaps still say every one of those components is unestablished.
     for (const t of tweets) expect(withTweets.proof.gaps.some((g) => g.component === t.component && g.kind === "ALL_EVIDENCE_EXCLUDED")).toBe(true);
   });

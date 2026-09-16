@@ -170,7 +170,7 @@ describe("persistence (items 18, 19, 22, 23, 24, 25)", () => {
     expect(out.refusal).toBeNull();
     const [row] = await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, f.jobId));
     expect(row.verdict).toBe("INSUFFICIENT_EVIDENCE");
-    expect(row.confidence).toBe(60); // reasoned exclusion, no blocking gap
+    expect(row.confidence).toBe(20); // exclusion-shaped absence caps like absence (Round 6.5, Founder decision 2)
     const layers = JSON.stringify(row.layers);
     expect(layers).toContain("ALL_EVIDENCE_EXCLUDED");
     expect(layers).toContain("RELATIONSHIP_NOT_SUPPORTING");

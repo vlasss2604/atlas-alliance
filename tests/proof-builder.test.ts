@@ -354,7 +354,10 @@ describe("D-135 acceptance: the five ratified fixture cases", () => {
     expect(out.proof!.confidenceBindingReasons).toContain("INSUFFICIENT_AUTHORITY");
   });
 
-  it("C. ALL_EVIDENCE_EXCLUDED with a required blocking gap -> 40 / LIMITED", () => {
+  // ROUND 6.5 (Founder decision 2): ALL_EVIDENCE_EXCLUDED is exclusion-
+  // shaped absence and caps at LOW like NO_EVIDENCE_FOUND; the blocking
+  // gap's LIMITED cap no longer binds because the lower one does.
+  it("C. ALL_EVIDENCE_EXCLUDED with a required blocking gap -> 20 / LOW (the exclusion caps like absence; the blocking gap is recorded, not binding)", () => {
     const excluded = ["x1", "x2", "x3", "x4", "x5", "x6"];
     const out = buildProof(
       input({
@@ -381,9 +384,10 @@ describe("D-135 acceptance: the five ratified fixture cases", () => {
       }),
     );
     expect(out.proof!.verdict).toBe("INSUFFICIENT_EVIDENCE");
-    expect(out.proof!.confidenceScore).toBe(40);
-    expect(out.proof!.confidenceBand).toBe("LIMITED");
-    expect(out.proof!.confidenceBindingReasons).toContain("REQUIRED_BLOCKING_GAP");
+    expect(out.proof!.confidenceScore).toBe(20);
+    expect(out.proof!.confidenceBand).toBe("LOW");
+    expect(out.proof!.confidenceBindingReasons).toEqual(["ALL_EVIDENCE_EXCLUDED"]);
+    expect(out.proof!.gaps.some((g) => g.kind === "MISSING_COMPONENT" && g.origin === "REQUIREMENT_BLOCKING")).toBe(true);
     expect(out.proof!.citedEvidenceIds).toEqual([]);
   });
 

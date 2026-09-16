@@ -93,14 +93,21 @@ describe("the non-monotonicity that makes the field informative (items 3-6)", ()
     expect(out.score).toBe(80);
   });
 
-  it("4. INSUFFICIENT_EVIDENCE can be STRONG when the exclusion was reasoned", () => {
+  // ROUND 6.5 (Founder decision 2) — EXCLUDED EVIDENCE != CONFIDENCE. This
+  // item used to pin "INSUFFICIENT_EVIDENCE can be STRONG when the
+  // exclusion was reasoned" (60). Reasoned exclusion is exclusion-shaped
+  // absence: the same component with the excluded rows removed is
+  // NO_EVIDENCE_FOUND, and an inadmissible addition may never read
+  // stronger than that control.
+  it("4. INSUFFICIENT_EVIDENCE over a reasoned exclusion is LOW — exactly what it is over bare absence", () => {
     const out = computeProofConfidence(
       inp({
         verdict: "INSUFFICIENT_EVIDENCE",
         componentResults: [{ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["ALL_EVIDENCE_EXCLUDED"] }],
       }),
     );
-    expect(out.band).toBe("STRONG");
+    expect(out.band).toBe("LOW");
+    expect(out.bindingReasons).toEqual(["ALL_EVIDENCE_EXCLUDED"]);
   });
 
   it("5. PARTIALLY_SUPPORTED can be LIMITED when a required atom is blocked", () => {
@@ -109,11 +116,13 @@ describe("the non-monotonicity that makes the field informative (items 3-6)", ()
     expect(out.score).toBe(40);
   });
 
-  it("a reasoned INSUFFICIENT_EVIDENCE OUTRANKS a blocked PARTIALLY_SUPPORTED — confidence is not monotonic in verdict positivity", () => {
+  it("an INSUFFICIENT_EVIDENCE whose only recorded limitation is weak authority OUTRANKS a blocked PARTIALLY_SUPPORTED — confidence is not monotonic in verdict positivity", () => {
+    // (The former example — a reasoned exclusion at 60 — was retired by
+    // Founder decision 2; the property itself is unchanged.)
     const insufficient = computeProofConfidence(
       inp({
         verdict: "INSUFFICIENT_EVIDENCE",
-        componentResults: [{ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["ALL_EVIDENCE_EXCLUDED"] }],
+        componentResults: [{ status: "PARTIALLY_SUPPORTED", reasonCodes: ["INSUFFICIENT_AUTHORITY"] }],
       }),
     );
     const partial = computeProofConfidence(inp({ verdict: "PARTIALLY_SUPPORTED", hasRequiredBlockingGap: true }));
@@ -141,22 +150,20 @@ describe("the caps (items 6-10)", () => {
     }
   });
 
-  it("7. ALL_EVIDENCE_EXCLUDED alone is NOT equivalent to NO_EVIDENCE_FOUND", () => {
-    const reasoned = computeProofConfidence(
-      inp({
-        verdict: "INSUFFICIENT_EVIDENCE",
-        componentResults: [{ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["ALL_EVIDENCE_EXCLUDED"] }],
-      }),
-    );
-    const blind = computeProofConfidence(
-      inp({
-        verdict: "INSUFFICIENT_EVIDENCE",
-        componentResults: [{ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"] }],
-      }),
-    );
-    expect(reasoned.score).toBe(60);
-    expect(blind.score).toBe(20);
-    expect(reasoned.score).toBeGreaterThan(blind.score);
+  it("7. ALL_EVIDENCE_EXCLUDED, MISSING_CURRENT_STATE, STALE_CURRENT_STATE and MISSING_EXECUTION_EVIDENCE — the four exclusion-shaped absences — score exactly what NO_EVIDENCE_FOUND scores, for every verdict (Round 6.5, Founder decision 2)", () => {
+    for (const verdict of ["SUPPORTED", "NOT_SUPPORTED", "PARTIALLY_SUPPORTED", "INSUFFICIENT_EVIDENCE"] as const) {
+      const blind = computeProofConfidence(
+        inp({ verdict, componentResults: [{ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_EVIDENCE_FOUND"] }] }),
+      );
+      expect(blind.score, verdict).toBe(20);
+      for (const code of ["ALL_EVIDENCE_EXCLUDED", "MISSING_CURRENT_STATE", "STALE_CURRENT_STATE", "MISSING_EXECUTION_EVIDENCE"] as const) {
+        const reasoned = computeProofConfidence(
+          inp({ verdict, componentResults: [{ status: "INSUFFICIENT_EVIDENCE", reasonCodes: [code] }] }),
+        );
+        expect(reasoned.score, `${verdict} ${code}`).toBe(blind.score);
+        expect(reasoned.bindingReasons, `${verdict} ${code}`).toEqual([code]);
+      }
+    }
   });
 
   it("8. a blocking gap on a REQUIRED requirement caps at 40", () => {
@@ -221,9 +228,10 @@ describe("exhaustiveness and fail-closed (items 11, 12)", () => {
         inp({ verdict: "SUPPORTED", componentResults: [{ status: "SUPPORTED", reasonCodes: [code] }] }),
       );
       expect(out.bindingReasons, code).not.toContain("UNKNOWN_REASON_CODE");
-      // ALL_EVIDENCE_EXCLUDED is the one deliberate no-cap.
-      if (code === "ALL_EVIDENCE_EXCLUDED") expect(out.score, code).toBe(80);
-      else expect(out.score, code).toBeLessThan(80);
+      // No deliberate no-cap remains: since Round 6.5 (Founder decision 2)
+      // ALL_EVIDENCE_EXCLUDED caps like absence, so every code in the
+      // vocabulary caps below the SUPPORTED ceiling.
+      expect(out.score, code).toBeLessThan(80);
     }
   });
 

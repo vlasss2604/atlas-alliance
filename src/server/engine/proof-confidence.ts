@@ -89,12 +89,30 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // Evidence, named truthfully. Neither stronger nor weaker than bare
   // absence.
   EXTRACTION_NOT_COMPLETED: CONFIDENCE_BANDS.LOW,
-  // Reasoned exclusion is NOT blind absence: every candidate was examined
-  // and rejected for a recorded reason, so the insufficiency is itself
-  // established. No cap of its own — an accompanying blocking gap still
-  // applies normally.
-  ALL_EVIDENCE_EXCLUDED: null,
-  MISSING_EXECUTION_EVIDENCE: CONFIDENCE_BANDS.LIMITED,
+  // ROUND 6.5 (Founder decision 2) — EXCLUDED EVIDENCE != CONFIDENCE.
+  //
+  // The four codes below are the reconciler's EXCLUSION-SHAPED ABSENCE:
+  // rows were offered for the component and every one of them was
+  // excluded, so nothing establishes it (component-reconciler.ts, the
+  // single `establishing.length === 0` branch that emits all four). Each
+  // is a diagnostic about WHY the record is empty — never a finding about
+  // the project. Round 6 (F12b / F1b) proved the old table let them read
+  // as one: with `null` here, adding ONLY inadmissible rows to components
+  // that had nothing lifted a SUPPORTED Proof from LOW to VERY_STRONG on
+  // the same admissible evidence, and a stale current-state row alone
+  // lifted the band above bare absence.
+  //
+  // The invariant is COMPARATIVE, not a number: a Proof over the control
+  // plus inadmissible-only additions is never stronger than the control.
+  // The control here is the same component with the excluded rows removed
+  // — the zero-Evidence return — and that return is always one of the
+  // absence codes above, every one of which caps at LOW. So the cap of an
+  // exclusion-shaped absence is the cap of the absence it would otherwise
+  // be: LOW, by identity with the control, not by choice of a value. The
+  // excluded rows stay visible in S5's exclusion record and the Proof's
+  // gaps; they carry nothing into the band.
+  ALL_EVIDENCE_EXCLUDED: CONFIDENCE_BANDS.LOW,
+  MISSING_EXECUTION_EVIDENCE: CONFIDENCE_BANDS.LOW,
   // D-158 PHASE 2 — MISSING STRUCTURE, like the two B1 codes below rather
   // than like weak authority. The component has documentary support and
   // lacks machine-owned causal provenance, so what is absent is a proof
@@ -131,7 +149,9 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // CONFLICTING_SUPPLY_DELTA: the record contradicts itself about the
   // measurement. Nothing about that footing is strong.
   CONFLICTING_SUPPLY_DELTA: CONFIDENCE_BANDS.LIMITED,
-  MISSING_CURRENT_STATE: CONFIDENCE_BANDS.LIMITED,
+  // Exclusion-shaped absence too (see ALL_EVIDENCE_EXCLUDED): the
+  // current-state rows offered were all undated or otherwise inadmissible.
+  MISSING_CURRENT_STATE: CONFIDENCE_BANDS.LOW,
   CONFLICTING_STATE: CONFIDENCE_BANDS.LIMITED,
   // D-074. The best establishing row is CLAIMED, so the finding rests on
   // a claim rather than confirmed authority. It caps at STRONG rather
@@ -144,7 +164,11 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   TOKEN_STATE_UNQUALIFIED: CONFIDENCE_BANDS.STRONG,
   INDIRECT_ONLY: CONFIDENCE_BANDS.STRONG,
   STATE_NOT_FULLY_LIVE: CONFIDENCE_BANDS.STRONG,
-  STALE_CURRENT_STATE: CONFIDENCE_BANDS.STRONG,
+  // Exclusion-shaped absence (see ALL_EVIDENCE_EXCLUDED): every
+  // current-state row offered fell outside the freshness window. A stale
+  // statement that the mechanism WAS live is not footing for what it is
+  // now; the component is exactly as unestablished as an empty one.
+  STALE_CURRENT_STATE: CONFIDENCE_BANDS.LOW,
   // GOVERNANCE LIFECYCLE SAFETY V1 — MISSING STRUCTURE, like the D-158 and
   // B1 codes, not weak authority: the record describes a proposal (or an
   // authorisation with no approval-bearing state), so what is absent is

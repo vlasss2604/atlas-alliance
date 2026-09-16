@@ -419,7 +419,8 @@ describe("acceptance: each S8 state projects the Proof it implies", () => {
     ]);
   }, 30_000);
 
-  it("INSUFFICIENT_EVIDENCE / LIMITED (40) — all excluded with a required blocking gap", async () => {
+  // ROUND 6.5 (Founder decision 2): ALL_EVIDENCE_EXCLUDED caps like absence.
+  it("INSUFFICIENT_EVIDENCE / LOW (20) — all excluded with a required blocking gap", async () => {
     const f = await makeFixture({
       claimStatus: "INSUFFICIENT_EVIDENCE",
       requirementStatus: "UNSATISFIED",
@@ -431,8 +432,8 @@ describe("acceptance: each S8 state projects the Proof it implies", () => {
     const v = await loadProofForJob(ctx.db, f.jobId, f.userId);
     expect([v!.verdict, v!.confidence.band, v!.confidence.score]).toEqual([
       "INSUFFICIENT_EVIDENCE",
-      "LIMITED",
-      40,
+      "LOW",
+      20,
     ]);
     // The layers still carry the recorded reasons — absence explains itself.
     expect(JSON.stringify(v!.layers)).toContain("ALL_EVIDENCE_EXCLUDED");
