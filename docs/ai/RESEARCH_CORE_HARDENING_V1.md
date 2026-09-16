@@ -22,6 +22,8 @@ touches a provider.
 | `tests/founder-semantics-round3-5-v1.test.ts` | Round 3.5 — the Founder-approved semantics pinned over the real store: freshness re-checked at adoption (H8), VERIFIED terminal (H9), verification only of a successful bounded job (H10), documentary memory bound to its token identity (H11), the memory kill switch re-read at adoption, the Pattern version boundary; plus the cross-state attacks (stale + switch, identity + fresh, identity + route, regression attempt over ACTIVE memory, failed-job Proof with eligible Evidence) and the no-false-conclusion assertions. Not an adversarial round; does not count toward the two clean rounds. |
 | `tests/adversarial-core-round4-sequences-v1.test.ts` | Round 4 — ATLAS as a long-lived stateful system: long legal sequences in two orders (route replaced, Pattern activated, memory aged, memory disabled, identity replaced between planning and adoption); concurrent pairs (verify ∥ review, two workers claiming one job, adoption ∥ adoption, Pattern activation ∥ verification); cross-project (shared host, ticker, documents, source rows); cross-chain (same-address explorer pages on other EVM chains, an identity that moved chains); the Round 3.5 rules combined with other failures; an independent audit walk Proof → S7 → S6 → S5 → Evidence → source / memory origin; crash and retry windows (Evidence written then attempt left STARTED, lease, reclaim, convergence); legacy data (pre-H10 VERIFIED Proof of a FAILED job, domain-wide unclassified route, contract-version-1 Evidence, identity_key NULL); the health axis at adoption. |
 | `tests/founder-semantics-round5-5-v1.test.ts` | Round 5.5 — the Founder decisions on the three Round 5 boundaries, pinned over the real S4 executor and store: A SAME TICKER ≠ SAME PROJECT (unrouted binding needs the confirmed name, slug or token contract; routed sources unchanged; GOVERNANCE not route-only; the Round 5 B1 attack equals its control); B TECHNICAL FAILURE ≠ PROJECT REALITY (a 401 / 403 / 404 on a generation call is capability-fatal for the extractor and the proposer alike, like count_tokens'; transient retry and document-local failures unchanged); C NO EVIDENCE ≠ NOT EXTRACTED (`EXTRACTION_NOT_COMPLETED`, diagnostic only). Not an adversarial round; does not count toward the two clean rounds. |
+| `tests/adversarial-core-round6-metamorphic-v1.test.ts` | Round 6 — metamorphic invariants over the pure chain: start from a complete, fully sourced control world and TRANSFORM it — add weak / foreign / inadmissible / stale rows (F1), duplicate a passage from the same or mirror sources and duplicate chain observations (F2), remove any component, the strongest authority row, one side of a conflict, the measurement or the binding (F3), add every admissible contradiction in every arrival order (F4), permute rows and swap same-timestamp ids (F5), weak-then-strong and strong-then-weaker authority (F6), age a current-state row across the freshness window (F7), enrich with OPTIONAL atoms / remove a REQUIRED basis (F11), attack the band independently of the verdict (F12), provenance under every transformation (F13), the fresh review (F14). Relation: a transformed world is never stronger than its control on verdict, band, S5, S7 or citations; an inadmissible addition is identical. |
+| `tests/adversarial-core-round6-metamorphic-db-v1.test.ts` | Round 6 — the same relations over the persisted Research (real S4 executor, lifecycle, Postgres): duplication through search / provider / mirror / Memory (F2), discovery and fetch order (F5), routed vs unrouted and same-ticker foreign (F6), the technical-failure ladder incl. RPC down (F8), Memory A–H (F9), project / chain substitution (F10), verification audit metadata across later Researches (F13). |
 | `tests/adversarial-core-round5-blackbox-v1.test.ts` | Round 5 — the final result, black box: complete Research runs through the REAL S4 executor over deterministic documents (fixture proposer, search, fetcher, extractor; the real EVM adapter over a fixture RPC where a chain is involved), read only at the Proof. Families: strong vs weak authority; documentary vs on-chain (BUYBACK ≠ BURN, point-in-time supply ≠ change, APPROVED ≠ EXECUTING, transaction ≠ mechanism); partial research for every intent; technical failure beside valid Evidence; Memory vs fresh; project / token ambiguity; temporal; misleading language; exclusion pressure; bounded budgets; order independence; the independent review. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
@@ -196,6 +198,11 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H7 (`round2` P5) | S8 citations are support-only: a NOT_SUPPORTED verdict from a state CONFLICT cites nothing; the contradicting rows are visible only as CONFLICTING_STATE gaps. | Cite contradicting rows on refutations. |
 | — | No owner path supersedes a PROJECT_IDENTITY (`ACTIVE_IDENTITY_EXISTS` refuses a second, also under concurrency; token migration legacy → current has no lifecycle act, only a manual DEPRECATE plus a fresh confirmation); `resolveConfirmedIdentity` takes the oldest valid ACTIVE row if two ever exist, reachable only by direct SQL. Documentary memory verified under the old identity is refused after the replacement (H11, decided). | An identity supersession script mirroring route classification. |
 | — (`round3` F1, `round3-5` L) | A Proof of a job planned under an earlier Pattern version cannot be verified once a later version is ACTIVE: `markProofVerified` refuses (`MissingActivePatternError`) and rolls back whole. Founder-confirmed as the safe rule; a product limitation, not a bug. | Verify under the version the job was planned under. |
+| F8b (`round6-db`) | **NEW, Round 6, MAJOR-class.** With the chain UP a successful TOKEN_SUPPLY reading closes CURRENT_STATE's acquisition (`ONCHAIN_EVIDENCE_ESTABLISHED` returns before the documentary search); the component holds a supply level with no mechanism state (PARTIALLY_SUPPORTED / INSUFFICIENT_AUTHORITY) and "is it current?" is INSUFFICIENT. With the RPC DOWN the official current-state page is read and the same question is SUPPORTED: a technical failure reads stronger than a working chain, and MCS is unanswerable for every EVM project whose chain works (the live Lido shape). | The local fix — continue the documentary pass when the chain rows carry no state the component requires (`requiresCurrentState` / `requiresLiveMechanismState`) — was implemented and MEASURED: CURRENT_STATE becomes SUPPORTED on both rows, but the documentary row is a second slot beside the chain reading, the lineage forks at CURRENT_STATE under D-101, DESTINATION / RECIPIENT / NET_EFFECT / DURABILITY_BASIS become `BRANCH_ATTRIBUTION_UNRESOLVED`, and PRT-2 drops PARTIAL → UNSATISFIED on the live EVM shape. Two locked policies collide; **Founder decision required** (fix the pre-emption alone and accept the D-101 cost; or fix both under D-104's reopen clause; or keep today's behaviour). The change is reverted; the behaviour is pinned by name. |
+| F1c / F2b (`round6`) | D-101 accepted limitation v1 in metamorphic form: a SECOND agreeing admissible row at a fork point (another official SOURCE_OF_VALUE or FLOW_PATH page, a weak CLAIMED governance row for SOURCE_OF_VALUE, four more distinct burn observations at EXECUTION_EVIDENCE) splits the lineage and the claim WEAKENS (PRT-2 / BSE-1 PARTIAL → UNSATISFIED, `BRANCH_ATTRIBUTION_UNRESOLVED`); five mirror sources of one passage are five slots, five identical flows and five citations. Never stronger; the error direction is over-splitting. | Slot identity that recognises one assembled element across sources (D-101 says this needs an extraction contract, not a classifier; D-104's reopen clause names "beta data showing the deferred limitation materially blocks correct assembly" — Round 6 F1c/F2c and the live B run are that data). Founder decision. |
+| H1 (`round6` F6a2) | Metamorphic form: an AGREEING CLAIMED explorer row dated the same day as the official row demotes CURRENT_STATE from SUPPORTED to PARTIALLY_SUPPORTED (the cap reads the newest establishing row; the chain class sorts first at an equal date). Weaker, never stronger. | As H1. |
+| H4 (`round6` F6c) | Metamorphic form: a NEWER CLAIMED explorer row saying LIVE beside an OLDER CONFIRMED official PAUSED supersedes it and moves "is it current?" from NOT_SUPPORTED to PARTIALLY_SUPPORTED on the weaker source. | As H4. |
+| H5 (`round6` F12b, F1b) | Metamorphic form: adding ONLY inadmissible rows (social posts) to components that had nothing lifts a SUPPORTED single-atom Proof from LOW (20) to VERY_STRONG (80) with the same admissible evidence — bare absence caps at LOW, reasoned exclusion caps nothing. By Round 6's own criterion ("a confidence increase must be explained by newly admissible, relevant evidence") this is MAJOR-class; it is the pinned H5 boundary. | Cap ALL_EVIDENCE_EXCLUDED at LOW (or LIMITED) like absence. Founder decision. |
 | H7 (`round3` J1, J2) || H7 (`round3` J1, J2) | Kept. The audit path is complete in persisted state: a REQUIRED-component conflict leaves the refuting row ids in the S7 requirement's provenance and a `CONTRADICTED_COMPONENT` blocking gap; the S5 row holds `contradictingEvidenceIds`; the Proof's layer 6 names the code and component. A lifecycle requirement over a contradicted CURRENT_STATE is UNSATISFIED / INSUFFICIENT_EVIDENCE (never negative) and carries no component keys — its basis is the code-owned CURRENT_STATE. | Cite contradicting rows on refutations; name the basis on the unsatisfied lifecycle branch. |
 
 ## Observed, not defects (Round 4)
@@ -231,6 +238,48 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
   that dates its facts at extraction time reproduces Round 1 D3/G2
   (MISSING_PUBLICATION_DATE, and an undated LIVE beside a dated APPROVED
   is H2's conflict).
+
+## Observed, not defects (Round 6)
+
+- **Every inadmissible addition is identical.** Over every intent, every
+  component and twelve kinds of weak row (research media, social, data
+  provider, CLAIMED governance, stale, foreign job, unbound explorer,
+  INFERRED, CONTEXT, LIMITS, legacy contract, wrong component), a row S5
+  excludes changes nothing but the exclusion record; an admissible-but-
+  weaker row may only weaken (H1, H4, D-101 above).
+- **Duplicates never corroborate.** Same-unit copies reduce to one
+  representative; distinct copies of a CLAIMED row stay CLAIMED; the
+  search returning a URL twice, the provider returning every fact twice
+  and Memory beside an identical fresh copy each yield one row per
+  (source, passage) and the control's Proof.
+- **Removal never strengthens; a lone counter-row establishes nothing;
+  removing the measured interval or the binding only weakens.**
+- **Every state-bearing contradiction stays visible** in S5, the flow
+  gaps, the Proof gaps and the binding reasons, in both arrival orders and
+  under ten later agreeing rows; a stale counter-row is superseded (D-093);
+  a prose-only "contradiction" with no state is a non-supporting row
+  (D-094), traceable in S5's exclusions, never a conflict.
+- **Order invariance holds** over rich pools, same-timestamp id swaps,
+  fetch-time shifts, and reversed discovery / fetch order through the real
+  executor; an equal-instant disagreement is a conflict in both id orders.
+- **Freshness is monotone**: at the HIGH_CHANGE boundary inclusive the row
+  is current, one millisecond past it STALE_CURRENT_STATE, undated
+  MISSING_CURRENT_STATE; a stale LIVE never revives a fresh PAUSED and a
+  stale PAUSED never contradicts a fresh LIVE.
+- **Technical degradation never strengthens** across the ladder
+  (document-local failure, recovered 429, exhausted transient, fetch
+  timeout, search budget, permanent 401) — except the F8b boundary above.
+- **Memory is monotone**: valid ACTIVE Memory, the same observation
+  verified twice, Memory beside an identical fresh copy, stale / unhealthy
+  / other-identity Memory and the switch flipped between planning and
+  adoption all yield the no-Memory control's Proof; the verified Proof's
+  actor, time and memory rows are byte-identical after later Researches.
+- **Substitution fails closed**: chain, address, wrapper, other-chain
+  explorer and no-identity variants all bind UNVERIFIED; a renamed project
+  no longer binds its old name; the ticker never binds.
+- **The contradiction exemption cannot lift a refutation**: NOT_SUPPORTED
+  with an unrelated unresolved conflict still carries CONFLICTING_STATE's
+  LIMITED cap.
 
 ## Not covered offline (real-provider / live-environment risk)
 
