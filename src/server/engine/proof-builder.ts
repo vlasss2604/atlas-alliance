@@ -275,7 +275,13 @@ export function buildProof(input: ProofBuilderInput): ProofBuildOutcome {
     hasRequiredBlockingGap: cs.requirementResults.some(
       (r) => r.optionality === "REQUIRED" && r.blockingGaps.length > 0,
     ),
-    hasClaimContextGap: cs.contextGaps.length > 0,
+    // ROUND 6.6 (Founder decision 2) — ENUMERATION LIMIT != PROJECT
+    // COUNTEREVIDENCE. A context gap is unresolved state in the mechanism
+    // picture the claim did not rest on; FLOW_ENUMERATION_INCOMPLETE is
+    // not that — it says ATLAS stopped listing agreeing permutations at
+    // its safety cap. It stays in the Proof's gaps (layer 6, CLAIM_CONTEXT
+    // origin) so the limit is never hidden, and it never binds the band.
+    hasClaimContextGap: cs.contextGaps.some((g) => g.kind !== "FLOW_ENUMERATION_INCOMPLETE"),
     componentResults: input.componentResults.map((r) => ({ status: r.status, reasonCodes: r.reasonCodes })),
   });
 
