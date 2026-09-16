@@ -740,11 +740,17 @@ describe("Фаза 6, S4 — HIGH-A: boundary-aware project identity — не su
     expect(accepted).toBe(false);
   });
 
-  // D. ticker appears as an exact standalone token.
-  it("D. тикер встречается как ТОЧНЫЙ отдельный токен -> устанавливает идентичность", async () => {
+  // D. ticker appears as an exact standalone token. ROUND 5.5 (Founder
+  // decision A, SAME TICKER != SAME PROJECT): on an UNROUTED document the
+  // bare ticker is no longer a project anchor — two projects can share it.
+  // The exact-token rule itself is unchanged (cases A/C still refuse the
+  // substring forms for the same reason); what changed is that the ticker
+  // is not among the anchors. The full rule is pinned in
+  // tests/founder-semantics-round5-5-v1.test.ts.
+  it("D. тикер встречается как ТОЧНЫЙ отдельный токен, документ без маршрута -> НЕ устанавливает идентичность (Round 5.5)", async () => {
     const p = await makeJob({ name: `Unrelated ${uniq("name")}`, slug: uniq("proj"), ticker: "OP" });
     const accepted = await acceptsAsEvidence(p, "the treasury for OP accrues fees directly from sequencer revenue");
-    expect(accepted).toBe(true);
+    expect(accepted).toBe(false);
   });
 
   // E. canonical multi-word project name.

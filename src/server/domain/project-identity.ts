@@ -226,6 +226,24 @@ export function chainAddressesEqual(chain: SupportedChain, a: string, b: string)
   return chain === "solana" ? a === b : a.toLowerCase() === b.toLowerCase();
 }
 
+// The same chain-family rule, for CONTAINMENT: does this document text name
+// the address literally? `present` is the caller's boundary-aware literal
+// check (documentary-locator.ts's literallyPresent — the rule that decides
+// whether a claimed locator is in a document), applied under the family's
+// own case rule: base58 exactly as written, an EVM address in either of its
+// valid spellings. Stated here, beside equality, so no engine module has to
+// branch on a chain name to ask the question (Round 5.5, Founder decision A).
+export function documentNamesChainAddress(
+  chain: SupportedChain,
+  documentText: string,
+  address: string,
+  present: (text: string, value: string) => boolean,
+): boolean {
+  return chain === "solana"
+    ? present(documentText, address)
+    : present(documentText.toLowerCase(), address.toLowerCase());
+}
+
 export function urlReferencesAddress(
   url: string,
   chain: SupportedChain,

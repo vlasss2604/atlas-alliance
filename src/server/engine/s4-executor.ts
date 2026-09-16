@@ -65,6 +65,7 @@ import {
   resolveOnchainSourceOpenReserve,
 } from "./onchain-source-open-reserve";
 import { docsPayloadRecoveryEligible } from "./docs-payload-eligibility";
+import { literallyPresent } from "./documentary-locator";
 import type { LocatorRejection } from "./documentary-locator";
 import {
   admittedLocatorsForJob,
@@ -101,7 +102,8 @@ import { loadAcquisitionPlan } from "./acquisition-plan";
 // same source fragment is one unit whichever path wrote it.
 import { extractionUnitKey, normalizeForContainment } from "./extraction-unit-key";
 import { seedRoutedForComponent, selectApprovedSeedTargets } from "./source-resource-seeds";
-import { computeEntityBinding } from "../domain/project-identity";
+import { computeEntityBinding, documentNamesChainAddress } from "../domain/project-identity";
+import type { ConfirmedProjectIdentity } from "../domain/project-identity";
 import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
@@ -288,19 +290,52 @@ function containsIdentityPhrase(documentTokens: string[], phrase: string): boole
 
 // HIGH-2/HIGH-A: deterministic, non-fuzzy project containment. A document
 // is "about" the target project only if it literally names the project —
-// by its canonical name, canonical slug, or exact ticker token — never
-// because a search result or an extractor's rewritten summary says so, and
-// never because a short identifier merely appears as a substring of some
-// other word. This intentionally does NOT attempt semantic understanding
-// of what the document is "really about"; it is a structural, code-owned,
+// by its canonical name or canonical slug — never because a search result
+// or an extractor's rewritten summary says so, and never because a short
+// identifier merely appears as a substring of some other word. This
+// intentionally does NOT attempt semantic understanding of what the
+// document is "really about"; it is a structural, code-owned,
 // boundary-aware identity check.
+//
+// ROUND 5.5 (Founder decision A) — SAME TICKER != SAME PROJECT. The exact
+// ticker token used to be a third anchor here. It no longer is: two
+// unrelated projects can share a ticker, and an UNROUTED document that
+// says only "ABC" says nothing about WHICH project it belongs to — Round
+// 5 F6c showed another project's governance proposal admitted CLAIMED on
+// the bare ticker and lifting the target project's confidence cap. A
+// routed document never reaches this check (a CONFIRMED route IS the
+// project's own domain, see the call site); an unrouted one must carry a
+// stronger anchor: the confirmed project name, the canonical slug, or the
+// confirmed token contract / mint (documentNamesConfirmedToken below).
+// The ticker is still informational everywhere else; it is simply not
+// binding evidence on its own. No fuzzy matching is introduced by this —
+// the same exact-token run rule decides, over fewer candidates.
 function documentNamesProject(
   documentText: string,
-  project: { name: string; slug: string; ticker: string | null },
+  project: { name: string; slug: string },
 ): boolean {
   const documentTokens = tokenize(documentText);
-  const candidates = [project.name, project.slug, project.ticker ?? ""].filter((c) => c.trim().length > 0);
+  const candidates = [project.name, project.slug].filter((c) => c.trim().length > 0);
   return candidates.some((c) => containsIdentityPhrase(documentTokens, c));
+}
+
+// ROUND 5.5 (Founder decision A) — the confirmed token contract / mint as
+// a project anchor. The identity is the one the owner confirmed
+// (plan.confirmedIdentity, D-134), never anything the document or the
+// extractor proposes; the address must appear literally, complete and
+// identifier-bounded (documentary-locator.ts's literallyPresent — the same
+// rule that decides whether a claimed locator is in the document), under
+// the chain family's own case rule stated once in the domain module
+// (documentNamesChainAddress, beside chainAddressesEqual): base58 is
+// case-significant, an EVM address is the same address in its checksummed
+// and lowercase forms. A project with no confirmed identity, or an identity
+// with no token address, anchors nothing here.
+function documentNamesConfirmedToken(
+  documentText: string,
+  identity: ConfirmedProjectIdentity | null,
+): boolean {
+  if (!identity?.tokenAddress) return false;
+  return documentNamesChainAddress(identity.chain, documentText, identity.tokenAddress, literallyPresent);
 }
 
 async function findOrCreateSource(
@@ -2971,13 +3006,24 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // domain is a human-CONFIRMED SOURCE_ROUTE for the project
           // (computed below, per-source — a confirmed domain IS the
           // project's own domain by definition, so text-mention is not
-          // additionally required in that case).
+          // additionally required in that case). ROUND 5.5: for an
+          // unrouted document "names the project" means the confirmed
+          // name, the canonical slug or the confirmed token contract —
+          // never the bare ticker (SAME TICKER != SAME PROJECT). A refusal
+          // that would have passed on the ticker alone says so in the
+          // observation channel, so the audit can tell "another project's
+          // page" from "a page about nothing".
           const sourceInfo = await findOrCreateSource(deps.db, doc.finalUrl);
           const route = await resolveSourceRoute(deps.db, deps.project.id, doc.finalUrl);
           if (route.observation) observations.add(observationCode(route.observation));
           const projectContained =
-            route.officiality === "CONFIRMED" || documentNamesProject(doc.normalizedText, deps.project);
+            route.officiality === "CONFIRMED" ||
+            documentNamesProject(doc.normalizedText, deps.project) ||
+            documentNamesConfirmedToken(doc.normalizedText, plan.confirmedIdentity);
           if (!projectContained) {
+            if (deps.project.ticker && containsIdentityPhrase(tokenize(doc.normalizedText), deps.project.ticker)) {
+              observations.add("WRONG_PROJECT_TICKER_ONLY");
+            }
             await recordTraceEvent(deps.db, {
               researchJobId: ctx.jobId,
               researchAttemptId: attemptId,
