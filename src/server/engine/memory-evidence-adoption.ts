@@ -202,6 +202,12 @@ export function isMemoryAdoptionSufficient(
 //                     freshness rule, over the row's own verifiedAt /
 //                     freshnessClass / staleAfter). Not a contradiction;
 //                     the row stays ACTIVE and is simply not eligible now.
+//   MEMORY_HEALTH_NOT_OK
+//                     the row's health is no longer OK (QUESTIONABLE,
+//                     REVERIFY, STALE). D-059: only healthy memory may
+//                     close a component — the planner's rule, re-applied
+//                     to the row as it is now. DEPRECATED health stays
+//                     MEMORY_NOT_ACTIVE (knowledge judged wrong, D-059).
 //   IDENTITY_CHANGED  the row was verified under a confirmed token
 //                     identity (`identity_key`) that is not the identity
 //                     confirmed today (H11). Not an inference that the old
@@ -215,6 +221,7 @@ export type MemoryAdoptionRefusal =
   | "MEMORY_NOT_ACTIVE"
   | "MEMORY_SCOPE_MISMATCH"
   | "MEMORY_STALE"
+  | "MEMORY_HEALTH_NOT_OK"
   | "IDENTITY_CHANGED"
   | "PROVENANCE_INCOMPLETE"
   | "ORIGIN_EVIDENCE_MISSING"
@@ -532,6 +539,13 @@ async function materializeOne(
   const memory = found.memory;
   if (memory.lifecycleState !== "ACTIVE" || memory.health === "DEPRECATED") {
     return { ok: false, reason: "MEMORY_NOT_ACTIVE" };
+  }
+  // HEALTHY NOW, NOT ONLY AT PLAN TIME. The planner lets only health OK
+  // close a component (D-059); a row marked QUESTIONABLE / REVERIFY / STALE
+  // between planning and adoption may direct re-verification but never
+  // becomes Evidence of this job.
+  if (memory.health !== "OK") {
+    return { ok: false, reason: "MEMORY_HEALTH_NOT_OK" };
   }
   // The planner already scoped retrieval by project and topic; this is the
   // fail-closed re-check at the point where a row becomes Evidence of a
