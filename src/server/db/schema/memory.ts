@@ -88,6 +88,12 @@ export const researchMemory = pgTable(
     // establishing the same passage adds no second logical observation.
     // NULL on rows written by other paths (golden set, manual promotion).
     observationKey: text("observation_key"),
+    // H11 — the project's confirmed token identity at the moment this row
+    // was written (domain/project-identity.ts `identityBindingKey`: chain
+    // and token address). Adoption refuses a row whose identity differs
+    // from the one confirmed today. NULL = written under no confirmed
+    // identity (or before the column existed; never backfilled).
+    identityKey: text("identity_key"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

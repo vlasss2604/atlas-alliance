@@ -267,6 +267,21 @@ export function computeEntityBinding(
   return urlReferencesAddress(url, identity.chain, identity.tokenAddress) ? "CONFIRMED" : "UNVERIFIED";
 }
 
+// H11 — THE IDENTITY A DOCUMENTARY OBSERVATION IS BOUND TO.
+//
+// The token identity as a value, never a row id: a project whose identity
+// row is deprecated and re-confirmed with the SAME chain and address has
+// not replaced its token, and a row confirmed with ANOTHER address (or on
+// another chain) has. Ticker and programs are not part of it — the ticker
+// is informational (see the schema above) and a program list names
+// activities, not the token. `null` means "no confirmed identity": a
+// candidate written then is bound to nothing, and is eligible only while
+// the project still has nothing.
+export function identityBindingKey(identity: ConfirmedProjectIdentity | null): string | null {
+  if (!identity) return null;
+  return `${identity.chain}:${identity.tokenAddress ?? ""}`;
+}
+
 // D-134 — the DB-aware counterpart to parseProjectIdentity: the project's
 // confirmed identity, read the SAME way SOURCE_ROUTE is (ACTIVE
 // project_memory_items rows only — D-074). When multiple ACTIVE rows

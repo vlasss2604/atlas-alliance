@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import {
@@ -10,8 +10,10 @@ import {
   researchMemoryProvenance,
   sources,
 } from "../db/schema";
+import { loadProductConfig, type ProductConfig } from "../config/product";
 import { componentRequirementsFor, type PatternContent } from "../domain/pattern";
-import { resolveConfirmedIdentity, computeEntityBinding } from "../domain/project-identity";
+import { computeEntityBinding, identityBindingKey, resolveConfirmedIdentity } from "../domain/project-identity";
+import { isStale } from "../memory/planner";
 import type { ComponentReconciliationStatus, ResultReasonCode } from "./component-reconciler";
 import {
   loadActivePatternContentForJob,
@@ -185,11 +187,35 @@ export function isMemoryAdoptionSufficient(
 }
 
 // Closed. Every value is a reason the component went BACK to fresh work.
+//
+// THREE ADOPTION-TIME RE-CHECKS (Round 3.5, Founder-approved). Planning
+// decided these once; the world can change between planning and the
+// moment a memory row becomes Evidence of a job, and each is re-decided
+// HERE, on the persisted row, by the same rule planning used:
+//
+//   MEMORY_DISABLED   the operator's kill switch (`memory_enabled`) is off
+//                     NOW. Read once per adoption; every reused component
+//                     returns to fresh work, nothing is written, the
+//                     Research itself is not cancelled.
+//   MEMORY_STALE      the observation crossed its freshness window between
+//                     planning and adoption (planner.ts `isStale`, the ONE
+//                     freshness rule, over the row's own verifiedAt /
+//                     freshnessClass / staleAfter). Not a contradiction;
+//                     the row stays ACTIVE and is simply not eligible now.
+//   IDENTITY_CHANGED  the row was verified under a confirmed token
+//                     identity (`identity_key`) that is not the identity
+//                     confirmed today (H11). Not an inference that the old
+//                     fact is false; the row is not deleted or rebound.
+//                     Fresh Research re-establishes it under the new
+//                     identity.
 export type MemoryAdoptionRefusal =
   | "FRESH_ONLY_COMPONENT"
+  | "MEMORY_DISABLED"
   | "MEMORY_NOT_FOUND"
   | "MEMORY_NOT_ACTIVE"
   | "MEMORY_SCOPE_MISMATCH"
+  | "MEMORY_STALE"
+  | "IDENTITY_CHANGED"
   | "PROVENANCE_INCOMPLETE"
   | "ORIGIN_EVIDENCE_MISSING"
   | "SOURCE_MISSING"
@@ -246,13 +272,33 @@ export async function adoptReusedMemory(
   const topicId = job.topicId;
 
   const pattern = await loadActivePatternContentForJob(db, jobId);
+  const config = await loadProductConfig(db);
   const identity = await resolveConfirmedIdentity(db, projectId);
 
   const adopted: MemoryAdoptionComponentOutcome[] = [];
   const fallback: MemoryAdoptionComponentOutcome[] = [];
 
+  // THE KILL SWITCH, RE-READ AT THE MOMENT OF ADOPTION. A job planned while
+  // memory_enabled was true does not carry that permission with it: the
+  // switch is an operational control over what Memory may do NOW. Off means
+  // every reused component becomes ordinary fresh work with no row written.
+  if (!config.memory_enabled) {
+    for (const reused of view.reused) {
+      fallback.push({
+        step: reused.step,
+        component: reused.component,
+        memoryIds: reused.memoryIds,
+        adopted: false,
+        evidenceIds: [],
+        status: null,
+        refusals: [{ memoryId: null, reason: "MEMORY_DISABLED" }],
+      });
+    }
+    return { workQueue: buildEffectiveWorkQueue(view, pattern, fallback), adopted, fallback };
+  }
+
   for (const reused of view.reused) {
-    const outcome = await adoptComponent(db, { jobId, projectId, topicId, pattern, identity, reused, now });
+    const outcome = await adoptComponent(db, { jobId, projectId, topicId, pattern, identity, config, reused, now });
     (outcome.adopted ? adopted : fallback).push(outcome);
   }
 
@@ -335,6 +381,13 @@ export async function loadEffectiveJobContractView(
   const { job, view } = await loadJobContractView(db, jobId);
   if (view.reused.length === 0) return { job, view };
   const pattern = await loadActivePatternContentForJob(db, jobId);
+  // The kill switch, read the same way adoption reads it: off means every
+  // reused component is fresh work for preparation too, so a phase that
+  // prepares after the operator flipped the switch prepares what the
+  // controller will actually walk.
+  if (!(await loadProductConfig(db)).memory_enabled) {
+    return { job, view: { ...view, workQueue: buildEffectiveWorkQueue(view, pattern, view.reused) } };
+  }
   const attempted = new Set(
     (
       await db
@@ -403,11 +456,12 @@ async function adoptComponent(
     topicId: string;
     pattern: PatternContent;
     identity: Awaited<ReturnType<typeof resolveConfirmedIdentity>>;
+    config: ProductConfig;
     reused: ReusedComponent;
     now: Date;
   },
 ): Promise<MemoryAdoptionComponentOutcome> {
-  const { jobId, projectId, topicId, pattern, identity, reused, now } = input;
+  const { jobId, projectId, topicId, pattern, identity, config, reused, now } = input;
   const base = { step: reused.step, component: reused.component, memoryIds: reused.memoryIds };
 
   if (isFreshOnlyComponent(pattern, reused.component)) {
@@ -418,7 +472,7 @@ async function adoptComponent(
   const refusals: MemoryAdoptionComponentOutcome["refusals"] = [];
 
   for (const memoryId of reused.memoryIds) {
-    const materialized = await materializeOne(db, { jobId, projectId, topicId, identity, memoryId, step: reused.step, component: reused.component });
+    const materialized = await materializeOne(db, { jobId, projectId, topicId, identity, config, memoryId, step: reused.step, component: reused.component, now });
     if (materialized.ok) evidenceIds.push(materialized.evidenceId);
     else refusals.push({ memoryId, reason: materialized.reason });
   }
@@ -455,15 +509,27 @@ async function materializeOne(
     projectId: string;
     topicId: string;
     identity: Awaited<ReturnType<typeof resolveConfirmedIdentity>>;
+    config: ProductConfig;
     memoryId: string;
     step: number;
     component: string;
+    now: Date;
   },
 ): Promise<{ ok: true; evidenceId: string } | { ok: false; reason: MemoryAdoptionRefusal }> {
-  const { jobId, projectId, topicId, identity, memoryId, step, component } = input;
+  const { jobId, projectId, topicId, identity, config, memoryId, step, component, now } = input;
 
-  const [memory] = await db.select().from(researchMemory).where(eq(researchMemory.id, memoryId));
-  if (!memory) return { ok: false, reason: "MEMORY_NOT_FOUND" };
+  // The row's own stale_after, whole, in seconds — read the way the
+  // retrieval gateway reads it, so the planner's freshness rule sees the
+  // same facts here that it saw at plan time.
+  const [found] = await db
+    .select({
+      memory: researchMemory,
+      staleAfterSeconds: sql<number | null>`EXTRACT(EPOCH FROM ${researchMemory.staleAfter})::double precision`,
+    })
+    .from(researchMemory)
+    .where(eq(researchMemory.id, memoryId));
+  if (!found) return { ok: false, reason: "MEMORY_NOT_FOUND" };
+  const memory = found.memory;
   if (memory.lifecycleState !== "ACTIVE" || memory.health === "DEPRECATED") {
     return { ok: false, reason: "MEMORY_NOT_ACTIVE" };
   }
@@ -493,6 +559,33 @@ async function materializeOne(
     return pointed.patternStep === step && pointed.component === component
       ? { ok: true, evidenceId: pointed.id }
       : { ok: false, reason: "MEMORY_SCOPE_MISMATCH" };
+  }
+
+  // FRESH NOW, NOT ONLY AT PLAN TIME (H8). The same rule, the same window,
+  // the same config the planner applied — over the row as it is at this
+  // moment. A row that crossed its window since planning is not adopted;
+  // it stays ACTIVE and untouched, and the component is acquired fresh.
+  if (
+    isStale(
+      {
+        verifiedAt: memory.verifiedAt,
+        freshnessClass: memory.freshnessClass,
+        staleAfterSeconds: found.staleAfterSeconds != null ? Number(found.staleAfterSeconds) : null,
+      },
+      now,
+      config,
+    )
+  ) {
+    return { ok: false, reason: "MEMORY_STALE" };
+  }
+
+  // THE IDENTITY IT WAS VERIFIED UNDER MUST BE THE IDENTITY CONFIRMED NOW
+  // (H11). Compared as values (chain and token address), never as row ids,
+  // so a re-confirmation of the same token is not a replacement and a
+  // different token on any chain is. NULL on the row means "verified under
+  // no confirmed identity": eligible only while the project still has none.
+  if (memory.identityKey !== identityBindingKey(identity)) {
+    return { ok: false, reason: "IDENTITY_CHANGED" };
   }
 
   // The copied provenance (research_memory_provenance) is the observation's

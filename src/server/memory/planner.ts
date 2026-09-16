@@ -26,8 +26,13 @@ const CAPABILITY_RANK: Record<ResearchCapability, number> = {
 // MEDIUM-1: интервал считается целиком, в секундах. Фолбэк из конфига —
 // ТОЛЬКО когда запись не несёт собственного stale_after (NULL); явно
 // сохранённая политика записи никогда молча не подменяется.
+// The three facts staleness is a function of. A RetrievalHit carries them;
+// so does a research_memory row read directly (adoption, H8) — the SAME
+// rule is applied at both moments, never a second notion of freshness.
+export type FreshnessFacts = Pick<RetrievalHit, "verifiedAt" | "freshnessClass" | "staleAfterSeconds">;
+
 function effectiveStaleAfterSeconds(
-  hit: RetrievalHit,
+  hit: FreshnessFacts,
   config: Pick<ProductConfig, "memory_stale_after_days">,
 ): number {
   return (
@@ -38,7 +43,7 @@ function effectiveStaleAfterSeconds(
 
 // REUSE DOES NOT OVERRIDE FRESHNESS (§4.4) — единственное место, где это
 // решается, чистая функция времени и конфига, без места для интерпретации.
-export function isStale(hit: RetrievalHit, now: Date, config: ProductConfig): boolean {
+export function isStale(hit: FreshnessFacts, now: Date, config: Pick<ProductConfig, "memory_stale_after_days">): boolean {
   const ageMs = now.getTime() - hit.verifiedAt.getTime();
   return ageMs > effectiveStaleAfterSeconds(hit, config) * 1000;
 }

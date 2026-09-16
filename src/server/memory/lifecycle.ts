@@ -56,6 +56,9 @@ export interface ObserveMemoryInput {
   staleAfter?: StaleAfterInput | null;
   confidence: number;
   originKind: string;
+  // H11 — the confirmed token identity this observation was made under
+  // (domain/project-identity.ts `identityBindingKey`). Absent/null = none.
+  identityKey?: string | null;
 }
 
 // Кандидат наблюдается всегда как OBSERVED — извлечение НЕ ограничено
@@ -83,6 +86,7 @@ export async function observeMemoryCandidate(
           : null,
       confidence: input.confidence,
       originKind: input.originKind,
+      identityKey: input.identityKey ?? null,
     })
     .returning({ id: researchMemory.id });
   return row;

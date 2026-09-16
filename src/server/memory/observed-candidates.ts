@@ -3,6 +3,7 @@ import { and, eq, inArray } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { evidence, proofs, researchComponentResults, researchMemory } from "../db/schema";
 import { componentRequirementsFor, type PatternContent } from "../domain/pattern";
+import { identityBindingKey, resolveConfirmedIdentity } from "../domain/project-identity";
 import { loadActivePatternContentForJob } from "../engine/component-reconciliation-store";
 import { observationKey } from "../engine/extraction-unit-key";
 import { applicableFactKindsForComponent } from "../engine/onchain-facts";
@@ -60,6 +61,10 @@ import { copyProvenanceFromEvidence } from "./lifecycle";
 //   8. it was not itself adopted from Research Memory
 //      (reused_from_memory_id IS NULL): the memory row it came from IS the
 //      observation, and cloning memory into memory would only fork lineage.
+//
+// IDENTITY BINDING (H11). Each row records the project's confirmed token
+// identity at the moment of verification (`identity_key`), so a later
+// adoption can refuse it once the identity has been replaced.
 //
 // Anything else — an unknown class, a new component semantic, a row with a
 // missing axis — is refused, with a closed reason, and the Proof stays
@@ -205,6 +210,9 @@ export async function writeObservedCandidatesForVerifiedProof(
       a.id.localeCompare(b.id),
   );
   const pattern = await loadActivePatternContentForJob(db, jobId);
+  // H11 — every candidate of this verification is bound to the token
+  // identity confirmed NOW, read once through the production resolver.
+  const identityKey = identityBindingKey(await resolveConfirmedIdentity(db, proof.projectId));
 
   for (const row of rows) {
     const refusal = observedCandidateRefusal(row, pattern);
@@ -257,6 +265,7 @@ export async function writeObservedCandidatesForVerifiedProof(
         confidence: VERIFIED_OBSERVATION_CONFIDENCE,
         originKind: VERIFIED_OBSERVATION_ORIGIN_KIND,
         observationKey: key,
+        identityKey,
       })
       .onConflictDoNothing()
       .returning({ id: researchMemory.id });
