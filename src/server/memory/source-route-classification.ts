@@ -1,7 +1,7 @@
 import { and, eq } from "drizzle-orm";
 
 import type { Database } from "../db/client";
-import { projectMemoryItems } from "../db/schema";
+import { projectMemoryItems, projects } from "../db/schema";
 import {
   VALID_ROUTE_CLASSES,
   isValidRouteClass,
@@ -179,6 +179,22 @@ export async function classifySourceRoute(
   let outcome: RouteClassificationResult | null = null;
 
   await db.transaction(async (tx) => {
+    // SERIALIZED ON THE PROJECT ROW, and the target re-read under the lock:
+    // two classifications of the same route arriving together would each
+    // read it ACTIVE, each insert a replacement and each supersede the
+    // original — two ACTIVE replacements for one route. The second waits
+    // here, re-reads, finds the route already stepped aside, and refuses.
+    await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, row.projectId)).for("update");
+    const [locked] = await tx.select().from(projectMemoryItems).where(eq(projectMemoryItems.id, row.id));
+    if (!locked || locked.lifecycleState !== "ACTIVE") {
+      outcome = {
+        ok: false,
+        refusal: "ROUTE_NOT_ACTIVE",
+        detail: `route is ${locked?.lifecycleState ?? "gone"}; only an ACTIVE route may be classified`,
+      };
+      throw new RollbackClassification();
+    }
+
     const before = new Map<string, ResolvedSourceRoute>();
     for (const url of probeUrls) {
       before.set(url, await resolveSourceRoute(tx, row.projectId, url));

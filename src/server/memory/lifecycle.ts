@@ -173,11 +173,22 @@ export async function promoteToActive(
 ): Promise<{ id: string; lifecycleState: string; promotedBy: string | null }> {
   await assertAdmin(db, adminUserId);
   return db.transaction(async (tx) => {
+    // FOR UPDATE: two admins promoting the same row at once are serialized
+    // on the row itself, so the second reads the state the first committed
+    // and takes the no-op branch below instead of racing the guard.
     const [current] = await tx
-      .select({ lifecycleState: researchMemory.lifecycleState })
+      .select({ lifecycleState: researchMemory.lifecycleState, promotedBy: researchMemory.promotedBy })
       .from(researchMemory)
-      .where(eq(researchMemory.id, memoryId));
+      .where(eq(researchMemory.id, memoryId))
+      .for("update");
     if (!current) throw new Error(`research_memory not found: ${memoryId}`);
+    // ALREADY ACTIVE: the promotion on record IS the human decision that
+    // made it so (D-021/D-055/D-065). Repeating the command is a no-op —
+    // never a rewrite of promoted_by / promoted_at, which would replace the
+    // audit of the original decision with the audit of the repeat.
+    if (current.lifecycleState === "ACTIVE") {
+      return { id: memoryId, lifecycleState: "ACTIVE", promotedBy: current.promotedBy };
+    }
     if (current.lifecycleState === "OBSERVED") {
       await promoteToCandidate(tx, memoryId);
     }

@@ -301,57 +301,69 @@ export async function confirmProjectIdentity(
     };
   }
 
-  const activeRows = await db
-    .select()
-    .from(projectMemoryItems)
-    .where(
-      and(
-        eq(projectMemoryItems.projectId, project.id),
-        eq(projectMemoryItems.kind, "PROJECT_IDENTITY"),
-        eq(projectMemoryItems.lifecycleState, "ACTIVE"),
-      ),
-    );
-  if (activeRows.length > 0) {
-    // Reported through the real resolver, so the operator is told what
-    // the project's identity actually resolves to rather than what some
-    // row happens to contain.
-    const existing = await resolveConfirmedIdentity(db, project.id);
+  // ONE TRANSACTION, SERIALIZED ON THE PROJECT ROW. The check ("is there an
+  // ACTIVE identity?") and the act (insert + promote) used to be separate
+  // statements on the pool, so two confirmations arriving together both
+  // saw zero ACTIVE rows and both went ACTIVE — the exact silent second
+  // identity this refusal exists to prevent, reachable by nothing more than
+  // two invocations. The row lock is the same serialization the attempt
+  // claim uses (controller.ts): the second confirmation waits for the
+  // first to commit, re-reads, and is refused.
+  return db.transaction(async (tx) => {
+    await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).for("update");
+
+    const activeRows = await tx
+      .select()
+      .from(projectMemoryItems)
+      .where(
+        and(
+          eq(projectMemoryItems.projectId, project.id),
+          eq(projectMemoryItems.kind, "PROJECT_IDENTITY"),
+          eq(projectMemoryItems.lifecycleState, "ACTIVE"),
+        ),
+      );
+    if (activeRows.length > 0) {
+      // Reported through the real resolver, so the operator is told what
+      // the project's identity actually resolves to rather than what some
+      // row happens to contain.
+      const existing = await resolveConfirmedIdentity(tx, project.id);
+      return {
+        ok: false,
+        refusal: "ACTIVE_IDENTITY_EXISTS",
+        detail:
+          `${activeRows.length} ACTIVE PROJECT_IDENTITY row(s) already exist for this project. ` +
+          `A second one would be silently ignored — the earliest valid record keeps deciding ` +
+          `identity — so superseding is a separate owner act, not a side effect of confirming.`,
+        ...(existing ? { existing } : {}),
+      } satisfies IdentityConfirmationResult;
+    }
+
+    // Inserted as OBSERVED because the database guard permits nothing else,
+    // then walked to ACTIVE by the EXISTING lifecycle function. No
+    // transition is re-implemented here.
+    const [row] = await tx
+      .insert(projectMemoryItems)
+      .values({
+        projectId: project.id,
+        kind: "PROJECT_IDENTITY",
+        content: validated.content,
+        lifecycleState: "OBSERVED",
+      })
+      .returning();
+
+    await promoteProjectMemoryItem(tx, row.id);
+
+    // Verified through the production resolver, never assumed from what was
+    // written — it is the thing every consumer actually calls.
+    const resolved = await resolveConfirmedIdentity(tx, project.id);
     return {
-      ok: false,
-      refusal: "ACTIVE_IDENTITY_EXISTS",
-      detail:
-        `${activeRows.length} ACTIVE PROJECT_IDENTITY row(s) already exist for this project. ` +
-        `A second one would be silently ignored — the earliest valid record keeps deciding ` +
-        `identity — so superseding is a separate owner act, not a side effect of confirming.`,
-      ...(existing ? { existing } : {}),
-    };
-  }
-
-  // Inserted as OBSERVED because the database guard permits nothing else,
-  // then walked to ACTIVE by the EXISTING lifecycle function. No
-  // transition is re-implemented here.
-  const [row] = await db
-    .insert(projectMemoryItems)
-    .values({
+      ok: true,
+      itemId: row.id,
       projectId: project.id,
-      kind: "PROJECT_IDENTITY",
       content: validated.content,
-      lifecycleState: "OBSERVED",
-    })
-    .returning();
-
-  await promoteProjectMemoryItem(db, row.id);
-
-  // Verified through the production resolver, never assumed from what was
-  // written — it is the thing every consumer actually calls.
-  const resolved = await resolveConfirmedIdentity(db, project.id);
-  return {
-    ok: true,
-    itemId: row.id,
-    projectId: project.id,
-    content: validated.content,
-    resolved,
-  };
+      resolved,
+    } satisfies IdentityConfirmationResult;
+  });
 }
 
 // Re-exported so a caller can read a stored record back through the same

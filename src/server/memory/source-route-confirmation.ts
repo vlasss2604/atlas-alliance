@@ -208,78 +208,89 @@ export async function confirmSourceRoute(
     return { ok: false, refusal: "UNKNOWN_PROJECT", detail: `no project with slug "${input.projectSlug}"` };
   }
 
-  const existing = await db
-    .select()
-    .from(projectMemoryItems)
-    .where(
-      and(
-        eq(projectMemoryItems.projectId, project.id),
-        eq(projectMemoryItems.kind, "SOURCE_ROUTE"),
-        eq(projectMemoryItems.lifecycleState, "ACTIVE"),
-      ),
-    );
+  // ONE TRANSACTION, SERIALIZED ON THE PROJECT ROW. The three hazard checks
+  // below read the ACTIVE rows and the act inserts a new one; as separate
+  // statements on the pool, two identical confirmations arriving together
+  // both passed the checks and both went ACTIVE — two co-matching
+  // path-scoped rows, which is hazard 1 inflicted by the tool that exists
+  // to prevent it. The row lock (the attempt claim's own pattern,
+  // controller.ts) makes the second confirmation wait, re-read, and refuse.
+  return db.transaction(async (tx) => {
+    await tx.select({ id: projects.id }).from(projects).where(eq(projects.id, project.id)).for("update");
 
-  for (const row of existing) {
-    const c = readRouteContent(row.content);
-    if (c.domain !== domain) continue;
+    const existing = await tx
+      .select()
+      .from(projectMemoryItems)
+      .where(
+        and(
+          eq(projectMemoryItems.projectId, project.id),
+          eq(projectMemoryItems.kind, "SOURCE_ROUTE"),
+          eq(projectMemoryItems.lifecycleState, "ACTIVE"),
+        ),
+      );
 
-    if (c.pathPrefix !== null && normalizePathPrefix(c.pathPrefix) === pathPrefix) {
-      return {
-        ok: false,
-        refusal: "DUPLICATE_ACTIVE_ROUTE",
-        detail: `an ACTIVE route already confirms ${domain} at ${pathPrefix}`,
-      };
-    }
-    // Hazard 2: a domain-wide ACTIVE row applies to every url on the host.
-    if (c.pathPrefix === null && c.routeClass !== null) {
-      return {
-        ok: false,
-        refusal: "WOULD_INHERIT_ROUTE_CLASS",
-        detail: `an ACTIVE domain-wide route for ${domain} carries routeClass ${c.routeClass}, which this url would inherit`,
-      };
-    }
-    // Hazard 1: prefixes that co-match any url, in either direction.
-    if (
-      c.pathPrefix !== null &&
-      (matchesPathPrefix(pathPrefix, c.pathPrefix) || matchesPathPrefix(c.pathPrefix, pathPrefix))
-    ) {
-      return {
-        ok: false,
-        refusal: "OVERLAPPING_ACTIVE_PREFIX",
-        detail: `an ACTIVE route at ${c.pathPrefix} overlaps ${pathPrefix}; adding this would null the matched prefix for urls both cover`,
-      };
-    }
-  }
+    for (const row of existing) {
+      const c = readRouteContent(row.content);
+      if (c.domain !== domain) continue;
 
-  // Inserted as OBSERVED because the database guard permits nothing else,
-  // then walked to ACTIVE by the EXISTING lifecycle function — the
-  // transitions are not re-implemented here.
-  //
-  // `content` carries exactly the three documented fields and no more, and
-  // routeClass is ABSENT rather than explicitly null: the documented shape
-  // treats absent and null identically, and writing the key would invite
-  // someone to fill it in.
-  const [row] = await db
-    .insert(projectMemoryItems)
-    .values({
+      if (c.pathPrefix !== null && normalizePathPrefix(c.pathPrefix) === pathPrefix) {
+        return {
+          ok: false,
+          refusal: "DUPLICATE_ACTIVE_ROUTE",
+          detail: `an ACTIVE route already confirms ${domain} at ${pathPrefix}`,
+        } satisfies RouteConfirmationResult;
+      }
+      // Hazard 2: a domain-wide ACTIVE row applies to every url on the host.
+      if (c.pathPrefix === null && c.routeClass !== null) {
+        return {
+          ok: false,
+          refusal: "WOULD_INHERIT_ROUTE_CLASS",
+          detail: `an ACTIVE domain-wide route for ${domain} carries routeClass ${c.routeClass}, which this url would inherit`,
+        } satisfies RouteConfirmationResult;
+      }
+      // Hazard 1: prefixes that co-match any url, in either direction.
+      if (
+        c.pathPrefix !== null &&
+        (matchesPathPrefix(pathPrefix, c.pathPrefix) || matchesPathPrefix(c.pathPrefix, pathPrefix))
+      ) {
+        return {
+          ok: false,
+          refusal: "OVERLAPPING_ACTIVE_PREFIX",
+          detail: `an ACTIVE route at ${c.pathPrefix} overlaps ${pathPrefix}; adding this would null the matched prefix for urls both cover`,
+        } satisfies RouteConfirmationResult;
+      }
+    }
+
+    // Inserted as OBSERVED because the database guard permits nothing else,
+    // then walked to ACTIVE by the EXISTING lifecycle function — the
+    // transitions are not re-implemented here.
+    //
+    // `content` carries exactly the three documented fields and no more, and
+    // routeClass is ABSENT rather than explicitly null: the documented shape
+    // treats absent and null identically, and writing the key would invite
+    // someone to fill it in.
+    const [row] = await tx
+      .insert(projectMemoryItems)
+      .values({
+        projectId: project.id,
+        kind: "SOURCE_ROUTE",
+        content: { domain, pathPrefix },
+        lifecycleState: "OBSERVED",
+      })
+      .returning();
+
+    await promoteProjectMemoryItem(tx, row.id);
+
+    // Verified against the real resolver, never assumed from what was
+    // written. The url is built from the confirmed values themselves.
+    const resolved = await resolveSourceRoute(tx, project.id, `https://${domain}${pathPrefix}`);
+    return {
+      ok: true,
+      itemId: row.id,
       projectId: project.id,
-      kind: "SOURCE_ROUTE",
-      content: { domain, pathPrefix },
-      lifecycleState: "OBSERVED",
-    })
-    .returning();
-
-  await promoteProjectMemoryItem(db, row.id);
-
-  // Verified against the real resolver, never assumed from what was
-  // written. The url is built from the confirmed values themselves.
-  const resolved = await resolveSourceRoute(db, project.id, `https://${domain}${pathPrefix}`);
-  return {
-    ok: true,
-    itemId: row.id,
-    projectId: project.id,
-    domain,
-    pathPrefix,
-    resolved,
-  };
+      domain,
+      pathPrefix,
+      resolved,
+    } satisfies RouteConfirmationResult;
+  });
 }
