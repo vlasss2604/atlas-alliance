@@ -121,23 +121,44 @@ describe("HIGH-1 — cartesian cross-branch attribution is dead", () => {
 });
 
 describe("MEDIUM-1 — shared-prefix provenance is not branch attribution", () => {
-  it("destination evidence sharing only the PREFIX source -> BRANCH_ATTRIBUTION_UNRESOLVED on every branch, no attachment", () => {
+  // ROUND 6.5 (Founder decision 3): a row whose source shares nothing with
+  // the post-fork part of ANY branch names no branch. It used to be
+  // BRANCH_ATTRIBUTION_UNRESOLVED on every branch (§13.4 outcome 3); it
+  // now continues the trunk on every branch, exactly as an unforked
+  // lineage would have taken it, and its source never becomes a branch's
+  // post-fork provenance. What MEDIUM-1 actually forbade — the prefix
+  // source DISCRIMINATING between branches — still holds: a later row
+  // from the prefix source names no branch either, and a row from a
+  // branch's own source still attaches to that branch only.
+  it("destination evidence sharing only the PREFIX source names no branch -> attached on every branch, prefix source never becomes post-fork provenance, branch-own sources still discriminate", () => {
     const evidenceRows = [
       ev("q1", "sPrefix", "protocol fees paid by users"),
       ev("qA", "sA", "buyback allocation"),
       ev("qB", "sB", "treasury allocation"),
       ev("qD", "sPrefix", "tokens sent to treasury"),
+      ev("qR", "sPrefix", "holders receive"),
+      ev("qNA", "sA", "supply reduced"),
     ];
     const results = [
       cr(1, "SOURCE_OF_VALUE", "SUPPORTED", ["q1"]),
       cr(3, "MECHANISM_SPEC", "SUPPORTED", ["qA", "qB"]),
       cr(6, "DESTINATION", "SUPPORTED", ["qD"]),
+      cr(6, "RECIPIENT", "SUPPORTED", ["qR"]),
+      cr(7, "NET_EFFECT", "SUPPORTED", ["qNA"]),
     ];
     const r = assemble(results, evidenceRows);
     expect(r.flows.length).toBe(2);
     for (const f of r.flows) {
-      expect(f.lineage.find((s) => s.component === "DESTINATION")).toBeUndefined();
-      expect(f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === "DESTINATION")).toBe(true);
+      expect(f.lineage.find((s) => s.component === "DESTINATION")?.evidenceIds).toEqual(["qD"]);
+      expect(f.lineage.find((s) => s.component === "RECIPIENT")?.evidenceIds).toEqual(["qR"]);
+      expect(f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && (g.component === "DESTINATION" || g.component === "RECIPIENT"))).toBe(false);
+      const mech = f.lineage.find((s) => s.component === "MECHANISM_SPEC")!;
+      if (mech.evidenceIds.includes("qA")) {
+        expect(f.lineage.find((s) => s.component === "NET_EFFECT")?.evidenceIds).toEqual(["qNA"]);
+      } else {
+        expect(f.lineage.find((s) => s.component === "NET_EFFECT")).toBeUndefined();
+        expect(f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === "NET_EFFECT")).toBe(true);
+      }
     }
   });
 });

@@ -671,25 +671,51 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
         }
 
         // §13.4, post-audit-fix semantics: once this lineage has forked,
-        // a row attaches to it ONLY when the row's provenance singles this
+        // a row attaches to it when the row's provenance singles this
         // branch out — it shares a post-fork sourceId with this branch and
-        // with NO sibling branch. Rows shared by several branches (the
-        // whole-document case) or by none are unattributable: they
-        // produce BRANCH_ATTRIBUTION_UNRESOLVED, never an attachment to
-        // every passing branch and never a cartesian fork multiplication.
+        // with NO sibling branch. A row shared by several branches (the
+        // whole-document case: one source describes the fork AND what
+        // lies below it, so the source itself defines which branch each
+        // of its rows belongs to and the assembler cannot read that) is
+        // unattributable: BRANCH_ATTRIBUTION_UNRESOLVED, never an
+        // attachment to every passing branch and never the cartesian fork
+        // multiplication of audit HIGH-1.
+        //
+        // ROUND 6.5 (Founder decision 3) — MORE AGREEING ADMISSIBLE
+        // EVIDENCE != WEAKER PROOF. A row that names NO branch — its source
+        // shares nothing with the post-fork part of any branch (§13.4
+        // outcome 3, and the prefix-only source of audit MEDIUM-1) — is
+        // not evidence about the fork at all. An unforked lineage attaches
+        // every admitted row of a component by Pattern structure alone;
+        // Round 6 (F1c, F2c) proved that treating such a row as
+        // unattributable let a SECOND agreeing official page at one
+        // component turn every later component into
+        // BRANCH_ATTRIBUTION_UNRESOLVED and the claim from PARTIAL to
+        // UNSATISFIED, with no contradiction, no temporal, identity or
+        // scope reason — only multiplicity. So a row that names no branch
+        // continues the trunk on every branch, exactly as it would have
+        // with one slot fewer; and because it distinguishes none of them
+        // its source is NOT added to any branch's post-fork provenance
+        // (below), so a later row from that source names no branch either.
+        // Each branch's flow is what the unforked flow would have been with
+        // that branch's slot; S7 is existential over flows, so the claim is
+        // never stronger than the strongest single-slot world and never
+        // weaker than the control. Rows a single source spans across the
+        // fork keep outcome 2: a real ambiguity the source defines.
         let candidateRows: AssemblyEvidenceProjection[];
         let attributionUnresolved = false;
         if (l.branchPointStep === null) {
           candidateRows = allRows;
         } else {
           candidateRows = allRows.filter(
-            (r) => l.postForkSourceIds.has(r.sourceId) && passCountByRowId.get(r.id) === 1,
+            (r) =>
+              (l.postForkSourceIds.has(r.sourceId) && passCountByRowId.get(r.id) === 1) ||
+              (passCountByRowId.get(r.id) ?? 0) === 0,
           );
           const anyAmbiguousToMe = allRows.some(
             (r) => l.postForkSourceIds.has(r.sourceId) && (passCountByRowId.get(r.id) ?? 0) > 1,
           );
-          const anyOrphan = allRows.some((r) => (passCountByRowId.get(r.id) ?? 0) === 0);
-          attributionUnresolved = candidateRows.length === 0 || anyAmbiguousToMe || anyOrphan;
+          attributionUnresolved = candidateRows.length === 0 || anyAmbiguousToMe;
         }
 
         if (candidateRows.length === 0) {
@@ -735,8 +761,13 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
           // Post-fork provenance accumulates from the fork point onward —
           // the diverging slot itself included (it IS what distinguishes
           // this branch); pre-fork slots stay out (see postForkSourceIds).
+          // A row that named no branch (attached to every branch above)
+          // distinguishes none, so its source stays out too. The pass
+          // count map is empty while nothing has forked yet, and a row of
+          // the slot that forks THIS lineage right now is never an orphan.
           if (clone.branchPointStep !== null) {
             for (const id of slot.evidenceIds) {
+              if (l.branchPointStep !== null && (passCountByRowId.get(id) ?? 0) === 0) continue;
               const row = evidenceById.get(id)!;
               clone.postForkSourceIds.add(row.sourceId);
             }
