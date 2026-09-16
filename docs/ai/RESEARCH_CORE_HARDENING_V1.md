@@ -24,6 +24,8 @@ touches a provider.
 | `tests/founder-semantics-round5-5-v1.test.ts` | Round 5.5 — the Founder decisions on the three Round 5 boundaries, pinned over the real S4 executor and store: A SAME TICKER ≠ SAME PROJECT (unrouted binding needs the confirmed name, slug or token contract; routed sources unchanged; GOVERNANCE not route-only; the Round 5 B1 attack equals its control); B TECHNICAL FAILURE ≠ PROJECT REALITY (a 401 / 403 / 404 on a generation call is capability-fatal for the extractor and the proposer alike, like count_tokens'; transient retry and document-local failures unchanged); C NO EVIDENCE ≠ NOT EXTRACTED (`EXTRACTION_NOT_COMPLETED`, diagnostic only). Not an adversarial round; does not count toward the two clean rounds. |
 | `tests/adversarial-core-round6-metamorphic-v1.test.ts` | Round 6 — metamorphic invariants over the pure chain: start from a complete, fully sourced control world and TRANSFORM it — add weak / foreign / inadmissible / stale rows (F1), duplicate a passage from the same or mirror sources and duplicate chain observations (F2), remove any component, the strongest authority row, one side of a conflict, the measurement or the binding (F3), add every admissible contradiction in every arrival order (F4), permute rows and swap same-timestamp ids (F5), weak-then-strong and strong-then-weaker authority (F6), age a current-state row across the freshness window (F7), enrich with OPTIONAL atoms / remove a REQUIRED basis (F11), attack the band independently of the verdict (F12), provenance under every transformation (F13), the fresh review (F14). Relation: a transformed world is never stronger than its control on verdict, band, S5, S7 or citations; an inadmissible addition is identical. |
 | `tests/adversarial-core-round6-metamorphic-db-v1.test.ts` | Round 6 — the same relations over the persisted Research (real S4 executor, lifecycle, Postgres): duplication through search / provider / mirror / Memory (F2), discovery and fetch order (F5), routed vs unrouted and same-ticker foreign (F6), the technical-failure ladder incl. RPC down (F8), Memory A–H (F9), project / chain substitution (F10), verification audit metadata across later Researches (F13). |
+| `tests/founder-semantics-round6-5-v1.test.ts` | Round 6.5 — the Founder decisions on Round 6's H5 and D-101 boundaries, pinned over the pure chain: Decision 2 EXCLUDED EVIDENCE ≠ CONFIDENCE (C one excluded row, D many, E every excluded class — wrong project, wrong chain, stale, wrong class, unconfirmed entity, superseded route — one at a time and all at once; E2 the stale-only shapes by name; E3 the comparative rule at the band function); Decision 3 MORE AGREEING ADMISSIBLE EVIDENCE ≠ WEAKER PROOF (F an agreeing twin at every component for every intent, twins at 2 / 3 / 5 components; G the exact Round 6 F1c fork shapes; G2 a row that names one branch attaches there only, and the retained outcome-2 boundary; H contradiction still weakens, visibly, in both orders; I the temporal semantics intact); the no-false-semantics pins; F2 the enumeration-cap boundary. Not an adversarial round; does not count toward the two clean rounds. |
+| `tests/founder-semantics-round6-5-db-v1.test.ts` | Round 6.5 — Founder decision 1 TECHNICAL FAILURE ≠ STRONGER PROJECT REALITY over the real S4 executor, lifecycle and Postgres with a fixture EVM RPC: A RPC UP vs DOWN for the state, revenue and supply intents (down never stronger); B CURRENT_STATE on EVM — the TOKEN_SUPPLY reading AND the official page, both supporting, SUPPORTED / LIVE, the attempt naming why the pass went on; B2 the live EVM revenue shape (the fork, no false attribution, PRT-2 PARTIAL as with the RPC down); B3 the pass finds nothing → the attempt still closes SUCCEEDED on the reading; B4 bounded research preserved (NET_EFFECT still closes on its reading, never more opens with the chain working). |
 | `tests/adversarial-core-round5-blackbox-v1.test.ts` | Round 5 — the final result, black box: complete Research runs through the REAL S4 executor over deterministic documents (fixture proposer, search, fetcher, extractor; the real EVM adapter over a fixture RPC where a chain is involved), read only at the Proof. Families: strong vs weak authority; documentary vs on-chain (BUYBACK ≠ BURN, point-in-time supply ≠ change, APPROVED ≠ EXECUTING, transaction ≠ mechanism); partial research for every intent; technical failure beside valid Evidence; Memory vs fresh; project / token ambiguity; temporal; misleading language; exclusion pressure; bounded budgets; order independence; the independent review. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
@@ -61,6 +63,9 @@ NO EVIDENCE ≠ NOT EXTRACTED.
 | A bare ticker bound an UNROUTED document to the project: another project sharing the ticker had its public governance proposal admitted CLAIMED and lifted the confidence cap 20 → 40 | `founder-semantics-round5-5-v1.test.ts` A1–A9, `adversarial-core-round5-blackbox-v1.test.ts` F6c, `phase6-s4-executor.test.ts` HIGH-A D |
 | A permanent provider rejection (401 / 403 / 404) of the generation call was document-local: a mid-run credential rejection left every later component NO_EVIDENCE_FOUND on a SUCCEEDED, verifiable job | `founder-semantics-round5-5-v1.test.ts` B1–B8, `adversarial-core-round5-blackbox-v1.test.ts` F4b', `transient-extractor-resilience-v1.test.ts` 5b |
 | "Acquired, not extracted" read as NO_EVIDENCE_FOUND | `founder-semantics-round5-5-v1.test.ts` C1–C5 |
+| With the chain UP a state-less TOKEN_SUPPLY reading closed CURRENT_STATE's acquisition and the official current-state page was never read; with the RPC DOWN it was, and the state question read stronger (Round 6 F8b) | `founder-semantics-round6-5-db-v1.test.ts` A, B, B2, B3, B4; `adversarial-core-round6-metamorphic-db-v1.test.ts` F8b |
+| Adding ONLY excluded rows to empty components lifted a SUPPORTED Proof from LOW (20) to VERY_STRONG (80); a stale current-state row alone lifted the band above bare absence (Round 6 F12b / F1b, H5) | `founder-semantics-round6-5-v1.test.ts` C, D, E, E2, E3; `proof-confidence.test.ts` 4, 7, 11; `adversarial-core-boundaries-v1.test.ts` H5 |
+| A second agreeing admissible row at a fork point made every later row BRANCH_ATTRIBUTION_UNRESOLVED and the claim PARTIAL → UNSATISFIED on multiplicity alone (Round 6 F1c / F2c, D-101 accepted limitation v1) | `founder-semantics-round6-5-v1.test.ts` F, G, G2; `phase6-s6-audit-fixes.test.ts` MEDIUM-1; `phase6-s6-mechanism-assembler.test.ts` AD |
 
 ## Semantics the hardening pass fixed (now current behaviour)
 
@@ -174,6 +179,55 @@ NO EVIDENCE ≠ NOT EXTRACTED.
   bare absence; a document that was never opened, or was read and said
   nothing, is still NO_EVIDENCE_FOUND; a component with any Evidence is
   reduced exactly as before.
+- **A chain read closes a component's acquisition only when its rows carry
+  what the component reports (Founder decision 1, Round 6.5).**
+  `loadAcquisitionPlan` exposes `reportsMechanismState`
+  (`requiresCurrentState || requiresLiveMechanismState`, the reconciler's own
+  predicate for a state-carrying component); at step 0b `s4-executor.ts`
+  returns `ONCHAIN_EVIDENCE_ESTABLISHED` only when that is false or at
+  least one persisted chain row normalizes to a known mechanism state.
+  Otherwise the rows stay, the attempt records
+  `ONCHAIN_EVIDENCE_WITHOUT_MECHANISM_STATE`, and the documentary pass runs
+  exactly as it would with no chain — same search, open and model bounds,
+  the explorer-page guard still in force. A documentary close that means
+  "nothing more was found / read" (SKIPPED on a bounded reason, FAILED on a
+  document-local one) is folded by `closeDocumentaryPass` into SUCCEEDED /
+  `ONCHAIN_EVIDENCE_ESTABLISHED; documentary pass <status>: <reason>` — the
+  component IS established by persisted rows, and must not read as
+  unestablished to the controller (a recovery retry of finished work).
+  Budget and capability failures are thrown, not returned, and stay thrown.
+  Components whose reading carries state (EXECUTION_EVIDENCE: BURN rows are
+  LIVE) or that report none (NET_EFFECT, FLOW_PATH, DESTINATION, ...) keep
+  the pre-emption unchanged. Generic: Pattern data and row state only.
+- **Exclusion-shaped absence caps like absence (Founder decision 2, Round
+  6.5).** `ALL_EVIDENCE_EXCLUDED`, `MISSING_EXECUTION_EVIDENCE`,
+  `MISSING_CURRENT_STATE` and `STALE_CURRENT_STATE` — the four codes the
+  reconciler's single "rows offered, every one excluded" branch emits — cap
+  at LOW in `proof-confidence.ts`. The invariant is comparative: the control
+  with the excluded rows removed is the zero-Evidence return, always an
+  absence code, always LOW; so the cap is the control's, by identity, not a
+  chosen number. The diagnostics stay as they are (S5 reason codes, the
+  exclusion record, the Proof's gaps); only the band no longer reads them
+  as footing. D-135's "reasoned exclusion imposes no cap" clause is
+  superseded by this decision.
+- **A row that names no branch continues the trunk on every branch (Founder
+  decision 3, Round 6.5).** In `assembleMechanism` a row of a forked
+  lineage whose source shares nothing with the post-fork part of ANY branch
+  (§13.4 outcome 3, and the prefix-only source of audit MEDIUM-1) is no
+  longer BRANCH_ATTRIBUTION_UNRESOLVED: it attaches to every branch, as it
+  would have in the unforked lineage, and its source is never added to a
+  branch's post-fork provenance (it distinguishes none; a later row from
+  that source names no branch either). Each branch's flow is the single-slot
+  world's flow; S7 is existential over flows; so the claim is never
+  stronger than the strongest single-slot world and never weaker than the
+  control. Unchanged: outcome 1 (a row that names ONE branch attaches there
+  only), outcome 2 (a row a single source spans across the fork — audit
+  HIGH-1 — stays unresolved: a scope the source defines and the assembler
+  does not guess), slot identity (D-101: the lineage still forks, one slot
+  per structural unit), the enumeration cap. D-101's "accepted limitation
+  v1" is reopened under D-104's clause for exactly this: Round 6 was the
+  beta data showing the deferred limitation materially blocks correct
+  assembly.
 - **Owner confirmations are serialized on the project row.** Identity
   confirmation, route confirmation and route classification run their
   check-then-act inside one transaction that locks the project row (the
@@ -192,17 +246,18 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H2 | LIVE beside an undated PROPOSED record of the same component is a state CONFLICT → CONTRADICTED; a required-component conflict → NOT_SUPPORTED (confidence capped LIMITED). | Treat PROPOSED as a lifecycle rung below LIVE (progression), not an incompatibility. |
 | H3 | S6's lexical classifiers have no negation grammar ("not burned" → BURN). Accepted S6 audit limitation LOW-3; cannot create structure. | A negation stop-list on the closed dictionaries. |
 | H4 | Recency wins over officiality in supersession (D-093 forbids an authority ranking). | Refuse supersession of a CONFIRMED row by a CLAIMED one. |
-| H5 | ALL_EVIDENCE_EXCLUDED carries no confidence cap; gaps on the claim's own flow that block no atom are not a context gap. A single-atom SUPPORTED claim can sit at STRONG with every unrelated component unestablished. | Count own-flow non-blocking gaps as a STRONG cap. |
+| H5 | **DECIDED (Round 6.5, Founder decision 2).** ALL_EVIDENCE_EXCLUDED and the other exclusion-shaped absences cap at LOW, like bare absence; a single-atom SUPPORTED claim with every unrelated component excluded sits at LOW, exactly where it sits with them empty. The second half of the original note — gaps on the claim's own flow that block no atom are not a context gap — is unchanged. | — |
 | H6 | An established DEPRECATED current state with no execution record is lifecycle NOT_ESTABLISHED → "is it current?" is INSUFFICIENT_EVIDENCE, not answered "no". | Let an established non-live CURRENT_STATE refute CURRENT without an execution record. |
 | — | EXECUTION_EVIDENCE has `freshnessClass: MEDIUM_CHANGE` but `requiresCurrentState: false`, so age is never checked for it; "currently executing" is protected by CURRENT_STATE only. | Apply the freshness window to EXECUTION_EVIDENCE. |
 | H7 (`round2` P5) | S8 citations are support-only: a NOT_SUPPORTED verdict from a state CONFLICT cites nothing; the contradicting rows are visible only as CONFLICTING_STATE gaps. | Cite contradicting rows on refutations. |
 | — | No owner path supersedes a PROJECT_IDENTITY (`ACTIVE_IDENTITY_EXISTS` refuses a second, also under concurrency; token migration legacy → current has no lifecycle act, only a manual DEPRECATE plus a fresh confirmation); `resolveConfirmedIdentity` takes the oldest valid ACTIVE row if two ever exist, reachable only by direct SQL. Documentary memory verified under the old identity is refused after the replacement (H11, decided). | An identity supersession script mirroring route classification. |
 | — (`round3` F1, `round3-5` L) | A Proof of a job planned under an earlier Pattern version cannot be verified once a later version is ACTIVE: `markProofVerified` refuses (`MissingActivePatternError`) and rolls back whole. Founder-confirmed as the safe rule; a product limitation, not a bug. | Verify under the version the job was planned under. |
-| F8b (`round6-db`) | **NEW, Round 6, MAJOR-class.** With the chain UP a successful TOKEN_SUPPLY reading closes CURRENT_STATE's acquisition (`ONCHAIN_EVIDENCE_ESTABLISHED` returns before the documentary search); the component holds a supply level with no mechanism state (PARTIALLY_SUPPORTED / INSUFFICIENT_AUTHORITY) and "is it current?" is INSUFFICIENT. With the RPC DOWN the official current-state page is read and the same question is SUPPORTED: a technical failure reads stronger than a working chain, and MCS is unanswerable for every EVM project whose chain works (the live Lido shape). | The local fix — continue the documentary pass when the chain rows carry no state the component requires (`requiresCurrentState` / `requiresLiveMechanismState`) — was implemented and MEASURED: CURRENT_STATE becomes SUPPORTED on both rows, but the documentary row is a second slot beside the chain reading, the lineage forks at CURRENT_STATE under D-101, DESTINATION / RECIPIENT / NET_EFFECT / DURABILITY_BASIS become `BRANCH_ATTRIBUTION_UNRESOLVED`, and PRT-2 drops PARTIAL → UNSATISFIED on the live EVM shape. Two locked policies collide; **Founder decision required** (fix the pre-emption alone and accept the D-101 cost; or fix both under D-104's reopen clause; or keep today's behaviour). The change is reverted; the behaviour is pinned by name. |
-| F1c / F2b (`round6`) | D-101 accepted limitation v1 in metamorphic form: a SECOND agreeing admissible row at a fork point (another official SOURCE_OF_VALUE or FLOW_PATH page, a weak CLAIMED governance row for SOURCE_OF_VALUE, four more distinct burn observations at EXECUTION_EVIDENCE) splits the lineage and the claim WEAKENS (PRT-2 / BSE-1 PARTIAL → UNSATISFIED, `BRANCH_ATTRIBUTION_UNRESOLVED`); five mirror sources of one passage are five slots, five identical flows and five citations. Never stronger; the error direction is over-splitting. | Slot identity that recognises one assembled element across sources (D-101 says this needs an extraction contract, not a classifier; D-104's reopen clause names "beta data showing the deferred limitation materially blocks correct assembly" — Round 6 F1c/F2c and the live B run are that data). Founder decision. |
+| F8b (`round6-db`) | **DECIDED (Round 6.5, Founder decision 1).** A chain read closes a component only when its rows carry what the component reports; a state-less TOKEN_SUPPLY reading no longer suppresses CURRENT_STATE's documentary pass. With the chain UP the official page is read beside the reading, the component is SUPPORTED / LIVE, "is it current?" is answered as with the RPC down, and the RPC-down world is never stronger. The D-101 cost the round measured (the fork at CURRENT_STATE) is removed by decision 3: the page rows continue the trunk on both branches, the reading attaches to its own, PRT-2 stays PARTIAL. Pinned in `founder-semantics-round6-5-db-v1`. | — |
+| F1c / F2b (`round6`) | **DECIDED (Round 6.5, Founder decision 3).** A row that names no branch continues the trunk on every branch; a second agreeing admissible row at a fork point still splits the lineage (slot identity untouched — F2b's five mirrors are still five slots, five flows, five citations) and no longer weakens the claim: no BRANCH_ATTRIBUTION_UNRESOLVED, the control's verdict, band and requirements. Pinned in `founder-semantics-round6-5-v1` F, G, G2. **Retained (G2, by name):** a row a single source spans across the fork (§13.4 outcome 2, audit HIGH-1) stays unresolved and weakens for a named reason — a scope the source defines. | Decide outcome 2 separately if a live case shows one document legitimately describing several agreeing elements and their common continuation. |
 | H1 (`round6` F6a2) | Metamorphic form: an AGREEING CLAIMED explorer row dated the same day as the official row demotes CURRENT_STATE from SUPPORTED to PARTIALLY_SUPPORTED (the cap reads the newest establishing row; the chain class sorts first at an equal date). Weaker, never stronger. | As H1. |
 | H4 (`round6` F6c) | Metamorphic form: a NEWER CLAIMED explorer row saying LIVE beside an OLDER CONFIRMED official PAUSED supersedes it and moves "is it current?" from NOT_SUPPORTED to PARTIALLY_SUPPORTED on the weaker source. | As H4. |
-| H5 (`round6` F12b, F1b) | Metamorphic form: adding ONLY inadmissible rows (social posts) to components that had nothing lifts a SUPPORTED single-atom Proof from LOW (20) to VERY_STRONG (80) with the same admissible evidence — bare absence caps at LOW, reasoned exclusion caps nothing. By Round 6's own criterion ("a confidence increase must be explained by newly admissible, relevant evidence") this is MAJOR-class; it is the pinned H5 boundary. | Cap ALL_EVIDENCE_EXCLUDED at LOW (or LIMITED) like absence. Founder decision. |
+| H5 (`round6` F12b, F1b) | **DECIDED (Round 6.5, Founder decision 2)** — see H5 above. 20 → 20 on inadmissible rows alone; the stale-only shapes (`STALE_CURRENT_STATE`, `MISSING_CURRENT_STATE`, `MISSING_EXECUTION_EVIDENCE`) sit exactly where bare absence sits. Pinned in `founder-semantics-round6-5-v1` C, D, E, E2, E3. | — |
+| F2 (`round6-5`) | **NEW boundary, Round 6.5.** The flow-enumeration cap (`MAX_FLOWS` 64) under multiplicity: an agreeing twin at every component would be 2^10 structural flows; the cap refuses the sixth fork at 32 flows, the components from there on are FLOW_ENUMERATION_INCOMPLETE on every flow, and the claim weakens (PRT-2 PARTIAL → UNSATISFIED) on multiplicity alone. Reachable only past five two-slot components (or fewer with wider slots: 5 burns × 2 × 2 × 2 = 80). Two locked rules collide: D-104's bounded enumeration with an explicit gap, and Founder decision 3. | Keep the structurally-first slot on the lineage when the cap binds (the flow stays real, the gap says the alternatives were not enumerated; never stronger than full enumeration, never weaker than today); or raise the cap; or keep. Founder decision. |
 | H7 (`round3` J1, J2) || H7 (`round3` J1, J2) | Kept. The audit path is complete in persisted state: a REQUIRED-component conflict leaves the refuting row ids in the S7 requirement's provenance and a `CONTRADICTED_COMPONENT` blocking gap; the S5 row holds `contradictingEvidenceIds`; the Proof's layer 6 names the code and component. A lifecycle requirement over a contradicted CURRENT_STATE is UNSATISFIED / INSUFFICIENT_EVIDENCE (never negative) and carries no component keys — its basis is the code-owned CURRENT_STATE. | Cite contradicting rows on refutations; name the basis on the unsatisfied lifecycle branch. |
 
 ## Observed, not defects (Round 4)
@@ -245,8 +300,9 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
   component and twelve kinds of weak row (research media, social, data
   provider, CLAIMED governance, stale, foreign job, unbound explorer,
   INFERRED, CONTEXT, LIMITS, legacy contract, wrong component), a row S5
-  excludes changes nothing but the exclusion record; an admissible-but-
-  weaker row may only weaken (H1, H4, D-101 above).
+  excludes changes nothing but the exclusion record — since Round 6.5 not
+  the band either; an admissible-but-weaker row may only weaken (H1, H4),
+  and an admissible AGREEING row never does (decision 3).
 - **Duplicates never corroborate.** Same-unit copies reduce to one
   representative; distinct copies of a CLAIMED row stay CLAIMED; the
   search returning a URL twice, the provider returning every fact twice
@@ -268,7 +324,8 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
   stale PAUSED never contradicts a fresh LIVE.
 - **Technical degradation never strengthens** across the ladder
   (document-local failure, recovered 429, exhausted transient, fetch
-  timeout, search budget, permanent 401) — except the F8b boundary above.
+  timeout, search budget, permanent 401, and — since Round 6.5 — an RPC
+  down beside a working chain).
 - **Memory is monotone**: valid ACTIVE Memory, the same observation
   verified twice, Memory beside an identical fresh copy, stale / unhealthy
   / other-identity Memory and the switch flipped between planning and

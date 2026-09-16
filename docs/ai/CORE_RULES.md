@@ -23,6 +23,18 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **No evidence ≠ not extracted.** A document that was opened but never
   inspected reads `EXTRACTION_NOT_COMPLETED`, not "nothing found". The
   distinction is diagnostic: same status, same confidence footing.
+- **Technical failure ≠ stronger project reality.** Technical degradation
+  (an RPC down, a provider unreachable) must never make the semantic Research
+  result stronger than it is with everything working. A deterministic chain
+  read closes a component's acquisition only when its rows carry what the
+  component reports; a reading that carries no mechanism state never
+  suppresses the documentary pass that can.
+- **Excluded evidence ≠ confidence.** Evidence that S5 excludes may stay
+  visible in the audit record and never strengthens verdict, support,
+  confidence or citations: a Proof over the control plus inadmissible-only
+  additions is never stronger than the control. Exclusion-shaped absence
+  (`ALL_EVIDENCE_EXCLUDED`, `MISSING_CURRENT_STATE`, `STALE_CURRENT_STATE`,
+  `MISSING_EXECUTION_EVIDENCE`) caps exactly where bare absence caps.
 - Absence of a mechanism *is* a valid finding, when you actually looked.
 - **Zero balance ≠ burn.** Zero balance ≠ proof that tokens never existed.
 
@@ -94,6 +106,16 @@ willing to assert. Collapsing any two of these is the most common failure.
   observations with a hole between them.
 
 ## Establishment
+
+- **More agreeing admissible evidence ≠ weaker Proof.** A second admissible row
+  that agrees with the first never weakens a claim merely because the
+  assembled lineage forks. A weaker result needs a real semantic reason the
+  existing rules already define — contradiction, temporal incompatibility,
+  identity mismatch, scope mismatch, an authority or current-state conflict.
+  Mere multiplicity or branching is not one. Structurally: a row whose source
+  names no branch continues the trunk on every branch, as it would in an
+  unforked lineage; a row a single source spans across the fork is a scope
+  that source defines and the assembler does not guess (`BRANCH_ATTRIBUTION_UNRESOLVED`).
 
 - **Fact truth ≠ component-establishment eligibility.** A fact can be exactly
   true, DIRECT and bound to the right project, and still be unable to establish a
