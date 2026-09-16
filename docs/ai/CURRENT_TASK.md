@@ -33,7 +33,11 @@ acquisition-graceful-degradation updated to the approved semantics.
 
 ### Next
 
-- Founder decision whether GOVERNANCE should also count as route-only
-  (today snapshot.org-class pages classify GOVERNANCE without a route, so
-  GOVERNANCE_BASIS / DURABILITY_BASIS still search).
+- GOVERNANCE route-only: DECIDED (Round 5.5, Founder decision A) — GOVERNANCE
+  is NOT globally route-only. snapshot.org-class pages still classify
+  GOVERNANCE without a route; an unrouted governance document is admitted
+  only when project binding is strong (confirmed project name, canonical
+  slug, or confirmed token contract / mint — never the bare ticker). See
+  `RESEARCH_CORE_HARDENING_V1.md` and `CORE_RULES.md` ("Same ticker ≠ same
+  project").
 - With new approval: ONE A2-next + ONE B.
