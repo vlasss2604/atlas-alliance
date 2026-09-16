@@ -20,6 +20,7 @@ touches a provider.
 | `tests/adversarial-core-round2-v1.test.ts` | Round 2 — interactions and order: the same Evidence in every permutation (byte-identical S5/S6 flow ids/S7/S8), mixed pools (weak rows beside strong), temporal boundaries (`publishedAt == fetchedAt`, equal timestamps, undated vs dated), S7→S8 traceability, cross-stage idempotency, and a fresh pass on the Pattern→S7 contract, memory-candidate admission and projection labels. |
 | `tests/adversarial-core-round3-db-v1.test.ts` | Round 3 — the DB-backed stateful Core, attacked by changing the world BETWEEN two correct operations: A verification → candidates (concurrent verification, vanished rows, rollback); B promotion (repeat, race, forbidden transitions, one live row per observation, duplicate ACTIVE state); C adoption after a route withdrawal, a re-classification, an identity replacement, a Pattern change, a freshness crossing, competing states, a Proof downgrade, a memory switch-off; D identity lifecycle and historical chain readings; E route resolver determinism, supersession, classification rollback; F Pattern activation against existing jobs and memory; G attempt/job terminal states, retry after partial work, the crash window after S8; I cross-project contamination; J the H7 audit path over persisted rows; K the health axis. |
 | `tests/founder-semantics-round3-5-v1.test.ts` | Round 3.5 — the Founder-approved semantics pinned over the real store: freshness re-checked at adoption (H8), VERIFIED terminal (H9), verification only of a successful bounded job (H10), documentary memory bound to its token identity (H11), the memory kill switch re-read at adoption, the Pattern version boundary; plus the cross-state attacks (stale + switch, identity + fresh, identity + route, regression attempt over ACTIVE memory, failed-job Proof with eligible Evidence) and the no-false-conclusion assertions. Not an adversarial round; does not count toward the two clean rounds. |
+| `tests/adversarial-core-round4-sequences-v1.test.ts` | Round 4 — ATLAS as a long-lived stateful system: long legal sequences in two orders (route replaced, Pattern activated, memory aged, memory disabled, identity replaced between planning and adoption); concurrent pairs (verify ∥ review, two workers claiming one job, adoption ∥ adoption, Pattern activation ∥ verification); cross-project (shared host, ticker, documents, source rows); cross-chain (same-address explorer pages on other EVM chains, an identity that moved chains); the Round 3.5 rules combined with other failures; an independent audit walk Proof → S7 → S6 → S5 → Evidence → source / memory origin; crash and retry windows (Evidence written then attempt left STARTED, lease, reclaim, convergence); legacy data (pre-H10 VERIFIED Proof of a FAILED job, domain-wide unclassified route, contract-version-1 Evidence, identity_key NULL); the health axis at adoption. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
 BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE ≠
@@ -50,6 +51,8 @@ EXECUTED, MEASUREMENT ≠ ATTRIBUTION, NOT_ESTABLISHED ≠ CONTRADICTED, DISCOVE
 | All-OPTIONAL requirement set → vacuous SUPPORTED | `adversarial-core-round2-v1.test.ts` Z1 |
 | Repeated promotion of an ACTIVE memory row rewrote `promoted_by` / `promoted_at` | `adversarial-core-round3-db-v1.test.ts` B1 |
 | Two concurrent owner confirmations (identity, route, classification) both went ACTIVE | `adversarial-core-round3-db-v1.test.ts` D2 |
+| Same-address explorer page on ANOTHER EVM chain bound CONFIRMED (bscscan / polygonscan / Optimism for an Ethereum identity) | `adversarial-core-round4-sequences-v1.test.ts` X1, X2 |
+| Memory health (D-059) decided at plan time only; a row marked QUESTIONABLE / REVERIFY / STALE before adoption was materialized | `adversarial-core-round4-sequences-v1.test.ts` M1 |
 
 ## Semantics the hardening pass fixed (now current behaviour)
 
@@ -106,6 +109,18 @@ EXECUTED, MEASUREMENT ≠ ATTRIBUTION, NOT_ESTABLISHED ≠ CONTRADICTED, DISCOVE
   Never backfilled — that would be the automatic rebinding the rule
   forbids; an owner re-establishes by retiring the old row and verifying a
   new Research (`round3-5` H shows the path).
+- **Entity binding requires the explorer of the identity's chain.**
+  `computeEntityBinding` binds CONFIRMED only when the URL's host (www
+  stripped, exact) is one of the code-owned mainnet explorers of the
+  confirmed chain (`urlHostIsExplorerOfChain`) AND the URL names the
+  address. An EVM address is the same string on every EVM chain, so the
+  host decides the chain; `optimistic.etherscan.io` is Optimism's, not
+  Ethereum's; a host the map does not list binds nothing. Chain artifact
+  rows bind through onchain-binding.ts, never through a URL.
+- **Memory health is re-checked at adoption (D-059).** A row whose health
+  is not OK at the moment of adoption is refused `MEMORY_HEALTH_NOT_OK`
+  (DEPRECATED health stays `MEMORY_NOT_ACTIVE`); it stays as it is and the
+  component is fresh work.
 - **The memory kill switch is re-read at adoption.** `memory_enabled`
   false at the moment of adoption returns every reused component to fresh
   work (`MEMORY_DISABLED`) with nothing written; the preparation read-back
@@ -136,6 +151,22 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | — | No owner path supersedes a PROJECT_IDENTITY (`ACTIVE_IDENTITY_EXISTS` refuses a second, also under concurrency; token migration legacy → current has no lifecycle act, only a manual DEPRECATE plus a fresh confirmation); `resolveConfirmedIdentity` takes the oldest valid ACTIVE row if two ever exist, reachable only by direct SQL. Documentary memory verified under the old identity is refused after the replacement (H11, decided). | An identity supersession script mirroring route classification. |
 | — (`round3` F1, `round3-5` L) | A Proof of a job planned under an earlier Pattern version cannot be verified once a later version is ACTIVE: `markProofVerified` refuses (`MissingActivePatternError`) and rolls back whole. Founder-confirmed as the safe rule; a product limitation, not a bug. | Verify under the version the job was planned under. |
 | H7 (`round3` J1, J2) | Kept. The audit path is complete in persisted state: a REQUIRED-component conflict leaves the refuting row ids in the S7 requirement's provenance and a `CONTRADICTED_COMPONENT` blocking gap; the S5 row holds `contradictingEvidenceIds`; the Proof's layer 6 names the code and component. A lifecycle requirement over a contradicted CURRENT_STATE is UNSATISFIED / INSUFFICIENT_EVIDENCE (never negative) and carries no component keys — its basis is the code-owned CURRENT_STATE. | Cite contradicting rows on refutations; name the basis on the unsatisfied lifecycle branch. |
+
+## Observed, not defects (Round 4)
+
+- **Authority is as-of each row's own moment.** A row adopted or acquired
+  while a route was CONFIRMED keeps CONFIRMED inside that job if the route
+  is withdrawn before the Proof; rows acquired after the withdrawal are
+  CLAIMED. The same holds for identity binding. A job mixes as-of states
+  exactly as fresh acquisition always has.
+- **Proofs carry no persisted verification actor or time.** D-055's audit
+  is the ADMIN role check plus the script's printed confirmation;
+  `research_memory` records `promoted_by` / `promoted_at`, `proofs` records
+  nothing. There is nothing to rewrite, and nothing to audit from the row.
+  A Founder decision, not a defect under the current design.
+- **After an identity replacement, Memory of the old identity is frozen
+  until an owner retires it**: a new verification of the same passage
+  dedups against the live old row and never rebinds it (H11, by design).
 
 ## Not covered offline (real-provider / live-environment risk)
 
