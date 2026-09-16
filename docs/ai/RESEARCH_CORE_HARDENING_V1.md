@@ -19,6 +19,7 @@ touches a provider.
 | `tests/adversarial-core-boundaries-v1.test.ts` | Section N: attacks that held, kept as regressions. Section H: **documented boundaries** — behaviour that sits on a policy line; each case pins what the Core does today so a later Founder decision fails a named test rather than drifting. |
 | `tests/adversarial-core-round2-v1.test.ts` | Round 2 — interactions and order: the same Evidence in every permutation (byte-identical S5/S6 flow ids/S7/S8), mixed pools (weak rows beside strong), temporal boundaries (`publishedAt == fetchedAt`, equal timestamps, undated vs dated), S7→S8 traceability, cross-stage idempotency, and a fresh pass on the Pattern→S7 contract, memory-candidate admission and projection labels. |
 | `tests/adversarial-core-round3-db-v1.test.ts` | Round 3 — the DB-backed stateful Core, attacked by changing the world BETWEEN two correct operations: A verification → candidates (concurrent verification, vanished rows, rollback); B promotion (repeat, race, forbidden transitions, one live row per observation, duplicate ACTIVE state); C adoption after a route withdrawal, a re-classification, an identity replacement, a Pattern change, a freshness crossing, competing states, a Proof downgrade, a memory switch-off; D identity lifecycle and historical chain readings; E route resolver determinism, supersession, classification rollback; F Pattern activation against existing jobs and memory; G attempt/job terminal states, retry after partial work, the crash window after S8; I cross-project contamination; J the H7 audit path over persisted rows; K the health axis. |
+| `tests/founder-semantics-round3-5-v1.test.ts` | Round 3.5 — the Founder-approved semantics pinned over the real store: freshness re-checked at adoption (H8), VERIFIED terminal (H9), verification only of a successful bounded job (H10), documentary memory bound to its token identity (H11), the memory kill switch re-read at adoption, the Pattern version boundary; plus the cross-state attacks (stale + switch, identity + fresh, identity + route, regression attempt over ACTIVE memory, failed-job Proof with eligible Evidence) and the no-false-conclusion assertions. Not an adversarial round; does not count toward the two clean rounds. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
 BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE ≠
@@ -78,6 +79,38 @@ EXECUTED, MEASUREMENT ≠ ATTRIBUTION, NOT_ESTABLISHED ≠ CONTRADICTED, DISCOVE
   UPDATE`; an already-ACTIVE row returns as it is, so a repeat by another
   admin never replaces the audit of the first decision, and two admins
   racing produce one promotion.
+- **Memory must be fresh at adoption, not only at planning (H8).**
+  `adoptReusedMemory` applies the planner's own `isStale` (same window,
+  same config, the row's own `stale_after`) to the persisted row at the
+  moment it would become Evidence; a row that crossed its window since
+  planning is refused `MEMORY_STALE`, stays ACTIVE, and the component is
+  ordinary fresh work. Stale is never a contradiction.
+- **VERIFIED is terminal (H9).** `markProofReviewed` refuses a VERIFIED
+  Proof (`VERIFIED_IS_TERMINAL`) and the database guard
+  `proof_verification_status_guard` (migration 0052) refuses any regression
+  from VERIFIED, direct SQL included. Re-verifying is a no-op on the row.
+  Verdict and confidence are untouched by the rule.
+- **Only a Proof of a successful bounded job is verifiable (H10).**
+  `markProofVerified` reads the job under the Proof's row lock and refuses
+  (`JOB_NOT_SUCCESSFUL`) unless the job ended SUCCEEDED or
+  BUDGET_LIMIT_REACHED (`VERIFIABLE_JOB_STATES`). A DRAFT written by S8
+  before a crash or sweep stays persisted for audit and is never verified;
+  no candidate is written. A failed Research is not a negative finding.
+- **Documentary memory is bound to its token identity (H11).** The
+  candidate writer records `research_memory.identity_key`
+  (`identityBindingKey`: chain and token address, never a row id) from the
+  identity confirmed at verification; adoption refuses a row whose key
+  differs from today's (`IDENTITY_CHANGED`). A deprecate + re-confirmation
+  of the same token is not a replacement. NULL means "verified under no
+  identity": eligible while the project has none, refused once it has one.
+  Never backfilled — that would be the automatic rebinding the rule
+  forbids; an owner re-establishes by retiring the old row and verifying a
+  new Research (`round3-5` H shows the path).
+- **The memory kill switch is re-read at adoption.** `memory_enabled`
+  false at the moment of adoption returns every reused component to fresh
+  work (`MEMORY_DISABLED`) with nothing written; the preparation read-back
+  (`loadEffectiveJobContractView`) agrees. The Research is not cancelled,
+  Memory is not touched, the code default stays false.
 - **Owner confirmations are serialized on the project row.** Identity
   confirmation, route confirmation and route classification run their
   check-then-act inside one transaction that locks the project row (the
@@ -100,13 +133,8 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H6 | An established DEPRECATED current state with no execution record is lifecycle NOT_ESTABLISHED → "is it current?" is INSUFFICIENT_EVIDENCE, not answered "no". | Let an established non-live CURRENT_STATE refute CURRENT without an execution record. |
 | — | EXECUTION_EVIDENCE has `freshnessClass: MEDIUM_CHANGE` but `requiresCurrentState: false`, so age is never checked for it; "currently executing" is protected by CURRENT_STATE only. | Apply the freshness window to EXECUTION_EVIDENCE. |
 | H7 (`round2` P5) | S8 citations are support-only: a NOT_SUPPORTED verdict from a state CONFLICT cites nothing; the contradicting rows are visible only as CONFLICTING_STATE gaps. | Cite contradicting rows on refutations. |
-| — | No owner path supersedes a PROJECT_IDENTITY (`ACTIVE_IDENTITY_EXISTS` refuses a second, now also under concurrency; token migration legacy → current has no lifecycle act, only a manual DEPRECATE plus a fresh confirmation); `resolveConfirmedIdentity` takes the oldest valid ACTIVE row if two ever exist, which is now reachable only by direct SQL. | An identity supersession script mirroring route classification. |
-| H8 (`round3` C4) | Memory freshness is decided at plan time only (`isStale` over `verifiedAt`); an observation that crosses its window between planning and adoption is still adopted. Exposure is one job's lifetime. | Re-check staleness at adoption. |
-| H9 (`round3` C6) | Proof verification has no state graph: `markProofReviewed` moves a VERIFIED Proof back to REVIEWED, and neither the OBSERVED candidates nor any ACTIVE memory derived from it is touched. | Guard the graph, or cascade a withdrawal to derived candidates. |
-| H10 (`round3` G4) | The crash window after S8: a job whose worker died between the Proof write and the terminal transaction is swept FAILED and keeps its DRAFT Proof; `markProofVerified` accepts it and writes candidates. The Proof reflects completed research; FAILED is the sweep's conservative verdict. | Refuse verification unless the job ended SUCCEEDED / BUDGET_LIMIT_REACHED. |
-| H11 (`round3` C3) | Documentary Research Memory is not identity-bound: after the project's token identity is replaced, an ACTIVE documentary observation is still adopted (entity binding is a chain-only axis, and chain observations never enter memory). | Record the identity current at verification on the row and refuse adoption under another. |
-| — (`round3` C7) | `memory_enabled` is read at planning only; a job planned while it was on still adopts after it is switched off. | Re-read the switch before adoption. |
-| — (`round3` F1) | A Proof of a job planned under an earlier Pattern version cannot be verified once a later version is ACTIVE: `markProofVerified` refuses (`MissingActivePatternError`) and rolls back whole. Safe direction; a product limitation, not a bug. | Verify under the version the job was planned under. |
+| — | No owner path supersedes a PROJECT_IDENTITY (`ACTIVE_IDENTITY_EXISTS` refuses a second, also under concurrency; token migration legacy → current has no lifecycle act, only a manual DEPRECATE plus a fresh confirmation); `resolveConfirmedIdentity` takes the oldest valid ACTIVE row if two ever exist, reachable only by direct SQL. Documentary memory verified under the old identity is refused after the replacement (H11, decided). | An identity supersession script mirroring route classification. |
+| — (`round3` F1, `round3-5` L) | A Proof of a job planned under an earlier Pattern version cannot be verified once a later version is ACTIVE: `markProofVerified` refuses (`MissingActivePatternError`) and rolls back whole. Founder-confirmed as the safe rule; a product limitation, not a bug. | Verify under the version the job was planned under. |
 | H7 (`round3` J1, J2) | Kept. The audit path is complete in persisted state: a REQUIRED-component conflict leaves the refuting row ids in the S7 requirement's provenance and a `CONTRADICTED_COMPONENT` blocking gap; the S5 row holds `contradictingEvidenceIds`; the Proof's layer 6 names the code and component. A lifecycle requirement over a contradicted CURRENT_STATE is UNSATISFIED / INSUFFICIENT_EVIDENCE (never negative) and carries no component keys — its basis is the code-owned CURRENT_STATE. | Cite contradicting rows on refutations; name the basis on the unsatisfied lifecycle branch. |
 
 ## Not covered offline (real-provider / live-environment risk)

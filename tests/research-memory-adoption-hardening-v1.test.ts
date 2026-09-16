@@ -38,6 +38,7 @@ import {
 } from "../src/server/memory/lifecycle";
 import { loadActivePatternComponents } from "../src/server/memory/pattern-components";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
+import { identityBindingKey, resolveConfirmedIdentity } from "../src/server/domain/project-identity";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
 import { registerSourceResource } from "../src/server/memory/source-resource";
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
@@ -283,6 +284,9 @@ async function researchAThenPromote(
     verifiedAt: new Date(),
     confidence: 90,
     originKind: "TEST_PROMOTION",
+    // The fixture stands in for the candidate writer, which binds every
+    // candidate to the token identity confirmed at verification (H11).
+    identityKey: identityBindingKey(await resolveConfirmedIdentity(ctx.db, projectId)),
   });
   await promoteToActive(ctx.db, memoryId, admin);
   await copyProvenanceFromEvidence(ctx.db, memoryId, origin.id);

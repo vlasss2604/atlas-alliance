@@ -20,14 +20,14 @@ import {
   userIdentities,
   users,
 } from "../src/server/db/schema";
-import { createResearchJob } from "../src/server/jobs/research-jobs";
+import { createResearchJob, transitionJobState } from "../src/server/jobs/research-jobs";
 import {
   copyProvenanceFromEvidence,
   NotAdminError,
   observeMemoryCandidate,
   promoteToActive,
 } from "../src/server/memory/lifecycle";
-import { markProofVerified } from "../src/server/memory/verification";
+import { markProofVerified, ProofVerificationRefusedError } from "../src/server/memory/verification";
 import { structuredMemoryRetrievalGateway } from "../src/server/memory/retrieval-gateway";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { coreEntitlement, demoEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
@@ -639,6 +639,13 @@ describe("Фаза 5 — lifecycle-код и VERIFIED-механизм (chunk B/
     await expect(markProofVerified(ctx.db, proofRow.id, notAdmin.id)).rejects.toThrow(
       NotAdminError,
     );
+    // H10: a Proof is verifiable only once its job ended in a successful
+    // bounded terminal state — a QUEUED job's Proof is refused, by an admin too.
+    await expect(markProofVerified(ctx.db, proofRow.id, admin.id)).rejects.toThrow(
+      ProofVerificationRefusedError,
+    );
+    await transitionJobState(ctx.db, jobRow.job.id, "RUNNING");
+    await transitionJobState(ctx.db, jobRow.job.id, "SUCCEEDED");
     const verified = await markProofVerified(ctx.db, proofRow.id, admin.id);
     expect(verified.verificationStatus).toBe("VERIFIED");
   });

@@ -53,7 +53,7 @@ import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
-import { markProofReviewed, markProofVerified } from "../src/server/memory/verification";
+import { markProofReviewed, markProofVerified, ProofVerificationRefusedError } from "../src/server/memory/verification";
 import { claimResearchJob, createResearchJob, transitionJobState } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask, sweepStaleRunningJobs } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
@@ -776,7 +776,7 @@ describe("C. ACTIVE memory -> adoption, with the world changed in between", () =
     expect((await proofOf(jobB)).confidence).toBe((await proofOf(control)).confidence);
   });
 
-  it("C3. BOUNDARY — documentary memory is not identity-bound: after the project's token identity is replaced, an ACTIVE documentary observation is still adopted, and no chain observation can ever be in memory", async () => {
+  it("C3. H11 — documentary memory is bound to the token identity it was verified under: after the identity is replaced, an ACTIVE observation is refused (IDENTITY_CHANGED), the row is untouched, and the component is acquired fresh", async () => {
     const project = await makeProject();
     const mintA = "So11111111111111111111111111111111111111112";
     const mintB = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
@@ -792,23 +792,26 @@ describe("C. ACTIVE memory -> adoption, with the world changed in between", () =
 
     await setMemoryEnabled(true);
     const { jobId: jobB, worked } = await runJob(project);
+    expect((await jobOf(jobB)).state).toBe("SUCCEEDED");
     const destB = await evidenceOf(jobB, "DESTINATION");
     expect(destB.length).toBe(1);
-    expect(destB[0].reusedFromMemoryId).toBe(promoted.DESTINATION[0]);
-    expect(destB[0].entityBinding).toBeNull();
-    expect(worked.some((w) => w.startsWith("6:DESTINATION"))).toBe(false);
-    // The memory family never holds a chain observation (ONCHAIN_FAMILY refusal
-    // is pinned by the observed-candidates suite); here: no adopted row of this
-    // job carries a chain kind, artifact or binding.
+    expect(destB[0].reusedFromMemoryId).toBeNull();
+    expect(worked).toContain("6:DESTINATION#1");
+    const { view } = await loadJobContractView(ctx.db, jobB);
+    const again = await adoptReusedMemory(ctx.db, jobB, view, new Date());
+    expect(again.fallback.map((f) => f.refusals.map((r) => r.reason))).toEqual([["IDENTITY_CHANGED"]]);
+    const [mem] = await ctx.db.select().from(researchMemory).where(eq(researchMemory.id, promoted.DESTINATION[0]));
+    expect(mem.lifecycleState).toBe("ACTIVE");
+    expect(mem.identityKey).toBe(`solana:${mintA}`);
+    // The memory family never holds a chain observation; nothing adopted here
+    // carries a chain kind or artifact.
     for (const row of await evidenceOf(jobB)) {
-      if (row.reusedFromMemoryId !== null) {
-        expect(row.onchainFactKind).toBeNull();
-        expect(row.onchainArtifactId).toBeNull();
-      }
+      expect(row.onchainFactKind).toBeNull();
+      expect(row.onchainArtifactId).toBeNull();
     }
   });
 
-  it("C4. BOUNDARY — freshness is decided at plan time only: an observation that crosses its window between planning and adoption is still adopted", async () => {
+  it("C4. H8 — freshness is re-checked at adoption: an observation fresh at planning that crosses its window before adoption is refused (MEMORY_STALE), stays ACTIVE, and the component is fresh work", async () => {
     const project = await makeProject();
     const { promoted } = await verifiedAndPromoted(project, ["FLOW_PATH"]);
     const flowId = promoted.FLOW_PATH[0];
@@ -824,9 +827,13 @@ describe("C. ACTIVE memory -> adoption, with the world changed in between", () =
     expect(view.reused.map((r) => r.component)).toEqual(["FLOW_PATH"]);
     const tenDaysLater = new Date(Date.now() + 10 * 24 * 3600 * 1000);
     const adoption = await adoptReusedMemory(ctx.db, jobB, view, tenDaysLater);
-    expect(adoption.adopted.map((a) => a.component)).toEqual(["FLOW_PATH"]);
-    expect(adoption.fallback).toEqual([]);
-    await transitionJobState(ctx.db, jobB, "FAILED", "round 3 fixture: boundary case ends here");
+    expect(adoption.adopted).toEqual([]);
+    expect(adoption.fallback.map((f) => `${f.component}:${f.refusals.map((r) => r.reason).join(",")}`)).toEqual(["FLOW_PATH:MEMORY_STALE"]);
+    expect(adoption.workQueue.some((w) => w.component === "FLOW_PATH" && w.state === "NO_MEMORY")).toBe(true);
+    expect((await evidenceOf(jobB, "FLOW_PATH")).length).toBe(0);
+    const [mem] = await ctx.db.select().from(researchMemory).where(eq(researchMemory.id, flowId));
+    expect(mem.lifecycleState).toBe("ACTIVE");
+    await transitionJobState(ctx.db, jobB, "FAILED", "round 3 fixture: case ends here");
   });
 
   it("C5. two ACTIVE observations that disagree on mechanism state are CONTRADICTED at planning: nothing is adopted and the component is fresh work", async () => {
@@ -865,11 +872,12 @@ describe("C. ACTIVE memory -> adoption, with the world changed in between", () =
     expect((await evidenceOf(jobB, "MECHANISM_SPEC")).every((r) => r.reusedFromMemoryId === null)).toBe(true);
   });
 
-  it("C6. BOUNDARY — Proof verification has no state graph: the origin Proof can be downgraded VERIFIED -> REVIEWED and its verdict rewritten, and neither the derived memory nor Research B's adoption is touched", async () => {
+  it("C6. H9 — VERIFIED is terminal: the origin Proof cannot be moved back to REVIEWED (code and database guard), its derived ACTIVE memory is untouched, and a rewritten verdict on the old Proof reaches nothing in Research B", async () => {
     const project = await makeProject();
     const { proof: proofA, promoted, admin } = await verifiedAndPromoted(project, ["DESTINATION"]);
-    const downgraded = await markProofReviewed(ctx.db, proofA.id, admin);
-    expect(downgraded.verificationStatus).toBe("REVIEWED");
+    await expect(markProofReviewed(ctx.db, proofA.id, admin)).rejects.toBeInstanceOf(ProofVerificationRefusedError);
+    await expect(ctx.db.update(proofs).set({ verificationStatus: "DRAFT" }).where(eq(proofs.id, proofA.id))).rejects.toSatisfy(isCheckViolation);
+    expect((await proofOf(proofA.researchJobId)).verificationStatus).toBe("VERIFIED");
     await ctx.db.update(proofs).set({ verdict: "NOT_SUPPORTED", confidence: 1 }).where(eq(proofs.id, proofA.id));
     const memory = await memoryOf(project.id);
     expect(memory.find((m) => m.id === promoted.DESTINATION[0])!.lifecycleState).toBe("ACTIVE");
@@ -883,27 +891,34 @@ describe("C. ACTIVE memory -> adoption, with the world changed in between", () =
     expect(proofB.verdict).toBe((await proofOf(control)).verdict);
     expect(proofB.confidence).toBe((await proofOf(control)).confidence);
     expect(proofB.verdict).not.toBe("NOT_SUPPORTED");
-    // The downgraded Proof still cannot be rebuilt by S8, and re-verifying
-    // it adds nothing.
     expect((await buildAndPersistProof(ctx.db, proofA.researchJobId)).refusal).toBe("PROOF_NOT_DRAFT");
     const reverified = await markProofVerified(ctx.db, proofA.id, admin);
     expect(reverified.memoryCandidates.created).toEqual([]);
     expect((await memoryOf(project.id)).length).toBe(memory.length);
   });
 
-  it("C7. BOUNDARY — memory disabled between planning and execution: the frozen contract still adopts; the switch governs planning, not a job already planned", async () => {
+  it("C7. KILL SWITCH — memory disabled between planning and execution: nothing is adopted (MEMORY_DISABLED), no reused row is written, the component is acquired fresh, and the Research still completes", async () => {
     const project = await makeProject();
     const { promoted } = await verifiedAndPromoted(project, ["DESTINATION"]);
     await setMemoryEnabled(true);
     const jobB = await newJob(project);
     expect(await claimResearchJob(ctx.db, jobB)).not.toBeNull();
     await runMemoryPlanningStage(ctx.db, jobB);
+    const { view } = await loadJobContractView(ctx.db, jobB);
+    expect(view.reused.map((r) => r.component)).toEqual(["DESTINATION"]);
     await setMemoryEnabled(false);
     const worked: string[] = [];
-    await runS4ResearchJob(ctx.db, jobB, executorOf(project, {}, worked), new Date());
-    const [destB] = await evidenceOf(jobB, "DESTINATION");
-    expect(destB.reusedFromMemoryId).toBe(promoted.DESTINATION[0]);
-    expect(worked.some((w) => w.startsWith("6:DESTINATION"))).toBe(false);
+    const result = await runS4ResearchJob(ctx.db, jobB, executorOf(project, {}, worked), new Date());
+    expect(result.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
+    const destB = await evidenceOf(jobB, "DESTINATION");
+    expect(destB.length).toBe(1);
+    expect(destB[0].reusedFromMemoryId).toBeNull();
+    expect(worked).toContain("6:DESTINATION#1");
+    expect((await s5Of(jobB, "DESTINATION")).status).toBe("SUPPORTED");
+    const again = await adoptReusedMemory(ctx.db, jobB, view, new Date());
+    expect(again.fallback.map((f) => f.refusals.map((r) => r.reason))).toEqual([["MEMORY_DISABLED"]]);
+    const [mem] = await ctx.db.select().from(researchMemory).where(eq(researchMemory.id, promoted.DESTINATION[0]));
+    expect(mem.lifecycleState).toBe("ACTIVE");
     await transitionJobState(ctx.db, jobB, "SUCCEEDED", "round 3 fixture");
   });
 });
@@ -1211,20 +1226,24 @@ describe("G. job / attempt terminal states", () => {
     await transitionJobState(ctx.db, jobId, "SUCCEEDED", "round 3 fixture");
   });
 
-  it("G4. BOUNDARY — the crash window after S8: a job swept FAILED after its Proof was written keeps that DRAFT Proof, and the canonical verification act accepts it", async () => {
+  it("G4. H10 — the crash window after S8: a job swept FAILED after its Proof was written keeps that DRAFT Proof for audit, and verification refuses it (JOB_NOT_SUCCESSFUL) without writing a candidate", async () => {
     const project = await makeProject();
     const admin = await makeAdmin();
     const { jobId } = await runJobWithoutTerminal(project);
     const proof = await proofOf(jobId);
     expect(proof).toBeDefined();
+    // Not terminal yet: not verifiable either.
+    await expect(markProofVerified(ctx.db, proof.id, admin)).rejects.toMatchObject({ refusal: "JOB_NOT_SUCCESSFUL" });
     await ctx.db.update(researchJobs).set({ startedAt: new Date(Date.now() - 2 * 24 * 3600 * 1000) }).where(eq(researchJobs.id, jobId));
     expect(await sweepStaleRunningJobs(ctx.db)).toBeGreaterThanOrEqual(1);
     const job = await jobOf(jobId);
     expect(job.state).toBe("FAILED");
     expect((await proofOf(jobId)).id).toBe(proof.id);
-    const verified = await markProofVerified(ctx.db, proof.id, admin);
-    expect(verified.verificationStatus).toBe("VERIFIED");
-    expect(verified.memoryCandidates.created.length).toBeGreaterThan(0);
+    await expect(markProofVerified(ctx.db, proof.id, admin)).rejects.toBeInstanceOf(ProofVerificationRefusedError);
+    const after = await proofOf(jobId);
+    expect(after.verificationStatus).toBe("DRAFT");
+    expect(after.verdict).toBe(proof.verdict);
+    expect(await memoryOf(project.id)).toEqual([]);
   });
 });
 
