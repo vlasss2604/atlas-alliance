@@ -702,20 +702,39 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
         // never stronger than the strongest single-slot world and never
         // weaker than the control. Rows a single source spans across the
         // fork keep outcome 2: a real ambiguity the source defines.
+        const parentBranchPathHash = sha256Hex(canonicalize(l.lineage));
         let candidateRows: AssemblyEvidenceProjection[];
         let attributionUnresolved = false;
         if (l.branchPointStep === null) {
           candidateRows = allRows;
         } else {
+          // ROUND 6.6 (Founder decision 1) — SHARED SOURCE != AUTOMATIC
+          // ATTRIBUTION FAILURE. Rows a single source spans across the fork
+          // (they pass this branch AND a sibling) are ambiguous only when
+          // there is a PAIRING CHOICE to make: when, on this branch, they
+          // form two or more slots — audit HIGH-1's shape, one document
+          // describing both allocations and both destinations, where the
+          // document's own structure decides the pairing and the assembler
+          // cannot read it. One shared slot offers no choice: every branch
+          // the source spans continues with the same element, exactly as
+          // an unforked lineage would take it, and the branches stay
+          // distinct (one slot each at the fork, one shared provenance
+          // below it — never an independent corroboration, S7 is
+          // existential and confidence never counts). Two or more shared
+          // slots keep outcome 2: BRANCH_ATTRIBUTION_UNRESOLVED, and none
+          // of them attaches.
+          const sharedWithMe = allRows.filter(
+            (r) => l.postForkSourceIds.has(r.sourceId) && (passCountByRowId.get(r.id) ?? 0) > 1,
+          );
+          const sharedIsOneElement =
+            sharedWithMe.length > 0 && partitionIntoSlots(step, component, parentBranchPathHash, sharedWithMe).length === 1;
           candidateRows = allRows.filter(
             (r) =>
               (l.postForkSourceIds.has(r.sourceId) && passCountByRowId.get(r.id) === 1) ||
-              (passCountByRowId.get(r.id) ?? 0) === 0,
+              (passCountByRowId.get(r.id) ?? 0) === 0 ||
+              (sharedIsOneElement && sharedWithMe.includes(r)),
           );
-          const anyAmbiguousToMe = allRows.some(
-            (r) => l.postForkSourceIds.has(r.sourceId) && (passCountByRowId.get(r.id) ?? 0) > 1,
-          );
-          attributionUnresolved = candidateRows.length === 0 || anyAmbiguousToMe;
+          attributionUnresolved = candidateRows.length === 0 || (sharedWithMe.length > 0 && !sharedIsOneElement);
         }
 
         if (candidateRows.length === 0) {
@@ -730,33 +749,44 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
           continue;
         }
 
-        const parentBranchPathHash = sha256Hex(canonicalize(l.lineage));
         const slots = partitionIntoSlots(step, component, parentBranchPathHash, candidateRows);
 
-        if (active.length * slots.length + (active.length - 1) > MAX_FLOWS && slots.length > 1) {
-          // S6 audit fix (HIGH-2): the cap must never silently drop an
-          // established component from this lineage's structure. The
-          // affected flow carries a positioned FLOW_ENUMERATION_INCOMPLETE
-          // gap (so it can never present COMPLETE_PATH), and the
-          // result-level gap below names the first cap position too.
-          enumerationCapPoint = enumerationCapPoint ?? { step, component };
-          const clone = cloneLineage(l);
-          clone.gaps.push({
-            kind: "FLOW_ENUMERATION_INCOMPLETE",
-            component,
-            afterStep: step,
-            provenance: { componentResults: [{ step, component }], evidenceIds: [] },
-          });
-          next.push(clone);
-          continue;
-        }
+        // S6 audit fix (HIGH-2): the cap must never silently drop an
+        // established component from this lineage's structure. The
+        // affected flow carries a positioned FLOW_ENUMERATION_INCOMPLETE
+        // gap (so it can never present COMPLETE_PATH), and the
+        // result-level gap below names the first cap position too.
+        //
+        // ROUND 6.6 (Founder decision 2) — BOUNDED ENUMERATION != WEAKER
+        // TRUTH. The cap used to leave the component OFF the lineage, so
+        // every claim needing it read UNSATISFIED once enough agreeing
+        // slots existed to exhaust the enumeration (Round 6.5 F2). The cap
+        // is a computational safety boundary, not project counterevidence:
+        // when it binds, the lineage continues with the STRUCTURALLY-FIRST
+        // slot (slots are sorted by structuralUnitKey then ids — the same
+        // element whatever the input order), no fork is opened, and the
+        // gap records that the other slots were not enumerated. The flow is
+        // a real lineage of established rows — never stronger than full
+        // enumeration would give (it is one of its flows), never weaker
+        // than the retained rows establish.
+        const capBinds = active.length * slots.length + (active.length - 1) > MAX_FLOWS && slots.length > 1;
+        if (capBinds) enumerationCapPoint = enumerationCapPoint ?? { step, component };
+        const enumerated = capBinds ? [slots[0]] : slots;
 
-        slots.forEach((slot, slotIndex) => {
+        enumerated.forEach((slot, slotIndex) => {
           const clone = cloneLineage(l);
           clone.lineage.push({ step, component, componentResultKey: key, evidenceIds: slot.evidenceIds });
-          if (slots.length > 1) {
+          if (enumerated.length > 1) {
             clone.branchPointStep = clone.branchPointStep ?? step;
             clone.branchSlotPath.push(slotIndex);
+          }
+          if (capBinds) {
+            clone.gaps.push({
+              kind: "FLOW_ENUMERATION_INCOMPLETE",
+              component,
+              afterStep: step,
+              provenance: { componentResults: [{ step, component }], evidenceIds: [] },
+            });
           }
           // Post-fork provenance accumulates from the fork point onward —
           // the diverging slot itself included (it IS what distinguishes

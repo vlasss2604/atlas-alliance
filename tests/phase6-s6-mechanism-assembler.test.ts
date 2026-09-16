@@ -502,14 +502,18 @@ describe("S6 acceptance scenarios D-099/D-101 extensions (§26 AA-AU)", () => {
       expect(f.lineage.find((s) => s.component === "NET_EFFECT")?.evidenceIds).toEqual(["adN"]);
       expect(f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED")).toBe(false);
     }
-    // A source that spans the fork (one document for both allocations AND
-    // the net effect) is still unattributable: HIGH-1 / §13.4 outcome 2.
+    // ROUND 6.6 (Founder decision 1): a source that spans the fork (one
+    // document for both allocations AND ONE net-effect statement) offers no
+    // pairing choice — one shared slot — so it continues on both branches
+    // too, with the one shared provenance. Two shared slots (HIGH-1, the
+    // audit-fixes suite) stay unattributable.
     const spanning = [ev("ad1", "s1", "protocol fees"), ev("adA", "sAB", "buyback allocation"), ev("adB", "sAB", "treasury allocation"), ev("adN", "sAB", "net supply reduced")];
     const r2 = assemble(results, spanning);
     expect(r2.flows.length).toBe(2);
     for (const f of r2.flows) {
-      expect(f.netEffect).toBeNull();
-      expect(f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === "NET_EFFECT")).toBe(true);
+      expect(f.netEffect).not.toBeNull();
+      expect(f.lineage.find((s) => s.component === "NET_EFFECT")?.evidenceIds).toEqual(["adN"]);
+      expect(f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED")).toBe(false);
     }
   });
 
