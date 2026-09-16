@@ -462,20 +462,25 @@ describe("Decision 3 — MORE AGREEING ADMISSIBLE EVIDENCE != WEAKER PROOF (D-10
     }
   });
 
-  it("F2. BOUNDARY, PINNED — the flow-enumeration cap under multiplicity: twins at every component would be 2^10 structural flows; the cap (MAX_FLOWS 64) refuses the sixth fork at 32 flows, the components from there on are FLOW_ENUMERATION_INCOMPLETE on every flow, and the claim WEAKENS on multiplicity alone. Two locked rules collide (D-104: bounded enumeration with an explicit gap; Founder decision 3: multiplicity never weakens); a decision either way fails this test by name", () => {
+  it("F2. DECIDED (Round 6.6, Founder decision 2) — the flow-enumeration cap under multiplicity: twins at every component would be 2^10 structural flows; the cap (MAX_FLOWS 64) refuses the sixth fork at 32 flows, every flow continues with the structurally-first slot and carries FLOW_ENUMERATION_INCOMPLETE, and the claim is exactly the control's — bounded enumeration is never weaker truth. The full pin is founder-semantics-round6-6-v1 (F–J)", () => {
     const base = world();
     const control = runChain("PROTOCOL_REVENUE_TO_TOKEN", base);
     const all = runChain("PROTOCOL_REVENUE_TO_TOKEN", [...base, ...ALL_COMPONENTS.map((c) => agreeingTwin(c, base))]);
     noStrongerThan(all, control, "all twins");
+    noWeakerThan(all, control, "all twins");
     expect(all.assembly.flows.length).toBe(32);
     expect(all.assembly.unassignedGaps.some((g) => g.kind === "FLOW_ENUMERATION_INCOMPLETE")).toBe(true);
     expect(all.assembly.flows.every((f) => f.gaps.some((g) => g.kind === "FLOW_ENUMERATION_INCOMPLETE"))).toBe(true);
-    // THE BOUNDARY: PRT-2 PARTIAL -> UNSATISFIED with no contradiction, no
-    // temporal, identity or scope reason — the cap alone.
+    expect(all.assembly.flows.every((f) => ALL_COMPONENTS.every((c) => f.lineage.some((st) => st.component === c)))).toBe(true);
     expect(control.claim.requirementResults.find((r) => r.requirementId === "PRT-2")?.status).toBe("PARTIAL");
-    expect(all.claim.requirementResults.find((r) => r.requirementId === "PRT-2")?.status).toBe("UNSATISFIED");
-    expect(all.proof.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED")).toBe(false);
-    expect(all.proof.verdict).not.toBe("NOT_SUPPORTED");
+    expect(all.claim.requirementResults.find((r) => r.requirementId === "PRT-2")?.status).toBe("PARTIAL");
+    // The conclusion is the control's; the ONLY difference is the visible
+    // diagnostic that enumeration stopped (at CURRENT_STATE, the sixth
+    // two-slot component), which binds nothing.
+    const minusCap = (k: ReturnType<typeof conclusion>) => ({ ...k, gaps: k.gaps.filter((g) => !g.includes("FLOW_ENUMERATION_INCOMPLETE")) });
+    expect(minusCap(conclusion(all))).toEqual(minusCap(conclusion(control)));
+    expect(all.proof.gaps.some((g) => g.kind === "FLOW_ENUMERATION_INCOMPLETE" && g.origin === "CLAIM_CONTEXT" && g.component === "CURRENT_STATE")).toBe(true);
+    expect(all.proof.confidenceBindingReasons).not.toContain("CLAIM_CONTEXT_GAP");
     provenanceHolds(all);
   });
 
@@ -514,7 +519,7 @@ describe("Decision 3 — MORE AGREEING ADMISSIBLE EVIDENCE != WEAKER PROOF (D-10
     expect(m.assembly.flows.length).toBe(control.assembly.flows.length * 5);
   });
 
-  it("G2. the fork is never a merge and never a cartesian invention: a row that names ONE branch attaches there only; a second row that names the other branch attaches there only; a row a single source spans across the fork (audit HIGH-1, §13.4 outcome 2) stays BRANCH_ATTRIBUTION_UNRESOLVED — that is a scope the source defines and the assembler cannot read, not multiplicity", () => {
+  it("G2. the fork is never a merge and never a cartesian invention: a row that names ONE branch attaches there only; a second row that names the other branch attaches there only; and (DECIDED, Round 6.6) a row a single source spans across the fork continues on every branch it spans when it is ONE element — two shared slots (audit HIGH-1) stay BRANCH_ATTRIBUTION_UNRESOLVED", () => {
     const base = world();
     const control = runChain("PROTOCOL_REVENUE_TO_TOKEN", base);
     // Fork at SOURCE_OF_VALUE between page A (the control's) and page B;
@@ -533,13 +538,12 @@ describe("Decision 3 — MORE AGREEING ADMISSIBLE EVIDENCE != WEAKER PROOF (D-10
     }
     expect(named.proof.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED")).toBe(false);
     expect(conclusion(named)).toEqual(conclusion(control));
-    // THE RETAINED BOUNDARY: two agreeing SOURCE_OF_VALUE passages from ONE
-    // page and that page's own FLOW_PATH row: the page spans the fork, its
-    // FLOW_PATH row could belong to either passage's branch, and the
-    // assembler refuses to guess. The claim weakens (PRT-2 PARTIAL ->
-    // UNSATISFIED) for a named reason — a scope the source itself defines —
-    // and never falsely merges. Pinned so that a decision on outcome 2
-    // fails this test by name.
+    // DECIDED (Round 6.6, Founder decision 1): two agreeing SOURCE_OF_VALUE
+    // passages from ONE page and that page's own DESTINATION row. The page
+    // spans the fork; its one DESTINATION element offers no pairing choice,
+    // so both branches continue with it (one shared provenance, never an
+    // independent corroboration) and the claim is exactly the control's.
+    // The full pin is founder-semantics-round6-6-v1 (A–E).
     const pageP = "page-P";
     const spanning = [
       row("SOURCE_OF_VALUE", { fragment: "swap fees generate the revenue", sourceId: pageP }),
@@ -549,12 +553,17 @@ describe("Decision 3 — MORE AGREEING ADMISSIBLE EVIDENCE != WEAKER PROOF (D-10
     ];
     const s = runChain("PROTOCOL_REVENUE_TO_TOKEN", spanning);
     expect(s.assembly.flows.length).toBe(2);
-    expect(s.assembly.flows.every((f) => f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === "DESTINATION"))).toBe(true);
-    expect(s.proof.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === "DESTINATION")).toBe(true);
-    noStrongerThan(s, control, "spanning source");
-    expect(s.claim.requirementResults.find((r) => r.requirementId === "PRT-2")?.status).toBe("UNSATISFIED");
-    expect(s.proof.verdict).not.toBe("NOT_SUPPORTED");
+    expect(s.assembly.flows.every((f) => f.lineage.some((st) => st.component === "DESTINATION"))).toBe(true);
+    expect(s.proof.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED")).toBe(false);
+    expect(conclusion(s)).toEqual(conclusion(control));
+    // Two shared slots from that page (HIGH-1's shape) still refuse to pair.
+    const twoShared = [...spanning, row("DESTINATION", { fragment: "lending fees are sent to the treasury", sourceId: pageP })];
+    const u = runChain("PROTOCOL_REVENUE_TO_TOKEN", twoShared);
+    expect(u.assembly.flows.every((f) => f.gaps.some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED" && g.component === "DESTINATION"))).toBe(true);
+    expect(u.claim.requirementResults.find((r) => r.requirementId === "PRT-2")?.status).toBe("UNSATISFIED");
+    noStrongerThan(u, control, "two shared slots");
     provenanceHolds(s);
+    provenanceHolds(u);
   });
 
   it("H. actual CONTRADICTORY evidence still weakens, and visibly: a fresh official PAUSED beside the control's LIVE at CURRENT_STATE or MECHANISM_SPEC is CONTRADICTED in S5, a CONTRADICTED_COMPONENT gap on the flow, a COMPONENT_CONTRADICTED binding on the band — in both arrival orders, and not silenced by an agreeing twin arriving with it", () => {

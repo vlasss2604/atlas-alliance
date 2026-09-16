@@ -114,8 +114,21 @@ willing to assert. Collapsing any two of these is the most common failure.
   identity mismatch, scope mismatch, an authority or current-state conflict.
   Mere multiplicity or branching is not one. Structurally: a row whose source
   names no branch continues the trunk on every branch, as it would in an
-  unforked lineage; a row a single source spans across the fork is a scope
-  that source defines and the assembler does not guess (`BRANCH_ATTRIBUTION_UNRESOLVED`).
+  unforked lineage.
+- **Same source ≠ extra independent confidence; same source ≠ automatic
+  penalty.** Several agreeing passages of one page are never independent
+  corroboration (S7 is existential, confidence never counts). A page that
+  spans a fork with ONE element below it offers no pairing choice: that
+  element continues on every branch the page spans, one shared provenance,
+  the branches kept distinct. Two elements of the same page below the fork
+  are a genuine pairing choice the page's own structure decides and the
+  assembler does not guess (`BRANCH_ATTRIBUTION_UNRESOLVED`, audit HIGH-1).
+- **Bounded enumeration ≠ weaker truth.** The flow-enumeration cap is a
+  computational safety boundary, not project counterevidence. When it binds,
+  the lineage continues with the structurally-first slot, the fact that not
+  every permutation was listed stays visible (`FLOW_ENUMERATION_INCOMPLETE`
+  on the flow, on the result and in the Proof), and it never binds the
+  confidence band. A real contradiction on the retained path still weakens.
 
 - **Fact truth ≠ component-establishment eligibility.** A fact can be exactly
   true, DIRECT and bound to the right project, and still be unable to establish a
