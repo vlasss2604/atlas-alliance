@@ -776,6 +776,65 @@ describe("X — cross-state attacks", () => {
   });
 });
 
+// ================================================================== V
+
+describe("V — verification audit metadata (Founder, pre-Round 5)", () => {
+  it("V1. the transition into VERIFIED records the ADMIN actor and the time; a repeat by another admin rewrites neither; nothing that decides research changes", async () => {
+    const project = await makeProject();
+    const admin1 = await makeAdmin();
+    const admin2 = await makeAdmin();
+    const { jobId } = await runJob(project);
+    const draft = await proofOf(jobId);
+    expect(draft.verifiedBy).toBeNull();
+    expect(draft.verifiedAt).toBeNull();
+    const t0 = Date.now();
+    await markProofVerified(ctx.db, draft.id, admin1);
+    const first = await proofOf(jobId);
+    expect(first.verifiedBy).toBe(admin1);
+    expect(first.verifiedAt).not.toBeNull();
+    expect(Math.abs(first.verifiedAt!.getTime() - t0)).toBeLessThan(60_000);
+    expect(first.verdict).toBe(draft.verdict);
+    expect(first.confidence).toBe(draft.confidence);
+    expect(first.layers).toEqual(draft.layers);
+    const again = await markProofVerified(ctx.db, draft.id, admin2);
+    expect(again.memoryCandidates.created).toEqual([]);
+    const second = await proofOf(jobId);
+    expect(second.verifiedBy).toBe(admin1);
+    expect(second.verifiedAt!.getTime()).toBe(first.verifiedAt!.getTime());
+    // The candidate picture and Memory eligibility are unchanged by who
+    // verified: the same observations, the same keys.
+    const memory = await memoryOf(project.id);
+    expect(memory.every((m) => m.originKind === "VERIFIED_RESEARCH")).toBe(true);
+    await setMemoryEnabled(true);
+    const dest = memory.find((m) => m.component === "DESTINATION")!;
+    await promoteToActive(ctx.db, dest.id, admin2);
+    const { jobId: jobB, view } = await plannedJob(project);
+    expect((await adoptReusedMemory(ctx.db, jobB, view, new Date())).adopted.map((a) => a.component)).toEqual(["DESTINATION"]);
+    await transitionJobState(ctx.db, jobB, "FAILED", "fixture");
+  });
+
+  it("V2. the database guard: VERIFIED cannot be written without an actor and a time, nor with a non-ADMIN actor; the audit columns cannot be rewritten by a regression attempt", async () => {
+    const project = await makeProject();
+    const admin = await makeAdmin();
+    const [user] = await ctx.db.insert(users).values({}).returning();
+    const { jobId } = await runJob(project);
+    const proof = await proofOf(jobId);
+    await expect(ctx.db.update(proofs).set({ verificationStatus: "VERIFIED" }).where(eq(proofs.id, proof.id))).rejects.toSatisfy(isCheckViolation);
+    await expect(ctx.db.update(proofs).set({ verificationStatus: "VERIFIED", verifiedBy: admin, verifiedAt: null }).where(eq(proofs.id, proof.id))).rejects.toSatisfy(isCheckViolation);
+    await expect(ctx.db.update(proofs).set({ verificationStatus: "VERIFIED", verifiedBy: user.id, verifiedAt: new Date() }).where(eq(proofs.id, proof.id))).rejects.toSatisfy(isCheckViolation);
+    expect((await proofOf(jobId)).verificationStatus).toBe("DRAFT");
+    await markProofVerified(ctx.db, proof.id, admin);
+    const verified = await proofOf(jobId);
+    await expect(ctx.db.update(proofs).set({ verificationStatus: "DRAFT", verifiedBy: null, verifiedAt: null }).where(eq(proofs.id, proof.id))).rejects.toSatisfy(isCheckViolation);
+    const after = await proofOf(jobId);
+    expect(after.verifiedBy).toBe(verified.verifiedBy);
+    expect(after.verifiedAt!.getTime()).toBe(verified.verifiedAt!.getTime());
+    // Demoting the admin afterwards does not unverify (transition-time check).
+    await ctx.db.update(users).set({ role: "USER" }).where(eq(users.id, admin));
+    expect((await proofOf(jobId)).verificationStatus).toBe("VERIFIED");
+  });
+});
+
 // ================================================================== L
 
 describe("L — Pattern version boundary (unchanged rule, runs last)", () => {

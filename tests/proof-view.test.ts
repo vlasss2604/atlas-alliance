@@ -191,9 +191,10 @@ describe("the DTO reads persisted S8 state and copies it (items 1-6, 14)", () =>
     // Same confidence, different verification — proving the two are
     // independent fields rather than one derived from the other.
     const before = await loadProofForJob(ctx.db, f.jobId, f.userId);
+    const [auditor] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();
     await ctx.db
       .update(proofs)
-      .set({ verificationStatus: "VERIFIED" })
+      .set({ verificationStatus: "VERIFIED", verifiedBy: auditor.id, verifiedAt: new Date() })
       .where(eq(proofs.id, persisted.proofId!));
     const after = await loadProofForJob(ctx.db, f.jobId, f.userId);
 

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { proofs, researchJobs } from "../db/schema";
@@ -38,6 +38,13 @@ import { writeObservedCandidatesForVerifiedProof, type ObservedCandidatesResult 
 //   database guard (migration 0052) for anything that bypasses this code.
 //   Verifying an already VERIFIED Proof is a no-op on the row (no update,
 //   no history rewritten) that still reports the candidate picture.
+//
+//   THE EVENT IS RECORDED (Founder, pre-Round 5): `verified_by` (the ADMIN
+//   actor this act already requires) and `verified_at` are written on the
+//   one transition into VERIFIED and never again — a repeat leaves both as
+//   they were. The database guard (migration 0054) requires both on the
+//   transition and an ADMIN actor, exactly as promotion does (D-065).
+//   Nothing that decides research reads them.
 
 export type ProofVerificationRefusal =
   // The Proof's job did not end in a successful bounded terminal state.
@@ -92,12 +99,13 @@ export async function markProofVerified(
     }
     let row: { id: string; verificationStatus: string };
     if (proof.verificationStatus === "VERIFIED") {
-      // Already verified: nothing on the row is rewritten.
+      // Already verified: nothing on the row is rewritten — not the
+      // status, not the actor, not the time.
       row = { id: proof.id, verificationStatus: proof.verificationStatus };
     } else {
       [row] = await tx
         .update(proofs)
-        .set({ verificationStatus: "VERIFIED" })
+        .set({ verificationStatus: "VERIFIED", verifiedBy: adminUserId, verifiedAt: sql`now()` })
         .where(eq(proofs.id, proofId))
         .returning({ id: proofs.id, verificationStatus: proofs.verificationStatus });
     }

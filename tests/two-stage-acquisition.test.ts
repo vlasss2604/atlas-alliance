@@ -637,7 +637,8 @@ describe("resumed path — S5 -> S6 -> S7 -> S8, the production functions", () =
     expect(again.s8!.proofId).toBe(first.s8!.proofId);
     expect(await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId))).toHaveLength(1);
 
-    await ctx.db.update(proofs).set({ verificationStatus: "VERIFIED" }).where(eq(proofs.id, first.s8!.proofId!));
+    const [auditor] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();
+    await ctx.db.update(proofs).set({ verificationStatus: "VERIFIED", verifiedBy: auditor.id, verifiedAt: new Date() }).where(eq(proofs.id, first.s8!.proofId!));
     const third = await buildAndPersistProof(ctx.db, jobId);
     expect(third.refusal).toBe("PROOF_NOT_DRAFT");
     const [row] = await ctx.db.select().from(proofs).where(eq(proofs.id, first.s8!.proofId!));

@@ -379,6 +379,13 @@
       "when": 1789516800000,
       "tag": "0053_research_memory_identity_key",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1789603200000,
+      "tag": "0054_proof_verification_audit",
+      "breakpoints": true
     }
   ]
 }

@@ -63,6 +63,12 @@ export const proofs = pgTable(
     verificationStatus: proofVerificationStatus("verification_status")
       .notNull()
       .default("DRAFT"),
+    // The verification event itself (migration 0054): the ADMIN actor and
+    // the moment of the one transition into VERIFIED. Written once, never
+    // rewritten by a repeat, read by nothing that decides research. NULL
+    // on Proofs verified before the columns existed.
+    verifiedBy: uuid("verified_by").references(() => users.id, { onDelete: "set null" }),
+    verifiedAt: timestamp("verified_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

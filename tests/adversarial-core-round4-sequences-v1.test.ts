@@ -1039,9 +1039,15 @@ describe("L. legacy persisted data — fail closed, never stronger after an upgr
     await runS4ResearchJob(ctx.db, jobId, executorOf(project), new Date());
     await transitionJobState(ctx.db, jobId, "FAILED", "legacy: failed after S8");
     const proof = await proofOf(jobId);
-    // As an older release would have left it: VERIFIED by direct update
-    // (legal for the guard), with no candidate writer having run.
-    await ctx.db.update(proofs).set({ verificationStatus: "VERIFIED" }).where(eq(proofs.id, proof.id));
+    // As an older release left it: VERIFIED with no candidate writer having
+    // run and no audit columns (they did not exist; 0054 never backfills).
+    await ctx.db.execute(sql`ALTER TABLE proofs DISABLE TRIGGER trg_proofs_verification_status_guard`);
+    try {
+      await ctx.db.update(proofs).set({ verificationStatus: "VERIFIED" }).where(eq(proofs.id, proof.id));
+    } finally {
+      await ctx.db.execute(sql`ALTER TABLE proofs ENABLE TRIGGER trg_proofs_verification_status_guard`);
+    }
+    expect((await proofOf(jobId)).verifiedBy).toBeNull();
     const before = await countMemory();
     await expect(markProofVerified(ctx.db, proof.id, admin)).rejects.toMatchObject({ refusal: "JOB_NOT_SUCCESSFUL" });
     await expect(markProofReviewed(ctx.db, proof.id, admin)).rejects.toMatchObject({ refusal: "VERIFIED_IS_TERMINAL" });
