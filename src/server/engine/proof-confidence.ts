@@ -84,6 +84,11 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // than the gap it leaves.
   SEARCH_BUDGET_EXHAUSTED: CONFIDENCE_BANDS.LOW,
   NO_ADMISSIBLE_ROUTE: CONFIDENCE_BANDS.LOW,
+  // ROUND 5.5 (Founder decision C) — the third boundary, same footing:
+  // documents that were read but never inspected are still absence of
+  // Evidence, named truthfully. Neither stronger nor weaker than bare
+  // absence.
+  EXTRACTION_NOT_COMPLETED: CONFIDENCE_BANDS.LOW,
   // Reasoned exclusion is NOT blind absence: every candidate was examined
   // and rejected for a recorded reason, so the insufficiency is itself
   // established. No cap of its own — an accompanying blocking gap still

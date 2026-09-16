@@ -52,6 +52,8 @@ const ENGINE_REASON_CODES = [
   // is: a reader must never meet a bounded step with no stated reason.
   "SEARCH_BUDGET_EXHAUSTED",
   "NO_ADMISSIBLE_ROUTE",
+  // ROUND 5.5 — the third acquisition boundary: opened, not read through.
+  "EXTRACTION_NOT_COMPLETED",
   "ALL_EVIDENCE_EXCLUDED",
   "MISSING_EXECUTION_EVIDENCE",
   "MISSING_CURRENT_STATE",

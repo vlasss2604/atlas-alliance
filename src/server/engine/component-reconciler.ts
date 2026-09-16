@@ -96,6 +96,24 @@ export type ResultReasonCode =
   // (proof-confidence.ts caps both at the same floor as bare absence).
   | "SEARCH_BUDGET_EXHAUSTED"
   | "NO_ADMISSIBLE_ROUTE"
+  // ROUND 5.5 (Founder decision C) — the third acquisition boundary,
+  // one stage later than the other two:
+  //
+  //   EXTRACTION_NOT_COMPLETED the component's documents were acquired
+  //                            but extraction completed for NONE of them,
+  //                            each for a document-local reason (the
+  //                            attempt closed FAILED /
+  //                            EVIDENCE_EXTRACTOR_UNAVAILABLE). ATLAS never
+  //                            inspected what those documents say, so it
+  //                            cannot claim they say nothing. "Read, not
+  //                            extracted", never "the record is silent".
+  //
+  // Diagnostic only: same status, same confidence footing as bare absence
+  // (proof-confidence.ts), never a contradiction, never a strength. A
+  // capability-wide failure never reaches this — it ends the job (Founder
+  // decision B) — and a document that WAS extracted and yielded nothing
+  // admissible is still NO_EVIDENCE_FOUND.
+  | "EXTRACTION_NOT_COMPLETED"
   | "ALL_EVIDENCE_EXCLUDED"
   | "MISSING_EXECUTION_EVIDENCE"
   | "MISSING_CURRENT_STATE"
@@ -719,22 +737,34 @@ function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict): boolean {
   return v.eligibleCore && row.relationship === "SUPPORTS" && row.directness === "DIRECT";
 }
 
-// The two reasons an S4 attempt may close on that the reducer must not
+// The three reasons an S4 attempt may close on that the reducer must not
 // paraphrase as "nothing was found". `acquisitionBoundaryFromAttempt` is
-// the ONE reduction from a persisted attempt to this value: the attempt
-// must have closed SKIPPED and its reason must START with the boundary's
-// own code (the executor writes the code first and appends observations
-// after a semicolon). Anything else — a SUCCEEDED, FAILED or STARTED
-// attempt, an ordinary SKIPPED reason, free text — is null, and the
-// reducer behaves exactly as it always did.
-export type AcquisitionBoundary = "SEARCH_BUDGET_EXHAUSTED" | "NO_ADMISSIBLE_ROUTE";
+// the ONE reduction from a persisted attempt to this value: the attempt's
+// reason must START with the boundary's own code (the executor writes the
+// code first and appends observations after a semicolon), under the one
+// status the executor closes that boundary with — SKIPPED for the two
+// search-stage boundaries, FAILED / EVIDENCE_EXTRACTOR_UNAVAILABLE (or
+// SKIPPED / EXTRACTION_NOT_COMPLETED when every failure was an oversized
+// input) for the extraction-stage one (Round 5.5, Founder decision C:
+// every fetched document failed extraction locally, so nothing was
+// inspected). Anything
+// else — a SUCCEEDED or STARTED attempt, an ordinary SKIPPED or FAILED
+// reason, free text — is null, and the reducer behaves exactly as it
+// always did. A document that was never opened is not "not extracted":
+// only the executor's own all-documents-failed-extraction terminal reason
+// maps here, so the code names the stage that was actually reached.
+export type AcquisitionBoundary = "SEARCH_BUDGET_EXHAUSTED" | "NO_ADMISSIBLE_ROUTE" | "EXTRACTION_NOT_COMPLETED";
 
 export function acquisitionBoundaryFromAttempt(
   attempt: { status: string; reason: string | null } | null | undefined,
 ): AcquisitionBoundary | null {
-  if (!attempt || attempt.status !== "SKIPPED" || !attempt.reason) return null;
+  if (!attempt || !attempt.reason) return null;
   const head = attempt.reason.split(";")[0].trim();
-  if (head === "SEARCH_BUDGET_EXHAUSTED" || head === "NO_ADMISSIBLE_ROUTE") return head;
+  if (attempt.status === "SKIPPED" && (head === "SEARCH_BUDGET_EXHAUSTED" || head === "NO_ADMISSIBLE_ROUTE")) return head;
+  if (attempt.status === "FAILED" && head === "EVIDENCE_EXTRACTOR_UNAVAILABLE") return "EXTRACTION_NOT_COMPLETED";
+  // The oversized-only shape of the same boundary (every opened document
+  // refused by the input gate) closes SKIPPED under its own name.
+  if (attempt.status === "SKIPPED" && head === "EXTRACTION_NOT_COMPLETED") return head;
   return null;
 }
 

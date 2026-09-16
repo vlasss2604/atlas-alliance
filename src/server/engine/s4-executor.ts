@@ -3373,6 +3373,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       if (extractionFailures > 0 && extractionFailures === fetchedDocs.length && nonOversizedExtractionFailures > 0) {
         return { status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent };
       }
+      // ROUND 5.5 (Founder decision C) — every document this attempt opened
+      // was too large for the input gate: the same "read, not inspected"
+      // fact as the FAILED line above, under the status the oversized rule
+      // (BLOCKER-1, D-119) already gives it. SKIPPED, as before; the reason
+      // now names the stage reached, so S5 reads EXTRACTION_NOT_COMPLETED
+      // and never "nothing found" for documents nobody read through.
+      if (extractionFailures > 0 && extractionFailures === fetchedDocs.length) {
+        return { status: "SKIPPED", reason: withObservations("EXTRACTION_NOT_COMPLETED"), spent };
+      }
       // A technical failure above keeps its name. Otherwise, an attempt
       // whose acquisition was cut short by the search boundary — or that
       // had no admissible route and read only an approved seed that said

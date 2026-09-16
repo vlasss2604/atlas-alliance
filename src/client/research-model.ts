@@ -1097,6 +1097,10 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
     "This research reached its search limit before this point could be checked.",
   NO_ADMISSIBLE_ROUTE:
     "No confirmed source route exists yet through which this point could be checked.",
+  // ROUND 5.5 (Founder decision C) — the third boundary: the sources were
+  // opened but never read through. Says nothing about what they contain.
+  EXTRACTION_NOT_COMPLETED:
+    "The sources opened for this point could not be read through, so nothing was checked.",
   ALL_EVIDENCE_EXCLUDED:
     "Sources discussed this, but none met the standard this claim requires.",
   MISSING_EXECUTION_EVIDENCE:
