@@ -243,7 +243,11 @@ describe("idempotency and historical safety (items 20, 21)", () => {
     for (const status of ["REVIEWED", "VERIFIED"] as const) {
       const f = await makeFixture({});
       const first = await buildAndPersistProof(ctx.db, f.jobId);
-      await ctx.db.update(proofs).set({ verificationStatus: status }).where(eq(proofs.id, first.proofId!));
+      const [auditor] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();
+      await ctx.db
+        .update(proofs)
+        .set(status === "VERIFIED" ? { verificationStatus: status, verifiedBy: auditor.id, verifiedAt: new Date() } : { verificationStatus: status })
+        .where(eq(proofs.id, first.proofId!));
 
       const again = await buildAndPersistProof(ctx.db, f.jobId);
       expect(again.refusal, status).toBe("PROOF_NOT_DRAFT");
