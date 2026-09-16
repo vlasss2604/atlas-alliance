@@ -446,8 +446,11 @@ describe("the reachability rule, asked of the classifier that owns the classes",
     const executor = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
     // The route close and the budget close return SKIPPED, never FAILED,
     // never CONTRADICTED, and never NO_EVIDENCE_FOUND.
-    expect(executor).toContain('return { status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent };');
-    expect(executor).toContain('return { status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent };');
+    // (Since Round 6.5 the documentary close passes through
+    // closeDocumentaryPass, which folds it into SUCCEEDED only when the
+    // component already holds chain rows — see founder-semantics-round6-5-db.)
+    expect(executor).toContain('return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent });');
+    expect(executor).toContain('return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent });');
     // No project, chain, token or component in the rule.
     const targeting = readFileSync("src/server/engine/acquisition-targeting.ts", "utf-8");
     const start = targeting.indexOf("export function documentaryReachability(");
@@ -676,9 +679,13 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
     }
     // 4. the route-unreachable obligation spends nothing.
     expect(per.get("EXECUTION_EVIDENCE")).toBeUndefined();
-    // On-chain components establish deterministically, no documentary spend.
-    expect(per.get("CURRENT_STATE")).toBeUndefined();
+    // NET_EFFECT establishes deterministically, no documentary spend.
+    // CURRENT_STATE's TOKEN_SUPPLY reading carries no mechanism state, so
+    // since Round 6.5 (Founder decision 1) its documentary pass runs beside
+    // the reading, within the same cap.
     expect(per.get("NET_EFFECT")).toBeUndefined();
+    expect(per.get("CURRENT_STATE")?.proposer).toBe(1);
+    expect(searched("CURRENT_STATE")).toBeGreaterThan(0);
     expect(evm.calls.length).toBeGreaterThan(0);
 
     // 5. no whole-Research budget stop, no STARTED attempt.
@@ -734,7 +741,11 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
     }
     const rows = await trace(jobId);
     const skips = rows.filter((r) => r.operationType === "MODEL_CALL_SKIPPED" && r.reasonCode === "SEARCH_QUERY_BUDGET_EXHAUSTED");
-    expect(skips.length).toBe(bounded.filter((a) => (p.perComponent.get(a.component)?.search ?? 0) === 0).length);
+    // A component that already holds a chain reading and reaches the spent
+    // axis skips the proposer the same way but closes SUCCEEDED on the
+    // reading (Round 6.5, Founder decision 1) — its skip is traced too.
+    const foldedBounded = att.filter((a) => a.status === "SUCCEEDED" && /documentary pass SKIPPED: SEARCH_BUDGET_EXHAUSTED/.test(a.reason ?? ""));
+    expect(skips.length).toBe(bounded.filter((a) => (p.perComponent.get(a.component)?.search ?? 0) === 0).length + foldedBounded.length);
 
     // C/D. earlier Evidence survives and is reduced normally; the bounded
     // components are INSUFFICIENT on the boundary, never contradicted.

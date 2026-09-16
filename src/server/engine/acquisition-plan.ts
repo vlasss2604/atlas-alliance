@@ -58,6 +58,17 @@ export interface AcquisitionPlan {
   // degrade-never-throw contract applies to them exactly as to targeting.
   evidenceGoal: string | null;
   researchTask: string | null;
+  // ROUND 6.5 (Founder decision 1) — does establishing this component
+  // REPORT A MECHANISM STATE? Pattern data, the same predicate S5 uses to
+  // decide whether a component carries `currentState` at all
+  // (component-reconciler.ts: requiresCurrentState ||
+  // requiresLiveMechanismState). Read by s4-executor.ts to decide whether
+  // a deterministic chain read that carries no state may close the
+  // component's acquisition, or whether the documentary pass — the only
+  // path that can carry the state — is still required. False when the
+  // Pattern cannot be read: the pre-existing pre-emption then applies,
+  // exactly as before.
+  reportsMechanismState: boolean;
 }
 
 const EMPTY_PLAN: AcquisitionPlan = {
@@ -69,6 +80,7 @@ const EMPTY_PLAN: AcquisitionPlan = {
   intent: "UNKNOWN",
   evidenceGoal: null,
   researchTask: null,
+  reportsMechanismState: false,
 };
 
 // The job's normalized task text, when the Interpreter produced one.
@@ -190,10 +202,12 @@ export async function loadAcquisitionPlan(
 
     let establishingClasses: readonly EvidenceSourceClass[] = [];
     let evidenceGoal: string | null = null;
+    let reportsMechanismState = false;
     try {
       const requirements = componentRequirementsFor(pattern, component);
       establishingClasses = requirements.establishingClasses;
       evidenceGoal = requirements.evidenceGoal ?? null;
+      reportsMechanismState = requirements.requiresCurrentState || requirements.requiresLiveMechanismState;
     } catch {
       // Component not configured in CORE for targeting purposes — S5 will
       // surface that as its own configuration failure at reconciliation
@@ -221,6 +235,7 @@ export async function loadAcquisitionPlan(
       intent,
       evidenceGoal,
       researchTask: normalizedTaskText(job.normalizedTask),
+      reportsMechanismState,
     };
   } catch {
     return EMPTY_PLAN;

@@ -661,43 +661,32 @@ describe("F8. technical-failure monotonicity", () => {
     for (const v of Object.values(dead.s5)) if (v) expect(v.reasonCodes).not.toContain("NO_EVIDENCE_FOUND");
   });
 
-  it("F8b. ROUND 6 FINDING — BOUNDARY, PINNED PENDING A FOUNDER DECISION: with the chain UP, a successful TOKEN_SUPPLY reading closes CURRENT_STATE's acquisition (ONCHAIN_EVIDENCE_ESTABLISHED) and the official 'the mechanism is live' page is never read; the component holds a supply level with no mechanism state, and 'is it current?' is INSUFFICIENT. With the RPC DOWN the documentary path runs and the same question is SUPPORTED. A technical failure reads stronger than a working chain", async () => {
+  it("F8b. DECIDED (Round 6.5, Founder decision 1) — with the chain UP, the TOKEN_SUPPLY reading carries no mechanism state, so it no longer closes CURRENT_STATE's acquisition: the official 'the mechanism is live' page is read beside it, the component is SUPPORTED / LIVE on both rows, and 'is it current?' is answered exactly as with the RPC DOWN. A technical failure never reads stronger than a working chain. The full pin is founder-semantics-round6-5-db-v1 (A, B, B2, B3, B4)", async () => {
     const project = await makeProject({ identity: { chain: "ethereum", tokenAddress: EVM } });
     const up = await research(project, { docs: canonDocs(project), chain: "ENABLED", intent: "MECHANISM_CURRENT_STATE" });
     const down = await research(project, { docs: canonDocs(project), chain: "ENABLED", rpc: "down", intent: "MECHANISM_CURRENT_STATE" });
     expect(up.state).toBe("SUCCEEDED");
     expect(down.state).toBe("SUCCEEDED");
-    // TODAY. The chain up: one CURRENT_STATE row, the supply reading —
-    // bound, CLAIMED (D-074), no mechanism state — and the docs page for
-    // the component untouched (the component's documentary search never
-    // ran). PARTIALLY_SUPPORTED / INSUFFICIENT_AUTHORITY, no current state,
-    // lifecycle NOT_ESTABLISHED, MCS-1 UNSATISFIED.
+    // The chain up: the supply reading (bound, CLAIMED, no state) AND the
+    // official page (LIVE) — both supporting.
     const csUp = await evidenceOf(up.jobId, "CURRENT_STATE");
-    expect(csUp.map((r) => [r.sourceClass, r.officiality, r.entityBinding, r.onchainFactKind, r.mechanismState])).toEqual([["ONCHAIN_VERIFIABLE", "CLAIMED", "CONFIRMED", "TOKEN_SUPPLY", null]]);
-    expect(up.s5.CURRENT_STATE!.status).toBe("PARTIALLY_SUPPORTED");
-    expect(up.s5.CURRENT_STATE!.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
-    expect(up.verdict).toBe("INSUFFICIENT_EVIDENCE");
-    expect(up.requirements).toEqual(["MCS-1:UNSATISFIED"]);
-    // The chain down: the documentary path runs, the official page is
-    // read, CURRENT_STATE is SUPPORTED / LIVE and the question is answered.
+    expect(csUp.map((r) => [r.sourceClass, r.officiality, r.entityBinding, r.onchainFactKind, r.mechanismState]).sort()).toEqual([
+      ["OFFICIAL_DOCS", "CONFIRMED", null, null, "LIVE"],
+      ["ONCHAIN_VERIFIABLE", "CLAIMED", "CONFIRMED", "TOKEN_SUPPLY", null],
+    ]);
+    expect(up.s5.CURRENT_STATE!.status).toBe("SUPPORTED");
+    expect(up.s5.CURRENT_STATE!.supporting.length).toBe(2);
+    expect(up.verdict).toBe("SUPPORTED");
+    expect(up.requirements).toEqual(["MCS-1:SATISFIED"]);
+    // The chain down: the documentary path alone, the same answer.
     const csDown = await evidenceOf(down.jobId, "CURRENT_STATE");
     expect(csDown.map((r) => [r.sourceClass, r.mechanismState])).toEqual([["OFFICIAL_DOCS", "LIVE"]]);
     expect(down.s5.CURRENT_STATE!.status).toBe("SUPPORTED");
     expect(down.verdict).toBe("SUPPORTED");
-    // THE BOUNDARY (Round 6, F8b): the technically DEGRADED world is
-    // stronger than the working one on the state question. The obvious
-    // local fix — keep reading the documentary current state when the
-    // chain rows carry no mechanism state — was implemented and measured:
-    // it makes CURRENT_STATE SUPPORTED with both rows, and it makes the
-    // documentary row a SECOND SLOT beside the chain reading, so under the
-    // LOCKED D-101 slot rule the lineage forks at CURRENT_STATE, DESTINATION
-    // becomes BRANCH_ATTRIBUTION_UNRESOLVED and the revenue intent's PRT-2
-    // drops from PARTIAL to UNSATISFIED on exactly the live EVM shape. Two
-    // locked policies collide here; the Founder decides which way. A
-    // decision either way fails this test by name.
-    expect(VERDICT_RANK[down.verdict!]).toBeGreaterThan(VERDICT_RANK[up.verdict!]);
-    // What stays true on both sides: nothing negative, no invented
-    // artifact when the RPC is down, provenance complete.
+    expect(down.requirements).toEqual(up.requirements);
+    // THE RELATION: the degraded world is never stronger than the working
+    // one.
+    noStrongerThan(down, up, "rpc down vs up");
     nonNegative(up);
     nonNegative(down);
     expect((await evidenceOf(down.jobId)).every((r) => r.onchainArtifactId === null)).toBe(true);

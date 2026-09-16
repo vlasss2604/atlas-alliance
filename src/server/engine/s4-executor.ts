@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { eq, sql } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 
 import { loadProductConfig } from "../config/product";
 import type { Database, Transaction } from "../db/client";
@@ -66,6 +66,7 @@ import {
   planQueries,
 } from "./acquisition-ledger";
 import { componentAdmitsOnchainAcquisition, runStructuredOnchainAcquisition } from "./onchain-acquisition";
+import { normalizeMechanismState } from "../domain/mechanism-state";
 import {
   deterministicCeilingForComponent,
   resolveOnchainSourceOpenReserve,
@@ -1102,6 +1103,27 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         return `${reason}; source-route observations: ${[...observations].join(", ")}`;
       }
 
+      // ROUND 6.5 (Founder decision 1) — TECHNICAL FAILURE != STRONGER
+      // PROJECT REALITY. Evidence ids the deterministic chain read
+      // established for THIS component at step 0b when that read could not
+      // close the component on its own (see there). Non-empty means the
+      // component IS established by persisted rows whatever the documentary
+      // pass below finds, so a documentary close that means "nothing more
+      // was found / read" — SKIPPED on a bounded reason, FAILED on a
+      // document-local reason — must not become the attempt's verdict: the
+      // component would read as unestablished to the controller (a
+      // recovery retry of work already done) while S5 reads the rows. Budget
+      // and capability failures are thrown, not returned, and stay thrown.
+      let onchainEvidenceIds: string[] = [];
+      function closeDocumentaryPass(result: WorkExecutionResult): WorkExecutionResult {
+        if (onchainEvidenceIds.length === 0 || result.status === "SUCCEEDED") return result;
+        return {
+          status: "SUCCEEDED",
+          reason: `ONCHAIN_EVIDENCE_ESTABLISHED; documentary pass ${result.status}: ${result.reason}`,
+          spent: result.spent,
+        };
+      }
+
       // D-090 step 1: determine configured model for each role. Same
       // config keys product.ts/loadProductConfig already define
       // (query_proposer_model/evidence_extractor_model) — the same D-026
@@ -1249,11 +1271,43 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // found. Meaning-of-the-mechanism questions belong to OTHER
           // components (MECHANISM_SPEC / GOVERNANCE_BASIS), each with its
           // own attempt and its own doc-oriented targeting.
-          return {
-            status: "SUCCEEDED",
-            reason: withObservations("ONCHAIN_EVIDENCE_ESTABLISHED"),
-            spent,
-          };
+          //
+          // ROUND 6.5 (Founder decision 1) — UNLESS THE READ CANNOT CARRY
+          // WHAT THE COMPONENT REPORTS. A component that reports a mechanism
+          // state (Pattern: requiresCurrentState / requiresLiveMechanismState
+          // — CURRENT_STATE, EXECUTION_EVIDENCE) is answered by a row that
+          // carries one. A chain read whose rows carry none (a TOKEN_SUPPLY
+          // level for CURRENT_STATE: a quantity, no LIVE / PAUSED / ...) is
+          // admissible Evidence and never the answer to "what state is it
+          // in?" — S5 reports `currentState: null` off it, and the only path
+          // that can carry the state is the documentary pass below. Round 6
+          // (F8b) measured the pre-emption as it stood: with the chain UP the
+          // official current-state page was never read and the question was
+          // INSUFFICIENT; with the RPC DOWN it was read and SUPPORTED — a
+          // technical failure read stronger than a working chain. So the
+          // read closes the component only when its rows carry the state
+          // the component reports; otherwise the rows stay, the pass goes
+          // on exactly as it would have with no chain, within the same
+          // bounds, and the attempt closes on the rows it holds (see
+          // closeDocumentaryPass). Generic: Pattern data and row state, no
+          // intent, no project, no fact kind named here.
+          const closesComponent =
+            !plan.reportsMechanismState ||
+            (
+              await deps.db
+                .select({ mechanismState: evidence.mechanismState })
+                .from(evidence)
+                .where(inArray(evidence.id, onchainOutcome.evidenceIds))
+            ).some((r) => normalizeMechanismState(r.mechanismState) !== "UNKNOWN");
+          if (closesComponent) {
+            return {
+              status: "SUCCEEDED",
+              reason: withObservations("ONCHAIN_EVIDENCE_ESTABLISHED"),
+              spent,
+            };
+          }
+          onchainEvidenceIds = [...onchainOutcome.evidenceIds];
+          observations.add("ONCHAIN_EVIDENCE_WITHOUT_MECHANISM_STATE");
         }
       }
 
@@ -1293,10 +1347,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       //     before.
       //
       // By the time this line is reached, the deterministic path has ALREADY
-      // run for this component and produced no evidence (a success returns
-      // at step 0b) — so this is never "instead of trying"; it is "the one
-      // mechanism that can answer this has been tried, and buying the SPA
-      // shell of the same explorer is not a second attempt at it".
+      // run for this component and either produced no evidence or produced
+      // rows that cannot carry the state the component reports (a read that
+      // closes the component returns at step 0b) — so this is never "instead
+      // of trying"; it is "the one mechanism that can answer this has been
+      // tried, and buying the SPA shell of the same explorer is not a second
+      // attempt at it".
       //
       // WHAT THIS IS NOT. Not a blacklist: nothing is removed from any
       // domain list, no class is lowered, and the explorer is skipped ONLY
@@ -1588,7 +1644,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           budgetAxis: "modelCostMicro",
           budgetAmount: queryProposerOutcome.attempts * queryProposerCostMicro,
         });
-        return { status: "FAILED", reason: queryProposerOutcome.reason!, spent };
+        return closeDocumentaryPass({ status: "FAILED", reason: queryProposerOutcome.reason!, spent });
       }
       // "ok" — S10 (§7) — audit-only actual usage/cost for this ONE
       // successful QueryProposer attempt, priced with the SAME approved
@@ -1636,7 +1692,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // attempt. A proposer that was deliberately skipped is not — the
       // deterministic locators below are this attempt's queries.
       if (modelQueries.length === 0 && canUseModelQueries) {
-        return { status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent };
+        return closeDocumentaryPass({ status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent });
       }
 
       // D-129: steer part of this attempt's allowance at hosts whose
@@ -1960,17 +2016,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // with the reason the reducer reads as "not established within
         // this bounded Research", never FAILED, never "no evidence exists".
         if (noAdmissibleRoute) {
-          return { status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent };
+          return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent });
         }
         if (searchBudgetExhausted) {
-          return { status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent };
+          return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent });
         }
         // Reaching here with zero candidates means every query failed for
         // a non-budget (local/capability-already-handled) reason. LOW-A:
         // prefer the actual typed provider failure reason over the generic
         // label when one exists.
         const reason = lastSearchFailureReason ?? "NO_SEARCH_CANDIDATES";
-        return { status: "FAILED", reason, spent };
+        return closeDocumentaryPass({ status: "FAILED", reason, spent });
       }
 
       // --- 3. ContentFetcher (already the accepted S1 SSRF-safe impl) ------
@@ -2693,11 +2749,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // research_attempts row) this string is the only place it appears
           // at all. Everything appended is code-owned: the sanitized fetch
           // reason, plus observation codes this function itself authored.
-          return {
+          return closeDocumentaryPass({
             status: "FAILED",
             reason: withObservations(lastFetchFailureReason ?? "NO_SOURCE_COULD_BE_FETCHED"),
             spent,
-          };
+          });
         }
 
         // --- 4. EvidenceExtractor ----------------------------------------------
@@ -3371,7 +3427,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // at the point of denial — reaching here means every document
       // either had zero admitted facts or failed for a non-budget reason.
       if (extractionFailures > 0 && extractionFailures === fetchedDocs.length && nonOversizedExtractionFailures > 0) {
-        return { status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent };
+        return closeDocumentaryPass({ status: "FAILED", reason: withObservations("EVIDENCE_EXTRACTOR_UNAVAILABLE"), spent });
       }
       // ROUND 5.5 (Founder decision C) — every document this attempt opened
       // was too large for the input gate: the same "read, not inspected"
@@ -3380,7 +3436,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // now names the stage reached, so S5 reads EXTRACTION_NOT_COMPLETED
       // and never "nothing found" for documents nobody read through.
       if (extractionFailures > 0 && extractionFailures === fetchedDocs.length) {
-        return { status: "SKIPPED", reason: withObservations("EXTRACTION_NOT_COMPLETED"), spent };
+        return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("EXTRACTION_NOT_COMPLETED"), spent });
       }
       // A technical failure above keeps its name. Otherwise, an attempt
       // whose acquisition was cut short by the search boundary — or that
@@ -3388,12 +3444,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // nothing — closes on the bounded reason, not on "nothing was found":
       // what it did not get to search cannot be called silent.
       if (noAdmissibleRoute) {
-        return { status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent };
+        return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("NO_ADMISSIBLE_ROUTE"), spent });
       }
       if (searchBudgetExhausted) {
-        return { status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent };
+        return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("SEARCH_BUDGET_EXHAUSTED"), spent });
       }
-      return { status: "SKIPPED", reason: withObservations("NO_TRACEABLE_FACTS_FOR_COMPONENT"), spent };
+      return closeDocumentaryPass({ status: "SKIPPED", reason: withObservations("NO_TRACEABLE_FACTS_FOR_COMPONENT"), spent });
     },
   };
 }
