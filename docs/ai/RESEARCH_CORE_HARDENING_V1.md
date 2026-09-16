@@ -21,6 +21,7 @@ touches a provider.
 | `tests/adversarial-core-round3-db-v1.test.ts` | Round 3 — the DB-backed stateful Core, attacked by changing the world BETWEEN two correct operations: A verification → candidates (concurrent verification, vanished rows, rollback); B promotion (repeat, race, forbidden transitions, one live row per observation, duplicate ACTIVE state); C adoption after a route withdrawal, a re-classification, an identity replacement, a Pattern change, a freshness crossing, competing states, a Proof downgrade, a memory switch-off; D identity lifecycle and historical chain readings; E route resolver determinism, supersession, classification rollback; F Pattern activation against existing jobs and memory; G attempt/job terminal states, retry after partial work, the crash window after S8; I cross-project contamination; J the H7 audit path over persisted rows; K the health axis. |
 | `tests/founder-semantics-round3-5-v1.test.ts` | Round 3.5 — the Founder-approved semantics pinned over the real store: freshness re-checked at adoption (H8), VERIFIED terminal (H9), verification only of a successful bounded job (H10), documentary memory bound to its token identity (H11), the memory kill switch re-read at adoption, the Pattern version boundary; plus the cross-state attacks (stale + switch, identity + fresh, identity + route, regression attempt over ACTIVE memory, failed-job Proof with eligible Evidence) and the no-false-conclusion assertions. Not an adversarial round; does not count toward the two clean rounds. |
 | `tests/adversarial-core-round4-sequences-v1.test.ts` | Round 4 — ATLAS as a long-lived stateful system: long legal sequences in two orders (route replaced, Pattern activated, memory aged, memory disabled, identity replaced between planning and adoption); concurrent pairs (verify ∥ review, two workers claiming one job, adoption ∥ adoption, Pattern activation ∥ verification); cross-project (shared host, ticker, documents, source rows); cross-chain (same-address explorer pages on other EVM chains, an identity that moved chains); the Round 3.5 rules combined with other failures; an independent audit walk Proof → S7 → S6 → S5 → Evidence → source / memory origin; crash and retry windows (Evidence written then attempt left STARTED, lease, reclaim, convergence); legacy data (pre-H10 VERIFIED Proof of a FAILED job, domain-wide unclassified route, contract-version-1 Evidence, identity_key NULL); the health axis at adoption. |
+| `tests/founder-semantics-round5-5-v1.test.ts` | Round 5.5 — the Founder decisions on the three Round 5 boundaries, pinned over the real S4 executor and store: A SAME TICKER ≠ SAME PROJECT (unrouted binding needs the confirmed name, slug or token contract; routed sources unchanged; GOVERNANCE not route-only; the Round 5 B1 attack equals its control); B TECHNICAL FAILURE ≠ PROJECT REALITY (a 401 / 403 / 404 on a generation call is capability-fatal for the extractor and the proposer alike, like count_tokens'; transient retry and document-local failures unchanged); C NO EVIDENCE ≠ NOT EXTRACTED (`EXTRACTION_NOT_COMPLETED`, diagnostic only). Not an adversarial round; does not count toward the two clean rounds. |
 | `tests/adversarial-core-round5-blackbox-v1.test.ts` | Round 5 — the final result, black box: complete Research runs through the REAL S4 executor over deterministic documents (fixture proposer, search, fetcher, extractor; the real EVM adapter over a fixture RPC where a chain is involved), read only at the Proof. Families: strong vs weak authority; documentary vs on-chain (BUYBACK ≠ BURN, point-in-time supply ≠ change, APPROVED ≠ EXECUTING, transaction ≠ mechanism); partial research for every intent; technical failure beside valid Evidence; Memory vs fresh; project / token ambiguity; temporal; misleading language; exclusion pressure; bounded budgets; order independence; the independent review. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
@@ -28,7 +29,8 @@ BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE �
 EVIDENCE OF ABSENCE, DOCUMENTED ≠ APPROVED ≠ ACTIVATED ≠ EXECUTING, ADDRESS
 EXISTS ≠ ECONOMIC ROLE, WHERE ≠ WHO, TRANSACTION HAPPENED ≠ MECHANISM
 EXECUTED, MEASUREMENT ≠ ATTRIBUTION, NOT_ESTABLISHED ≠ CONTRADICTED, DISCOVERY
-≠ AUTHORITY, TECHNICAL FAILURE ≠ PROJECT REALITY.
+≠ AUTHORITY, TECHNICAL FAILURE ≠ PROJECT REALITY, SAME TICKER ≠ SAME PROJECT,
+NO EVIDENCE ≠ NOT EXTRACTED.
 
 ## Known live incidents and their permanent regressions
 
@@ -54,6 +56,9 @@ EXECUTED, MEASUREMENT ≠ ATTRIBUTION, NOT_ESTABLISHED ≠ CONTRADICTED, DISCOVE
 | Two concurrent owner confirmations (identity, route, classification) both went ACTIVE | `adversarial-core-round3-db-v1.test.ts` D2 |
 | Same-address explorer page on ANOTHER EVM chain bound CONFIRMED (bscscan / polygonscan / Optimism for an Ethereum identity) | `adversarial-core-round4-sequences-v1.test.ts` X1, X2 |
 | Memory health (D-059) decided at plan time only; a row marked QUESTIONABLE / REVERIFY / STALE before adoption was materialized | `adversarial-core-round4-sequences-v1.test.ts` M1 |
+| A bare ticker bound an UNROUTED document to the project: another project sharing the ticker had its public governance proposal admitted CLAIMED and lifted the confidence cap 20 → 40 | `founder-semantics-round5-5-v1.test.ts` A1–A9, `adversarial-core-round5-blackbox-v1.test.ts` F6c, `phase6-s4-executor.test.ts` HIGH-A D |
+| A permanent provider rejection (401 / 403 / 404) of the generation call was document-local: a mid-run credential rejection left every later component NO_EVIDENCE_FOUND on a SUCCEEDED, verifiable job | `founder-semantics-round5-5-v1.test.ts` B1–B8, `adversarial-core-round5-blackbox-v1.test.ts` F4b', `transient-extractor-resilience-v1.test.ts` 5b |
+| "Acquired, not extracted" read as NO_EVIDENCE_FOUND | `founder-semantics-round5-5-v1.test.ts` C1–C5 |
 
 ## Semantics the hardening pass fixed (now current behaviour)
 
@@ -133,6 +138,40 @@ EXECUTED, MEASUREMENT ≠ ATTRIBUTION, NOT_ESTABLISHED ≠ CONTRADICTED, DISCOVE
   work (`MEMORY_DISABLED`) with nothing written; the preparation read-back
   (`loadEffectiveJobContractView`) agrees. The Research is not cancelled,
   Memory is not touched, the code default stays false.
+- **An unrouted document binds on a strong anchor, never the bare ticker
+  (Founder decision A, Round 5.5).** `documentNamesProject` in
+  `s4-executor.ts` accepts the confirmed project name and the canonical
+  slug (the exact consecutive-token rule, unchanged);
+  `documentNamesConfirmedToken` accepts the confirmed token contract / mint
+  literally present and identifier-bounded (`literallyPresent`; base58
+  case-significant, EVM case-insensitive). The ticker is no longer a
+  candidate. A CONFIRMED route still binds without any text anchor, so
+  routed official sources are untouched; GOVERNANCE keeps its public-
+  platform class, so a public governance page with a strong anchor is
+  still usable CLAIMED. A refusal that the ticker alone would have passed
+  adds `WRONG_PROJECT_TICKER_ONLY` to the attempt's observations.
+- **A permanent provider rejection of a generation call is capability-fatal
+  (Founder decision B, Round 5.5).** `PERMANENT_PROVIDER_REJECTIONS`
+  (token-gate.ts: AUTHENTICATION_FAILED / PERMISSION_DENIED / NOT_FOUND —
+  401 / 403 / 404) is read by `reserveAndCallWithRetry` off the typed
+  extractor error's closed diagnostic or the typed proposer error's
+  trusted status, before the transient check: the outcome is `fatal` /
+  `PROVIDER_REJECTED_PERMANENTLY`, one call, never softened by the N=2
+  document counter, thrown as `CapabilityFatalError` → job FAILED /
+  SYSTEM_OR_PROVIDER_FAILURE, no S7, no Proof. INVALID_REQUEST (400 /
+  422), the output classes and an oversized input stay document-local;
+  429 / 5xx / no-response keep the one retry. count_tokens is unchanged
+  (every permanent failure already fatal). Evidence extracted before the
+  rejection stays persisted.
+- **Read but not inspected is `EXTRACTION_NOT_COMPLETED` (Founder decision
+  C, Round 5.5).** `acquisitionBoundaryFromAttempt` maps a FAILED /
+  `EVIDENCE_EXTRACTOR_UNAVAILABLE` attempt (every fetched document failed
+  extraction locally) and the oversized-only shape (now SKIPPED /
+  `EXTRACTION_NOT_COMPLETED` instead of NO_TRACEABLE_FACTS) to the third
+  acquisition boundary. Same INSUFFICIENT_EVIDENCE status, same LOW cap as
+  bare absence; a document that was never opened, or was read and said
+  nothing, is still NO_EVIDENCE_FOUND; a component with any Evidence is
+  reduced exactly as before.
 - **Owner confirmations are serialized on the project row.** Identity
   confirmation, route confirmation and route classification run their
   check-then-act inside one transaction that locks the project row (the
@@ -157,9 +196,6 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H7 (`round2` P5) | S8 citations are support-only: a NOT_SUPPORTED verdict from a state CONFLICT cites nothing; the contradicting rows are visible only as CONFLICTING_STATE gaps. | Cite contradicting rows on refutations. |
 | — | No owner path supersedes a PROJECT_IDENTITY (`ACTIVE_IDENTITY_EXISTS` refuses a second, also under concurrency; token migration legacy → current has no lifecycle act, only a manual DEPRECATE plus a fresh confirmation); `resolveConfirmedIdentity` takes the oldest valid ACTIVE row if two ever exist, reachable only by direct SQL. Documentary memory verified under the old identity is refused after the replacement (H11, decided). | An identity supersession script mirroring route classification. |
 | — (`round3` F1, `round3-5` L) | A Proof of a job planned under an earlier Pattern version cannot be verified once a later version is ACTIVE: `markProofVerified` refuses (`MissingActivePatternError`) and rolls back whole. Founder-confirmed as the safe rule; a product limitation, not a bug. | Verify under the version the job was planned under. |
-| B1 (`round5` F6c) | The wrong-project naming gate accepts a bare ticker token, and a public governance platform is class GOVERNANCE for any project: another project sharing the ticker has its proposal admitted CLAIMED for GOVERNANCE_BASIS, reaching PARTIALLY_SUPPORTED under the INSUFFICIENT_AUTHORITY cap and lifting the Proof's confidence cap from LOW to LIMITED (20 → 40, same verdict). | GOVERNANCE as a route-only class (the open item), or the naming gate refusing a bare ticker for an unrouted document, or both. **Founder decision required; cross-project, CRITICAL-class.** |
-| B2 (`round5` F4b') | A permanent generation-side provider rejection (401 / 403 / 404) is document-local (approved rule, `transient-extractor-resilience-v1` case 5); an extractor whose credential is rejected mid-run leaves every later component NO_EVIDENCE_FOUND, the job SUCCEEDED (so verifiable under H10) and the verdict PARTIALLY_SUPPORTED on what was read before. The trace alone records the refusals. count_tokens treats the same classes as immediately fatal. | Hold the generation call to the count_tokens rule for the permanent classes (credential rejected, not permitted, model not found). **Founder decision required; technical inability read as sources that say nothing, MAJOR.** |
-| — (`round5` F4b) | A per-document extraction failure leaves the component INSUFFICIENT_EVIDENCE with reason NO_EVIDENCE_FOUND; only the trace (EXTRACT_FAILED) says the source was read but not extracted. | A distinct S5 boundary code for "acquired, not extracted" (the SEARCH_BUDGET_EXHAUSTED / NO_ADMISSIBLE_ROUTE mechanism). MINOR. |
 | H7 (`round3` J1, J2) || H7 (`round3` J1, J2) | Kept. The audit path is complete in persisted state: a REQUIRED-component conflict leaves the refuting row ids in the S7 requirement's provenance and a `CONTRADICTED_COMPONENT` blocking gap; the S5 row holds `contradictingEvidenceIds`; the Proof's layer 6 names the code and component. A lifecycle requirement over a contradicted CURRENT_STATE is UNSATISFIED / INSUFFICIENT_EVIDENCE (never negative) and carries no component keys — its basis is the code-owned CURRENT_STATE. | Cite contradicting rows on refutations; name the basis on the unsatisfied lifecycle branch. |
 
 ## Observed, not defects (Round 4)

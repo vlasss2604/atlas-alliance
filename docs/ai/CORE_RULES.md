@@ -17,6 +17,12 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Absence of evidence ≠ evidence of absence.**
 - **Failure to read a source ≠ evidence that the information is absent.** A fetch
   error, a render failure, an unsearched payload — none of them is a finding.
+- **Technical failure ≠ project reality.** A provider that rejects ATLAS's
+  credential (401 / 403 / 404) has said nothing about the project: the
+  Research fails as a capability failure and never becomes `NO_EVIDENCE_FOUND`.
+- **No evidence ≠ not extracted.** A document that was opened but never
+  inspected reads `EXTRACTION_NOT_COMPLETED`, not "nothing found". The
+  distinction is diagnostic: same status, same confidence footing.
 - Absence of a mechanism *is* a valid finding, when you actually looked.
 - **Zero balance ≠ burn.** Zero balance ≠ proof that tokens never existed.
 
@@ -25,6 +31,10 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Official domain ≠ OFFICIAL_DOCS authority automatically.**
 - **Source authority ≠ project identity.** That a document is authoritative says
   nothing about which asset it is about.
+- **Same ticker ≠ same project.** An unrouted document binds to the project
+  only on a strong anchor — the confirmed project name, the canonical slug, or
+  the confirmed token contract / mint. A bare ticker match is not binding: two
+  unrelated projects can share one. A confirmed route is its own anchor.
 - **Token mint ≠ mechanism locator.** The project's mint identifies the asset,
   not the account where a mechanism operates.
 - Social sources cannot independently establish a conclusion, however many of

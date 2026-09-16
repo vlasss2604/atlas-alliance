@@ -725,38 +725,37 @@ describe("F4. technical failure beside valid Evidence", () => {
     citesOnlySupport(single);
   });
 
-  it("F4b'. BOUNDARY, PINNED PENDING A FOUNDER DECISION — the extractor's credential is REJECTED (401) for every document after the first component: today each rejection is document-local, the job ends SUCCEEDED, and nine components read NO_EVIDENCE_FOUND; the trace alone records the provider refusals", async () => {
+  it("F4b'. ROUND 5.5 (Founder decision B) — the extractor's credential is REJECTED (401) after the first component: the reader being refused is a capability failure, not sources that say nothing — the job ends FAILED / SYSTEM_OR_PROVIDER_FAILURE with no Proof, the Evidence read before stays auditable, and no later component is written as NO_EVIDENCE_FOUND", async () => {
     const project = await makeProject();
     const outage = canonDocs(project);
     for (const d of outage) if (!d.facts.SOURCE_OF_VALUE) d.extract = "outage";
     const o = await research(project, { docs: outage });
-    // TODAY (the approved rule pinned by transient-extractor-resilience-v1
-    // case 5: a permanent generation-side failure stays document-local and
-    // never counts toward the fatal threshold). The Proof is a
-    // non-conclusion (INSUFFICIENT_EVIDENCE, never negative), but its
-    // reason codes describe sources that say nothing, not a reader that
-    // was refused — and the job is SUCCEEDED, so H10 lets it be verified.
-    // count_tokens treats the same 401 as immediately fatal. Whether the
-    // generation call should too is the Founder's call; either decision
-    // fails this test by name.
-    expect(o.state).toBe("SUCCEEDED");
-    // SOURCE_OF_VALUE was read before the credential was rejected, so the
-    // revenue claim is PARTIALLY_SUPPORTED on that one component alone —
-    // a positive-sounding verdict for a run whose reader then died.
-    expect(o.verdict).toBe("PARTIALLY_SUPPORTED");
-    expect(o.requirements.every((r) => !r.endsWith(":SATISFIED"))).toBe(true);
-    nonNegative(o);
-    expect(o.s5.SOURCE_OF_VALUE!.status).not.toBe("INSUFFICIENT_EVIDENCE");
-    for (const c of ALL_COMPONENTS) {
-      if (c === "SOURCE_OF_VALUE") continue;
-      expect(o.s5[c]!.status).toBe("INSUFFICIENT_EVIDENCE");
-      expect(o.s5[c]!.reasonCodes).toEqual(["NO_EVIDENCE_FOUND"]);
-    }
+    // TECHNICAL FAILURE != PROJECT REALITY. Round 5 pinned the old rule
+    // here (document-local 401s, nine NO_EVIDENCE_FOUND components, a
+    // SUCCEEDED and therefore verifiable job with a PARTIALLY_SUPPORTED
+    // Proof). The Founder decided: a permanent provider rejection of the
+    // generation call is capability-fatal, like count_tokens' has always
+    // been.
+    expect(o.state).toBe("FAILED");
+    const [job] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, o.jobId));
+    expect(job.terminationReason).toBe("SYSTEM_OR_PROVIDER_FAILURE");
+    expect(o.verdict).toBeNull();
+    expect(o.claim).toBeNull();
+    // The Evidence read before the refusal is persisted and auditable.
+    const sov = await evidenceOf(o.jobId, "SOURCE_OF_VALUE");
+    expect(sov.length).toBeGreaterThan(0);
+    // Exactly one refusal: fatal on the first refused document, never
+    // repeated across the remaining components.
     const trace = await ctx.db.select().from(researchTraceEvents).where(eq(researchTraceEvents.researchJobId, o.jobId));
-    const refused = trace.filter((t) => t.operationType === "EXTRACT_FAILED" && t.reasonCode === "PROVIDER_ERROR");
-    expect(refused.length).toBe(9);
-    expect(refused.every((t) => t.diagnosticCode === "AUTHENTICATION_FAILED:401")).toBe(true);
-    expect(o.cited.map((c) => c.component)).toEqual(["SOURCE_OF_VALUE"]);
+    const refused = trace.filter((t) => t.operationType === "MODEL_CALL_ATTEMPTED" && t.status === "FAILED" && t.diagnosticCode === "AUTHENTICATION_FAILED:401");
+    expect(refused.length).toBe(1);
+    expect(trace.filter((t) => t.operationType === "EXTRACT_FAILED").length).toBe(0);
+    expect(o.calls.extract).toBe(2);
+    // No component is represented as "sources say nothing".
+    for (const c of ALL_COMPONENTS) {
+      if (o.s5[c]) expect(o.s5[c]!.reasonCodes).not.toContain("NO_EVIDENCE_FOUND");
+    }
+    nonNegative(o);
   });
 
   it("F4c. the RPC is down after documentary Evidence exists: the chain read fails boundedly, the documentary Proof stands, NET_EFFECT is unestablished, nothing is negative", async () => {
@@ -908,7 +907,7 @@ describe("F6. project / token ambiguity", () => {
     citesOnlySupport(o);
   });
 
-  it("F6b. two projects share a ticker: the other project's official page names the ticker, passes the naming gate, is persisted CLAIMED, and is excluded — it establishes nothing and is never cited", async () => {
+  it("F6b. two projects share a ticker: the other project's official page names only the ticker and ITS OWN name — since Round 5.5 (Founder decision A) it is refused WRONG_PROJECT before it becomes Evidence; it establishes nothing and is never cited", async () => {
     const x = await makeProject({ name: "Nova Protocol", ticker: "NOVA" });
     const y = await makeProject({ name: "Nova Finance", ticker: "NOVA" });
     const docsX = canonDocs(x);
@@ -919,17 +918,21 @@ describe("F6. project / token ambiguity", () => {
     };
     const o = await research(x, { docs: [...docsX, strayY], search: { DESTINATION: [strayY.url, docsUrl(x, "destination")] } });
     const dest = await evidenceOf(o.jobId, "DESTINATION");
-    const stray = dest.find((r) => r.retrievedUrl === strayY.url);
-    expect(stray).toBeDefined();
-    expect(stray!.officiality).toBe("CLAIMED");
-    expect(stray!.sourceClass).toBe("SOCIAL");
-    expect(o.s5.DESTINATION!.excluded.find((e) => e.evidenceId === stray!.id)?.reason).toBe("CLASS_NOT_ADMISSIBLE");
-    expect(o.s5.DESTINATION!.supporting).toEqual([dest.find((r) => r.retrievedUrl !== strayY.url)!.id]);
+    // Round 5 pinned the old gate here (the bare ticker passed; the row was
+    // persisted CLAIMED / SOCIAL and excluded CLASS_NOT_ADMISSIBLE). The
+    // page is unrouted for X and carries no anchor of X — only the shared
+    // ticker and Y's name — so it is now refused at the gate. The Proof is
+    // what it always was: X's own docs establish, nothing of Y is cited.
+    expect(dest.find((r) => r.retrievedUrl === strayY.url)).toBeUndefined();
+    const trace = await ctx.db.select().from(researchTraceEvents).where(eq(researchTraceEvents.researchJobId, o.jobId));
+    expect(trace.some((t) => t.operationType === "REJECTED_WRONG_PROJECT" && t.targetRef === strayY.url)).toBe(true);
+    expect(dest).toHaveLength(1);
+    expect(o.s5.DESTINATION!.supporting).toEqual([dest[0].id]);
     expect(o.cited.map((c) => c.url)).not.toContain(strayY.url);
     citesOnlySupport(o);
   });
 
-  it("F6c. PROBE — the same shared ticker on a PUBLIC governance platform: the other project's proposal is class GOVERNANCE without any route; what it may do for GOVERNANCE_BASIS is recorded here as the current boundary", async () => {
+  it("F6c. ROUND 5.5 (Founder decision A) — the same shared ticker on a PUBLIC governance platform: the other project's proposal names only the ticker, is refused WRONG_PROJECT before any Evidence exists, and the Proof equals the control — SAME TICKER != SAME PROJECT", async () => {
     const x = await makeProject({ name: "Nova Protocol", ticker: "NOVA" });
     const docsX = canonDocs(x, ALL_COMPONENTS.filter((c) => c !== "GOVERNANCE_BASIS"));
     const strayGov: Doc = {
@@ -939,30 +942,20 @@ describe("F6. project / token ambiguity", () => {
     };
     const control = await research(x, { docs: docsX });
     const o = await research(x, { docs: [...docsX, strayGov], search: { GOVERNANCE_BASIS: [strayGov.url] } });
-    const gov = (await evidenceOf(o.jobId, "GOVERNANCE_BASIS")).find((r) => r.retrievedUrl === strayGov.url);
-    expect(gov).toBeDefined();
-    expect(gov!.sourceClass).toBe("GOVERNANCE");
-    expect(gov!.officiality).toBe("CLAIMED");
-    const s5 = o.s5.GOVERNANCE_BASIS!;
-    // THE BOUNDARY, PINNED PENDING A FOUNDER DECISION (Round 5, F6c).
-    // Today: the other project's page passes the naming gate on the bare
-    // ticker token, is class GOVERNANCE because the host is a public
-    // governance platform, CLAIMED because this project has no route
-    // there, and reaches PARTIALLY_SUPPORTED under the INSUFFICIENT_AUTHORITY
-    // cap (H1 / D-074). That lifts the Proof's confidence cap from LOW
-    // (the control's NO_EVIDENCE_FOUND) to LIMITED: 20 -> 40 with the same
-    // verdict. Two rules could close it — GOVERNANCE as a route-only class
-    // (an open Founder item) or the naming gate refusing a bare ticker for
-    // an unrouted document — and neither is decided here. A decision
-    // either way fails this test by name.
-    expect(s5.status).toBe("PARTIALLY_SUPPORTED");
-    expect(s5.reasonCodes).toContain("INSUFFICIENT_AUTHORITY");
-    expect(s5.supporting).toEqual([gov!.id]);
-    expect(control.s5.GOVERNANCE_BASIS!.status).toBe("INSUFFICIENT_EVIDENCE");
+    // Round 5 pinned the old rule here: the bare ticker passed the naming
+    // gate, the page was class GOVERNANCE / CLAIMED, GOVERNANCE_BASIS
+    // reached PARTIALLY_SUPPORTED and the confidence cap lifted 20 -> 40.
+    // The Founder decided: an unrouted document needs a stronger anchor
+    // than the ticker. The page is now refused before it becomes Evidence.
+    expect((await evidenceOf(o.jobId, "GOVERNANCE_BASIS")).length).toBe(0);
+    const trace = await ctx.db.select().from(researchTraceEvents).where(eq(researchTraceEvents.researchJobId, o.jobId));
+    expect(trace.some((t) => t.operationType === "REJECTED_WRONG_PROJECT" && t.targetRef === strayGov.url)).toBe(true);
+    expect(o.s5.GOVERNANCE_BASIS!.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(o.s5.GOVERNANCE_BASIS!.reasonCodes).toEqual(control.s5.GOVERNANCE_BASIS!.reasonCodes);
     expect(o.verdict).toBe(control.verdict);
-    expect(o.verdict).not.toBe("SUPPORTED");
+    expect(o.confidence).toBe(control.confidence);
     expect(control.confidence).toBe(20);
-    expect(o.confidence).toBe(40);
+    expect(shapeOf(o)).toEqual(shapeOf(control));
     expect(o.cited.map((c) => c.url)).not.toContain(strayGov.url);
   });
 });
