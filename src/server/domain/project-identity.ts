@@ -257,6 +257,20 @@ export function urlReferencesAddress(
 // establish a component FOR THIS PROJECT. SOURCE != EVIDENCE != FACT: this
 // is a THIRD axis (entity binding), independent of sourceClass and
 // officiality (D-074's two axes) — see evidence.entity_binding.
+//
+// THE HOST MUST BE AN EXPLORER OF THE IDENTITY'S CHAIN. An EVM contract
+// address is the same string on every EVM chain (the same deployer and
+// nonce, or CREATE2, put unrelated contracts at one address on Ethereum,
+// BSC, Polygon and the L2s), so "the URL names the address" is not "the
+// URL is about this token": a bscscan page about the BSC contract at the
+// Ethereum token's address named the address and bound CONFIRMED. The
+// chain is decided by the HOST, exactly (after the www prefix, the only
+// normalisation the resolver applies), against the code-owned mainnet
+// explorer map for the confirmed chain — `optimistic.etherscan.io` is
+// Optimism's explorer, not Ethereum's, and a host the map does not list
+// for this chain binds nothing. A URI with no host (the atlas-onchain:
+// canonical form) never reaches this function: chain observations bind
+// through onchain-binding.ts, never through a URL.
 export function computeEntityBinding(
   url: string,
   sourceClass: string | null,
@@ -264,7 +278,18 @@ export function computeEntityBinding(
 ): "CONFIRMED" | "UNVERIFIED" | null {
   if (sourceClass !== "ONCHAIN_VERIFIABLE") return null; // axis not applicable
   if (!identity?.tokenAddress) return "UNVERIFIED";
+  if (!urlHostIsExplorerOfChain(url, identity.chain)) return "UNVERIFIED";
   return urlReferencesAddress(url, identity.chain, identity.tokenAddress) ? "CONFIRMED" : "UNVERIFIED";
+}
+
+export function urlHostIsExplorerOfChain(url: string, chain: SupportedChain): boolean {
+  let host: string;
+  try {
+    host = new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return false;
+  }
+  return explorerHostsForChain(chain).includes(host);
 }
 
 // H11 — THE IDENTITY A DOCUMENTARY OBSERVATION IS BOUND TO.
