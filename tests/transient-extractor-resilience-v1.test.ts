@@ -51,6 +51,12 @@ import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./ph
 // whose count_tokens exhausted ITS transient retry — cases D through H
 // below. A PERMANENT count_tokens failure (auth/config/request) is still
 // immediately fatal (case G).
+//
+// ROUND 5.5 (Founder decision B): a PERMANENT provider REJECTION of the
+// generation call itself (401 / 403 / 404) is now capability-fatal exactly
+// like case G — case 5b. A permanent failure that is genuinely
+// document-local (an output that is not JSON, an oversized input) stays
+// local, single-call, and never counts toward the threshold — case 5.
 
 let ctx: TestContext;
 
@@ -176,7 +182,12 @@ function networkNoResponse(): EvidenceExtractorUnavailableError {
 type DocBehaviour =
   | "TRANSIENT"
   | "OK"
+  // A permanent provider REJECTION of the generation call (403): since
+  // Round 5.5 (Founder decision B) capability-fatal, like count_tokens'.
   | "PERMANENT_403"
+  // A permanent, genuinely document-local generation failure: the
+  // completed output was not JSON. Never a provider rejection.
+  | "PERMANENT_LOCAL"
   | "OVERSIZED"
   // count_tokens exhausted its own transient retry (what token-gate.ts
   // throws after its 2 attempts): transient, NETWORK_NO_RESPONSE.
@@ -198,6 +209,8 @@ function scripted(plan: Record<string, DocBehaviour>) {
           throw networkNoResponse();
         case "PERMANENT_403":
           throw new EvidenceExtractorUnavailableError("simulated 403", false, "PERMISSION_DENIED", 403);
+        case "PERMANENT_LOCAL":
+          throw new EvidenceExtractorUnavailableError("simulated bad output", false, "OUTPUT_NOT_JSON", null);
         case "OVERSIZED":
           throw new ModelInputOversizedError(99_999, 8_000);
         case "COUNT_TOKENS_DOWN":
@@ -378,7 +391,7 @@ describe("transient extractor resilience — one document is local, two consecut
   it("4b. only a SUCCESSFUL extraction resets: a permanent document-local failure between two transient documents does not", async () => {
     const p = await makeJob();
     const urls = [U(1), U(2), U(3)];
-    const s = scripted({ [U(1)]: "TRANSIENT", [U(2)]: "PERMANENT_403", [U(3)]: "TRANSIENT" });
+    const s = scripted({ [U(1)]: "TRANSIENT", [U(2)]: "PERMANENT_LOCAL", [U(3)]: "TRANSIENT" });
     await expect(executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
     expect(s.calls(U(1))).toBe(2);
     expect(s.calls(U(2))).toBe(1); // permanent: never retried, as before
@@ -388,19 +401,42 @@ describe("transient extractor resilience — one document is local, two consecut
   it("5. permanent document-local failures remain local, single-call, and never count toward the fatal threshold", async () => {
     const p = await makeJob();
     const urls = [U(1), U(2), U(3)];
-    const s = scripted({ [U(1)]: "PERMANENT_403", [U(2)]: "OVERSIZED", [U(3)]: "PERMANENT_403" });
+    const s = scripted({ [U(1)]: "PERMANENT_LOCAL", [U(2)]: "OVERSIZED", [U(3)]: "PERMANENT_LOCAL" });
     const result = await executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId));
     expect(result.status).toBe("FAILED");
     expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
-    expect(result.reason).toContain("EXTRACT_FAILED:PERMISSION_DENIED:403");
+    expect(result.reason).toContain("EXTRACT_FAILED:OUTPUT_NOT_JSON");
     expect(s.totalCalls()).toBe(3);
     const rows = await trace(p.jobId);
     const failed = rows.filter((r) => r.operationType === "EXTRACT_FAILED");
     expect(failed.map((r) => [r.reasonCode, r.diagnosticCode])).toEqual([
-      ["PROVIDER_ERROR", "PERMISSION_DENIED:403"],
+      ["PROVIDER_ERROR", "OUTPUT_NOT_JSON"],
       ["MODEL_INPUT_OVERSIZED", null],
-      ["PROVIDER_ERROR", "PERMISSION_DENIED:403"],
+      ["PROVIDER_ERROR", "OUTPUT_NOT_JSON"],
     ]);
+    expect(await evidenceRows(p.jobId)).toHaveLength(0);
+  });
+
+  it("5b. ROUND 5.5 (Founder decision B): a permanent provider REJECTION of the generation call (403) is capability-fatal on the first document — one call, EVIDENCE_EXTRACTOR naming PERMISSION_DENIED:403, no EXTRACT_FAILED row, the next document never touched", async () => {
+    const p = await makeJob();
+    const urls = [U(1), U(2), U(3)];
+    const s = scripted({ [U(1)]: "PERMANENT_403", [U(2)]: "OK", [U(3)]: "OK" });
+    const outcome = executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId));
+    await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+    await outcome.catch((e: CapabilityFatalError) => {
+      expect(e.capability).toBe("EVIDENCE_EXTRACTOR");
+      expect(e.message).toBe(
+        "capability unavailable: EVIDENCE_EXTRACTOR — EVIDENCE_EXTRACTOR_FAILED:EvidenceExtractorUnavailableError:PERMISSION_DENIED:403",
+      );
+    });
+    expect(s.calls(U(1))).toBe(1);
+    expect(s.calls(U(2))).toBe(0);
+    expect(s.calls(U(3))).toBe(0);
+    const rows = await trace(p.jobId);
+    const failedCalls = rows.filter((r) => r.operationType === "MODEL_CALL_ATTEMPTED" && r.status === "FAILED");
+    expect(failedCalls).toHaveLength(1);
+    expect(failedCalls[0].diagnosticCode).toBe("PERMISSION_DENIED:403");
+    expect(rows.filter((r) => r.operationType === "EXTRACT_FAILED")).toHaveLength(0);
     expect(await evidenceRows(p.jobId)).toHaveLength(0);
   });
 
@@ -522,7 +558,7 @@ describe("transient extractor resilience — one document is local, two consecut
 
   it("F2. only a SUCCESSFUL extraction resets: a permanent document-local failure between two count_tokens documents does not", async () => {
     const p = await makeJob();
-    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "PERMANENT_403", [U(3)]: "COUNT_TOKENS_DOWN" });
+    const s = scripted({ [U(1)]: "COUNT_TOKENS_DOWN", [U(2)]: "PERMANENT_LOCAL", [U(3)]: "COUNT_TOKENS_DOWN" });
     await expect(executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
     expect(s.calls(U(1))).toBe(1);
     expect(s.calls(U(2))).toBe(1);

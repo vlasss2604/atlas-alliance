@@ -108,6 +108,42 @@ export function isTokenCountDiagnostic(v: unknown): v is TokenCountDiagnostic {
   return typeof v === "string" && TOKEN_COUNT_DIAGNOSTIC_SET.has(v);
 }
 
+// ROUND 5.5 (Founder decision B) — THE PERMANENT PROVIDER REJECTIONS.
+//
+// The three classes where the provider answered and refused THIS CALLER,
+// not this request: the credential was rejected (401), the credential is
+// not permitted (403), the model does not exist (404). None of them is a
+// property of the document being read — the next document meets the same
+// refusal — so a generation call that meets one is proof that the
+// generation capability itself is unavailable, exactly as count_tokens
+// has always treated its own permanent failures. INVALID_REQUEST is NOT
+// here: a 400 / 422 can be about the one request's shape, and treating it
+// as capability-wide would make a document-specific failure fatal.
+//
+// Stated once, on the shared vocabulary, so the generation path and the
+// count path cannot drift on which statuses mean "the reader is gone".
+export const PERMANENT_PROVIDER_REJECTIONS = [
+  "AUTHENTICATION_FAILED",
+  "PERMISSION_DENIED",
+  "NOT_FOUND",
+] as const satisfies readonly TokenCountDiagnostic[];
+
+const PERMANENT_PROVIDER_REJECTION_SET: ReadonlySet<string> = new Set<string>(PERMANENT_PROVIDER_REJECTIONS);
+
+// Membership-gated like every other closed vocabulary here: a forged or
+// null diagnostic is not a permanent rejection.
+export function isPermanentProviderRejection(diagnostic: unknown): boolean {
+  return typeof diagnostic === "string" && PERMANENT_PROVIDER_REJECTION_SET.has(diagnostic);
+}
+
+// The same rule read off a trusted status integer, for a typed provider
+// error that carries the status but no closed diagnostic
+// (QueryProposerUnavailableError). Same three statuses, same classifier
+// below decides which class each one is.
+export function isPermanentProviderRejectionStatus(status: unknown): boolean {
+  return status === 401 || status === 403 || status === 404;
+}
+
 // The ONE place a raw count_tokens exception is reduced to the closed
 // vocabulary. Reads only the SDK's class identity and trusted numeric
 // status — never the message, never the response body, never headers.

@@ -30,12 +30,18 @@ import {
   resolveEvidenceExtractor,
 } from "./providers/evidence-extractor";
 import type { EvidenceExtractor, RejectedFactReport } from "./providers/evidence-extractor";
-import { resolveQueryProposer } from "./providers/query-proposer";
+import { QueryProposerUnavailableError, resolveQueryProposer } from "./providers/query-proposer";
 import type { QueryProposer } from "./providers/query-proposer";
 import { resolveSearchGateway } from "./providers/search-gateway";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isTransientError, sleep, transientRetryDelayMs } from "./providers/retry";
-import { isTokenCountDiagnostic, ModelInputOversizedError, TokenCountUnavailableError } from "./providers/token-gate";
+import {
+  isPermanentProviderRejection,
+  isPermanentProviderRejectionStatus,
+  isTokenCountDiagnostic,
+  ModelInputOversizedError,
+  TokenCountUnavailableError,
+} from "./providers/token-gate";
 import {
   isExtractorFailureDiagnosticCode,
   type ExtractorFailureDiagnosticCode,
@@ -457,6 +463,22 @@ function safeFailureDetail(e: unknown): string | null {
   return e.httpStatus === null ? e.reason : `${e.reason}:${e.httpStatus}`;
 }
 
+// ROUND 5.5 (Founder decision B) — is this thrown generation failure one
+// of the PERMANENT provider rejections (token-gate.ts)? Two independent
+// gates, as everywhere here: the error must be one of the two typed
+// generation errors this repository owns, and the value read off it must
+// pass the closed membership test. The extractor carries the closed
+// diagnostic classified at its throw site; the proposer carries only the
+// trusted status integer, so the status form of the same rule decides for
+// it. A raw SDK exception, a fetch or search error, a count_tokens error
+// (which has its own, stricter fatal rule) and a forged look-alike all
+// return false — nothing is parsed out of a message.
+function isPermanentProviderRejectionError(e: unknown): boolean {
+  if (e instanceof EvidenceExtractorUnavailableError) return isPermanentProviderRejection(e.diagnostic);
+  if (e instanceof QueryProposerUnavailableError) return isPermanentProviderRejectionStatus(e.httpStatus);
+  return false;
+}
+
 // The same two gates, returning the typed facts a caller may branch on
 // rather than a string it would have to parse. Nothing here is derived
 // from a message.
@@ -649,7 +671,18 @@ interface RetryOutcome<T> {
   //   TOKEN_COUNT_UNAVAILABLE               — count_tokens failed permanently
   //                                           (auth/config/request/unknown):
   //                                           one attempt, never softened.
-  fatalCause?: "TRANSIENT_RETRY_EXHAUSTED" | "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" | "TOKEN_COUNT_UNAVAILABLE";
+  //   PROVIDER_REJECTED_PERMANENTLY         — the generation call itself was
+  //                                           refused by a permanent provider
+  //                                           rejection (401 / 403 / 404,
+  //                                           token-gate.ts's
+  //                                           PERMANENT_PROVIDER_REJECTIONS):
+  //                                           one attempt, never softened.
+  //                                           Round 5.5, Founder decision B.
+  fatalCause?:
+    | "TRANSIENT_RETRY_EXHAUSTED"
+    | "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED"
+    | "TOKEN_COUNT_UNAVAILABLE"
+    | "PROVIDER_REJECTED_PERMANENTLY";
   // The closed, membership-gated detail (safeFailureDetail product) of a
   // "local" or "fatal" failure, when one exists — null/absent otherwise.
   // Lets the caller SAY the classified WHY (in the observation channel
@@ -796,6 +829,26 @@ async function reserveAndCallWithRetry<T>(params: {
           fatalCause: e.transient ? "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED" : "TOKEN_COUNT_UNAVAILABLE",
           reason: safeFailureReason(params.label, e),
           capability: `${params.capability}_COUNT_TOKENS`,
+          detail: safeFailureDetail(e),
+          attempts,
+        };
+      }
+      if (isPermanentProviderRejectionError(e)) {
+        // ROUND 5.5 (Founder decision B) — TECHNICAL FAILURE != PROJECT
+        // REALITY. The provider answered and refused the CALLER: the
+        // credential is rejected, not permitted, or the model is unknown.
+        // Nothing about this document caused it and the next document
+        // meets the same refusal, so it is the generation capability that
+        // is unavailable — the rule count_tokens has always applied to its
+        // own permanent failures, now applied to the generation call it
+        // gates. Fatal on the first document, never retried, never
+        // softened into a document-local EXTRACT_FAILED that the attempt
+        // would then close as "sources say nothing".
+        return {
+          kind: "fatal",
+          fatalCause: "PROVIDER_REJECTED_PERMANENTLY",
+          reason: safeFailureReason(params.label, e),
+          capability: params.capability,
           detail: safeFailureDetail(e),
           attempts,
         };
@@ -2918,7 +2971,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               // (auth/config/request/unknown — not retried, not transient)
               // is proven capability unavailability — throw, never return an
               // ordinary FAILED/SKIPPED result (see the QueryProposer section
-              // above for the full propagation note).
+              // above for the full propagation note). ROUND 5.5: the same
+              // throw for PROVIDER_REJECTED_PERMANENTLY — a 401 / 403 / 404
+              // on the generation call is the reader being refused, not this
+              // document failing, and it never reaches the document-local
+              // record below (Founder decision B).
               throw new CapabilityFatalError(extractOutcome.capability!, extractOutcome.reason);
             }
             // TRANSIENT_RETRY_EXHAUSTED / TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED

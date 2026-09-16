@@ -689,9 +689,14 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
     return ctx.db.select().from(researchTraceEvents).where(eq(researchTraceEvents.researchJobId, jobId));
   }
 
-  it("15. a non-transient 4xx stays ONE attempt and the terminal reason now names the closed class", async () => {
+  it("15. a non-transient, request-local 4xx (400) stays ONE attempt and the terminal reason now names the closed class", async () => {
+    // ROUND 5.5 (Founder decision B): 401 / 403 / 404 are permanent provider
+    // REJECTIONS of the caller and are now capability-fatal (see
+    // tests/transient-extractor-resilience-v1.test.ts 5b and
+    // tests/founder-semantics-round5-5-v1.test.ts). INVALID_REQUEST (400)
+    // is the non-transient class that remains document-local.
     const { err } = await extractFailure(async () => {
-      throw apiError(403);
+      throw apiError(400);
     });
     const { outcome, calls, jobId } = await runWithExtractor(async () => {
       throw err;
@@ -699,7 +704,7 @@ describe("end to end: the terminal line an operator actually sees (items 14-18, 
     const result = await outcome;
     expect(result.status).toBe("FAILED");
     expect(result.reason).toContain("EVIDENCE_EXTRACTOR_UNAVAILABLE");
-    expect(result.reason).toContain("EXTRACT_FAILED:PERMISSION_DENIED:403");
+    expect(result.reason).toContain("EXTRACT_FAILED:INVALID_REQUEST:400");
     expect(result.reason).not.toContain(SECRET);
     expect(calls.extract).toBe(1);
     const trace = await traceRowsFor(jobId);
