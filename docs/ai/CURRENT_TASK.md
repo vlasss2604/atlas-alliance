@@ -2,42 +2,48 @@
 
 > Overwrite this file each round. Never append.
 
-## BOUNDED SEARCH FINALIZATION + ROUTE-AWARE ACQUISITION V1 (done this round)
+## RESEARCH CORE ADVERSARIAL HARDENING — ROUND 7: CROSS-QUESTION / LOGICAL CONSISTENCY (done this round)
 
-Offline round. Two Founder-approved semantics (2026-09-15). No live/API/RPC
-call, no rerun, no Memory change, no budget change, no schema change.
+Independent adversarial round, offline, $0 spend (no Anthropic, Brave, RPC or
+live Research; atlas_dev not migrated, migrations 0052–0054 still pending;
+Lido Memory untouched). Question: can ATLAS produce two individually
+plausible Proofs that contradict each other on the SAME facts?
 
-**1. Search-budget exhaustion finalizes boundedly.** `s4-executor.ts`: the
-search axis no longer throws. Allowance 0 → proposer skipped
-(`SEARCH_QUERY_BUDGET_EXHAUSTED`, amount 0), no query; a mid-attempt refusal
-→ recorded, search stage ends, paid candidates still read; close
-`SKIPPED / SEARCH_BUDGET_EXHAUSTED` when nothing was established. Job
-finalizes WORK_QUEUE_EXHAUSTED on the ordinary path. Model-cost and
-source-open denials unchanged (still thrown).
+**Method.** Every Pattern v1 intent asked of the same evidence world, over
+the real S5 → S6 → S7 → S8 chain (pure) and over eight persisted jobs per
+document set through the real S4 executor, lifecycle and Postgres (DB).
+Only dependencies Pattern v1 already defines are asserted (VC = PRT ∧ BSE;
+PRT ≡ RS ≡ UTL; TU-1 = PRT-1; BSE = NET_EFFECT; MCS = lifecycle CURRENT on
+CURRENT_STATE; PHO = recipient attribute). No new ontology, no implication
+rules, no negation grammar, no engine.
 
-**2. Route-aware documentary acquisition.** `documentaryReachability`
-(`acquisition-targeting.ts`) over `CONFIRMED_ROUTE_ONLY_CLASSES`
-(`source-authority.ts`: OFFICIAL_DOCS, OFFICIAL_REPORT). Unreachable
-component → no proposer, no search, no fetch, close
-`SKIPPED / NO_ADMISSIBLE_ROUTE`; seeds still read; mixed components keep
-their reachable class; phased search phase applies the same rule.
+**Result: CLEAN.** 56,700 exploratory worlds and the 2,880 pinned ones
+violate no law; every family (buyback / burn / net effect, revenue / value
+capture, governance lifecycle, documentation vs execution, transaction vs
+role, supply, historical vs current, positive / negative, Proof
+consistency, confidence, six holdout worlds) holds. Zero CRITICAL, zero
+MAJOR. One MINOR (M2): an S6 gap on the claim's own matched flow that
+blocks no atom (`DESTINATION_UNRESOLVED` on an established destination of
+unrecognised kind, `FLOW_IDENTITY_UNRESOLVED` on an established source) is
+API-visible engine state but reaches no Proof gap list; verdict and band
+are unaffected. Not fixed: surfacing it in layer 6 is a product decision.
 
-**S5.** New reason codes `SEARCH_BUDGET_EXHAUSTED` / `NO_ADMISSIBLE_ROUTE`
-at the zero-Evidence return only, read off the latest attempt
-(`acquisitionBoundaryFromAttempt`); confidence cap = NO_EVIDENCE_FOUND;
-UI short forms added.
+**Tests.** `tests/adversarial-core-round7-cross-question-v1.test.ts` (66)
+and `tests/adversarial-core-round7-cross-question-db-v1.test.ts` (4).
+Boundaries pinned for the Founder (no semantics invented): M1 structural
+intents carry no lifecycle atom; M2 above; M3 PASSIVE_HOLDER_OUTCOME rests
+on RECIPIENT alone; M4 conflicting supply intervals are a limitation where
+conflicting states are a contradiction; C4 PRT-2 is satisfied by an
+established destination of unrecognised kind. Observed: under Pattern v1
+no Proof of any intent exceeds LIMITED (40) because NET_EFFECT always keeps
+a limitation. Details in `RESEARCH_CORE_HARDENING_V1.md`.
 
-Tests: `tests/bounded-search-finalization-v1.test.ts` (new, 15);
-phase6-s4-executor / s10-final-pre-smoke-closure / post-raydium-cleanup /
-acquisition-graceful-degradation updated to the approved semantics.
+**Consecutive CLEAN count: 1.** One more independent clean round is
+required. Do not start it without instruction.
 
 ### Next
 
-- GOVERNANCE route-only: DECIDED (Round 5.5, Founder decision A) — GOVERNANCE
-  is NOT globally route-only. snapshot.org-class pages still classify
-  GOVERNANCE without a route; an unrouted governance document is admitted
-  only when project binding is strong (confirmed project name, canonical
-  slug, or confirmed token contract / mint — never the bare ticker). See
-  `RESEARCH_CORE_HARDENING_V1.md` and `CORE_RULES.md` ("Same ticker ≠ same
-  project").
-- With new approval: ONE A2-next + ONE B.
+- Founder decisions on M1–M4 / C4 (each is a new semantic dependency, not a
+  defect).
+- Round 8 (independent angle) when instructed.
+- With new approval: ONE A2-next + ONE B live.

@@ -28,6 +28,8 @@ touches a provider.
 | `tests/founder-semantics-round6-5-db-v1.test.ts` | Round 6.5 — Founder decision 1 TECHNICAL FAILURE ≠ STRONGER PROJECT REALITY over the real S4 executor, lifecycle and Postgres with a fixture EVM RPC: A RPC UP vs DOWN for the state, revenue and supply intents (down never stronger); B CURRENT_STATE on EVM — the TOKEN_SUPPLY reading AND the official page, both supporting, SUPPORTED / LIVE, the attempt naming why the pass went on; B2 the live EVM revenue shape (the fork, no false attribution, PRT-2 PARTIAL as with the RPC down); B3 the pass finds nothing → the attempt still closes SUCCEEDED on the reading; B4 bounded research preserved (NET_EFFECT still closes on its reading, never more opens with the chain working). |
 | `tests/founder-semantics-round6-6-v1.test.ts` | Round 6.6 — the Founder decisions on Round 6.5's two residual boundaries, over the pure chain: Decision 1 SAME SOURCE ≠ EXTRA CONFIDENCE / ≠ AUTOMATIC PENALTY (A one page, two compatible components; B exact duplicates and near-identical fragments; C the genuine pairing choice — HIGH-1 — stays unresolved; D independent sources unchanged and equal to the same-page shape; E the exact G2 shape); Decision 2 BOUNDED ENUMERATION ≠ WEAKER TRUTH (F below the cap; G at the boundary, deterministic; H above the cap — 32 flows, complete lineages, the diagnostic visible on flow / result / Proof, the control's conclusion and band; H2 the S8 predicate; I above the cap with a real contradiction; J six insertion orders byte-identical); the four named invariants. Not an adversarial round; does not count toward the two clean rounds. |
 | `tests/adversarial-core-round5-blackbox-v1.test.ts` | Round 5 — the final result, black box: complete Research runs through the REAL S4 executor over deterministic documents (fixture proposer, search, fetcher, extractor; the real EVM adapter over a fixture RPC where a chain is involved), read only at the Proof. Families: strong vs weak authority; documentary vs on-chain (BUYBACK ≠ BURN, point-in-time supply ≠ change, APPROVED ≠ EXECUTING, transaction ≠ mechanism); partial research for every intent; technical failure beside valid Evidence; Memory vs fresh; project / token ambiguity; temporal; misleading language; exclusion pressure; bounded budgets; order independence; the independent review. |
+| `tests/adversarial-core-round7-cross-question-v1.test.ts` | Round 7 — cross-question / logical consistency over the pure chain: EVERY Pattern v1 intent asked of the SAME evidence world. The implication laws Pattern v1 itself defines (L0 S5/S6 intent-independent; L1 PRT ≡ REWARD_SOURCE ≡ USAGE_TO_TOKEN_LINKAGE; L2 VALUE_CAPTURE = PRT ∧ BSE atom by atom, refutation / insufficiency laws; L3 TOKEN_UTILITY's REQUIRED atom is PRT-1; L4 no supply question is ever SUPPORTED; L5 "is it current?" rests on CURRENT_STATE and is refuted only by execution + a non-live state; L6 provenance and cross-job leakage; L7 confidence ceilings and the stronger claim never outranking its prerequisite; L8 a refutation always has provenance) over a 2,880-world combinatorial battery (A), then per family: buyback / burn / net effect (B), revenue / fees / value capture (C), governance lifecycle (D), documentation vs execution (E), transaction vs economic role (F), supply consistency incl. the burn × delta × attribution grid (G), historical vs current (H), NOT_ESTABLISHED vs CONTRADICTED (I), Proof consistency (J), confidence consistency (K), six holdout worlds A–F (L), the independent review's boundaries (M). |
+| `tests/adversarial-core-round7-cross-question-db-v1.test.ts` | Round 7 — the same questions of the SAME DOCUMENTS through the real S4 executor, lifecycle and Postgres: one job per intent (eight jobs per document set), the persisted S5 / S6 shapes identical across jobs, the persisted laws, own-job-only citations and no shared Evidence row; the complete documentary world, approved-not-activated, executed-then-paused (persisted HISTORICAL refutation citing that job's state and execution rows), and the chain-up world (the level beside the page, the supply question at the B1 rung). |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
 BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE ≠
@@ -287,6 +289,11 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H4 (`round6` F6c) | Metamorphic form: a NEWER CLAIMED explorer row saying LIVE beside an OLDER CONFIRMED official PAUSED supersedes it and moves "is it current?" from NOT_SUPPORTED to PARTIALLY_SUPPORTED on the weaker source. | As H4. |
 | H5 (`round6` F12b, F1b) | **DECIDED (Round 6.5, Founder decision 2)** — see H5 above. 20 → 20 on inadmissible rows alone; the stale-only shapes (`STALE_CURRENT_STATE`, `MISSING_CURRENT_STATE`, `MISSING_EXECUTION_EVIDENCE`) sit exactly where bare absence sits. Pinned in `founder-semantics-round6-5-v1` C, D, E, E2, E3. | — |
 | F2 (`round6-5`) | **DECIDED (Round 6.6, Founder decision 2).** The cap stays (`MAX_FLOWS` 64, sixth two-slot fork refused at 32 flows); when it binds the lineage continues with the structurally-first slot, `FLOW_ENUMERATION_INCOMPLETE` stays visible on flow, result and Proof, never binds the band, and the claim is exactly the control's. Deterministic across input order; a real contradiction still weakens. Pinned in `founder-semantics-round6-6-v1` F–J. | — |
+| M1 (`round7`) | Structural intents carry no lifecycle atom: a mechanism positively refuted as current (HISTORICAL — executed, now PAUSED) still reads PROTOCOL_REVENUE_TO_TOKEN / PASSIVE_HOLDER_OUTCOME / TOKEN_UTILITY SUPPORTED over the same facts. Consistent with Pattern v1's requirement sets (no LIFECYCLE atom in them); pinned so a present-tense dependency is a named decision. | Add a LIFECYCLE (or "not HISTORICAL") atom to the present-tense intents. |
+| M2 (`round7`) | **MINOR.** An S6 gap on the claim's own matched flow that blocks no atom — `DESTINATION_UNRESOLVED` on an ESTABLISHED destination whose kind the closed dictionary does not recognise, `FLOW_IDENTITY_UNRESOLVED` on an established source with no recognised value source — is recorded in the assembly (API-visible engine state) but reaches no Proof gap list: not blocking, not a context gap (the flow is matched), not a component reason (the component is SUPPORTED). Verdict and band are unaffected (H5's second half: such gaps are not a context gap). | Carry matched-flow non-blocking S6 gaps into the Proof's layer 6 under their own origin, without binding the band. |
+| M3 (`round7`) | PASSIVE_HOLDER_OUTCOME rests on RECIPIENT alone: one official sentence naming holders answers "do holders receive value?" SUPPORTED (at LOW, H5) while every flow component is absent and "does revenue reach the token?" is INSUFFICIENT. Pattern v1's own requirement set (`PHO-1` only). | Require a flow basis (SOURCE_OF_VALUE, DESTINATION) beside the recipient attribute. |
+| M4 (`round7`) | A self-contradicting measurement record (two supply intervals, opposite directions) is a limitation (PARTIALLY_SUPPORTED, `CONFLICTING_SUPPLY_DELTA`) where a self-contradicting state record is CONTRADICTED; adding a favourable interval to a refuted NET question lifts it from NOT_SUPPORTED to PARTIALLY_SUPPORTED. Decided when B2 shipped (`net-effect-measured-supply` 14: a second interval is reachable only through corruption, surfaced rather than resolved). | Treat conflicting intervals as CONTRADICTED, like conflicting states. |
+| C4 (`round7`) | PRT-2 (and RS-2 / UTL-2 / VC-2) is satisfied by an ESTABLISHED destination of unrecognised kind: "does revenue reach the token?" reads the same whether the destination is a treasury or an opaque multisig address. The relationship atom asks that a destination be established on the flow, not what kind it is. | Require a recognised `destinationKind` for the relationship atom. |
 | H7 (`round3` J1, J2) || H7 (`round3` J1, J2) | Kept. The audit path is complete in persisted state: a REQUIRED-component conflict leaves the refuting row ids in the S7 requirement's provenance and a `CONTRADICTED_COMPONENT` blocking gap; the S5 row holds `contradictingEvidenceIds`; the Proof's layer 6 names the code and component. A lifecycle requirement over a contradicted CURRENT_STATE is UNSATISFIED / INSUFFICIENT_EVIDENCE (never negative) and carries no component keys — its basis is the code-owned CURRENT_STATE. | Cite contradicting rows on refutations; name the basis on the unsatisfied lifecycle branch. |
 
 ## Observed, not defects (Round 4)
@@ -366,6 +373,62 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 - **The contradiction exemption cannot lift a refutation**: NOT_SUPPORTED
   with an unrelated unresolved conflict still carries CONFLICTING_STATE's
   LIMITED cap.
+
+## Observed, not defects (Round 7)
+
+- **One reduced picture per evidence world.** S5 and S6 are functions of
+  the evidence alone; every intent asked of the same facts shares them byte
+  for byte, in memory and as persisted rows across eight jobs over one
+  document set. Only S7 / S8 differ between questions.
+- **The conjunction is exactly its conjuncts.** VALUE_CAPTURE's atoms are
+  PRT-1 / PRT-2 / BSE-1 verbatim; it is NOT_SUPPORTED iff a conjunct is,
+  INSUFFICIENT iff both are, never stronger than either; PRT, REWARD_SOURCE
+  and USAGE_TO_TOKEN_LINKAGE are one requirement set and agree byte for
+  byte; TOKEN_UTILITY's REQUIRED atom is PRT-1. Over 56,700 exploratory
+  worlds and the 2,880 pinned ones, no law was violated.
+- **No supply question is ever SUPPORTED under Pattern v1**, and no Proof
+  of any intent exceeds LIMITED (40): NET_EFFECT keeps a limitation in
+  every typed outcome (SUPPLY_REDUCTION_NOT_ESTABLISHED, NET_SUPPLY_CHANGE_
+  NOT_ESTABLISHED, NET_SUPPLY_CHANGE_NOT_ATTRIBUTED, CONFLICTING_SUPPLY_
+  DELTA, NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL), each capping at LIMITED,
+  and its absence caps at LOW; confidence is job-wide. STRONG and
+  VERY_STRONG are unreachable until attribution exists.
+- **BUYBACK ≠ BURN ≠ NET EFFECT, cross-question.** A documentary "burned"
+  destination classifies BURN lexically and reaches no verdict (no v1
+  intent reads `destinationKind`); every question answers exactly as in the
+  buyback-only world. One typed BURN establishes execution and the
+  gross-reduction rung only; a reading, a decrease, a non-decrease and two
+  disagreeing intervals each move NET_EFFECT to their own code and nothing
+  else — the revenue, holder and current questions never move with the
+  supply record.
+- **DOCUMENTED ≠ APPROVED ≠ ACTIVATED ≠ EXECUTING, cross-question.**
+  Proposed-only caps every structural component and answers nothing;
+  approved establishes GOVERNANCE_BASIS and leaves "is it current?"
+  INSUFFICIENT even with a fresh official APPROVED state; a fresh official
+  LIVE answers "is it current?" without any execution (the lifecycle atom
+  rests on CURRENT_STATE by definition) while no edge reads executed; a
+  burn strengthens the supply questions only. A GOVERNANCE record filed at
+  CURRENT_STATE is inadmissible by class.
+- **TRANSACTION ≠ MECHANISM ≠ ROLE, cross-question.** Production-shaped
+  transfers, owner listings and transaction details are CONTEXT or
+  kind-refused and strengthen no question; a single bound balance carries
+  DESTINATION (a position) and never RECIPIENT, and neither "did revenue
+  fund it?" nor "did holders receive?" moves.
+- **HISTORICAL ≠ CURRENT, cross-question.** Execution alone leaves "is it
+  current?" INSUFFICIENT; a stale LIVE page changes nothing; a fresh LIVE
+  strengthens only that question; a fresh PAUSED beside an execution
+  refutes it (citing state and execution) and moves nothing else; a
+  two-year-old OFFICIAL_REPORT of execution reads the same HISTORICAL as a
+  chain burn (EXECUTION_EVIDENCE has no freshness window, boundary "—"). A
+  burn READ today beside a page PUBLISHED yesterday still reads HISTORICAL:
+  a chain row's temporal basis is its read time, not the event's, so
+  nothing licenses "the burn is newer than the pause".
+- **NOT_ESTABLISHED ≠ CONTRADICTED, cross-question.** Every absence shape
+  for CURRENT_STATE (none, stale, undated, wrong class) is INSUFFICIENT at
+  LOW; a lone CONTRADICTS row is absence; the only attribute refutation in
+  v1 (a positively different recipient) is positive and cited; "is it
+  inactive?" and "is there evidence X does not happen?" are unsupported
+  question forms and no negation grammar was added (H3 unchanged).
 
 ## Not covered offline (real-provider / live-environment risk)
 
