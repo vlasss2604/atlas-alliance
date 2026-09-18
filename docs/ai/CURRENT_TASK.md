@@ -2,48 +2,83 @@
 
 > Overwrite this file each round. Never append.
 
-## RESEARCH CORE ADVERSARIAL HARDENING — ROUND 7: CROSS-QUESTION / LOGICAL CONSISTENCY (done this round)
+## ROUND 7.5 — FOUNDER SEMANTICS M3 + C4, AND ROUND 8 (done this round)
 
-Independent adversarial round, offline, $0 spend (no Anthropic, Brave, RPC or
-live Research; atlas_dev not migrated, migrations 0052–0054 still pending;
-Lido Memory untouched). Question: can ATLAS produce two individually
-plausible Proofs that contradict each other on the SAME facts?
+Offline, $0 spend (no Anthropic, Brave, RPC or live Research; migrations
+0052–0054 still pending and NOT applied; Lido Memory untouched).
 
-**Method.** Every Pattern v1 intent asked of the same evidence world, over
-the real S5 → S6 → S7 → S8 chain (pure) and over eight persisted jobs per
-document set through the real S4 executor, lifecycle and Postgres (DB).
-Only dependencies Pattern v1 already defines are asserted (VC = PRT ∧ BSE;
-PRT ≡ RS ≡ UTL; TU-1 = PRT-1; BSE = NET_EFFECT; MCS = lifecycle CURRENT on
-CURRENT_STATE; PHO = recipient attribute). No new ontology, no implication
-rules, no negation grammar, no engine.
+### Round 7.5 — the two approved decisions
 
-**Result: CLEAN.** 56,700 exploratory worlds and the 2,880 pinned ones
-violate no law; every family (buyback / burn / net effect, revenue / value
-capture, governance lifecycle, documentation vs execution, transaction vs
-role, supply, historical vs current, positive / negative, Proof
-consistency, confidence, six holdout worlds) holds. Zero CRITICAL, zero
-MAJOR. One MINOR (M2): an S6 gap on the claim's own matched flow that
-blocks no atom (`DESTINATION_UNRESOLVED` on an established destination of
-unrecognised kind, `FLOW_IDENTITY_UNRESOLVED` on an established source) is
-API-visible engine state but reaches no Proof gap list; verdict and band
-are unaffected. Not fixed: surfacing it in layer 6 is a product decision.
+One shape, two places: **a component can be ESTABLISHED while the economic
+ROLE it must play is unknown**, and a requirement whose meaning depends on
+that role may not be satisfied from the role-less fact.
 
-**Tests.** `tests/adversarial-core-round7-cross-question-v1.test.ts` (66)
-and `tests/adversarial-core-round7-cross-question-db-v1.test.ts` (4).
-Boundaries pinned for the Founder (no semantics invented): M1 structural
-intents carry no lifecycle atom; M2 above; M3 PASSIVE_HOLDER_OUTCOME rests
-on RECIPIENT alone; M4 conflicting supply intervals are a limitation where
-conflicting states are a contradiction; C4 PRT-2 is satisfied by an
-established destination of unrecognised kind. Observed: under Pattern v1
-no Proof of any intent exceeds LIMITED (40) because NET_EFFECT always keeps
-a limitation. Details in `RESEARCH_CORE_HARDENING_V1.md`.
+**M3 — recipient identity is not entitlement.** "Holders receive something"
+is not "passive holding entitles holders to receive it". S6 gains
+`classifyHolderEntitlement`, a closed positive dictionary for the
+holding → entitlement/receipt bridge, in the same D-100 discipline as every
+other classifier. It is asked of each admitted RECIPIENT row SEPARATELY and
+only of rows that name holders on their own, so two individually true
+sentences about different actors cannot compose into an entitlement neither
+states. `recipientKind = PASSIVE_HOLDER` with no match leaves a positioned
+`RECIPIENT_UNRESOLVED` gap on the ESTABLISHED recipient.
 
-**Consecutive CLEAN count: 1.** One more independent clean round is
-required. Do not start it without instruction.
+**C4 — an address is not an economic role. WHERE ≠ WHO.** S6 already
+recorded `DESTINATION_UNRESOLVED` on an established destination whose kind
+the closed dictionary cannot classify; nothing read it.
+
+S7 now reads both. A role-unresolved gap on a relationship endpoint caps
+`FLOW_RELATIONSHIP` at PARTIAL (PRT-2 / RS-2 / UTL-2 / VC-2); on an
+attribute's own role component it caps `FLOW_ATTRIBUTE` at PARTIAL (PHO-1,
+TU-2). Both name `REQUIRED_RELATIONSHIP_UNRESOLVED` and carry the gap as a
+blocking gap, so the limitation reaches the Proof and the band. SUPPORTED
+becomes unreachable in both worlds; the component stays established and its
+rows stay cited.
+
+PARTIAL and **not** UNSATISFIED deliberately — see
+`RESEARCH_CORE_HARDENING_V1.md` (C4 row) for why.
+
+Deliberate consequence: any gap makes a flow `PARTIAL_PATH`, so a holder
+flow with no stated entitlement now reads PARTIAL_PATH. Symmetric with the
+pre-existing destination behaviour; pinned as S6 scenario A2. Half of MINOR
+M2 is closed by C4.
+
+**Tests.** `tests/founder-semantics-round7-5-v1.test.ts` (14).
+
+### Round 8 — ROLE MANUFACTURE AND ATTRIBUTION LAUNDERING
+
+A new angle, not a replay of Round 7. For each distinction ATLAS claims to
+make, can the STRONGER side be MANUFACTURED out of parts that individually
+do not carry it? position → role, receipt → entitlement, address →
+destination role, documented → executing, approved → live, supply level →
+attributed delta, two sentences → one relation, technical failure → project
+reality, absence → denial.
+
+**Result: CLEAN.** Zero CRITICAL, zero MAJOR. 486 combinatorial worlds × 8
+intents plus the targeted families violate no law; a bound chain balance
+never becomes a role, entitlement never crosses actors or components, a
+proposal never becomes a live outcome, foreign and inadmissible rows reach
+nothing, 24 permutations per world are byte-identical, mirrors multiply
+structure and not truth, and the existential rule never lets a role-less
+flow satisfy a role-dependent atom. The persisted half proves a role is not
+inheritable through Research Memory: A bounded → VERIFIED → ACTIVE → B
+adopts the same observations and is bounded for the same reason, with A's
+deliberately corrupted verdict, confidence and S5 status nowhere in B.
+
+**One MINOR (I3), inherited:** the entitlement dictionary has no negation or
+tense grammar, exactly like every other closed S6 classifier — a sentence
+that DENIES holder entitlement satisfies the bridge. Not a regression (each
+of those worlds answered SUPPORTED before the gate existed), and the remedy
+is the already-documented H3 decision.
+
+**Tests.** `tests/adversarial-core-round8-role-attribution-v1.test.ts` (22)
+and `tests/adversarial-core-round8-role-memory-db-v1.test.ts` (3).
+
+**Consecutive CLEAN count: 2.** Round 7 = CLEAN #1, Round 8 = CLEAN #2.
+**SEMANTIC CORE HARDENING COMPLETE.** Do not start Round 9.
 
 ### Next
 
-- Founder decisions on M1–M4 / C4 (each is a new semantic dependency, not a
-  defect).
-- Round 8 (independent angle) when instructed.
-- With new approval: ONE A2-next + ONE B live.
+- Founder review, then SPEED + COST OPTIMIZATION.
+- Later: pending migrations 0052–0054, live Solana Research, live
+  Ethereum/EVM Research. No live spend before Founder approval.

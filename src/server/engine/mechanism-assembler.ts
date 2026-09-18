@@ -951,15 +951,21 @@ function buildFlow(
     DURABILITY_BASIS: 8,
   };
 
-  const textFor = (component: string): string => {
+  // Each admitted row's own text, kept separate. `textFor` joins them, which
+  // is right for classifying ONE value out of everything the component says,
+  // and wrong for asking whether ONE statement links two things: joining
+  // "token holders receive the fees" to "the protocol is entitled to a pro
+  // rata share" would read as holder entitlement although neither sentence
+  // says it. Anything that must be stated TOGETHER reads this instead.
+  const textsFor = (component: string): string[] => {
     const lineageStep = lineageStepFor(l, component);
-    if (!lineageStep) return "";
+    if (!lineageStep) return [];
     return lineageStep.evidenceIds
       .map((id) => evidenceById.get(id))
       .filter((r): r is AssemblyEvidenceProjection => !!r)
-      .map(admittedTextOf)
-      .join(" ");
+      .map(admittedTextOf);
   };
+  const textFor = (component: string): string => textsFor(component).join(" ");
 
   for (const [component, kind] of Object.entries(NODE_COMPONENTS)) {
     const step = stepOf[component];
@@ -1049,9 +1055,18 @@ function buildFlow(
   // DESTINATION whose kind the closed dictionary does not recognise (below,
   // and the same gap kind the walk emits when the component is absent).
   // S7 reads it; nothing here decides a verdict.
+  //
+  // Asked of each admitted row SEPARATELY, and only of rows that name
+  // holders on their own: the bridge is a claim about holders, so one
+  // statement must carry both halves. Pooling the component's text would
+  // let two individually true sentences about different actors compose into
+  // an entitlement neither of them states.
+  const holderEntitlementEstablished = textsFor("RECIPIENT").some(
+    (t) => classifyRecipientKind(t) === "PASSIVE_HOLDER" && classifyHolderEntitlement(t),
+  );
   if (
     recipientKind === "PASSIVE_HOLDER" &&
-    !classifyHolderEntitlement(recipientText) &&
+    !holderEntitlementEstablished &&
     !gaps.some((g) => g.component === "RECIPIENT" && g.kind === "RECIPIENT_UNRESOLVED")
   ) {
     gaps.push({

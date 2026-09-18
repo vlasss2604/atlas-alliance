@@ -379,6 +379,37 @@ describe("M3 — RECIPIENT IDENTITY IS NOT ENTITLEMENT", () => {
     expect(many.PASSIVE_HOLDER_OUTCOME.proof.confidenceScore).toBe(ask(entitled, { identity: IDENTITY }).PASSIVE_HOLDER_OUTCOME.proof.confidenceScore);
   });
 
+  it("7. the bridge must be stated by ONE statement: two individually true official sentences — 'token holders receive the fees' and 'the protocol is entitled to a pro rata share' — do not compose into holder entitlement, and the same entitlement wording that DOES name holders still does", () => {
+    const holders = row("RECIPIENT", { fragment: "token holders receive the distributed fees" });
+    const otherActor = row("RECIPIENT", { fragment: "the protocol is entitled to a pro rata share of trading fees", sourceId: "src-other" });
+    const base = [...sovProven(), flowPath(), specLive(), csLive(), destHolders()];
+
+    // Neither sentence says holding entitles holders, so their sum does not.
+    const laundered = ask([...base, holders, otherActor], { identity: IDENTITY });
+    // Two recipient statements are two slots, so two flows. The branch that
+    // names holders carries the unresolved bridge; the branch carrying only
+    // the protocol sentence is not a passive-holder flow at all.
+    const holderFlows = laundered.PASSIVE_HOLDER_OUTCOME.assembly.flows.filter((f) => f.attributes.recipientKind === "PASSIVE_HOLDER");
+    expect(holderFlows.length).toBeGreaterThan(0);
+    expect(holderFlows.every((f) => f.gaps.some((g) => g.kind === "RECIPIENT_UNRESOLVED"))).toBe(true);
+    expect(verdicts(laundered).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    expect(req(laundered.PASSIVE_HOLDER_OUTCOME, "PHO-1").status).toBe("PARTIAL");
+
+    // A row that names holders AND states the bridge still establishes it,
+    // even beside the same unrelated protocol sentence.
+    const genuine = ask(
+      [...base, row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }), otherActor],
+      { identity: IDENTITY },
+    );
+    expect(genuine.PASSIVE_HOLDER_OUTCOME.assembly.flows.some((f) => f.gaps.every((g) => g.kind !== "RECIPIENT_UNRESOLVED"))).toBe(true);
+    expect(verdicts(genuine).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+
+    // And adding the unrelated sentence to the genuine world never weakens
+    // it either — the gate reads statements, it does not count them.
+    const alone = ask([...base, row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" })], { identity: IDENTITY });
+    expect(verdicts(genuine).PASSIVE_HOLDER_OUTCOME).toBe(verdicts(alone).PASSIVE_HOLDER_OUTCOME);
+  });
+
   it("6. conflicting recipient evidence stays fail-closed under the existing contradiction rules: an entitlement sentence beside a contradicting recipient row never reaches SUPPORTED, and never reads stronger than the entitlement world alone", () => {
     // A contradiction in ATLAS is state INCOMPATIBILITY, not a relationship
     // label (S5 MEDIUM-1): both rows must bear a normalized state, and the

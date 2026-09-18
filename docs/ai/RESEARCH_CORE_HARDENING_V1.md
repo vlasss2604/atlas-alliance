@@ -30,6 +30,9 @@ touches a provider.
 | `tests/adversarial-core-round5-blackbox-v1.test.ts` | Round 5 — the final result, black box: complete Research runs through the REAL S4 executor over deterministic documents (fixture proposer, search, fetcher, extractor; the real EVM adapter over a fixture RPC where a chain is involved), read only at the Proof. Families: strong vs weak authority; documentary vs on-chain (BUYBACK ≠ BURN, point-in-time supply ≠ change, APPROVED ≠ EXECUTING, transaction ≠ mechanism); partial research for every intent; technical failure beside valid Evidence; Memory vs fresh; project / token ambiguity; temporal; misleading language; exclusion pressure; bounded budgets; order independence; the independent review. |
 | `tests/adversarial-core-round7-cross-question-v1.test.ts` | Round 7 — cross-question / logical consistency over the pure chain: EVERY Pattern v1 intent asked of the SAME evidence world. The implication laws Pattern v1 itself defines (L0 S5/S6 intent-independent; L1 PRT ≡ REWARD_SOURCE ≡ USAGE_TO_TOKEN_LINKAGE; L2 VALUE_CAPTURE = PRT ∧ BSE atom by atom, refutation / insufficiency laws; L3 TOKEN_UTILITY's REQUIRED atom is PRT-1; L4 no supply question is ever SUPPORTED; L5 "is it current?" rests on CURRENT_STATE and is refuted only by execution + a non-live state; L6 provenance and cross-job leakage; L7 confidence ceilings and the stronger claim never outranking its prerequisite; L8 a refutation always has provenance) over a 2,880-world combinatorial battery (A), then per family: buyback / burn / net effect (B), revenue / fees / value capture (C), governance lifecycle (D), documentation vs execution (E), transaction vs economic role (F), supply consistency incl. the burn × delta × attribution grid (G), historical vs current (H), NOT_ESTABLISHED vs CONTRADICTED (I), Proof consistency (J), confidence consistency (K), six holdout worlds A–F (L), the independent review's boundaries (M). |
 | `tests/adversarial-core-round7-cross-question-db-v1.test.ts` | Round 7 — the same questions of the SAME DOCUMENTS through the real S4 executor, lifecycle and Postgres: one job per intent (eight jobs per document set), the persisted S5 / S6 shapes identical across jobs, the persisted laws, own-job-only citations and no shared Evidence row; the complete documentary world, approved-not-activated, executed-then-paused (persisted HISTORICAL refutation citing that job's state and execution rows), and the chain-up world (the level beside the page, the supply question at the B1 rung). |
+| `tests/founder-semantics-round7-5-v1.test.ts` | Round 7.5 — the Founder decisions M3 and C4 over the pure chain. M3 (six cases + the composition case): recipient identity alone never fully establishes the holder outcome; a stated holding → entitlement/receipt relation does; non-holder recipients keep their full `ACTOR_MISMATCH` refutation; inadmissible evidence and an entitlement sentence filed under another component buy nothing; order and duplication are inert; a state-bearing conflict is still the only contradiction; and the bridge must be carried by ONE statement, not assembled from two. C4 (six cases): an established destination of unrecognised kind cannot satisfy the relationship atom, a recognised kind is untouched, the unresolved role poisons no destination-independent question, an unknown destination never strengthens anything, order and duplication are inert, and two established destinations remain two flows under the existing existential rule. Not an adversarial round; does not count toward the two clean rounds. |
+| `tests/adversarial-core-round8-role-attribution-v1.test.ts` | Round 8 — ROLE MANUFACTURE AND ATTRIBUTION LAUNDERING over the pure chain: for each distinction ATLAS makes, can the stronger side be built from parts that individually do not carry it? A position is not a role (a bound balance establishes DESTINATION and never its kind, never RECIPIENT; chain UP is never weaker than chain DOWN); B two statements are not one relation (entitlement never crosses actors, a destination kind never crosses components); C approved and documented are not live; D more uncertainty is never a stronger conclusion (inadmissible rows, foreign rows, a failed acquisition boundary); E order and duplication are not evidence (24 permutations per world, mirror sources); F the existential rule is not cherry-picking (a role-less flow never satisfies a role-dependent atom; a compound claim needs one common flow); G supply is not attribution; H a 486-world × 8-intent sweep over the role dimensions with the role laws asserted per world, and the dimensions proven monotone; I the gates are question-local, and I3 names their inherited limit. |
+| `tests/adversarial-core-round8-role-memory-db-v1.test.ts` | Round 8 — the persisted half: a role is not inheritable through Research Memory. Research A establishes a recipient that only NAMES holders and a destination that is only an ADDRESS, is bounded, is VERIFIED by the canonical act and its observations promoted to ACTIVE; A's verdict, confidence and S5 status are then deliberately corrupted; Research B adopts those same observations and is bounded for the same reason, citing only its own rows. The mirror case proves adoption does not LOSE a role either. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
 BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE ≠
@@ -276,6 +279,7 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H1 | The INSUFFICIENT_AUTHORITY cap reads the NEWEST establishing row; an older CONFIRMED row beside a newer CLAIMED one still caps. | Cap only when NO establishing row is CONFIRMED (set-based, like INDIRECT_ONLY). Direction: strengthening. |
 | H2 | LIVE beside an undated PROPOSED record of the same component is a state CONFLICT → CONTRADICTED; a required-component conflict → NOT_SUPPORTED (confidence capped LIMITED). | Treat PROPOSED as a lifecycle rung below LIVE (progression), not an incompatibility. |
 | H3 | S6's lexical classifiers have no negation grammar ("not burned" → BURN). Accepted S6 audit limitation LOW-3; cannot create structure. | A negation stop-list on the closed dictionaries. |
+| I3 (`round8`) | **MINOR, inherited from H3.** The M3 holder-entitlement dictionary has no negation and no tense grammar either: "token holders are not entitled to any share", "may in future be entitled" and "were previously entitled" all satisfy the bridge. NOT a regression — every one of those worlds answered SUPPORTED before the gate existed — so the gate raises the bar in the ordinary case and is defeated exactly where every other closed classifier is. Pinned in `adversarial-core-round8-role-attribution-v1` I3. | As H3: a negation stop-list on the closed dictionaries. |
 | H4 | Recency wins over officiality in supersession (D-093 forbids an authority ranking). | Refuse supersession of a CONFIRMED row by a CLAIMED one. |
 | H5 | **DECIDED (Round 6.5, Founder decision 2).** ALL_EVIDENCE_EXCLUDED and the other exclusion-shaped absences cap at LOW, like bare absence; a single-atom SUPPORTED claim with every unrelated component excluded sits at LOW, exactly where it sits with them empty. The second half of the original note — gaps on the claim's own flow that block no atom are not a context gap — is unchanged. | — |
 | H6 | An established DEPRECATED current state with no execution record is lifecycle NOT_ESTABLISHED → "is it current?" is INSUFFICIENT_EVIDENCE, not answered "no". | Let an established non-live CURRENT_STATE refute CURRENT without an execution record. |
@@ -429,6 +433,29 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
   v1 (a positively different recipient) is positive and cited; "is it
   inactive?" and "is there evidence X does not happen?" are unsupported
   question forms and no negation grammar was added (H3 unchanged).
+
+## Observed, not defects (Round 8)
+
+- **A role gate is question-local.** Over a rich world, a bare versus an
+  entitled recipient differ in the holder question alone: every other
+  verdict, band and requirement is byte-identical. The one other atom that
+  moves is `TU-2`, which is the SAME recipient-role atom under another
+  intent — correctly gated, and OPTIONAL, so it binds nothing.
+- **An unresolved role makes a flow `PARTIAL_PATH`.** `shape` is literally
+  `gaps.length === 0`, so a holder flow with no stated entitlement and a
+  destination flow of unrecognised kind both read PARTIAL_PATH. A
+  presentation consequence of the two decisions, symmetric between them,
+  pinned as S6 scenario A2.
+- **Two established destinations are still two flows.** S7's existential
+  rule is untouched by C4: a classifiable destination satisfies the
+  relationship atom on its own flow while the opaque one keeps its own gap
+  and is not among the atom's matched flows. Adding the opaque row never
+  strengthens the world it was added to.
+- **Memory remembers observations, not verdicts.** A bounded Proof still
+  produces candidates; the memory row carries the passage's own statement
+  and no status. Adoption re-runs S5/S6/S7 over the adopted rows, so a role
+  that was never established is never inherited — proven with A's
+  conclusions corrupted on disk before B ran.
 
 ## Not covered offline (real-provider / live-environment risk)
 
