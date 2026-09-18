@@ -238,7 +238,7 @@ function world(): EvidenceRow[] {
     confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
-    row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
+    row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
     confirmed("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null }),
     confirmed("DURABILITY_BASIS", { sourceClass: "GOVERNANCE", fragment: "the distribution can be revoked by a governance vote", mechanismState: "APPROVED" }),
   ];
@@ -246,9 +246,14 @@ function world(): EvidenceRow[] {
 // The Round 6 F12b world: a single-atom SUPPORTED Proof (PASSIVE_HOLDER_
 // OUTCOME) with seven components holding nothing — the shape that exposed
 // H5.
+// Round 7.5 (Founder decision M3): the recipient row states the holding ->
+// entitlement bridge, so this world's single atom is still SUPPORTED and
+// these pins still test what they are about (the confidence band under
+// exclusion and duplication). Naming holders alone is now PARTIAL —
+// pinned in founder-semantics-round7-5-v1.
 function singleAtomWorld(): EvidenceRow[] {
   return [
-    row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
+    row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
     confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
     row("CURRENT_STATE", { mechanismState: "LIVE" }),
   ];

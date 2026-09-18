@@ -382,6 +382,62 @@ export function classifyRecipientKind(text: string): RecipientKind {
   return "UNKNOWN";
 }
 
+// FOUNDER DECISION M3 — "HOLDERS RECEIVE SOMETHING" != "PASSIVE HOLDING
+// ENTITLES HOLDERS TO RECEIVE IT".
+//
+// Every other RecipientKind names an ACT the recipient performs — staking,
+// running a node, providing liquidity, being the treasury of record. The
+// act is itself the basis on which that recipient receives. PASSIVE_HOLDER
+// names no act: it is established by one sentence containing the word
+// "holders", and the dictionary above cannot tell "fees are distributed to
+// holders" (which may describe an airdrop, a snapshot, a discretionary
+// grant, or a claim that requires staking first) apart from "holding the
+// token entitles you to a pro-rata share". The first does not establish
+// that PASSIVE HOLDING is sufficient for entitlement or receipt; only the
+// second does.
+//
+// So this closed dictionary is the bridge the Founder decision requires:
+// holding -> entitlement / automatic receipt. Same discipline as every
+// other classifier in this file (D-100): a POSITIVE lexical match only,
+// never an inference from absence, never a model. No match is not a
+// contradiction — it is an unresolved bridge, and buildFlow records it as
+// a positioned RECIPIENT_UNRESOLVED gap on an ESTABLISHED recipient,
+// exactly as an established DESTINATION of unrecognised kind is recorded.
+//
+// Deliberately narrow: phrases that state entitlement ("entitled to"),
+// proportionality to the holding ("pro rata", "per token held"), or
+// receipt conditioned on holding alone ("by holding", "accrues to
+// holders"). A bare "distributed to holders" is NOT here — it is the very
+// sentence the decision says is insufficient. The classifier reads only
+// the RECIPIENT component's own admitted text, so the entitlement must be
+// stated by the evidence that establishes who receives; a false negative
+// costs PARTIAL, which is the safe direction.
+const HOLDER_ENTITLEMENT_PHRASES = [
+  "entitled to",
+  "entitles",
+  "entitlement",
+  "pro rata",
+  "in proportion to",
+  "proportional to",
+  "per token held",
+  "for each token held",
+  "by holding",
+  "for holding",
+  "accrue to holders",
+  "accrues to holders",
+  "accrued to holders",
+  "automatically distributed to holders",
+  "automatically to holders",
+  "claimable by holders",
+  "redeemable by holders",
+  "no action required",
+];
+
+export function classifyHolderEntitlement(text: string): boolean {
+  const tokens = tokenizeForClassifier(text);
+  return HOLDER_ENTITLEMENT_PHRASES.some((p) => containsPhrase(tokens, p));
+}
+
 // §14 — new, minimal vocabulary. RETURN takes priority: a returned
 // collateral/principal flow must never read as OUTBOUND/reward (mutation 6).
 const DIRECTION_PHRASES: [FlowDirection, string[]][] = [
@@ -981,6 +1037,30 @@ function buildFlow(
 
   const recipientText = textFor("RECIPIENT");
   const recipientKind: RecipientKind = recipientText ? classifyRecipientKind(recipientText) : "UNKNOWN";
+
+  // FOUNDER DECISION M3 — RECIPIENT IDENTITY ALONE DOES NOT ESTABLISH
+  // PASSIVE HOLDER ENTITLEMENT. The recipient component IS established and
+  // the classification IS recognised, so this is not a MISSING/PARTIAL
+  // component and nothing about the recipient is withdrawn: the flow still
+  // carries recipientKind = PASSIVE_HOLDER, and every other recipient-based
+  // fact is untouched. What is unresolved is the bridge from HOLDING to
+  // entitlement/receipt, and that is recorded here, positioned on the
+  // recipient, in exactly the shape S6 already uses for an established
+  // DESTINATION whose kind the closed dictionary does not recognise (below,
+  // and the same gap kind the walk emits when the component is absent).
+  // S7 reads it; nothing here decides a verdict.
+  if (
+    recipientKind === "PASSIVE_HOLDER" &&
+    !classifyHolderEntitlement(recipientText) &&
+    !gaps.some((g) => g.component === "RECIPIENT" && g.kind === "RECIPIENT_UNRESOLVED")
+  ) {
+    gaps.push({
+      kind: "RECIPIENT_UNRESOLVED",
+      component: "RECIPIENT",
+      afterStep: 6,
+      provenance: provenanceOf(6, "RECIPIENT", lineageStepFor(l, "RECIPIENT")?.evidenceIds ?? []),
+    });
+  }
 
   const directionText = [textFor("SOURCE_OF_VALUE"), textFor("FLOW_PATH"), textFor("EXECUTION_EVIDENCE")]
     .filter(Boolean)

@@ -284,7 +284,7 @@ function world(): EvidenceRow[] {
     confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
-    row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
+    row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
     confirmed("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null }),
     confirmed("DURABILITY_BASIS", { sourceClass: "GOVERNANCE", fragment: "the distribution can be revoked by a governance vote", mechanismState: "APPROVED" }),
   ];
@@ -893,7 +893,7 @@ describe("F12. confidence invariants", () => {
 
   it("F12b. DECIDED (Round 6.5, Founder decision 2) — adding ONLY inadmissible rows (social posts) to components that had nothing leaves the band exactly where bare absence leaves it: 20 -> 20 on a SUPPORTED verdict, the exclusion recorded, nothing new cited. The full pin is founder-semantics-round6-5-v1 (C, D, E)", () => {
     const supported = [
-      row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
+      row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
       confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
       row("CURRENT_STATE", { mechanismState: "LIVE" }),
     ];

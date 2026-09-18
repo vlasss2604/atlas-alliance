@@ -181,6 +181,45 @@ function gapsForComponentOnFlow(flow: MechanismFlow, component: string): Mechani
   return flow.gaps.filter((g) => g.component === component).map((g) => gapRef(flow.flowId, g));
 }
 
+// ADDRESS EXISTS != ECONOMIC ROLE ESTABLISHED. WHERE != WHO.
+// (Founder decisions C4 and M3.)
+//
+// S6 records, on an ESTABLISHED component, that the economic role the
+// component must play is unresolved: a DESTINATION whose kind the closed
+// dictionary does not recognise (an opaque multisig address is a place,
+// not a treasury), and a RECIPIENT classified PASSIVE_HOLDER whose text
+// never links holding to entitlement or receipt (naming holders says who
+// got something, not that holding is what entitled them). Both are
+// positioned *_UNRESOLVED gaps on a component that IS established, which
+// is why every check that only asks "is this component established on
+// this flow?" used to walk straight past them.
+//
+// This is the whole of the two fixes: a requirement whose MEANING depends
+// on that role may not be satisfied from the role-less fact. Nothing else
+// changes — the component stays established, its evidence stays
+// admissible, and any requirement that does not depend on the role
+// (existence, token state, a positive incompatibility with a different
+// role) reads exactly as before.
+const ROLE_UNRESOLVED_GAP_KIND: Record<string, MechanismGapKind> = {
+  DESTINATION: "DESTINATION_UNRESOLVED",
+  RECIPIENT: "RECIPIENT_UNRESOLVED",
+};
+
+function roleUnresolvedGaps(flow: MechanismFlow, component: string): MechanismGapRef[] {
+  const kind = ROLE_UNRESOLVED_GAP_KIND[component];
+  if (!kind) return [];
+  return flow.gaps.filter((g) => g.component === component && g.kind === kind).map((g) => gapRef(flow.flowId, g));
+}
+
+// The component whose ROLE a flow attribute asserts. Only these two
+// attributes ARE a role claim about a component; valueSource, direction
+// and tokenState are not, and are deliberately absent so an unresolved
+// recipient role can never weaken an unrelated token-state match.
+const ATTRIBUTE_ROLE_COMPONENT: Record<string, string> = {
+  recipientKind: "RECIPIENT",
+  destinationKind: "DESTINATION",
+};
+
 // A CONTRADICTED_COMPONENT gap's own S6 provenance carries the
 // contradicting evidence ids (§18 of the S6 plan: "both id sets"). This
 // is what makes a CONTRADICTED atom's own provenance invariant (§22)
@@ -294,11 +333,41 @@ function evaluateFlowRelationship(req: ClaimRequirement, flow: MechanismFlow): F
   const unresolvedRelationship = [...fromGaps, ...toGaps].some((g) => g.kind === "DESTINATION_UNRESOLVED" || g.kind === "RECIPIENT_UNRESOLVED");
 
   if (fromStatus !== null && toStatus !== null) {
-    const status: ClaimRequirementStatus = fromStatus === "PARTIALLY_SUPPORTED" || toStatus === "PARTIALLY_SUPPORTED" ? "PARTIAL" : "SATISFIED";
+    // C4 — BOTH ENDPOINTS ESTABLISHED IS NOT YET A RELATIONSHIP. This atom
+    // asserts that value from `from` reaches `to`, which is a claim about
+    // what `to` economically IS: "does revenue reach the token?" reads
+    // differently for a burn address, a treasury and an opaque address the
+    // dictionary could not classify. When S6 has positively recorded that
+    // an endpoint's role is unresolved, the existence of the endpoint
+    // cannot stand in for it: the atom drops to PARTIAL, so a
+    // destination-dependent claim can never read SUPPORTED off an opaque
+    // address, and REQUIRED_RELATIONSHIP_UNRESOLVED names why.
+    //
+    // PARTIAL and not UNSATISFIED, deliberately. UNSATISFIED is this
+    // file's verdict for an endpoint that is NOT ESTABLISHED, and it
+    // carries no componentResultKeys — so it would have dropped the
+    // citation of every established destination row the Proof rests on,
+    // which is the one thing the decision says not to do ("do NOT
+    // globally invalidate all evidence rows that contain an unknown
+    // destination"). It would also collapse an unrecognised kind into the
+    // same verdict as a genuinely unpairable branch (Round 6.6 HIGH-1),
+    // erasing a decided distinction. PARTIAL keeps the lineage cited,
+    // keeps the limitation visible as a blocking gap (which lowers the
+    // band), and makes SATISFIED unreachable. Absence of a role is
+    // absence, never a positive incompatibility.
+    const roleGaps = [...roleUnresolvedGaps(flow, from), ...roleUnresolvedGaps(flow, to)];
+    const partialEndpoint = fromStatus === "PARTIALLY_SUPPORTED" || toStatus === "PARTIALLY_SUPPORTED";
+    const status: ClaimRequirementStatus = roleGaps.length > 0 || partialEndpoint ? "PARTIAL" : "SATISFIED";
+    const reasonCodes: ClaimReasonCode[] = [];
+    // The role-less endpoint is named first: it is the reason the atom
+    // cannot be SATISFIED, and REQUIRED_PATH_PARTIAL alone would read as
+    // an authority limitation rather than an unknown economic role.
+    if (roleGaps.length > 0) reasonCodes.push("REQUIRED_RELATIONSHIP_UNRESOLVED");
+    if (partialEndpoint) reasonCodes.push("REQUIRED_PATH_PARTIAL");
     return {
       status,
-      reasonCodes: status === "PARTIAL" ? ["REQUIRED_PATH_PARTIAL"] : [],
-      blockingGaps: [],
+      reasonCodes: reasonCodes.sort(),
+      blockingGaps: roleGaps,
       evidenceIds: evidenceIdsForComponentsOnFlow(flow, [from, to]),
       componentResultKeys: [
         { step: stepOfComponent(flow, from), component: from },
@@ -395,8 +464,25 @@ function evaluateFlowAttribute(req: ClaimRequirement, flow: MechanismFlow): Flow
     // partial match — see ATTRIBUTE_BASIS_COMPONENTS. A positive
     // incompatibility below stays CONTRADICTED regardless: partial
     // authority is a confidence matter, not a reason to soften a finding.
-    if (anyBasisComponentPartial(flow, basis)) {
-      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys };
+    //
+    // M3 — AND a match on a role the flow carries but whose basis S6 left
+    // role-unresolved is equally not a full match. The only case Pattern
+    // v1 reaches is recipientKind = PASSIVE_HOLDER with no holding ->
+    // entitlement/receipt bridge: the recipient IS holders, so the value
+    // stands and a mismatch against a different role below is still a real
+    // refutation, but "holders receive something" does not fully establish
+    // "passive holding entitles holders to receive it". PARTIAL, never
+    // SATISFIED — the atom keeps its evidence and its citation, and
+    // PASSIVE_HOLDER_OUTCOME lands on PARTIALLY_SUPPORTED instead of
+    // SUPPORTED. destinationKind never arrives here role-unresolved: an
+    // unrecognised kind is UNKNOWN and was already answered above.
+    const roleGaps = roleUnresolvedGaps(flow, ATTRIBUTE_ROLE_COMPONENT[attribute] ?? "");
+    const partialBasis = anyBasisComponentPartial(flow, basis);
+    if (roleGaps.length > 0 || partialBasis) {
+      const reasonCodes: ClaimReasonCode[] = [];
+      if (roleGaps.length > 0) reasonCodes.push("REQUIRED_RELATIONSHIP_UNRESOLVED");
+      if (partialBasis) reasonCodes.push("REQUIRED_PATH_PARTIAL");
+      return { status: "PARTIAL", reasonCodes: reasonCodes.sort(), blockingGaps: roleGaps, evidenceIds, componentResultKeys };
     }
     return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys };
   }

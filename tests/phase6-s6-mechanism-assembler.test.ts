@@ -77,7 +77,12 @@ function completeChainEvidence(): AssemblyEvidenceProjection[] {
     ev("e5", "s4", "buyback executed on-chain"),
     ev("e6", "s5", "mechanism is LIVE"),
     ev("e7", "s6d", "tokens sent to treasury"),
-    ev("e8", "s6r", "token holders benefit"),
+    // Round 7.5 (Founder decision M3): a recipient sentence that names
+    // holders without linking HOLDING to entitlement leaves a positioned
+    // RECIPIENT_UNRESOLVED gap on the established recipient — and any gap
+    // makes the flow PARTIAL_PATH. Scenario A is the plan's COMPLETE chain,
+    // so its recipient states the bridge. The bare form is scenario A2.
+    ev("e8", "s6r", "token holders are entitled to a pro rata share of the fees"),
     ev("e9", "s7", "net supply reduced"),
     ev("e10", "s8", "locked by governance contract"),
   ];
@@ -115,6 +120,20 @@ describe("S6 acceptance scenarios (phase-6-s6-plan.md §26)", () => {
     expect(flow.edges.length).toBe(2);
     for (const n of flow.nodes) expect(n.provenance.evidenceIds.length).toBeGreaterThan(0);
     for (const e of flow.edges) expect(e.provenance.evidenceIds.length).toBeGreaterThan(0);
+  });
+
+  it("A2 (Round 7.5, M3). the same complete chain whose recipient only NAMES holders: every component is still established and attached, and the one unresolved holding -> entitlement bridge is a positioned RECIPIENT_UNRESOLVED gap that makes the path PARTIAL", () => {
+    const evidence = completeChainEvidence().map((e) => (e.id === "e8" ? { ...e, fragment: "token holders benefit" } : e));
+    const r = assemble(completeChainResults(), evidence);
+    const flow = r.flows[0];
+    expect(flow.lineage.length).toBe(assemble(completeChainResults(), completeChainEvidence()).flows[0].lineage.length);
+    expect(flow.attributes.recipientKind).toBe("PASSIVE_HOLDER");
+    const gaps = flow.gaps.filter((g) => g.kind === "RECIPIENT_UNRESOLVED");
+    expect(gaps.length).toBe(1);
+    expect(gaps[0].component).toBe("RECIPIENT");
+    expect(gaps[0].afterStep).toBe(6);
+    expect(gaps[0].provenance.evidenceIds).toEqual(["e8"]);
+    expect(flow.shape).toBe("PARTIAL_PATH");
   });
 
   it("B. DESTINATION missing -> gap DESTINATION_UNRESOLVED; no destination node; burn never appears from nowhere", () => {

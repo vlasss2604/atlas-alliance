@@ -191,7 +191,11 @@ describe("H. documented boundaries — current behaviour, Founder decision pendi
 
   it("H5 (DECIDED, Round 6.5): reasoned exclusion is exclusion-shaped absence and caps like absence — a SUPPORTED single-atom claim sits at LOW while every unrelated component holds only excluded (SOCIAL) evidence, exactly where it sits with those components empty", () => {
     // PASSIVE_HOLDER_OUTCOME asks only recipientKind. RECIPIENT is a
-    // CONFIRMED official statement; execution and current state are fresh
+    // CONFIRMED official statement that also states the holding ->
+    // entitlement bridge (Founder decision M3, Round 7.5: naming holders
+    // alone no longer fully establishes the outcome, and this pin is about
+    // the confidence band under exclusion, not about that bridge);
+    // execution and current state are fresh
     // chain reads (CLAIMED, so STRONG cap). Every other component saw only
     // a SOCIAL page, so it is ALL_EVIDENCE_EXCLUDED — which used to cap
     // nothing (this test pinned STRONG / 60) and, by Founder decision 2
@@ -201,7 +205,7 @@ describe("H. documented boundaries — current behaviour, Founder decision pendi
     // addition may never leave the Proof stronger than that control.
     const social = (component: string) => row(component, { sourceClass: "SOCIAL", officiality: "CLAIMED" });
     const pool = [
-      row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),
+      row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
       row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" }),
       row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY", mechanismState: "LIVE", publishedAt: null }),
       ...["SOURCE_OF_VALUE", "FLOW_PATH", "MECHANISM_SPEC", "GOVERNANCE_BASIS", "DESTINATION", "NET_EFFECT", "DURABILITY_BASIS"].map(social),
@@ -256,11 +260,19 @@ describe("N. attacks that held — kept as regressions", () => {
   });
 
   it("N2b. a SUPPORTED attribute claim cites the rows it rests on — a Proof never says 'no evidence is cited' about a verdict evidence produced", () => {
-    const holders = row("RECIPIENT", { fragment: "token holders receive the distributed fees" });
+    // The recipient row states the holding -> entitlement bridge, so the
+    // claim is SUPPORTED (Founder decision M3, Round 7.5) and the citation
+    // this pin is about is exercised. The bare-recipient world is PARTIAL
+    // and cites the same row — pinned in founder-semantics-round7-5-v1.
+    const holders = row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" });
     const pool = [holders, row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" })];
     const { claim, proof } = runChain("PASSIVE_HOLDER_OUTCOME", pool);
     expect(claim.status).toBe("SUPPORTED");
     expect(proof.citedEvidenceIds).toEqual([holders.id]);
+
+    const bare = runChain("PASSIVE_HOLDER_OUTCOME", [row("RECIPIENT", { fragment: "token holders receive the distributed fees" }), ...pool.slice(1)]);
+    expect(bare.claim.status).toBe("PARTIALLY_SUPPORTED");
+    expect(bare.proof.citedEvidenceIds.length).toBe(1);
   });
 
   it("N2c. a lifecycle verdict cites CURRENT_STATE (and the execution record when HISTORICAL)", () => {

@@ -669,7 +669,11 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
     laws(m, "C3");
     expect(verdicts(m)).toEqual({
       PROTOCOL_REVENUE_TO_TOKEN: "SUPPORTED",
-      PASSIVE_HOLDER_OUTCOME: "SUPPORTED",
+      // Round 7.5 (Founder decision M3): the recipient sentence names
+      // holders and never links HOLDING to entitlement, so the holder
+      // question is bounded at PARTIALLY_SUPPORTED; every other question
+      // in this world is unchanged.
+      PASSIVE_HOLDER_OUTCOME: "PARTIALLY_SUPPORTED",
       REWARD_SOURCE: "SUPPORTED",
       BURN_OR_SUPPLY_EFFECT: "PARTIALLY_SUPPORTED",
       MECHANISM_CURRENT_STATE: "SUPPORTED",
@@ -678,19 +682,37 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
       TOKEN_UTILITY: "SUPPORTED",
     });
     expect(m.VALUE_CAPTURE.claim.reasonCodes).toEqual(["REQUIRED_PATH_PARTIAL"]);
-    for (const i of INTENTS) expect(m[i].proof.confidenceScore).toBe(40);
-    for (const i of INTENTS) expect(m[i].proof.confidenceBindingReasons).toEqual(["NET_SUPPLY_CHANGE_NOT_ESTABLISHED"]);
+    // Round 7.5 (M3): the holder question additionally carries its own
+    // REQUIRED blocking gap (the unresolved holding -> entitlement
+    // bridge), so it binds on one more reason than the rest. Every other
+    // question is exactly where Round 7 left it.
+    const others = INTENTS.filter((i) => i !== "PASSIVE_HOLDER_OUTCOME");
+    for (const i of others) expect(m[i].proof.confidenceScore, i).toBe(40);
+    for (const i of others) expect(m[i].proof.confidenceBindingReasons, i).toEqual(["NET_SUPPLY_CHANGE_NOT_ESTABLISHED"]);
+    expect(m.PASSIVE_HOLDER_OUTCOME.proof.confidenceBindingReasons).toEqual(["NET_SUPPLY_CHANGE_NOT_ESTABLISHED", "REQUIRED_BLOCKING_GAP"]);
+    expect(m.PASSIVE_HOLDER_OUTCOME.proof.confidenceScore).toBeLessThanOrEqual(40);
   });
 
-  it("C4. 'where do fees go?' with an established destination S6 cannot classify (a multisig address): the relationship SOV -> DESTINATION is satisfied on the established row, the unresolved KIND is recorded on the flow, and the revenue verdict is the same as with a classifiable destination — documented boundary, pinned (see M2)", () => {
+  it("C4 (DECIDED, Round 7.5): 'where do fees go?' with an established destination S6 cannot classify (a multisig address) no longer reads the same as a treasury — the destination stays established and cited, the relationship atom drops to PARTIAL on REQUIRED_RELATIONSHIP_UNRESOLVED, and the revenue question can no longer be SUPPORTED. WHERE != WHO", () => {
     const opaque = ask([...sovProven(), flowPath(), destOpaque()], { identity: IDENTITY });
     const treasury = ask([...sovProven(), flowPath(), destTreasury()], { identity: IDENTITY });
     laws(opaque, "C4");
+    // Nothing about the destination is withdrawn.
     expect(s5(opaque, "DESTINATION").status).toBe("SUPPORTED");
     expect(flow0(opaque).attributes.destinationKind).toBe("UNKNOWN");
     expect(flow0(opaque).gaps.some((g) => g.kind === "DESTINATION_UNRESOLVED" && g.provenance.evidenceIds.length > 0)).toBe(true);
-    expect(req(opaque.PROTOCOL_REVENUE_TO_TOKEN, "PRT-2").status).toBe("SATISFIED");
-    expect(verdicts(opaque).PROTOCOL_REVENUE_TO_TOKEN).toBe(verdicts(treasury).PROTOCOL_REVENUE_TO_TOKEN);
+    // The role-dependent atom is bounded, and says why.
+    const prt2 = req(opaque.PROTOCOL_REVENUE_TO_TOKEN, "PRT-2");
+    expect(prt2.status).toBe("PARTIAL");
+    expect(prt2.reasonCodes).toContain("REQUIRED_RELATIONSHIP_UNRESOLVED");
+    expect(prt2.blockingGaps.map((g) => g.kind)).toEqual(["DESTINATION_UNRESOLVED"]);
+    // Still cited — the decision forbids invalidating the rows themselves.
+    expect(prt2.provenance.componentResultKeys.map((k) => k.component)).toContain("DESTINATION");
+    expect(prt2.provenance.evidenceIds.length).toBeGreaterThan(0);
+    // The two worlds now read differently, and the opaque one is weaker.
+    expect(req(treasury.PROTOCOL_REVENUE_TO_TOKEN, "PRT-2").status).toBe("SATISFIED");
+    expect(VERDICT_RANK[verdicts(opaque).PROTOCOL_REVENUE_TO_TOKEN]).toBeLessThan(VERDICT_RANK[verdicts(treasury).PROTOCOL_REVENUE_TO_TOKEN]);
+    expect(verdicts(opaque).PROTOCOL_REVENUE_TO_TOKEN).toBe("PARTIALLY_SUPPORTED");
   });
 
   it("C5. holders vs treasury: the same revenue world with a treasury recipient refutes 'do holders receive value?' and leaves 'does revenue reach the token?' untouched; with a holder recipient both hold — the two questions never disagree about the recipient they share", () => {
@@ -699,7 +721,11 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
     const treasury = ask([...base, rcptTreasury()], { identity: IDENTITY });
     laws(holders, "C5 holders");
     laws(treasury, "C5 treasury");
-    expect(verdicts(holders).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    // Round 7.5 (M3): "holders receive" is bounded at PARTIAL; "the
+    // treasury receives, not holders" is still a full refutation from
+    // recipient identity alone — the decision weakens no independently
+    // valid recipient fact.
+    expect(verdicts(holders).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
     expect(verdicts(treasury).PASSIVE_HOLDER_OUTCOME).toBe("NOT_SUPPORTED");
     expect(req(treasury.PASSIVE_HOLDER_OUTCOME, "PHO-1").reasonCodes).toEqual(["ACTOR_MISMATCH"]);
     expect(verdicts(holders).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
@@ -799,7 +825,7 @@ describe("E. documentation vs execution over one evidence world", () => {
     laws(m, "E1");
     nonNegative(m, "E1");
     expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
-    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED"); // Round 7.5, M3
     expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
     expect(flow0(m).edges.every((e) => !e.executed)).toBe(true);
     expect(flow0(m).lifecycle).toBe("NOT_ESTABLISHED");
@@ -1026,7 +1052,7 @@ describe("H. historical vs current over one evidence world", () => {
     expect(paused.MECHANISM_CURRENT_STATE.proof.citations.map((c) => c.component).sort()).toEqual(["CURRENT_STATE", "EXECUTION_EVIDENCE"]);
     onlyTheseChange(live, paused, ["MECHANISM_CURRENT_STATE"], "H4");
     expect(verdicts(paused).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
-    expect(verdicts(paused).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    expect(verdicts(paused).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED"); // Round 7.5, M3
   });
 
   it("H5. a two-year-old OFFICIAL_REPORT of execution beside a fresh PAUSED page reads the same HISTORICAL picture as a chain burn would — the execution component has no freshness window (documented boundary), and only CURRENT_STATE decides 'now'", () => {
@@ -1324,9 +1350,10 @@ describe("L. fresh holdout worlds — the full question matrix over each", () =>
     expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
     expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("PARTIALLY_SUPPORTED");
     expect(verdicts(m).VALUE_CAPTURE).toBe("PARTIALLY_SUPPORTED");
-    // The holder question is structural (M3) and holds on the approved
-    // recipient sentence; it says nothing about activation.
-    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    // The holder question is structural and says nothing about activation;
+    // Round 7.5 (M3) bounds it at PARTIAL because the approved recipient
+    // sentence names holders without linking holding to entitlement.
+    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
     expect(flow0(m).lifecycle).toBe("NOT_ESTABLISHED");
     expect(flow0(m).edges.every((e) => !e.executed)).toBe(true);
   });
@@ -1354,7 +1381,11 @@ describe("L. fresh holdout worlds — the full question matrix over each", () =>
     nonNegative(m, "L-F");
     expect(verdicts(m)).toEqual({
       PROTOCOL_REVENUE_TO_TOKEN: "SUPPORTED",
-      PASSIVE_HOLDER_OUTCOME: "SUPPORTED",
+      // Round 7.5 (Founder decision M3): the recipient sentence names
+      // holders and never links HOLDING to entitlement, so the holder
+      // question is bounded at PARTIALLY_SUPPORTED; every other question
+      // in this world is unchanged.
+      PASSIVE_HOLDER_OUTCOME: "PARTIALLY_SUPPORTED",
       REWARD_SOURCE: "SUPPORTED",
       BURN_OR_SUPPLY_EFFECT: "INSUFFICIENT_EVIDENCE",
       MECHANISM_CURRENT_STATE: "INSUFFICIENT_EVIDENCE",
@@ -1375,32 +1406,46 @@ describe("M. independent review — two questions ATLAS answers differently from
     const m = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
     expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
-    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    // Round 7.5 (M3) bounds the holder question for its own reason; the
+    // boundary M1 pins is that NEITHER question carries a lifecycle atom,
+    // so a positively refuted current state still leaves them positive.
+    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
     expect(verdicts(m).TOKEN_UTILITY).toBe("SUPPORTED");
     expect(PATTERN_V1_CONTENT.intentRequirements!.PROTOCOL_REVENUE_TO_TOKEN.requirements.every((r) => r.kind !== "LIFECYCLE")).toBe(true);
     expect(PATTERN_V1_CONTENT.intentRequirements!.PASSIVE_HOLDER_OUTCOME.requirements.every((r) => r.kind !== "LIFECYCLE")).toBe(true);
   });
 
-  it("M2. an S6 gap on the claim's own flow that blocks no atom (DESTINATION_UNRESOLVED on an established destination of unrecognised kind, FLOW_IDENTITY_UNRESOLVED on an established source) is recorded in the assembly but reaches no Proof gap list — MINOR: diagnostic only, verdict and band unaffected, pinned", () => {
+  it("M2 (HALF RESOLVED, Round 7.5): the destination half now BLOCKS an atom and therefore reaches the Proof — DESTINATION_UNRESOLVED on an established destination is a REQUIREMENT_BLOCKING gap. The source half is unchanged and stays MINOR: FLOW_IDENTITY_UNRESOLVED on an established source blocks nothing and is still API-visible only", () => {
     const opaque = ask([...sovProven(), flowPath(), destOpaque()], { identity: IDENTITY });
     const f = flow0(opaque);
     expect(f.gaps.some((g) => g.kind === "DESTINATION_UNRESOLVED" && g.provenance.evidenceIds.length > 0)).toBe(true);
-    expect(opaque.PROTOCOL_REVENUE_TO_TOKEN.proof.gaps.some((g) => g.kind === "DESTINATION_UNRESOLVED")).toBe(false);
+    // Was `false` before C4: the unresolved destination role is now on the
+    // Proof's record because it is the reason PRT-2 cannot be SATISFIED.
+    expect(opaque.PROTOCOL_REVENUE_TO_TOKEN.proof.gaps.some((g) => g.kind === "DESTINATION_UNRESOLVED" && g.origin === "REQUIREMENT_BLOCKING")).toBe(true);
     expect(opaque.PROTOCOL_REVENUE_TO_TOKEN.claim.contextGaps).toEqual([]);
     const vague = ask([row("SOURCE_OF_VALUE", { fragment: "the protocol earns money somehow" }), flowPath(), destHolders()]);
     expect(flow0(vague).gaps.some((g) => g.kind === "FLOW_IDENTITY_UNRESOLVED")).toBe(true);
     expect(vague.PROTOCOL_REVENUE_TO_TOKEN.proof.gaps.some((g) => g.kind === "FLOW_IDENTITY_UNRESOLVED")).toBe(false);
-    // Neither is stronger than its classifiable twin.
+    // Neither is stronger than its classifiable twin — the opaque world is
+    // now strictly weaker, which is the point of the decision.
     const treasury = ask([...sovProven(), flowPath(), destTreasury()], { identity: IDENTITY });
-    expect(verdicts(opaque)).toEqual(verdicts(treasury));
-    expect(opaque.PROTOCOL_REVENUE_TO_TOKEN.proof.confidenceScore).toBe(treasury.PROTOCOL_REVENUE_TO_TOKEN.proof.confidenceScore);
+    for (const i of INTENTS) expect(VERDICT_RANK[verdicts(opaque)[i]], i).toBeLessThanOrEqual(VERDICT_RANK[verdicts(treasury)[i]]);
+    expect(opaque.PROTOCOL_REVENUE_TO_TOKEN.proof.confidenceScore).toBeLessThanOrEqual(treasury.PROTOCOL_REVENUE_TO_TOKEN.proof.confidenceScore);
   });
 
-  it("M3. PASSIVE_HOLDER_OUTCOME rests on RECIPIENT alone: one official sentence naming holders answers 'do holders receive value?' SUPPORTED at LOW while every flow component is absent and 'does revenue reach the token?' is INSUFFICIENT — Pattern v1's own requirement set, pinned (H5 band)", () => {
-    const m = ask([rcptHolders()]);
-    expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
-    expect(m.PASSIVE_HOLDER_OUTCOME.proof.confidenceScore).toBe(20);
-    expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("INSUFFICIENT_EVIDENCE");
+  it("M3 (DECIDED, Round 7.5): one official sentence naming holders no longer answers 'do holders receive value?' SUPPORTED — recipient identity alone is not entitlement, so the single-atom world is bounded at PARTIALLY_SUPPORTED, and stating the holding -> entitlement relation restores it", () => {
+    const bare = ask([rcptHolders()]);
+    expect(verdicts(bare).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    expect(req(bare.PASSIVE_HOLDER_OUTCOME, "PHO-1").reasonCodes).toContain("REQUIRED_RELATIONSHIP_UNRESOLVED");
+    expect(verdicts(bare).PROTOCOL_REVENUE_TO_TOKEN).toBe("INSUFFICIENT_EVIDENCE");
+
+    // The bridge, stated: the same single-atom world is SUPPORTED again.
+    const entitled = ask([row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" })]);
+    expect(verdicts(entitled).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    expect(entitled.PASSIVE_HOLDER_OUTCOME.proof.confidenceScore).toBe(20); // H5 band, unchanged
+
+    // The requirement set itself is untouched CORE data — the decision is
+    // a semantic qualification, not a new atom.
     expect(PATTERN_V1_CONTENT.intentRequirements!.PASSIVE_HOLDER_OUTCOME.requirements.map((r) => r.kind)).toEqual(["FLOW_ATTRIBUTE"]);
   });
 
