@@ -2,56 +2,61 @@
 
 > Overwrite this file each round. Never append.
 
-## ROUND 12 — TECHNICAL DEGRADATION AND TEMPORAL MONOTONICITY (done this round)
+## ROUND 13 — IDENTITY, PROVENANCE AND ISOLATION UNDER COMPOSITION (done this round)
 
 Offline, $0 spend (no Anthropic, Brave, RPC or live Research; migrations
 0052–0054 still pending and NOT applied; Lido Memory untouched).
 
-One question, asked compositionally: **can ATLAS ever produce a stronger
-truth when the evidence environment gets worse?**
+Question: **can ATLAS assemble a stronger Proof by combining evidence
+that is individually valid but belongs to the wrong identity?**
 
 ### What was new
 
-Round 6 removed one thing at a time from a control and took the chain
-wholesale up or down. That leaves the interesting part untested: what
-happens when degradations COMBINE. A rule can be monotone against every
-single removal and still be non-monotone against a pair.
+Rounds 4 and 5.5 asked whether ONE foreign row binds — same ticker, same
+contract, same host, same hex address on another chain. Each is refused.
+That leaves composition untested, and composition is where an isolation
+rule usually breaks: no single foreign row is enough to matter, so nothing
+trips a per-row check, while together they supply exactly the components
+the local world is missing.
 
-So Round 12 builds a **lattice**. Six independent technical degradations —
-supply read off, burn read off, current state aged out, destination route
-withdrawn, extraction not completed, a documentary component unreachable —
-give 64 worlds ordered by subset inclusion, and every covering pair is
-asserted for all eight intents:
+So Round 13 is a **jigsaw attack**. The local world is deliberately
+incomplete and every hole is offered a piece that is perfectly good
+evidence — for somebody else:
 
-- verdict never rises,
-- at an equal verdict the band never rises,
-- no world is NOT_SUPPORTED unless the control already was
-  (LOSS OF EVIDENCE IS NOT EVIDENCE OF ABSENCE),
-- provenance and citations hold at every point,
-- and the lattice is proven non-vacuous: each axis bites, and the fully
-  degraded world really is weaker.
+- revenue here + another project's mechanism + a third's execution
+  must not become a value-capture path;
+- an unbound burn + an unbound supply delta must not become NET_EFFECT;
+- holders here + the entitlement bridge there must not become
+  PASSIVE_HOLDER_OUTCOME.
 
-Then partial chain visibility, temporal pathologies (future-dated,
-undated, input order vs temporal order, stale support meeting fresh
-contradiction, historical execution vs current state), and confidence
-neutrality. The persisted half degrades the real pipeline with providers
-that fail as providers do.
+The law asserted is the strongest available: the mixed world is **byte
+identical** to the isolated control, not merely "no stronger".
+
+The persisted half runs it where binding is actually computed — two
+onboarded projects with their own confirmed identities and routes, and a
+provider that serves BOTH projects' pages, offering the foreign one first
+at every step.
 
 ### Result
 
-**CLEAN #1.** Zero CRITICAL, zero MAJOR, zero MINOR.
+**CLEAN.** Zero CRITICAL, zero MAJOR, zero MINOR. No fix required.
 
-Two harness facts found by probing and recorded so a later round does not
-repeat them: a project whose pages were already acquired REUSES those
-documents, so a degraded run must be the first research of its own fresh
-project; and with a confirmed OFFICIAL_DOCS route the executor resolves
-candidate urls from the ROUTE, never consulting the search gateway, so a
-"search finds nothing" fixture is inert.
+Two things worth recording rather than hiding:
 
-**Consecutive CLEAN count: 1.**
+- A foreign row is not silently dropped — it is **recorded as refused**
+  with reason `WRONG_PROJECT`, which changes the diagnostics and nothing
+  else. It never becomes a blocking gap, and verdict, band, requirements
+  and citations are the isolated world's exactly.
+- Both DB cases assert their own non-vacuity: the attack surface is
+  proven reached (the foreign page is offered and fetched) and the
+  isolated control is proven to establish something.
+
+**SEMANTIC CORE HARDENING COMPLETE** — Round 12 = CLEAN #1,
+Round 13 = CLEAN #2.
 
 ### Next
 
-- **Round 13** — a further independent adversarial round is required for
-  CLEAN #2. Do not start it without instruction.
-- Not yet: speed optimization, migrations 0052–0054, any live Research.
+**SPEED + COST OPTIMIZATION**, after Founder review. Not started.
+
+Still pending and untouched: migrations 0052–0054, live Solana Research,
+live Ethereum/EVM Research. No live spend before Founder approval.
