@@ -36,7 +36,7 @@ import {
   RESEARCH_QUEUE,
   type ResearchQueuePayload,
 } from "./queue";
-import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
+import { claimResearchJob, resolveDemoReservation, resolveDemoReservationForTerminal, transitionJobState } from "./research-jobs";
 import { resolveContentFetcher } from "../engine/providers/content-fetcher";
 import { resolveQueryProposer } from "../engine/providers/query-proposer";
 import { resolveSearchGateway } from "../engine/providers/search-gateway";
@@ -433,7 +433,10 @@ export async function handleResearchJobTask(
       .where(eq(researchJobs.id, jobId));
     await transitionJobState(tx, jobId, resolvedOutcome.state, `engine: ${resolvedOutcome.terminationReason}`);
     if (job.entitlementAtStart === "DEMO") {
-      await resolveDemoReservation(tx, jobId, "RELEASED");
+      // Founder decision Q1: a completed Research that produced a durable
+      // Proof spends the lifetime slot, whatever the verdict says; a
+      // technical terminal, or a completion with no Proof, returns it.
+      await resolveDemoReservationForTerminal(tx, jobId, resolvedOutcome.state);
     }
   });
 

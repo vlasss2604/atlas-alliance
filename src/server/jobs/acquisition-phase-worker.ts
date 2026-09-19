@@ -27,7 +27,7 @@ import type { ComponentTarget, ModelUsage } from "../engine/providers/types";
 import { runS4ResearchJob } from "../engine/run-job";
 import { runMemoryPlanningStage } from "../memory/plan-job";
 import { enqueueAcquisitionPhaseInTx, initializeAcquisitionPhaseInTx } from "./queue";
-import { claimResearchJob, resolveDemoReservation, transitionJobState } from "./research-jobs";
+import { claimResearchJob, resolveDemoReservationForTerminal, transitionJobState } from "./research-jobs";
 import type { AcquisitionPhase, PhaseCapability } from "./worker-capabilities";
 import { workerServesPhase } from "./worker-capabilities";
 
@@ -411,8 +411,9 @@ export async function handleExtractingPhase(
 
 // The terminal write, shared by every phased failure and by extraction's
 // own outcome. Identical in shape to the single-process worker's terminal
-// transaction, including the DEMO reservation release — a phased job must
-// not leave a quota slot reserved forever.
+// transaction, including the DEMO reservation resolution — a phased job
+// must not leave a quota slot reserved forever, and must spend it on the
+// same rule the single-process worker uses.
 export async function finishPhasedJob(
   db: Database,
   jobId: string,
@@ -431,7 +432,10 @@ export async function finishPhasedJob(
       .where(eq(researchJobs.id, jobId));
     await transitionJobState(tx, jobId, outcome.state, note);
     if (entitlementAtStart === "DEMO") {
-      await resolveDemoReservation(tx, jobId, "RELEASED");
+      // Same rule as the single-process worker (Founder decision Q1): a
+      // phased Research that finished with a durable Proof spends the
+      // slot; a phased failure returns it.
+      await resolveDemoReservationForTerminal(tx, jobId, outcome.state);
     }
   });
 }

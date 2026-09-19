@@ -377,48 +377,45 @@ describe("B. A LIFETIME QUOTA IS NOT BEATABLE BY DOING TWO THINGS AT ONCE", () =
     expect(new Set(res.map((r) => r.researchJobId)).size).toBe(res.length);
   }, 180_000);
 
-  it("B1b (FINDING, MAJOR-class — Founder decision required). THE DEMO LIFETIME PROOF QUOTA NEVER DECREMENTS. Admission counts RESERVED + CONSUMED, but no code path anywhere passes CONSUMED: every terminal outcome, SUCCESS INCLUDED, releases the reservation. So the lifetime limit bounds only concurrency — which the one-active-job rule already bounds — and a DEMO account can run without limit", async () => {
+  it("B1b (FIXED, Founder decision Q1). the lifetime quota now decrements: a completed Research with a durable Proof CONSUMES its slot, and the allowance is exhausted exactly at the limit", async () => {
     const userId = await makeUser();
     const project = await makeProject(DOCS_HOST_A);
     const LIMIT = 2;
 
-    // Run the limit, each to a real terminal state through the worker.
     for (let i = 0; i < LIMIT; i++) {
       const { jobId } = await newJob(userId, project, "DEMO");
       const state = await runToTerminal(jobId, project);
-      expect(["SUCCEEDED", "BUDGET_LIMIT_REACHED", "FAILED"], `demo job ${i} state`).toContain(state);
-      // A SUCCEEDED DEMO run that produced a Proof still releases its slot.
+      expect(["SUCCEEDED", "BUDGET_LIMIT_REACHED"], `demo job ${i} state`).toContain(state);
+      const [proof] = await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId));
+      expect(proof, `demo job ${i} produced no Proof`).toBeDefined();
+      // WAS RELEASED before Q1 — this is the line the decision flipped.
       const [res] = await ctx.db
         .select()
         .from(demoQuotaReservations)
         .where(eq(demoQuotaReservations.researchJobId, jobId));
-      expect(res.state, `demo job ${i} reservation`).toBe("RELEASED");
+      expect(res.state, `demo job ${i} reservation`).toBe("CONSUMED");
     }
-    const [proofCount] = await ctx.db
-      .select({ n: count() })
-      .from(proofs)
-      .where(eq(proofs.ownerUserId, userId));
-    expect(Number(proofCount.n), "the account really did get Proofs").toBeGreaterThan(0);
 
-    // Nothing occupies a slot, so the next start is admitted. THIS IS THE
-    // FINDING, pinned as observed behaviour: a fix will flip this line.
     const [{ n: occupied }] = (
       await ctx.db.execute(sql`
         SELECT count(*)::int AS n FROM ${demoQuotaReservations}
         WHERE user_id = ${userId} AND state IN ('RESERVED','CONSUMED')
       `)
     ).rows as [{ n: number }];
-    expect(occupied).toBe(0);
-    const beyond = await newJob(userId, project, "DEMO");
-    expect(beyond.created).toBe(true);
-    await runToTerminal(beyond.jobId, project);
+    expect(occupied).toBe(LIMIT);
 
-    // And the reason, stated structurally rather than by inspection: no
-    // reservation of this account ever reached CONSUMED.
+    // Nothing is active, so only the quota can refuse the next start.
+    const active = await ctx.db
+      .select({ n: count() })
+      .from(researchJobs)
+      .where(and(eq(researchJobs.userId, userId), sql`state IN ('QUEUED','RUNNING','AWAITING_CLARIFICATION')`));
+    expect(Number(active[0].n)).toBe(0);
+    await expect(newJob(userId, project, "DEMO")).rejects.toBeInstanceOf(DemoQuotaExceededError);
+
+    // And CONSUMED is reachable now — the state is no longer dead.
     const all = await ctx.db.select().from(demoQuotaReservations).where(eq(demoQuotaReservations.userId, userId));
-    expect(all.length).toBeGreaterThan(LIMIT);
-    expect(all.every((r) => r.state === "RELEASED")).toBe(true);
-    expect(all.some((r) => r.state === "CONSUMED")).toBe(false);
+    expect(all.length).toBe(LIMIT);
+    expect(all.every((r) => r.state === "CONSUMED")).toBe(true);
   }, 400_000);
 
   it("B2. what the quota DOES still bind is per account and concurrent: an account with a live reservation cannot open a second one, and another account is unaffected by it", async () => {
@@ -540,8 +537,9 @@ describe("D. ENTITLEMENT DECIDES WHAT MAY START, AND NEVER REWRITES WHAT FINISHE
     const j2 = await newJob(a, project, "DEMO");
     const resA = await ctx.db.select().from(demoQuotaReservations).where(eq(demoQuotaReservations.userId, a));
     expect(new Set(resA.map((r) => r.researchJobId))).toEqual(new Set([j1.jobId, j2.jobId]));
-    // One finished, one live — the ledger distinguishes them.
-    expect(new Set(resA.map((r) => r.state))).toEqual(new Set(["RELEASED", "RESERVED"]));
+    // One finished with a Proof, one still live — the ledger distinguishes
+    // them, and the finished one has SPENT its slot (Founder decision Q1).
+    expect(new Set(resA.map((r) => r.state))).toEqual(new Set(["CONSUMED", "RESERVED"]));
     for (const r of resA) expect(r.userId).toBe(a);
 
     const [{ n: nb }] = (

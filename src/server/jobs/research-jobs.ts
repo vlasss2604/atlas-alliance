@@ -6,6 +6,7 @@ import {
   demoQuotaReservations,
   researchJobs,
   users,
+  proofs,
 } from "../db/schema";
 import type { EntitlementSnapshot } from "../../server/domain/types";
 import { enqueueResearchJobInTx, initializeAcquisitionPhaseInTx } from "./queue";
@@ -273,6 +274,15 @@ export async function claimResearchJob(
 
 // Разрешение резервации DEMO-квоты: RESERVED -> CONSUMED | RELEASED.
 // Недопустимые переходы блокирует триггер demo_quota_reservation_guard.
+//
+// EXACTLY ONCE, BY THE WHERE CLAUSE. The update matches only a reservation
+// that is still RESERVED, so the FIRST terminal handling decides the
+// outcome and every later one is a no-op: a worker replay, a duplicate
+// terminal event, a retry after a crash, or two workers racing the same
+// completion. Without this the database trigger would be doing the
+// arguing — it forbids CONSUMED -> RELEASED and raises, which would turn
+// an ordinary replay into a failed transaction — and a second RELEASED
+// could otherwise hand back a slot the research had already spent.
 export async function resolveDemoReservation(
   dbOrTx: Database | Transaction,
   researchJobId: string,
@@ -281,5 +291,53 @@ export async function resolveDemoReservation(
   await dbOrTx
     .update(demoQuotaReservations)
     .set({ state: outcome, resolvedAt: sql`now()` })
-    .where(eq(demoQuotaReservations.researchJobId, researchJobId));
+    .where(
+      and(
+        eq(demoQuotaReservations.researchJobId, researchJobId),
+        eq(demoQuotaReservations.state, "RESERVED"),
+      ),
+    );
+}
+
+// WHAT SPENDS A DEMO LIFETIME SLOT (Founder decision Q1).
+//
+//   PROJECT REALITY / RESEARCH VERDICT consumes quota.
+//   TECHNICAL FAILURE does not.
+//
+// A slot is CONSUMED when the Research completed and produced a durable
+// Proof. The VERDICT does not enter into it: INSUFFICIENT_EVIDENCE and
+// NOT_ESTABLISHED are legitimate ATLAS outcomes — ATLAS did the work and
+// returned a bounded conclusion — so a question that ends in insufficient
+// evidence is not free research.
+//
+// BUDGET_LIMIT_REACHED counts alongside SUCCEEDED because it is the same
+// kind of thing: an honest bounded stop that the engine's own terminal
+// vocabulary deliberately keeps distinct from SYSTEM_OR_PROVIDER_FAILURE,
+// and the projection store already treats both as states that carry a
+// result. FAILED, CANCELLED and every other technical terminal never
+// consume, and neither does a completion that produced no Proof at all.
+const PROOF_BEARING_TERMINAL_STATES: ReadonlySet<string> = new Set(["SUCCEEDED", "BUDGET_LIMIT_REACHED"]);
+
+export async function demoTerminalOutcome(
+  dbOrTx: Database | Transaction,
+  researchJobId: string,
+  terminalState: string,
+): Promise<"CONSUMED" | "RELEASED"> {
+  if (!PROOF_BEARING_TERMINAL_STATES.has(terminalState)) return "RELEASED";
+  const [proof] = await dbOrTx
+    .select({ id: proofs.id })
+    .from(proofs)
+    .where(eq(proofs.researchJobId, researchJobId))
+    .limit(1);
+  return proof ? "CONSUMED" : "RELEASED";
+}
+
+// The terminal resolution every completion path shares: decide by the rule
+// above, then apply it idempotently.
+export async function resolveDemoReservationForTerminal(
+  dbOrTx: Database | Transaction,
+  researchJobId: string,
+  terminalState: string,
+): Promise<void> {
+  await resolveDemoReservation(dbOrTx, researchJobId, await demoTerminalOutcome(dbOrTx, researchJobId, terminalState));
 }
