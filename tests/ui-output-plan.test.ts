@@ -377,9 +377,18 @@ describe("the selector cannot make a claim the record did not", () => {
     const b = fx("B").input;
     // Upstream NET_EFFECT absent: the delta is still a metric, and there is
     // no claim beside it — nothing is manufactured from INCREASED.
+    // The delta is moved to EXECUTION_EVIDENCE so the NET_EFFECT component
+    // can be dropped while a delta metric survives. Round 9: a measurement
+    // is admitted by the component it CLAIMS, so the move takes the row's
+    // admission with it — otherwise this would be the very shape round9 F3
+    // forbids (a component quoting a number it never admitted), and the
+    // metric would correctly vanish for a reason this test is not about.
+    const movedDeltaIds = b.quantities.filter((x) => x.factKind === "TOTAL_SUPPLY_DELTA").map((x) => x.evidenceId);
     const without = chooseAnalyticalBlocks({
       ...b,
-      components: b.components.filter((c) => c.component !== "NET_EFFECT"),
+      components: b.components
+        .filter((c) => c.component !== "NET_EFFECT")
+        .map((c) => (c.component === "EXECUTION_EVIDENCE" ? { ...c, supportingEvidenceIds: [...c.supportingEvidenceIds, ...movedDeltaIds] } : c)),
       quantities: b.quantities.filter((x) => x.component !== "NET_EFFECT" || x.factKind === "TOTAL_SUPPLY_DELTA").map((x) => (x.factKind === "TOTAL_SUPPLY_DELTA" ? { ...x, component: "EXECUTION_EVIDENCE", step: 4 } : x)),
     });
     const m = without.orderedBlocks.find((x) => x.type === "METRIC") as Extract<PlannedBlock, { type: "METRIC" }>;

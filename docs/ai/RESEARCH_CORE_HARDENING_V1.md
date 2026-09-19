@@ -33,6 +33,7 @@ touches a provider.
 | `tests/founder-semantics-round7-5-v1.test.ts` | Round 7.5 — the Founder decisions M3 and C4 over the pure chain. M3 (six cases + the composition case): recipient identity alone never fully establishes the holder outcome; a stated holding → entitlement/receipt relation does; non-holder recipients keep their full `ACTOR_MISMATCH` refutation; inadmissible evidence and an entitlement sentence filed under another component buy nothing; order and duplication are inert; a state-bearing conflict is still the only contradiction; and the bridge must be carried by ONE statement, not assembled from two. C4 (six cases): an established destination of unrecognised kind cannot satisfy the relationship atom, a recognised kind is untouched, the unresolved role poisons no destination-independent question, an unknown destination never strengthens anything, order and duplication are inert, and two established destinations remain two flows under the existing existential rule. Not an adversarial round; does not count toward the two clean rounds. |
 | `tests/adversarial-core-round8-role-attribution-v1.test.ts` | Round 8 — ROLE MANUFACTURE AND ATTRIBUTION LAUNDERING over the pure chain: for each distinction ATLAS makes, can the stronger side be built from parts that individually do not carry it? A position is not a role (a bound balance establishes DESTINATION and never its kind, never RECIPIENT; chain UP is never weaker than chain DOWN); B two statements are not one relation (entitlement never crosses actors, a destination kind never crosses components); C approved and documented are not live; D more uncertainty is never a stronger conclusion (inadmissible rows, foreign rows, a failed acquisition boundary); E order and duplication are not evidence (24 permutations per world, mirror sources); F the existential rule is not cherry-picking (a role-less flow never satisfies a role-dependent atom; a compound claim needs one common flow); G supply is not attribution; H a 486-world × 8-intent sweep over the role dimensions with the role laws asserted per world, and the dimensions proven monotone; I the gates are question-local, and I3 names their inherited limit. |
 | `tests/adversarial-core-round8-role-memory-db-v1.test.ts` | Round 8 — the persisted half: a role is not inheritable through Research Memory. Research A establishes a recipient that only NAMES holders and a destination that is only an ADDRESS, is bounded, is VERIFIED by the canonical act and its observations promoted to ACTIVE; A's verdict, confidence and S5 status are then deliberately corrupted; Research B adopts those same observations and is bounded for the same reason, citing only its own rows. The mirror case proves adoption does not LOSE a role either. |
+| `tests/adversarial-core-round9-output-boundary-v1.test.ts` | Round 9 — THE OUTPUT BOUNDARY, the last hop from the persisted record to the sentence a reader actually reads. A the projection label guard (the status-word rule holds; the surface it does not cover is measured and pinned rather than assumed away; a resolved finding carries a label and canonical keys and no status); B reference closure (invented / drifted / requirement-shaped refs rejected, a vanished row's finding dropped rather than re-pointed, all-dropped returns null, cross-job leakage, self-support and duplicates, both count bounds, and the model's input carries no fragments, urls or evidence ids); C the page never outruns the record (WHAT STOOD UP holds only checks that stood, and a partly-established one stands in only when nothing was established; counts index the checks and never score them, a blocked check is NOT CHECKED; a contradiction is never manufactured from a gap; nothing is lost or double-counted); D a weaker record never makes a stronger page (a six-rung degradation ladder, permutation invariance, no reassuring summary with nothing standing); E the ladder's RealityState maps into the reader's four ProofState words by one total function and an unrecognised status never becomes positive; F **the defect this round found** — an S5-EXCLUDED reading rendered as an ESTABLISHED measurement. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
 BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE ≠
@@ -269,6 +270,31 @@ NO EVIDENCE ≠ NOT EXTRACTED.
   refused (`ACTIVE_IDENTITY_EXISTS`, `DUPLICATE_ACTIVE_ROUTE`,
   `ROUTE_NOT_ACTIVE`) instead of producing a second ACTIVE row.
 
+### Round 9 — a relationship label is not an admission (CRITICAL-class, fixed)
+
+`relationship` is what the EXTRACTOR said a row was for. S5 then decides
+whether the row is admissible and records what it refused in the
+component's `excludedEvidence` — exclusion never rewrites the row, so a
+reading refused for an unconfirmed entity binding, a withdrawn route,
+supersession or a foreign job still reads `relationship: "SUPPORTS"`.
+
+`output-plan.ts` admitted on that label alone, and `PlanComponent` carries
+no excluded set, so the presentation layer could not see a refusal. An
+EXCLUDED on-chain TOKEN_SUPPLY reading was therefore rendered as a METRIC
+tile with `state: "ESTABLISHED"` — byte-identical to the admitted twin —
+and excluded rows could appear in the evidence snapshot. The detail route
+already enforces the matching invariant for a finding's evidence lists
+("something a component excluded can never be presented as that
+component's support"); the numbers were chosen without it.
+
+Fixed by POSITIVE, COMPONENT-SCOPED admission (`admittedFor`): a row must
+be in that component result's supporting or contradicting set, both of
+which are already in the payload and are kept disjoint from the excluded
+set by S5. No new field, no API change. Component-scoped on purpose — a
+reading may support CURRENT_STATE while NET_EFFECT excludes it, and a
+NET_EFFECT tile quoting it would still attribute a number to a component
+that refused it. Pinned in `adversarial-core-round9-output-boundary-v1` F.
+
 ## Documented boundaries — Founder decision pending
 
 Pinned by `adversarial-core-boundaries-v1.test.ts` section H. None is a
@@ -280,6 +306,9 @@ false SUPPORTED; each is a place where a different reasonable rule exists.
 | H2 | LIVE beside an undated PROPOSED record of the same component is a state CONFLICT → CONTRADICTED; a required-component conflict → NOT_SUPPORTED (confidence capped LIMITED). | Treat PROPOSED as a lifecycle rung below LIVE (progression), not an incompatibility. |
 | H3 | S6's lexical classifiers have no negation grammar ("not burned" → BURN). Accepted S6 audit limitation LOW-3; cannot create structure. | A negation stop-list on the closed dictionaries. |
 | I3 (`round8`) | **MINOR, inherited from H3.** The M3 holder-entitlement dictionary has no negation and no tense grammar either: "token holders are not entitled to any share", "may in future be entitled" and "were previously entitled" all satisfy the bridge. NOT a regression — every one of those worlds answered SUPPORTED before the gate existed — so the gate raises the bar in the ordinary case and is defeated exactly where every other closed classifier is. Pinned in `adversarial-core-round8-role-attribution-v1` I3. | As H3: a negation stop-list on the closed dictionaries. |
+| I4 (`round9`) | **MINOR, open.** The holder-entitlement dictionary has no TENSE grammar: "may in future be entitled" and "were previously entitled" satisfy the positive bridge. ATLAS bounds tense through `mechanism_state` and the lifecycle machinery instead (a PROPOSED recipient row caps at `PROPOSED_STATE_ONLY` and cannot reach SUPPORTED), so reading prose tense in a classifier would be a NEW semantic rule rather than an implication of the approved one. Pinned in `adversarial-core-round8-role-attribution-v1` I4. | Add a tense stop-list, or leave tense to `mechanism_state` as today. |
+| A2 (`round9`) | **MINOR, measured.** The projection label guard is a closed status-word list, so a model-authored `userFacingLabel` may still assert a magnitude, a certainty or a yes/no answer ("50% of all fees reach the token", "holders definitely receive value"). Documented as deliberate where the guard was written: a label is a POINTER PLUS A NAME, `resolveProjectionFindings` returns it beside canonical component keys and NO status, and the reader's status, reason, coverage and evidence all still come from the canonical row. Measured and pinned rather than assumed away. | Constrain labels further (a noun-phrase or question-form rule), or keep the pointer-plus-name contract. |
+| A3 (`round9`) | **MINOR.** The label guard is enforced on the WRITE path only: `resolveProjectionFindings` re-checks references, not copy, so a stored finding whose label is a status word still resolves. Reachable only by writing the projection row directly. | Re-apply the label rule on read. |
 | H4 | Recency wins over officiality in supersession (D-093 forbids an authority ranking). | Refuse supersession of a CONFIRMED row by a CLAIMED one. |
 | H5 | **DECIDED (Round 6.5, Founder decision 2).** ALL_EVIDENCE_EXCLUDED and the other exclusion-shaped absences cap at LOW, like bare absence; a single-atom SUPPORTED claim with every unrelated component excluded sits at LOW, exactly where it sits with them empty. The second half of the original note — gaps on the claim's own flow that block no atom are not a context gap — is unchanged. | — |
 | H6 | An established DEPRECATED current state with no execution record is lifecycle NOT_ESTABLISHED → "is it current?" is INSUFFICIENT_EVIDENCE, not answered "no". | Let an established non-live CURRENT_STATE refute CURRENT without an execution record. |

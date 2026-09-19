@@ -562,6 +562,10 @@ interface Context {
   componentByName: Map<string, PlanComponent>;
   evidenceById: Map<string, PlanEvidence>;
   relevant: Set<string>;
+  // ROUND 9 — POSITIVE ADMISSION, PER COMPONENT. The evidence ids each
+  // component result actually rests on: its supporting and contradicting
+  // rows, and nothing else. See `admittedFor`.
+  admittedByComponent: Map<string, Set<string>>;
 }
 
 function buildContext(input: AnalyticalOutputInputV1): Context {
@@ -570,6 +574,9 @@ function buildContext(input: AnalyticalOutputInputV1): Context {
     componentByName: new Map(input.components.map((c) => [c.component, c])),
     evidenceById: new Map(input.evidence.map((e) => [e.id, e])),
     relevant: new Set(input.question.relevantComponents),
+    admittedByComponent: new Map(
+      input.components.map((c) => [c.component, new Set([...c.supportingEvidenceIds, ...c.contradictingEvidenceIds])]),
+    ),
   };
 }
 
@@ -589,12 +596,42 @@ function isAdmitted(e: PlanEvidence | undefined): e is PlanEvidence {
   return e !== undefined && (e.relationship === "SUPPORTS" || e.relationship === "CONTRADICTS");
 }
 
+// ROUND 9 — A RELATIONSHIP LABEL IS NOT AN ADMISSION.
+//
+// `relationship` is what the EXTRACTOR said the row was for; S5 then
+// decides whether the row is admissible at all, and records the ones it
+// refused in the component's `excludedEvidence`. Exclusion does not
+// rewrite the row — a row excluded for an unconfirmed entity binding, a
+// withdrawn route, a superseded date or a foreign job still reads
+// `relationship: "SUPPORTS"`. So a check on the label alone admits exactly
+// the rows S5 threw out, which is how an EXCLUDED on-chain supply reading
+// could be rendered as an ESTABLISHED measurement tile, and how excluded
+// rows could appear in the evidence snapshot.
+//
+// The admission that counts is POSITIVE and belongs to a COMPONENT: the
+// row must be in that component result's supporting or contradicting set.
+// Those sets are already in the payload and S5 keeps them disjoint from
+// the excluded set, so this needs no new field and no new API — it is the
+// same invariant the detail route already enforces for a finding's
+// evidence lists ("something a component excluded can never be presented
+// as that component's support"), applied where the numbers are chosen.
+//
+// Component-scoped rather than global on purpose: a reading may legitimately
+// support CURRENT_STATE while NET_EFFECT excludes it, and a NET_EFFECT tile
+// quoting it would still be attributing a number to a component that
+// refused it.
+function admittedFor(ctx: Context, component: string | null, evidenceId: string): boolean {
+  if (component === null) return false;
+  return ctx.admittedByComponent.get(component)?.has(evidenceId) === true;
+}
+
 // THE STANDING OF A MEASUREMENT: how the row carrying it was admitted. A
 // direct read is established; an indirect one is partly so; a row that was
 // not admitted, or does not exist, carries no measurement the plan may show.
-function measurementState(ctx: Context, evidenceId: string): ProofState | null {
+function measurementState(ctx: Context, component: string, evidenceId: string): ProofState | null {
   const e = ctx.evidenceById.get(evidenceId);
   if (!isAdmitted(e)) return null;
+  if (!admittedFor(ctx, component, evidenceId)) return null;
   return e.directness === "DIRECT" ? "ESTABLISHED" : "PARTLY_ESTABLISHED";
 }
 
@@ -651,7 +688,7 @@ function metricBlock(ctx: Context): PlannedBlock[] | BlockRejection {
     if (q.amountRaw === null || !CANONICAL_INTEGER.test(q.amountRaw)) continue;
     if (!Number.isInteger(q.decimals) || q.decimals < 0 || q.mint.length === 0) continue;
     if (!ctx.componentByName.has(q.component)) continue;
-    const admitted = measurementState(ctx, q.evidenceId);
+    const admitted = measurementState(ctx, q.component, q.evidenceId);
     if (admitted === null) continue;
     const coverage = q.coverage ?? null;
     if (coverage !== null && (coverage.expected <= 0 || coverage.observed > coverage.expected)) continue;
@@ -791,7 +828,7 @@ function seriesGroups(ctx: Context): { groups: SeriesGroup[]; ctx: Context } {
     if (!Number.isInteger(q.decimals) || q.decimals < 0 || q.mint.length === 0) continue;
     if (q.amountRaw !== null && !CANONICAL_INTEGER.test(q.amountRaw)) continue;
     if (!ctx.componentByName.has(q.component)) continue;
-    const admitted = measurementState(ctx, q.evidenceId);
+    const admitted = measurementState(ctx, q.component, q.evidenceId);
     if (admitted === null) continue;
 
     const id = `${q.mint}:${q.decimals}`;
@@ -1083,7 +1120,7 @@ function entityBlock(ctx: Context): PlannedBlock[] | BlockRejection {
 function evidenceSnapshotBlock(ctx: Context): PlannedBlock[] | BlockRejection {
   const assessed = new Set(ctx.input.components.map((c) => c.component));
   const rows = ctx.input.evidence.filter(
-    (e) => isAdmitted(e) && e.fragment.trim().length > 0 && e.component !== null && assessed.has(e.component),
+    (e) => isAdmitted(e) && admittedFor(ctx, e.component, e.id) && e.fragment.trim().length > 0 && e.component !== null && assessed.has(e.component),
   );
   if (rows.length === 0) return "NO_ADMITTED_EVIDENCE";
   const score = (e: PlanEvidence) =>
