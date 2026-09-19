@@ -2,55 +2,56 @@
 
 > Overwrite this file each round. Never append.
 
-## FOUNDER DECISION Q1, AND ROUND 11 (done this round)
+## ROUND 12 — TECHNICAL DEGRADATION AND TEMPORAL MONOTONICITY (done this round)
 
 Offline, $0 spend (no Anthropic, Brave, RPC or live Research; migrations
 0052–0054 still pending and NOT applied; Lido Memory untouched).
 
-### Q1 — what spends a DEMO lifetime slot
+One question, asked compositionally: **can ATLAS ever produce a stronger
+truth when the evidence environment gets worse?**
 
-  PROJECT REALITY / RESEARCH VERDICT consumes quota.
-  TECHNICAL FAILURE does not.
+### What was new
 
-`demoTerminalOutcome` returns CONSUMED when the terminal state carries a
-result (SUCCEEDED or BUDGET_LIMIT_REACHED) AND a durable Proof exists;
-everything else releases. The verdict is not consulted —
-INSUFFICIENT_EVIDENCE and NOT_SUPPORTED are legitimate outcomes and the
-work was done. `resolveDemoReservation` now matches only a reservation
-still in RESERVED, so the first terminal handling decides and every
-replay, retry, duplicate event and concurrent completion is a no-op
-instead of the DB trigger raising on CONSUMED -> RELEASED.
+Round 6 removed one thing at a time from a control and took the chain
+wholesale up or down. That leaves the interesting part untested: what
+happens when degradations COMBINE. A rule can be monotone against every
+single removal and still be non-monotone against a pair.
 
-Boundary pinned: a DOCUMENT-LOCAL provider failure is not a technical
-failure of the Research — the run still finalises with a bounded Proof, so
-it DOES spend the slot.
+So Round 12 builds a **lattice**. Six independent technical degradations —
+supply read off, burn read off, current state aged out, destination route
+withdrawn, extraction not completed, a documentary component unreachable —
+give 64 worlds ordered by subset inclusion, and every covering pair is
+asserted for all eight intents:
 
-### Round 11 — MEMORY UNDER CORRUPTED AND STALE PERSISTED STATE
+- verdict never rises,
+- at an equal verdict the band never rises,
+- no world is NOT_SUPPORTED unless the control already was
+  (LOSS OF EVIDENCE IS NOT EVIDENCE OF ABSENCE),
+- provenance and citations hold at every point,
+- and the lattice is proven non-vacuous: each axis bites, and the fully
+  degraded world really is weaker.
 
-Round 6 attacked the gate fields adoption re-checks; Round 8 proved a role
-is not inheritable; Round 11 attacks the CONTENT of the stored row,
-corrupted after verification and promotion, against two controls each
-time (clean memory, and no memory).
+Then partial chain visibility, temporal pathologies (future-dated,
+undated, input order vs temporal order, stale support meeting fresh
+contradiction, historical execution vs current state), and confidence
+neutrality. The persisted half degrades the real pipeline with providers
+that fail as providers do.
 
-**Result: NOT CLEAN. One CRITICAL, found and fixed.**
+### Result
 
-`memory-evidence-adoption.ts` took the adopted Evidence row's `summary`
-and `mechanismState` from the mutable memory row. Both are engine inputs —
-S6 classifies over `fragment + " " + summary`. One UPDATE of
-`research_memory.statement`, with no new document and no acquisition,
-turned a bounded PARTIALLY_SUPPORTED into SUPPORTED. Fixed by taking both
-from the ORIGIN observation, as every other axis on that insert already
-did. The regression fails without the fix.
+**CLEAN #1.** Zero CRITICAL, zero MAJOR, zero MINOR.
 
-Everything else held: mechanism-state injection, freshness laundering,
-confidence inflation, provenance fragment rewritten, provenance url
-repointed at an unrouted host, and a corrupted row in one project never
-reaching another.
+Two harness facts found by probing and recorded so a later round does not
+repeat them: a project whose pages were already acquired REUSES those
+documents, so a degraded run must be the first research of its own fresh
+project; and with a confirmed OFFICIAL_DOCS route the executor resolves
+candidate urls from the ROUTE, never consulting the search gateway, so a
+"search finds nothing" fixture is inert.
 
-**Consecutive CLEAN count: 0.**
+**Consecutive CLEAN count: 1.**
 
 ### Next
 
-- **Round 12** — a new independent adversarial round. Two consecutive
-  clean rounds are still required.
+- **Round 13** — a further independent adversarial round is required for
+  CLEAN #2. Do not start it without instruction.
 - Not yet: speed optimization, migrations 0052–0054, any live Research.
