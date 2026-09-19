@@ -12,6 +12,8 @@ import {
 import { chooseAnalyticalBlocks, type AnalyticalOutputInputV1 } from "../src/client/output-plan";
 import { OUTPUT_PLAN_FIXTURES, GOLDEN_AUDIT_FIXTURE, outputPlanFixture } from "../src/client/output-plan-fixtures";
 import { deriveResultLadder, type LadderComponentInput } from "../src/client/research-model";
+import { deriveQuestionFindings } from "../src/client/research-model";
+import { isLabelSafe, labelSafety, neutralLabelFor } from "../src/shared/projection-label-safety";
 import {
   allowedRefKeys,
   buildProjectionInput,
@@ -95,45 +97,100 @@ describe("A. THE PROJECTION LABEL GUARD — what claims actually survive it", ()
     }
   });
 
-  it("A2 (MEASURED BOUNDARY). the guard is a closed word list, so a label may still assert a magnitude, a certainty or a yes/no answer the record never carried — this test MEASURES that surface rather than assuming it away", () => {
-    // Each of these is a claim about reality, and none contains a status
-    // word. They are recorded here so the surface is a named, sized thing.
-    const claims = [
-      "50% of all fees reach the token",
-      "holders definitely receive value",
-      "yes — revenue reaches the token",
-      "the buyback is real and ongoing",
-      "fees are never sent to holders",
-      "every epoch burns 1,000,000 tokens",
+  it("A2 (FIXED, Founder decision). PRESENTATION MUST NOT CREATE NEW TRUTH: a label may not add certainty, magnitude, direction or economic meaning the record does not carry — each refused on its own named axis", () => {
+    const byAxis: [string, string][] = [
+      ["MAGNITUDE", "50% of all fees reach the token"],
+      ["MAGNITUDE", "every epoch burns 1,000,000 tokens"],
+      ["MAGNITUDE", "significant revenue"],
+      ["MAGNITUDE", "large treasury balance"],
+      ["CERTAINTY", "holders definitely receive value"],
+      ["CERTAINTY", "yes, revenue reaches the token"],
+      ["CERTAINTY", "the buyback is real and ongoing"],
+      ["CERTAINTY", "fees are never sent to holders"],
+      ["DIRECTION", "supply decreased over the interval"],
+      ["DIRECTION", "revenue is growing"],
+      ["STATUS", "revenue is proven"],
     ];
-    const accepted: string[] = [];
-    for (const claim of claims) {
+    for (const [axis, claim] of byAxis) {
       const r = validateProjection(withLabels([claim, "a second finding"]), input);
-      if (r.ok) accepted.push(claim);
-    }
-    // The measured fact, pinned so a future change to the guard is visible.
-    expect(accepted).toEqual(claims);
-
-    // WHY THIS IS A BOUNDARY AND NOT A FALSE VERDICT: the label is a
-    // POINTER PLUS A NAME. Nothing downstream reads it as a status —
-    // resolveProjectionFindings returns the label beside the canonical
-    // component keys and NO status, so the reader's status, reason,
-    // coverage and evidence all still come from the canonical row.
-    const resolved = resolveProjectionFindings(withLabels(claims.slice(0, 2)).findings, COMPONENTS.map((c, i) => ({ patternStep: i + 1, component: c })));
-    expect(resolved).not.toBeNull();
-    for (const f of resolved!) {
-      expect(Object.keys(f).sort()).toEqual(["component", "label", "patternStep", "supportingComponents"]);
-      expect(JSON.stringify(f)).not.toMatch(/SUPPORTED|PARTIAL|CONTRADICTED|status/i);
+      expect(r.ok, `${axis}: ${claim}`).toBe(false);
+      if (!r.ok) expect(r.rejection, claim).toBe("LABEL_UNUSABLE");
+      const direct = labelSafety(null, claim);
+      expect(direct.safe, claim).toBe(false);
+      if (!direct.safe) expect(direct.rejection, claim).toBe(axis);
     }
   });
 
-  it("A3. the label guard is not re-applied on the way out: a stored finding whose label IS a status word still resolves. The resolver re-checks REFERENCES, not copy", () => {
-    const stored = [{ userFacingLabel: "revenue is proven", primaryRef: refOf(0), supportingRefs: [] }];
-    const resolved = resolveProjectionFindings(stored, COMPONENTS.map((c, i) => ({ patternStep: i + 1, component: c })));
-    // Measured, and pinned: the write path is the only place the copy rule
-    // is enforced. Nothing here invents a status either way.
-    expect(resolved).not.toBeNull();
-    expect(resolved![0].label).toBe("revenue is proven");
+  it("A2b. the economic envelope is per component: a label outside a component's canonical meaning is refused for THAT component and is ordinary copy elsewhere", () => {
+    expect(labelSafety("NET_EFFECT", "the effect on token value").safe).toBe(false);
+    expect(labelSafety("NET_EFFECT", "the effect on token supply").safe).toBe(true);
+    expect(labelSafety("SOURCE_OF_VALUE", "where the fees end up").safe).toBe(false);
+    expect(labelSafety("SOURCE_OF_VALUE", "where the fees come from").safe).toBe(true);
+    expect(labelSafety("MECHANISM_SPEC", "the buyback is live").safe).toBe(false);
+  });
+
+  it("A2c. a NEUTRAL record still gets ordinary naming copy: names, questions and identifiers with digits inside a word are not refused", () => {
+    for (const label of [
+      "where the revenue comes from",
+      "what the fees pay for",
+      "who receives the distribution",
+      "ERC-20 supply",
+      "v2 revenue split",
+      "the route from fees to the token",
+    ]) {
+      expect(labelSafety(null, label).safe, label).toBe(true);
+    }
+    const ok = validateProjection(withLabels(["where the revenue comes from", "what the fees pay for"]), input);
+    expect(ok.ok).toBe(true);
+  });
+
+  it("A3 (FIXED, Founder decision). THE RULE RUNS ON READ TOO: a stored label that would strengthen the page is NEUTRALISED to the component's own canonical name, and the safe twin is passed through untouched", () => {
+    const live = COMPONENTS.map((c, i) => ({ patternStep: i + 1, component: c }));
+    const unsafe = [
+      { userFacingLabel: "revenue is proven", primaryRef: refOf(0), supportingRefs: [] },
+      { userFacingLabel: "50% of fees reach the token", primaryRef: refOf(1), supportingRefs: [] },
+      { userFacingLabel: "holders definitely receive value", primaryRef: refOf(2), supportingRefs: [] },
+    ];
+    const resolved = resolveProjectionFindings(unsafe, live)!;
+    expect(resolved.length).toBe(3);
+    for (const f of resolved) {
+      expect(labelSafety(f.component, f.label).safe, f.label).toBe(true);
+      expect(f.label).toBe(neutralLabelFor(f.component));
+    }
+    // The pointer survives the neutralisation — only the copy is replaced.
+    expect(resolved.map((f) => f.component)).toEqual([COMPONENTS[0], COMPONENTS[1], COMPONENTS[2]]);
+
+    // A safe stored label is returned exactly as stored.
+    const safe = [{ userFacingLabel: "where the revenue comes from", primaryRef: refOf(0), supportingRefs: [] }];
+    expect(resolveProjectionFindings(safe, live)![0].label).toBe("where the revenue comes from");
+  });
+
+  it("A3b. the renderer applies the identical rule, so an unsafe label cannot reach a row even if it reached the payload", () => {
+    const components = COMPONENTS.map((c) => ({ component: c, status: "SUPPORTED", reasonCodes: [], supportingEvidenceIds: ["e"], contradictingEvidenceIds: [] }));
+    const rows = deriveQuestionFindings(
+      [
+        { label: "50% of fees reach the token", patternStep: 1, component: "SOURCE_OF_VALUE", supportingComponents: [] },
+        { label: "where the revenue comes from", patternStep: 1, component: "FLOW_PATH", supportingComponents: [] },
+      ],
+      components,
+    );
+    for (const r of rows) expect(labelSafety(null, r.label).safe, r.label).toBe(true);
+    expect(rows.some((r) => r.label === "50% of fees reach the token")).toBe(false);
+    expect(rows.some((r) => r.label === "where the revenue comes from")).toBe(true);
+  });
+
+  it("A3c. order, duplication and permutation do not change which labels are safe", () => {
+    const live = COMPONENTS.map((c, i) => ({ patternStep: i + 1, component: c }));
+    const stored = [
+      { userFacingLabel: "50% of fees reach the token", primaryRef: refOf(0), supportingRefs: [] },
+      { userFacingLabel: "where the revenue comes from", primaryRef: refOf(1), supportingRefs: [] },
+    ];
+    const a = resolveProjectionFindings(stored, live)!.map((f) => f.label);
+    const b = resolveProjectionFindings([...stored].reverse(), live)!.map((f) => f.label).reverse();
+    expect(a).toEqual(b);
+    const dup = resolveProjectionFindings([...stored, ...stored], live)!;
+    expect(dup.length).toBe(2);
+    for (const f of dup) expect(labelSafety(f.component, f.label).safe).toBe(true);
   });
 });
 
@@ -212,7 +269,7 @@ describe("B. REFERENCE CLOSURE — a label may never be rendered against another
   });
 
   it("B6. the count bounds fail closed in both directions — an overflowing answer is never silently trimmed into looking deliberate", () => {
-    const many = { findings: COMPONENTS.slice(0, MAX_FINDINGS + 1).map((c, i) => ({ userFacingLabel: `f${i}`, primaryRef: { kind: "COMPONENT" as const, step: i + 1, component: c }, supportingRefs: [] })) };
+    const many = { findings: COMPONENTS.slice(0, MAX_FINDINGS + 1).map((c, i) => ({ userFacingLabel: `finding ${"x".repeat(i + 1)}`, primaryRef: { kind: "COMPONENT" as const, step: i + 1, component: c }, supportingRefs: [] })) };
     const rMany = validateProjection(many, input);
     expect(rMany.ok).toBe(false);
     if (!rMany.ok) expect(rMany.rejection).toBe("TOO_MANY_FINDINGS");

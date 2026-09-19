@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { isLabelSafe, neutralLabelFor } from "../../shared/projection-label-safety";
+
 // QUESTION-DRIVEN PROOF PROJECTION — the pure layer.
 //
 // THE ONE IDEA THIS FILE ENFORCES.
@@ -171,11 +173,9 @@ export function allowedRefKeys(input: ProjectionModelInput): Set<string> {
   return keys;
 }
 
-// A label that is really a status word is a label trying to be a claim.
-// The status beside it is canonical and might say the opposite, and a
-// reader would have no way to tell which one to believe.
-const STATUS_WORDS =
-  /\b(established|unestablished|supported|unsupported|not supported|contradicted|verified|unverified|proven|disproven|confirmed|insufficient)\b/i;
+// The label rule itself lives in `shared/projection-label-safety`, so the
+// WRITE path here and the READ paths (below, and the client renderer) are
+// the same rule rather than two that can drift apart (Founder decision A3).
 
 export function validateProjection(
   raw: unknown,
@@ -192,8 +192,9 @@ export function validateProjection(
     const label = finding.userFacingLabel.trim();
     // A label must be presentation, not a verdict, and not empty once the
     // model's whitespace is removed.
-    if (label.length === 0) return { ok: false, rejection: "LABEL_UNUSABLE" };
-    if (STATUS_WORDS.test(label)) return { ok: false, rejection: "LABEL_UNUSABLE" };
+    // A label must be presentation, not a verdict, not a magnitude, not a
+    // certainty, not a direction, and not outside its component's meaning.
+    if (!isLabelSafe(finding.primaryRef.component, label)) return { ok: false, rejection: "LABEL_UNUSABLE" };
 
     const primaryKey = refKey(finding.primaryRef);
     if (!allowed.has(primaryKey)) return { ok: false, rejection: "UNKNOWN_REF" };
@@ -271,8 +272,16 @@ export function resolveProjectionFindings(
     const key = `${primaryRef.step}:${primaryRef.component}`;
     if (!live.has(key) || seen.has(key)) continue;
     seen.add(key);
+    // STORAGE IS NOT TRUSTED (Founder decision A3). The row was checked when
+    // it was written, but a legacy row predates the rule and a corrupted
+    // row is part of the adversarial model. An unsafe label is NEUTRALISED
+    // here — the pointer is still good, only its copy is not — so the
+    // response itself can never carry a claim the record does not hold.
+    const label = isLabelSafe(primaryRef.component, userFacingLabel)
+      ? userFacingLabel
+      : neutralLabelFor(primaryRef.component);
     resolved.push({
-      label: userFacingLabel,
+      label,
       patternStep: primaryRef.step,
       component: primaryRef.component,
       supportingComponents: supportingRefs

@@ -479,6 +479,77 @@ const HOLDER_ENTITLEMENT_NEGATORS = new Set([
   "nothing",
 ]);
 const NEGATOR_WINDOW = 6;
+
+// FOUNDER DECISION I4 — UNCERTAIN, PROPOSED OR CONDITIONAL IS NOT POSITIVE.
+//
+// "Holders MAY be entitled", "PROPOSED entitlement", "WOULD be entitled IF
+// the vote passes", "EXPECTED to become entitled" — each of these is the
+// same sentence as the bridge with its actuality removed. The approved M3
+// rule asks for POSITIVE entitlement or receipt, and language that
+// explicitly leaves the entitlement possible, planned or conditional does
+// not supply it.
+//
+// Same bounded philosophy as the negators above: a small closed list of
+// explicit non-actuality markers, read only inside the matched phrase's own
+// clause. NOT a tense parser and not a grammar — this cannot and does not
+// try to decide what tense a sentence is in.
+//
+// "WILL" IS DELIBERATELY ABSENT, and so is "can". "Holders will be entitled
+// to a pro rata share" describes a scheduled mechanism, not an uncertain
+// one; whether that mechanism is current or executing is what
+// mechanism_state and the lifecycle machinery already decide, and this
+// classifier must not quietly take that decision over. Only language that
+// explicitly marks the entitlement as uncertain, proposed, conditional or
+// merely possible is refused.
+const HOLDER_ENTITLEMENT_NON_ACTUALITY = new Set([
+  // possibility
+  "may",
+  "might",
+  "could",
+  "possible",
+  "possibly",
+  "potential",
+  "potentially",
+  "prospective",
+  // conditionality
+  "would",
+  "should",
+  "contingent",
+  "subject",
+  "conditional",
+  // intention, not fact
+  "proposed",
+  "proposal",
+  "plan",
+  "plans",
+  "planned",
+  "intend",
+  "intends",
+  "intended",
+  "expect",
+  "expects",
+  "expected",
+  "anticipate",
+  "anticipates",
+  "anticipated",
+  // not yet
+  "pending",
+  "tentative",
+  "draft",
+  "eventually",
+]);
+// Non-actuality is read on BOTH sides of the matched phrase, within the same
+// bounded window: a negator precedes what it denies ("not entitled"), but a
+// condition may follow what it qualifies ("entitled ... subject to a vote").
+// Wider than the negator window: a negator sits immediately on what it
+// denies ("not entitled"), while an intention or condition often opens the
+// clause ("the protocol PLANS to entitle holders to a pro rata share").
+// Deliberately conservative — an unresolved bridge costs PARTIAL, and a
+// clause that does contain explicit proposal language is refused even when
+// a reader could tell the proposal had already passed. ATLAS represents
+// governance approval structurally (GOVERNANCE_BASIS, mechanism_state
+// APPROVED), so nothing real rests on reading it out of prose.
+const NON_ACTUALITY_WINDOW = 10;
 // Sentence and clause terminators. A comma is not one — see above.
 const CLAUSE_TERMINATORS = /[.;:!?\n\r]+/;
 
@@ -502,6 +573,16 @@ function negatedAt(tokens: string[], start: number): boolean {
   return false;
 }
 
+function nonActualAt(tokens: string[], start: number, length: number): boolean {
+  const from = Math.max(0, start - NON_ACTUALITY_WINDOW);
+  const to = Math.min(tokens.length, start + length + NON_ACTUALITY_WINDOW);
+  for (let k = from; k < to; k++) {
+    if (k >= start && k < start + length) continue; // the phrase itself
+    if (HOLDER_ENTITLEMENT_NON_ACTUALITY.has(tokens[k])) return true;
+  }
+  return false;
+}
+
 export function classifyHolderEntitlement(text: string): boolean {
   for (const clause of text.split(CLAUSE_TERMINATORS)) {
     const tokens = tokenizeForClassifier(clause);
@@ -509,11 +590,24 @@ export function classifyHolderEntitlement(text: string): boolean {
     // The clause must be about holders on its own — the bridge is a claim
     // about holders, so the actor and the entitlement are one statement.
     if (classifyRecipientKind(clause) !== "PASSIVE_HOLDER") continue;
+    // A CLAUSE IS JUDGED AS ONE ASSERTION. Several dictionary phrases can
+    // match inside one clause — "may in future be ENTITLED TO a PRO RATA
+    // share" matches twice — and the marker that defeats one of them sits
+    // outside the other's window. Taking the first clean match would let
+    // the clause through on its own second half. So the clause establishes
+    // the bridge only when it has a clean match AND no defeated one:
+    // whatever made one occurrence uncertain or denied made the clause
+    // uncertain or denied.
+    let clean = 0;
+    let defeated = 0;
     for (const phrase of HOLDER_ENTITLEMENT_PHRASES) {
+      const length = tokenizeForClassifier(phrase).length;
       for (const start of phraseOccurrences(tokens, phrase)) {
-        if (!negatedAt(tokens, start)) return true;
+        if (negatedAt(tokens, start) || nonActualAt(tokens, start, length)) defeated += 1;
+        else clean += 1;
       }
     }
+    if (clean > 0 && defeated === 0) return true;
   }
   return false;
 }

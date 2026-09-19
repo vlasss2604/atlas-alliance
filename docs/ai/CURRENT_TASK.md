@@ -2,72 +2,69 @@
 
 > Overwrite this file each round. Never append.
 
-## FOUNDER REVIEW OF ROUND 8, THE I3 FIX, AND ROUND 9 (done this round)
+## THE THREE APPROVED FIXES, AND ROUND 10 (done this round)
 
 Offline, $0 spend (no Anthropic, Brave, RPC or live Research; migrations
 0052–0054 still pending and NOT applied; Lido Memory untouched).
 
-### Founder review of Round 8
+### I4 — uncertain, proposed or conditional is not positive
 
-**Round 8 is NOT CLEAN.** It discovered a semantic defect in its own
-baseline — holder entitlement could be manufactured by pooling text from
-separate rows, one naming holders and another carrying unrelated
-entitlement language. A serious semantic defect found during an
-adversarial round means that round cannot count as clean, even when the
-defect was introduced earlier in the same turn and fixed before the
-report. **Consecutive CLEAN count: 0.**
+A closed list of possibility, conditionality and intention markers, read
+inside the matched phrase's own clause within a bounded window, and judged
+PER CLAUSE: a clause with any defeated occurrence establishes nothing
+(several dictionary phrases can match one clause, and the marker that
+defeats one sits outside another's window).
 
-### The I3 fix — explicit negation is not the positive bridge
+Not a tense parser. `will` and `can` are deliberately absent — a scheduled
+mechanism's actuality is `mechanism_state`'s decision. Conservative where
+it cannot tell: a clause carrying explicit proposal language is refused
+even where a reader could see the proposal had passed, because governance
+approval is represented structurally and nothing real rests on prose.
 
-I3 was ruled a defect, not a boundary: the approved M3 rule is that
-POSITIVE entitlement or receipt must be established, so a sentence denying
-it must not satisfy the bridge. Implied by the approved rule; no new
-Founder decision. Implemented row-locally, keeping the closed positive
-dictionary, with two bounds:
+### A2 + A3 — one label guard, every path
 
-- **CLAUSE** — the text is cut at sentence/clause terminators (not
-  commas), and one clause must carry the WHOLE bridge: name holders itself
-  AND state the entitlement. This also closes, inside one row, the same
-  laundering case 7 closed across two rows.
-- **WINDOW** — within that clause only the 6 tokens before the matched
-  phrase are read for a negator, from a closed 11-word list. So a denial
-  about something else, or in another sentence, never suppresses a real
-  statement.
+`src/shared/projection-label-safety.ts` is the single rule, called on the
+WRITE path (reject), the API READ path (neutralise) and the RENDERER
+(neutralise). Storage is never trusted, so a legacy or corrupted row is
+neutralised on the way out.
 
-A denial is ABSENCE of the bridge, never a refutation of the recipient —
-NOT_SUPPORTED stays unreachable this way, and H3 (the destination
-dictionary's own negation limit) is untouched.
+Five closed axes, each named after what it refuses: STATUS, CERTAINTY,
+MAGNITUDE (any stated number; a digit inside a word such as `ERC-20` is a
+name and passes), DIRECTION, and the per-component ECONOMIC ENVELOPE that
+already existed. A refusal degrades to the component's canonical copy.
+The lists are closed, as every ATLAS dictionary is, and that limit is
+stated rather than hidden.
 
-### Round 9 — THE OUTPUT BOUNDARY
+### Round 10 — AUTHORIZATION, TENANCY AND ENTITLEMENT UNDER COMPOSITION
 
-A new angle: every previous round stopped at the Proof. Round 9 attacks
-the last hop — from the persisted record to the sentence a reader actually
-reads. Can a reader be shown more than the record proves?
+A different boundary: whose record is it, and when was the right to it
+decided? Tenancy at every loader, Proof-owner drift, the DEMO quota
+ledger, idempotency as a per-account name, entitlement frozen at start,
+and whole-table ownership invariants.
 
-**Result: NOT CLEAN. One CRITICAL-class defect, found and fixed.**
+**Result: NOT CLEAN. One MAJOR-class finding, NOT fixed — it needs a
+Founder decision.**
 
-`relationship` is what the EXTRACTOR said a row was for; S5 decides
-admissibility and records refusals in `excludedEvidence`, which never
-rewrites the row. `output-plan.ts` admitted on the label alone, so an
-S5-EXCLUDED on-chain TOKEN_SUPPLY reading rendered as a METRIC tile marked
-`state: "ESTABLISHED"` — byte-identical to the admitted twin — and
-excluded rows could appear in the evidence snapshot. Fixed by positive,
-component-scoped admission (`admittedFor`), using sets already in the
-payload: no new field, no API change. Four of the five F regression cases
-fail without the fix.
+**Q1 — the DEMO lifetime proof quota never decrements.** Admission counts
+`RESERVED + CONSUMED`, but no code path anywhere passes `CONSUMED`: all
+seven `resolveDemoReservation` call sites pass `RELEASED`, including the
+ordinary SUCCESS path. A DEMO account that runs a job to SUCCEEDED and
+receives a Proof gets its slot back, so the lifetime limit bounds only
+concurrency — which the one-active-job rule already bounds. Which terminal
+outcomes should consume a lifetime proof is a product policy question
+ATLAS's semantics do not settle, so no fix was chosen and the observed
+behaviour is pinned.
 
-**MINOR, open:** I4 (no tense grammar in the entitlement dictionary — ATLAS
-bounds tense through `mechanism_state` instead), A2 (the projection label
-guard is a closed status-word list, so a label may still assert magnitude
-or certainty; deliberate by design, now measured), A3 (the label rule is
-enforced on write, not on read).
+Everything else in Round 10 held: no cross-account read at any door, no
+cross-job evidence through a job you own, no Proof-owner drift anywhere in
+the table, idempotency is per account, entitlement is frozen at start and
+a downgrade never destroys a finished Proof.
 
-**Tests.** `tests/adversarial-core-round9-output-boundary-v1.test.ts` (25).
+**Consecutive CLEAN count: 0.**
 
 ### Next
 
-- **Round 10** — a new independent adversarial round. Round 9 was NOT
-  CLEAN, so the counter is still 0 and TWO consecutive clean rounds remain
-  required.
-- Founder decisions open: I4, A2, A3.
+- **Founder decision on Q1**, then a fix and a regression test.
+- **Round 11** — a new independent adversarial round. Two consecutive
+  clean rounds are still required.
 - Not yet: speed optimization, migrations 0052–0054, any live Research.

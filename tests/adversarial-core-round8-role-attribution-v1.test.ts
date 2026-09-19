@@ -708,19 +708,77 @@ describe("I. THE GATES ARE QUESTION-LOCAL, AND THEIR LIMITS ARE NAMED", () => {
     expect(d.PROTOCOL_REVENUE_TO_TOKEN.assembly.flows[0].attributes.destinationKind).toBe("BURN");
   });
 
-  it("I4 (BOUNDARY, MINOR — Founder decision open). the holder-entitlement dictionary still has no TENSE grammar: 'may in future be entitled' and 'were previously entitled' satisfy the positive bridge. ATLAS bounds tense through mechanism_state and the lifecycle machinery instead (round7-5 C1/C2: a PROPOSED recipient row caps at PROPOSED_STATE_ONLY), so reading prose tense in a classifier would be a NEW semantic rule rather than an implication of the approved one. Pinned, not decided", () => {
-    for (const fragment of [
+  it("I4 (FIXED, Founder decision). UNCERTAIN, PROPOSED OR CONDITIONAL IS NOT POSITIVE: possibility, intention and conditionality no longer satisfy the bridge — and a plain scheduled future ('will be entitled') is deliberately NOT refused, because whether a scheduled mechanism is current is mechanism_state's decision, not this classifier's", () => {
+    const refused = [
       "token holders may in future be entitled to a pro rata share of the fees",
-      "token holders were previously entitled to a pro rata share of the fees",
-    ]) {
+      "token holders might be entitled to a pro rata share of the fees",
+      "token holders could be entitled to a pro rata share of the fees",
+      "a proposed entitlement would give token holders a pro rata share",
+      "the protocol plans to entitle token holders to a pro rata share",
+      "token holders are expected to become entitled to a pro rata share",
+      "token holders would be entitled to a pro rata share if the proposal passes",
+      "token holders are entitled to a pro rata share, subject to a governance vote",
+    ];
+    for (const fragment of refused) {
       const m = ask([...base(), destHolders(), row("RECIPIENT", { fragment })], { identity: IDENTITY });
       laws(m, `I4:${fragment}`);
-      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("SUPPORTED");
-      // The lifecycle machinery is what actually bounds it: the same
-      // sentence recorded as a PROPOSAL cannot reach SUPPORTED.
-      const proposed = ask([...base(), destHolders(), row("RECIPIENT", { fragment, mechanismState: "PROPOSED" })], { identity: IDENTITY });
-      expect(s5(proposed, "RECIPIENT").reasonCodes, fragment).toContain("PROPOSED_STATE_ONLY");
-      expect(verdicts(proposed).PASSIVE_HOLDER_OUTCOME, fragment).not.toBe("SUPPORTED");
+      const holderFlows = m.PASSIVE_HOLDER_OUTCOME.assembly.flows.filter((f) => f.attributes.recipientKind === "PASSIVE_HOLDER");
+      expect(holderFlows.length, fragment).toBeGreaterThan(0);
+      for (const f of holderFlows) expect(f.gaps.some((g) => g.kind === "RECIPIENT_UNRESOLVED"), fragment).toBe(true);
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("PARTIALLY_SUPPORTED");
+      // Uncertainty is ABSENCE of the bridge, never a refutation.
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).not.toBe("NOT_SUPPORTED");
     }
+    // NOT globally refused: a scheduled entitlement still establishes it.
+    for (const fragment of [
+      "token holders will be entitled to a pro rata share of the fees",
+      "token holders can claim their pro rata share at any time",
+    ]) {
+      const m = ask([...base(), destHolders(), row("RECIPIENT", { fragment })], { identity: IDENTITY });
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("SUPPORTED");
+    }
+    // ACCEPTED CONSERVATIVE REFUSAL, pinned so it is a decision and not a
+    // surprise: a clause that carries explicit proposal language is refused
+    // even where a reader could tell the proposal had already passed.
+    // Governance approval is represented structurally (GOVERNANCE_BASIS,
+    // mechanism_state APPROVED), so nothing real rests on reading it out of
+    // prose, and the cost is PARTIAL.
+    const proposalProse = ask(
+      [...base(), destHolders(), row("RECIPIENT", { fragment: "the allocation proposal passed the token holder vote and token holders are entitled to a pro rata share" })],
+      { identity: IDENTITY },
+    );
+    expect(verdicts(proposalProse).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+
+    // And modal language in ANOTHER clause suppresses nothing.
+    const other = ask(
+      [...base(), destHolders(), row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the fees. the schedule may change." })],
+      { identity: IDENTITY },
+    );
+    expect(verdicts(other).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    // The lifecycle machinery still owns actuality: the same sentence
+    // recorded as a PROPOSAL cannot reach SUPPORTED.
+    const proposed = ask(
+      [...base(), destHolders(), row("RECIPIENT", { fragment: "token holders will be entitled to a pro rata share of the fees", mechanismState: "PROPOSED" })],
+      { identity: IDENTITY },
+    );
+    expect(s5(proposed, "RECIPIENT").reasonCodes).toContain("PROPOSED_STATE_ONLY");
+    expect(verdicts(proposed).PASSIVE_HOLDER_OUTCOME).not.toBe("SUPPORTED");
+  });
+
+  it("I4b. ordering, duplication and inadmissible evidence are inert around the contingency rule", () => {
+    const uncertain = () => row("RECIPIENT", { fragment: "token holders may be entitled to a pro rata share of the fees" });
+    const world = [...base(), destHolders(), uncertain()];
+    const control = ask(world, { identity: IDENTITY });
+    expect(verdicts(control).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    const key = (m: Matrix) => JSON.stringify({ v: verdicts(m), b: INTENTS.map((i) => m[i].proof.confidenceScore) });
+    expect(key(ask([...world].reverse(), { identity: IDENTITY }))).toBe(key(control));
+    const mirrors = Array.from({ length: 4 }, (_, i) =>
+      row("RECIPIENT", { fragment: "token holders may be entitled to a pro rata share of the fees", contentHash: "same-maybe", sourceId: `maybe-${i}` }),
+    );
+    expect(verdicts(ask([...world, ...mirrors], { identity: IDENTITY })).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    const social = row("RECIPIENT", { sourceClass: "SOCIAL", fragment: "everyone knows token holders are entitled to a pro rata share" });
+    const withSocial = ask([...world, social], { identity: IDENTITY });
+    expect(verdicts(withSocial).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    noStronger(withSocial, control, "social entitlement post");
   });
 });

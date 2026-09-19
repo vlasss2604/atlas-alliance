@@ -331,7 +331,10 @@ describe("projection — bounded, and malformed output never renders", () => {
   it("TEST 10: a focused result is a few findings, not the component grid", () => {
     expect(MIN_FINDINGS).toBe(2);
     expect(MAX_FINDINGS).toBe(5);
-    const all = COMPONENTS.map((c) => finding(`About ${c.patternStep}`, c.patternStep, c.component));
+    // Labels are plain names: a bare number in a label reads as a stated
+    // magnitude and is refused by the shared label guard (A2), which this
+    // test is not about.
+    const all = COMPONENTS.map((c) => finding(`About ${c.component.toLowerCase().replace(/_/g, " ")}`, c.patternStep, c.component));
     // Five is the ceiling and validates; a sixth is refused rather than
     // silently trimmed, because truncating would present overflow as
     // though it had been a deliberate selection.

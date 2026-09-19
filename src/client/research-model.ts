@@ -11,6 +11,8 @@
 // persisted data cannot answer a question, the answer is "could not verify"
 // — which is a research outcome, not an application error.
 
+import { isLabelSafe } from "../shared/projection-label-safety";
+
 export type JobState =
   | "QUEUED"
   | "RUNNING"
@@ -1352,42 +1354,16 @@ export function componentClaimLabel(component: string | null | undefined): strin
   return CLAIM_LABELS[component] ?? componentLabel(component);
 }
 
-// THE SEMANTIC ENVELOPE OF A CANONICAL COMPONENT.
-//
-// A projection label is model-written presentation, and presentation may
-// rename a finding but must never WIDEN it. Observed live: NET_EFFECT —
-// whose canonical meaning is a durable effect on token SUPPLY — was
-// labelled "the intended effect of buybacks on token value". A reader
-// sees "value" and reasonably reads price. The research never checked
-// price, so the label was quietly claiming a different question had been
-// answered than the one the status underneath it grades.
-//
-// The guard is per COMPONENT, not per project: it names the vocabulary
-// that is canonically wrong for a given component's meaning, and it holds
-// for every project the engine will ever run. There is no token here, no
-// domain, no question text — a Raydium run and a run on anything else are
-// checked by the identical rule.
-//
-// A label that trips it is REPLACED with that component's own canonical
-// label, never patched or reworded. Presentation degrades to the safe
-// wording; it never tries to guess what the model meant.
-const CLAIM_LABEL_FORBIDDEN: Record<string, RegExp> = {
-  // Supply, not markets. Price/return/valuation are a different question.
-  NET_EFFECT: /\b(price|valuation|market cap|marketcap|return|returns|yield|worth|value)\b/i,
-  // Where value COMES FROM is not where it goes.
-  SOURCE_OF_VALUE: /\b(destination|recipient|receives?|ends? up|goes? to)\b/i,
-  // What is written down is not what is happening.
-  MECHANISM_SPEC: /\b(execut|running|happening|live|active)/i,
-  // An authorisation is not an execution.
-  GOVERNANCE_BASIS: /\b(execut|running|happening)/i,
-  // An intended destination is not an observed transfer.
-  DESTINATION: /\b(execut|transferred|actually sent|observed)/i,
-};
+// The semantic envelope of a canonical component, the certainty, magnitude
+// and direction axes, and the status-word rule all live together in
+// `shared/projection-label-safety` — one function, every path.
 
 export function safeClaimLabel(component: string, label: string): string {
-  const forbidden = CLAIM_LABEL_FORBIDDEN[component];
-  if (forbidden && forbidden.test(label)) return componentClaimLabel(component);
-  return label;
+  // The envelope is one of five axes now, and all five live in the shared
+  // module so the renderer, the API read path and the write path enforce
+  // the identical rule (Founder decisions A2/A3). A refused label degrades
+  // to this component's own canonical copy — never to a reworded guess.
+  return isLabelSafe(component, label) ? label : componentClaimLabel(component);
 }
 
 export interface LadderComponentInput {

@@ -273,17 +273,18 @@ describe("a label may rename a finding, never widen it", () => {
   });
 
   it("TEST 12: the guard is per COMPONENT, never per project", () => {
+    // The rule itself now lives in the shared label-safety module, so the
+    // write path, the API read path and the renderer enforce one function
+    // rather than three that can drift (Founder decisions A2/A3). The
+    // property this test pins is unchanged: the rule is per COMPONENT and
+    // never per project, and it never reads the question.
     const model = readFileSync(MODEL, "utf-8");
-    // Comments explain WHY each rule exists and legitimately use the words
-    // the rule is about — strip them before scanning the code itself.
-    const guard = model
-      .slice(
-        model.indexOf("const CLAIM_LABEL_FORBIDDEN"),
-        model.indexOf("export function safeClaimLabel") + 400,
-      )
-      .split("\n")
-      .filter((l) => !l.trim().startsWith("//"))
-      .join("\n");
+    const stripComments = (src: string) =>
+      src
+        .split("\n")
+        .filter((l) => !l.trim().startsWith("//") && !l.trim().startsWith("*") && !l.trim().startsWith("/*"))
+        .join("\n");
+    const guard = stripComments(readFileSync("src/shared/projection-label-safety.ts", "utf-8"));
     // No token, no domain, no project — the identical rule applies to every
     // research this engine will ever run.
     for (const token of ["Raydium", "raydium", "RAY", "pump", "Solana", ".io", "http"]) {
@@ -292,7 +293,13 @@ describe("a label may rename a finding, never widen it", () => {
     // And it never inspects the QUESTION — only the label against its own
     // component, which is what keeps it from being a keyword hack.
     expect(guard).not.toContain("question");
-    expect(guard).toContain("componentClaimLabel(component)");
+    // The per-component envelope is keyed by canonical component name only.
+    expect(guard).toContain("ECONOMIC_ENVELOPE");
+    expect(guard).toContain("NET_EFFECT:");
+    // And a refused label still degrades to that component's canonical copy
+    // in the renderer, which is the half of the rule that lives here.
+    const safe = stripComments(model.slice(model.indexOf("export function safeClaimLabel"), model.indexOf("export function safeClaimLabel") + 500));
+    expect(safe).toContain("componentClaimLabel(component)");
   });
 
   it("TEST 12b: a guarded label reaches the screen already corrected", () => {
