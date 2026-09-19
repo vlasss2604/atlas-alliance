@@ -27,6 +27,22 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## Acquisition concurrency
+
+Two acquisition loops that wait on the network — the fetch phase over
+urls and one component's search queries — overlap that waiting with
+bounded concurrency (`src/server/engine/concurrency.ts`, default 4,
+`ATLAS_ACQUISITION_CONCURRENCY` to pin it, `1` is the old sequential
+loop). Extraction overlap is built and pinned equivalent but ships OFF
+(`ATLAS_EXTRACTION_CONCURRENCY`, default 1) because Founder decision 5.5B
+pins "the next document is never touched" after a fatal outcome, which
+no overlap can honour; enabling it is a pending Founder decision.
+Every budget reservation is still one atomic conditional UPDATE, first
+attempts are reserved in document/plan order, results are merged in that
+order, and the per-job render cap is serialised per job. The persisted
+research picture is pinned identical between concurrency 1 and 4
+(`tests/perf-pipeline-timing-v1.test.ts`).
+
 ## VERIFICATION: WHAT FROM THIS CLAIM ACTUALLY SURVIVED
 
 The user-facing modes are RESEARCH ("what did ATLAS find?") and

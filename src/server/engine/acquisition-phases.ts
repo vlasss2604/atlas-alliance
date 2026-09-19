@@ -1,4 +1,5 @@
 import { asc, eq } from "drizzle-orm";
+import { acquisitionConcurrency, mapWithConcurrency, serializeByKey } from "./concurrency";
 
 import type { Database, Transaction } from "../db/client";
 import { researchTraceEvents } from "../db/schema";
@@ -364,43 +365,26 @@ export async function runSearchPhase(input: {
     // metered gateway, so the second branch below preserves its budget
     // behaviour exactly: a query another component already paid for is still
     // never paid for twice.
-    for (const entry of planQueries(proposed, ledger, {
-      step: item.step,
-      component: item.component,
-    })) {
-      if (!entry.needsSearch) {
-        out.dedupedQueries.push(entry.query);
-        // A deduped query still contributes what THIS component found.
-        for (const url of entry.knownCandidates) {
-          if (!seenCandidates.has(url)) {
-            seenCandidates.add(url);
-            out.candidateUrls.push(url);
-          }
-        }
+    const queryPlan = [...planQueries(proposed, ledger, { step: item.step, component: item.component })];
+
+    // SPEED + COST — ONE COMPONENT'S SEARCHES OVERLAP. Three passes where
+    // there was one loop, and every observable order is the loop's:
+    //   1. reserve, in plan order, for every query that needs a search
+    //      (so which queries get the budget is decided exactly as before,
+    //      and a refusal is traced exactly where it was);
+    //   2. run the reserved searches with bounded concurrency;
+    //   3. in plan order, trace each search, record executed queries and
+    //      merge candidates through the same seen-set — so candidateUrls,
+    //      which becomes the fetch order, is byte-identical to the loop's.
+    const reservedIdx: boolean[] = [];
+    for (const entry of queryPlan) {
+      if (!entry.needsSearch || entry.alreadyPaid) {
+        reservedIdx.push(false);
         continue;
       }
-      if (entry.alreadyPaid) {
-        // Paid for by another component. The urls are still worth acquiring
-        // — acquisition is job-wide — but they are NOT recorded as this
-        // component's discovery, so they cannot become its extraction corpus.
-        out.dedupedQueries.push(entry.query);
-        for (const url of entry.jobWideCandidates) {
-          if (!seenCandidates.has(url)) {
-            seenCandidates.add(url);
-            out.candidateUrls.push(url);
-          }
-        }
-        continue;
-      }
-      const reserved = await reserveJobBudget(
-        input.db,
-        input.jobId,
-        "searchQueries",
-        1,
-        input.maxSearchQueries,
-      );
+      const reserved = await reserveJobBudget(input.db, input.jobId, "searchQueries", 1, input.maxSearchQueries);
+      reservedIdx.push(reserved);
       if (!reserved) {
-        out.budgetRefusedQueries.push(entry.query);
         await recordTraceEvent(input.db, {
           researchJobId: input.jobId,
           operationType: "SEARCH_EXECUTED",
@@ -414,17 +398,43 @@ export async function runSearchPhase(input: {
           budgetAxis: "searchQueries",
           budgetAmount: 1,
         });
+      }
+    }
+    const searched = await mapWithConcurrency(queryPlan, acquisitionConcurrency(), async (entry, i) => {
+      if (!reservedIdx[i]) return null;
+      try {
+        const candidates = await input.searchGateway.search(entry.query, target, { maxResults: input.maxResultsPerQuery });
+        return { candidates, failed: false as const };
+      } catch {
+        return { candidates: [] as { url: string }[], failed: true as const };
+      }
+    });
+    for (const [i, entry] of queryPlan.entries()) {
+      if (!entry.needsSearch) {
+        out.dedupedQueries.push(entry.query);
+        for (const url of entry.knownCandidates) {
+          if (!seenCandidates.has(url)) {
+            seenCandidates.add(url);
+            out.candidateUrls.push(url);
+          }
+        }
         continue;
       }
-      let candidates: { url: string }[] = [];
-      let failed = false;
-      try {
-        candidates = await input.searchGateway.search(entry.query, target, {
-          maxResults: input.maxResultsPerQuery,
-        });
-      } catch {
-        failed = true;
+      if (entry.alreadyPaid) {
+        out.dedupedQueries.push(entry.query);
+        for (const url of entry.jobWideCandidates) {
+          if (!seenCandidates.has(url)) {
+            seenCandidates.add(url);
+            out.candidateUrls.push(url);
+          }
+        }
+        continue;
       }
+      if (!reservedIdx[i]) {
+        out.budgetRefusedQueries.push(entry.query);
+        continue;
+      }
+      const result = searched[i]!;
       await recordTraceEvent(input.db, {
         researchJobId: input.jobId,
         operationType: "SEARCH_EXECUTED",
@@ -433,14 +443,14 @@ export async function runSearchPhase(input: {
         patternStep: item.step,
         component: item.component,
         targetRef: entry.query,
-        status: failed ? "FAILED" : "OK",
-        reasonCode: failed ? "PROVIDER_ERROR" : "NONE",
+        status: result.failed ? "FAILED" : "OK",
+        reasonCode: result.failed ? "PROVIDER_ERROR" : "NONE",
         budgetAxis: "searchQueries",
         budgetAmount: 1,
       });
-      if (failed) continue;
+      if (result.failed) continue;
       out.executedQueries.push(entry.query);
-      for (const c of candidates) {
+      for (const c of result.candidates) {
         await recordTraceEvent(input.db, {
           researchJobId: input.jobId,
           operationType: "CANDIDATE_RETURNED",
@@ -638,8 +648,9 @@ export async function runFetchPhase(input: {
   const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };
   const targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
 
+  // Fail closed before any transport call, in target order.
+  const admissible: string[] = [];
   for (const url of targets) {
-    // Fail closed before any transport call.
     try {
       const parsed = new URL(url);
       if (parsed.protocol !== "https:") {
@@ -650,10 +661,31 @@ export async function runFetchPhase(input: {
       out.refusedUrls.push(url);
       continue;
     }
-
-    const outcome = await acquireOneUrl(documentaryInput, url, out);
-    if (outcome === "BUDGET_EXHAUSTED") break;
+    admissible.push(url);
   }
+
+  // SPEED + COST — DOCUMENTS ARE FETCHED WITH BOUNDED CONCURRENCY.
+  //
+  // One url's acquisition does not depend on another's: each reserves its
+  // own source open through the one atomic ledger mutator, seals its own
+  // document, and records its own trace. The only per-job resource decided
+  // by a read-then-act check — the rendered-document cap — is serialised
+  // inside attemptRender / sealDocument (serializeByKey), so a parallel
+  // fetch cannot race it. The sequential loop stopped launching at the
+  // first BUDGET_EXHAUSTED; this does the same: nothing new starts once a
+  // url reports it, and the urls already in flight finish on reservations
+  // they already hold. ATLAS_ACQUISITION_CONCURRENCY=1 is the old loop.
+  let budgetExhausted = false;
+  await mapWithConcurrency(
+    admissible,
+    acquisitionConcurrency(),
+    async (url) => {
+      if (budgetExhausted) return;
+      const outcome = await acquireOneUrl(documentaryInput, url, out);
+      if (outcome === "BUDGET_EXHAUSTED") budgetExhausted = true;
+    },
+    { shouldStart: () => !budgetExhausted },
+  );
   return out;
 }
 
@@ -763,7 +795,15 @@ async function acquireOneUrl(
             })
           : routeEligibility(url, preFetchRoute, rendererEnabled);
       if (!eligibility.eligible) continue;
-      const rendered = await attemptRender(input, url, eligibility, out);
+      // The cap check above is the cheap early exit; the one that COUNTS is
+      // re-read inside the gate, so two urls that both passed it while a
+      // third was rendering cannot both render afterwards.
+      const rendered = await serializeByKey(`render:${input.jobId}`, async () => {
+        const fresh = await loadAcquisitionLedger(input.db, input.jobId);
+        if (providerAttemptCount(providerName, fresh) >= MAX_RENDER_ATTEMPTS_PER_JOB) return "CAPPED" as const;
+        return attemptRender(input, url, eligibility, out);
+      });
+      if (rendered === "CAPPED") continue;
       if (rendered === "BUDGET_EXHAUSTED") return "BUDGET_EXHAUSTED";
       if (rendered === "SEALED") return "SEALED";
       attempted += 1;
@@ -882,6 +922,11 @@ async function sealDocument(
     rendererEnabled,
   });
   if (upgrade.eligible) {
+    // The per-job render cap is a read-then-act check over the ledger; under
+    // a concurrent fetch two urls could both read "3 of 4" and both render.
+    // The cap check, the reservation and the render run one at a time per
+    // job — renders are the expensive resource in any case.
+    await serializeByKey(`render:${input.jobId}`, async () => {
     const ledger = await loadAcquisitionLedger(input.db, input.jobId);
     const providerName = STRATEGY_PROVIDER.ISOLATED_RENDER;
     if (
@@ -923,6 +968,7 @@ async function sealDocument(
         }
       }
     }
+    });
   }
 
   // Authority is RESOLVED and recorded, never granted — and never by the

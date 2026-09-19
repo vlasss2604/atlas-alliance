@@ -114,6 +114,7 @@ import type { ConfirmedProjectIdentity } from "../domain/project-identity";
 import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
+import { extractionConcurrency, startWithConcurrency } from "./concurrency";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — this
 // file's OWN instrumentation is additive-only: every recordTraceEvent
@@ -779,6 +780,13 @@ async function reserveAndCallWithRetry<T>(params: {
   // document (it is never retried) and never proof that the capability
   // is unavailable — one unretried attempt cannot prove that.
   maxAttempts?: 1 | 2;
+  // SPEED + COST — the caller reserved attempt 1 itself, in DOCUMENT ORDER,
+  // before overlapping several calls. Attempt 1 then skips the reservation
+  // here; a transient retry (attempt 2) still reserves exactly as before.
+  // This is what keeps budget ORDER identical to the sequential loop for
+  // every first attempt: which documents get the budget is decided in the
+  // same order, only the network wait overlaps.
+  firstAttemptReserved?: boolean;
 }): Promise<RetryOutcome<T>> {
   const budgetReasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED" =
     params.budgetAxis === "searchQueries" ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "MODEL_COST_BUDGET_EXHAUSTED";
@@ -787,9 +795,10 @@ async function reserveAndCallWithRetry<T>(params: {
   let lastError: unknown = null;
   const meter = params.meter !== false;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const reserved = meter
-      ? await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget)
-      : true;
+    const reserved =
+      meter && !(attempt === 1 && params.firstAttemptReserved)
+        ? await reserveJobBudget(params.db, params.jobId, params.budgetAxis, params.reserveAmount, params.maxBudget)
+        : true;
     if (!reserved) {
       // attempt===1: zero real attempts ever made. attempt===2: exactly
       // one real attempt was made (it failed transiently), then the
@@ -937,9 +946,6 @@ interface PreflightFailure {
   reason: string;
 }
 
-function clearRejectedFacts(u: UsageCapture): void {
-  u.rejectedFacts = null;
-}
 
 function capabilityFatalPreflight(code: string, reason: string): PreflightFailure {
   return { ok: false, kind: "CAPABILITY_FATAL", code, reason };
@@ -2759,19 +2765,56 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // --- 4. EvidenceExtractor ----------------------------------------------
         // Only the documents THIS round opened; an earlier round's documents
         // were already read.
-        for (const doc of fetchedDocs.slice(extractedDocCount)) {
-          // BLOCKER-2 (S10 closure, D-119): reserveAndCallWithRetry reserves
-          // BEFORE every real extraction attempt, including a retry —
-          // EXTRACT_ATTEMPTED fires once per real attempt via onAttempt.
-          // D-153 — cleared before every call, so a rejection reported for an
-          // earlier document can never be attributed to this one. Cleared
-          // through a helper rather than inline, so the read below stays typed
-          // as the report array instead of being narrowed to the null this
-          // statement just wrote.
-          clearRejectedFacts(usage);
-          // ONE EXTRACT_ATTEMPTED ROW PER REAL, RESERVED EXTRACTION CALL —
-          // the full extraction's attempts and, when one is made, the compact
-          // fallback's single attempt, through the same writer.
+        // SPEED + COST — THE MODEL CALLS FOR ONE ROUND'S DOCUMENTS OVERLAP.
+        //
+        // This used to be one loop: reserve, call the extractor, wait, then
+        // persist, for each document in turn. The extractor call is the
+        // single largest wait in a Research (one Anthropic round trip per
+        // (component, document)), and the documents of one round are
+        // independent of each other. So the loop is now two:
+        //
+        //   PHASE A  reserve attempt 1 for every document IN DOCUMENT ORDER
+        //            (so which documents get the budget is decided exactly
+        //            as the sequential loop decided it), then run the calls
+        //            with bounded concurrency, each reporting usage and
+        //            rejected facts into its OWN capture (D-153: cleared
+        //            before every call, per call);
+        //   PHASE B  in document order, replay that call's capture into the
+        //            component-scoped usage and run the unchanged tail:
+        //            budget outcome, failure accounting, admission,
+        //            persistence.
+        //
+        // BLOCKER-2 (S10 closure, D-119) still holds: every real attempt is
+        // reserved before it is made — attempt 1 by the ordered pass here,
+        // a transient retry by the wrapper — and EXTRACT_ATTEMPTED fires
+        // once per real attempt via onAttempt.
+        //
+        // Nothing downstream of the call changed. What a document
+        // establishes, how it is admitted and what it costs are the same;
+        // only the waiting overlaps. ATLAS_ACQUISITION_CONCURRENCY=1
+        // restores the sequential timing exactly.
+        //
+        // ONE DOCUMENTED BOUNDARY: a transient retry (attempt 2) reserves
+        // when it happens, as before, but now that can be after a LATER
+        // document's attempt 1 was reserved. Under a budget exhausted
+        // mid-round AND a transient provider failure in the same round, the
+        // set of documents that got a call can differ from the sequential
+        // loop's. Total spend cannot: every unit is one atomic reservation
+        // either way.
+        const roundDocs = fetchedDocs.slice(extractedDocCount);
+        // ONE DOCUMENT AT A TIME UNTIL THE ROUND'S FIRST SUCCESS, THEN
+        // OVERLAP. The failure semantics Founder decision 5.5B pinned are
+        // sequential by nature — a permanent rejection on the FIRST document
+        // is fatal after ONE call and "the next document is never touched";
+        // two consecutive transient exhaustions are fatal and the third is
+        // never touched — and they are decided in the tail below between
+        // calls. So while no document of this round has succeeded, each is
+        // called and reduced exactly as the sequential loop did, byte for
+        // byte. Once one has, the rest of the round is reserved in document
+        // order and called with bounded concurrency, and their results are
+        // still consumed in document order.
+        const callOne = async (doc: FetchedDocument, docIndex: number, firstAttemptReserved: boolean) => {
+          const capture: UsageCapture = { queryProposer: null, evidenceExtractor: null, rejectedFacts: null };
           const recordExtractAttempted = async () => {
             await recordTraceEvent(deps.db, {
               researchJobId: ctx.jobId,
@@ -2787,6 +2830,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               budgetAmount: evidenceExtractorCostMicro,
             });
           };
+          const perCallSinks = {
+            onUsage: (u: ModelUsage) => {
+              capture.evidenceExtractor = u;
+            },
+            onRejectedFacts: (r: readonly RejectedFactReport[]) => {
+              capture.rejectedFacts = r;
+            },
+          };
+          let authorizedMicro = 0;
           let extractOutcome = await reserveAndCallWithRetry({
             db: deps.db,
             jobId: ctx.jobId,
@@ -2795,16 +2847,8 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             maxBudget: ctx.budget.maxModelCostMicro,
             label: "EVIDENCE_EXTRACTOR",
             capability: "EVIDENCE_EXTRACTOR",
-            // Item 6 (S4 final acceptance fix): no input bounding — the
-            // extractor is given the document text exactly as fetched. See
-            // model-cost-profile.ts's module comment for why a chars/token
-            // heuristic was removed rather than kept as a claimed guarantee.
-            fn: () => evidenceExtractor.extract({ target, document: doc }),
+            fn: () => evidenceExtractor.extract({ target, document: doc, ...perCallSinks }),
             onAttempt: recordExtractAttempted,
-            // §8/D-120: same MODEL_CALL attempt-cardinality tightening as
-            // QueryProposer above — one FAILED row for the transient
-            // attempt-1 failure, distinct from the row written below for
-            // the resolved (ok/fatal) attempt-2 outcome.
             onTransientRetry: async (firstAttemptError) => {
               await recordTraceEvent(deps.db, {
                 researchJobId: ctx.jobId,
@@ -2819,65 +2863,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 reasonCode: classifyTraceReasonCode(firstAttemptError),
                 budgetAxis: "modelCostMicro",
                 budgetAmount: evidenceExtractorCostMicro,
-                // The typed WHY of the failed first attempt (e.g.
-                // NETWORK_NO_RESPONSE, RATE_LIMITED:429), on the row itself.
-                // The live run 06ade56b persisted two FAILED attempt rows
-                // that said only PROVIDER_ERROR while the class sat in the
-                // thrown message — this is the proven gap.
                 diagnosticCode: extractorDiagnosticCode(safeFailureDetail(firstAttemptError)),
               });
             },
+            // Reserved above, in document order. A document whose ordered
+            // reservation was refused reserves again here and is refused
+            // again — the same budget_exhausted outcome the sequential loop
+            // produced, with no call made.
+            firstAttemptReserved,
           });
-          spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+          authorizedMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
 
-          // ACQUISITION GRACEFUL DEGRADATION V1 — A PAGE THAT SAYS TOO MUCH IS
-          // NOT A PAGE THAT SAYS NOTHING.
-          //
-          // THE DEFECT THIS CLOSES, measured on the first controlled live
-          // Memory acceptance run (job b5395f96-…) and identically on the run
-          // before it: the ONE documentary open a component made fetched a
-          // rich official page (94,584 normalized characters, inside the
-          // input gate), the model tried to report so much of it that the
-          // output hit the approved ceiling, the response was correctly
-          // refused as MAX_TOKENS_TRUNCATED — and the whole paid-for document
-          // contributed zero facts. The component ended
-          // EVIDENCE_EXTRACTOR_UNAVAILABLE with its best source unread. A
-          // second component lost a document the same way in the same run.
-          //
-          // THE FALLBACK, and its bounds, all of which are visible right here:
-          //   * the SAME already-fetched document (`doc`) — no new search, no
-          //     new fetch, no new source open, no new reservation on either
-          //     of those axes;
-          //   * ONE further model extraction call, never more — `maxAttempts:
-          //     1`, so not even the transient retry every other model call is
-          //     allowed. That one call is reserved and traced exactly like any
-          //     other (its own EXTRACT_ATTEMPTED row, its own modelCostMicro
-          //     reservation, counted into spent.authorizedModelCostMicro);
-          //   * a COMPACT request (evidence-extractor-anthropic.ts): the same
-          //     system prompt and input gate, asking only for the few most
-          //     direct observations on this component's Evidence goal, with
-          //     the fact cap enforced at the output schema;
-          //   * whatever the compact call returns takes the place of the full
-          //     outcome and flows through the IDENTICAL admission below —
-          //     the same per-fact validation, wrong-project/wrong-component
-          //     rejection, traceability check and canonical extraction-unit
-          //     key (job, source, step, component, fragment), so a compact
-          //     fact is the same Evidence identity a full extraction of the
-          //     same passage would have produced;
-          //   * fail closed, again: a compact response that truncates again,
-          //     fails to parse, fails the schema, is oversized, or fails
-          //     transiently is this document's failure exactly as it always
-          //     was — the existing "local" handling records it and moves on.
-          //     No truncated JSON prefix is ever salvaged, from either call.
-          //
-          // The truncated FULL pass is still recorded as its own EXTRACT_FAILED
-          // row with its MAX_TOKENS_TRUNCATED diagnostic: it happened and it
-          // was paid for. What it no longer does is decide the document's
-          // fate by itself — that is the compact pass's to decide — so it is
-          // not counted into this attempt's document-failure tally here.
-          // Only the closed, membership-gated detail is consulted: the detail
-          // is exactly the diagnostic string when it carries no status, which
-          // is the only shape MAX_TOKENS_TRUNCATED ever has.
           if (extractOutcome.kind === "local" && extractOutcome.detail === "MAX_TOKENS_TRUNCATED") {
             observations.add("EXTRACT_FAILED:MAX_TOKENS_TRUNCATED");
             await recordTraceEvent(deps.db, {
@@ -2894,7 +2890,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               diagnosticCode: extractorDiagnosticCode(extractOutcome.detail),
             });
             observations.add("EXTRACT_COMPACT_RETRY");
-            clearRejectedFacts(usage);
+            capture.rejectedFacts = null;
             extractOutcome = await reserveAndCallWithRetry({
               db: deps.db,
               jobId: ctx.jobId,
@@ -2903,17 +2899,51 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               maxBudget: ctx.budget.maxModelCostMicro,
               label: "EVIDENCE_EXTRACTOR",
               capability: "EVIDENCE_EXTRACTOR",
-              fn: () => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT" }),
+              fn: () => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT", ...perCallSinks }),
               onAttempt: recordExtractAttempted,
               maxAttempts: 1,
             });
-            spent.authorizedModelCostMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+            authorizedMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
             if (extractOutcome.kind === "ok") {
               observations.add("EXTRACT_COMPACT_RETRY_OK");
             } else {
               observations.add("EXTRACT_COMPACT_RETRY_FAILED");
             }
           }
+          return { doc, extractOutcome, capture, authorizedMicro };
+        };
+        type RoundCall = Awaited<ReturnType<typeof callOne>>;
+        const pending: Promise<RoundCall>[] = [];
+        let overlapping = false;
+        let lastOutcomeOk = false;
+
+        for (let docIndex = 0; docIndex < roundDocs.length; docIndex++) {
+          // Overlap is opt-in (extractionConcurrency, default 1): at 1 every
+          // document is called and reduced in turn, exactly as before.
+          if (!overlapping && lastOutcomeOk && extractionConcurrency() > 1) {
+            overlapping = true;
+            const rest = roundDocs.slice(docIndex);
+            const reserved: boolean[] = [];
+            for (let k = 0; k < rest.length; k++) {
+              reserved.push(
+                await reserveJobBudget(deps.db, ctx.jobId, "modelCostMicro", evidenceExtractorCostMicro, ctx.budget.maxModelCostMicro),
+              );
+            }
+            const started = startWithConcurrency(rest, extractionConcurrency(), (d, k) => callOne(d, docIndex + k, reserved[k]));
+            for (let k = 0; k < rest.length; k++) {
+              pending[docIndex + k] = started[k];
+              // Consumed in order below; a rejection is re-thrown there, not
+              // reported as unhandled meanwhile.
+              started[k].catch(() => undefined);
+            }
+          }
+          const call = overlapping ? await pending[docIndex] : await callOne(roundDocs[docIndex], docIndex, false);
+          lastOutcomeOk = call.extractOutcome.kind === "ok";
+          const doc = call.doc;
+          const extractOutcome = call.extractOutcome;
+          usage.evidenceExtractor = call.capture.evidenceExtractor;
+          usage.rejectedFacts = call.capture.rejectedFacts;
+          spent.authorizedModelCostMicro += call.authorizedMicro;
 
           if (extractOutcome.kind === "budget_exhausted") {
             // HIGH-1 (S10 LAST HIGH CLOSURE, D-121): throw AT the denial

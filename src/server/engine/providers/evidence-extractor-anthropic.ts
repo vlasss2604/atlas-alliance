@@ -304,7 +304,9 @@ export function createAnthropicEvidenceExtractor(
     // reservation) is now owned entirely by s4-executor.ts's
     // reserveAndCallWithRetry, never by this provider primitive.
     async extract(input: EvidenceExtractionInput) {
-      return doExtract(input, model, maxOutputTokens, maxInputTokens, onUsage, onRejectedFacts);
+      // A per-call sink (concurrent extraction) outranks the adapter-level
+      // one; the adapter-level sink is the sequential path's behaviour.
+      return doExtract(input, model, maxOutputTokens, maxInputTokens, input.onUsage ?? onUsage, input.onRejectedFacts ?? onRejectedFacts);
     },
   };
 }

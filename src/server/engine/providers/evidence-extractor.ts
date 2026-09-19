@@ -26,6 +26,16 @@ export interface EvidenceExtractionInput {
   // after a FULL extraction truncated at the output ceiling. See
   // COMPACT_EXTRACTION_MAX_FACTS for what "compact" bounds.
   mode?: ExtractionMode;
+  // SPEED + COST — PER-CALL USAGE SINKS. The adapter-level sinks installed
+  // at preflight write into ONE component-scoped capture, which was correct
+  // while extractions ran one at a time. When the executor overlaps the
+  // model calls for one component's documents, each call must report into
+  // its own capture, or two calls racing to completion would clobber each
+  // other's usage and rejected-fact report. When present these take
+  // precedence over the adapter-level sinks; fixtures that never report
+  // usage are unaffected.
+  onUsage?: (usage: ModelUsage) => void;
+  onRejectedFacts?: (rejected: readonly RejectedFactReport[]) => void;
 }
 
 // THE TWO EXTRACTIONS A DOCUMENT MAY RECEIVE, AND NOTHING IN BETWEEN.
