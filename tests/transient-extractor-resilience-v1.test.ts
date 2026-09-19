@@ -194,7 +194,12 @@ type DocBehaviour =
   | "COUNT_TOKENS_DOWN"
   // count_tokens refused permanently (what token-gate.ts throws after its
   // 1 attempt): not transient, AUTHENTICATION_FAILED:401.
-  | "COUNT_TOKENS_PERMANENT_401";
+  | "COUNT_TOKENS_PERMANENT_401"
+  // Overlap pins: the same outcomes, arriving a beat later (long enough
+  // that a fast failure beside them is known while they are in flight,
+  // even under full-suite load).
+  | "SLOW_OK"
+  | "SLOW_TRANSIENT";
 function scripted(plan: Record<string, DocBehaviour>) {
   const calls = new Map<string, number>();
   const extractor: EvidenceExtractor = {
@@ -205,6 +210,12 @@ function scripted(plan: Record<string, DocBehaviour>) {
       switch (plan[url]) {
         case "OK":
           return [validFact()];
+        case "SLOW_OK":
+          await new Promise((r) => setTimeout(r, 400));
+          return [validFact()];
+        case "SLOW_TRANSIENT":
+          await new Promise((r) => setTimeout(r, 400));
+          throw networkNoResponse();
         case "TRANSIENT":
           throw networkNoResponse();
         case "PERMANENT_403":
@@ -588,15 +599,36 @@ describe("transient extractor resilience — one document is local, two consecut
     expect(await evidenceRows(p.jobId)).toHaveLength(0);
   });
 
-  it("G2. a permanent count_tokens failure is fatal even right after a tolerated transient one — the tolerance is never applied to it", async () => {
-    const p = await makeJob();
-    const s = scripted({ [U(1)]: "OK", [U(2)]: "COUNT_TOKENS_PERMANENT_401", [U(3)]: "OK" });
-    const outcome = executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId));
-    await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
-    await outcome.catch((e: CapabilityFatalError) => expect(e.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS"));
-    expect(s.calls(U(3))).toBe(0);
-    // The Evidence extracted before is persisted, never deleted.
-    expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(1)]);
+  it("G2. a permanent count_tokens failure is fatal even right after a tolerated transient one — the tolerance is never applied to it; at concurrency 1 the next document is never touched, at the approved overlap it may already be in flight and no NEW call starts", async () => {
+    const withConcurrency = async (n: string) => {
+      const prev = process.env.ATLAS_EXTRACTION_CONCURRENCY;
+      process.env.ATLAS_EXTRACTION_CONCURRENCY = n;
+      try {
+        const p = await makeJob();
+        const s = scripted({ [U(1)]: "OK", [U(2)]: "COUNT_TOKENS_PERMANENT_401", [U(3)]: "SLOW_OK", [U(4)]: "SLOW_OK", [U(5)]: "SLOW_OK", [U(6)]: "OK" });
+        const outcome = executorFor(p, [U(1), U(2), U(3), U(4), U(5), U(6)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+        await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+        await outcome.catch((e: CapabilityFatalError) => expect(e.capability).toBe("EVIDENCE_EXTRACTOR_COUNT_TOKENS"));
+        // The Evidence extracted before is persisted, never deleted; nothing
+        // after the fatal document is reduced.
+        expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(1)]);
+        return s;
+      } finally {
+        if (prev === undefined) delete process.env.ATLAS_EXTRACTION_CONCURRENCY;
+        else process.env.ATLAS_EXTRACTION_CONCURRENCY = prev;
+      }
+    };
+    // Sequential: the old behaviour, byte for byte.
+    const seq = await withConcurrency("1");
+    expect(seq.calls(U(2))).toBe(1);
+    for (const u of [U(3), U(4), U(5), U(6)]) expect(seq.calls(u), `sequential touched ${u}`).toBe(0);
+    // Approved overlap (4): after doc 1 succeeds, docs 2..5 start together;
+    // doc 2's permanent failure is known at once; docs 3..5 were already in
+    // flight and complete; doc 6 never starts.
+    const par = await withConcurrency("4");
+    expect(par.calls(U(2))).toBe(1);
+    for (const u of [U(3), U(4), U(5)]) expect(par.calls(u), `in-flight ${u}`).toBe(1);
+    expect(par.calls(U(6)), "a new call started after a known fatal outcome").toBe(0);
   });
 
   it("H. same-document count_tokens retries count ONE distinct document: the real countThenGate makes 2 count_tokens calls for the document, the counter reads 1, and the next document carries the attempt", async () => {
@@ -682,4 +714,76 @@ describe("transient extractor resilience — one document is local, two consecut
     const claims = await ctx.db.select().from(researchClaimSupport).where(eq(researchClaimSupport.researchJobId, p.jobId));
     expect(claims.some((c) => c.status === "CONTRADICTED")).toBe(false);
   });
+
+  describe("APPROVED OVERLAP SEMANTICS — fatal + in-flight (Founder decision, speed+cost)", () => {
+    const withConcurrency = async <T,>(n: string, fn: () => Promise<T>): Promise<T> => {
+      const prev = process.env.ATLAS_EXTRACTION_CONCURRENCY;
+      process.env.ATLAS_EXTRACTION_CONCURRENCY = n;
+      try {
+        return await fn();
+      } finally {
+        if (prev === undefined) delete process.env.ATLAS_EXTRACTION_CONCURRENCY;
+        else process.env.ATLAS_EXTRACTION_CONCURRENCY = prev;
+      }
+    };
+
+    it("O1. a fatal outcome BEFORE the round's first success is exactly the sequential story at every concurrency: one call, the next document never touched", async () => {
+      for (const n of ["1", "4"]) {
+        await withConcurrency(n, async () => {
+          const p = await makeJob();
+          const s = scripted({ [U(1)]: "PERMANENT_403", [U(2)]: "OK", [U(3)]: "OK" });
+          await expect(executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
+          expect(s.calls(U(1)), n).toBe(1);
+          expect(s.calls(U(2)), n).toBe(0);
+          expect(s.calls(U(3)), n).toBe(0);
+        });
+      }
+    });
+
+    it("O2. after a fatal outcome NO NEW RETRY starts: a transient document in flight beside a permanent failure is not retried, and the job is fatal on the permanent one", async () => {
+      await withConcurrency("4", async () => {
+        const p = await makeJob();
+        // doc 1 ok -> docs 2,3 start together; doc 2 fails permanently at
+        // once; doc 3's first attempt fails transiently a beat later and
+        // must NOT be retried.
+        const s = scripted({ [U(1)]: "OK", [U(2)]: "PERMANENT_403", [U(3)]: "SLOW_TRANSIENT" });
+        const outcome = executorFor(p, [U(1), U(2), U(3)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+        await expect(outcome).rejects.toBeInstanceOf(CapabilityFatalError);
+        await outcome.catch((e: CapabilityFatalError) => expect(e.capability).toBe("EVIDENCE_EXTRACTOR"));
+        expect(s.calls(U(2))).toBe(1);
+        expect(s.calls(U(3)), "a retry started after a known fatal outcome").toBe(1);
+        expect((await evidenceRows(p.jobId)).map((e) => e.retrievedUrl)).toEqual([U(1)]);
+      });
+    });
+
+    it("O3. the ceiling is four: with nine documents, at most four are in flight when the fatal outcome is known, and the rest never start", async () => {
+      await withConcurrency("4", async () => {
+        const p = await makeJob();
+        const plan: Record<string, DocBehaviour> = { [U(1)]: "OK", [U(2)]: "PERMANENT_403" };
+        for (let i = 3; i <= 9; i++) plan[U(i)] = "SLOW_OK";
+        const s = scripted(plan);
+        const urls = Array.from({ length: 9 }, (_, i) => U(i + 1));
+        await expect(executorFor(p, urls, s.extractor).execute(ITEM, ctxFor(p.jobId))).rejects.toBeInstanceOf(CapabilityFatalError);
+        for (const i of [3, 4, 5]) expect(s.calls(U(i)), `in-flight ${i}`).toBe(1);
+        for (const i of [6, 7, 8, 9]) expect(s.calls(U(i)), `started after fatal ${i}`).toBe(0);
+        expect(s.totalCalls()).toBe(5);
+      });
+    });
+
+    it("O4. no failure at all: the overlapped round persists every document's facts in document order, exactly as sequential does", async () => {
+      const rowsFor = async (n: string) =>
+        withConcurrency(n, async () => {
+          const p = await makeJob();
+          const s = scripted({ [U(1)]: "OK", [U(2)]: "SLOW_OK", [U(3)]: "OK", [U(4)]: "SLOW_OK" });
+          const result = await executorFor(p, [U(1), U(2), U(3), U(4)], s.extractor).execute(ITEM, ctxFor(p.jobId));
+          expect(result.status).toBe("SUCCEEDED");
+          expect(s.totalCalls()).toBe(4);
+          return (await evidenceRows(p.jobId)).map((e) => e.retrievedUrl);
+        });
+      const seq = await rowsFor("1");
+      const par = await rowsFor("4");
+      expect(par).toEqual(seq);
+    });
+  });
+
 });

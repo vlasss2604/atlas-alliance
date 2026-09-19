@@ -298,7 +298,7 @@ describe("PIPELINE TIMING MODEL — one normal Research through the real phased 
     console.log(
       [
         "",
-        `PIPELINE TIMING MODEL  (PERF_SCALE=${SCALE}; acquisition concurrency ${process.env.ATLAS_ACQUISITION_CONCURRENCY ?? "default 4"}, extraction concurrency ${process.env.ATLAS_EXTRACTION_CONCURRENCY ?? "default 1"}; modelled latencies proposer ${LAT.proposer}ms, search ${LAT.search}ms, fetch ${LAT.fetch}ms, extract ${LAT.extract}ms)`,
+        `PIPELINE TIMING MODEL  (PERF_SCALE=${SCALE}; acquisition concurrency ${process.env.ATLAS_ACQUISITION_CONCURRENCY ?? "default 4"}, extraction concurrency ${process.env.ATLAS_EXTRACTION_CONCURRENCY ?? "default 4"}; modelled latencies proposer ${LAT.proposer}ms, search ${LAT.search}ms, fetch ${LAT.fetch}ms, extract ${LAT.extract}ms)`,
         `  components in work queue : ${t.components}`,
         `  memory planning          : ${fmt(t.memoryPlanningMs)}`,
         `  SEARCH phase             : ${fmt(t.searchMs)}   proposer calls ${c.proposer}, search calls ${c.search}`,

@@ -20,25 +20,22 @@
 // the sequential loops did. The limit is read once from the environment so
 // an operator can pin it to 1 in production without a code change.
 
-// EXTRACTION IS SEQUENTIAL BY DEFAULT — A FOUNDER DECISION IS PENDING.
+// EXTRACTION OVERLAP — APPROVED SEMANTICS (Founder decision, speed+cost):
 //
-// Founder decision 5.5B pins the extractor's failure semantics: a permanent
-// provider rejection on the FIRST document is fatal after ONE call and "the
-// next document is never touched"; two consecutive transient exhaustions
-// are fatal and the third is never touched. Fatality is only known when a
-// call RETURNS, so a document's call may not start before the previous
-// document's outcome is known — which is the definition of sequential.
-// Overlapping extraction therefore cannot honour "never touched" for a
-// document that fails after an earlier success (up to limit-1 later
-// documents are already in flight). The machinery is here, it is pinned
-// equivalent in the no-failure case, and it is OFF until the Founder
-// decides whether "no NEW calls after a fatal outcome" may replace "never
-// touched". ATLAS_EXTRACTION_CONCURRENCY=4 opts in.
+//   max extraction concurrency = 4;
+//   after a KNOWN fatal outcome no new extraction call starts;
+//   calls already in flight may complete;
+//   after a fatal outcome no new retry starts;
+//   concurrency 1 reproduces the sequential behaviour exactly.
+//
+// The executor enforces the first four (a stop flag consulted before every
+// new call and before every retry); this function fixes the ceiling.
+// ATLAS_EXTRACTION_CONCURRENCY pins it lower for an operator.
 export function extractionConcurrency(): number {
   const raw = process.env.ATLAS_EXTRACTION_CONCURRENCY;
   const n = raw === undefined ? NaN : Number(raw);
-  if (Number.isInteger(n) && n >= 1 && n <= 16) return n;
-  return 1;
+  if (Number.isInteger(n) && n >= 1 && n <= 4) return n;
+  return 4;
 }
 
 export function acquisitionConcurrency(): number {
@@ -76,22 +73,37 @@ export async function mapWithConcurrency<T, R>(
 // consumer's own sequential logic (budget outcome, failure accounting,
 // admission) must see each result as soon as its predecessors are done,
 // not once everything is.
+// `shouldStart` is consulted before EVERY new item; once it says no, no
+// further item is started and every item not yet started resolves to null
+// — the consumer sees "never started", never a hang. Items already running
+// complete normally.
 export function startWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,
   fn: (item: T, index: number) => Promise<R>,
-): Promise<R>[] {
+  opts: { shouldStart?: () => boolean } = {},
+): Promise<R | null>[] {
   const width = Math.max(1, Math.min(limit, items.length));
-  const settlers: Array<{ resolve: (r: R) => void; reject: (e: unknown) => void }> = [];
+  const settlers: Array<{ resolve: (r: R | null) => void; reject: (e: unknown) => void }> = [];
   const promises = items.map(
     () =>
-      new Promise<R>((resolve, reject) => {
+      new Promise<R | null>((resolve, reject) => {
         settlers.push({ resolve, reject });
       }),
   );
   let next = 0;
+  let stopped = false;
+  const drain = (): void => {
+    stopped = true;
+    while (next < items.length) settlers[next++].resolve(null);
+  };
   const worker = async (): Promise<void> => {
     for (;;) {
+      if (stopped) return;
+      if (opts.shouldStart && !opts.shouldStart()) {
+        drain();
+        return;
+      }
       const index = next;
       if (index >= items.length) return;
       next += 1;

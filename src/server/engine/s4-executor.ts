@@ -787,6 +787,12 @@ async function reserveAndCallWithRetry<T>(params: {
   // every first attempt: which documents get the budget is decided in the
   // same order, only the network wait overlaps.
   firstAttemptReserved?: boolean;
+  // SPEED + COST — consulted before a transient RETRY (attempt 2) begins.
+  // Under overlapped extraction a fatal outcome on another document means
+  // no new call may start, retries included; the un-retried transient
+  // failure is then reported exactly as a single-attempt transient failure
+  // is (local, PROVIDER_ERROR).
+  abortRetry?: () => boolean;
 }): Promise<RetryOutcome<T>> {
   const budgetReasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED" | "MODEL_COST_BUDGET_EXHAUSTED" =
     params.budgetAxis === "searchQueries" ? "SEARCH_QUERY_BUDGET_EXHAUSTED" : "MODEL_COST_BUDGET_EXHAUSTED";
@@ -885,6 +891,9 @@ async function reserveAndCallWithRetry<T>(params: {
         };
       }
       // Transient on attempt 1 — loop continues, reserves again, retries.
+      if (params.abortRetry?.()) {
+        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", detail: safeFailureDetail(e), attempts };
+      }
       if (params.onTransientRetry) await params.onTransientRetry(e);
       // TRANSIENT RETRY DELAY (providers/retry.ts): the one bounded wait
       // before that single retry — so a no-response retry is not made
@@ -894,6 +903,9 @@ async function reserveAndCallWithRetry<T>(params: {
       // count stays two.
       const delayMs = transientRetryDelayMs(e);
       if (delayMs > 0) await sleep(delayMs);
+      if (params.abortRetry?.()) {
+        return { kind: "local", reason: safeFailureReason(params.label, e), reasonCode: "PROVIDER_ERROR", detail: safeFailureDetail(e), attempts };
+      }
     }
   }
   // Unreachable (the loop always returns), but keeps the function total.
@@ -2802,6 +2814,18 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // loop's. Total spend cannot: every unit is one atomic reservation
         // either way.
         const roundDocs = fetchedDocs.slice(extractedDocCount);
+        // APPROVED SEMANTICS (Founder decision, speed+cost): max concurrency
+        // 4; after a KNOWN fatal outcome no new extraction call starts and no
+        // new retry starts; calls already in flight may complete;
+        // concurrency 1 reproduces the sequential loop exactly.
+        //
+        // `extractionStopped` is the one flag. It is raised the moment any
+        // call returns a permanently fatal outcome (a provider rejection, a
+        // permanent count_tokens failure) and unconditionally when this
+        // round's loop exits for any reason (a fatal throw from the tail,
+        // budget exhaustion, ordinary completion) — so nothing can start
+        // after a fatal outcome is known, however it became known.
+        //
         // ONE DOCUMENT AT A TIME UNTIL THE ROUND'S FIRST SUCCESS, THEN
         // OVERLAP. The failure semantics Founder decision 5.5B pinned are
         // sequential by nature — a permanent rejection on the FIRST document
@@ -2813,7 +2837,8 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // byte. Once one has, the rest of the round is reserved in document
         // order and called with bounded concurrency, and their results are
         // still consumed in document order.
-        const callOne = async (doc: FetchedDocument, docIndex: number, firstAttemptReserved: boolean) => {
+        let extractionStopped = false;
+        const callOne = async (doc: FetchedDocument) => {
           const capture: UsageCapture = { queryProposer: null, evidenceExtractor: null, rejectedFacts: null };
           const recordExtractAttempted = async () => {
             await recordTraceEvent(deps.db, {
@@ -2866,13 +2891,13 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 diagnosticCode: extractorDiagnosticCode(safeFailureDetail(firstAttemptError)),
               });
             },
-            // Reserved above, in document order. A document whose ordered
-            // reservation was refused reserves again here and is refused
-            // again — the same budget_exhausted outcome the sequential loop
-            // produced, with no call made.
-            firstAttemptReserved,
+            abortRetry: () => extractionStopped,
           });
           authorizedMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+          if (extractOutcome.kind === "fatal" && extractOutcome.fatalCause !== "TRANSIENT_RETRY_EXHAUSTED" && extractOutcome.fatalCause !== "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED") {
+            // Known fatal: no new call, no new retry, from this instant.
+            extractionStopped = true;
+          }
 
           if (extractOutcome.kind === "local" && extractOutcome.detail === "MAX_TOKENS_TRUNCATED") {
             observations.add("EXTRACT_FAILED:MAX_TOKENS_TRUNCATED");
@@ -2891,6 +2916,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             });
             observations.add("EXTRACT_COMPACT_RETRY");
             capture.rejectedFacts = null;
+            // The compact retry is a NEW call: not after a known fatal
+            // outcome. The truncated outcome stands as the document's.
+            if (extractionStopped) return { doc, extractOutcome, capture, authorizedMicro };
             extractOutcome = await reserveAndCallWithRetry({
               db: deps.db,
               jobId: ctx.jobId,
@@ -2913,23 +2941,24 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           return { doc, extractOutcome, capture, authorizedMicro };
         };
         type RoundCall = Awaited<ReturnType<typeof callOne>>;
-        const pending: Promise<RoundCall>[] = [];
+        const pending: Promise<RoundCall | null>[] = [];
         let overlapping = false;
         let lastOutcomeOk = false;
 
+        try {
         for (let docIndex = 0; docIndex < roundDocs.length; docIndex++) {
-          // Overlap is opt-in (extractionConcurrency, default 1): at 1 every
-          // document is called and reduced in turn, exactly as before.
-          if (!overlapping && lastOutcomeOk && extractionConcurrency() > 1) {
+          // At concurrency 1 every document is called and reduced in turn,
+          // exactly as before. Above 1, once the round has a success the
+          // rest is started with bounded concurrency; each call reserves
+          // as it STARTS (the wrapper's ordinary attempt-1 reservation), in
+          // start order, so nothing is reserved for a document that never
+          // starts.
+          if (!overlapping && lastOutcomeOk && extractionConcurrency() > 1 && !extractionStopped) {
             overlapping = true;
             const rest = roundDocs.slice(docIndex);
-            const reserved: boolean[] = [];
-            for (let k = 0; k < rest.length; k++) {
-              reserved.push(
-                await reserveJobBudget(deps.db, ctx.jobId, "modelCostMicro", evidenceExtractorCostMicro, ctx.budget.maxModelCostMicro),
-              );
-            }
-            const started = startWithConcurrency(rest, extractionConcurrency(), (d, k) => callOne(d, docIndex + k, reserved[k]));
+            const started = startWithConcurrency(rest, extractionConcurrency(), (d) => callOne(d), {
+              shouldStart: () => !extractionStopped,
+            });
             for (let k = 0; k < rest.length; k++) {
               pending[docIndex + k] = started[k];
               // Consumed in order below; a rejection is re-thrown there, not
@@ -2937,7 +2966,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               started[k].catch(() => undefined);
             }
           }
-          const call = overlapping ? await pending[docIndex] : await callOne(roundDocs[docIndex], docIndex, false);
+          const call = overlapping ? await pending[docIndex] : await callOne(roundDocs[docIndex]);
+          // Never started: a fatal outcome was known before this document's
+          // turn. The tail throws for the fatal document before its
+          // successors are consumed, so this is a guard, not a path.
+          if (call === null) break;
           lastOutcomeOk = call.extractOutcome.kind === "ok";
           const doc = call.doc;
           const extractOutcome = call.extractOutcome;
@@ -3392,6 +3425,15 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               observations.add("SOURCE_ROUTE_CANDIDATE_WRITE_FAILED");
             }
           }
+        }
+        } finally {
+          // However this round ended — a fatal throw, budget exhaustion or
+          // ordinary completion — no further extraction call may start, and
+          // the calls already in flight are allowed to finish BEFORE the
+          // outcome propagates: nothing of this attempt (a trace row, a
+          // usage capture) is written after the attempt has been closed.
+          extractionStopped = true;
+          await Promise.allSettled(pending);
         }
         extractedDocCount = fetchedDocs.length;
 

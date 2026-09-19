@@ -225,6 +225,15 @@ function evmFixture(opts: { down?: boolean }) {
 
 function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; calls: Record<string, number> } {
   const byUrl = new Map(s.docs.map((d) => [d.url, d]));
+  // The fixture's default publication date is DETERMINISTIC and monotone
+  // in document order: yesterday, plus one second per document. It used
+  // to be the clock at extraction time, which encoded the sequential
+  // extraction order into the supersession order; under overlapped
+  // extraction (speed+cost pass 2) that order is a scheduling race. The
+  // production extractor reads publication dates from the document, never
+  // from the clock.
+  const defaultPublishedAtBase = daysAgo(1).getTime();
+  const defaultPublishedAt = (finalUrl: string): Date => new Date(defaultPublishedAtBase + Math.max(0, [...byUrl.keys()].indexOf(finalUrl)) * 1000);
   const calls: Record<string, number> = { proposer: 0, search: 0, fetch: 0, extract: 0 };
   const served = new Set<string>();
   const extractCalls = new Map<string, number>();
@@ -299,7 +308,7 @@ function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; c
             supportFragment: f.fragment,
             mechanismState: f.mechanismState ?? null,
             directness: "DIRECT",
-            publishedAt: f.publishedAt === undefined ? daysAgo(1) : f.publishedAt,
+            publishedAt: f.publishedAt === undefined ? defaultPublishedAt(url) : f.publishedAt,
             doesNotProve: "does not prove the size of the effect",
             relationship: "SUPPORTS",
           }),

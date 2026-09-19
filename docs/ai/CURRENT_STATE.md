@@ -33,13 +33,17 @@ Two acquisition loops that wait on the network — the fetch phase over
 urls and one component's search queries — overlap that waiting with
 bounded concurrency (`src/server/engine/concurrency.ts`, default 4,
 `ATLAS_ACQUISITION_CONCURRENCY` to pin it, `1` is the old sequential
-loop). Extraction overlap is built and pinned equivalent but ships OFF
-(`ATLAS_EXTRACTION_CONCURRENCY`, default 1) because Founder decision 5.5B
-pins "the next document is never touched" after a fatal outcome, which
-no overlap can honour; enabling it is a pending Founder decision.
-Every budget reservation is still one atomic conditional UPDATE, first
-attempts are reserved in document/plan order, results are merged in that
-order, and the per-job render cap is serialised per job. The persisted
+loop). Extraction overlap ships ON (`ATLAS_EXTRACTION_CONCURRENCY`,
+ceiling and default 4, `1` reproduces the sequential loop exactly) under
+the Founder-approved semantics of 2026-09-19: one document at a time
+until a round's first success, then bounded overlap; after a KNOWN fatal
+outcome (permanent provider rejection, permanent count_tokens, or any
+throw from the tail) no new extraction call, no new transient retry and
+no compact retry starts, while calls already in flight complete and are
+paid. Every budget reservation is still one atomic conditional UPDATE
+(an overlapped extraction reserves as it starts, in start order),
+search first attempts are reserved in plan order, results are merged in
+document/plan order, and the per-job render cap is serialised per job. The persisted
 research picture is pinned identical between concurrency 1 and 4
 (`tests/perf-pipeline-timing-v1.test.ts`).
 

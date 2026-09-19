@@ -20,19 +20,18 @@ providers that count every call and sleep a MODELLED latency per call
 typical values, not live measurements). What it measures faithfully is
 the STRUCTURE: how many calls, and how many are on the serial path.
 
-| stage | before | shipped default | opt-in extraction overlap | calls (unchanged) |
+| stage | before | pass 1 (fetch + search) | shipped (pass 2, extraction overlap) | calls (unchanged) |
 |---|---|---|---|---|
 | SEARCH phase | 14.6 s | 12.1 s | 12.1 s | 6 proposer, 12 search |
 | FETCH phase | 6.0 s | 1.8 s | 1.8 s | 7 fetches, 7 unique urls |
-| EXTRACT + S5–S8 | 55.2 s | 55.2 s | 32.3 s | 21 extractions |
-| **total** | **75.9 s** | **69.1 s** | **46.2 s** | |
+| EXTRACT + S5–S8 | 55.2 s | 55.2 s | 32.4 s | 21 extractions |
+| **total** | **75.9 s** | **69.1 s** | **46.3 s** | |
 
 Best of two runs each; the search phase varied by up to 2.8 s between
 identical runs (its ~30 DB round trips on a WSL/Docker Postgres), so
 treat ±3 s as noise. Extraction is per-component serial by design: the
-opt-in column overlaps only the documents AFTER a round's first success,
-which is why it is 32 s and not the 17 s a fully overlapped round would
-give.
+overlap covers only the documents AFTER a round's first success, which
+is why it is 32 s and not the 17 s a fully overlapped round would give.
 
 Run it with `PERF_SCALE=1` for the numbers; the suite runs it at ~0 for the
 structural pins. `ATLAS_ACQUISITION_CONCURRENCY=1` reproduces "before";
@@ -50,44 +49,64 @@ waiting and nothing else (`engine/concurrency.ts`, bounded at 4 by default):
 - **SEARCH phase** — one component's queries: reserved in plan order,
   searched concurrently, merged in plan order, so `candidateUrls` (the
   fetch order) is byte-identical.
-- **EXTRACTION — built, pinned equivalent, and OFF by default.** One
-  round's documents are called one at a time until the round's first
-  success, then the rest are reserved in document order and overlapped
-  with per-call usage capture (the adapter-level usage sink was one shared
-  object per component), their results consumed in document order by the
-  unchanged tail. It ships at concurrency 1 because Founder decision 5.5B
-  pins "the next document is never touched" after a fatal outcome, and
-  fatality is only known when a call returns — so a later document's call
-  cannot start before the previous outcome is known without violating
-  the pin (`transient-extractor-resilience-v1` G2 caught exactly this).
-  That is a decision, not a bug: see below.
+- **EXTRACTION — shipped ON (pass 2), under the Founder-approved
+  semantics.** One round's documents are called one at a time until the
+  round's first success, then the rest are started with bounded
+  concurrency (ceiling 4; `ATLAS_EXTRACTION_CONCURRENCY` pins it lower,
+  `1` is the old sequential loop byte for byte), each call reserving as
+  it starts, in start order, with per-call usage capture; results are
+  consumed in document order by the unchanged tail. The one flag
+  `extractionStopped` is raised the instant a call returns a permanently
+  fatal outcome (provider rejection 401/403/404, permanent count_tokens)
+  and unconditionally when the round's loop exits for any reason (a fatal
+  throw from the tail, budget exhaustion, completion). After it: no new
+  call starts (`startWithConcurrency`'s `shouldStart`), no new transient
+  retry starts (`reserveAndCallWithRetry`'s `abortRetry`, checked before
+  and after the retry delay; the un-retried failure is reported as the
+  single-attempt local failure), no compact retry starts; calls already
+  in flight complete and are paid, and the round waits for them
+  (`Promise.allSettled`) before the fatal outcome propagates, so nothing
+  of the attempt is written after the attempt is closed. Founder
+  decision 5.5B's "the next document is never touched" now reads "no
+  NEW call after a known fatal outcome" above concurrency 1 and is
+  unchanged at concurrency 1.
+- **One fixture defect surfaced by the overlap (not a pipeline change).**
+  Five test extractors (`adversarial-core-round5/6/7`,
+  `founder-semantics-round5-5/6-5`) defaulted `publishedAt` to
+  `daysAgo(1)` read from the clock AT EXTRACTION TIME, which silently
+  encoded the sequential extraction order into the reducer's supersession
+  order (round 5 F6a flipped CLASS_NOT_ADMISSIBLE → SUPERSEDED_BY_NEWER
+  in ~4 of 5 runs). The default is now deterministic: yesterday plus one
+  second per document, monotone in document order — the world the tests
+  always assumed. The production extractor reads publication dates from
+  the document, never from the clock; nothing in the pipeline changed.
 
 `SEQUENTIAL == CONCURRENT` is pinned: two fresh projects, one at
 concurrency 1 and one at 4, persist the identical S5 statuses and reason
 codes, S6 flow shapes, S7 requirements, verdict, band, evidence count and
 trace counts.
 
-One documented equivalence boundary: a transient retry (attempt 2)
-reserves when it happens, which can now be after a later document's
-attempt 1. Under a model budget exhausted mid-round AND a transient
-provider failure in the same round, the SET of documents that got a call
-can differ from the sequential loop's; total spend cannot.
+Pins for the approved semantics (`tests/transient-extractor-resilience-v1`):
+G2 (permanent count_tokens after a success: at 1 the next document is
+never touched; at 4 docs 3–5 were in flight and complete, doc 6 never
+starts), O1 (a fatal outcome before the round's first success is the
+sequential story at every concurrency), O2 (a transient failure in
+flight beside a permanent one is NOT retried; the job is fatal on the
+permanent one), O3 (nine documents: exactly four in flight when the
+fatal outcome is known, five calls total, the rest never start), O4
+(no failure: evidence rows identical to sequential, in document order).
 
-### Founder decision required: extraction overlap
+Documented equivalence boundaries: (a) a transient retry reserves when
+it happens, which can be after a later document's attempt 1 — under a
+model budget exhausted mid-round AND a transient failure in the same
+round, the SET of documents that got a call can differ from the
+sequential loop's; total spend cannot; (b) after a fatal outcome that
+follows a success in the same round, up to three later documents were
+already in flight — those calls are made and paid (under a genuinely
+broken capability they fail immediately); nothing after them is reduced
+or persisted.
 
-Extraction is 73% of the modelled wall-clock and the only stage still
-serial. Overlapping it needs 5.5B's "the next document is never touched"
-relaxed to "no NEW extraction call starts after a fatal outcome; calls
-already in flight complete". Cost of the relaxation: on a permanent
-provider rejection or a second consecutive transient exhaustion that
-follows an earlier success in the same round, up to (concurrency − 1)
-later documents are already in flight — those calls are made and paid.
-Under a genuinely broken capability (401/403) they fail immediately.
-Benefit: 55 s → 32 s modelled on the normal Research (69 s → 46 s
-total); the ≤ 60 s target is not reachable without it, and reaching it
-with margin also needs cross-component overlap (below). `ATLAS_EXTRACTION_CONCURRENCY=4` turns it on.
-
-### Cost levers found, not taken (Founder decisions)
+### Deferred by Founder decision (2026-09-19)
 
 - **Prompt caching** would cut the largest cost — the same document is
   extracted once per component that opened it — but the extractor prompt
@@ -98,9 +117,11 @@ with margin also needs cross-component overlap (below). `ATLAS_EXTRACTION_CONCUR
 - **Cross-component parallelism** (proposer across components, extraction
   across components) is the remaining wall-clock: it interacts with D-140
   fair share and attempt claiming, so it needs a design review.
+- **pg-boss polling** (~2 s per phase hop at the default interval) — not
+  pursued.
 
 ### Next
 
-- Founder review of this report.
+- Founder review of the pass 2 report.
 - Then: migrations 0052–0054, live Solana Research, live EVM Research.
   No live spend before approval.
