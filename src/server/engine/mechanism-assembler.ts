@@ -433,9 +433,89 @@ const HOLDER_ENTITLEMENT_PHRASES = [
   "no action required",
 ];
 
+// FOUNDER REVIEW OF ROUND 8 — EXPLICIT NEGATION IS NOT A POSITIVE BRIDGE.
+//
+// The approved M3 rule is that POSITIVE entitlement or receipt must be
+// established. "Holders are NOT entitled to any share" is the denial of
+// exactly the proposition the dictionary above looks for, so reading it as
+// the bridge does not merely fail to help — it asserts the opposite of the
+// evidence. That is not the accepted H3 limitation ("not burned" -> BURN
+// classifies a KIND that is genuinely discussed); it is the one place where
+// the polarity of the sentence IS the fact being classified.
+//
+// The smallest rule that fixes it, and nothing more: a closed negator list,
+// scoped so that a denial about something else cannot suppress a real
+// statement about holders. Two bounds, both local to this one classifier:
+//
+//   CLAUSE   — the text is cut at sentence/clause terminators, and a clause
+//              must carry the WHOLE bridge: it must name holders itself AND
+//              state the entitlement. "Holders receive the fees; the
+//              protocol is entitled to a pro rata share" is two clauses
+//              about two actors, and establishes nothing — the same rule
+//              that stopped two ROWS composing into a bridge, applied at
+//              the granularity where the same composition is still
+//              possible inside one row. Commas are deliberately NOT
+//              terminators: "token holders, who hold the token, are
+//              entitled to a pro rata share" is one statement.
+//   WINDOW   — within that clause, only the NEGATOR_WINDOW tokens
+//              immediately before the matched phrase are read. So "no fee
+//              is charged and holders are entitled to a pro rata share"
+//              still establishes the bridge, while "holders shall not,
+//              under any circumstances, be entitled to fees" does not.
+//
+// No grammar, no parser, no model: one closed word list and two positional
+// bounds. Every rejection costs PARTIAL, which is the safe direction.
+const HOLDER_ENTITLEMENT_NEGATORS = new Set([
+  "not",
+  "no",
+  "never",
+  "without",
+  "none",
+  "nor",
+  "neither",
+  "cannot",
+  "excluded",
+  "ineligible",
+  "nothing",
+]);
+const NEGATOR_WINDOW = 6;
+// Sentence and clause terminators. A comma is not one — see above.
+const CLAUSE_TERMINATORS = /[.;:!?\n\r]+/;
+
+// Every start index at which `phrase` occurs in `tokens`.
+function phraseOccurrences(tokens: string[], phrase: string): number[] {
+  const phraseTokens = tokenizeForClassifier(phrase);
+  const out: number[] = [];
+  outer: for (let i = 0; i + phraseTokens.length <= tokens.length; i++) {
+    for (let j = 0; j < phraseTokens.length; j++) {
+      if (tokens[i + j] !== phraseTokens[j]) continue outer;
+    }
+    out.push(i);
+  }
+  return out;
+}
+
+function negatedAt(tokens: string[], start: number): boolean {
+  for (let k = Math.max(0, start - NEGATOR_WINDOW); k < start; k++) {
+    if (HOLDER_ENTITLEMENT_NEGATORS.has(tokens[k])) return true;
+  }
+  return false;
+}
+
 export function classifyHolderEntitlement(text: string): boolean {
-  const tokens = tokenizeForClassifier(text);
-  return HOLDER_ENTITLEMENT_PHRASES.some((p) => containsPhrase(tokens, p));
+  for (const clause of text.split(CLAUSE_TERMINATORS)) {
+    const tokens = tokenizeForClassifier(clause);
+    if (tokens.length === 0) continue;
+    // The clause must be about holders on its own — the bridge is a claim
+    // about holders, so the actor and the entitlement are one statement.
+    if (classifyRecipientKind(clause) !== "PASSIVE_HOLDER") continue;
+    for (const phrase of HOLDER_ENTITLEMENT_PHRASES) {
+      for (const start of phraseOccurrences(tokens, phrase)) {
+        if (!negatedAt(tokens, start)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 // §14 — new, minimal vocabulary. RETURN takes priority: a returned
@@ -1056,14 +1136,13 @@ function buildFlow(
   // and the same gap kind the walk emits when the component is absent).
   // S7 reads it; nothing here decides a verdict.
   //
-  // Asked of each admitted row SEPARATELY, and only of rows that name
-  // holders on their own: the bridge is a claim about holders, so one
-  // statement must carry both halves. Pooling the component's text would
-  // let two individually true sentences about different actors compose into
-  // an entitlement neither of them states.
-  const holderEntitlementEstablished = textsFor("RECIPIENT").some(
-    (t) => classifyRecipientKind(t) === "PASSIVE_HOLDER" && classifyHolderEntitlement(t),
-  );
+  // Asked of each admitted row SEPARATELY, and inside a row of each clause
+  // separately: the bridge is a claim about holders, so ONE statement must
+  // carry both halves. Pooling the component's text would let two
+  // individually true sentences about different actors compose into an
+  // entitlement neither of them states, and so would pooling two clauses
+  // of one row. Explicit negation of the bridge is not the bridge.
+  const holderEntitlementEstablished = textsFor("RECIPIENT").some(classifyHolderEntitlement);
   if (
     recipientKind === "PASSIVE_HOLDER" &&
     !holderEntitlementEstablished &&

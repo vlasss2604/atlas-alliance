@@ -679,21 +679,48 @@ describe("I. THE GATES ARE QUESTION-LOCAL, AND THEIR LIMITS ARE NAMED", () => {
     expect(VERDICT_RANK[verdicts(opaque).PROTOCOL_REVENUE_TO_TOKEN]).toBeLessThan(VERDICT_RANK[verdicts(known).PROTOCOL_REVENUE_TO_TOKEN]);
   });
 
-  it("I3 (BOUNDARY, inherited H3 / S6 audit LOW-3). the entitlement dictionary has no negation and no tense grammar, exactly like every other closed classifier in S6: a sentence that DENIES holder entitlement, or places it in the future or the past, satisfies the bridge. NOT a regression — each of these worlds answered SUPPORTED before the gate existed too — and the remedy (a negation stop-list on the closed dictionaries) is the already-documented H3 decision, not a new one", () => {
-    const shapes = [
+  it("I3 (FIXED, Founder review of Round 8). EXPLICIT NEGATION IS NOT THE POSITIVE BRIDGE: a sentence denying holder entitlement no longer satisfies it, and a denial about something else or in another sentence still does not suppress a real one. The destination dictionary's own negation limit (H3) is untouched and still pinned", () => {
+    for (const fragment of [
       "token holders are not entitled to any share of protocol revenue",
-      "token holders may in future be entitled to a pro rata share of the fees",
-      "token holders were previously entitled to a pro rata share of the fees",
-    ];
-    for (const fragment of shapes) {
+      "token holders have no entitlement to protocol revenue",
+      "token holders never receive any pro rata share of the fees",
+      "token holders shall not, under any circumstances, be entitled to the fees",
+    ]) {
       const m = ask([...base(), destHolders(), row("RECIPIENT", { fragment })], { identity: IDENTITY });
       laws(m, `I3:${fragment}`);
-      // The gate is satisfied — this is the limit, stated rather than hidden.
-      expect(m.PASSIVE_HOLDER_OUTCOME.assembly.flows.every((f) => f.gaps.every((g) => g.kind !== "RECIPIENT_UNRESOLVED")), fragment).toBe(true);
+      const holderFlows = m.PASSIVE_HOLDER_OUTCOME.assembly.flows.filter((f) => f.attributes.recipientKind === "PASSIVE_HOLDER");
+      expect(holderFlows.length, fragment).toBeGreaterThan(0);
+      for (const f of holderFlows) expect(f.gaps.some((g) => g.kind === "RECIPIENT_UNRESOLVED"), fragment).toBe(true);
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("PARTIALLY_SUPPORTED");
+      // A denial is ABSENCE of the bridge, not a refutation of the
+      // recipient. No negation grammar was added anywhere else.
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).not.toBe("NOT_SUPPORTED");
+    }
+    // Scoped: a denial in its own sentence leaves a real statement alone.
+    const scoped = ask(
+      [...base(), destHolders(), row("RECIPIENT", { fragment: "fees are not charged on transfers. token holders are entitled to a pro rata share of the distributed fees." })],
+      { identity: IDENTITY },
+    );
+    expect(verdicts(scoped).PASSIVE_HOLDER_OUTCOME).toBe("SUPPORTED");
+    // H3 itself is untouched: the DESTINATION dictionary still has no
+    // negation grammar, and that remains the documented Founder boundary.
+    const d = ask([...base(), row("DESTINATION", { fragment: "these tokens are not burned" })], { identity: IDENTITY });
+    expect(d.PROTOCOL_REVENUE_TO_TOKEN.assembly.flows[0].attributes.destinationKind).toBe("BURN");
+  });
+
+  it("I4 (BOUNDARY, MINOR — Founder decision open). the holder-entitlement dictionary still has no TENSE grammar: 'may in future be entitled' and 'were previously entitled' satisfy the positive bridge. ATLAS bounds tense through mechanism_state and the lifecycle machinery instead (round7-5 C1/C2: a PROPOSED recipient row caps at PROPOSED_STATE_ONLY), so reading prose tense in a classifier would be a NEW semantic rule rather than an implication of the approved one. Pinned, not decided", () => {
+    for (const fragment of [
+      "token holders may in future be entitled to a pro rata share of the fees",
+      "token holders were previously entitled to a pro rata share of the fees",
+    ]) {
+      const m = ask([...base(), destHolders(), row("RECIPIENT", { fragment })], { identity: IDENTITY });
+      laws(m, `I4:${fragment}`);
       expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("SUPPORTED");
-      // The same limit the destination dictionary has always had.
-      const d = ask([...base(), row("DESTINATION", { fragment: "these tokens are not burned" })], { identity: IDENTITY });
-      expect(d.PROTOCOL_REVENUE_TO_TOKEN.assembly.flows[0].attributes.destinationKind).toBe("BURN");
+      // The lifecycle machinery is what actually bounds it: the same
+      // sentence recorded as a PROPOSAL cannot reach SUPPORTED.
+      const proposed = ask([...base(), destHolders(), row("RECIPIENT", { fragment, mechanismState: "PROPOSED" })], { identity: IDENTITY });
+      expect(s5(proposed, "RECIPIENT").reasonCodes, fragment).toContain("PROPOSED_STATE_ONLY");
+      expect(verdicts(proposed).PASSIVE_HOLDER_OUTCOME, fragment).not.toBe("SUPPORTED");
     }
   });
 });

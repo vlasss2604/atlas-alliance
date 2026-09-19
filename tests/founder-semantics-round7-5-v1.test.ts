@@ -410,6 +410,98 @@ describe("M3 — RECIPIENT IDENTITY IS NOT ENTITLEMENT", () => {
     expect(verdicts(genuine).PASSIVE_HOLDER_OUTCOME).toBe(verdicts(alone).PASSIVE_HOLDER_OUTCOME);
   });
 
+  it("8 (Founder review of Round 8). EXPLICIT NEGATION IS NOT THE POSITIVE BRIDGE: a row that DENIES holder entitlement leaves the bridge unresolved, exactly as a row that never mentions it does", () => {
+    const control = ask(worldWith(rcptHoldersBare()), { identity: IDENTITY });
+    const negations = [
+      "token holders are not entitled to any share of protocol revenue",
+      "token holders have no entitlement to protocol revenue",
+      "there is no entitlement for token holders",
+      "token holders never receive any pro rata share of the fees",
+      "token holders receive no pro rata share",
+      "token holders shall not, under any circumstances, be entitled to the fees",
+    ];
+    for (const fragment of negations) {
+      const m = ask(worldWith(row("RECIPIENT", { fragment })), { identity: IDENTITY });
+      // The recipient is still established and still classified: nothing
+      // about WHO receives is withdrawn by this rule.
+      expect(s5(m, "RECIPIENT").status, fragment).toBe("SUPPORTED");
+      expect(flow0(m).attributes.recipientKind, fragment).toBe("PASSIVE_HOLDER");
+      // But the positive bridge is not established.
+      expect(RECIPIENT_GAP(m.PASSIVE_HOLDER_OUTCOME).length, fragment).toBe(1);
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("PARTIALLY_SUPPORTED");
+      expect(req(m.PASSIVE_HOLDER_OUTCOME, "PHO-1").status, fragment).toBe("PARTIAL");
+      expect(req(m.PASSIVE_HOLDER_OUTCOME, "PHO-1").reasonCodes, fragment).toContain("REQUIRED_RELATIONSHIP_UNRESOLVED");
+      // A denial is ABSENCE of the bridge, never a refutation of the
+      // recipient: NOT_SUPPORTED would be a negation grammar, which this is
+      // deliberately not (H3 is untouched).
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).not.toBe("NOT_SUPPORTED");
+      // And never stronger than the bare-recipient control.
+      noStrongerThan(m, control, `negation: ${fragment}`);
+      provenanceHolds(m, "M3-8");
+    }
+  });
+
+  it("9 (Founder review of Round 8). the negation rule is SCOPED: a denial about someone else, or in another sentence, never suppresses a real holder-entitlement statement; and within one row two clauses about two actors still compose into nothing", () => {
+    // A denial elsewhere in the same row does not suppress the bridge.
+    for (const fragment of [
+      // A denial in its own sentence. (It deliberately names no other
+      // dictionary role: a row mentioning the treasury classifies
+      // recipientKind TREASURY on first-match-wins, which is the separate,
+      // pre-existing rule pinned in round8 B2.)
+      "fees are not charged on transfers. token holders are entitled to a pro rata share of the distributed fees.",
+      "no fee is charged on transfers and token holders are entitled to a pro rata share",
+      "token holders, who hold the token, are entitled to a pro rata share",
+      "token holders are entitled to a pro rata share and nothing is withheld",
+    ]) {
+      const m = ask(worldWith(row("RECIPIENT", { fragment })), { identity: IDENTITY });
+      expect(RECIPIENT_GAP(m.PASSIVE_HOLDER_OUTCOME).length, fragment).toBe(0);
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).toBe("SUPPORTED");
+      provenanceHolds(m, "M3-9-positive");
+    }
+    // Two clauses, two actors, one row: the case 7 laundering at clause
+    // granularity. Neither clause carries the whole bridge.
+    for (const fragment of [
+      "token holders receive the distributed fees; the protocol is entitled to a pro rata share of trading fees",
+      "token holders benefit from the mechanism. a pro rata share is paid to the foundation.",
+    ]) {
+      const m = ask(worldWith(row("RECIPIENT", { fragment })), { identity: IDENTITY });
+      const holderFlows = m.PASSIVE_HOLDER_OUTCOME.assembly.flows.filter((f) => f.attributes.recipientKind === "PASSIVE_HOLDER");
+      expect(holderFlows.length, fragment).toBeGreaterThan(0);
+      for (const f of holderFlows) expect(f.gaps.some((g) => g.kind === "RECIPIENT_UNRESOLVED"), fragment).toBe(true);
+      expect(verdicts(m).PASSIVE_HOLDER_OUTCOME, fragment).not.toBe("SUPPORTED");
+      provenanceHolds(m, "M3-9-laundering");
+    }
+  });
+
+  it("10 (Founder review of Round 8). the negation rule is inert to order, duplication and inadmissible evidence: a denied bridge stays denied however many times it is filed, and no SOCIAL post reciting the entitlement can lift it", () => {
+    const denied = () => row("RECIPIENT", { fragment: "token holders are not entitled to any share of protocol revenue" });
+    const world = worldWith(denied());
+    const control = ask(world, { identity: IDENTITY });
+    const key = (m: Matrix) =>
+      JSON.stringify({
+        v: verdicts(m),
+        r: INTENTS.map((i) => m[i].claim.requirementResults.map((x) => `${x.requirementId}:${x.status}:${[...x.reasonCodes].sort().join("|")}`)),
+        b: INTENTS.map((i) => m[i].proof.confidenceScore),
+      });
+    expect(verdicts(control).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+
+    // Order.
+    expect(key(ask([...world].reverse(), { identity: IDENTITY }))).toBe(key(control));
+    // Duplication — five mirrors of the same denial.
+    const mirrors = Array.from({ length: 4 }, (_, i) =>
+      row("RECIPIENT", { fragment: "token holders are not entitled to any share of protocol revenue", contentHash: "same-denial", sourceId: `deny-${i}` }),
+    );
+    const many = ask([...world, ...mirrors], { identity: IDENTITY });
+    expect(verdicts(many).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    expect(req(many.PASSIVE_HOLDER_OUTCOME, "PHO-1").status).toBe("PARTIAL");
+    noStrongerThan(many, control, "duplicated denial");
+    // Inadmissible evidence reciting the entitlement.
+    const withSocial = ask([...world, social("RECIPIENT")], { identity: IDENTITY });
+    expect(verdicts(withSocial).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED");
+    noStrongerThan(withSocial, control, "social entitlement post");
+    provenanceHolds(withSocial, "M3-10");
+  });
+
   it("6. conflicting recipient evidence stays fail-closed under the existing contradiction rules: an entitlement sentence beside a contradicting recipient row never reaches SUPPORTED, and never reads stronger than the entitlement world alone", () => {
     // A contradiction in ATLAS is state INCOMPATIBILITY, not a relationship
     // label (S5 MEDIUM-1): both rows must bear a normalized state, and the
