@@ -2,69 +2,55 @@
 
 > Overwrite this file each round. Never append.
 
-## THE THREE APPROVED FIXES, AND ROUND 10 (done this round)
+## FOUNDER DECISION Q1, AND ROUND 11 (done this round)
 
 Offline, $0 spend (no Anthropic, Brave, RPC or live Research; migrations
 0052–0054 still pending and NOT applied; Lido Memory untouched).
 
-### I4 — uncertain, proposed or conditional is not positive
+### Q1 — what spends a DEMO lifetime slot
 
-A closed list of possibility, conditionality and intention markers, read
-inside the matched phrase's own clause within a bounded window, and judged
-PER CLAUSE: a clause with any defeated occurrence establishes nothing
-(several dictionary phrases can match one clause, and the marker that
-defeats one sits outside another's window).
+  PROJECT REALITY / RESEARCH VERDICT consumes quota.
+  TECHNICAL FAILURE does not.
 
-Not a tense parser. `will` and `can` are deliberately absent — a scheduled
-mechanism's actuality is `mechanism_state`'s decision. Conservative where
-it cannot tell: a clause carrying explicit proposal language is refused
-even where a reader could see the proposal had passed, because governance
-approval is represented structurally and nothing real rests on prose.
+`demoTerminalOutcome` returns CONSUMED when the terminal state carries a
+result (SUCCEEDED or BUDGET_LIMIT_REACHED) AND a durable Proof exists;
+everything else releases. The verdict is not consulted —
+INSUFFICIENT_EVIDENCE and NOT_SUPPORTED are legitimate outcomes and the
+work was done. `resolveDemoReservation` now matches only a reservation
+still in RESERVED, so the first terminal handling decides and every
+replay, retry, duplicate event and concurrent completion is a no-op
+instead of the DB trigger raising on CONSUMED -> RELEASED.
 
-### A2 + A3 — one label guard, every path
+Boundary pinned: a DOCUMENT-LOCAL provider failure is not a technical
+failure of the Research — the run still finalises with a bounded Proof, so
+it DOES spend the slot.
 
-`src/shared/projection-label-safety.ts` is the single rule, called on the
-WRITE path (reject), the API READ path (neutralise) and the RENDERER
-(neutralise). Storage is never trusted, so a legacy or corrupted row is
-neutralised on the way out.
+### Round 11 — MEMORY UNDER CORRUPTED AND STALE PERSISTED STATE
 
-Five closed axes, each named after what it refuses: STATUS, CERTAINTY,
-MAGNITUDE (any stated number; a digit inside a word such as `ERC-20` is a
-name and passes), DIRECTION, and the per-component ECONOMIC ENVELOPE that
-already existed. A refusal degrades to the component's canonical copy.
-The lists are closed, as every ATLAS dictionary is, and that limit is
-stated rather than hidden.
+Round 6 attacked the gate fields adoption re-checks; Round 8 proved a role
+is not inheritable; Round 11 attacks the CONTENT of the stored row,
+corrupted after verification and promotion, against two controls each
+time (clean memory, and no memory).
 
-### Round 10 — AUTHORIZATION, TENANCY AND ENTITLEMENT UNDER COMPOSITION
+**Result: NOT CLEAN. One CRITICAL, found and fixed.**
 
-A different boundary: whose record is it, and when was the right to it
-decided? Tenancy at every loader, Proof-owner drift, the DEMO quota
-ledger, idempotency as a per-account name, entitlement frozen at start,
-and whole-table ownership invariants.
+`memory-evidence-adoption.ts` took the adopted Evidence row's `summary`
+and `mechanismState` from the mutable memory row. Both are engine inputs —
+S6 classifies over `fragment + " " + summary`. One UPDATE of
+`research_memory.statement`, with no new document and no acquisition,
+turned a bounded PARTIALLY_SUPPORTED into SUPPORTED. Fixed by taking both
+from the ORIGIN observation, as every other axis on that insert already
+did. The regression fails without the fix.
 
-**Result: NOT CLEAN. One MAJOR-class finding, NOT fixed — it needs a
-Founder decision.**
-
-**Q1 — the DEMO lifetime proof quota never decrements.** Admission counts
-`RESERVED + CONSUMED`, but no code path anywhere passes `CONSUMED`: all
-seven `resolveDemoReservation` call sites pass `RELEASED`, including the
-ordinary SUCCESS path. A DEMO account that runs a job to SUCCEEDED and
-receives a Proof gets its slot back, so the lifetime limit bounds only
-concurrency — which the one-active-job rule already bounds. Which terminal
-outcomes should consume a lifetime proof is a product policy question
-ATLAS's semantics do not settle, so no fix was chosen and the observed
-behaviour is pinned.
-
-Everything else in Round 10 held: no cross-account read at any door, no
-cross-job evidence through a job you own, no Proof-owner drift anywhere in
-the table, idempotency is per account, entitlement is frozen at start and
-a downgrade never destroys a finished Proof.
+Everything else held: mechanism-state injection, freshness laundering,
+confidence inflation, provenance fragment rewritten, provenance url
+repointed at an unrouted host, and a corrupted row in one project never
+reaching another.
 
 **Consecutive CLEAN count: 0.**
 
 ### Next
 
-- **Founder decision on Q1**, then a fix and a regression test.
-- **Round 11** — a new independent adversarial round. Two consecutive
+- **Round 12** — a new independent adversarial round. Two consecutive
   clean rounds are still required.
 - Not yet: speed optimization, migrations 0052–0054, any live Research.

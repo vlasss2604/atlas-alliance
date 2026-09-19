@@ -37,6 +37,7 @@ touches a provider.
 | `tests/adversarial-core-round9-label-safety-db-v1.test.ts` | Round 9, persisted — STORAGE IS NOT TRUSTED. A real job is researched, its projection row is then overwritten with claim-shaped labels (the legacy and the tampered case at once), and the rendered page is read back through the same loaders the detail route uses: every unsafe label is neutralised to its component's canonical name, every pointer survives, every status is the persisted one, and a safe label is passed through unchanged. A corrupted reference is dropped rather than re-pointed. |
 | `tests/adversarial-core-round10-tenancy-entitlement-db-v1.test.ts` | Round 10 — AUTHORIZATION, TENANCY AND ENTITLEMENT UNDER COMPOSITION: whose record is it, and when was the right to it decided? A one account's finished research is unreachable from another at every loader (job, proof, snapshot), an evidence id from another job cannot be read through a job you do own, a Proof's owner never drifts from its job's owner (asserted over the whole table), and a job carries only its own project's research; B the DEMO quota ledger (the finding below); C an idempotency key is per account, never a global name; D entitlement is frozen at start — a downgrade never destroys a finished Proof and an upgrade grants nothing retroactively; E whole-table invariants: no orphan proof, evidence or component result, and no component result citing another job's evidence. |
 | `tests/demo-quota-lifetime-consumption-v1.test.ts` | Founder decision Q1 — what spends a DEMO lifetime slot. A three evidence worlds run end to end all consume, and the rule is shown verdict-blind over a real job's real persisted Proof across the whole verdict enum; B a technical terminal with no Proof releases (driven through the real phased terminal writer), a cancellation releases, and the pinned boundary that a DOCUMENT-LOCAL provider failure which still finalises with a bounded Proof DOES consume; C exactly once under replay, under a late stale RELEASED, and under concurrent completion, with no completed Proof left RESERVED anywhere; D the limit now binds, a released slot is genuinely reusable, and accounts are isolated; E a paid entitlement takes no reservation at all and idempotency is unchanged. |
+| `tests/adversarial-core-round11-memory-corruption-db-v1.test.ts` | Round 11 — MEMORY UNDER CORRUPTED AND STALE PERSISTED STATE. Round 6 attacked the GATE fields adoption re-checks (stale, unhealthy, another identity); Round 8 proved a role is not inheritable; this round attacks the CONTENT of the stored row, corrupted after it was verified and promoted, against two controls each time (clean memory, and no memory). Statement injection on a strong and on a WEAK baseline (the defect below), mechanism-state injection, freshness laundering, confidence inflation, provenance fragment rewritten and url repointed at an unrouted host, and cross-project isolation of a corrupted row. |
 
 Every canonical invariant in `CORE_RULES.md` has at least one case: BUYBACK ≠
 BURN, BURN ≠ NET DEFLATION, POINT-IN-TIME SUPPLY ≠ SUPPLY CHANGE, ABSENCE ≠
@@ -324,6 +325,35 @@ scheduled mechanism's actuality is `mechanism_state`'s decision, not this
 classifier's. Conservative where it cannot tell: a clause carrying explicit
 proposal language is refused even where a reader could tell the proposal
 had passed, because governance approval is represented structurally.
+
+### Round 11 — a research input comes from the observation, never from the mutable memory row (CRITICAL-class, fixed)
+
+`memory-evidence-adoption.ts` wrote the adopted Evidence row with
+`summary: memory.statement` and
+`mechanismState: memory.mechanismState ?? origin.mechanismState`. Both are
+read by the engine — S6 classifies over `fragment + " " + summary`, S5
+reads mechanism state — and both came from the one part of an adopted row
+that can be edited after the observation was verified.
+
+So a single UPDATE of `research_memory.statement`, with no new document and
+no acquisition, turned a bounded `PARTIALLY_SUPPORTED` (recipient named,
+holding -> entitlement bridge unresolved, `RECIPIENT_UNRESOLVED` on the
+flow) into `SUPPORTED`. Corrupted storage was creating established truth:
+a false ESTABLISHED, and a user-visible conclusion stronger than any
+admitted evidence.
+
+Fixed by taking both axes from the ORIGIN observation, as every other axis
+on that insert already did (relationship, directness, doesNotProve,
+publishedAt, valueSource). This is also what the memory contract already
+said they were: the seeding path writes
+`statement: origin.summary ?? origin.fragment`, and the module's own
+docstring calls the statement "the verified fragment's own statement". A
+row whose statement has drifted from its observation is corrupt, and a
+corrupt row is not a classifier input. The memory statement is still what
+Memory shows and searches on — it is simply not research input.
+
+Pinned in `adversarial-core-round11-memory-corruption-db-v1` R11-1b, which
+fails without the fix.
 
 ## Documented boundaries — Founder decision pending
 

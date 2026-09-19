@@ -75,8 +75,9 @@ import { resolveSourceClass, resolveSourceRoute } from "./source-authority";
 // NOTHING IS COPIED THAT IS A CONCLUSION: not the old component status, not
 // the old Proof verdict or confidence, not any delta or NET_EFFECT reading.
 // The memory row's own `confidence` is a planner input and never reaches
-// Evidence. The memory row's `statement` becomes the adopted row's summary
-// — it is the verified fragment's own statement, not a verdict.
+// Evidence. Nor does its `statement` or `mechanismState` (Round 11): every
+// axis the engine reads is taken from the ORIGIN observation, because the
+// memory row is the part that can be edited after verification.
 //
 // FRESH-ONLY COMPONENTS are decided from Pattern data and the closed
 // on-chain maps, never from a component name: a requirement that demands a
@@ -669,9 +670,34 @@ async function materializeOne(
       relationship: origin.relationship,
       directness: origin.directness,
       fragment,
-      summary: memory.statement,
+      summary: origin.summary ?? origin.fragment,
       doesNotProve: origin.doesNotProve,
-      mechanismState: memory.mechanismState ?? origin.mechanismState,
+      // ROUND 11 — A RESEARCH INPUT COMES FROM THE OBSERVATION, NEVER FROM
+      // THE MUTABLE MEMORY ROW.
+      //
+      // `summary` and `mechanismState` are read by the engine: S6
+      // classifies over `fragment + " " + summary` (admittedTextOf), and
+      // S5 reads mechanism state. They used to be taken from the memory
+      // row, which is the one part of an adopted row that can be edited
+      // after the observation was verified — so rewriting
+      // research_memory.statement, with no new document and no
+      // acquisition, turned a bounded PARTIALLY_SUPPORTED (recipient
+      // named, holding -> entitlement bridge unresolved) into SUPPORTED.
+      // Corrupted storage was creating established truth.
+      //
+      // Every OTHER axis here already comes from `origin` — relationship,
+      // directness, doesNotProve, publishedAt, valueSource — because the
+      // origin Evidence row is the immutable record of what was actually
+      // observed. These two now do too, which is also what the memory
+      // contract already said they were: the seeding path writes
+      // `statement: origin.summary ?? origin.fragment`, and this module's
+      // own contract calls the statement "the verified fragment's own
+      // statement". A row whose statement has drifted from its observation
+      // is corrupt, and a corrupt row must not be a classifier input.
+      //
+      // The memory row's statement is still what Memory shows and searches
+      // on; it is simply not research input any more.
+      mechanismState: origin.mechanismState,
       valueSource: origin.valueSource,
       sourceClass,
       officiality: route.officiality,
