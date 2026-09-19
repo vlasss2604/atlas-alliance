@@ -39,6 +39,8 @@ const KNOWN_ASSETS: Record<string, string[]> = {
   Raydium: ["raydium"],
   Morpho: ["morpho"],
   Lido: ["lido"],
+  // Founder-approved 2026-09-19 (final live acceptance, Solana).
+  Jupiter: ["jupiter"],
   Hyperliquid: ["hyperliquid"],
   Uniswap: ["uniswap"],
   Aave: ["aave"],

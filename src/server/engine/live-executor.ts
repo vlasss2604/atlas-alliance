@@ -68,4 +68,7 @@ export const INTERNAL_ALPHA_LIVE_PROJECT_SLUGS = new Set<string>([
   // validation project. Same rule — membership is approval, nothing in the
   // engine branches on the identity.
   "lido",
+  // Founder-approved 2026-09-19: the two final live acceptance targets.
+  "jupiter",
+  "aave",
 ]);

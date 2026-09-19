@@ -44,6 +44,12 @@ export async function seed(db: Database): Promise<void> {
     // (scenario family REVENUE ≠ TOKEN VALUE CAPTURE). Catalog entry only —
     // no identity, no route, no resource: the engine discovers everything.
     { slug: "lido", name: "Lido", ticker: null },
+    // Founder-approved 2026-09-19: the two final live acceptance projects
+    // (one Solana, one EVM), chosen because neither ever drove a rule or a
+    // run. Catalog entries only — identity and routes are separate owner
+    // acts (confirm-project-identity / confirm-source-route).
+    { slug: "jupiter", name: "Jupiter", ticker: null },
+    { slug: "aave", name: "Aave", ticker: null },
   ] as const;
 
   for (const p of catalogProjects) {
