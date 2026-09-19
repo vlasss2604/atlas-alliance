@@ -11,7 +11,7 @@ import { DeveloperDetails } from "@/src/client/components/developer-details";
 import { type EvidenceRole } from "@/src/client/components/evidence-document-card";
 import { ResearchProgress } from "@/src/client/components/research-progress";
 import { JobVerification } from "@/src/client/components/job-verification";
-import { ResultBriefing } from "@/src/client/components/result-briefing";
+import { KeyEvidence, NotEstablished, ProofMap } from "@/src/client/components/result-first-screen";
 import { ResultLadder } from "@/src/client/components/result-ladder";
 import { OutcomeBadge } from "@/src/client/components/verdict-badge";
 import {
@@ -21,8 +21,10 @@ import {
   groupEvidenceByDocument,
   isTerminal,
   jobOutcome,
-  resultBriefing,
+  keyEvidenceFrom,
   relativeAge,
+  resultBriefing,
+  splitMainLimitation,
   type EvidenceItemLike,
 } from "@/src/client/research-model";
 import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
@@ -57,18 +59,19 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 //
 // TWO VIEWS OF ONE FINISHED RESULT: RESEARCH | VERIFICATION.
 //
-// Research is what ATLAS found; Verification is what from the claim
-// actually survived verification. They are two readings of the SAME loaded
-// payload — the switch changes which composition renders and nothing
-// else: no second request, no recomputation, no research run. The view is
-// a piece of local state mirrored into `?view=` with the native History
-// API, so a link can open a result in Verification and the switch itself
-// never navigates.
-type ResultView = "research" | "verification";
-
-function viewFromLocation(): ResultView {
-  if (typeof window === "undefined") return "research";
-  return new URLSearchParams(window.location.search).get("view") === "verification" ? "verification" : "research";
+// ONE RESEARCH OBJECT. A finished result used to offer two competing
+// readings of the same payload — "Research" and "Verification" — behind a
+// switch in the result header. A reader met two modes for one answer and
+// had to decide which to trust. There is one composition now: the answer,
+// the proof map, the key evidence and the boundary on the first screen,
+// and everything deeper (every ladder row, the verification composition,
+// the audit) behind one disclosure beneath them. A link that still says
+// `?view=verification` (or `?view=full`) opens that disclosure; nothing is
+// fetched or recomputed for it and the switch itself is gone.
+function deepOpenFromLocation(): boolean {
+  if (typeof window === "undefined") return false;
+  const view = new URLSearchParams(window.location.search).get("view");
+  return view === "verification" || view === "full";
 }
 
 export default function ResearchDetailPage() {
@@ -78,17 +81,9 @@ export default function ResearchDetailPage() {
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   // Initialised from the URL on the client; the server render has no
-  // location and defaults to Research. Nothing rendered before the payload
+  // location and defaults to closed. Nothing rendered before the payload
   // loads depends on it, so the two cannot disagree on screen.
-  const [view, setView] = useState<ResultView>(viewFromLocation);
-
-  const switchView = useCallback((next: ResultView) => {
-    setView(next);
-    const url = new URL(window.location.href);
-    if (next === "research") url.searchParams.delete("view");
-    else url.searchParams.set("view", next);
-    window.history.replaceState(null, "", url.pathname + url.search + url.hash);
-  }, []);
+  const [deepOpen] = useState<boolean>(deepOpenFromLocation);
 
   // Re-read the whole detail. Used when the job reaches a terminal state,
   // because the Proof only exists once the job has finished.
@@ -188,12 +183,10 @@ export default function ResearchDetailPage() {
   const finished = isTerminal(job.state);
   const outcome = jobOutcome({ state: job.state, verdict: proof?.verdict ?? null });
   // VERIFICATION NEEDS A RESEARCH RESULT TO VERIFY. A failed or cancelled
-  // run is a product fault, not a finding, and the Research view already
-  // says so; offering a verification of it would present an empty gap
-  // list as "every check was established". The switch is not shown there
-  // and a requested `?view=verification` falls back to Research.
+  // run is a product fault, not a finding, and the answer already says so;
+  // composing a verification of it would present an empty gap list as
+  // "every check was established". The composition is simply absent there.
   const verifiable = finished && outcome.kind !== "FAILED" && outcome.kind !== "CANCELLED";
-  const shown: ResultView = verifiable ? view : "research";
   // The briefing is derived further down, once the finding rows it reads
   // exist — it must summarise exactly the rows this page renders below it,
   // never a separately-derived set that could disagree with them.
@@ -352,7 +345,23 @@ export default function ResearchDetailPage() {
     components,
     rows: briefingRows,
   });
-  const answer = briefing.shortAnswer;
+  // The answer stays at the findings; its "Main limitation" sentence leads
+  // the "Not established" block below instead, so the boundary is stated
+  // once. Nothing is dropped — see `splitMainLimitation`.
+  const { answer, limitation } = splitMainLimitation(briefing.shortAnswer);
+
+  // THE FEW ROWS A READER NEEDS FIRST — S5's contradicting rows, S8's
+  // citations, then supporting rows in proof-map order; one per document;
+  // capped. Built only from links the engine recorded as SUPPORTING or
+  // CONTRADICTING (evidenceByComponent skips EXCLUDED), so a refused
+  // source can never lead the screen.
+  const keyEvidence = keyEvidenceFrom({
+    jobId,
+    cited: used.map((u) => ({ ...u.data, hasSnapshot: snapshotIds.has(u.data.id) })),
+    contradicting: contradicting.map((c) => ({ ...c.data, hasSnapshot: snapshotIds.has(c.data.id) })),
+    supportingByComponent: evidenceByComponent,
+    rowComponents: briefing.keyFindings.map((f) => f.component),
+  });
 
   return (
     <main className="enter flex flex-col gap-5 pb-6">
@@ -418,18 +427,12 @@ export default function ResearchDetailPage() {
               {projectName.slice(0, 2).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="eyebrow eyebrow-violet">{shown === "verification" ? "Verification" : "Research result"}</p>
+              <p className="eyebrow eyebrow-violet">Research result</p>
               <p className="mt-0.5 text-[1rem] font-semibold leading-tight tracking-tight">
                 {projectName}
               </p>
             </div>
-            {/* THE MODE SWITCH, IN THE RESULT HEADER. Beside the identity
-                from `sm`; below it on a handset, where the row is too
-                narrow for both. The subject and the question stay above
-                whichever view is chosen. */}
-            {verifiable && <ViewSwitch view={shown} onChange={switchView} className="hidden sm:inline-flex" />}
           </div>
-          {verifiable && <ViewSwitch view={shown} onChange={switchView} className="mt-4 inline-flex w-full sm:hidden" />}
 
           {/* THE QUESTION IS THE HEADING OF THIS RESULT.
               It used to be a grey subtitle under a 2.15rem project name,
@@ -450,8 +453,6 @@ export default function ResearchDetailPage() {
             {job.originalQuestion}
           </h1>
 
-          {shown === "research" && (
-          <>
           <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-[var(--hairline)] pt-4">
             <OutcomeBadge job={{ state: job.state, verdict: proof?.verdict ?? null }} />
             {proof?.confidence.band && (
@@ -509,151 +510,80 @@ export default function ResearchDetailPage() {
               Sources · {usedDocs}
             </p>
           )}
-          </>
-          )}
         </section>
       )}
 
-      {/* ---- VERIFICATION: the approved composition over the same
-           payload. Nothing below is fetched or recomputed for it. ------ */}
-      {shown === "verification" && (
-        <div data-testid="verification-view">
-          <JobVerification detail={detail} />
-        </div>
+      {/* ---- 2. PROOF MAP — the chain the question turns on. The rows are
+           the briefing's own (the question projection where one resolved,
+           the Pattern ladder otherwise), so this, the answer above and the
+           ladder below read the identical persisted states. ------------ */}
+      {finished && <ProofMap rows={briefing.keyFindings} />}
+
+      {/* ---- 3. KEY EVIDENCE — the few rows that carry the conclusion,
+           each with its claim, source, date and a way to read it in full.
+           Selection is `keyEvidenceFrom`'s; nothing is chosen here. ---- */}
+      {finished && <KeyEvidence items={keyEvidence} />}
+
+      {/* ---- 4. NOT ESTABLISHED — the boundary, stated once: the answer's
+           limitation sentence, then the open checks with their persisted
+           reasons. Never "this does not happen". ----------------------- */}
+      {finished && (
+        <NotEstablished limitation={limitation} items={briefing.unresolved} more={briefing.unresolvedMore} />
       )}
 
-      {/* ---- 1b. QUICK UNDERSTANDING, BEFORE THE PROOF ---------------
-           Key findings as one scannable table, then the checks that are
-           still open. Both are derived from the same rows the ladder
-           below renders, so this cannot say anything the detail does not.
-           Nothing beneath it was removed: the ladder, the evidence, the
-           snapshots and the full audit all continue unchanged. ------- */}
-      {finished && shown === "research" && (
-        <ResultBriefing
-          keyFindings={briefing.keyFindings}
-          unresolved={briefing.unresolved}
-          unresolvedMore={briefing.unresolvedMore}
-        />
-      )}
-
-      {/* ---- 2. THE CLAIMS, AND LEVEL 2 INSIDE THEM ------------------ */}
-      {finished && shown === "research" && (
-        <ResultLadder
-          components={components}
-          jobId={jobId}
-          sourceClassesByComponent={sourceClassesByComponent}
-          evidenceByComponent={evidenceByComponent}
-          supportingSummariesByComponent={supportingSummariesByComponent}
-          questionFindings={detail.questionFindings}
-        />
-      )}
-
-      {/* ---- FULL RESEARCH AUDIT ------------------------------------- *
-       * Everything the research did, rather than everything the question
-       * needed. When a projection resolved, this is the ONLY place the
-       * Pattern's own ten components appear — a reader who asked where
-       * fees go should not have to meet SOURCE_OF_VALUE or DURABILITY_BASIS
-       * to understand the answer, but an expert who wants to check the
-       * work must still be able to see every one of them.
-       *
-       * It is not a second answer, and it is not renamed developer data:
-       * the rows here are the same canonical component results, derived by
-       * the same function, under the Pattern's own grouping.
-       *
-       * RESEARCH ONLY. The audit entry and the research process are how
-       * Research shows its work; Verification is the composition alone
-       * under the shared identity and question. On the first fresh run
-       * both rendered beneath the Verification composition, so the mode
-       * ended in Research's own panels and the two views were not two
-       * readings of one result but one view with an extra block on top.
-       */}
-      {finished && shown === "research" && (
-        // `group` + `group-open:` is native <details> state driving a CSS
-        // rotation — no JS state added, the disclosure itself is untouched.
-        // The custom chevron replaces the browser's default triangle
-        // marker so this entry point matches the chevrons used everywhere
-        // else in the product instead of looking like a leftover form
-        // control.
-        // THE AUDIT IS A DIFFERENT SURFACE, ON ITS OWN SCREEN.
-        //
-        // This used to re-render the SAME ResultLadder the reader had just
-        // finished, with a document list under it — which gave a
-        // professional nothing they did not already have. It is now a
-        // link to a dedicated audit view that projects the same canonical
-        // truth differently: coverage, evidence relationships, source
-        // accounting including what was NOT used, conflicts, limitations
-        // and a technical trace.
-        //
-        // NOTHING IS PREPARED BY RENDERING THIS PAGE. No audit request of
-        // any kind is made here; following the link is the explicit
-        // request, and the server generates at most one projection per job.
-        <div className="flex flex-col gap-4" data-testid="progress-slot-finished">
-          <Link
-            href={`/research/${jobId}/audit`}
-            className="panel flex w-full items-center gap-2.5 px-5 py-4 text-[0.8rem] text-[var(--atlas-text-dim)] transition-colors hover:text-[var(--atlas-text)]/85"
-            data-testid="audit-entry"
-          >
-            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+      {/* ---- 5. FULL EVIDENCE AND AUDIT — everything deeper, behind one
+           disclosure. The ladder with every row and excerpt, the
+           verification composition over the same payload (absent for a
+           failed or cancelled run, which has nothing to verify), the
+           audit entry and the research process. Nothing below is fetched
+           or recomputed: it is the same object, read further down.
+           A `?view=verification` or `?view=full` link opens it. ------- */}
+      {finished && (
+        <details
+          className="panel group px-4 py-3.5 sm:px-6 sm:py-4"
+          open={deepOpen}
+          data-testid="full-evidence"
+        >
+          <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[0.8rem] font-medium text-[var(--atlas-text-dim)] transition-colors hover:text-[var(--atlas-text)]/85 [&::-webkit-details-marker]:hidden">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0 transition-transform group-open:rotate-90">
               <path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
             </svg>
-            Full research audit
-          </Link>
-          <ResearchProgress job={job} />
-        </div>
+            Full evidence and audit
+          </summary>
+          <div className="mt-4 flex flex-col gap-4">
+            <ResultLadder
+              components={components}
+              jobId={jobId}
+              sourceClassesByComponent={sourceClassesByComponent}
+              evidenceByComponent={evidenceByComponent}
+              supportingSummariesByComponent={supportingSummariesByComponent}
+              questionFindings={detail.questionFindings}
+            />
+            {verifiable && (
+              <div data-testid="verification-view">
+                <JobVerification detail={detail} />
+              </div>
+            )}
+            <div className="flex flex-col gap-4" data-testid="progress-slot-finished">
+              <Link
+                href={`/research/${jobId}/audit`}
+                className="panel flex w-full items-center gap-2.5 px-5 py-4 text-[0.8rem] text-[var(--atlas-text-dim)] transition-colors hover:text-[var(--atlas-text)]/85"
+                data-testid="audit-entry"
+              >
+                <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
+                  <path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                Full research audit
+              </Link>
+              <ResearchProgress job={job} />
+            </div>
+          </div>
+        </details>
       )}
 
       {/* ---- engine internals, behind an explicit opt-in ------------- */}
       <DeveloperDetails detail={detail} />
     </main>
-  );
-}
-
-// RESEARCH | VERIFICATION — one segmented control, two buttons. Pressed
-// state is carried by `aria-pressed` and by the colour; the words are the
-// product's two modes and nothing else, so it cannot read as two products.
-function ViewSwitch({
-  view,
-  onChange,
-  className = "",
-}: {
-  view: ResultView;
-  onChange: (v: ResultView) => void;
-  className?: string;
-}) {
-  const options: { key: ResultView; label: string }[] = [
-    { key: "research", label: "Research" },
-    { key: "verification", label: "Verification" },
-  ];
-  return (
-    <div
-      className={`${className} shrink-0 items-center gap-0.5 rounded-full border border-[var(--hairline)] p-0.5`}
-      style={{ background: "rgba(4,7,13,0.45)" }}
-      role="group"
-      aria-label="Result view"
-      data-testid="view-switch"
-      data-view={view}
-    >
-      {options.map((o) => {
-        const active = o.key === view;
-        return (
-          <button
-            key={o.key}
-            type="button"
-            onClick={() => onChange(o.key)}
-            aria-pressed={active}
-            className="flex-1 rounded-full px-3.5 py-1.5 text-[0.74rem] font-semibold tracking-[0.02em] transition-colors sm:flex-none"
-            style={{
-              color: active ? "var(--atlas-text)" : "var(--atlas-text-dim)",
-              background: active ? "rgba(103, 232, 249, 0.14)" : "transparent",
-              boxShadow: active ? "inset 0 0 0 1px rgba(103, 232, 249, 0.35)" : "none",
-            }}
-            data-testid={`view-${o.key}`}
-          >
-            {o.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }
 

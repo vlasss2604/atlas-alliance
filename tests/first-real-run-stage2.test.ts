@@ -546,13 +546,13 @@ describe("First Real Run Stage 2 acceptance closure — real Interpreter path (M
     __setInterpreterGateway(fakeGateway);
     try {
       const topicId = await activeTopicId();
-      const projectSlug = uniq("aave_test");
-      const [project] = await ctx.db.insert(projects).values({ slug: projectSlug, name: "Aave", status: "ACTIVE_CORE" }).returning();
+      const projectSlug = uniq("tao_test");
+      const [project] = await ctx.db.insert(projects).values({ slug: projectSlug, name: "TAO", status: "ACTIVE_CORE" }).returning();
       const userId = await makeUser();
 
       const interpretResult = await createInterpretation(ctx.db, DEFAULT_PRODUCT_CONFIG, {
         userId,
-        question: "does protocol revenue reach Aave token holders?",
+        question: "does protocol revenue reach TAO token holders?",
       });
       const interp = interpretResult.interpretation;
       // §I: a classified alpha-run-style question does NOT default to
@@ -569,7 +569,7 @@ describe("First Real Run Stage 2 acceptance closure — real Interpreter path (M
           userId,
           topicId,
           projectId: project.id,
-          originalQuestion: "does protocol revenue reach Aave token holders?",
+          originalQuestion: "does protocol revenue reach TAO token holders?",
           normalizedTask: {
             project_slug: interp.understood!.projectSlug,
             project_slugs: [interp.understood!.projectSlug],

@@ -21,6 +21,7 @@ import {
   runFetchPhase,
   runSearchPhase,
 } from "../src/server/engine/acquisition-phases";
+import { loadAcquisitionPlan } from "../src/server/engine/acquisition-plan";
 import { persistAcquiredDocument } from "../src/server/engine/acquired-documents";
 import { buildAndPersistProof } from "../src/server/engine/proof-store";
 import { loadProofForJob } from "../src/server/services/proof-view";
@@ -306,6 +307,64 @@ describe("PHASE 1 — SEARCHING persists a handoff and nothing else (items 2-5)"
     expect(second.dedupedQueries).toEqual(["q-alpha"]);
     expect(second.candidateUrls).toEqual([DOC_URL]);
     expect((await loadFetchTargets(ctx.db, jobId))).toEqual([DOC_URL]);
+  }, 60_000);
+});
+
+describe("PHASE 1 — the proposer receives the same task context the executor gives it (Aave live regression, 2b0f00e4)", () => {
+  it("researchTask, intent and the component's Evidence goal reach the phase proposer; the target the phase built without them is enriched, not replaced", async () => {
+    // A job whose normalized task names a concrete economic mechanism: the
+    // proposer must see it, or every query restates the component label.
+    const project = await makeClassifiedProject();
+    const [topic] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
+    const [user] = await ctx.db.insert(users).values({}).returning();
+    const task = "Investigate whether protocol revenue is used to buy back the token and whether repurchased tokens go to a reserve rather than being burned.";
+    const { job } = await createResearchJob(ctx.db, ctx.boss, {
+      userId: user.id,
+      topicId: topic.id,
+      projectId: project.id,
+      originalQuestion: "q",
+      normalizedTask: { project_slug: project.slug, project_slugs: [project.slug], task },
+      normalizedTaskHash: uniq("hash"),
+      idempotencyKey: uniq("idem"),
+      entitlement: coreEntitlement(),
+      demoLifetimeProofLimit: 1000,
+    });
+    await runMemoryPlanningStage(ctx.db, job.id);
+    const items = await workQueueFor(job.id);
+    const seen: ComponentTarget[] = [];
+    await runSearchPhase({
+      db: ctx.db,
+      jobId: job.id,
+      items,
+      target: targetFor(project),
+      queryProposer: {
+        name: "capturing-proposer",
+        async proposeQueries(input) {
+          seen.push({ ...input.target });
+          return [`${input.target.component} q`];
+        },
+      },
+      searchGateway: fixtureSearch({}),
+      maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
+      maxResultsPerQuery: 5,
+      maxQueriesPerComponent: 1,
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
+    });
+    expect(seen.length).toBeGreaterThan(0);
+    for (const t of seen) {
+      expect(t.researchTask, `${t.component}: research task missing from the proposer target`).toBe(task);
+      expect(typeof t.intent, `${t.component}: intent missing`).toBe("string");
+      // The goal is the Pattern's own per-component text (acquisition-plan.ts);
+      // whatever it is for this component, the phase must pass exactly it.
+      const plan = await loadAcquisitionPlan(ctx.db, job.id, t.component, project.id);
+      expect(t.evidenceGoal).toBe(plan.evidenceGoal);
+      expect(t.intent).toBe(plan.intent);
+      // Nothing the phase already set was lost.
+      expect(t.projectSlug).toBe(project.slug);
+      expect(t.projectName).toBe(project.name);
+    }
   }, 60_000);
 });
 

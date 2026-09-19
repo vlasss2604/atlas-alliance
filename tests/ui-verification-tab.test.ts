@@ -73,89 +73,68 @@ const render = (detail: ResearchJobDetail, historicalNote?: boolean) =>
 const count = (h: string, id: string) => h.match(new RegExp(`data-testid="${id}"`, "g"))?.length ?? 0;
 
 /* ------------------------------------------------------------------ */
-/* 1. THE SWITCH ON THE PRODUCT PAGE                                   */
+/* 1. ONE RESEARCH OBJECT ON THE PRODUCT PAGE                          */
 /* ------------------------------------------------------------------ */
 
-describe("the result page carries Research | Verification", () => {
+// FOUNDER DECISION (2026-09-19, after the first live UI acceptance): a
+// finished result is ONE object. The Research | Verification switch is
+// gone; the verification composition is read further down the same page,
+// behind the one disclosure that also holds the ladder and the audit.
+describe("the result page is one Research object — no competing modes", () => {
   const code = codeOf(PAGE);
 
-  it("has one switch with exactly the two modes, inside the result header, and defaults to Research", () => {
-    expect(code).toContain('data-testid="view-switch"');
-    expect(code).toContain("data-testid={`view-${o.key}`}");
-    expect(code).toMatch(/label: "Research"/);
-    expect(code).toMatch(/label: "Verification"/);
-    // Default Research: the URL initialiser returns it for anything but
-    // an explicit `?view=verification`, and the server render has no URL.
-    expect(code).toContain('if (typeof window === "undefined") return "research";');
-    expect(code).toContain('get("view") === "verification" ? "verification" : "research"');
-    expect(code).toContain("useState<ResultView>(viewFromLocation)");
-    // The switch lives inside the answer panel, under the identity and
-    // above the question — so switching never hides who or what.
+  it("carries no mode switch and no view state; the first screen is answer, proof map, key evidence, not-established", () => {
+    expect(code).not.toContain('data-testid="view-switch"');
+    expect(code).not.toContain("<ViewSwitch");
+    expect(code).not.toContain("ResultView");
+    expect(code).not.toContain('label: "Verification"');
     const panelAt = code.indexOf('data-testid="answer-panel"');
-    const switchAt = code.indexOf("<ViewSwitch");
-    const questionAt = code.indexOf('data-testid="result-question"');
-    expect(switchAt).toBeGreaterThan(panelAt);
-    expect(switchAt).toBeLessThan(questionAt);
-    // Two placements, one control: beside the identity from `sm`, full
-    // width beneath it on a handset.
-    expect(code).toContain('className="hidden sm:inline-flex"');
-    expect(code).toContain('className="mt-4 inline-flex w-full sm:hidden"');
-    // Both placements are gated on the same condition, so a failed or
-    // cancelled run — a fault, not a finding — offers no verification.
-    expect((code.match(/\{verifiable && <ViewSwitch/g) ?? []).length).toBe(2);
-    expect(code).toContain('outcome.kind !== "FAILED" && outcome.kind !== "CANCELLED"');
-    expect(code).toContain('const shown: ResultView = verifiable ? view : "research";');
+    const mapAt = code.indexOf("<ProofMap rows={briefing.keyFindings}");
+    const evidenceAt = code.indexOf("<KeyEvidence items={keyEvidence}");
+    const openAt = code.indexOf("<NotEstablished limitation={limitation}");
+    const deepAt = code.indexOf('data-testid="full-evidence"');
+    expect(panelAt).toBeGreaterThan(-1);
+    expect(mapAt).toBeGreaterThan(panelAt);
+    expect(evidenceAt).toBeGreaterThan(mapAt);
+    expect(openAt).toBeGreaterThan(evidenceAt);
+    expect(deepAt).toBeGreaterThan(openAt);
   });
 
-  it("the Research view is untouched: identity, question, badges, answer, briefing, ladder all still render in that mode", () => {
-    for (const id of ["answer-panel", "result-question", "confidence-band", "answer-text", "answer-metadata", "audit-entry"]) {
+  it("the answer panel keeps identity, question, verdict, confidence, answer and the sources footnote", () => {
+    for (const id of ["answer-panel", "result-question", "confidence-band", "answer-text", "answer-metadata"]) {
       expect(code, id).toContain(`data-testid="${id}"`);
     }
-    expect(code).toMatch(/shown === "research" && \(\s*<ResultBriefing/);
-    expect(code).toMatch(/shown === "research" && \(\s*<ResultLadder/);
-    // The Verification view renders the approved composition for the SAME
-    // detail, and only where there is a result to verify.
-    expect(code).toMatch(/shown === "verification" && \(\s*<div data-testid="verification-view">\s*<JobVerification detail=\{detail\} \/>/);
+    // The answer's limitation sentence moves to the boundary block; nothing
+    // is dropped (splitMainLimitation is total).
+    expect(code).toContain("const { answer, limitation } = splitMainLimitation(briefing.shortAnswer);");
+    expect(code).toContain("{answer.map((s) => (");
   });
 
-  // RESEARCH-ONLY UI STAYS IN RESEARCH — BEFORE → AFTER. The "Full research
-  // audit" link and the Research process panel rendered under the
-  // Verification composition on the first fresh run. Every Research-only
-  // block is now gated on `shown === "research"`; Verification is the
-  // composition under the shared identity, question and switch.
-  it("Verification carries no Research-only panels: the audit entry, the research process, the briefing and the ladder are all gated on Research", () => {
-    // Each finished-result block that belongs to Research is rendered
-    // only in Research. The header (identity, question, switch) is shared.
-    expect(code).toMatch(/\{finished && shown === "research" && \(\s*<ResultBriefing/);
-    expect(code).toMatch(/\{finished && shown === "research" && \(\s*<ResultLadder/);
-    const auditSlot = code.indexOf('data-testid="progress-slot-finished"');
-    expect(auditSlot).toBeGreaterThan(0);
-    const gate = code.lastIndexOf('{finished && shown === "research" && (', auditSlot);
-    const priorVerificationGate = code.lastIndexOf('shown === "verification"', auditSlot);
-    expect(gate).toBeGreaterThan(priorVerificationGate);
-    // The audit entry and the progress panel are inside that gated slot.
-    const slot = code.slice(gate, code.indexOf("</div>", code.indexOf('data-testid="progress-slot-finished"')));
-    expect(slot).toContain('data-testid="audit-entry"');
-    expect(slot).toContain("<ResearchProgress job={job} />");
-    // No finished-result block renders unconditionally on `finished` alone
-    // except the answer panel, which carries the shared header.
-    const unconditional = code.match(/\{finished && \($/gm) ?? [];
-    expect(unconditional.length).toBe(1);
-    expect(code.indexOf('data-testid="answer-panel"')).toBeGreaterThan(code.indexOf("{finished && ("));
-    // ResearchProgress appears exactly twice: the live slot and the
-    // Research-gated finished slot. Never a third time.
-    expect((code.match(/<ResearchProgress job=\{job\} \/>/g) ?? []).length).toBe(2);
-    // The Verification branch itself holds only the composition.
-    expect(code).toMatch(/shown === "verification" && \(\s*<div data-testid="verification-view">\s*<JobVerification detail=\{detail\} \/>\s*<\/div>\s*\)\}/);
+  it("everything deeper sits behind ONE disclosure: the ladder, the verification composition, the audit entry and the research process", () => {
+    const deep = code.slice(code.indexOf('data-testid="full-evidence"'), code.indexOf("</details>"));
+    expect(deep).toContain("<ResultLadder");
+    expect(deep).toContain('data-testid="verification-view"');
+    expect(deep).toContain("<JobVerification detail={detail} />");
+    expect(deep).toContain('data-testid="audit-entry"');
+    expect(deep).toContain("<ResearchProgress job={job} />");
+    expect(deep).toContain('data-testid="progress-slot-finished"');
+    // Exactly one ladder, one verification composition, one audit entry.
+    expect((code.match(/<ResultLadder/g) ?? []).length).toBe(1);
+    expect((code.match(/<JobVerification detail=\{detail\} \/>/g) ?? []).length).toBe(1);
+    expect((code.match(/data-testid="audit-entry"/g) ?? []).length).toBe(1);
+    // A failed or cancelled run has nothing to verify: the composition is
+    // gated, the rest of the disclosure is not.
+    expect(code).toContain('outcome.kind !== "FAILED" && outcome.kind !== "CANCELLED"');
+    expect(deep).toMatch(/\{verifiable && \(\s*<div data-testid="verification-view">/);
   });
 
-  it("view state is local and mirrored into ?view= with the History API — the switch never navigates and never fetches", () => {
-    expect(code).toContain('get("view") === "verification"');
-    expect(code).toContain("window.history.replaceState(");
+  it("a legacy ?view=verification link opens the disclosure; nothing navigates, nothing fetches", () => {
+    expect(code).toContain('view === "verification" || view === "full"');
+    expect(code).toContain("useState<boolean>(deepOpenFromLocation)");
+    expect(code).toContain("open={deepOpen}");
+    expect(code).not.toContain("window.history.replaceState(");
     expect(code).not.toMatch(/router\.(push|replace)\(/);
     expect(code).not.toContain("useSearchParams");
-    expect(code).not.toContain("useEffect(() => {\n    setView");
-    // The only reads of the job are the ones the page always made.
     expect((code.match(/\.getResearchJob\(/g) ?? []).length).toBe(2);
     expect(code).not.toMatch(/prepareAudit|startResearch|api\.research\(|fetch\(/);
   });

@@ -69,8 +69,8 @@ describe("resolution — only the code contract's own in-scope intents", () => {
 
 async function interpretedQuestion(question: string) {
   const [topic] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
-  const slug = uniq("aave_override");
-  const [project] = await ctx.db.insert(projects).values({ slug, name: "Aave", status: "ACTIVE_CORE" }).returning();
+  const slug = uniq("tao_override");
+  const [project] = await ctx.db.insert(projects).values({ slug, name: "TAO", status: "ACTIVE_CORE" }).returning();
   const [user] = await ctx.db.insert(users).values({}).returning();
   const { interpretation } = await createInterpretation(ctx.db, DEFAULT_PRODUCT_CONFIG, { userId: user.id, question });
   expect(interpretation.status).toBe("READY");
@@ -80,7 +80,7 @@ async function interpretedQuestion(question: string) {
 
 describe("application — the persisted interpretation row carries the override and says so", () => {
   it("replaces the fake interpreter's intent, records from/to/actor/at, and the engine reads the override", async () => {
-    const { topic, project, user, interpretation } = await interpretedQuestion("does the Aave buyback reduce the AAVE supply?");
+    const { topic, project, user, interpretation } = await interpretedQuestion("does the TAO buyback reduce the TAO supply?");
     const [before] = await ctx.db.select({ result: interpretations.result }).from(interpretations).where(eq(interpretations.id, interpretation.id));
     const fakeIntent = (before.result as { normalized_intent: string }).normalized_intent;
     expect(fakeIntent).toBe("PROTOCOL_REVENUE_TO_TOKEN"); // the fake interpreter's fixed answer
@@ -108,7 +108,7 @@ describe("application — the persisted interpretation row carries the override 
         userId: user.id,
         topicId: topic.id,
         projectId: project.id,
-        originalQuestion: "does the Aave buyback reduce the AAVE supply?",
+        originalQuestion: "does the TAO buyback reduce the TAO supply?",
         normalizedTask: { project_slug: project.slug, project_slugs: [project.slug], task: "x" },
         normalizedTaskHash: uniq("hash"),
         idempotencyKey: uniq("idem"),

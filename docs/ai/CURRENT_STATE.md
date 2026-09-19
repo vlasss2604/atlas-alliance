@@ -27,6 +27,40 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   change on them — and for the first one, check the file's line endings before
   believing either result.
 
+## The phased pipeline's first live run, and the two generic gaps it exposed
+
+The first live Research through the phased pipeline (SEARCH → FETCH →
+EXTRACTING on separate workers, `phased_research_enabled=true`, the
+OWNER_MANUAL_ALPHA app path) — Aave, job `2b0f00e4`, 2026-09-19 —
+extracted nothing: the SEARCH phase spent all twelve units of the
+INTERNAL_ALPHA_V1 envelope (fair share, correct), the FETCH phase sealed
+sixteen documents, and the EXTRACTING replay closed every documentary
+component SKIPPED / SEARCH_BUDGET_EXHAUSTED without touching them. Two
+generic gaps, both closed:
+
+- **A replay is bounded by what was searched, never by what is left to
+  search.** `s4-executor.ts` read "component allowance is 0" as "the
+  search axis is exhausted" (bounded search finalization) and applied it
+  to the EXTRACTING replay, whose proposer, gateway and fetcher are replay
+  providers that reserve nothing (D-137). Now `searchAxisSpent` and the
+  allowance bound apply only when the search gateway is metered; under a
+  replay the bound is `MAX_QUERIES_PER_ATTEMPT` and the replayed queries
+  restore the phase's candidates from the ledger, the replay fetcher
+  serves the sealed documents, and extraction runs. The metered path is
+  byte-for-byte unchanged. Every earlier live run had used the unphased
+  alpha-run executor, where the gateway and the allowance move together,
+  which is why it never showed. `tests/phased-replay-search-axis-regression-v1.test.ts`
+  reproduces the live shape (job budget = the envelope the phases spend)
+  on a generic fixture and pins both paths.
+- **The phase proposer now receives the research task, the intent and
+  the component's Evidence goal** (`acquisition-phases.ts`), exactly as
+  the unphased executor already gave it (ACQUISITION MINIMUM SAFE V1 A).
+  The phase had loaded the acquisition plan for fair share and
+  reachability but handed the proposer a target carrying none of it, so
+  every live query restated the component label ("token transfer
+  destination recipient address") and the official page that answered the
+  question was never a candidate. Pinned in `tests/acquisition-phases.test.ts`.
+
 ## Acquisition concurrency
 
 Two acquisition loops that wait on the network — the fetch phase over
@@ -82,26 +116,42 @@ chain, no signals, no contradiction panel. Rendered at
 spelling; fixtures and real jobs, historical-semantics banner kept) and
 `/dev/verification-showcase` (`GOLDEN_AUDIT_FIXTURE`).
 
-**On the product result screen** (`/research/[id]`) a finished result
-carries a RESEARCH | VERIFICATION switch in the result header, under the
-project identity and above the question, which stay visible in both modes.
-Research is the default and is unchanged. Verification renders
-`JobVerification` (`src/client/components/job-verification.tsx`): a pure
-projection of the already-loaded `ResearchJobDetail` through
-`inputFromResearchJobDetail` → `chooseAnalyticalBlocks` → `composeAudit` —
-no request, no recomputation, no model. View state is local and mirrored
-into `?view=verification` with `window.history.replaceState`, so a link can
-open Verification and the switch never navigates. The verdict shown is
-`jobOutcome`'s (a terminal product state outranks a persisted verdict); a
-FAILED or CANCELLED run offers no switch and falls back to Research.
-Research-only blocks (briefing, ladder, the "Full research audit" entry,
-the Research process panel) render only in Research; Verification is the
-composition under the shared identity, question and switch. The
-historical-semantics note is opt-in on `JobVerification` (`historicalNote`)
-and the product route never opts in: the payload records no semantics
-version, none is invented and no date cutoff decides, so a fresh job is
-never called historical. The dev bridge renders the same component under
-its own explicit historical banner.
+**On the product result screen** (`/research/[id]`) a finished result is
+ONE Research object (Founder decision 2026-09-19, after the first live UI
+acceptance): there is no Research | Verification switch and no view
+state. The first screen is, in order: ANSWER (identity, the question as
+the heading, verdict badge, confidence, the short answer's finding
+sentences, the sources footnote); PROOF MAP (`ProofMap`,
+`src/client/components/result-first-screen.tsx` — the briefing's own
+rows, i.e. the question projection where one resolved and the Pattern
+ladder otherwise, one status word per link from the closed
+`PROOF_MAP_STATUS` vocabulary Supported / Partial / Not established /
+Contradicted / Not assessed, read from the row's persisted reality
+state); KEY EVIDENCE (`KeyEvidence` over `keyEvidenceFrom`: S5
+contradicting rows first, then S8's citations, then SUPPORTING rows in
+proof-map order, one entry per document, at most `MAX_KEY_EVIDENCE` = 4;
+each with the claim in the ladder's words, the engine's persisted reading
+of the passage (the passage itself when there is none), source name and
+class, retrieval date, the snapshot link where a capture exists and the
+original link); NOT ESTABLISHED (`NotEstablished`: the short answer's
+"Main limitation" sentence, moved here by `splitMainLimitation` so it is
+stated once, then the briefing's open checks with their persisted reasons
+and the "N more" count). Everything deeper sits behind ONE `<details>`
+disclosure "Full evidence and audit": the `ResultLadder` with every row
+and excerpt, the verification composition (`JobVerification`, same pure
+projection as before, absent for a FAILED or CANCELLED run which has
+nothing to verify), the "Full research audit" entry and the Research
+process panel; `DeveloperDetails` stays after it. A legacy
+`?view=verification` (or `?view=full`) link opens the disclosure; nothing
+navigates, nothing is fetched or recomputed. The invariant is unchanged
+and now pinned on the new surfaces (`tests/ui-first-screen-v1.test.ts`):
+PAGE <= PERSISTED VERIFIED RECORD — the first screen selects, orders,
+splits and relabels values `research-model` already derived from
+persisted rows; it decides no status, writes no sentence, chooses no
+evidence, and can neither strengthen a verdict nor turn "not
+established" into a negative claim. The historical-semantics note is
+opt-in on `JobVerification` (`historicalNote`) and the product route never
+opts in.
 
 Counting on the Verification page is over what is OPEN, not over the whole
 boundary: `open = boundary − components shown under WHAT STOOD UP` (a
@@ -113,8 +163,9 @@ GOVERNANCE → Governance, DATA_PROVIDER → Quantitative,
 OFFICIAL_DOCS / OFFICIAL_REPORT → Documentary, RESEARCH_MEDIA → Research
 media, SOCIAL → Social, anything else → Unclassified — never Documentary by
 default.
-`tests/ui-verification-tab.test.ts` pins the switch, the default, the
-gating, the purity and the sparse case.
+`tests/ui-verification-tab.test.ts` pins the one-object composition (no
+switch, block order, the disclosure's contents), the purity and the sparse
+case.
 `tests/ui-audit-output.test.ts` pins the structure, the counts, the chain's
 edge rule, the contradiction's measurement provenance, the boundary choice,
 the one-thing-per-check rule, the finding-tied filters, the upstream-only

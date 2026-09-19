@@ -526,12 +526,14 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
     // there was not enough of it. That is reader-facing prose about what
     // the run reached, not a data path to an evidence row.
     expect(code).toContain("Not enough evidence to settle these");
-    // And the page hands it three derived props, nothing evidential.
+    // And the page hands the first-screen surfaces the same three derived
+    // values — the proof map takes the index, the boundary block takes the
+    // open checks and their count. Nothing evidential reaches either.
     const page = readFileSync(PAGE, "utf-8");
     for (const prop of [
-      "keyFindings={briefing.keyFindings}",
-      "unresolved={briefing.unresolved}",
-      "unresolvedMore={briefing.unresolvedMore}",
+      "<ProofMap rows={briefing.keyFindings}",
+      "items={briefing.unresolved}",
+      "more={briefing.unresolvedMore}",
     ]) {
       expect(page, prop).toContain(prop);
     }
@@ -539,12 +541,14 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
 
   it("STRUCTURAL: the status index carries only a label and a state", () => {
     // The explanatory third column is gone. A KeyFinding now has exactly
-    // four fields, none of which can hold a sentence written by a model:
+    // five fields, none of which can hold a sentence written by a model:
     // the component (never rendered), the ladder's own claim label, the
-    // canonical state label, and its tone.
+    // canonical state label, its tone, and the canonical reality state the
+    // label was read from (so the proof map's status word is read from
+    // the same persisted state, never re-derived from label text).
     const { keyFindings } = briefingFor(RAYDIUM);
     for (const f of keyFindings) {
-      expect(Object.keys(f).sort()).toEqual(["check", "component", "result", "tone"]);
+      expect(Object.keys(f).sort()).toEqual(["check", "component", "result", "state", "tone"]);
     }
     const model = readFileSync(MODEL, "utf-8");
     expect(model).not.toContain("establishedCell");
@@ -570,8 +574,13 @@ describe("the deep result is intact beneath the new layer", () => {
     expect(page).toContain('data-testid="audit-entry"');
     expect(page).toContain("<DeveloperDetails");
     expect(page).toContain("<ResearchProgress");
-    // And the briefing is ABOVE the ladder, not instead of it.
-    expect(page.indexOf("<ResultBriefing")).toBeLessThan(page.indexOf("<ResultLadder"));
+    // And the briefing's rows render ABOVE the ladder, not instead of it —
+    // as the proof map and the "Not established" block of the first screen
+    // (result-first-screen.tsx), fed by `briefing.keyFindings` and
+    // `briefing.unresolved`.
+    expect(page.indexOf("<ProofMap rows={briefing.keyFindings}")).toBeGreaterThan(-1);
+    expect(page.indexOf("<ProofMap")).toBeLessThan(page.indexOf("<ResultLadder"));
+    expect(page.indexOf("<NotEstablished")).toBeLessThan(page.indexOf("<ResultLadder"));
   });
 
   it("the briefing summarises the SAME rows the ladder renders", () => {

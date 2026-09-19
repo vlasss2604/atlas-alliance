@@ -1742,6 +1742,10 @@ export interface KeyFinding {
   check: string;
   result: string;
   tone: VerdictTone;
+  // The canonical reality state behind `result`, so a surface with its own
+  // status vocabulary (the proof map) reads the same persisted state and
+  // never re-derives one from the label text.
+  state: RealityState;
 }
 
 export interface UnresolvedItem {
@@ -1795,6 +1799,7 @@ export function keyFindingsFrom(rows: readonly ResultRow[]): KeyFinding[] {
       check: r.label,
       result: r.stateLabel,
       tone: stateTone(r.state),
+      state: r.state,
     }));
 }
 
@@ -1963,4 +1968,124 @@ export function resultBriefing(input: BriefingInput): ResultBriefing {
     // Never negative, and zero whenever everything fit.
     unresolvedMore: Math.max(0, allUnresolved.length - MAX_UNRESOLVED_SHOWN),
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * THE FIRST SCREEN — ANSWER, PROOF MAP, KEY EVIDENCE, NOT ESTABLISHED
+ * ------------------------------------------------------------------ */
+
+// PRESENTATION ONLY. Everything below is a re-reading of values already
+// derived above from persisted rows: it selects, orders, splits and
+// relabels; it never decides a state, never upgrades one, never invents
+// evidence. PAGE <= PERSISTED VERIFIED RECORD.
+
+// THE PROOF MAP'S STATUS WORDS. One short word per canonical reality
+// state, aligned with the verdict vocabulary ("Supported", "Partially
+// supported") the badge above the map already uses. The ladder underneath
+// keeps its fuller labels; both read the same persisted state, so they can
+// differ in wording but never in meaning.
+export const PROOF_MAP_STATUS: Record<RealityState, string> = {
+  VERIFIED: "Supported",
+  PARTIAL: "Partial",
+  UNRESOLVED: "Not established",
+  NOT_HAPPENING: "Contradicted",
+  NOT_ASSESSED: "Not assessed",
+};
+
+export function proofMapStatus(state: RealityState): string {
+  return PROOF_MAP_STATUS[state];
+}
+
+// THE SHORT ANSWER, SPLIT AT ITS LIMITATION. `shortAnswerFor` closes with
+// one "Main limitation" sentence. On the first screen that sentence leads
+// the "Not established" block instead of ending the answer, so the answer
+// stays at the findings and the limitation is stated exactly once, where
+// the rest of the boundary is listed. Nothing is dropped: a sentence is
+// either in `answer` or is `limitation`.
+export function splitMainLimitation(sentences: readonly string[]): {
+  answer: string[];
+  limitation: string | null;
+} {
+  const answer: string[] = [];
+  let limitation: string | null = null;
+  for (const s of sentences) {
+    if (limitation === null && s.startsWith("Main limitation")) limitation = s;
+    else answer.push(s);
+  }
+  return { answer, limitation };
+}
+
+export interface KeyEvidenceItem {
+  id: string;
+  // Carried for keys and tests — never rendered as a label.
+  component: string | null;
+  // "Contradicts" leads; "Supports" is the ordinary case. Never a role the
+  // engine did not record.
+  relation: "SUPPORTS" | "CONTRADICTS";
+  // The claim this row was admitted for, in the ladder's own words.
+  claim: string;
+  // What the evidence shows: the engine's persisted reading of the passage
+  // where one exists, the passage itself otherwise. Never a sentence
+  // written here.
+  proves: string;
+  sourceName: string;
+  sourceClass: string;
+  retrievedDate: string | null;
+  url: string;
+  snapshotHref: string | null;
+}
+
+export const MAX_KEY_EVIDENCE = 4;
+
+export interface KeyEvidenceInput {
+  jobId: string | null;
+  // S8's citation binding — what the Proof itself rests on. Leads.
+  cited: readonly EvidenceItemLike[];
+  // S5's contradicting rows. Lead even the citations: a contradiction is
+  // the one thing a reader must not miss.
+  contradicting: readonly EvidenceItemLike[];
+  // S5's supporting rows per component (SUPPORTING links only — an
+  // excluded row is never in here, by construction of the caller).
+  supportingByComponent: Readonly<Record<string, readonly EvidenceItemLike[]>>;
+  // The proof map's rows, in order: which components matter for THIS
+  // question, and in what order to look for their evidence.
+  rowComponents: readonly string[];
+  max?: number;
+}
+
+// THE FEW PIECES A READER NEEDS FIRST. Order: contradicting, cited by the
+// Proof, then supporting rows in proof-map order. One row per document —
+// the same document supporting two components is one entry, under the
+// first claim it was met for. Capped; the full set is in the ladder.
+export function keyEvidenceFrom(input: KeyEvidenceInput): KeyEvidenceItem[] {
+  const max = input.max ?? MAX_KEY_EVIDENCE;
+  const out: KeyEvidenceItem[] = [];
+  const seenIds = new Set<string>();
+  const seenDocs = new Set<string>();
+  const push = (e: EvidenceItemLike, relation: "SUPPORTS" | "CONTRADICTS", component: string | null) => {
+    if (out.length >= max) return;
+    if (seenIds.has(e.id)) return;
+    const doc = canonicalDocumentKey(e.retrievedUrl);
+    if (seenDocs.has(doc)) return;
+    seenIds.add(e.id);
+    seenDocs.add(doc);
+    out.push({
+      id: e.id,
+      component,
+      relation,
+      claim: componentClaimLabel(component),
+      proves: e.summary && e.summary.trim().length > 0 ? e.summary : e.fragment,
+      sourceName: documentName(e.retrievedUrl, e.sourceTitle),
+      sourceClass: sourceClassLabel(e.sourceClass),
+      retrievedDate: retrievedOn(e.fetchedAt),
+      url: e.retrievedUrl,
+      snapshotHref: e.hasSnapshot && input.jobId ? `/research/${input.jobId}/source/${e.id}` : null,
+    });
+  };
+  for (const e of input.contradicting) push(e, "CONTRADICTS", e.component);
+  for (const e of input.cited) push(e, "SUPPORTS", e.component);
+  for (const component of input.rowComponents) {
+    for (const e of input.supportingByComponent[component] ?? []) push(e, "SUPPORTS", component);
+  }
+  return out;
 }

@@ -228,9 +228,9 @@ describe("Phase 3 DoD", () => {
     // Проект вне ACTIVE_CORE
     await ctx.db
       .insert(projects)
-      .values({ slug: "aave", name: "Aave", ticker: "AAVE", status: "CANDIDATE" })
+      .values({ slug: "tao", name: "TAO", ticker: "TAO", status: "CANDIDATE" })
       .onConflictDoNothing({ target: projects.slug });
-    const r1 = await startJob(c, "aave");
+    const r1 = await startJob(c, "tao");
     expect(r1.res.status).toBe(403);
     expect(((await r1.res.json()) as { error: string }).error).toBe("OUT_OF_SCOPE");
 

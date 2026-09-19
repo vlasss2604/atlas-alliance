@@ -224,6 +224,19 @@ export async function runSearchPhase(input: {
     // intent requires this component per the Pattern's own data.
     const plan = await loadAcquisitionPlan(input.db, input.jobId, item.component, input.projectId);
 
+    // ACQUISITION MINIMUM SAFE V1 (A) — THE SAME CONTEXT THE EXECUTOR GIVES
+    // THE PROPOSER (s4-executor.ts, step 0): what this component must
+    // actually resolve, and for which task. Context for query generation
+    // only, never an admissibility input. This phase loaded the plan for
+    // fair share and reachability but handed the proposer a target that
+    // carried none of it, so the first live phased Research (Aave,
+    // 2b0f00e4) searched for component LABELS ("token transfer destination
+    // recipient address") instead of the question's own mechanism, and the
+    // official page that answered it was never a candidate.
+    target.researchTask = plan.researchTask;
+    target.intent = plan.intent;
+    target.evidenceGoal = plan.evidenceGoal;
+
     // ROUTE-AWARE DOCUMENTARY ACQUISITION V1 — asked BEFORE the allowance,
     // because an unreachable obligation must not consume a share either.
     // The same rule the executor asks (acquisition-targeting.ts). This

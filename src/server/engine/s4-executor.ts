@@ -1458,8 +1458,23 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // keep exactly the semantics they have (D-121 / D3): a required model
       // reservation refused is still thrown, and the source-open axis keeps
       // its own read-then-throw contract.
-      const searchAxisSpent = searchAllowance === 0;
-      const effectiveAllowance = Math.max(1, searchAllowance);
+      //
+      // THE ALLOWANCE BOUNDS A METERED SEARCH ONLY. In the phased EXTRACTING
+      // phase every provider here is a replay (D-137): the proposer returns
+      // the queries this job already paid a model call for, the gateway
+      // serves the candidates the SEARCH phase already paid a unit for, and
+      // the fetcher serves the documents the FETCH phase already opened.
+      // Nothing below reserves a search unit, so the job's spent search axis
+      // is not a constraint on it — it is the RECEIPT for the work being
+      // replayed. Reading the allowance as exhaustion here closed every
+      // component of the first live phased Research (Aave, 2b0f00e4) as
+      // SKIPPED / SEARCH_BUDGET_EXHAUSTED with sixteen fetched documents
+      // never extracted: the SEARCH phase had, correctly, spent all twelve
+      // units before extraction began. A replay is bounded by what was
+      // searched, never by what is left to search.
+      const searchMetered = !isReplayProvider(searchGateway);
+      const searchAxisSpent = searchMetered && searchAllowance === 0;
+      const effectiveAllowance = searchMetered ? Math.max(1, searchAllowance) : MAX_QUERIES_PER_ATTEMPT;
       let searchBudgetExhausted = searchAxisSpent;
 
       // ROUTE-AWARE DOCUMENTARY ACQUISITION V1 — before any Evidence-search
@@ -1817,7 +1832,6 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // Derived from persisted trace, so it spans components, attempts and
       // recovery without any new state.
       const ledger = await loadAcquisitionLedger(deps.db, ctx.jobId);
-      const searchMetered = !isReplayProvider(searchGateway);
       // D-152 — REUSE IS SCOPED TO THE COMPONENT THAT DID THE WORK.
       //
       // The same canonical query is legitimately proposed by several
