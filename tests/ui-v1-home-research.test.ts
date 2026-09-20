@@ -244,7 +244,7 @@ describe("UI — answer first", () => {
     // reached, never about what is true of the world — but reaches the
     // fact itself far sooner. The world-claim collapse is still refused.
     expect(text).toContain("Confirmed:");
-    expect(text).toContain("Not established:");
+    expect(text).toContain("The available evidence does not show");
     expect(text).not.toContain("ATLAS verified");
     expect(text).not.toContain("ATLAS could not verify");
 
@@ -279,7 +279,7 @@ describe("UI — answer first", () => {
     // may never let the first stand in for the second.
     expect(sentences).toContain("whether the mechanism has actually executed");
     expect(sentences).toMatch(
-      /Not established:[^.]*whether the mechanism has actually executed/,
+      /The available evidence does not show[^.]*whether the mechanism has actually executed/,
     );
     expect(sentences.toLowerCase()).not.toContain("burn");
     expect(sentences.toLowerCase()).not.toContain("therefore");
@@ -919,7 +919,7 @@ describe("UI — a failed run that still persisted findings", () => {
     });
     expect(sentences).toHaveLength(2);
     expect(sentences[0]).toContain("did not complete");
-    expect(sentences[0]).toContain("established nothing about Fixture Project");
+    expect(sentences[0]).toContain("confirmed nothing about Fixture Project");
     expect(sentences[1]).toContain(FAULT);
   });
 
@@ -935,7 +935,7 @@ describe("UI — a failed run that still persisted findings", () => {
     }).join(" ");
     // The contradiction with the rows below is what this fix removes.
     expect(sentences).not.toContain("established nothing");
-    expect(sentences).toContain("Before it failed it established");
+    expect(sentences).toContain("Before it failed the sources confirmed");
     expect(sentences).toContain("the path the value takes through the protocol");
   });
 
@@ -950,9 +950,9 @@ describe("UI — a failed run that still persisted findings", () => {
       ],
     }).join(" ");
     expect(sentences).toContain(
-      "Before it failed it partly established where the economic value comes from",
+      "Before it failed the sources partly confirmed where the economic value comes from",
     );
-    expect(sentences).not.toContain("Before it failed it established");
+    expect(sentences).not.toContain("Before it failed the sources confirmed");
     expect(sentences).not.toContain("established nothing");
   });
 
@@ -973,7 +973,7 @@ describe("UI — a failed run that still persisted findings", () => {
     expect(sentences[sentences.length - 1]).toContain(FAULT);
     // Both buckets are reported, each in its own vocabulary, in one sentence.
     expect(joined).toContain(
-      "Before it failed it established what the project's own documentation specifies, and partly established where the economic value comes from",
+      "Before it failed the sources confirmed what the project's own documentation specifies, and partly confirmed where the economic value comes from",
     );
     // Nothing may imply the run reached a conclusion.
     expect(joined).not.toContain("established nothing");

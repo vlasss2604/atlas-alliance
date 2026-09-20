@@ -222,11 +222,12 @@ export type AuditOutcomeKind =
 
 export const AUDIT_OUTCOME_LABELS: Record<AuditOutcomeKind, string> = {
   CONFIRMED: "Confirmed",
-  PARTIALLY_CONFIRMED: "Partially confirmed",
+  PARTIALLY_CONFIRMED: "Partly confirmed",
   CONTRADICTED: "Contradicted",
-  // The same words the Result uses — one vocabulary on both surfaces.
-  COULD_NOT_VERIFY: "Not established",
-  RESEARCH_BLOCKED: "Not established — research limit",
+  // Plain words; the record keeps the distinction between an evidence gap
+  // and a research limit that the whole audit exists to draw.
+  COULD_NOT_VERIFY: "Not confirmed",
+  RESEARCH_BLOCKED: "Not confirmed — research limit reached",
 };
 
 export function auditOutcome(status: string, coverage: ComponentCoverage): AuditOutcomeKind {

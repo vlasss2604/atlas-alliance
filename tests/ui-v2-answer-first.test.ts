@@ -657,7 +657,7 @@ describe("V2 — what the default screen does and does not carry", () => {
       ],
     }).join(" ");
     expect(text).toContain("Confirmed:");
-    expect(text).toContain("Not established:");
+    expect(text).toContain("The available evidence does not show");
     expect(text.toLowerCase()).not.toContain("burn");
     expect(text.toLowerCase()).not.toContain("is executing");
     expect(text.toLowerCase()).not.toContain("therefore");

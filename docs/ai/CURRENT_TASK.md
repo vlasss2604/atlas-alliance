@@ -2,85 +2,96 @@
 
 > Overwrite this file each round. Never append.
 
-## FINAL UI CLEANUP BEFORE LIVE ACCEPTANCE — HOME + EVIDENCE INTERACTIONS (awaiting Founder review)
+## FINAL COPY ROUND — HUMAN LANGUAGE, EXACT TRUTH (awaiting Founder review)
 
-Two goals only, on the accepted V5/V6 result: finish Home; make the
-Evidence / View excerpt / Open original / Snapshot interactions visibly
-work. Result structure, palette, navigation, surface model and every
-research semantic: untouched. $0, no live Research.
+Copy only, on the frozen UI. Layout, palette, navigation, interactions,
+the surface model's derivations, verdict / confidence logic, Evidence
+semantics and every research semantic: untouched. $0, no live Research.
+Files: `result-surface.ts` (copy constants and the answer sentences),
+`research-result.tsx` / `research-audit.tsx` (the state words, "Also
+confirmed", the limit sentence, the path node "Where it goes"),
+`audit-model.ts` (technical-record outcome words), `research-model.ts`
+(the non-verdict answer's sentences), tests.
 
-### Home — exact changes (`app/(app)/home/page.tsx`, composer, recent row)
+### Phrases changed, by category
 
-- Brand area: AP mark (hero halo), `ATLAS PROOF` wordmark larger (1.25 /
-  1.45 rem), `CRYPTO VERIFICATION` as a small tracked tagline with a
-  hairline either side (`.tagline`). The explanatory paragraph is gone;
-  nothing replaces it.
-- Composer: same headline and input, tighter spacing (smaller panel
-  padding, 50 px send disc, no text size reduced), placed directly under
-  the brand.
-- Suggested questions: four, in the product's domain — "Does PUMP buyback
-  actually reduce supply?", "Where do Raydium trading fees go?", "Does
-  HYPE revenue actually reach token holders?", "Are bought-back tokens
-  burned or held?" — as cyan-lit chips; a tap fills the input and sending
-  goes through the existing interpret → gate → start flow (the fourth
-  names no project on purpose: the interpreter asks which).
-- Previously researched: real history, project-first rows — a
-  deterministic initials avatar (`project-avatar.tsx`: ticker or name
-  initials, one hue from the project's stable key; no asset fetching, no
-  icon service), project name, the question, "Checked <date>" for a
-  finished run (relative age while live), the persisted outcome as a
-  pill. Loading is a three-row skeleton; the empty state is one sentence.
-
-### Evidence interactions — investigated, then fixed
-
-Driven in a real browser on the persisted Lido result before any change:
-Evidence · N toggled `aria-expanded` and rendered the block; View
-excerpt toggled the quotation; Open original opened a new tab with the
-lido.fi URL (`_blank`, `noopener noreferrer`); Snapshot linked to this
-job's source route. So the mechanics were sound; what was wrong:
-
-- **Evidence · N** — the opened state was too quiet. It now opens a
-  tinted, cyan-edged block directly beneath the finding, titled
-  "Evidence behind this answer · N sources", one card per admitted source
-  with the excerpt already open, 200 ms fade. `FindingRow` takes a
-  presentation-only `defaultOpen` so the open state is unit-testable.
-- **View excerpt** — unchanged mechanics; the control is the cyan action
-  pill, expanded state styled; the persisted excerpt renders as a
-  quotation with "Does not prove" beneath.
-- **Open original** — rendered only for a real http(s) URL (a chain
-  locator has no page). Inside Telegram a `_blank` anchor is not honoured
-  by every client, so the platform adapter gained `openExternal(url)`:
-  Telegram → `WebApp.openLink`, web → the anchor. The URL is never
-  rewritten. (On the design fixtures the URLs are fixture domains — that
-  is data, and those pages do not exist.)
-- **Snapshot** — verified from the real Lido result: the action opens
-  `/research/58952f45…/source/f5266d4b…`, which renders the captured
-  extracted text (API 200). No snapshot → no button; fixture → no link.
+- **Executive answer** — "ATLAS established X, Y and Z." → "The sources
+  confirm X, Y and Z."; "It found evidence X, but could not fully confirm
+  it — <reason>" → "There is evidence X, but it is not fully confirmed.
+  <persisted reason>"; "It could not establish X or Y: the research
+  reached its configured limit…" → "The available evidence does not show
+  X or Y. The research limit was reached before all relevant sources
+  could be checked."; configuration → "… ATLAS currently lacks a source
+  route that can independently verify this for <project>."; substantive →
+  "The available evidence does not show X or Y." Contradiction unchanged:
+  "On X, the evidence points the other way."
+- **Findings rows** — fallbacks only (a confirmed row already leads with
+  the persisted fact): "The checked evidence establishes X." → "The
+  sources confirm X."; "The evidence goes part of the way." → "The
+  sources cover part of this."; technical → "The research limit was
+  reached before this could be checked."; configuration → "ATLAS
+  currently lacks a source route that can independently verify this
+  point."; substantive fallback → "The available evidence does not settle
+  this." "Also established:" → "Also confirmed:". The row's tooltip now
+  carries the state sentence, not the canonical label.
+- **State words** — one exported set, `RESULT_STATE_WORDS` (Verified /
+  Partly verified / Unresolved / Contradicted), used by the result rows,
+  the research path (title and screen-reader text) and the audit's
+  research points. The canonical labels (`RESULT_STATUS_LABELS`,
+  `COMPONENT_STATUS_LABELS`) stay as the record's vocabulary for the
+  technical record and the deep layers, and no longer reach visible text
+  on the result or the audit's research points.
+- **Uncertainty section** — `BOUNDARY_COPY`: technical "The research
+  limit was reached before all relevant sources could be checked.";
+  configuration "ATLAS currently lacks a source route that can
+  independently verify this point."; substantive "The available evidence
+  does not settle this."; the counted form "The research limit was
+  reached before N known relevant sources could be checked." The
+  never-read-as notes keep their meaning ("not a finding about the
+  project" / "not a finding that the mechanism is not executing" / "not
+  proof that the thing is absent").
+- **Technical record (audit)** — outcome words "Partially confirmed" →
+  "Partly confirmed", "Not established" → "Not confirmed", "Not
+  established — research limit" → "Not confirmed — research limit
+  reached".
+- **Non-verdict answer** (failed / cancelled / stopped) — "it established
+  nothing about" → "it confirmed nothing about"; "Before it failed it
+  established …" → "Before it failed the sources confirmed …"; "partly
+  established" → "partly confirmed"; "Not established: X or Y." → "The
+  available evidence does not show X or Y."
+- **Research path** — node "Destination" → "Where it goes".
+- **Forbidden on the surface** — `FORBIDDEN_SURFACE_TOKENS` gained
+  "ATLAS established", "could not establish", "Partially established",
+  "partially established", "mechanism established", "Current state",
+  "Destination".
+- Untouched: dates, source names, freshness, evidence sentences (the
+  persisted readings), "Does not prove", the legacy briefing / ladder
+  layers no current surface renders (their own wording and pins stand).
 
 ### Tests
 
-- New `tests/ui-result-interactions.test.ts` (18 cases): Evidence closed /
-  open (count, `aria-expanded`, the block inside the row with every
-  source), View excerpt closed / open (the exact persisted excerpt, no
-  raw record), chain readings have no excerpt control, Open original
-  only for http(s) with `_blank` + safe rel, no dead source action across
-  four fixtures, the Telegram/web link contract, Home rows (avatar
-  initials, "Checked", outcome, live-job stage), the avatar invents
-  nothing, Home has no marketing paragraph and has skeleton + empty
-  states, the four suggested questions and their flow.
-- `tests/ui-source-snapshot.test.ts` keeps the three snapshot cases.
-- New `e2e/result-interactions.spec.ts` clicks the whole sequence on the
-  fixture page; NOT run here — `playwright.config.ts` pins a Chromium
-  binary this machine does not have. The same clicks were driven with
-  Playwright's own Chromium in a scratch script (Evidence, excerpt, Open
-  original popup, Snapshot href) on the real Lido result.
+- New `tests/ui-copy-human-language.test.ts` (10 cases): no engine phrase
+  and no forbidden token in the visible text of the result or the
+  audit's research points on all eight fixtures; the shared state words;
+  the non-verdict answer speaks of the evidence; the confirmed sentence
+  lists exactly the confirmed checks (never a partial or open one); a
+  partly verified check is never a bare "partial" and carries its
+  persisted reason; "does not show" never becomes absence or
+  contradiction; contradiction stays its own explicit sentence; the three
+  boundary sentences are distinct and land on the right fixtures; the
+  rows and the unclear section say the same boundary.
+- Pins re-pointed to the new wording (invariants unchanged):
+  `ui-result-surface-v1` (boundary copy, the answer's boundary
+  sentences), `research-audit` (technical-record word),
+  `ui-result-language` / `ui-v2-answer-first` / `ui-v1-home-research`
+  (the non-verdict sentences). The one guard that a technical or
+  configuration boundary never contains "does not" is kept — which is
+  why the capability sentence reads "currently lacks", not "does not
+  support".
 - Presentation + snapshot + projection-safety + Round 12/13 (incl. DB
-  variants): 26 files, **595 passing**; `tsc` clean; lint 0 errors.
-- Screenshots at 390 and 1120: Home, the real Lido result with the
-  evidence block open, the fixture open on a handset — no horizontal
-  overflow, bottom bar unobstructed, no console errors beyond the
-  pre-existing Telegram `--tg-viewport-height` hydration note and the
-  first unauthenticated call.
+  variants): 27 files, **605 passing**; `tsc` clean; lint 0 errors.
+  Screenshots of states 2, 4 and 5 confirm the sentences on the
+  unchanged layout.
 
 ### The shell (`app-chrome.tsx`)
 

@@ -70,6 +70,16 @@ export const RESULT_STATUS_LABELS: Record<ResultStatus, string> = {
   CONTRADICTED: "Contradicted",
 };
 
+// THE STATE, IN A READER'S WORD — what the surfaces show beside a fact.
+// The canonical labels above remain the record's vocabulary (tests, the
+// technical record); these are the words a person reads.
+export const RESULT_STATE_WORDS: Record<ResultStatus, string> = {
+  CONFIRMED: "Verified",
+  PARTIAL: "Partly verified",
+  NOT_ESTABLISHED: "Unresolved",
+  CONTRADICTED: "Contradicted",
+};
+
 export function resultStatus(state: RealityState): ResultStatus | null {
   switch (state) {
     case "VERIFIED":
@@ -120,17 +130,17 @@ export function statusTone(status: ResultStatus): VerdictTone {
 export type BoundaryKind = "SUBSTANTIVE" | "TECHNICAL" | "CONFIGURATION";
 
 export const BOUNDARY_COPY: Record<BoundaryKind, string> = {
-  SUBSTANTIVE: "ATLAS checked the available sources and found nothing that settles this.",
-  TECHNICAL: "Research reached its configured limit before every relevant source could be checked.",
-  CONFIGURATION: "ATLAS currently has no supported source route that can independently verify this.",
+  SUBSTANTIVE: "The available evidence does not settle this.",
+  TECHNICAL: "The research limit was reached before all relevant sources could be checked.",
+  CONFIGURATION: "ATLAS currently lacks a source route that can independently verify this point.",
 };
 
 // What each kind must never read as. Stated once, beside the group, so the
 // distinction the record carries survives onto the screen.
 export const BOUNDARY_NEVER: Record<BoundaryKind, string> = {
-  SUBSTANTIVE: "This is a statement about the evidence checked, not proof that the thing is absent.",
+  SUBSTANTIVE: "This describes the evidence checked, not proof that the thing is absent.",
   TECHNICAL: "This is a limit of the research run, not a finding about the project.",
-  CONFIGURATION: "This is a limit of ATLAS's current source routes, not a finding that the mechanism is not executing.",
+  CONFIGURATION: "This is a limit of what ATLAS can currently verify, not a finding that the mechanism is not executing.",
 };
 
 const TECHNICAL_BOUNDARY_CODES: ReadonlySet<string> = new Set([
@@ -469,8 +479,8 @@ function firstSentence(text: string): string {
 // plain words, why: the persisted reason for a substantive gap, or the
 // kind of limit the run hit.
 export const ROW_LIMIT_COPY: Record<Exclude<BoundaryKind, "SUBSTANTIVE">, string> = {
-  TECHNICAL: "ATLAS reached its research limit before this could be checked.",
-  CONFIGURATION: "ATLAS has no supported source route that can verify this yet.",
+  TECHNICAL: "The research limit was reached before this could be checked.",
+  CONFIGURATION: "ATLAS currently lacks a source route that can independently verify this point.",
 };
 
 function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: BoundaryReading | null): string {
@@ -479,11 +489,11 @@ function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: Bou
     const summary = evidence.find((e) => e.relation === "SUPPORTS" && !e.onchain)?.proves
       ?? evidence.find((e) => e.relation === "SUPPORTS")?.proves;
     const fact = summary && firstSentence(summary).length <= MAX_ESTABLISHED ? firstSentence(summary) : null;
-    if (row.state === "VERIFIED") return fact ?? row.shows ?? `The checked evidence establishes ${phrase}.`;
+    if (row.state === "VERIFIED") return fact ?? row.shows ?? `The sources confirm ${phrase}.`;
     // Partial: the fact, then the gap — one persisted sentence, never the
     // word "partial" on its own.
-    const gap = row.reason ?? "ATLAS could not confirm the whole claim from the sources it could rely on.";
-    return fact ? `${fact} ${gap}` : `The evidence goes part of the way. ${gap}`;
+    const gap = row.reason ?? "The whole claim is not confirmed by the sources that could be relied on.";
+    return fact ? `${fact} ${gap}` : `The sources cover part of this. ${gap}`;
   }
   if (row.state === "NOT_HAPPENING") {
     const contra = evidence.find((e) => e.relation === "CONTRADICTS")?.proves;
@@ -495,7 +505,7 @@ function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: Bou
   }
   const kind = boundary?.kind ?? "SUBSTANTIVE";
   if (kind !== "SUBSTANTIVE") return ROW_LIMIT_COPY[kind];
-  return row.reason ?? "ATLAS checked the available sources and found nothing that settles this.";
+  return row.reason ?? "The available evidence does not settle this.";
 }
 
 export interface SurfaceInput {
@@ -784,9 +794,6 @@ function joinPhrases(items: readonly string[], last = "and"): string {
   return `${items.slice(0, -1).join(", ")} ${last} ${items[items.length - 1]}`;
 }
 
-function lowerFirst(s: string): string {
-  return s.length > 0 ? s[0].toLowerCase() + s.slice(1) : s;
-}
 
 // THE ANSWER — TWO TO FOUR SENTENCES IN THE PROJECT'S TERMS, TYPED.
 //
@@ -794,10 +801,13 @@ function lowerFirst(s: string): string {
 // result reads as ATLAS's own conclusion, so every clause here is a
 // persisted status or reason code rendered through the same question
 // phrases the rows use. What it says, in order: what the evidence points
-// against, what it established, what it found evidence for but could not
-// fully confirm (and exactly why), what it could not establish — and, only
-// where the run rather than the record is the limit, that boundary.
-// Nothing is manufactured; nothing is stronger than a row beneath it.
+// against, what the sources confirm, what there is evidence for but is
+// not fully confirmed (and exactly why), what the available evidence does
+// not show — and, only where the run rather than the record is the limit,
+// that boundary, in words that keep a research limit, a missing source
+// route and an evidence gap distinct. The subject of every sentence is
+// the evidence, never ATLAS. Nothing is manufactured; nothing is
+// stronger than a row beneath it.
 export function surfaceAnswer(input: {
   outcomeKind: OutcomeKind;
   verdict: string | null;
@@ -833,24 +843,24 @@ export function surfaceAnswer(input: {
   }
   const confirmed = by("CONFIRMED");
   if (confirmed.length > 0) {
-    sentences.push(`ATLAS established ${joinPhrases(confirmed.map(phrase).slice(0, 4))}.`);
+    sentences.push(`The sources confirm ${joinPhrases(confirmed.map(phrase).slice(0, 4))}.`);
   }
   const partial = by("PARTIAL");
   if (partial.length > 0) {
     const lead = partial[0];
-    const gap = lead.row.reason ? ` — ${lowerFirst(lead.row.reason)}` : "";
-    sentences.push(`It found evidence ${joinPhrases(partial.map(phrase).slice(0, 2))}, but could not fully confirm it${gap}`);
+    const gap = lead.row.reason ? ` ${lead.row.reason}` : "";
+    sentences.push(`There is evidence ${joinPhrases(partial.map(phrase).slice(0, 2))}, but it is not fully confirmed.${gap}`);
   }
   const open = by("NOT_ESTABLISHED");
   if (open.length > 0) {
     const kinds = new Set(open.map((r) => r.boundary?.kind ?? "SUBSTANTIVE"));
-    const what = `It could not establish ${joinPhrases(open.map(phrase).slice(0, 3), "or")}`;
+    const what = `The available evidence does not show ${joinPhrases(open.map(phrase).slice(0, 3), "or")}.`;
     if (kinds.has("TECHNICAL")) {
-      sentences.push(`${what}: the research reached its configured limit before every relevant source could be checked.`);
+      sentences.push(`${what} The research limit was reached before all relevant sources could be checked.`);
     } else if (kinds.has("CONFIGURATION")) {
-      sentences.push(`${what}: ATLAS has no supported source route that can verify this for ${input.projectName ?? "this project"} yet.`);
+      sentences.push(`${what} ATLAS currently lacks a source route that can independently verify this for ${input.projectName ?? "this project"}.`);
     } else {
-      sentences.push(`${what} from the sources it could rely on.`);
+      sentences.push(what);
     }
   }
   if (sentences.length === 0) {
@@ -934,6 +944,13 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
 // Engine vocabulary the rendered surface is scanned for in tests. Any of
 // these on screen is a leak, whatever the sentence around it.
 export const FORBIDDEN_SURFACE_TOKENS: readonly string[] = [
+  "ATLAS established",
+  "could not establish",
+  "Partially established",
+  "partially established",
+  "mechanism established",
+  "Current state",
+  "Destination",
   "S5",
   "S6",
   "S7",

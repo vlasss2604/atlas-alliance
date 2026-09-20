@@ -297,12 +297,12 @@ describe("the boundary — three kinds, read from persisted truth", () => {
   });
 
   it("the copy for each kind says what it must and never what it must not", () => {
-    expect(BOUNDARY_COPY.TECHNICAL).toBe("Research reached its configured limit before every relevant source could be checked.");
-    expect(BOUNDARY_COPY.CONFIGURATION).toBe("ATLAS currently has no supported source route that can independently verify this.");
-    expect(BOUNDARY_COPY.SUBSTANTIVE).toBe("ATLAS checked the available sources and found nothing that settles this.");
+    expect(BOUNDARY_COPY.TECHNICAL).toBe("The research limit was reached before all relevant sources could be checked.");
+    expect(BOUNDARY_COPY.CONFIGURATION).toBe("ATLAS currently lacks a source route that can independently verify this point.");
+    expect(BOUNDARY_COPY.SUBSTANTIVE).toBe("The available evidence does not settle this.");
     // The row's own one-line form of the same two limits.
-    expect(ROW_LIMIT_COPY.TECHNICAL).toBe("ATLAS reached its research limit before this could be checked.");
-    expect(ROW_LIMIT_COPY.CONFIGURATION).toBe("ATLAS has no supported source route that can verify this yet.");
+    expect(ROW_LIMIT_COPY.TECHNICAL).toBe("The research limit was reached before this could be checked.");
+    expect(ROW_LIMIT_COPY.CONFIGURATION).toBe("ATLAS currently lacks a source route that can independently verify this point.");
     for (const kind of ["TECHNICAL", "CONFIGURATION"] as const) {
       expect(BOUNDARY_COPY[kind].toLowerCase()).not.toMatch(/no evidence exists|not executing|does not|absent/);
       expect(ROW_LIMIT_COPY[kind].toLowerCase()).not.toMatch(/no evidence exists|not executing|does not|absent/);
@@ -323,15 +323,15 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     const first = textOf(firstScreenOf(html));
     // The group's one sentence carries the count; the reading it must
     // never be given stands beside it.
-    expect(first).toContain("Research reached its configured limit before 4 known relevant sources could be checked.");
+    expect(first).toContain("The research limit was reached before 4 known relevant sources could be checked.");
     expect(first).toContain(BOUNDARY_NEVER.TECHNICAL);
     // The row itself says the same thing, not "no evidence".
     const cs = surface.table.find((r) => r.component === "CURRENT_STATE")!;
     expect(cs.established).toBe(ROW_LIMIT_COPY.TECHNICAL);
     expect(attrValues(html, "research-row", "boundary")).toContain("TECHNICAL");
     // The answer's boundary sentence names the run's limit, once.
-    expect(surface.answer.sentences.join(" ")).toContain("reached its configured limit before every relevant source could be checked");
-    expect(surface.answer.sentences.join(" ").split("reached its configured limit").length - 1).toBe(1);
+    expect(surface.answer.sentences.join(" ")).toContain("The research limit was reached before all relevant sources could be checked");
+    expect(surface.answer.sentences.join(" ").split("research limit was reached").length - 1).toBe(1);
   });
 
   it("a substantive gap is explained on its row and nowhere else (the real Aave shape: six checks, one exclusion reason, no boundary group)", () => {
@@ -365,7 +365,8 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     const text = textOf(firstScreenOf(html));
     expect(text).not.toContain("research limit");
     expect(text).not.toContain("source route");
-    expect(surface.answer.sentences.join(" ")).toContain("from the sources it could rely on");
+    expect(surface.answer.sentences.join(" ")).toContain("The available evidence does not show");
+    expect(surface.answer.sentences.join(" ")).not.toContain("research limit");
   });
 
   it("fixture 5 (configuration): reads as a limit of ATLAS's routes, never as 'not executing'", () => {
@@ -380,7 +381,7 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     // this must NOT be read that way.
     const claims = text.replace(BOUNDARY_NEVER.CONFIGURATION, "").toLowerCase();
     expect(claims).not.toMatch(/is not executing|not running|no buyback/);
-    expect(surface.answer.sentences.join(" ")).toContain("no supported source route that can verify this");
+    expect(surface.answer.sentences.join(" ")).toContain("currently lacks a source route that can independently verify this");
   });
 
   it("the real Aave shapes, with no boundary record: excluded-only checks are substantive, budget-bounded checks are technical, execution is configuration", () => {

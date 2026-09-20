@@ -408,7 +408,7 @@ describe("TEST 6 — FAILED with substantive findings keeps its established beha
     }).shortAnswer.join(" ");
     expect(text).toContain("did not complete");
     expect(text).toContain("did not answer the whole question");
-    expect(text).toContain("Before it failed it established");
+    expect(text).toContain("Before it failed the sources confirmed");
     expect(text).toContain("it is not a finding about the project");
   });
 
@@ -435,7 +435,7 @@ describe("TEST 7 — FAILED with nothing substantive keeps its exact wording", (
       projectName: "Raydium",
     }).shortAnswer;
     expect(text).toEqual([
-      "This research run did not complete, so it established nothing about Raydium.",
+      "This research run did not complete, so it confirmed nothing about Raydium.",
       "The failure is a problem with the run itself — it is not a finding about the project.",
     ]);
   });

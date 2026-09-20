@@ -25,6 +25,7 @@ import {
   BOUNDARY_COPY,
   BOUNDARY_NEVER,
   buildResultSurface,
+  RESULT_STATE_WORDS,
   sourceSentence,
   type EvidenceCard,
   type ResearchTableRow,
@@ -176,12 +177,12 @@ function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
       </p>
       <p className="mt-2 flex items-center gap-1.5 text-[0.88rem] text-[var(--atlas-text-dim)]">
         <span className={`dot dot-${row.tone}`} aria-hidden />
-        {row.statusLabel}
+        {RESULT_STATE_WORDS[row.status]}
       </p>
 
       {row.restsOn.length > 0 && (
         <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="audit-point-rests-on">
-          Also established: {row.restsOn.map((r) => r.phrase).join(", ")}.
+          Also confirmed: {row.restsOn.map((r) => r.phrase).join(", ")}.
         </p>
       )}
 
@@ -206,7 +207,7 @@ function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
           <p className="section-label">Limit</p>
           <p className="mt-1.5 text-[0.95rem] leading-[1.5] text-[var(--atlas-text)]/85">
             {row.boundary.kind === "TECHNICAL" && row.boundary.remainingPaths !== null
-              ? `Research reached its configured limit before ${row.boundary.remainingPaths} known relevant ${row.boundary.remainingPaths === 1 ? "source" : "sources"} could be checked.`
+              ? `The research limit was reached before ${row.boundary.remainingPaths} known relevant ${row.boundary.remainingPaths === 1 ? "source" : "sources"} could be checked.`
               : BOUNDARY_COPY[row.boundary.kind]}
           </p>
           <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">{BOUNDARY_NEVER[row.boundary.kind]}</p>

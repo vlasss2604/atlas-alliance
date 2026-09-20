@@ -373,7 +373,7 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
       ],
     });
     expect(text[0]).toMatch(/^Confirmed:/);
-    expect(text.join(" ")).toContain("Not established:");
+    expect(text.join(" ")).toContain("The available evidence does not show");
     // The badge beside it already says PARTIALLY SUPPORTED; the prose does
     // not spend its first sentence saying so again.
     expect(text.join(" ")).not.toContain("part of what this question asked");

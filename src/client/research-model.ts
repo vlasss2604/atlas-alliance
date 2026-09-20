@@ -944,7 +944,7 @@ export function researchAnswer(input: AnswerInput): string[] {
       // is the whole answer, worded exactly as before.
       if (!input.components.some((c) => SUBSTANTIVE_STATUSES.has(c.status))) {
         return [
-          `This research run did not complete, so it established nothing about ${subject}.`,
+          `This research run did not complete, so it confirmed nothing about ${subject}.`,
           `The failure is a problem with the run itself — it is not a finding about the project.`,
         ];
       }
@@ -960,19 +960,19 @@ export function researchAnswer(input: AnswerInput): string[] {
       }
       if (failedVerified.length > 0 && failedPartial.length > 0) {
         failed.push(
-          `Before it failed it established ${joinPhrases(failedVerified)}, and partly established ${joinPhrases(failedPartial)}.`,
+          `Before it failed the sources confirmed ${joinPhrases(failedVerified)}, and partly confirmed ${joinPhrases(failedPartial)}.`,
         );
       } else if (failedVerified.length > 0) {
-        failed.push(`Before it failed it established ${joinPhrases(failedVerified)}.`);
+        failed.push(`Before it failed the sources confirmed ${joinPhrases(failedVerified)}.`);
       } else if (failedPartial.length > 0) {
         failed.push(
-          `Before it failed it partly established ${joinPhrases(failedPartial)}.`,
+          `Before it failed the sources partly confirmed ${joinPhrases(failedPartial)}.`,
         );
       } else if (failedContradicted.length === 0) {
         // Substantive rows exist, but none of them has a reader-facing
         // phrase. Point at the rows rather than inventing wording for them.
         failed.push(
-          `Some findings were established before it failed; they are listed below.`,
+          `Some findings were confirmed before it failed; they are listed below.`,
         );
       }
       // NO "Not established: …" LIST ON THIS PATH, DELIBERATELY.
@@ -1036,7 +1036,7 @@ export function researchAnswer(input: AnswerInput): string[] {
     verified.length > 0 ? 2 : 3,
   );
   if (unresolved.length > 0 && sentences.length < 3) {
-    sentences.push(`Not established: ${joinPhrases(unresolved, "or")}.`);
+    sentences.push(`The available evidence does not show ${joinPhrases(unresolved, "or")}.`);
   }
 
   // THREE SENTENCES, NOT FOUR. The default screen is read in about half a

@@ -666,7 +666,7 @@ describe("audit is a different surface, not the result repeated", () => {
     const content = buildAuditContent(components, evidence, null);
     const blocked = content.scope.find((s) => s.component === "CURRENT_STATE");
     // The same words the Result uses — one vocabulary on both surfaces.
-    expect(blocked?.outcomeLabel).toBe("Not established — research limit");
+    expect(blocked?.outcomeLabel).toBe("Not confirmed — research limit reached");
     expect(blocked?.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(blocked?.coverage).toBe("BLOCKED");
   });

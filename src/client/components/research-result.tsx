@@ -7,6 +7,7 @@ import type { ResearchJobDetail } from "../api";
 import {
   buildResultSurface,
   mechanismNounOf,
+  RESULT_STATE_WORDS,
   sourceSentence,
   statusTone,
   tableRows,
@@ -54,14 +55,9 @@ const TONE_COLORS: Record<VerdictTone, string> = {
   neutral: "var(--atlas-slate)",
 };
 
-// THE STATE, IN A READER'S WORD. The canonical status label stays on the
-// row as its title; this is what the state line says beside the fact.
-const STATE_WORDS: Record<ResultStatus, string> = {
-  CONFIRMED: "Verified",
-  PARTIAL: "Partly verified",
-  NOT_ESTABLISHED: "Unresolved",
-  CONTRADICTED: "Contradicted",
-};
+// THE STATE, IN A READER'S WORD — shared with the audit so both surfaces
+// say the same thing beside the same fact.
+const STATE_WORDS = RESULT_STATE_WORDS;
 const STATE_GLYPHS: Record<ResultStatus, string> = {
   CONFIRMED: "✓",
   PARTIAL: "◐",
@@ -204,7 +200,7 @@ function pathWord(component: string, noun: string): string {
     case "EXECUTION_EVIDENCE":
       return "Execution";
     case "DESTINATION":
-      return "Destination";
+      return "Where it goes";
     case "RECIPIENT":
       return "Recipient";
     case "NET_EFFECT":
@@ -231,7 +227,7 @@ function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: stri
             key={n.component}
             className="path-node"
             style={{ "--node": TONE_COLORS[n.tone] } as React.CSSProperties}
-            title={`${n.label} — ${n.statusLabel}`}
+            title={`${n.label} — ${STATE_WORDS[n.status]}`}
             data-testid="path-node"
             data-component={n.component}
             data-status={n.status}
@@ -240,7 +236,7 @@ function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: stri
               {STATE_GLYPHS[n.status]}
             </span>
             <span>{pathWord(n.component, noun)}</span>
-            <span className="sr-only">{n.statusLabel}</span>
+            <span className="sr-only">{STATE_WORDS[n.status]}</span>
           </li>
         ))}
       </ol>
@@ -309,7 +305,7 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
     <li
       className={`finding ${open ? "finding-open" : ""}`}
       style={{ "--row-accent": color } as React.CSSProperties}
-      title={row.statusLabel}
+      title={stateSentence(row)}
       data-testid="research-row"
       data-component={row.component}
       data-status={row.status}
@@ -325,7 +321,7 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
         </p>
         {row.restsOn.length > 0 && (
           <p className="mt-1.5 text-[0.92rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="row-rests-on">
-            Also established: {joinPhrases(row.restsOn.map((d) => d.phrase))}.
+            Also confirmed: {joinPhrases(row.restsOn.map((d) => d.phrase))}.
           </p>
         )}
         <p className="state-line mt-2.5">
@@ -553,7 +549,7 @@ function UnclearSection({ groups }: { groups: readonly BoundaryGroup[] }) {
             <p className="text-[1.05rem] font-semibold leading-snug text-[var(--atlas-text-strong)]">{UNCLEAR_HEADINGS[g.kind]}</p>
             <p className="mt-1.5 text-[1rem] leading-[1.5] text-[var(--atlas-text)]/90" data-testid="unclear-copy">
               {g.kind === "TECHNICAL" && g.remainingPaths !== null
-                ? `Research reached its configured limit before ${g.remainingPaths} known relevant ${g.remainingPaths === 1 ? "source" : "sources"} could be checked.`
+                ? `The research limit was reached before ${g.remainingPaths} known relevant ${g.remainingPaths === 1 ? "source" : "sources"} could be checked.`
                 : g.copy}
             </p>
             <ul className="mt-3 flex flex-col gap-1.5" data-testid="unclear-items">

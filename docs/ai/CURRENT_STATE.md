@@ -463,6 +463,24 @@ their state colour (`color-mix`); finding rows have a luminous state rail
 and a cyan-tinted hover. Tone class names (`tone-*`, `dot-*`) are
 unchanged, so every colour-meaning pin holds.
 
+**Surface copy (final copy round, 2026-09-21).** Every sentence a reader
+meets is stated about the evidence, never about ATLAS: the answer says
+"The sources confirm …", "There is evidence …, but it is not fully
+confirmed. <persisted reason>", "The available evidence does not show …"
+plus, only where the run is the limit, "The research limit was reached
+before all relevant sources could be checked." (technical) or "ATLAS
+currently lacks a source route that can independently verify this for
+<project>." (configuration); contradiction stays "the evidence points the
+other way". `RESULT_STATE_WORDS` (Verified / Partly verified /
+Unresolved / Contradicted) is the one visible state vocabulary on the
+result and the audit's research points; the canonical labels remain the
+record's vocabulary for the technical record and deep layers. A
+technical or configuration boundary sentence never contains "does not"
+(pinned), so it can never read as a negative finding about the project.
+`FORBIDDEN_SURFACE_TOKENS` includes "ATLAS established", "could not
+establish", "Partially established", "Current state", "Destination".
+Pinned in `tests/ui-copy-human-language.test.ts`.
+
 **Evidence interactions (final cleanup, 2026-09-21).** "Evidence · N"
 opens a tinted, cyan-edged `.row-evidence` block beneath the finding
 ("Evidence behind this answer · N sources", one card per admitted source,
