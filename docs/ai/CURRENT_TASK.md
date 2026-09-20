@@ -2,82 +2,85 @@
 
 > Overwrite this file each round. Never append.
 
-## C2 — MINIMAL RELIABILITY FIX: EVIDENCE-STATE RECOVERY ELIGIBILITY AND ROUTE EXPLORATION ACCOUNTING
+## RESEARCH RELIABILITY V1 — FINAL OFFLINE ACCEPTANCE (boundary invariant)
 
-Founder decision 2026-09-20: C1 DEFERRED (no search-budget or envelope
-change); C2 APPROVED only for the two verified bounded completion/recovery
-defects. Offline, $0, no live Research, no UI, no project-specific logic,
-no new terminal state, no schema change. Verdict, confidence, freshness,
-admissibility and Proof-layer rules untouched.
+Founder brief 2026-09-20: verify the 28 residual benchmark cases are
+represented as TECHNICALLY BOUNDED research, never mistakable for a
+substantive "checked and not established"; prove the technical /
+substantive / configuration distinctions at the persisted-record level;
+smallest additive fix only where a case reaches the Proof without a
+technical marker. $0, no live Research, no UI, no budget or recovery
+change.
 
-### What changed (three source files, one new test file, one report split)
+### What the audit found (benchmark BOUNDARY AUDIT table, pre-fix)
 
-- `src/server/engine/controller.ts` — on a targeted pass
-  (`targetedRecovery` set) the pending set and the job-locked claim are
-  gated by the one-recovery maximum (`maxAttempt <= 1`) instead of by the
-  first attempt's technical status (`succeededKeys`). A critical component
-  whose first attempt SUCCEEDED technically but whose Evidence S5 excluded
-  now gets its one bounded second look; a component that already has an
-  attempt numbered above 1 is never claimed again, even on a redelivered
-  scoped cycle. First-pass behaviour is unchanged.
-- `src/server/engine/acquisition-ledger.ts` — `exploredRoutesByComponent`
-  (`step:component` → domains) from SEARCH_EXECUTED rows that are status
-  OK, carry a spent unit (`budget_amount` > 0), are attributed to a
-  component and use the code-owned `site:<domain>` form
-  (`routeScopedQueryDomain`); `routeExploredForComponent(...)`.
-- `src/server/engine/targeted-recovery.ts` — ROUTE_UNEXPLORED is not
-  planned for a route this component's scoped search already ran against
-  and answered, zero results included. FAILED / SKIPPED / replayed / other
-  component / other host never count.
-- `tests/benchmark-economics-reliability-v1.test.ts` — the REPORT splits
-  the C2 audit count into "no recovery ever ran for the node" (the defect)
-  and "paths left after the one bounded recovery" (the ceiling by design).
-- `tests/targeted-recovery-eligibility-c2-v1.test.ts` — 10 pins: A (first
-  attempt SUCCEEDED, Evidence stale, sealed route documents unread →
-  recovery runs, resolves on fresh Evidence only, stale rows stay
-  excluded, resolved critical components get no second attempt); A2 (at
-  most one recovery even when the recovery closes SUCCEEDED on stale
-  Evidence; a re-walk of the same scope claims nothing); B (executed
-  scoped search with zero results → route explored, component not
-  planned again); provider failure, budget refusal, replay, unconfirmed
-  host / other component / unattributed row → route still unexplored;
-  end-to-end unphased: no second scoped search of an already-empty route.
-  Nine of the ten fail on the pre-fix source (the control case passes by
-  construction).
+All 29 residual nodes (28 runs) were AMBIGUOUS: first pass SUCCEEDED /
+FAILED, recovery closed SKIPPED / NO_TRACEABLE_FACTS_FOR_COMPONENT, S5
+STALE_CURRENT_STATE / NO_EVIDENCE_FOUND, 1–6 known paths still open, and
+`proofs.bounded_by` carried no technical code — the record read as
+substantive. Two more concrete gaps surfaced by the same audit: a
+provider failure closes the attempt with a `<LABEL>_FAILED:<Class>` head
+the boundary module did not map (read substantive); and the phased FETCH
+phase sealed different documents on two runs of identical code at the
+24/24 opens ceiling (S05/OFFICIAL_LATE/PHASED), because each in-flight
+url reserved its first open after its own async prologue.
+
+### Changes (additive; verdict, confidence, lifecycle, budgets untouched)
+
+- `research-boundary.ts` — technical codes RECOVERY_BOUND_REACHED (the
+  one bounded recovery ran, known admissible paths remain) and
+  KNOWN_PATHS_UNEXPLORED (paths remain, no recovery ever ran), with
+  `remainingPaths` by kind on the entry; provider-failure heads mapped by
+  label (`technicalCodeForAttemptHead`: CONTENT_FETCHER →
+  SOURCE_UNAVAILABLE, SEARCH_GATEWAY → SEARCH_UNAVAILABLE, QUERY_PROPOSER
+  → NO_QUERIES_PROPOSED, EVIDENCE_EXTRACTOR → EXTRACTION_NOT_COMPLETED).
+- `targeted-recovery.ts` — `auditRemainingKnownPaths` (the planner in
+  audit mode over every component with an S5 row, plus whether its
+  recovery ran); the planner's queue parameter narrowed to
+  `{ step, component }`.
+- `proof-store.ts` / `proof-builder.ts` — the audit read is passed into
+  `deriveResearchBoundary` at Proof build (`remainingPaths`, optional).
+- `acquisition-phases.ts` — the FETCH phase reserves each url's first
+  source open in start order through a per-phase prologue chain (the
+  SEARCH phase's existing rule); transport, seal and trace still overlap.
+- Benchmark — BOUNDARY AUDIT table and counts; the acceptance assertion
+  "ambiguous / no boundary marker = 0"; the MAJOR-technical rule now
+  requires the corpus to carry the fact (`scenario.mustEstablish`): a
+  node with no fact ending RECOVERY_BOUND_REACHED is the record telling
+  the truth. `onchain-budget-reservation-v1` source pin re-pinned to the
+  four reservations against the capped ceiling.
+- Tests — `tests/research-boundary-recovery-bound-v1.test.ts` (10):
+  recovery exhausted + known paths → RECOVERY_BOUND_REACHED persisted,
+  stale finding beside it, verdict/confidence identical with and without
+  the marker; projections + DRAFT rebuild leave it byte-identical;
+  KNOWN_PATHS_UNEXPLORED / zero paths / SUPPORTED derivation; substantive
+  exhaustion ×2 (no marker, NO_EVIDENCE_FOUND stands); NO_ADMISSIBLE_ROUTE
+  configuration boundary (persisted + derivation); provider failure →
+  SOURCE_UNAVAILABLE (end to end + every label); phased FETCH ceiling
+  deterministic at concurrency 4 and 1.
 
 ### Verified ($0)
 
-- Benchmark: 161 passing; 672/672 critical nodes attempted; second pass
-  in 69 runs (63 before); technical boundary on a critical node in 3 runs
-  (EXECUTION_EVIDENCE, CHAIN_EARLY, NO_ADMISSIBLE_ROUTE — configuration
-  boundary); CRITICAL 0; MAJOR 0; S5 parity phased = unphased. Search
-  calls over the matrix 1718 → 1699; avg modelled cost $0.185 → $0.186.
-  Audit "unexplored at finalize" 48 → 28; ROUTE_UNEXPLORED 0; nodes with
-  no recovery attempt 0; the 28 are residue after the one bounded
-  recovery (SEALED_UNEXTRACTED / UNOPENED_CANDIDATE beyond its 3-open /
-  3-extraction bound), i.e. the one-recovery maximum the Founder kept.
-- Targeted suites (targeted-second-pass, eligibility-c2, boundary record,
-  acquisition-phases, site-local expansion, D-152 ledger, founder
-  semantics 5.5, adversarial round 3 DB, s10 closure, phased replay
-  regression, memory adoption ×2, perf parity, Round 12/13 ×4): 17 files,
-  201 passing.
+- Benchmark (final): 161 passing; 160 runs; critical attempted 672/672;
+  second pass 69 runs; unresolved critical nodes at finalize 159, of
+  which after a recovery 58; technical bounded marker 33 (3 of them
+  configuration-only NO_ADMISSIBLE_ROUTE: EXECUTION_EVIDENCE under
+  CHAIN_EARLY S05/S06/S07); substantive exhausted 126; ambiguous 0;
+  runs with a technical boundary on a critical node 31; CRITICAL 0;
+  MAJOR 0; MINOR not asserted. Two consecutive post-fix runs produced
+  byte-identical per-run tables and audit rows.
+- Targeted set (boundary, targeted recovery, fetch-phase suites, parity,
+  Round 12/13, memory adoption, founder semantics): 32 files, 492 passing.
 - `npx tsc --noEmit` clean; `npm run lint` 0 errors.
-- Full suite, run alone: 5192 passing, 4 skipped, 4 failing (5200, 250
-  files, 2230 s). Three are the known pre-existing catalog / renderer
-  cases. The fourth, `research-memory-controlled-reuse-acceptance-v1`,
-  pinned exactly one attempt per component; its fixture facts carry no
-  publication date, so CURRENT_STATE closes MISSING_CURRENT_STATE after
-  a completed attempt with sealed route pages unread — the approved
-  change now gives it one paths-only recovery (proposer 1, search 1,
-  fetch 1, extract 1 + 3) in the fresh, control and Memory Researches
-  alike, so every Memory-vs-control comparison holds. Re-pinned with the
-  recovery explicit (`recoveryAttemptsOf` = `5:CURRENT_STATE:#2`);
-  passes alone after the re-pin.
+- Full suite on the final tree, run alone after every test-pin change:
+  5203 passing, 4 skipped, 3 failing (5210, 251 files, 2123 s) — the
+  three are the known unchanged catalog (phase1 DoD 1, phase2 DoD 6) and
+  renderer (EXECUTABLE_NOT_FOUND vs PROCESS_START_FAILED) cases.
 
-### Next
-- Founder review of the residual 28 (one-recovery ceiling residue); any
-  change there is a new decision, not this task.
-- Founder-initiated UI rerun of the Aave question under the $0.50 cap
-  (not before approval). Jupiter identity still BLOCKED.
-- Any other environment running the phased workers needs 0055/0056
-  applied first.
+### Status
+
+RESEARCH RELIABILITY V1: see the final decision report of 2026-09-20.
+Acquisition / reliability work stops here unless a live run reveals a
+concrete generic defect. Next phase: Result Presentation / UX (the
+projections do not read `bounded_by` yet; no live batch before the
+result surface is polished and Founder-approved).

@@ -663,10 +663,38 @@ interface RunResult {
   // left after the one bounded recovery ran is the one-recovery maximum
   // by design (never a third pass), not a node the Research skipped.
   unexploredWithoutRecovery: string[];
+  // BOUNDARY AUDIT (Research Reliability V1 final acceptance) — every
+  // critical component still INSUFFICIENT_EVIDENCE at finalize, with what
+  // the persisted record says about WHY: the first-pass and recovery
+  // attempt outcomes, the S5 reason codes, the Proof's boundary entry
+  // (technical / substantive codes), the known paths the audit planner
+  // still sees, and the marker class this adds up to:
+  //   TECHNICAL    — a technical boundary code is persisted (bounded
+  //                  recovery limit, configuration, provider, extraction);
+  //   SUBSTANTIVE  — no known admissible path remains and only
+  //                  substantive codes are persisted: looked, not found;
+  //   AMBIGUOUS    — a known admissible path remains but the persisted
+  //                  Proof carries no technical code for it, or no
+  //                  boundary entry at all. Must be zero.
+  unresolvedCritical: UnresolvedNode[];
   calls: Counters;
   costUsd: number;
   latencyModelSec: number;
   severity: { level: "CRITICAL" | "MAJOR"; note: string }[];
+}
+
+interface UnresolvedNode {
+  component: string;
+  firstPass: string;
+  recovery: string;
+  s5: string;
+  reasonCodes: string[];
+  remainingPaths: string[];
+  technical: string[];
+  substantive: string[];
+  marker: "TECHNICAL" | "SUBSTANTIVE" | "AMBIGUOUS";
+  verdict: string | null;
+  confidence: number | null;
 }
 
 function unphasedExecutor(project: Project, corpus: Corpus, c: Counters, chainEnabled: boolean): WorkExecutor {
@@ -787,6 +815,34 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
     return `${i.component}[${[...kinds].map(([k, n]) => `${k}=${n}`).join(",")}]`;
   });
   const unexploredWithoutRecovery = (audit?.items ?? []).filter((i) => (latest.get(i.component)?.attemptNumber ?? 0) <= 1).map((i) => i.component);
+  const attemptLabel = (a: (typeof attempts)[number] | undefined) => (a ? `${a.status}/${(a.reason ?? "").split(";")[0].trim() || "-"}` : "-");
+  const unresolvedCritical: UnresolvedNode[] = [];
+  for (const comp of critical) {
+    const row = s5rows.find((r) => r.component === comp);
+    if (!row || row.status !== "INSUFFICIENT_EVIDENCE") continue;
+    const first = attempts.find((a) => a.component === comp && a.attemptNumber === 1);
+    const second = attempts.filter((a) => a.component === comp && a.attemptNumber > 1).sort((a, b) => b.attemptNumber - a.attemptNumber)[0];
+    const item = audit?.items.find((i) => i.component === comp) ?? null;
+    const kinds = new Map<string, number>();
+    for (const pth of item?.paths ?? []) kinds.set(pth.kind, (kinds.get(pth.kind) ?? 0) + 1);
+    const remainingPaths = [...kinds].map(([k, n]) => `${k}=${n}`);
+    const technical = bounded.technical.find((t) => t.component === comp)?.codes ?? [];
+    const substantive = bounded.substantive.find((t) => t.component === comp)?.codes ?? [];
+    const marker: UnresolvedNode["marker"] = technical.length > 0 ? "TECHNICAL" : remainingPaths.length === 0 && substantive.length > 0 ? "SUBSTANTIVE" : "AMBIGUOUS";
+    unresolvedCritical.push({
+      component: comp,
+      firstPass: attemptLabel(first),
+      recovery: attemptLabel(second),
+      s5: row.status,
+      reasonCodes: (row.reasonCodes as string[]) ?? [],
+      remainingPaths,
+      technical: [...technical],
+      substantive: [...substantive],
+      marker,
+      verdict: proof?.verdict ?? null,
+      confidence: proof?.confidence ?? null,
+    });
+  }
   const modelCalls = c.proposer + c.extract;
   const costUsd = modelCalls * PRICE_PER_MODEL_CALL_USD;
   const latencyModelSec = c.proposer * LAT.proposer + (c.search * LAT.search) / 4 + (c.fetch * LAT.fetch) / 4 + (c.extract * LAT.extract) / 4;
@@ -807,6 +863,14 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
   for (const entry of bounded.technical) {
     if (!critical.includes(entry.component)) continue;
     if (corpus.unreachable.has(entry.component as Component)) continue;
+    // A REACHABLE path is one the corpus can establish the component
+    // through: the scenario names it in mustEstablish and the variant
+    // has not made it unreachable. A critical node the corpus carries no
+    // fact for can end on a technical boundary truthfully — the bounded
+    // Research stopped with paths open that would not have helped, which
+    // it cannot know — and that is the boundary record doing its job,
+    // not a node skipped.
+    if (!scenario.mustEstablish.includes(entry.component as Component)) continue;
     // NO_ADMISSIBLE_ROUTE is a configuration boundary (no owner-confirmed
     // route for the only establishing classes), not a path left unread.
     if (entry.codes.every((code) => code === "NO_ADMISSIBLE_ROUTE")) continue;
@@ -830,6 +894,7 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
     envelope,
     unexploredAtFinalize,
     unexploredWithoutRecovery,
+    unresolvedCritical,
     calls: c,
     costUsd,
     latencyModelSec,
@@ -899,6 +964,18 @@ describe("ECONOMICS RESEARCH RELIABILITY BENCHMARK V1", () => {
     lines.push(`C2: runs finalizing with an unresolved critical node AND a known admissible path still unexplored: ${unexploredRuns.length}${unexploredRuns.length > 0 ? " — " + unexploredRuns.map((r) => `${r.scenario}/${r.variant}/${r.runtime}: ${r.unexploredAtFinalize.join(",")}`).join("; ") : ""}`);
     const unrecoveredRuns = results.filter((r) => r.unexploredWithoutRecovery.length > 0);
     lines.push(`C2 split — of those, nodes for which NO recovery attempt ever ran (the completion defect): ${unrecoveredRuns.length} runs${unrecoveredRuns.length > 0 ? " — " + unrecoveredRuns.map((r) => `${r.scenario}/${r.variant}/${r.runtime}: ${r.unexploredWithoutRecovery.join(",")}`).join("; ") : ""}; paths left after the ONE bounded recovery ran (one-recovery maximum by design): ${unexploredRuns.length - unrecoveredRuns.length} runs`);
+    // BOUNDARY AUDIT — one line per unresolved critical node at finalize.
+    lines.push("BOUNDARY AUDIT — unresolved critical nodes at finalize: scenario/variant/runtime | component | first pass | recovery | S5 | remaining paths | technical | substantive | marker | verdict | confidence");
+    const nodes = results.flatMap((r) => r.unresolvedCritical.map((n) => ({ r, n })));
+    for (const { r, n } of nodes) {
+      lines.push(`${r.scenario}/${r.variant}/${r.runtime} | ${n.component} | ${n.firstPass} | ${n.recovery} | ${n.s5}[${n.reasonCodes.join(",")}] | ${n.remainingPaths.join(",") || "-"} | ${n.technical.join(",") || "-"} | ${n.substantive.join(",") || "-"} | ${n.marker} | ${n.verdict} | ${n.confidence}`);
+    }
+    const withRecovery = nodes.filter(({ n }) => n.recovery !== "-");
+    const tech = nodes.filter(({ n }) => n.marker === "TECHNICAL");
+    const subst = nodes.filter(({ n }) => n.marker === "SUBSTANTIVE");
+    const ambiguous = nodes.filter(({ n }) => n.marker === "AMBIGUOUS");
+    const configBoundedNodes = nodes.filter(({ n }) => n.technical.length > 0 && n.technical.every((code) => code === "NO_ADMISSIBLE_ROUTE"));
+    lines.push(`unresolved critical nodes at finalize: ${nodes.length}; after a recovery ran: ${withRecovery.length}; with a technical bounded marker: ${tech.length} (of which configuration-bounded NO_ADMISSIBLE_ROUTE only: ${configBoundedNodes.length}); with a substantive exhausted marker: ${subst.length}; ambiguous / no boundary marker: ${ambiguous.length}${ambiguous.length > 0 ? " — " + ambiguous.map(({ r, n }) => `${r.scenario}/${r.variant}/${r.runtime}:${n.component}`).join("; ") : ""}`);
     const avgCost = results.reduce((n, r) => n + r.costUsd, 0) / Math.max(1, results.length);
     const avgLat = results.reduce((n, r) => n + r.latencyModelSec, 0) / Math.max(1, results.length);
     lines.push(`avg model cost/run $${avgCost.toFixed(3)}; avg modelled latency ${avgLat.toFixed(1)} s`);
@@ -910,6 +987,10 @@ describe("ECONOMICS RESEARCH RELIABILITY BENCHMARK V1", () => {
     if (process.env.ATLAS_BENCH_REPORT_PATH) writeFileSync(process.env.ATLAS_BENCH_REPORT_PATH, report);
     expect(totalAttempted).toBe(totalCritical);
     expect(results.every((r) => r.severity.length === 0)).toBe(true);
+    // BOUNDARY INVARIANT: an unresolved critical node with a known
+    // admissible path still open must carry a technical boundary in the
+    // persisted Proof — never readable as "checked and not established".
+    expect(ambiguous.map(({ r, n }) => `${r.scenario}/${r.variant}/${r.runtime}:${n.component}`)).toEqual([]);
   });
 });
 

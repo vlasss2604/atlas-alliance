@@ -7,14 +7,9 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-20 (C2 minimal reliability fix):
-  **5192 passing, 4 skipped, 4 failing** (5200 total, 250 files, ~37 min)
-  on the run that exposed the fourth failure — the Memory-reuse
-  acceptance test pinning one attempt per component, which the approved
-  C2 change turns into one bounded recovery for its date-less
-  CURRENT_STATE; re-pinned (`recoveryAttemptsOf`, ONE_RECOVERY) and
-  passing alone afterwards, so the standing count is **5193 passing, 4
-  skipped, 3 failing**.
+- Full suite, last verified 2026-09-20 (Research Reliability V1 final
+  offline acceptance, on the final tree after every test-pin change):
+  **5203 passing, 4 skipped, 3 failing** (5210 total, 251 files, ~35 min).
   Run the suite ALONE — two concurrent `vitest run` invocations share the
   one test database and produce mass spurious failures (observed earlier:
   193 "failures" that vanished on a clean serial run). The three failures
@@ -211,6 +206,67 @@ lifecycle, Memory, confidence or Proof-layer rule changed.
   SEALED_UNEXTRACTED / UNOPENED_CANDIDATE residue of the one-recovery
   maximum the Founder kept, not nodes the Research skipped.
   Pinned in `tests/targeted-recovery-eligibility-c2-v1.test.ts` (10).
+- **Final offline acceptance — the boundary invariant.** A finished
+  Research must let a reader tell, from `proofs.bounded_by` alone and
+  without a model, "we looked and could not establish it" (SUBSTANTIVE:
+  every known admissible path attempted) from "the research limit was
+  reached before every relevant path was exhausted" (TECHNICAL). The
+  28-case audit (benchmark BOUNDARY AUDIT table, `ATLAS_BENCH_REPORT_PATH`)
+  found all 29 residual nodes AMBIGUOUS before this round — S5 said
+  STALE_CURRENT_STATE / NO_EVIDENCE_FOUND, the recovery closed
+  NO_TRACEABLE_FACTS_FOR_COMPONENT, and the record carried no technical
+  code although 1–6 known paths remained. Three additive changes, no
+  verdict / confidence / lifecycle change:
+  (i) `research-boundary.ts` — two technical codes read from the same
+  persisted state the second pass plans from (`targeted-recovery.ts`
+  `auditRemainingKnownPaths`, the planner in audit mode over every
+  component with an S5 row, called by `proof-store.ts` at Proof build):
+  **RECOVERY_BOUND_REACHED** (the one bounded recovery ran, known
+  admissible paths remain) and **KNOWN_PATHS_UNEXPLORED** (paths remain,
+  no recovery ever ran — a job stopped before its second pass). The
+  entry carries `remainingPaths` by kind (SEALED_UNEXTRACTED /
+  UNOPENED_CANDIDATE / ROUTE_UNEXPLORED with counts). A SUPPORTED
+  component never carries one; zero paths is no marker. A stale finding
+  stays on the substantive side beside it (the reader sees both).
+  (ii) `research-boundary.ts` — a provider failure as the executor writes
+  it (`<LABEL>_FAILED:<ErrorClass>[:detail]`, e.g.
+  `CONTENT_FETCHER_FAILED:ContentFetchError:HTTP_ERROR:404`) was not in
+  the technical vocabulary and read substantive. Mapped by label
+  (`technicalCodeForAttemptHead`): CONTENT_FETCHER → SOURCE_UNAVAILABLE,
+  SEARCH_GATEWAY → SEARCH_UNAVAILABLE, QUERY_PROPOSER →
+  NO_QUERIES_PROPOSED, EVIDENCE_EXTRACTOR → EXTRACTION_NOT_COMPLETED.
+  (iii) `acquisition-phases.ts` — the phased FETCH phase reserved each
+  url's first source open only after its own async prologue, so at the
+  24/24 opens ceiling which in-flight url got the last unit depended on
+  DB timing: S05/OFFICIAL_LATE/PHASED sealed different documents on two
+  runs of identical code (11:34 vs 13:32 on 2026-09-20), one of them
+  leaving NET_EFFECT's page unopened. First opens are now reserved in
+  start order through a per-phase prologue chain (the rule the SEARCH
+  phase already applied); the transport call, seal and trace still
+  overlap. Pinned: 8 candidates, ceiling 3, concurrency 4 and 1 → the
+  first three targets, every run.
+  Known imprecision, not changed: a phased recovery whose scoped FETCH
+  had no opens left closes NO_SOURCE_COULD_BE_FETCHED → SOURCE_UNAVAILABLE
+  (technical, correct side) where the truthful sub-cause is the opens
+  envelope; RECOVERY_BOUND_REACHED sits beside it. And the planner counts
+  a component's own unrouted candidate as a known path (the recovery
+  would open it) whether or not its class could establish the component;
+  the marker inherits that.
+  Projections: `question-projection-store` / `audit-projection-store`
+  derive their coverage from attempt statuses only and do not read
+  `bounded_by` yet; generating them leaves the Proof's record intact
+  (pinned). Surfacing the split is the Result Presentation phase.
+  Benchmark severity: the MAJOR rule "critical node left on a technical
+  boundary with a reachable path" now requires the corpus to carry the
+  fact (`scenario.mustEstablish`, not variant-unreachable): a node the
+  corpus has no fact for ending RECOVERY_BOUND_REACHED is the record
+  telling the truth, not a node skipped. Before the refinement the
+  honest marker flagged 12 such runs (S08 DESTINATION ×11, S05
+  NET_EFFECT) — and the same rule had produced one timing-dependent
+  false MAJOR (S05/OFFICIAL_LATE/PHASED, SOURCE_UNAVAILABLE on
+  NET_EFFECT, no fact) on the 13:32 run. Pinned in
+  `tests/research-boundary-recovery-bound-v1.test.ts` (10) and the
+  benchmark's BOUNDARY AUDIT (ambiguous / no boundary marker must be 0).
 
 ## The phased pipeline's first live run, and the two generic gaps it exposed
 

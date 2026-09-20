@@ -709,10 +709,30 @@ export async function runFetchPhase(input: {
     onchainReservedSourceOpens: reserve.reserved,
     documentarySourceOpenCeiling: reserve.documentaryCeiling,
   };
+  // FIRST OPENS ARE RESERVED IN START ORDER — the rule the SEARCH phase
+  // already applies (reserve in plan order, then overlap the network
+  // wait). Each url's prologue — route resolution, the persisted-failure
+  // plan, and the reservation of its first open — runs through this
+  // chain in the order the urls are started, so at the source-open
+  // ceiling the urls that get the last units are the first in target
+  // order, never whichever in-flight prologue's DB reads finished first.
+  // Measured on the benchmark (S05 / OFFICIAL_LATE / PHASED at 24/24): two
+  // runs of the same code sealed different documents and one of them
+  // left a critical page unopened. Only the prologue is serialised; the
+  // transport call, the seal and the trace still overlap as before.
+  let prologueChain: Promise<unknown> = Promise.resolve();
+  const inStartOrder = <T,>(fn: () => Promise<T>): Promise<T> => {
+    const next = prologueChain.then(fn);
+    prologueChain = next.then(
+      () => undefined,
+      () => undefined,
+    );
+    return next;
+  };
   // Every documentary reservation below — first fetch, content
   // negotiation, render fallback and render upgrade alike — reserves
   // against THIS ceiling, so no documentary path can reach the floor.
-  const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };
+  const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling, inStartOrder };
   let targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
   if (input.scope) {
     // B2 — a scoped second cycle: only the planned components' own
@@ -813,64 +833,90 @@ async function acquireOneUrl(
     projectId: string;
     contentFetcher: ContentFetcher;
     maxSourceOpens: number;
+    // Runs a url's prologue in start order (runFetchPhase). Absent: the
+    // prologue runs inline, as a sequential caller would.
+    inStartOrder?: <T>(fn: () => Promise<T>) => Promise<T>;
   },
   url: string,
   out: FetchPhaseResult,
 ): Promise<UrlOutcome> {
-  // The route is resolved BEFORE any transport call because two decisions
-  // depend on it up front: whether Stage-0 recovery may be requested on
-  // the very same fetch, and whether the renderer is even eligible. It is
-  // re-resolved on the document's finalUrl at seal time — a redirect must
-  // not let a pre-fetch decision speak for where the transport landed.
-  const preFetchRoute = await resolveSourceRoute(input.db, input.projectId, url);
-  const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
   const rendererEnabled = renderedDocsEnabled() && renderedDocsAvailable();
+  const ordered = input.inStartOrder ?? ((fn) => fn());
+  // THE PROLOGUE, in start order: the route, the persisted-failure plan and
+  // the reservation of the FIRST open this url will make. The reservation
+  // is taken here, before any transport call, for exactly the strategy
+  // the chain below will run first (the first planned, not-yet-attempted,
+  // non-render strategy); the chain then consumes it instead of reserving
+  // again. A first strategy that is a render reserves inside its own
+  // serialised gate, as before.
+  const { preFetchRoute, plan, firstOpen } = await ordered(async () => {
+    // The route is resolved BEFORE any transport call because two decisions
+    // depend on it up front: whether Stage-0 recovery may be requested on
+    // the very same fetch, and whether the renderer is even eligible. It is
+    // re-resolved on the document's finalUrl at seal time — a redirect must
+    // not let a pre-fetch decision speak for where the transport landed.
+    const preFetchRoute = await resolveSourceRoute(input.db, input.projectId, url);
 
-  const plan: AcquisitionStrategy[] = ["DIRECT_HTTP"];
+    const plan: AcquisitionStrategy[] = ["DIRECT_HTTP"];
 
-  // D-146 Slice 2 — REBUILD THE PLAN FROM WHAT IS PERSISTED, before the
-  // first attempt of this delivery.
-  //
-  // The chain is per url, not per delivery. A delivery that finds
-  // DIRECT_HTTP and CONTENT_NEGOTIATION already attempted has no live
-  // failure to learn from, so without this the plan would never grow past
-  // its first entry and the url would be reported exhausted while a
-  // strategy that has NEVER been attempted was still owed to it. That is
-  // not a retry: nothing already tried is tried again. It is the same
-  // chain, continuing.
-  //
-  // Only the persisted CLASS is consulted, and it decides exactly what a
-  // live failure of that class would have decided. The HTTP status is not
-  // persisted (D-143 stores the category alone, deliberately), so a
-  // reconstructed HTTP_ERROR is planned with a null status — which
-  // plannedFallbacks answers with no fallback. That is the fail-closed
-  // direction: a refusal-status render is earned inside the delivery that
-  // saw the refusal, and never inferred afterwards from a class that
-  // cannot distinguish 403 from 404.
-  {
-    const priorLedger = await loadAcquisitionLedger(input.db, input.jobId);
-    for (const failure of persistedFailureDiagnostics(url, priorLedger)) {
-      if (plan.length > MAX_FALLBACK_ATTEMPTS_PER_URL) break;
-      // The provider name on the row IS the strategy identity (D-146), so
-      // a transition that depends on WHICH strategy failed continues
-      // across a delivery boundary on the same terms it would have been
-      // decided live. An unrecognised or absent provider yields null,
-      // which those transitions read as not-licensed.
-      for (const next of plannedFallbacks(
-        failure.diagnosticCode,
-        null,
-        strategyOfProvider(failure.providerName),
-      )) {
-        if (!plan.includes(next)) plan.push(next);
+    // D-146 Slice 2 — REBUILD THE PLAN FROM WHAT IS PERSISTED, before the
+    // first attempt of this delivery.
+    //
+    // The chain is per url, not per delivery. A delivery that finds
+    // DIRECT_HTTP and CONTENT_NEGOTIATION already attempted has no live
+    // failure to learn from, so without this the plan would never grow past
+    // its first entry and the url would be reported exhausted while a
+    // strategy that has NEVER been attempted was still owed to it. That is
+    // not a retry: nothing already tried is tried again. It is the same
+    // chain, continuing.
+    //
+    // Only the persisted CLASS is consulted, and it decides exactly what a
+    // live failure of that class would have decided. The HTTP status is not
+    // persisted (D-143 stores the category alone, deliberately), so a
+    // reconstructed HTTP_ERROR is planned with a null status — which
+    // plannedFallbacks answers with no fallback. That is the fail-closed
+    // direction: a refusal-status render is earned inside the delivery that
+    // saw the refusal, and never inferred afterwards from a class that
+    // cannot distinguish 403 from 404.
+    {
+      const priorLedger = await loadAcquisitionLedger(input.db, input.jobId);
+      for (const failure of persistedFailureDiagnostics(url, priorLedger)) {
+        if (plan.length > MAX_FALLBACK_ATTEMPTS_PER_URL) break;
+        // The provider name on the row IS the strategy identity (D-146), so
+        // a transition that depends on WHICH strategy failed continues
+        // across a delivery boundary on the same terms it would have been
+        // decided live. An unrecognised or absent provider yields null,
+        // which those transitions read as not-licensed.
+        for (const next of plannedFallbacks(
+          failure.diagnosticCode,
+          null,
+          strategyOfProvider(failure.providerName),
+        )) {
+          if (!plan.includes(next)) plan.push(next);
+        }
       }
     }
-  }
+
+    let firstOpen: { strategy: AcquisitionStrategy; reserved: boolean } | null = null;
+    {
+      const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+      for (const strategy of plan) {
+        if (strategyAlreadyAttempted(url, STRATEGY_PROVIDER[strategy], ledger)) continue;
+        if (strategy === "ISOLATED_RENDER") break;
+        firstOpen = { strategy, reserved: await reserveJobBudget(input.db, input.jobId, "sourceOpens", 1, input.maxSourceOpens) };
+        break;
+      }
+    }
+    return { preFetchRoute, plan, firstOpen };
+  });
+  const recoverEmbeddedPayloads = docsPayloadRecoveryEligible(preFetchRoute);
 
   let attempted = 0;
   let lastDiagnostic: string | null = null;
   // Per url, never module state: two urls — or two jobs sharing a
   // process — must never be able to read each other's last failure.
   let lastHttpStatus: number | null = null;
+  let firstOpenPending = firstOpen;
 
   for (let i = 0; i < plan.length; i++) {
     const strategy = plan[i];
@@ -923,13 +969,21 @@ async function acquireOneUrl(
       continue;
     }
 
-    const reserved = await reserveJobBudget(
-      input.db,
-      input.jobId,
-      "sourceOpens",
-      1,
-      input.maxSourceOpens,
-    );
+    // The first open was reserved in the prologue, in start order; every
+    // later one (a fallback after a failure) reserves here as before.
+    let reserved: boolean;
+    if (firstOpenPending) {
+      reserved = firstOpenPending.reserved;
+      firstOpenPending = null;
+    } else {
+      reserved = await reserveJobBudget(
+        input.db,
+        input.jobId,
+        "sourceOpens",
+        1,
+        input.maxSourceOpens,
+      );
+    }
     if (!reserved) {
       out.skippedUrls.push(url);
       return "BUDGET_EXHAUSTED";

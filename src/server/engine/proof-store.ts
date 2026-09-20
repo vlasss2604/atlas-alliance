@@ -12,6 +12,7 @@ import {
 import type { ClaimReasonCode, ClaimRequirementResult, ClaimSupportStatus, MechanismGapRef } from "./claim-evaluator";
 import type { ComponentReconciliationStatus } from "./component-reconciler";
 import { buildProof, type ProofDraft, type ProofRefusalReason } from "./proof-builder";
+import { auditRemainingKnownPaths } from "./targeted-recovery";
 
 // Phase 6, S8 — the persistence half of the Proof Writer.
 //
@@ -145,6 +146,11 @@ async function persistWithin(tx: Transaction, jobId: string): Promise<ProofPersi
     .where(eq(researchAttempts.researchJobId, jobId))
     .orderBy(asc(researchAttempts.attemptNumber));
 
+  // KNOWN PATHS STILL OPEN — the audit read behind the boundary record's
+  // RECOVERY_BOUND_REACHED / KNOWN_PATHS_UNEXPLORED (research-boundary.ts):
+  // persisted state only, no provider, no spend.
+  const remainingPaths = await auditRemainingKnownPaths(tx, jobId, job.projectId);
+
   const outcome = buildProof({
     researchJobId: jobId,
     claimSupport: claim
@@ -168,6 +174,7 @@ async function persistWithin(tx: Transaction, jobId: string): Promise<ProofPersi
     // A2 — the latest attempt per component, oldest first so the last
     // write per key is the newest.
     attemptOutcomes: attemptRows.map((a) => ({ step: a.patternStep, component: a.component, status: a.status, reason: a.reason })),
+    remainingPaths,
   });
 
   if (outcome.proof === null) {

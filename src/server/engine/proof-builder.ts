@@ -11,7 +11,7 @@ import {
   type ConfidenceBindingReason,
   type ConfidenceScore,
 } from "./proof-confidence";
-import { deriveResearchBoundary, type BoundaryAttemptInput, type ResearchBoundary } from "./research-boundary";
+import { deriveResearchBoundary, type BoundaryAttemptInput, type BoundaryRemainingPathsInput, type ResearchBoundary } from "./research-boundary";
 
 // Phase 6, S8 — the Proof builder.
 //
@@ -84,6 +84,11 @@ export interface ProofBuilderInput {
   // record. Optional: a caller without attempts gets a record derived from
   // S5 codes alone.
   attemptOutcomes?: readonly BoundaryAttemptInput[];
+  // Known admissible paths still open at finalize per component, for the
+  // boundary record (research-boundary.ts RECOVERY_BOUND_REACHED /
+  // KNOWN_PATHS_UNEXPLORED). Optional and additive: absent, the record is
+  // what it was.
+  remainingPaths?: readonly BoundaryRemainingPathsInput[];
 }
 
 // One entry per canonical layer. `lines` is closed, templated content —
@@ -382,6 +387,7 @@ export function buildProof(input: ProofBuilderInput): ProofBuildOutcome {
       boundedBy: deriveResearchBoundary({
         components: input.componentResults.map((r) => ({ step: r.step, component: r.component, status: r.status, reasonCodes: r.reasonCodes })),
         attempts: input.attemptOutcomes,
+        remainingPaths: input.remainingPaths,
       }),
     },
     refusal: null,

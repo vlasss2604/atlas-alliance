@@ -106,7 +106,9 @@ export async function planTargetedRecovery(
   db: Database | Transaction,
   jobId: string,
   projectId: string | null,
-  workQueue: readonly ComponentWorkItem[],
+  // Only (step, component) is read: the work queue, or — for the audit
+  // read below — the components the job persisted a result for.
+  workQueue: readonly Pick<ComponentWorkItem, "step" | "component">[],
   // MEASUREMENT ONLY (Reliability Audit C2): `audit` lifts the
   // one-recovery-per-component gate so a finished job can be asked, after
   // the fact, whether a known admissible path was still unexplored for an
@@ -284,4 +286,51 @@ export function scopedWorkItems(plan: TargetedRecoveryPlan, workQueue: readonly 
 export function planItemFor(plan: TargetedRecoveryPlan | null | undefined, step: number, component: string): TargetedRecoveryItem | null {
   if (!plan) return null;
   return plan.items.find((i) => i.step === step && i.component === component) ?? null;
+}
+
+// KNOWN PATHS STILL OPEN AT FINALIZE — the Proof's boundary record reads
+// this (research-boundary.ts RECOVERY_BOUND_REACHED /
+// KNOWN_PATHS_UNEXPLORED). The same audit read the benchmark makes: the
+// planner in audit mode over every component the job persisted an S5
+// result for, plus whether the component's one recovery already ran.
+// Persisted state only; nothing runs, nothing is spent.
+export interface RemainingKnownPaths {
+  step: number;
+  component: string;
+  recoverySpent: boolean;
+  paths: { kind: KnownPathKind; count: number }[];
+}
+
+export async function auditRemainingKnownPaths(
+  db: Database | Transaction,
+  jobId: string,
+  projectId: string | null,
+): Promise<RemainingKnownPaths[]> {
+  const results = await db
+    .select({ step: researchComponentResults.patternStep, component: researchComponentResults.component })
+    .from(researchComponentResults)
+    .where(eq(researchComponentResults.researchJobId, jobId));
+  if (results.length === 0) return [];
+  const queue = [...results].sort((a, b) => a.step - b.step || a.component.localeCompare(b.component));
+  const plan = await planTargetedRecovery(db, jobId, projectId, queue, { audit: true });
+  if (!plan) return [];
+  const attempts = await db
+    .select({ step: researchAttempts.patternStep, component: researchAttempts.component, attemptNumber: researchAttempts.attemptNumber })
+    .from(researchAttempts)
+    .where(eq(researchAttempts.researchJobId, jobId));
+  const maxAttempt = new Map<string, number>();
+  for (const a of attempts) {
+    const k = `${a.step}:${a.component}`;
+    maxAttempt.set(k, Math.max(maxAttempt.get(k) ?? 0, a.attemptNumber));
+  }
+  return plan.items.map((item) => {
+    const counts = new Map<KnownPathKind, number>();
+    for (const p of item.paths) counts.set(p.kind, (counts.get(p.kind) ?? 0) + 1);
+    return {
+      step: item.step,
+      component: item.component,
+      recoverySpent: (maxAttempt.get(`${item.step}:${item.component}`) ?? 0) > 1,
+      paths: [...counts].map(([kind, count]) => ({ kind, count })).sort((a, b) => a.kind.localeCompare(b.kind)),
+    };
+  });
 }

@@ -298,10 +298,14 @@ describe("7. the rule is generic research capability, never a project", () => {
     const src = await readFile("src/server/engine/acquisition-phases.ts", "utf-8");
     // The phase computes the ceiling once and hands every strategy the
     // capped input; nothing in the chain reads the raw job ceiling again.
-    expect(src).toContain("const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };");
+    expect(src).toContain("const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling, inStartOrder };");
     expect(src).toContain("acquireOneUrl(documentaryInput, url, out)");
-    const reservations = src.match(/"sourceOpens",\r?\n\s+1,\r?\n\s+input\.maxSourceOpens,/g) ?? [];
-    expect(reservations.length).toBe(3); // fetch, render fallback, render upgrade
+    // Every reservation on the axis names the capped input ceiling — the
+    // first open (reserved in start order in the url's prologue), the
+    // fallback fetch, the render fallback and the render upgrade.
+    const reservations = src.match(/"sourceOpens",\s*1,\s*input\.maxSourceOpens[,)]/g) ?? [];
+    expect(reservations.length).toBe(4);
+    expect(src.match(/"sourceOpens",\s*1,(?!\s*input\.maxSourceOpens)/g) ?? []).toHaveLength(0);
   });
 
   it("no second budget ledger appears — reserveJobBudget stays the only mutator", async () => {
