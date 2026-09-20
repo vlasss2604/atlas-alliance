@@ -343,9 +343,12 @@ describe("a label may rename a finding, never widen it", () => {
 describe("one action vocabulary, and nothing strengthened by the rewrite", () => {
   it("TEST 13: the path to a source says SOURCES at every step", () => {
     const ladder = readFileSync(LADDER, "utf-8");
-    const page = readFileSync(PAGE, "utf-8");
+    const result = readFileSync("src/client/components/research-result.tsx", "utf-8");
     expect(ladder).toContain('{open ? "Hide sources" : "Sources"}');
-    expect(page).toContain("Sources · {usedDocs}");
+    // The result surface no longer counts sources at all — a count invited
+    // source arithmetic; the strongest source now sits beside each row.
+    expect(result).not.toContain("usedDocs");
+    expect(result).toContain('{open ? "Hide evidence" : "Evidence"}');
     // The old three-names-for-one-idea vocabulary is gone from the normal
     // result: proof, evidence and support were all the same journey.
     const code = ladder
@@ -369,7 +372,7 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
         { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE" },
       ],
     });
-    expect(text[0]).toMatch(/^Established:/);
+    expect(text[0]).toMatch(/^Confirmed:/);
     expect(text.join(" ")).toContain("Not established:");
     // The badge beside it already says PARTIALLY SUPPORTED; the prose does
     // not spend its first sentence saying so again.
@@ -380,7 +383,7 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
   it("TEST 15: no status was strengthened, and no gap became a negative fact", () => {
     // Partial stays partial.
     const partial = row({ status: "PARTIALLY_SUPPORTED" });
-    expect(partial.stateLabel).toBe("Partly established");
+    expect(partial.stateLabel).toBe("Partially confirmed");
     expect(findingExplanation(partial).join(" ")).not.toContain("fully");
 
     // Unresolved stays unresolved, and never becomes "does not happen".

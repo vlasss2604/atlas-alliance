@@ -222,6 +222,23 @@ export interface ProofCitationView {
   source: { title: string | null; publisher: string | null; sourceType: string };
 }
 
+// THE RESEARCH BOUNDARY RECORD, as S8 persisted it (`proofs.bounded_by`).
+// Per component not SUPPORTED: the closed technical codes the engine wrote
+// (never rendered as such — the surface translates the KIND of boundary:
+// technical, configuration or substantive) and, beside a recovery-limit
+// code, the known evidence paths still open by kind.
+export interface ProofBoundaryEntry {
+  step: number;
+  component: string;
+  codes: string[];
+  remainingPaths?: { kind: string; count: number }[];
+}
+export interface ProofBoundaryView {
+  version: number;
+  technical: ProofBoundaryEntry[];
+  substantive: ProofBoundaryEntry[];
+}
+
 export interface ProofView {
   proofId: string;
   researchJobId: string;
@@ -237,6 +254,10 @@ export interface ProofView {
   citations: ProofCitationView[];
   researchCutoff: string | null;
   createdAt: string;
+  // Null on a Proof written before the boundary record existed: the
+  // surface then reads the persisted reason codes and coverage instead,
+  // and never invents a boundary kind it cannot ground.
+  boundedBy: ProofBoundaryView | null;
 }
 
 // ATLAS SOURCE SNAPSHOT — the document acquisition actually stored, plus

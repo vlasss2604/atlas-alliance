@@ -21,7 +21,9 @@ import { deriveQuestionFindings, findingExplanation } from "../src/client/resear
 //   rather than the reader's knowledge, and the source footnote invited
 //   exactly the source arithmetic this product refuses.
 
-const PAGE = "app/(app)/research/[id]/page.tsx";
+// The finished result is ONE component (research-result.tsx), rendered by
+// the page; the composition pins read the component.
+const PAGE = "src/client/components/research-result.tsx";
 const page = readFileSync(PAGE, "utf-8");
 
 // Comments legitimately quote the old copy to explain why it is gone, so
@@ -179,19 +181,19 @@ describe("the normal result shows what the answer rests on, and nothing else", (
     expect(code).not.toMatch(/\{readDocs\}\s*\{readDocs === 1/);
   });
 
-  it("TEST 6: it shows only the count of sources used as evidence", () => {
-    const meta = code.slice(code.indexOf('data-testid="answer-metadata"'));
-    expect(meta.slice(0, 400)).toContain("{usedDocs}");
-    // ONE vocabulary for the whole chain: the footnote, the control that
-    // opens a finding's proof, and the card all say SOURCES.
-    expect(meta.slice(0, 400)).toContain("Sources ·");
-    expect(meta.slice(0, 400)).not.toContain("used as evidence");
-    // Rendered only when there is something to report.
-    expect(code).toContain("{usedDocs > 0 && (");
+  it("TEST 6: the answer's footnote states freshness, never a source count", () => {
+    // A count of sources invited source arithmetic. What a reader needs
+    // beside the answer is WHEN the evidence was checked and how recent
+    // the newest admitted source is — two persisted dates, no score.
+    expect(code).not.toContain("usedDocs");
+    expect(code).not.toContain("used as evidence");
+    const meta = code.slice(code.indexOf('data-testid="answer-freshness"'));
+    expect(meta.slice(0, 500)).toContain("Evidence checked {surface.checkedOn}");
+    expect(meta.slice(0, 500)).toContain("Latest source");
   });
 
-  it("TEST 6b: the count is a footnote, never styled as a score", () => {
-    const meta = code.slice(code.indexOf('data-testid="answer-metadata"') - 400);
+  it("TEST 6b: the footnote is a footnote, never styled as a score", () => {
+    const meta = code.slice(code.indexOf('data-testid="answer-freshness"') - 400);
     const block = meta.slice(0, 700);
     // Smallest text on the panel, in the dim token — no badge, no tone
     // class, no progress or confidence affordance.
@@ -232,9 +234,9 @@ describe("presentation only", () => {
       ],
     );
     expect(rows.map((r) => r.stateLabel)).toEqual([
-      "Established",
+      "Confirmed",
       "Not established",
-      "Evidence indicates otherwise",
+      "Contradicted",
     ]);
   });
 

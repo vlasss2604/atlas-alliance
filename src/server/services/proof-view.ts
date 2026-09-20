@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import type { Database } from "../db/client";
 import { evidence, proofs, sources } from "../db/schema";
 import { bandOfScore, CONFIDENCE_SCORES, type ConfidenceBand, type ConfidenceScore } from "../engine/proof-confidence";
+import type { ResearchBoundary } from "../engine/research-boundary";
 
 // Phase 6, S9 — THE PRODUCT BOUNDARY.
 //
@@ -93,6 +94,16 @@ export interface ProofView {
   citations: ProofCitationView[];
   researchCutoff: string | null;
   createdAt: string;
+  // THE RESEARCH BOUNDARY RECORD (Research Reliability V1, A2 + final
+  // acceptance): per component not SUPPORTED, whether the record stops
+  // for a TECHNICAL reason (the bounded Research never inspected the
+  // admissible material — a search or recovery limit, no admissible
+  // route, an unreadable or unavailable source) or a SUBSTANTIVE one (the
+  // material was attempted and the evidence stayed short). Copied exactly
+  // as S8 wrote it (`proofs.bounded_by`); null on a Proof written before
+  // the record existed, which a client renders as "no boundary record",
+  // never as "no boundary".
+  boundedBy: ResearchBoundary | null;
 }
 
 const BAND_ENCODINGS: ReadonlySet<number> = new Set<number>(CONFIDENCE_SCORES);
@@ -142,6 +153,7 @@ export async function loadProofForJob(
       layers: proofs.layers,
       researchCutoff: proofs.researchCutoff,
       createdAt: proofs.createdAt,
+      boundedBy: proofs.boundedBy,
     })
     .from(proofs)
     .where(and(eq(proofs.researchJobId, researchJobId), eq(proofs.ownerUserId, ownerUserId)));
@@ -216,5 +228,6 @@ export async function loadProofForJob(
     })),
     researchCutoff: iso(row.researchCutoff),
     createdAt: row.createdAt.toISOString(),
+    boundedBy: (row.boundedBy as ResearchBoundary | null) ?? null,
   };
 }

@@ -358,41 +358,58 @@ spelling; fixtures and real jobs, historical-semantics banner kept) and
 `/dev/verification-showcase` (`GOLDEN_AUDIT_FIXTURE`).
 
 **On the product result screen** (`/research/[id]`) a finished result is
-ONE Research object (Founder decision 2026-09-19, after the first live UI
-acceptance): there is no Research | Verification switch and no view
-state. The first screen is, in order: ANSWER (identity, the question as
-the heading, verdict badge, confidence, the short answer's finding
-sentences, the sources footnote); PROOF MAP (`ProofMap`,
-`src/client/components/result-first-screen.tsx` — the briefing's own
-rows, i.e. the question projection where one resolved and the Pattern
-ladder otherwise, one status word per link from the closed
-`PROOF_MAP_STATUS` vocabulary Supported / Partial / Not established /
-Contradicted / Not assessed, read from the row's persisted reality
-state); KEY EVIDENCE (`KeyEvidence` over `keyEvidenceFrom`: S5
-contradicting rows first, then S8's citations, then SUPPORTING rows in
-proof-map order, one entry per document, at most `MAX_KEY_EVIDENCE` = 4;
-each with the claim in the ladder's words, the engine's persisted reading
-of the passage (the passage itself when there is none), source name and
-class, retrieval date, the snapshot link where a capture exists and the
-original link); NOT ESTABLISHED (`NotEstablished`: the short answer's
-"Main limitation" sentence, moved here by `splitMainLimitation` so it is
-stated once, then the briefing's open checks with their persisted reasons
-and the "N more" count). Everything deeper sits behind ONE `<details>`
-disclosure "Full evidence and audit": the `ResultLadder` with every row
-and excerpt, the verification composition (`JobVerification`, same pure
-projection as before, absent for a FAILED or CANCELLED run which has
-nothing to verify), the "Full research audit" entry and the Research
-process panel; `DeveloperDetails` stays after it. A legacy
-`?view=verification` (or `?view=full`) link opens the disclosure; nothing
-navigates, nothing is fetched or recomputed. The invariant is unchanged
-and now pinned on the new surfaces (`tests/ui-first-screen-v1.test.ts`):
-PAGE <= PERSISTED VERIFIED RECORD — the first screen selects, orders,
-splits and relabels values `research-model` already derived from
-persisted rows; it decides no status, writes no sentence, chooses no
-evidence, and can neither strengthen a verdict nor turn "not
-established" into a negative claim. The historical-semantics note is
-opt-in on `JobVerification` (`historicalNote`) and the product route never
-opts in.
+ONE Research object (Result Presentation V1, 2026-09-20, pending
+Founder visual review): the page renders `ResearchResult`
+(`src/client/components/research-result.tsx`) from the detail payload,
+and `/dev/result-states?state=1..8` renders the same component from
+eight invented fixtures (`src/client/result-surface-fixtures.ts`:
+mostly confirmed, mixed, substantive not-established, technical
+recovery limit, configuration boundary, contradicted, documentary +
+on-chain, evidence-heavy). Everything is derived in
+`src/client/result-surface.ts` — pure, no fetch, no model — from
+persisted rows: PAGE <= PERSISTED VERIFIED RECORD. The first screen, in
+order: ANSWER (identity, the question as the heading, verdict badge,
+confidence word only with a verdict, two to four sentences — the
+briefing's finding sentences then ONE boundary sentence in the reader's
+terms — and a freshness footnote: when the evidence was checked and the
+newest admitted source's date; no source count); RESEARCH TABLE — the
+question projection's own rows plus the paper-vs-reality rows
+(MECHANISM_SPEC, CURRENT_STATE, EXECUTION_EVIDENCE whenever assessed;
+the Pattern ladder's rows when no projection resolved), each with a
+status word, one or two lines of what the evidence established (the
+engine's persisted reading of an admitted source; a chain reading
+translated, e.g. "FXT total supply observed: 100.0M"; for a
+not-established row the boundary sentence), the strongest admitted
+source, its date, and the admitted evidence one tap away inline; a
+supporting check folds under the finding that leans on it as a chip with
+its own status; PROOF MAP — every relevant check as a node in proof-path
+order (revenue → flow → mechanism → governance → active now → executed
+→ destination → recipient → supply effect → durability) with the same
+status; KEY EVIDENCE — contradicting first, then the Proof's citations,
+then on-chain readings, then supporting evidence, one card per document,
+at most five, each expanding in place to excerpt, why this source, what
+it does not prove, snapshot and original; WHAT IS NOT ESTABLISHED — one
+block grouped by kind from `proofs.bounded_by` (or, on a Proof written
+before the record existed, from the persisted reason codes and coverage):
+TECHNICAL "Research limit reached before every relevant evidence path
+could be checked." (+ N known sources left unread from `remainingPaths`),
+CONFIGURATION "Could not be verified with the currently supported
+evidence routes.", SUBSTANTIVE "Not established after checking the
+available evidence." with a reason shared by every row stated once, and
+under each group the sentence it must never be read as. Everything
+deeper sits behind ONE `<details>` "Full evidence and audit": the
+`ResultLadder`, `JobVerification`, the audit entry and the research
+process; `DeveloperDetails` stays after it on the page. The Proof read
+model (`services/proof-view.ts`) now carries `boundedBy` exactly as
+persisted (null on legacy Proofs). ONE STATUS VOCABULARY everywhere:
+Confirmed / Partially confirmed / Not established / Contradicted
+(`COMPONENT_STATUS_LABELS`, `RESULT_STATE_LABELS`, `PROOF_MAP_STATUS`,
+`PROOF_STATE`, the answer's "Confirmed:" / "Partially confirmed:"
+leads). No engine vocabulary reaches the surface
+(`FORBIDDEN_SURFACE_TOKENS`, scanned on every fixture and both Aave
+shapes). Pinned in `tests/ui-result-surface-v1.test.ts` (30); the
+older result pins were re-pointed at the component and the vocabulary.
+The question/audit projections still do not read `bounded_by`.
 
 Counting on the Verification page is over what is OPEN, not over the whole
 boundary: `open = boundary − components shown under WHAT STOOD UP` (a

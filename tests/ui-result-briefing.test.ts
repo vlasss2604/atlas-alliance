@@ -36,6 +36,7 @@ import {
 const BRIEFING = "src/client/components/result-briefing.tsx";
 const MODEL = "src/client/research-model.ts";
 const PAGE = "app/(app)/research/[id]/page.tsx";
+const RESULT = "src/client/components/research-result.tsx";
 
 const render = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 
@@ -117,8 +118,8 @@ describe("TEST 1 — a partial result is answered, not merely graded", () => {
     expect(shortAnswer.length).toBeLessThanOrEqual(6);
 
     // It answers, in ordinary words, rather than repeating the badge.
-    expect(text).toContain("Established:");
-    expect(text).toContain("Partly established:");
+    expect(text).toContain("Confirmed:");
+    expect(text).toContain("Partially confirmed:");
     expect(text).toContain("Not established:");
     expect(text).toContain("what the project's own documentation specifies");
     expect(text).toContain("whether the mechanism has actually executed");
@@ -141,9 +142,9 @@ describe("TEST 1 — a partial result is answered, not merely graded", () => {
       projectName: "Raydium",
       components: RAYDIUM.map((c) => ({ component: c.component, status: c.status })),
     }).join(" ");
-    expect(old).not.toContain("Partly established");
+    expect(old).not.toContain("Partially confirmed");
 
-    expect(briefingFor(RAYDIUM).shortAnswer.join(" ")).toContain("Partly established:");
+    expect(briefingFor(RAYDIUM).shortAnswer.join(" ")).toContain("Partially confirmed:");
   });
 
   it("the key findings table draws the distinctions the question turns on", () => {
@@ -152,13 +153,13 @@ describe("TEST 1 — a partial result is answered, not merely graded", () => {
 
     // Documented, but not observed executing — the distinction a reader
     // most needs and the one a bare verdict destroys.
-    expect(by.get("MECHANISM_SPEC")?.result).toBe("Established");
+    expect(by.get("MECHANISM_SPEC")?.result).toBe("Confirmed");
     expect(by.get("EXECUTION_EVIDENCE")?.result).toBe("Not established");
-    expect(by.get("CURRENT_STATE")?.result).toBe("Partly established");
-    expect(by.get("DESTINATION")?.result).toBe("Established");
+    expect(by.get("CURRENT_STATE")?.result).toBe("Partially confirmed");
+    expect(by.get("DESTINATION")?.result).toBe("Confirmed");
     expect(by.get("RECIPIENT")?.result).toBe("Not established");
     expect(by.get("NET_EFFECT")?.result).toBe("Not established");
-    expect(by.get("DURABILITY_BASIS")?.result).toBe("Partly established");
+    expect(by.get("DURABILITY_BASIS")?.result).toBe("Partially confirmed");
 
     // Destination and recipient are separately graded, which is the
     // engine's own split: where value lands is not who receives it.
@@ -198,10 +199,10 @@ describe("TEST 2 — mixed component statuses each render as themselves", () => 
     ];
     const { keyFindings } = briefingFor(mixed);
     expect(keyFindings.map((f) => f.result)).toEqual([
-      "Established",
-      "Partly established",
+      "Confirmed",
+      "Partially confirmed",
       "Not established",
-      "Evidence indicates otherwise",
+      "Contradicted",
     ]);
     expect(keyFindings.map((f) => f.tone)).toEqual([
       "supported",
@@ -318,7 +319,7 @@ describe("TEST 4 — a contradiction is distinguished from missing evidence", ()
     const net = keyFindings.find((f) => f.component === "NET_EFFECT");
     const exec = keyFindings.find((f) => f.component === "EXECUTION_EVIDENCE");
 
-    expect(net?.result).toBe("Evidence indicates otherwise");
+    expect(net?.result).toBe("Contradicted");
     expect(exec?.result).toBe("Not established");
     expect(net?.tone).toBe("negative");
     expect(exec?.tone).toBe("insufficient");
@@ -342,7 +343,7 @@ describe("TEST 4 — a contradiction is distinguished from missing evidence", ()
       { component: "MECHANISM_SPEC", status: "SUPPORTED", coverage: "COMPLETED" },
     ]);
     const text = shortAnswer.join(" ");
-    expect(text.indexOf("indicates otherwise")).toBeLessThan(text.indexOf("Established:"));
+    expect(text.indexOf("indicates otherwise")).toBeLessThan(text.indexOf("Confirmed:"));
   });
 });
 
@@ -361,11 +362,11 @@ describe("TEST 5 — a supported-only result carries no gap language", () => {
     const { shortAnswer, keyFindings, unresolved } = briefingFor(supported, {
       verdict: "SUPPORTED",
     });
-    expect(shortAnswer.join(" ")).toContain("Established:");
+    expect(shortAnswer.join(" ")).toContain("Confirmed:");
     expect(shortAnswer.join(" ")).not.toContain("Not established");
-    expect(shortAnswer.join(" ")).not.toContain("Partly established");
+    expect(shortAnswer.join(" ")).not.toContain("Partially confirmed");
     expect(unresolved).toEqual([]);
-    expect(keyFindings.every((f) => f.result === "Established")).toBe(true);
+    expect(keyFindings.every((f) => f.result === "Confirmed")).toBe(true);
   });
 
   it("the still-open section does not render at all", () => {
@@ -419,7 +420,7 @@ describe("TEST 6 — FAILED with substantive findings keeps its established beha
     const b = briefingFor(partialFailure, { outcomeKind: "FAILED" });
     expect(b.unresolved).toEqual([]);
     expect(b.keyFindings.map((f) => f.component)).toContain("EXECUTION_EVIDENCE");
-    expect(b.keyFindings.find((f) => f.component === "FLOW_PATH")?.result).toBe("Established");
+    expect(b.keyFindings.find((f) => f.component === "FLOW_PATH")?.result).toBe("Confirmed");
   });
 });
 
@@ -442,8 +443,8 @@ describe("TEST 7 — FAILED with nothing substantive keeps its exact wording", (
   it("no established/partly-established claim is manufactured from nothing", () => {
     const b = briefingFor(emptyFailure, { outcomeKind: "FAILED" });
     const text = b.shortAnswer.join(" ");
-    expect(text).not.toContain("Established:");
-    expect(text).not.toContain("Partly established:");
+    expect(text).not.toContain("Confirmed:");
+    expect(text).not.toContain("Partially confirmed:");
     expect(b.unresolved).toEqual([]);
   });
 
@@ -529,11 +530,10 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
     // And the page hands the first-screen surfaces the same three derived
     // values — the proof map takes the index, the boundary block takes the
     // open checks and their count. Nothing evidential reaches either.
-    const page = readFileSync(PAGE, "utf-8");
+    const page = readFileSync(RESULT, "utf-8");
     for (const prop of [
-      "<ProofMap rows={briefing.keyFindings}",
-      "items={briefing.unresolved}",
-      "more={briefing.unresolvedMore}",
+      "<ProofChainView nodes={surface.chain} />",
+      "<BoundaryPanel groups={surface.boundary} />",
     ]) {
       expect(page, prop).toContain(prop);
     }
@@ -568,29 +568,28 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
 
 describe("the deep result is intact beneath the new layer", () => {
   it("the ladder, the audit entry and the developer details all still render", () => {
-    const page = readFileSync(PAGE, "utf-8");
+    const page = readFileSync(RESULT, "utf-8");
     expect(page).toContain("<ResultLadder");
     expect(page.split("<ResultLadder").length - 1).toBe(1);
     expect(page).toContain('data-testid="audit-entry"');
-    expect(page).toContain("<DeveloperDetails");
+    expect(readFileSync(PAGE, "utf-8")).toContain("<DeveloperDetails");
     expect(page).toContain("<ResearchProgress");
-    // And the briefing's rows render ABOVE the ladder, not instead of it —
-    // as the proof map and the "Not established" block of the first screen
-    // (result-first-screen.tsx), fed by `briefing.keyFindings` and
-    // `briefing.unresolved`.
-    expect(page.indexOf("<ProofMap rows={briefing.keyFindings}")).toBeGreaterThan(-1);
-    expect(page.indexOf("<ProofMap")).toBeLessThan(page.indexOf("<ResultLadder"));
-    expect(page.indexOf("<NotEstablished")).toBeLessThan(page.indexOf("<ResultLadder"));
+    // And the surface's rows render ABOVE the ladder, not instead of it —
+    // the research table, the proof map and the boundary block, fed by the
+    // surface model.
+    expect(page.indexOf("<ResearchTable rows={surface.table} />")).toBeGreaterThan(-1);
+    expect(page.indexOf("<ResearchTable")).toBeLessThan(page.indexOf("<ResultLadder"));
+    expect(page.indexOf("<BoundaryPanel")).toBeLessThan(page.indexOf("<ResultLadder"));
   });
 
-  it("the briefing summarises the SAME rows the ladder renders", () => {
+  it("the surface summarises the SAME rows the ladder renders", () => {
     // Deriving from a different set would let the top of the page disagree
     // with the detail underneath it — the one failure this layer must not
-    // have.
-    const page = readFileSync(PAGE, "utf-8");
-    expect(page).toContain(
-      "questionRows.length > 0 ? questionRows : [...ladder.mechanism, ...ladder.value]",
-    );
+    // have: the table is the question projection's rows where one
+    // resolved, the Pattern ladder's rows otherwise.
+    const surface = readFileSync("src/client/result-surface.ts", "utf-8");
+    expect(surface).toContain("deriveQuestionFindings(findings, input.components, classesByComponent)");
+    expect(surface).toContain('for (const [c, row] of ladderRows) selected.set(c, { row, kind: "PRIMARY", restsOn: [] });');
   });
 
   it("PRESENTATION ONLY: no model call, no research call, no new persistence", () => {
@@ -608,10 +607,10 @@ describe("the deep result is intact beneath the new layer", () => {
     // labels the ladder already uses, so a reader meets one vocabulary.
     const { keyFindings } = briefingFor(RAYDIUM);
     const canonical = new Set([
-      "Established",
-      "Partly established",
+      "Confirmed",
+      "Partially confirmed",
       "Not established",
-      "Evidence indicates otherwise",
+      "Contradicted",
     ]);
     for (const f of keyFindings) {
       expect(canonical.has(f.result), f.result).toBe(true);
@@ -680,10 +679,10 @@ describe("CLEANUP — the index cannot overflow a phone", () => {
       new Set(RAYDIUM.map((c) => c.component)),
     );
     const canonical = new Set([
-      "Established",
-      "Partly established",
+      "Confirmed",
+      "Partially confirmed",
       "Not established",
-      "Evidence indicates otherwise",
+      "Contradicted",
     ]);
     for (const f of keyFindings) expect(canonical.has(f.result), f.result).toBe(true);
   });
@@ -788,14 +787,14 @@ describe("CLEANUP — the limitation is stated once", () => {
   });
 
   it("the deep Proof below is untouched by any of this", () => {
-    const page = readFileSync(PAGE, "utf-8");
+    const page = readFileSync(RESULT, "utf-8");
     expect(page.split("<ResultLadder").length - 1).toBe(1);
     expect(page).toContain('data-testid="audit-entry"');
-    expect(page).toContain("<DeveloperDetails");
+    expect(readFileSync(PAGE, "utf-8")).toContain("<DeveloperDetails");
     expect(page).toContain("questionFindings={detail.questionFindings}");
     expect(page).toContain("evidenceByComponent={evidenceByComponent}");
     expect(page).toContain("supportingSummariesByComponent={supportingSummariesByComponent}");
-    expect(page.indexOf("<ResultBriefing")).toBeLessThan(page.indexOf("<ResultLadder"));
+    expect(page.indexOf("<ResearchTable")).toBeLessThan(page.indexOf("<ResultLadder"));
   });
 });
 

@@ -196,18 +196,20 @@ describe("UI — answer first", () => {
   ];
 
   it("TEST 3: the answer leads the screen; everything else is below it", () => {
-    const src = readFileSync(RESULT_PAGE, "utf-8");
+    // The finished result is ONE component; the page renders it and keeps
+    // the developer opt-in after it.
+    const src = readFileSync("src/client/components/research-result.tsx", "utf-8");
     const answerAt = src.indexOf('data-testid="answer-panel"');
     const ladderAt = src.indexOf("<ResultLadder");
     const auditAt = src.indexOf('data-testid="progress-slot-finished"');
-    const devAt = src.indexOf("<DeveloperDetails");
-    for (const at of [answerAt, ladderAt, auditAt, devAt]) {
+    for (const at of [answerAt, ladderAt, auditAt]) {
       expect(at).toBeGreaterThan(-1);
     }
-    // Answer → the findings → the full audit → engine internals.
+    // Answer → the findings → the full audit; then engine internals.
     expect(answerAt).toBeLessThan(ladderAt);
     expect(ladderAt).toBeLessThan(auditAt);
-    expect(auditAt).toBeLessThan(devAt);
+    const page = readFileSync(RESULT_PAGE, "utf-8");
+    expect(page.indexOf("<ResearchResult")).toBeLessThan(page.indexOf("<DeveloperDetails"));
     // The document inventory has left this page entirely. It used to sit
     // inside the result's own audit block; the audit is now a separate
     // surface that accounts for sources as a register, so no general
@@ -235,11 +237,11 @@ describe("UI — answer first", () => {
     expect(text).not.toMatch(/^\d/);
 
     // THE EPISTEMIC FRAME STILL LEADS, IN ONE WORD INSTEAD OF SEVEN.
-    // "Established:" carries exactly what "The checked evidence
+    // "Confirmed:" carries exactly what "The checked evidence
     // establishes …" carried — a statement about what the EVIDENCE
     // reached, never about what is true of the world — but reaches the
     // fact itself far sooner. The world-claim collapse is still refused.
-    expect(text).toContain("Established:");
+    expect(text).toContain("Confirmed:");
     expect(text).toContain("Not established:");
     expect(text).not.toContain("ATLAS verified");
     expect(text).not.toContain("ATLAS could not verify");
@@ -357,10 +359,11 @@ describe("UI — live research state", () => {
 
   it("TEST 12: live progress is prominent, and TEST 11: finished progress is secondary", () => {
     const src = readFileSync(RESULT_PAGE, "utf-8");
+    const result = readFileSync("src/client/components/research-result.tsx", "utf-8");
     const liveAt = src.indexOf('data-testid="progress-slot-live"');
-    const answerAt = src.indexOf('data-testid="answer-panel"');
-    const finishedAt = src.indexOf('data-testid="progress-slot-finished"');
-    const evidenceAt = src.indexOf('data-testid="section-evidence"');
+    const answerAt = src.indexOf("<ResearchResult");
+    const finishedAt = result.indexOf('data-testid="progress-slot-finished"');
+    const evidenceAt = result.indexOf('data-testid="key-evidence"');
     expect(liveAt).toBeGreaterThan(-1);
     expect(finishedAt).toBeGreaterThan(-1);
 
@@ -374,7 +377,7 @@ describe("UI — live research state", () => {
     // prepares a separate surface on demand — with the progress log
     // beneath it. What matters is unchanged: nothing here is expanded,
     // and the audit costs nothing until it is asked for.
-    const finishedBlock = src.slice(finishedAt, finishedAt + 900);
+    const finishedBlock = result.slice(finishedAt, finishedAt + 900);
     expect(finishedBlock).toContain('data-testid="audit-entry"');
     expect(finishedBlock).toContain("<ResearchProgress");
     expect(finishedBlock).not.toMatch(/<details[^>]*\sopen/);
@@ -447,7 +450,7 @@ describe("UI — absence of evidence is not evidence of absence", () => {
     ]);
     const row = contradicted.value.find((r) => r.component === "NET_EFFECT");
     expect(row?.state).toBe("NOT_HAPPENING");
-    expect(row?.stateLabel).toBe("Evidence indicates otherwise");
+    expect(row?.stateLabel).toBe("Contradicted");
     // And no other status can produce it.
     for (const status of ["INSUFFICIENT_EVIDENCE", "PARTIALLY_SUPPORTED", "SUPPORTED"]) {
       const view = deriveResultLadder([{ component: "NET_EFFECT", status }]);

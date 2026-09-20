@@ -267,7 +267,7 @@ describe("V2 — a blocked check is separated from a completed one", () => {
     );
     expect(html).toContain('data-state="UNRESOLVED"');
     expect(html).toContain('data-coverage="BLOCKED"');
-    expect(html).not.toContain("Evidence indicates otherwise");
+    expect(html).not.toContain("Contradicted");
 
     // The expansion itself renders only once a reader opens the row, and
     // there is no DOM here to click with. What is pinned instead is that a
@@ -561,9 +561,11 @@ describe("V2 — what the default screen does and does not carry", () => {
     // The audit is now its own route, so this page holds no audit state
     // at all — the strongest form of "costs nothing until asked for".
     expect(src).not.toContain("prepareAudit");
-    expect(src).toContain('data-testid="audit-entry"');
-    expect(src).toContain("evidenceByComponent={evidenceByComponent}");
+    const result = readFileSync("src/client/components/research-result.tsx", "utf-8");
+    expect(result).toContain('data-testid="audit-entry"');
+    expect(result).toContain("evidenceByComponent={evidenceByComponent}");
     expect(src).not.toContain("<EvidenceSection");
+    expect(result).not.toContain("<EvidenceSection");
     // The old screen rendered the component grid, the gaps panel and the
     // reality ladder as three more equal-weight sections. They are gone,
     // and so is the general evidence wall that replaced them.
@@ -592,19 +594,22 @@ describe("V2 — what the default screen does and does not carry", () => {
     // accounting moved to the audit, where it is a register keyed by
     // canonical document. The one-document-one-source rule survives the
     // move and is asserted where it now lives.
-    const page = readFileSync(RESULT_PAGE, "utf-8");
+    const page = readFileSync(RESULT_PAGE, "utf-8") + readFileSync("src/client/components/research-result.tsx", "utf-8");
     expect(page).not.toContain("<EvidenceSection");
-    expect(page).toContain("const usedDocs = admittedDocs.reduce(");
+    // The result surface counts no sources at all any more (a count
+    // invited source arithmetic); the strongest source sits beside each
+    // row instead, and the accounting lives in the audit.
+    expect(page).not.toContain("usedDocs");
     const model = readFileSync("src/client/audit-model.ts", "utf-8");
     expect(model).toContain("function documentKeyOf");
     expect(model).toContain("byDocument");
   });
 
   it("TEST 14: evidence provenance is still built from persisted links only", () => {
-    const src = readFileSync(RESULT_PAGE, "utf-8");
-    // Roles come from S8 citations and S5 component sets, never from text.
+    const src = readFileSync("src/client/components/research-result.tsx", "utf-8") + readFileSync("src/client/result-surface.ts", "utf-8");
+    // Roles come from S8 citations and S5 component links, never from text.
     expect(src).toContain("proof?.citations");
-    expect(src).toContain("detail.finding.supporting");
+    expect(src).toContain("for (const link of e.links)");
     // Excluded rows are no longer derived on this page — the audit reads
     // them from the canonical component results instead. Still persisted
     // links, never text.
@@ -650,7 +655,7 @@ describe("V2 — what the default screen does and does not carry", () => {
         { component: "NET_EFFECT", status: "INSUFFICIENT_EVIDENCE" },
       ],
     }).join(" ");
-    expect(text).toContain("Established:");
+    expect(text).toContain("Confirmed:");
     expect(text).toContain("Not established:");
     expect(text.toLowerCase()).not.toContain("burn");
     expect(text.toLowerCase()).not.toContain("is executing");

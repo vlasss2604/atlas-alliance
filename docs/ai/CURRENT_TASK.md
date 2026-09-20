@@ -2,85 +2,58 @@
 
 > Overwrite this file each round. Never append.
 
-## RESEARCH RELIABILITY V1 — FINAL OFFLINE ACCEPTANCE (boundary invariant)
+## RESULT PRESENTATION V1 — ONE RESULT, SIMPLE SURFACE (awaiting Founder visual review)
 
-Founder brief 2026-09-20: verify the 28 residual benchmark cases are
-represented as TECHNICALLY BOUNDED research, never mistakable for a
-substantive "checked and not established"; prove the technical /
-substantive / configuration distinctions at the persisted-record level;
-smallest additive fix only where a case reaches the Proof without a
-technical marker. $0, no live Research, no UI, no budget or recovery
-change.
+Acquisition, search, recovery, budgets, Evidence/admissibility, verdict and
+confidence semantics, Pattern data: untouched. $0, no live Research. The
+completed result was redesigned around six sections (answer, research
+table, proof map, key evidence, what is not established, full evidence &
+audit) so a serious user understands the answer in 5–20 seconds.
 
-### What the audit found (benchmark BOUNDARY AUDIT table, pre-fix)
+### What changed
 
-All 29 residual nodes (28 runs) were AMBIGUOUS: first pass SUCCEEDED /
-FAILED, recovery closed SKIPPED / NO_TRACEABLE_FACTS_FOR_COMPONENT, S5
-STALE_CURRENT_STATE / NO_EVIDENCE_FOUND, 1–6 known paths still open, and
-`proofs.bounded_by` carried no technical code — the record read as
-substantive. Two more concrete gaps surfaced by the same audit: a
-provider failure closes the attempt with a `<LABEL>_FAILED:<Class>` head
-the boundary module did not map (read substantive); and the phased FETCH
-phase sealed different documents on two runs of identical code at the
-24/24 opens ceiling (S05/OFFICIAL_LATE/PHASED), because each in-flight
-url reserved its first open after its own async prologue.
-
-### Changes (additive; verdict, confidence, lifecycle, budgets untouched)
-
-- `research-boundary.ts` — technical codes RECOVERY_BOUND_REACHED (the
-  one bounded recovery ran, known admissible paths remain) and
-  KNOWN_PATHS_UNEXPLORED (paths remain, no recovery ever ran), with
-  `remainingPaths` by kind on the entry; provider-failure heads mapped by
-  label (`technicalCodeForAttemptHead`: CONTENT_FETCHER →
-  SOURCE_UNAVAILABLE, SEARCH_GATEWAY → SEARCH_UNAVAILABLE, QUERY_PROPOSER
-  → NO_QUERIES_PROPOSED, EVIDENCE_EXTRACTOR → EXTRACTION_NOT_COMPLETED).
-- `targeted-recovery.ts` — `auditRemainingKnownPaths` (the planner in
-  audit mode over every component with an S5 row, plus whether its
-  recovery ran); the planner's queue parameter narrowed to
-  `{ step, component }`.
-- `proof-store.ts` / `proof-builder.ts` — the audit read is passed into
-  `deriveResearchBoundary` at Proof build (`remainingPaths`, optional).
-- `acquisition-phases.ts` — the FETCH phase reserves each url's first
-  source open in start order through a per-phase prologue chain (the
-  SEARCH phase's existing rule); transport, seal and trace still overlap.
-- Benchmark — BOUNDARY AUDIT table and counts; the acceptance assertion
-  "ambiguous / no boundary marker = 0"; the MAJOR-technical rule now
-  requires the corpus to carry the fact (`scenario.mustEstablish`): a
-  node with no fact ending RECOVERY_BOUND_REACHED is the record telling
-  the truth. `onchain-budget-reservation-v1` source pin re-pinned to the
-  four reservations against the capped ceiling.
-- Tests — `tests/research-boundary-recovery-bound-v1.test.ts` (10):
-  recovery exhausted + known paths → RECOVERY_BOUND_REACHED persisted,
-  stale finding beside it, verdict/confidence identical with and without
-  the marker; projections + DRAFT rebuild leave it byte-identical;
-  KNOWN_PATHS_UNEXPLORED / zero paths / SUPPORTED derivation; substantive
-  exhaustion ×2 (no marker, NO_EVIDENCE_FOUND stands); NO_ADMISSIBLE_ROUTE
-  configuration boundary (persisted + derivation); provider failure →
-  SOURCE_UNAVAILABLE (end to end + every label); phased FETCH ceiling
-  deterministic at concurrency 4 and 1.
+- `src/client/result-surface.ts` — the pure surface model: status
+  vocabulary, boundary kinds (technical / configuration / substantive from
+  `proofs.bounded_by`, legacy fallback from reason codes + coverage), the
+  research table (projection rows + paper-vs-reality rows, supporting
+  checks folded as chips), the proof chain, key evidence, the boundary
+  groups, the 2–4 sentence answer, freshness, on-chain translation,
+  `FORBIDDEN_SURFACE_TOKENS`.
+- `src/client/components/research-result.tsx` — the one component; inline
+  evidence inspection (row → evidence cards → details), no navigation.
+- `app/(app)/research/[id]/page.tsx` — renders it when finished; live
+  state unchanged. `result-first-screen.tsx` and its test removed.
+- `app/(app)/dev/result-states/page.tsx` + `result-surface-fixtures.ts` —
+  eight invented states, production-gated.
+- `services/proof-view.ts` / `client/api.ts` — `boundedBy` on the Proof
+  read model (copied, nullable).
+- Vocabulary unified at the source: Confirmed / Partially confirmed / Not
+  established / Contradicted (`research-model.ts`, `result-blocks/types.ts`).
+- Tests: `tests/ui-result-surface-v1.test.ts` (30: status mapping, the
+  three boundary kinds incl. legacy fallback and both real Aave shapes,
+  projection rows and order, evidence linkage, no excluded evidence on
+  the first screen, freshness, on-chain translation, no raw codes / JSON,
+  contradiction preserved, confirmed never manufactured, failed run,
+  structure); 11 older suites re-pinned to the component and vocabulary.
 
 ### Verified ($0)
 
-- Benchmark (final): 161 passing; 160 runs; critical attempted 672/672;
-  second pass 69 runs; unresolved critical nodes at finalize 159, of
-  which after a recovery 58; technical bounded marker 33 (3 of them
-  configuration-only NO_ADMISSIBLE_ROUTE: EXECUTION_EVIDENCE under
-  CHAIN_EARLY S05/S06/S07); substantive exhausted 126; ambiguous 0;
-  runs with a technical boundary on a critical node 31; CRITICAL 0;
-  MAJOR 0; MINOR not asserted. Two consecutive post-fix runs produced
-  byte-identical per-run tables and audit rows.
-- Targeted set (boundary, targeted recovery, fetch-phase suites, parity,
-  Round 12/13, memory adoption, founder semantics): 32 files, 492 passing.
-- `npx tsc --noEmit` clean; `npm run lint` 0 errors.
-- Full suite on the final tree, run alone after every test-pin change:
-  5203 passing, 4 skipped, 3 failing (5210, 251 files, 2123 s) — the
-  three are the known unchanged catalog (phase1 DoD 1, phase2 DoD 6) and
-  renderer (EXECUTABLE_NOT_FOUND vs PROCESS_START_FAILED) cases.
+- Presentation + projection-safety + Round 9/12/13 set: 25 files, 548
+  passing. `npx tsc --noEmit` clean; lint 0 errors.
+- Screenshots (390×844 and 1120 wide) of all eight fixture states and
+  both persisted Aave results on the running dev server: every page
+  renders, no console errors (the Next dev overlay's hydration note on
+  the Telegram `<html style>` is pre-existing).
+- Full suite not rerun: no shared production behaviour outside the
+  presentation helpers and the Proof read model changed.
 
-### Status
+### Founder review — open these (dev server on :3000, dev auth bypass)
 
-RESEARCH RELIABILITY V1: see the final decision report of 2026-09-20.
-Acquisition / reliability work stops here unless a live run reveals a
-concrete generic defect. Next phase: Result Presentation / UX (the
-projections do not read `bounded_by` yet; no live batch before the
-result surface is polished and Founder-approved).
+- http://localhost:3000/research/cbe59f48-edbd-4153-b5e6-dc2082c9e105 — the
+  persisted Aave result (documentary checks excluded as inadmissible,
+  execution outside supported routes, two on-chain partials).
+- http://localhost:3000/research/2b0f00e4-b736-4e57-8b35-b77bb6ee7ced — the
+  earlier Aave run (search-limit bounded everywhere).
+- http://localhost:3000/dev/result-states?state=1 … 8 — the eight states.
+
+STOP here until the Founder approves the surface. No live batch before.

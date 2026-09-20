@@ -193,7 +193,7 @@ describe("projection — status is canonical, never model output", () => {
       ],
       COMPONENTS.map((c) => ({ ...c, coverage: "COMPLETED" as const })),
     );
-    expect(rows.map((r) => r.stateLabel)).toEqual(["Established", "Not established"]);
+    expect(rows.map((r) => r.stateLabel)).toEqual(["Confirmed", "Not established"]);
     // The label is the model's; every other word on the row is canonical.
     expect(rows[0].label).toBe("Where do the fees come from?");
   });
@@ -209,7 +209,7 @@ describe("projection — status is canonical, never model output", () => {
       COMPONENTS.map((c) => ({ ...c, coverage: "COMPLETED" as const })),
     );
     expect(rows[0].state).toBe("PARTIAL");
-    expect(rows[0].stateLabel).toBe("Partly established");
+    expect(rows[0].stateLabel).toBe("Partially confirmed");
     expect(rows[1].state).toBe("UNRESOLVED");
     expect(rows[1].stateLabel).toBe("Not established");
     expect(rows.some((r) => r.state === "VERIFIED")).toBe(false);
@@ -240,7 +240,7 @@ describe("projection — status is canonical, never model output", () => {
       [{ component: "DESTINATION", status: "CONTRADICTED", coverage: "COMPLETED" }],
     );
     expect(rows[0].state).toBe("NOT_HAPPENING");
-    expect(rows[0].stateLabel).toBe("Evidence indicates otherwise");
+    expect(rows[0].stateLabel).toBe("Contradicted");
   });
 
   it("TEST 7: a technical limitation survives the projection unchanged", () => {
@@ -583,9 +583,9 @@ describe("projection — the question shapes the default screen", () => {
     // projection, so that every canonical component appeared somewhere.
     // It is now a separate surface, and completeness is guaranteed there
     // instead — by code rather than by a second copy of the result.
-    const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");
-    // The entry lives on the page; the label itself now lives in the
-    // audit component that the entry opens.
+    // The result surface (rendered by the page) carries the entry; the
+    // label itself lives in the audit component that the entry opens.
+    const page = readFileSync("src/client/components/research-result.tsx", "utf-8");
     expect(page).toContain('data-testid="audit-entry"');
     expect(page).toContain("/audit`}");
     expect(page).not.toContain('data-testid="audit-full-ladder"');

@@ -401,8 +401,8 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
     const raw = (
       await Promise.all(
         [
-          "../app/(app)/research/[id]/page.tsx",
-          "../src/client/components/evidence-section.tsx",
+          "../src/client/components/research-result.tsx",
+          "../src/client/result-surface.ts",
         ].map((p) => fs.readFile(new URL(p, import.meta.url), "utf-8")),
       )
     ).join("\n");
@@ -415,38 +415,27 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
       .replace(/\/\*[\s\S]*?\*\//g, "")
       .replace(/^\s*\/\/.*$/gm, "");
 
-    // The finding's own lists come from S8's citation binding and S5's
-    // claim-scoped component sets.
-    expect(code).toContain("detail.finding.supporting");
-    // The result page no longer derives the finding's EXCLUDED list: that
-    // accounting moved to the audit's source register, where refused
-    // material is a ledger with reasons rather than a document list under
-    // the answer. The invariant this test protects is unchanged and is
-    // asserted below — the finding is built from claim-scoped sources and
-    // never from the job-wide evidence array.
-    expect(code).not.toContain("detail.finding.excluded");
+    // Every row's evidence comes from S5's PERSISTED component links —
+    // SUPPORTING and CONTRADICTING — and S8's citation binding decides
+    // what the Proof itself cites. An EXCLUDED link is skipped at the
+    // source and can never reach a row; the refused material stays in the
+    // audit's source register. The job-wide array is never rendered
+    // wholesale: it is walked link by link, and a row without a link to
+    // the component in question contributes nothing to it.
+    expect(code).toContain("for (const link of e.links)");
+    expect(code).toContain('if (link.role === "EXCLUDED") continue');
     expect(code).toContain("proof?.citations");
-    // `admitted` IS the finding grid. It is composed only of those sources —
-    // the job-wide array is not among them.
-    expect(code).toMatch(
-      /const admitted = \[\.\.\.used, \.\.\.supporting, \.\.\.contradicting\];/,
-    );
-    expect(code).not.toMatch(/const admitted[^;]*detail\.evidence/);
-
-    // The job-wide array may be read ONLY for the separate, differently
-    // headed section, and only for rows the finding did not already claim.
-    const usesJobWideEvidence = /detail\.evidence\s*\n?\s*\.filter/.test(code);
-    if (usesJobWideEvidence) {
-      expect(code).toContain("shownIds");
-      expect(code).toContain("Other material read");
-      // Nothing in that section may be presented as supporting the verdict:
-      // an excluded link outranks every other role for the same row.
-      expect(code).toContain('e.links.find((l) => l.role === "EXCLUDED")');
-    }
+    expect(code).not.toContain("detail.finding.excluded");
+    expect(code).not.toMatch(/detail\.evidence\.map\(\(e\) => \(?\s*</);
+    // The surface model receives the job-wide rows and admits a row to a
+    // check ONLY through a persisted link to that check's own component.
+    expect(code).toContain("if (link.role === \"EXCLUDED\") continue;");
+    expect(code).toContain("admittedByComponent[link.component]");
 
     // The honest empty state must exist rather than falling back to
-    // whatever else the job happens to hold.
-    expect(code).toContain("No evidence was bound in support of this finding.");
+    // whatever else the job happens to hold: a check with no admitted
+    // link says so on its own row.
+    expect(code).toContain("No admitted source");
     // And no step count may come from mechanism branch structure.
     expect(code).not.toContain("mechanism.flows.length");
   });

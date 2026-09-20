@@ -19,7 +19,7 @@ import {
 //   Where does trading fee revenue go?          Established
 //   The checked evidence establishes where the value ends up.
 //
-// The badge already said "Established"; the sentence said it again in
+// The badge already said "Confirmed"; the sentence said it again in
 // longer words and never said where the value goes. A reader had to open
 // every finding just to learn what was found, which turned expansion into
 // a retrieval step rather than the "why?" it is meant to be.
@@ -57,7 +57,7 @@ describe("an established finding states what was found", () => {
     expect(answer).toBe(`${REAL_SUMMARY}.`);
     // It answers the question rather than grading it.
     expect(answer).not.toContain("The checked evidence");
-    expect(answer).not.toContain("Established");
+    expect(answer).not.toContain("Confirmed");
   });
 
   it("TEST 2: the generic preamble is gone wherever a real statement exists", () => {
@@ -144,12 +144,12 @@ describe("the micro-answer never says more than the canonical result", () => {
 
   it("TEST 5: a partial result is never rendered as fully established", () => {
     const partial = row({ component: "NET_EFFECT", status: "PARTIALLY_SUPPORTED" });
-    expect(partial.stateLabel).toBe("Partly established");
+    expect(partial.stateLabel).toBe("Partially confirmed");
     // The badge carries the strength; the sentence carries the substance,
     // and the sentence itself asserts no strength at all.
     const answer = findingMicroAnswer(partial, [REAL_SUMMARY]);
     expect(answer).toBe(`${REAL_SUMMARY}.`);
-    expect(answer).not.toContain("Established");
+    expect(answer).not.toContain("Confirmed");
     expect(answer).not.toContain("fully");
   });
 
@@ -183,9 +183,9 @@ describe("a micro-answer cannot broaden its canonical claim", () => {
     );
     expect(src).not.toContain("supportingSummariesByComponent[");
 
-    // And the page builds it from SUPPORTING links only — a contradicting
-    // or refused row can never become a finding's answer.
-    const page = readFileSync(PAGE, "utf-8");
+    // And the result surface builds it from SUPPORTING links only — a
+    // contradicting or refused row can never become a finding's answer.
+    const page = readFileSync("src/client/components/research-result.tsx", "utf-8");
     expect(page).toContain('if (link.role === "SUPPORTING" && e.summary)');
     expect(page).toContain('if (link.role === "EXCLUDED") continue');
   });
@@ -322,7 +322,7 @@ describe("presentation only", () => {
     expect(html).toContain(REAL_SUMMARY);
     expect(html).toContain("Whether the mechanism has actually executed was not established.");
     // The status badge still states the strength, separately.
-    expect(html).toContain("Established");
+    expect(html).toContain("Confirmed");
     expect(html).toContain("Not established");
     // And no expansion is rendered until a row is opened.
     expect(html).not.toContain('data-testid="ladder-expansion"');

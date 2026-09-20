@@ -32,10 +32,10 @@ export const PROOF_STATE: Record<
   ProofState,
   { label: string; color: string; dim: string }
 > = {
-  ESTABLISHED: { label: "Established", color: "#5eead4", dim: "rgba(45, 212, 191, 0.14)" },
-  PARTLY_ESTABLISHED: { label: "Partly established", color: "#c4b5fd", dim: "rgba(167, 139, 250, 0.14)" },
+  ESTABLISHED: { label: "Confirmed", color: "#5eead4", dim: "rgba(45, 212, 191, 0.14)" },
+  PARTLY_ESTABLISHED: { label: "Partially confirmed", color: "#c4b5fd", dim: "rgba(167, 139, 250, 0.14)" },
   NOT_ESTABLISHED: { label: "Not established", color: "#fcd34d", dim: "rgba(251, 191, 36, 0.13)" },
-  CONTRADICTED: { label: "Evidence indicates otherwise", color: "#fca5a5", dim: "rgba(248, 113, 113, 0.14)" },
+  CONTRADICTED: { label: "Contradicted", color: "#fca5a5", dim: "rgba(248, 113, 113, 0.14)" },
 };
 
 /* ---------------------------- 1. HEADER ---------------------------- */

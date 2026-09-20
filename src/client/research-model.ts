@@ -478,15 +478,21 @@ export function componentLabel(component: string): string {
   return COMPONENT_LABELS[component] ?? component.replace(/_/g, " ").toLowerCase();
 }
 
+// ONE STATUS VOCABULARY FOR THE WHOLE RESULT (Result Presentation V1):
+// Confirmed / Partially confirmed / Not established / Contradicted. Every
+// surface that names a persisted status uses these four words, so a reader
+// meets the same word on the answer, the research table, the proof map and
+// the deep evidence. Presentation never strengthens truth: SUPPORTED alone
+// reads "Confirmed", and nothing weaker can.
 export const COMPONENT_STATUS_LABELS: Record<string, string> = {
-  SUPPORTED: "Established",
-  PARTIALLY_SUPPORTED: "Partly established",
+  SUPPORTED: "Confirmed",
+  PARTIALLY_SUPPORTED: "Partially confirmed",
   CONTRADICTED: "Contradicted",
-  INSUFFICIENT_EVIDENCE: "Could not verify",
+  INSUFFICIENT_EVIDENCE: "Not established",
 };
 
 export function componentStatusLabel(status: string): string {
-  return COMPONENT_STATUS_LABELS[status] ?? "Could not verify";
+  return COMPONENT_STATUS_LABELS[status] ?? "Not established";
 }
 
 export function componentTone(status: string): VerdictTone {
@@ -1017,7 +1023,7 @@ export function researchAnswer(input: AnswerInput): string[] {
   // accurate when the only source was documentation.
   const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
   if (verified.length > 0) {
-    sentences.push(`Established: ${joinPhrases(verified)}.`);
+    sentences.push(`Confirmed: ${joinPhrases(verified)}.`);
   }
 
   // 4 — what it did not settle. Only components that were actually
@@ -1327,10 +1333,10 @@ const VALUE_ROWS = [
 // "Not established" is the honest form: it describes the evidence, makes no
 // claim that the thing is absent, and reads the same wherever it appears.
 export const RESULT_STATE_LABELS: Record<RealityState, string> = {
-  VERIFIED: "Established",
-  PARTIAL: "Partly established",
+  VERIFIED: "Confirmed",
+  PARTIAL: "Partially confirmed",
   UNRESOLVED: "Not established",
-  NOT_HAPPENING: "Evidence indicates otherwise",
+  NOT_HAPPENING: "Contradicted",
   NOT_ASSESSED: "Not assessed",
 };
 
@@ -1895,7 +1901,7 @@ function shortAnswerFor(input: BriefingInput, rows: readonly ResultRow[]): strin
 
   const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
   if (verified.length > 0) {
-    sentences.push(`Established: ${joinPhrases(verified)}.`);
+    sentences.push(`Confirmed: ${joinPhrases(verified)}.`);
   }
 
   // THE SENTENCE THE OLD ANSWER NEVER HAD.
@@ -1907,7 +1913,7 @@ function shortAnswerFor(input: BriefingInput, rows: readonly ResultRow[]): strin
   const partial = pick(input.components, "PARTIALLY_SUPPORTED", VERIFIED_PRIORITY, 3);
   if (partial.length > 0) {
     sentences.push(
-      `Partly established: ${joinPhrases(partial)} — the evidence goes part of the way and stops short of the whole claim.`,
+      `Partially confirmed: ${joinPhrases(partial)} — the evidence goes part of the way and stops short of the whole claim.`,
     );
   }
 
@@ -1985,8 +1991,8 @@ export function resultBriefing(input: BriefingInput): ResultBriefing {
 // keeps its fuller labels; both read the same persisted state, so they can
 // differ in wording but never in meaning.
 export const PROOF_MAP_STATUS: Record<RealityState, string> = {
-  VERIFIED: "Supported",
-  PARTIAL: "Partial",
+  VERIFIED: "Confirmed",
+  PARTIAL: "Partially confirmed",
   UNRESOLVED: "Not established",
   NOT_HAPPENING: "Contradicted",
   NOT_ASSESSED: "Not assessed",

@@ -27,6 +27,7 @@ const render = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStati
 
 const LADDER = "src/client/components/result-ladder.tsx";
 const PAGE = "app/(app)/research/[id]/page.tsx";
+const RESULT = "src/client/components/research-result.tsx";
 
 const evidenceItem = (over: Partial<EvidenceItemLike> = {}): EvidenceItemLike => ({
   id: "ev-1",
@@ -225,7 +226,7 @@ describe("proof is attached to the conclusion it proves", () => {
   });
 
   it("TEST 5: evidence under a finding comes only from persisted links, never text", () => {
-    const page = readFileSync(PAGE, "utf-8");
+    const page = readFileSync(RESULT, "utf-8");
     expect(page).toContain("const evidenceByComponent: Record<string, EvidenceItemLike[]> = {}");
     expect(page).toContain("for (const link of e.links)");
     // An EXCLUDED link can never become proof of anything.
@@ -263,7 +264,7 @@ describe("proof is attached to the conclusion it proves", () => {
 
 describe("the normal result carries no document list", () => {
   it("TEST 7: no document pile renders on the result at any depth", () => {
-    const page = readFileSync(PAGE, "utf-8");
+    const page = readFileSync(RESULT, "utf-8") + readFileSync(PAGE, "utf-8");
     expect(page.indexOf('data-testid="audit-entry"')).toBeGreaterThan(-1);
     // Stronger than before. The document inventory used to live inside
     // this page's own audit block; the audit is now a separate surface,
@@ -351,9 +352,9 @@ describe("presentation only — no conclusion was strengthened or weakened", () 
   it("TEST 12: status still comes from the canonical component row", () => {
     const rows = deriveQuestionFindings(QUESTION_FINDINGS, COMPONENTS);
     expect(rows.map((r) => r.stateLabel)).toEqual([
-      "Established",
+      "Confirmed",
       "Not established",
-      "Established",
+      "Confirmed",
     ]);
     // A prettier explanation cannot lift an unresolved row.
     expect(rows[1].state).toBe("UNRESOLVED");
@@ -365,7 +366,7 @@ describe("presentation only — no conclusion was strengthened or weakened", () 
       [QUESTION_FINDINGS[0]],
       [{ component: "DESTINATION", status: "CONTRADICTED", coverage: "COMPLETED" }],
     );
-    expect(contradicted.stateLabel).toBe("Evidence indicates otherwise");
+    expect(contradicted.stateLabel).toBe("Contradicted");
     // Still a statement about what the SOURCES show, never a bare
     // assertion of the negative.
     expect(findingExplanation(contradicted).join(" ")).toContain("the sources point the other way");
