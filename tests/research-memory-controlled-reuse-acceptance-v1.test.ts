@@ -28,6 +28,7 @@ import { adoptReusedMemory } from "../src/server/engine/memory-evidence-adoption
 import type { ModelCostProfile } from "../src/server/engine/model-cost-profile";
 import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
+import { TARGETED_RECOVERY_BOUNDS } from "../src/server/engine/targeted-recovery";
 import { copyProvenanceFromEvidence, observeMemoryCandidate, promoteToActive } from "../src/server/memory/lifecycle";
 import { VERIFIED_OBSERVATION_CONFIDENCE, VERIFIED_OBSERVATION_ORIGIN_KIND } from "../src/server/memory/observed-candidates";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
@@ -377,9 +378,32 @@ async function claimSupportOf(jobId: string) {
   return r;
 }
 
+// The FIRST attempts — the work queue this Research walked. The one
+// bounded second look (below) is pinned separately.
 async function attemptsOf(jobId: string): Promise<string[]> {
   const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
-  return rows.map((r) => `${r.patternStep}:${r.component}`).sort();
+  return rows.filter((r) => r.attemptNumber === 1).map((r) => `${r.patternStep}:${r.component}`).sort();
+}
+
+// RESEARCH RELIABILITY V1 (B2, C2) — the targeted second pass. This
+// fixture's facts carry no publication date, so CURRENT_STATE (critical
+// for the intent, requires current state) closes INSUFFICIENT_EVIDENCE /
+// MISSING_CURRENT_STATE after a technically completed attempt, with the
+// confirmed route's other sealed pages a known path it never read. That
+// earns exactly ONE bounded recovery (paths only: no proposer, no search,
+// no transport open — the sealed copies are served; at most
+// TARGETED_RECOVERY_BOUNDS.extractions extractions), which finds nothing
+// for it either. Identical in the fresh, control and Memory Researches,
+// so every Memory-vs-control comparison below is unaffected by it.
+async function recoveryAttemptsOf(jobId: string): Promise<string[]> {
+  const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+  return rows.filter((r) => r.attemptNumber > 1).map((r) => `${r.patternStep}:${r.component}:#${r.attemptNumber}`).sort();
+}
+const ONE_RECOVERY = ["5:CURRENT_STATE:#2"];
+const ONE_ATTEMPT = { proposer: 1, search: 1, fetch: 1, extract: 1 };
+const ONE_ATTEMPT_PLUS_RECOVERY = { proposer: 1, search: 1, fetch: 1, extract: 1 + TARGETED_RECOVERY_BOUNDS.extractions };
+function expectedFreshCounters(c: Component) {
+  return c === "CURRENT_STATE" ? ONE_ATTEMPT_PLUS_RECOVERY : ONE_ATTEMPT;
 }
 
 async function traceCountsOf(jobId: string): Promise<Record<string, number>> {
@@ -464,8 +488,9 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     expect(handledA.claimed).toBe(true);
     expect((await ledgerOf(jobA)).state).toBe("SUCCEEDED");
     expect(await attemptsOf(jobA)).toEqual(ALL_COMPONENTS.map((c) => `${STEP_OF[c]}:${c}`).sort());
+    expect(await recoveryAttemptsOf(jobA)).toEqual(ONE_RECOVERY);
     for (const c of ALL_COMPONENTS) {
-      expect(runA.counters[c]).toEqual({ proposer: 1, search: 1, fetch: 1, extract: 1 });
+      expect(runA.counters[c]).toEqual(expectedFreshCounters(c));
       const rows = await evidenceOf(jobA, c);
       expect(rows.length).toBe(1);
       expect(rows[0].officiality).toBe("CONFIRMED");
@@ -579,7 +604,8 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     expect(viewC.reused).toEqual([]);
     expect(viewC.workQueue.length).toBe(10);
     expect(await attemptsOf(jobC)).toEqual(ALL_COMPONENTS.map((c) => `${STEP_OF[c]}:${c}`).sort());
-    for (const c of ALL_COMPONENTS) expect(runC.counters[c]).toEqual({ proposer: 1, search: 1, fetch: 1, extract: 1 });
+    expect(await recoveryAttemptsOf(jobC)).toEqual(ONE_RECOVERY);
+    for (const c of ALL_COMPONENTS) expect(runC.counters[c]).toEqual(expectedFreshCounters(c));
     const [retrievalC] = await ctx.db.select().from(memoryRetrievals).where(eq(memoryRetrievals.researchJobId, jobC));
     expect(retrievalC.retrievedCount).toBe(0);
 
@@ -664,7 +690,7 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     const currentRowsB = await evidenceOf(jobB, "CURRENT_STATE");
     expect(currentRowsB.length).toBe(1);
     expect(currentRowsB[0].reusedFromMemoryId).toBeNull();
-    expect(runB.counters.CURRENT_STATE).toEqual({ proposer: 1, search: 1, fetch: 1, extract: 1 });
+    expect(runB.counters.CURRENT_STATE).toEqual(ONE_ATTEMPT_PLUS_RECOVERY);
     //    OBSERVED-only and never-observed components: no memory, fresh.
     for (const c of ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE", "NET_EFFECT", "DURABILITY_BASIS"] as const) {
       const rows = await evidenceOf(jobB, c);
@@ -673,6 +699,7 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
       expect(runB.counters[c]).toEqual({ proposer: 1, search: 1, fetch: 1, extract: 1 });
     }
     expect(await attemptsOf(jobB)).toEqual(ALL_COMPONENTS.filter((c) => c !== "DESTINATION").map((c) => `${STEP_OF[c]}:${c}`).sort());
+    expect(await recoveryAttemptsOf(jobB)).toEqual(ONE_RECOVERY);
 
     // 12. COST / WORK — per component, Memory never pays more than control;
     //     for the reused obligation it pays nothing; in total it pays less.
@@ -787,6 +814,7 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     await handleResearchJobTask(ctx.db, jobB2, runB2.executor);
     expect(runB2.counters).toEqual(runB.counters);
     expect(await attemptsOf(jobB2)).toEqual(await attemptsOf(jobB));
+    expect(await recoveryAttemptsOf(jobB2)).toEqual(await recoveryAttemptsOf(jobB));
     expect(await s5PictureOf(jobB2)).toEqual(await s5PictureOf(jobB));
     expect(await gapsOf(jobB2)).toEqual(gapsB);
     const proofB2 = await proofOf(jobB2);

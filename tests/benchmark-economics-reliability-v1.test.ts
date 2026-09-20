@@ -658,6 +658,11 @@ interface RunResult {
   // confirmed route) was STILL available when the job finalized, read
   // through the second-pass planner in audit mode.
   unexploredAtFinalize: string[];
+  // C2 split: the subset of unexploredAtFinalize whose critical node never
+  // had a recovery attempt at all — the completion defect proper. What is
+  // left after the one bounded recovery ran is the one-recovery maximum
+  // by design (never a third pass), not a node the Research skipped.
+  unexploredWithoutRecovery: string[];
   calls: Counters;
   costUsd: number;
   latencyModelSec: number;
@@ -781,6 +786,7 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
     for (const p of i.paths) kinds.set(p.kind, (kinds.get(p.kind) ?? 0) + 1);
     return `${i.component}[${[...kinds].map(([k, n]) => `${k}=${n}`).join(",")}]`;
   });
+  const unexploredWithoutRecovery = (audit?.items ?? []).filter((i) => (latest.get(i.component)?.attemptNumber ?? 0) <= 1).map((i) => i.component);
   const modelCalls = c.proposer + c.extract;
   const costUsd = modelCalls * PRICE_PER_MODEL_CALL_USD;
   const latencyModelSec = c.proposer * LAT.proposer + (c.search * LAT.search) / 4 + (c.fetch * LAT.fetch) / 4 + (c.extract * LAT.extract) / 4;
@@ -823,6 +829,7 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
     searchBoundedCritical,
     envelope,
     unexploredAtFinalize,
+    unexploredWithoutRecovery,
     calls: c,
     costUsd,
     latencyModelSec,
@@ -890,6 +897,8 @@ describe("ECONOMICS RESEARCH RELIABILITY BENCHMARK V1", () => {
     const unexploredRuns = results.filter((r) => r.unexploredAtFinalize.length > 0);
     lines.push(`C1: critical nodes whose first attempt closed SEARCH_BUDGET_EXHAUSTED: ${searchBoundedNodes} in ${searchBoundedRuns.length} runs; of those nodes established by finalize: ${searchBoundedRecovered}; runs with the search envelope fully reserved at finalize: ${envelopeSpent.length}`);
     lines.push(`C2: runs finalizing with an unresolved critical node AND a known admissible path still unexplored: ${unexploredRuns.length}${unexploredRuns.length > 0 ? " — " + unexploredRuns.map((r) => `${r.scenario}/${r.variant}/${r.runtime}: ${r.unexploredAtFinalize.join(",")}`).join("; ") : ""}`);
+    const unrecoveredRuns = results.filter((r) => r.unexploredWithoutRecovery.length > 0);
+    lines.push(`C2 split — of those, nodes for which NO recovery attempt ever ran (the completion defect): ${unrecoveredRuns.length} runs${unrecoveredRuns.length > 0 ? " — " + unrecoveredRuns.map((r) => `${r.scenario}/${r.variant}/${r.runtime}: ${r.unexploredWithoutRecovery.join(",")}`).join("; ") : ""}; paths left after the ONE bounded recovery ran (one-recovery maximum by design): ${unexploredRuns.length - unrecoveredRuns.length} runs`);
     const avgCost = results.reduce((n, r) => n + r.costUsd, 0) / Math.max(1, results.length);
     const avgLat = results.reduce((n, r) => n + r.latencyModelSec, 0) / Math.max(1, results.length);
     lines.push(`avg model cost/run $${avgCost.toFixed(3)}; avg modelled latency ${avgLat.toFixed(1)} s`);

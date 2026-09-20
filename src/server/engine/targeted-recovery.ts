@@ -21,7 +21,11 @@
 //                       and is not known dead;
 //   ROUTE_UNEXPLORED    a CONFIRMED route for a class this component admits
 //                       on which no candidate for this component was ever
-//                       discovered.
+//                       discovered AND no route-scoped search for this
+//                       component ever ran and answered (C2: a scoped
+//                       search that executed and returned nothing has
+//                       explored the route; a refused, failed or replayed
+//                       one has not — acquisition-ledger.ts).
 //
 // If any path remains, the controller runs ONE bounded recovery attempt
 // for the component (TARGETED_RECOVERY_BOUNDS), and never a third. The
@@ -37,7 +41,7 @@ import { and, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { researchAttempts, researchComponentResults, researchTraceEvents } from "../db/schema";
-import { loadAcquisitionLedger } from "./acquisition-ledger";
+import { loadAcquisitionLedger, routeExploredForComponent } from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { sealedDocumentsForJob } from "./acquired-documents";
 import type { ComponentWorkItem } from "./contract-view";
@@ -201,7 +205,12 @@ export async function planTargetedRecovery(
     for (const url of ownCandidates) await consider(url, true);
     for (const urls of ledger.candidatesByQuery.values()) for (const url of urls) await consider(url, false);
     // Confirmed routes for an admitted class with no candidate of this
-    // component on them: never explored for this component.
+    // component on them AND no executed scoped search of this component
+    // against them: never explored for this component. A `site:<domain>`
+    // query that a real call ran and answered with zero candidates has
+    // explored the route (the bounded attempt was made — it says nothing
+    // about the project); a refused (SKIPPED), failed (provider error) or
+    // replayed one leaves it unexplored, in the fail-closed direction.
     const domainsSeen = new Set<string>();
     for (const url of ownCandidates) {
       try {
@@ -214,6 +223,7 @@ export async function planTargetedRecovery(
       if (!admits.has(cls as EvidenceSourceClass)) continue;
       for (const domain of domains ?? []) {
         if (domainsSeen.has(domain.toLowerCase())) continue;
+        if (routeExploredForComponent(ledger, item.step, item.component, domain)) continue;
         paths.push({ kind: "ROUTE_UNEXPLORED", domain, routeClass: cls });
       }
     }

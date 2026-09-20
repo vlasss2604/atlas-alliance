@@ -393,6 +393,10 @@ async function claimAttempt(
   now: Date,
   debugClaimDelayMs: number,
   recoveryCeilingOverride?: number,
+  // B2/C2 — true on a targeted second pass: the item was selected by the
+  // plan from persisted S5 state, and the only thing that still excludes
+  // it here is the one-recovery maximum (see the guard below).
+  targetedPass = false,
 ): Promise<ClaimOutcome> {
   return db.transaction(async (tx) => {
     // The row lock itself (not its columns) is what serializes concurrent
@@ -424,7 +428,18 @@ async function claimAttempt(
     }
 
     const key = componentKey(item.step, item.component);
-    if (succeededKeys.has(key)) {
+    // C2 — EVIDENCE-STATE RECOVERY ELIGIBILITY. On a first pass a
+    // SUCCEEDED attempt is never re-attempted: that is the whole point of
+    // persisting attempts. On a TARGETED pass the plan already selected
+    // this component from its persisted S5 result (unresolved, critical,
+    // a known admissible path left), and an attempt that SUCCEEDED
+    // technically while every Evidence it produced was excluded at S5
+    // (stale, inadmissible) has not resolved it. The technical status of
+    // the first attempt therefore does not exclude the component here;
+    // the one-recovery maximum does: a component that already has an
+    // attempt numbered above 1 is never claimed again, so a redelivered
+    // scoped cycle cannot produce a third attempt.
+    if (targetedPass ? (maxAttemptByKey.get(key) ?? 0) > 1 : succeededKeys.has(key)) {
       return { claimed: false, reason: "ALREADY_CLAIMED" };
     }
     const latest = latestAttemptByKey.get(key);
@@ -504,12 +519,20 @@ export async function runResearchController(
   // loop over (D-072: workQueue is the only authoritative work source).
   // It is NOT the budget authority — that lives inside claimAttempt's
   // job-locked transaction (R-1) and is re-checked fresh per item.
-  const { succeededKeys } = await loadAttemptState(db, jobId);
+  const { succeededKeys, maxAttemptByKey } = await loadAttemptState(db, jobId);
 
-  const pending = (input.pendingOverride ?? view.workQueue).filter(
-    (item) => !succeededKeys.has(componentKey(item.step, item.component)),
-  );
-  const recoveryCeilingOverride = input.targetedRecovery
+  // C2 — on a targeted second pass the plan's items are the eligible set
+  // (selected from persisted S5 state, targeted-recovery.ts), narrowed
+  // only by the one-recovery maximum: an item that already has its
+  // recovery attempt is not walked again. A first attempt that SUCCEEDED
+  // technically but whose Evidence S5 excluded does not remove the item —
+  // the same rule claimAttempt applies under the job lock.
+  const targetedPass = input.targetedRecovery != null;
+  const pending = (input.pendingOverride ?? view.workQueue).filter((item) => {
+    const key = componentKey(item.step, item.component);
+    return targetedPass ? (maxAttemptByKey.get(key) ?? 0) <= 1 : !succeededKeys.has(key);
+  });
+  const recoveryCeilingOverride = targetedPass
     ? (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime + pending.length
     : undefined;
 
@@ -567,6 +590,7 @@ export async function runResearchController(
       now,
       debugClaimDelayMs,
       recoveryCeilingOverride,
+      targetedPass,
     );
 
     if (!outcome.claimed) {

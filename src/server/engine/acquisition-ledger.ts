@@ -118,6 +118,35 @@ export interface AcquisitionLedger {
   // Only the closed diagnostic vocabulary is ever stored here (D-143), so
   // this carries no message, no address and no host-specific text.
   failureDiagnosticsByUrl: ReadonlyMap<string, readonly PersistedFailure[]>;
+  // ROUTE EXPLORATION ACCOUNTING (Research Reliability V1, C2) — which
+  // confirmed-route DOMAINS a component's route-scoped search actually
+  // ran against, keyed `step:component` → lower-cased hostnames.
+  //
+  // A route-scoped query (`site:<domain> <topic>`, acquisition-targeting.ts)
+  // that a real search call executed and answered — status OK, a search
+  // unit actually spent — has explored that route for that component,
+  // whether or not it returned a single candidate. Zero results is still
+  // an explored path: the bounded acquisition attempt was made. It says
+  // NOTHING about the project (absence of evidence ≠ evidence of absence,
+  // CORE_RULES); it only stops the targeted second pass from reporting the
+  // same route as never tried and spending a unit to ask it again.
+  //
+  // Deliberately NOT counted as explored, in the fail-closed direction:
+  //   FAILED   — a provider/system error answered nothing about the route;
+  //   SKIPPED  — the call was refused (budget denial) and never ran;
+  //   a replay — budget_amount 0: the EXTRACTING replay re-serves this
+  //              job's own discoveries and never asks the route;
+  //   an unattributed row (no step/component) — the site-local expansion's
+  //              synthetic rows carry no component and use no site: form.
+  exploredRoutesByComponent: ReadonlyMap<string, ReadonlySet<string>>;
+}
+
+// The domain a route-scoped query is aimed at (`site:<domain> …`), lower-
+// cased, or null for any other query text. The only query form that names
+// a route is the code-owned one acquisition-targeting.ts builds.
+export function routeScopedQueryDomain(query: string): string | null {
+  const m = /^site:([^\s]+)(?:\s|$)/i.exec(query.trim());
+  return m ? m[1].toLowerCase() : null;
 }
 
 // ONE PERSISTED FAILURE, as the planner needs to read it.
@@ -149,6 +178,7 @@ export const EMPTY_LEDGER: AcquisitionLedger = {
   strategiesAttempted: new Map(),
   attemptsByProvider: new Map(),
   failureDiagnosticsByUrl: new Map(),
+  exploredRoutesByComponent: new Map(),
 };
 
 // Reconstructs the ledger from this job's own trace. Degrade-never-throw,
@@ -172,6 +202,9 @@ export async function loadAcquisitionLedger(
         // simply stopped reading it.
         patternStep: researchTraceEvents.patternStep,
         component: researchTraceEvents.component,
+        // C2 — whether a real search unit was spent on the row (0 for a
+        // replayed search, null for a synthetic one).
+        budgetAmount: researchTraceEvents.budgetAmount,
       })
       .from(researchTraceEvents)
       .where(eq(researchTraceEvents.researchJobId, jobId))
@@ -187,6 +220,7 @@ export async function loadAcquisitionLedger(
     const strategiesAttempted = new Map<string, Set<string>>();
     const attemptsByProvider = new Map<string, number>();
     const failureDiagnosticsByUrl = new Map<string, PersistedFailure[]>();
+    const exploredRoutesByComponent = new Map<string, Set<string>>();
 
     // CANDIDATE_RETURNED rows are written by the executor immediately
     // after the SEARCH_EXECUTED row for the query that produced them, in
@@ -208,6 +242,17 @@ export async function loadAcquisitionLedger(
             executedQueries.add(ref);
             const scoped = componentScopeKey(row.patternStep, row.component, ref);
             if (scoped !== null) executedQueryComponents.add(scoped);
+          }
+          // C2 — a route-scoped query that a REAL call ran and answered has
+          // explored that route for this component (see the field's doc).
+          if (row.status === "OK" && (row.budgetAmount ?? 0) > 0 && row.patternStep !== null && row.component !== null) {
+            const domain = routeScopedQueryDomain(ref);
+            if (domain !== null) {
+              const key = `${row.patternStep}:${row.component}`;
+              const set = exploredRoutesByComponent.get(key) ?? new Set<string>();
+              set.add(domain);
+              exploredRoutesByComponent.set(key, set);
+            }
           }
           if (!candidatesByQuery.has(ref)) candidatesByQuery.set(ref, []);
           break;
@@ -314,6 +359,7 @@ export async function loadAcquisitionLedger(
       strategiesAttempted,
       attemptsByProvider,
       failureDiagnosticsByUrl,
+      exploredRoutesByComponent,
     };
   } catch {
     // No memory is always safe: the engine simply behaves as it did
@@ -465,4 +511,17 @@ export function isKnownDeadUrl(url: string, ledger: AcquisitionLedger): boolean 
 // still fetched, and is still not worth fetching again.
 export function isAlreadyFetchedUrl(url: string, ledger: AcquisitionLedger): boolean {
   return ledger.fetchedUrls.has(canonicalTargetRef(url));
+}
+
+// C2 — has a real route-scoped search already run for THIS component on
+// this confirmed-route domain in this job? True only for an executed,
+// answered, metered `site:<domain>` query attributed to the component —
+// never for a refused, failed, replayed or unattributed one.
+export function routeExploredForComponent(
+  ledger: AcquisitionLedger,
+  step: number,
+  component: string,
+  domain: string,
+): boolean {
+  return ledger.exploredRoutesByComponent.get(`${step}:${component}`)?.has(domain.toLowerCase()) ?? false;
 }

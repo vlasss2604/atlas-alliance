@@ -7,8 +7,14 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-20 (Research Reliability V1 round):
-  **5183 passing, 4 skipped, 3 failing** (5190 total, 249 files, ~38 min).
+- Full suite, last verified 2026-09-20 (C2 minimal reliability fix):
+  **5192 passing, 4 skipped, 4 failing** (5200 total, 250 files, ~37 min)
+  on the run that exposed the fourth failure — the Memory-reuse
+  acceptance test pinning one attempt per component, which the approved
+  C2 change turns into one bounded recovery for its date-less
+  CURRENT_STATE; re-pinned (`recoveryAttemptsOf`, ONE_RECOVERY) and
+  passing alone afterwards, so the standing count is **5193 passing, 4
+  skipped, 3 failing**.
   Run the suite ALONE — two concurrent `vitest run` invocations share the
   one test database and produce mass spurious failures (observed earlier:
   193 "failures" that vanished on a clean serial run). The three failures
@@ -160,35 +166,51 @@ lifecycle, Memory, confidence or Proof-layer rule changed.
   memory items, Evidence, S5, S7) fingerprinted identical before and
   after. `scripts/activate-pattern-version.ts --apply` is the mechanism
   (dry run without the flag).
-- **Reliability Audit C1/C2 — decision data, not decisions** (benchmark
-  after activation, 160 runs, `ATLAS_BENCH_REPORT_PATH` table).
-  C1: critical nodes whose first attempt closed SEARCH_BUDGET_EXHAUSTED:
-  0; critical attempted 672/672; the search envelope (12) is fully
-  reserved at finalize in the 40 phased runs (the SEARCH phase spends the
-  fair share deterministically) and at 10–11/12 in the unphased ones;
-  the axis that does bind is OPENS in phased OFFICIAL_LATE (3 runs at
-  24/24, 1 at 17/24) where NET_EFFECT keeps 3 sealed documents never
-  extracted for it. The budget was not raised.
-  C2: 48 runs finalize with an unresolved critical node while the
-  second-pass planner in audit mode still finds a known admissible path.
-  Two mechanisms, both verified on the persisted jobs, neither
-  implemented: (i) the targeted pass filters its planned items by
-  ATTEMPT success (`controller.ts`, `succeededKeys`), so a critical
-  component whose first attempt SUCCEEDED technically but whose Evidence
-  S5 excluded (9 STALE jobs, CURRENT_STATE / STALE_CURRENT_STATE, one
-  attempt each) never gets its second look although 5–7 sealed documents
-  remain unextracted for it; (ii) ROUTE_UNEXPLORED counts a confirmed
-  route on which a route-scoped query for the component already ran and
-  returned nothing (16 GOVERNANCE_BASIS second attempts after an empty
-  `site:vote.…` search, 10 of them spending one more search unit for
-  nothing). The remaining flagged runs are the one-recovery ceiling by
-  design (never a third pass) over other components' sealed documents.
-  Smallest deterministic change proposed for Founder decision: (i) when
-  `targetedRecovery` is set, the controller walks the plan's items
-  without the `succeededKeys` filter — the plan already selected
-  unresolved components from S5; (ii) the planner treats a route as
-  explored when the ledger holds an executed `site:<domain>` query for
-  this component. Nothing else.
+- **Reliability Audit C1/C2.** C1 DEFERRED by the Founder (2026-09-20):
+  the search budget and the global acquisition envelope are unchanged
+  (critical nodes whose first attempt closed SEARCH_BUDGET_EXHAUSTED: 0;
+  the envelope is fully reserved at finalize in the 40 phased runs, by
+  the SEARCH phase's deterministic fair share). C2 closed on exactly the
+  two verified defects, nothing broader:
+  (i) **Evidence-state recovery eligibility** (`controller.ts`). On a
+  targeted pass the eligible set is the plan's items — selected from
+  persisted S5 state — narrowed only by the one-recovery maximum (an
+  attempt numbered above 1 exists → never claimed again, also under a
+  redelivered scoped cycle). A first attempt that SUCCEEDED technically
+  while S5 excluded every Evidence it produced (stale for a current-state
+  component) no longer removes the component from its one second look.
+  Freshness is untouched: the stale rows stay excluded; the recovery only
+  reads the sealed documents the first pass never extracted for it. The
+  first-pass rule (a SUCCEEDED component is never re-attempted) is
+  byte-identical.
+  (ii) **Route exploration accounting** (`acquisition-ledger.ts`
+  `exploredRoutesByComponent` / `routeExploredForComponent`,
+  `targeted-recovery.ts`). A confirmed route is explored for a component
+  once a route-scoped query (`site:<domain> …`) attributed to that
+  component ran through a REAL call and answered — SEARCH_EXECUTED status
+  OK with a search unit spent (`budget_amount` > 0) — zero candidates
+  included. A refused (SKIPPED, budget denial), failed (FAILED, provider
+  error) or replayed (budget_amount 0) search leaves it unexplored, as
+  does a scoped search by another component or on another host. Zero
+  results never mean the fact is absent (CORE_RULES); they mean this
+  bounded path was tried, so ROUTE_UNEXPLORED no longer re-spends a unit
+  on it. Reason codes technical/substantive are unchanged.
+  Benchmark after (160 runs, same envelope): 672/672 critical nodes
+  attempted; second pass in 69 runs (63 before: the 9 STALE jobs and
+  others now get their look, the 16 GOVERNANCE_BASIS re-searches of an
+  already-empty `site:vote.…` route are gone); 3 runs finalize on a
+  technical boundary, all EXECUTION_EVIDENCE under CHAIN_EARLY on
+  NO_ADMISSIBLE_ROUTE (a configuration boundary — no confirmed route for
+  the class; the suite's MAJOR rule exempts exactly that code); CRITICAL 0, MAJOR 0; S5 parity phased =
+  unphased on every phased variant. Search calls across the matrix
+  1718 → 1699, extractions 2135 → 2171, avg modelled cost $0.185 →
+  $0.186. Audit-mode "unexplored at finalize": 48 → 28, ROUTE_UNEXPLORED
+  0 everywhere; the report now splits the count — nodes for which NO
+  recovery ever ran: **0**; paths left after the ONE bounded recovery ran
+  (3 extractions / 3 opens / 2 searches, never a third pass): 28, all
+  SEALED_UNEXTRACTED / UNOPENED_CANDIDATE residue of the one-recovery
+  maximum the Founder kept, not nodes the Research skipped.
+  Pinned in `tests/targeted-recovery-eligibility-c2-v1.test.ts` (10).
 
 ## The phased pipeline's first live run, and the two generic gaps it exposed
 
