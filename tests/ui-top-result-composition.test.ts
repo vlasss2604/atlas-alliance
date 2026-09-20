@@ -65,11 +65,12 @@ describe("the top of the result is one object", () => {
     // the <h1> tag itself, since the small label above it is legitimately
     // dim.
     const h1 = /<h1([\s\S]*?)>/.exec(code)?.[1] ?? "";
-    expect(h1).toContain("text-[1.16rem]");
+    expect(h1).toContain("text-[1.4rem]");
     expect(h1).toContain("font-semibold");
     expect(h1).not.toContain("var(--atlas-text-dim)");
-    // Larger than the answer body it sits above.
-    expect(code).toContain("text-[1.02rem]");
+    // Larger than the answer body it sits above — which is itself the
+    // largest running text on the screen.
+    expect(code).toContain("text-[1.15rem]");
   });
 
   it("TEST 2b: only one heading competes at the top", () => {
@@ -187,17 +188,17 @@ describe("the normal result shows what the answer rests on, and nothing else", (
     // the newest admitted source is — two persisted dates, no score.
     expect(code).not.toContain("usedDocs");
     expect(code).not.toContain("used as evidence");
-    const meta = code.slice(code.indexOf('data-testid="answer-freshness"'));
-    expect(meta.slice(0, 500)).toContain("Evidence checked {surface.checkedOn}");
-    expect(meta.slice(0, 500)).toContain("Latest source");
+    const meta = code.slice(code.indexOf('data-testid="answer-meta"'));
+    expect(meta.slice(0, 500)).toContain("Checked {surface.checkedOn}");
+    expect(meta.slice(0, 500)).toContain("Newest source");
   });
 
   it("TEST 6b: the footnote is a footnote, never styled as a score", () => {
-    const meta = code.slice(code.indexOf('data-testid="answer-freshness"') - 400);
+    const meta = code.slice(code.indexOf('data-testid="answer-meta"') - 400);
     const block = meta.slice(0, 700);
-    // Smallest text on the panel, in the dim token — no badge, no tone
-    // class, no progress or confidence affordance.
-    expect(block).toContain("text-[0.75rem]");
+    // Smallest text on the panel, in the dim token — no tone class, no
+    // progress or confidence affordance.
+    expect(block).toContain("text-[0.88rem]");
     expect(block).toContain("var(--atlas-text-dim)");
     expect(block).not.toContain("tone-");
     expect(block).not.toContain("confidence");
@@ -245,9 +246,9 @@ describe("presentation only", () => {
     expect(projection).toContain("export const PROJECTION_VERSION = 1");
     expect(projection).toContain("export const MIN_FINDINGS = 2");
     expect(projection).toContain("export const MAX_FINDINGS = 5");
-    // The page still consumes it exactly as before.
-    expect(code).toContain("questionFindings={detail.questionFindings}");
-    expect(code).toContain("evidenceByComponent={evidenceByComponent}");
+    // The surface model still consumes it exactly as before.
+    expect(readFileSync("src/client/result-surface.ts", "utf-8")).toContain("questionFindings: detail.questionFindings");
+    expect(code).toContain("buildResultSurface(detail)");
   });
 
   it("TEST 10: no model call and no research call reaches the screen", () => {

@@ -40,18 +40,21 @@ test("11. first visit shows onboarding once, skip is secondary", async ({ page }
   await expect(page.getByText("ATLAS PROOF").first()).toBeVisible();
 });
 
-test("12. bottom nav walks all tabs; ARI opens ask; example fills input; submit honestly disabled", async ({
+test("12. navigation walks all anchors; ARI opens ask; example fills input; submit honestly disabled", async ({
   page,
 }) => {
   await page.goto("/home");
   await expect(page).toHaveURL(/\/home$/);
 
-  // UI V1 navigation: Proof / Research / Watchlist / Profile. Watchlist is a
-  // visibly disabled placeholder rather than a link, Projects is no longer in
-  // the bar (reached by URL), and the centre ARI button is gone — the
-  // composer now lives on Home itself.
-  await page.getByRole("link", { name: /Research/ }).first().click();
+  // RESEARCH ← HOME → ANALYTICS, Profile aside. On a handset the anchors
+  // are the bottom dock with the AP orb in its centre; on a wide screen
+  // the same anchors sit in the header. Projects is reached by URL.
+  await page.getByTestId("dock-research").click();
   await expect(page).toHaveURL(/\/research$/);
+  await page.getByTestId("dock-analytics").click();
+  await expect(page).toHaveURL(/\/analytics$/);
+  await page.getByTestId("dock-home").click();
+  await expect(page).toHaveURL(/\/home$/);
 
   await page.goto("/projects");
   // Реальный roster из сида

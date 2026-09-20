@@ -183,11 +183,12 @@ describe("a micro-answer cannot broaden its canonical claim", () => {
     );
     expect(src).not.toContain("supportingSummariesByComponent[");
 
-    // And the result surface builds it from SUPPORTING links only — a
-    // contradicting or refused row can never become a finding's answer.
-    const page = readFileSync("src/client/components/research-result.tsx", "utf-8");
-    expect(page).toContain('if (link.role === "SUPPORTING" && e.summary)');
-    expect(page).toContain('if (link.role === "EXCLUDED") continue');
+    // And the result surface reads a row's fact from SUPPORTS relations
+    // only — a contradicting or refused row can never become a finding's
+    // answer.
+    const surface = readFileSync("src/client/result-surface.ts", "utf-8");
+    expect(surface).toContain('e.relation === "SUPPORTS"');
+    expect(surface).toContain('if (link.role === "EXCLUDED") continue');
   });
 
   it("TEST 7b: the phrase used is the component's own, never a broader one", () => {

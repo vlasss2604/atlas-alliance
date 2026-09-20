@@ -589,8 +589,9 @@ describe("projection — the question shapes the default screen", () => {
     expect(page).toContain('data-testid="audit-entry"');
     expect(page).toContain("/audit`}");
     expect(page).not.toContain('data-testid="audit-full-ladder"');
-    // One ladder on this page: the question-driven one.
-    expect(page.split("<ResultLadder").length - 1).toBe(1);
+    // No ladder on this page at all: the rows are the surface model's, and
+    // every canonical component is carried by the audit instead.
+    expect(page).not.toContain("<ResultLadder");
     // The audit's coverage section iterates every canonical component,
     // under its own label, with no projection able to drop one.
     const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");

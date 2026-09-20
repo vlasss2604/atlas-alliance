@@ -2,58 +2,97 @@
 
 > Overwrite this file each round. Never append.
 
-## RESULT PRESENTATION V1 — ONE RESULT, SIMPLE SURFACE (awaiting Founder visual review)
+## RESULT + APP UX V3 — THE USER READS THE PROJECT, NOT THE ENGINE (awaiting Founder visual review)
 
 Acquisition, search, recovery, budgets, Evidence/admissibility, verdict and
-confidence semantics, Pattern data: untouched. $0, no live Research. The
-completed result was redesigned around six sections (answer, research
-table, proof map, key evidence, what is not established, full evidence &
-audit) so a serious user understands the answer in 5–20 seconds.
+confidence semantics, Pattern data: untouched. $0, no live Research. This
+round was recovered from disk after an emergency reboot: every V3 stage
+(surface model, result component, app shell, Home, history, typography,
+Full Audit) had survived; the only file cut mid-edit was the audit's Limit
+block, which referenced two fields the boundary type never had.
 
-### What changed
+### The completed result (`src/client/components/research-result.tsx`)
 
-- `src/client/result-surface.ts` — the pure surface model: status
-  vocabulary, boundary kinds (technical / configuration / substantive from
-  `proofs.bounded_by`, legacy fallback from reason codes + coverage), the
-  research table (projection rows + paper-vs-reality rows, supporting
-  checks folded as chips), the proof chain, key evidence, the boundary
-  groups, the 2–4 sentence answer, freshness, on-chain translation,
-  `FORBIDDEN_SURFACE_TOKENS`.
-- `src/client/components/research-result.tsx` — the one component; inline
-  evidence inspection (row → evidence cards → details), no navigation.
-- `app/(app)/research/[id]/page.tsx` — renders it when finished; live
-  state unchanged. `result-first-screen.tsx` and its test removed.
-- `app/(app)/dev/result-states/page.tsx` + `result-surface-fixtures.ts` —
-  eight invented states, production-gated.
-- `services/proof-view.ts` / `client/api.ts` — `boundedBy` on the Proof
-  read model (copied, nullable).
-- Vocabulary unified at the source: Confirmed / Partially confirmed / Not
-  established / Contradicted (`research-model.ts`, `result-blocks/types.ts`).
-- Tests: `tests/ui-result-surface-v1.test.ts` (30: status mapping, the
-  three boundary kinds incl. legacy fallback and both real Aave shapes,
-  projection rows and order, evidence linkage, no excluded evidence on
-  the first screen, freshness, on-chain translation, no raw codes / JSON,
-  contradiction preserved, confirmed never manufactured, failed run,
-  structure); 11 older suites re-pinned to the component and vocabulary.
+1. Question + answer — project as a quiet label, the question as the h1,
+   two to four typed sentences in project language ("ATLAS established
+   what pays for the buyback and who approved it. It found evidence that
+   the buyback is happening now, but could not fully confirm it — <the
+   persisted reason>. It could not establish where the bought tokens go:
+   the research reached its configured limit…"); beneath, one line:
+   checked-on date, newest source date, the verdict badge.
+2. What ATLAS found — question · answer · source · as-of rows. The label
+   is the projection's own words for the rows it named, otherwise a
+   question in the reader's words (`questionLabelFor`: "What pays for the
+   buyback?", "Who approved it?", "Is the buyback happening now?", "Where
+   do the bought tokens go?", "Does total supply actually decrease?"); a
+   projection label the semantic-envelope guard refused falls back to the
+   question, never to the Pattern's claim label. The answer cell is the
+   fact, then — for a partial — exactly what could not be confirmed; a
+   not-established row says why (persisted reason) or which limit. The
+   status is a dot with a title, never the sentence. Confirmed supporting
+   checks fold under the row that leans on them ("Also established: …");
+   a contradicted, blocked or uncertain supporting check is promoted to
+   its own row. Evidence opens inline (`Evidence · N`).
+3. Sources — at most five, one sentence each on what the source tells us,
+   excerpt / original / snapshot one tap away.
+4. What remains unclear — only TECHNICAL and CONFIGURATION groups, once
+   each, with the checks they apply to and what they must never be read
+   as. A substantive gap is never repeated here.
+→  Open full audit.
+
+Removed from the user surface: proof map, key findings, verification
+result, main gaps, proof ladder, research process, the "Full evidence and
+audit" disclosure, `?view=` state. The components still exist for the dev
+showcases.
+
+### The Full Audit (`research-audit.tsx`, `/research/[id]/audit`)
+
+The same rows in the same words, one level deeper: Question → Answer →
+status word → Evidence (every admitted card with what it tells and what it
+does not prove) → Limit (technical / configuration only). Beneath, closed:
+**Technical record ▸** — summary counts, coverage, evidence map, source
+register with exclusion reasons, on-chain observations (raw), open items,
+trace. Outcome labels unified with the Result ("Not established",
+"Not established — research limit"). No type below 0.82rem.
+
+### App shell (`app-chrome.tsx`, `app/(app)/layout.tsx`)
+
+Header: ATLAS PROOF / Crypto Verification (left) · Research — AP orb (Home)
+— Analytics (centre, ≥640px) · Profile (right). Handset: the same three
+anchors as a bottom dock with the orb rising from its centre; Profile stays
+in the header. `/analytics` is a real page with an honest empty state (no
+Compare / Watchlist built). The old floating dock and `atlas-navigation.tsx`
+are gone. Home is the composer as hero + Recent research rows; Research
+history is rows with hairlines. `section-label` replaces the coloured
+eyebrows; nothing that matters below 0.8rem.
 
 ### Verified ($0)
 
-- Presentation + projection-safety + Round 9/12/13 set: 25 files, 548
-  passing. `npx tsc --noEmit` clean; lint 0 errors.
-- Screenshots (390×844 and 1120 wide) of all eight fixture states and
-  both persisted Aave results on the running dev server: every page
-  renders, no console errors (the Next dev overlay's hydration note on
-  the Telegram `<html style>` is pre-existing).
-- Full suite not rerun: no shared production behaviour outside the
-  presentation helpers and the Proof read model changed.
+- Presentation + projection-safety + Round 9/12/13 output-safety set
+  (`tests/ui-*`, `question-projection`, `research-audit`, round9 output
+  boundary, round12/13 non-DB): 20 files, 540 passing. `npx tsc --noEmit`
+  clean; lint 0 errors. Forty-two stale pins in twelve suites re-pointed at
+  the V3 surface without weakening an invariant; one new pin (refused
+  projection label → reader's question).
+- Screenshots (390×844 and 1120 wide) of Home, Research, Analytics, fixture
+  states 1/2/4/8, the fixture audit and the persisted Aave route: every
+  page renders, no console errors beyond the pre-existing Telegram
+  hydration note and the API calls that need the database.
+- NOT verified: the DB-backed projection suites and the persisted Aave
+  result. Postgres on localhost:5432 did not come back after the reboot
+  (no local binary, Docker not reachable from this WSL distro); the Aave
+  route renders "This research could not be loaded." until it is up.
 
 ### Founder review — open these (dev server on :3000, dev auth bypass)
 
-- http://localhost:3000/research/cbe59f48-edbd-4153-b5e6-dc2082c9e105 — the
-  persisted Aave result (documentary checks excluded as inadmissible,
-  execution outside supported routes, two on-chain partials).
-- http://localhost:3000/research/2b0f00e4-b736-4e57-8b35-b77bb6ee7ced — the
-  earlier Aave run (search-limit bounded everywhere).
-- http://localhost:3000/dev/result-states?state=1 … 8 — the eight states.
+- http://localhost:3000/home
+- http://localhost:3000/research
+- http://localhost:3000/analytics
+- http://localhost:3000/dev/result-states?state=1 (strong), =2 (mixed),
+  =4 (technical boundary), =8 (evidence-heavy); =3, =5, =6, =7 also exist.
+- http://localhost:3000/dev/result-states/audit?state=8 — the Full Audit
+  from the fixture (also =1…7).
+- http://localhost:3000/research/cbe59f48-edbd-4153-b5e6-dc2082c9e105 and
+  its `/audit` — the persisted Aave result, once Postgres is running.
 
-STOP here until the Founder approves the surface. No live batch before.
+STOP here until the Founder approves the experience. No live batch before.

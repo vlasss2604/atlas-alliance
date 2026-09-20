@@ -563,7 +563,8 @@ describe("V2 — what the default screen does and does not carry", () => {
     expect(src).not.toContain("prepareAudit");
     const result = readFileSync("src/client/components/research-result.tsx", "utf-8");
     expect(result).toContain('data-testid="audit-entry"');
-    expect(result).toContain("evidenceByComponent={evidenceByComponent}");
+    // Proof reaches a row through the surface model's persisted links.
+    expect(result).toContain("buildResultSurface(detail)");
     expect(src).not.toContain("<EvidenceSection");
     expect(result).not.toContain("<EvidenceSection");
     // The old screen rendered the component grid, the gaps panel and the
@@ -617,7 +618,7 @@ describe("V2 — what the default screen does and does not carry", () => {
     const model = readFileSync("src/client/audit-model.ts", "utf-8");
     expect(model).toContain("c.excludedEvidence");
     // The source classes behind a row come from persisted evidence links.
-    expect(src).toContain("sourceClassesByComponent");
+    expect(src).toContain("classesByComponent");
     expect(src).toContain('if (link.role === "EXCLUDED") continue');
   });
 

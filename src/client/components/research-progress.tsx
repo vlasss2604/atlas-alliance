@@ -14,7 +14,7 @@ export function ResearchProgress({ job }: { job: ProgressInput }) {
 
   return (
     <section className="panel p-5 sm:p-6" data-testid="research-progress">
-      <p className="eyebrow eyebrow-cyan">Research process</p>
+      <p className="section-label">Research process</p>
       <div className="rail mt-4" data-progress-source={progress.source}>
         {progress.stages.map((stage, i) => (
           <div key={stage.key} className="rail-item" data-stage={stage.key} data-state={stage.state}>

@@ -120,17 +120,17 @@ export function statusTone(status: ResultStatus): VerdictTone {
 export type BoundaryKind = "SUBSTANTIVE" | "TECHNICAL" | "CONFIGURATION";
 
 export const BOUNDARY_COPY: Record<BoundaryKind, string> = {
-  SUBSTANTIVE: "Not established after checking the available evidence.",
-  TECHNICAL: "Research limit reached before every relevant evidence path could be checked.",
-  CONFIGURATION: "Could not be verified with the currently supported evidence routes.",
+  SUBSTANTIVE: "ATLAS checked the available sources and found nothing that settles this.",
+  TECHNICAL: "Research reached its configured limit before every relevant source could be checked.",
+  CONFIGURATION: "ATLAS currently has no supported source route that can independently verify this.",
 };
 
 // What each kind must never read as. Stated once, beside the group, so the
 // distinction the record carries survives onto the screen.
 export const BOUNDARY_NEVER: Record<BoundaryKind, string> = {
   SUBSTANTIVE: "This is a statement about the evidence checked, not proof that the thing is absent.",
-  TECHNICAL: "This is a limit of the research run. It does not mean no evidence exists.",
-  CONFIGURATION: "This is a limit of ATLAS's current evidence routes. It does not mean the mechanism is not executing.",
+  TECHNICAL: "This is a limit of the research run, not a finding about the project.",
+  CONFIGURATION: "This is a limit of ATLAS's current source routes, not a finding that the mechanism is not executing.",
 };
 
 const TECHNICAL_BOUNDARY_CODES: ReadonlySet<string> = new Set([
@@ -198,20 +198,80 @@ export const PROOF_PATH_ORDER = [
   "DURABILITY_BASIS",
 ] as const;
 
-// Short node names for the proof map — a noun a reader can hold in view,
-// never a component enum.
-export const PROOF_NODE_LABELS: Record<string, string> = {
-  SOURCE_OF_VALUE: "Revenue source",
-  FLOW_PATH: "Value flow",
-  MECHANISM_SPEC: "Mechanism",
-  GOVERNANCE_BASIS: "Governance decision",
-  CURRENT_STATE: "Active now",
-  EXECUTION_EVIDENCE: "Executed on chain",
-  DESTINATION: "Token destination",
-  RECIPIENT: "Recipient",
-  NET_EFFECT: "Supply effect",
-  DURABILITY_BASIS: "Durability",
-};
+// THE MECHANISM, IN THE READER'S OWN WORD. The question and the
+// projection's labels name what was asked about — a buyback, a burn, a
+// revenue share, a reward. The noun is read from those words, never
+// guessed from the intent: "the mechanism" is the honest fallback.
+export function mechanismNounOf(texts: readonly (string | null | undefined)[]): string {
+  const text = texts.filter((t): t is string => typeof t === "string").join(" ").toLowerCase();
+  if (/buy[- ]?back|repurchas/.test(text)) return "the buyback";
+  if (/\bburn/.test(text)) return "the burn";
+  if (/revenue[- ]shar|fee[- ]shar|dividend|distribut/.test(text)) return "the revenue share";
+  if (/staking|reward/.test(text)) return "the reward";
+  if (/fee switch/.test(text)) return "the fee switch";
+  return "the mechanism";
+}
+
+// WHAT A READER ACTUALLY ASKS, per check — never the Pattern's noun. The
+// question projection's own labels lead where they exist; these serve the
+// checks it leans on and the reality checks it did not name.
+export function questionLabelFor(component: string, noun: string): string {
+  const buyback = noun === "the buyback";
+  switch (component) {
+    case "SOURCE_OF_VALUE":
+      return `What pays for ${noun}?`;
+    case "FLOW_PATH":
+      return "How does the value get there?";
+    case "MECHANISM_SPEC":
+      return `How is ${noun} designed to work?`;
+    case "GOVERNANCE_BASIS":
+      return "Who approved it?";
+    case "CURRENT_STATE":
+      return `Is ${noun} happening now?`;
+    case "EXECUTION_EVIDENCE":
+      return `Has ${noun} actually executed?`;
+    case "DESTINATION":
+      return buyback ? "Where do the bought tokens go?" : "Where does the value go?";
+    case "RECIPIENT":
+      return "Who ultimately receives it?";
+    case "NET_EFFECT":
+      return "Does total supply actually decrease?";
+    case "DURABILITY_BASIS":
+      return "How durable is it?";
+    default:
+      return componentClaimLabel(component);
+  }
+}
+
+// The same checks as clauses of a sentence — "ATLAS established WHAT PAYS
+// FOR THE BUYBACK and WHO APPROVED IT". Object forms for the answer.
+export function statementPhraseFor(component: string, noun: string): string {
+  const buyback = noun === "the buyback";
+  switch (component) {
+    case "SOURCE_OF_VALUE":
+      return `what pays for ${noun}`;
+    case "FLOW_PATH":
+      return "how the value gets there";
+    case "MECHANISM_SPEC":
+      return `how ${noun} is designed to work`;
+    case "GOVERNANCE_BASIS":
+      return "who approved it";
+    case "CURRENT_STATE":
+      return `that ${noun} is happening now`;
+    case "EXECUTION_EVIDENCE":
+      return `that ${noun} has actually executed`;
+    case "DESTINATION":
+      return buyback ? "where the bought tokens go" : "where the value goes";
+    case "RECIPIENT":
+      return "who ultimately receives it";
+    case "NET_EFFECT":
+      return "that total supply actually decreases";
+    case "DURABILITY_BASIS":
+      return "how durable it is";
+    default:
+      return componentPhrase(component) ?? componentClaimLabel(component).toLowerCase();
+  }
+}
 
 function pathIndex(component: string): number {
   const i = (PROOF_PATH_ORDER as readonly string[]).indexOf(component);
@@ -359,12 +419,15 @@ export interface ResearchTableRow {
   primary: boolean;
   // PRIMARY: a row the question projection named. REALITY: a row the
   // reader must always see when the record assessed it — what is
-  // documented versus what is active and executing. SUPPORTING: a row a
-  // primary finding leans on; it is folded under that finding on the
-  // table and stands as its own node on the proof map.
-  kind: "PRIMARY" | "REALITY" | "SUPPORTING";
-  // The supporting checks folded under this row, with their own status.
-  restsOn: { component: string; label: string; status: ResultStatus; statusLabel: string; tone: VerdictTone }[];
+  // documented versus what is active and executing. SUPPORTING: a check a
+  // primary finding leans on, established — folded under that finding as
+  // one quiet line. PROMOTED: a supporting check that is contradicted,
+  // blocked or uncertain; hiding it inside another row would conceal a
+  // material limitation, so it stands as a row of its own.
+  kind: "PRIMARY" | "REALITY" | "SUPPORTING" | "PROMOTED";
+  // The established supporting checks folded under this row — as the
+  // things they settle ("what pays for the buyback"), never as statuses.
+  restsOn: { component: string; label: string; phrase: string; status: ResultStatus; statusLabel: string; tone: VerdictTone }[];
   // The row's underlying derivation, for the deep surfaces.
   row: ResultRow;
 }
@@ -395,41 +458,51 @@ function firstSentence(text: string): string {
   return /[.!?]$/.test(first) ? first : `${first}.`;
 }
 
-// WHAT THE ROW SAYS IT ESTABLISHED. Confirmed and partially confirmed rows
-// speak in the engine's persisted reading of an admitted source (S5's
-// order; never a sentence written here); a contradicted row speaks in the
-// contradicting source's reading; a not-established row states the kind
-// of boundary it stopped at, then the persisted reason where one exists.
+// THE ANSWER CELL — THE FACT FIRST, THEN WHAT STOPS IT BEING WHOLE.
+//
+// A confirmed row speaks in the engine's persisted reading of an admitted
+// source (S5's order; never a sentence written here). A partially
+// confirmed row says the same fact and then, in one sentence from the
+// persisted reason code, exactly what could not be confirmed — so a
+// reader never has to ask "partial how?". A contradicted row speaks in
+// the contradicting source's reading. A not-established row states, in
+// plain words, why: the persisted reason for a substantive gap, or the
+// kind of limit the run hit.
+export const ROW_LIMIT_COPY: Record<Exclude<BoundaryKind, "SUBSTANTIVE">, string> = {
+  TECHNICAL: "ATLAS reached its research limit before this could be checked.",
+  CONFIGURATION: "ATLAS has no supported source route that can verify this yet.",
+};
+
 function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: BoundaryReading | null): string {
-  const phrase = componentPhrase(row.component);
+  const phrase = statementPhraseFor(row.component, "the mechanism");
   if (row.state === "VERIFIED" || row.state === "PARTIAL") {
     const summary = evidence.find((e) => e.relation === "SUPPORTS" && !e.onchain)?.proves
       ?? evidence.find((e) => e.relation === "SUPPORTS")?.proves;
-    if (summary) {
-      const one = firstSentence(summary);
-      if (one.length <= MAX_ESTABLISHED) return one;
-    }
-    return row.shows ?? (phrase ? `The checked evidence ${row.state === "PARTIAL" ? "partly " : ""}establishes ${phrase}.` : "");
+    const fact = summary && firstSentence(summary).length <= MAX_ESTABLISHED ? firstSentence(summary) : null;
+    if (row.state === "VERIFIED") return fact ?? row.shows ?? `The checked evidence establishes ${phrase}.`;
+    // Partial: the fact, then the gap — one persisted sentence, never the
+    // word "partial" on its own.
+    const gap = row.reason ?? "ATLAS could not confirm the whole claim from the sources it could rely on.";
+    return fact ? `${fact} ${gap}` : `The evidence goes part of the way. ${gap}`;
   }
   if (row.state === "NOT_HAPPENING") {
     const contra = evidence.find((e) => e.relation === "CONTRADICTS")?.proves;
     if (contra) {
       const one = firstSentence(contra);
-      if (one.length <= MAX_ESTABLISHED) return one;
+      if (one.length <= MAX_ESTABLISHED) return `${one} The evidence points the other way.`;
     }
-    return phrase ? `On ${phrase}, the sources point the other way.` : "The sources point the other way.";
+    return "The evidence points the other way.";
   }
-  // UNRESOLVED — the boundary speaks first.
   const kind = boundary?.kind ?? "SUBSTANTIVE";
-  if (kind !== "SUBSTANTIVE") return BOUNDARY_COPY[kind];
-  // `row.reason` already IS the persisted reason code's sentence — the
-  // ladder's own derivation, reused rather than re-derived.
-  return row.reason ?? BOUNDARY_COPY.SUBSTANTIVE;
+  if (kind !== "SUBSTANTIVE") return ROW_LIMIT_COPY[kind];
+  return row.reason ?? "ATLAS checked the available sources and found nothing that settles this.";
 }
 
 export interface SurfaceInput {
   jobId: string | null;
   ticker: string | null;
+  // The user's question, for the mechanism noun the row labels use.
+  question: string | null;
   components: readonly LadderComponentInput[];
   questionFindings:
     | readonly { label: string; patternStep: number; component: string; supportingComponents: string[] }[]
@@ -467,6 +540,7 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
   const ladderRows = new Map([...ladder.mechanism, ...ladder.value].map((r) => [r.component, r]));
   const selected = new Map<string, { row: ResultRow; kind: ResearchTableRow["kind"]; restsOn: string[] }>();
   const findings = input.questionFindings ?? [];
+  const noun = mechanismNounOf([input.question, ...findings.map((f) => f.label)]);
   if (findings.length > 0) {
     for (const r of deriveQuestionFindings(findings, input.components, classesByComponent)) {
       const own = findings.find((f) => f.component === r.component);
@@ -500,9 +574,17 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       : null;
     const strongestClass = SOURCE_PRECEDENCE.find((cls) => evidence.some((e) => e.sourceClass === sourceClassLabel(cls)));
     const strongest = strongestClass ? evidence.find((e) => e.sourceClass === sourceClassLabel(strongestClass)) ?? null : evidence[0] ?? null;
+    // The question projection's own words for the rows it named; a
+    // question in the reader's words for every other row. A projection
+    // label the semantic-envelope guard refused has already degraded to
+    // the Pattern's claim label (`safeClaimLabel`); that label is the
+    // engine's noun, so it too falls back to the reader's question.
+    const label = kind === "PRIMARY" && findings.length > 0 && row.label !== componentClaimLabel(component)
+      ? row.label
+      : questionLabelFor(component, noun);
     rows.push({
       component,
-      label: row.label,
+      label,
       status,
       statusLabel: RESULT_STATUS_LABELS[status],
       tone: statusTone(status),
@@ -519,10 +601,12 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
     void restsOn;
   }
   rows.sort((a, b) => pathIndex(a.component) - pathIndex(b.component));
-  // A supporting check folds under the FIRST primary row that leans on it,
-  // with its own status — a reader sees it, and sees it once. Only a
-  // SUPPORTING-kind row folds: a check that stands as a row of its own
-  // (primary or reality) is not repeated as a chip.
+  // A supporting check that is NOT confirmed is promoted: contradicted,
+  // blocked or uncertain, it would conceal a material limitation folded
+  // under another row. A confirmed supporting check folds under the FIRST
+  // primary row that leans on it, as the thing it settles — a reader sees
+  // it, and sees it once.
+  for (const r of rows) if (r.kind === "SUPPORTING" && r.status !== "CONFIRMED") r.kind = "PROMOTED";
   const byComponent = new Map(rows.map((r) => [r.component, r]));
   const folded = new Set<string>();
   for (const r of rows) {
@@ -531,7 +615,7 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       const dep = byComponent.get(c);
       if (!dep || dep.kind !== "SUPPORTING" || folded.has(c)) continue;
       folded.add(c);
-      r.restsOn.push({ component: c, label: PROOF_NODE_LABELS[c] ?? dep.label, status: dep.status, statusLabel: dep.statusLabel, tone: dep.tone });
+      r.restsOn.push({ component: c, label: questionLabelFor(c, noun), phrase: statementPhraseFor(c, noun), status: dep.status, statusLabel: dep.statusLabel, tone: dep.tone });
     }
     r.restsOn.sort((a, b) => pathIndex(a.component) - pathIndex(b.component));
   }
@@ -542,6 +626,13 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
 // that leans on it; everything else is a row. The proof map shows all.
 export function tableRows(rows: readonly ResearchTableRow[]): ResearchTableRow[] {
   return rows.filter((r) => r.kind !== "SUPPORTING");
+}
+
+// THE SOURCES SECTION'S ONE SENTENCE PER SOURCE: what this source tells
+// us, in the row's own terms — the engine's persisted reading, a chain
+// observation translated. Never a disclaimer.
+export function sourceSentence(card: EvidenceCard): string {
+  return card.onchain ? card.onchain.observation : card.proves;
 }
 
 // The most recent publication date among the row's admitted evidence; the
@@ -573,7 +664,7 @@ export function proofChain(rows: readonly ResearchTableRow[]): ProofNode[] {
     .sort((a, b) => pathIndex(a.component) - pathIndex(b.component))
     .map((r) => ({
       component: r.component,
-      label: PROOF_NODE_LABELS[r.component] ?? componentClaimLabel(r.component),
+      label: r.label,
       status: r.status,
       statusLabel: r.statusLabel,
       tone: r.tone,
@@ -632,12 +723,15 @@ export interface BoundaryGroup {
   remainingPaths: number | null;
 }
 
-// Only rows that are NOT ESTABLISHED. A contradicted row is a finding and
-// is never listed here; a confirmed or partially confirmed row is not a
-// gap. Grouped by kind so the same limitation is stated once per group
-// rather than repeated on every row.
+// WHAT REMAINS UNCLEAR — ONLY WHERE IT ADDS INFORMATION. A row already
+// says what was not established and, for a substantive gap, why; repeating
+// that here would be the same sentence twice. What a row cannot explain is
+// the RESEARCH BOUNDARY: that the run hit its configured limit with known
+// sources unread, or that ATLAS has no supported route for this project.
+// Those two kinds are listed, grouped, once. A contradicted row is a
+// finding and is never listed; a substantive gap is not.
 export function boundaryGroups(rows: readonly ResearchTableRow[]): BoundaryGroup[] {
-  const order: BoundaryKind[] = ["TECHNICAL", "CONFIGURATION", "SUBSTANTIVE"];
+  const order: BoundaryKind[] = ["TECHNICAL", "CONFIGURATION"];
   const groups: BoundaryGroup[] = [];
   for (const kind of order) {
     const members = rows.filter((r) => r.status === "NOT_ESTABLISHED" && (r.boundary?.kind ?? "SUBSTANTIVE") === kind);
@@ -685,22 +779,25 @@ const CONFIDENCE_WORDS: Record<string, string> = {
   VERY_STRONG: "Very strong",
 };
 
-// What the answer says about the boundary, once, in the reader's terms.
-// Technical outranks configuration outranks substantive, because the
-// reader most needs to know when the run — not the record — is the limit.
-function boundarySentence(rows: readonly ResearchTableRow[]): string | null {
-  const open = rows.filter((r) => r.status === "NOT_ESTABLISHED");
-  if (open.length === 0) return null;
-  const kinds = new Set(open.map((r) => r.boundary?.kind ?? "SUBSTANTIVE"));
-  if (kinds.has("TECHNICAL")) {
-    return "The research reached its limit before every relevant evidence path could be checked, so what is not established here is not a finding that it is absent.";
-  }
-  if (kinds.has("CONFIGURATION")) {
-    return "Some checks could not be verified with the evidence routes ATLAS currently supports, which says nothing about whether they are happening.";
-  }
-  return "What is not established was checked against the available evidence and not found there.";
+function joinPhrases(items: readonly string[], last = "and"): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} ${last} ${items[items.length - 1]}`;
 }
 
+function lowerFirst(s: string): string {
+  return s.length > 0 ? s[0].toLowerCase() + s.slice(1) : s;
+}
+
+// THE ANSWER — TWO TO FOUR SENTENCES IN THE PROJECT'S TERMS, TYPED.
+//
+// No evidence text reaches this paragraph: a sentence at the top of a
+// result reads as ATLAS's own conclusion, so every clause here is a
+// persisted status or reason code rendered through the same question
+// phrases the rows use. What it says, in order: what the evidence points
+// against, what it established, what it found evidence for but could not
+// fully confirm (and exactly why), what it could not establish — and, only
+// where the run rather than the record is the limit, that boundary.
+// Nothing is manufactured; nothing is stronger than a row beneath it.
 export function surfaceAnswer(input: {
   outcomeKind: OutcomeKind;
   verdict: string | null;
@@ -708,6 +805,7 @@ export function surfaceAnswer(input: {
   projectName: string | null;
   components: readonly { component: string; status: string }[];
   rows: readonly ResearchTableRow[];
+  question: string | null;
 }): SurfaceAnswer {
   const confidenceLabel = input.outcomeKind === "VERDICT" && input.confidenceBand ? (CONFIDENCE_WORDS[input.confidenceBand] ?? null) : null;
   // A run that did not end in a verdict keeps the settled wording for that
@@ -723,23 +821,42 @@ export function surfaceAnswer(input: {
       confidenceLabel,
     };
   }
-  const briefing = resultBriefing({
-    verdict: input.verdict,
-    outcomeKind: input.outcomeKind,
-    projectName: input.projectName,
-    components: [...input.components],
-    rows: input.rows.map((r) => r.row),
-  });
-  // The briefing's finding sentences (contradicted / confirmed / partially
-  // confirmed / not established), without its "Main limitation" line — the
-  // boundary sentence below replaces it in the reader's terms.
-  const findings = briefing.shortAnswer.filter((s) => !s.startsWith("Main limitation"));
-  const boundary = boundarySentence(input.rows);
-  const sentences = boundary ? [...findings.slice(0, 3), boundary] : findings.slice(0, 4);
+  const rows = [...input.rows].sort((a, b) => pathIndex(a.component) - pathIndex(b.component));
+  const noun = mechanismNounOf([input.question, ...rows.filter((r) => r.primary).map((r) => r.label)]);
+  const phrase = (r: ResearchTableRow) => statementPhraseFor(r.component, noun);
+  const by = (status: ResultStatus) => rows.filter((r) => r.status === status);
+  const sentences: string[] = [];
+
+  const contradicted = by("CONTRADICTED");
+  if (contradicted.length > 0) {
+    sentences.push(`On ${joinPhrases(contradicted.map(phrase).slice(0, 2))}, the evidence points the other way.`);
+  }
+  const confirmed = by("CONFIRMED");
+  if (confirmed.length > 0) {
+    sentences.push(`ATLAS established ${joinPhrases(confirmed.map(phrase).slice(0, 4))}.`);
+  }
+  const partial = by("PARTIAL");
+  if (partial.length > 0) {
+    const lead = partial[0];
+    const gap = lead.row.reason ? ` — ${lowerFirst(lead.row.reason)}` : "";
+    sentences.push(`It found evidence ${joinPhrases(partial.map(phrase).slice(0, 2))}, but could not fully confirm it${gap}`);
+  }
+  const open = by("NOT_ESTABLISHED");
+  if (open.length > 0) {
+    const kinds = new Set(open.map((r) => r.boundary?.kind ?? "SUBSTANTIVE"));
+    const what = `It could not establish ${joinPhrases(open.map(phrase).slice(0, 3), "or")}`;
+    if (kinds.has("TECHNICAL")) {
+      sentences.push(`${what}: the research reached its configured limit before every relevant source could be checked.`);
+    } else if (kinds.has("CONFIGURATION")) {
+      sentences.push(`${what}: ATLAS has no supported source route that can verify this for ${input.projectName ?? "this project"} yet.`);
+    } else {
+      sentences.push(`${what} from the sources it could rely on.`);
+    }
+  }
   if (sentences.length === 0) {
     sentences.push(`This research finished without a finding it could state about ${input.projectName ?? "this project"}.`);
   }
-  return { sentences, confidenceLabel };
+  return { sentences: sentences.slice(0, 4), confidenceLabel };
 }
 
 /* ------------------------------------------------------------------ *
@@ -779,6 +896,7 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
   const table = buildResearchTable({
     jobId: detail.job.id,
     ticker: detail.job.projectTicker,
+    question: detail.job.originalQuestion,
     components,
     questionFindings: detail.questionFindings,
     evidence: detail.evidence.map((e) => ({ ...e, hasSnapshot: snapshotIds.has(e.id) })),
@@ -797,6 +915,7 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
       projectName: detail.job.projectName,
       components: detail.components.map((c) => ({ component: c.component, status: c.status })),
       rows: table,
+      question: detail.job.originalQuestion,
     }),
     checkedOn: retrievedOn(detail.job.finishedAt),
     latestEvidence: latestDate(table.flatMap((r) => r.evidence)),
@@ -837,4 +956,19 @@ export const FORBIDDEN_SURFACE_TOKENS: readonly string[] = [
   "Still open",
   "Partially created",
   "Could not verify",
+  "Source of value",
+  "Flow path",
+  "Mechanism spec",
+  "Governance basis",
+  "Net effect",
+  "Durability basis",
+  // The Pattern ladder's claim labels — the engine's nouns, never a
+  // reader's question. A refused projection label degrades to one of
+  // these; the surface must turn it back into a question.
+  "Where the value comes from",
+  "The path the value takes",
+  "Where the value is meant to go",
+  "Who receives it",
+  "Effect on token supply",
+  "How durable the arrangement is",
 ];

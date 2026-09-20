@@ -527,13 +527,13 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
     // there was not enough of it. That is reader-facing prose about what
     // the run reached, not a data path to an evidence row.
     expect(code).toContain("Not enough evidence to settle these");
-    // And the page hands the first-screen surfaces the same three derived
-    // values — the proof map takes the index, the boundary block takes the
-    // open checks and their count. Nothing evidential reaches either.
+    // And the page hands its sections the surface model's derived values
+    // — the findings table takes the rows, the unclear block takes the
+    // boundary groups. Nothing evidential is composed in the component.
     const page = readFileSync(RESULT, "utf-8");
     for (const prop of [
-      "<ProofChainView nodes={surface.chain} />",
-      "<BoundaryPanel groups={surface.boundary} />",
+      "<FindingsTable rows={surface.table} />",
+      "<UnclearSection groups={surface.boundary} />",
     ]) {
       expect(page, prop).toContain(prop);
     }
@@ -567,19 +567,16 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
 /* ------------------------------------------------------------------ */
 
 describe("the deep result is intact beneath the new layer", () => {
-  it("the ladder, the audit entry and the developer details all still render", () => {
+  it("the audit entry and the developer details still render; the ladder and the process no longer render on the result", () => {
     const page = readFileSync(RESULT, "utf-8");
-    expect(page).toContain("<ResultLadder");
-    expect(page.split("<ResultLadder").length - 1).toBe(1);
+    expect(page).not.toContain("<ResultLadder");
+    expect(page).not.toContain("<ResearchProgress");
     expect(page).toContain('data-testid="audit-entry"');
     expect(readFileSync(PAGE, "utf-8")).toContain("<DeveloperDetails");
-    expect(page).toContain("<ResearchProgress");
-    // And the surface's rows render ABOVE the ladder, not instead of it —
-    // the research table, the proof map and the boundary block, fed by the
-    // surface model.
-    expect(page.indexOf("<ResearchTable rows={surface.table} />")).toBeGreaterThan(-1);
-    expect(page.indexOf("<ResearchTable")).toBeLessThan(page.indexOf("<ResultLadder"));
-    expect(page.indexOf("<BoundaryPanel")).toBeLessThan(page.indexOf("<ResultLadder"));
+    // The surface's rows ARE the result — the findings table and the
+    // unclear block, fed by the surface model, in that order.
+    expect(page.indexOf("<FindingsTable rows={surface.table} />")).toBeGreaterThan(-1);
+    expect(page.indexOf("<UnclearSection groups={surface.boundary} />")).toBeGreaterThan(page.indexOf("<FindingsTable"));
   });
 
   it("the surface summarises the SAME rows the ladder renders", () => {
@@ -786,15 +783,19 @@ describe("CLEANUP — the limitation is stated once", () => {
     expect(text.split("Main limitation").length - 1).toBe(1);
   });
 
-  it("the deep Proof below is untouched by any of this", () => {
+  it("the persisted inputs beneath are untouched by any of this", () => {
     const page = readFileSync(RESULT, "utf-8");
-    expect(page.split("<ResultLadder").length - 1).toBe(1);
+    expect(page).not.toContain("<ResultLadder");
     expect(page).toContain('data-testid="audit-entry"');
     expect(readFileSync(PAGE, "utf-8")).toContain("<DeveloperDetails");
-    expect(page).toContain("questionFindings={detail.questionFindings}");
-    expect(page).toContain("evidenceByComponent={evidenceByComponent}");
-    expect(page).toContain("supportingSummariesByComponent={supportingSummariesByComponent}");
-    expect(page.indexOf("<ResearchTable")).toBeLessThan(page.indexOf("<ResultLadder"));
+    // The rows are built by the surface model from the same persisted
+    // inputs — the projection's findings and the evidence links — and the
+    // component composes none of it.
+    const surface = readFileSync("src/client/result-surface.ts", "utf-8");
+    expect(surface).toContain("questionFindings: detail.questionFindings");
+    expect(surface).toContain("for (const link of e.links)");
+    expect(page).not.toContain("evidenceByComponent");
+    expect(page).not.toContain("supportingSummariesByComponent");
   });
 });
 

@@ -226,12 +226,16 @@ describe("proof is attached to the conclusion it proves", () => {
   });
 
   it("TEST 5: evidence under a finding comes only from persisted links, never text", () => {
-    const page = readFileSync(RESULT, "utf-8");
-    expect(page).toContain("const evidenceByComponent: Record<string, EvidenceItemLike[]> = {}");
-    expect(page).toContain("for (const link of e.links)");
+    // The surface model builds each row's evidence from persisted links.
+    const surface = readFileSync("src/client/result-surface.ts", "utf-8");
+    expect(surface).toContain("for (const link of e.links)");
     // An EXCLUDED link can never become proof of anything.
-    expect(page).toContain('if (link.role === "EXCLUDED") continue');
-    expect(page).toContain("evidenceByComponent[link.component]");
+    expect(surface).toContain('if (link.role === "EXCLUDED") continue');
+    expect(surface).toContain("admittedByComponent[link.component]");
+    // The component reads rows; it never walks the links itself.
+    const page = readFileSync(RESULT, "utf-8");
+    expect(page).toContain("buildResultSurface(detail)");
+    expect(page).not.toContain("e.links");
   });
 
   it("TEST 6: the strongest source leads and the rest stay behind a count", () => {

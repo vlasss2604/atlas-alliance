@@ -3,16 +3,14 @@
 import Link from "next/link";
 import { useState } from "react";
 
-import type { AuditProjectionView } from "../api";
+import type { AuditProjectionView, ResearchJobDetail } from "../api";
 import {
   AUDIT_SECTION_TITLES,
   buildAuditContent,
   availableAuditSections,
   orderAuditSections,
-  type AuditComponentRow,
   type AuditContent,
   type AuditEvidenceGroup,
-  type AuditEvidenceRow,
   type AuditOpenItem,
   type AuditScopeItem,
   type AuditSectionId,
@@ -21,54 +19,53 @@ import {
   auditOutcome,
 } from "../audit-model";
 import { retrievedOn } from "../research-model";
+import {
+  BOUNDARY_COPY,
+  BOUNDARY_NEVER,
+  buildResultSurface,
+  sourceSentence,
+  type EvidenceCard,
+  type ResearchTableRow,
+} from "../result-surface";
 
-// THE FULL RESEARCH AUDIT SURFACE.
+// THE FULL RESEARCH AUDIT.
 //
-// A DIFFERENT SCREEN FOR A DIFFERENT QUESTION. The Result answers "what is
-// the answer?". This answers "can I check how that answer was reached?" —
-// so it shares no layout with the Result and repeats none of its parts.
-// No verdict banner, no question-driven findings, no answer sentences, no
-// result ladder. A source is a citation on the Result and a ledger entry
-// here.
+// THE SAME QUESTIONS AS THE RESULT, ONE LEVEL DEEPER. The Result shows a
+// reader what ATLAS found; the audit lets them check it. So the audit is
+// built around the SAME research points, in the same words and the same
+// order, and for each one shows: the question → the answer → every piece
+// of evidence behind it, with what each proves and does not prove → the
+// limit, when the point stopped short. A reader who has just left the
+// Result recognises every heading, and nothing is said in a new
+// vocabulary.
 //
-// ONE CANONICAL HOME PER FACT. The rule that shapes every section below:
-// a reader must never wonder "did I already read this?". Coverage owns
-// what was checked. The evidence map owns RELATIONSHIPS and references
-// sources compactly. The source register owns source IDENTITY, once. Open
-// questions own what remains and what would close it. The trace owns the
-// engine's own vocabulary. Nothing is stated twice for its own sake.
+// THE TECHNICAL RECORD SITS BENEATH, CLOSED. Addresses, raw observations,
+// the source register with exclusion reasons, coverage, open questions
+// and the engine's own trace are kept complete — that is what an audit is
+// for — but behind one disclosure at the bottom, so the normal reading
+// path never crosses them.
 //
-// PROGRESSIVE DEPTH. Summary, coverage, open questions and the register's
-// rows are open; every detail is one click down. A professional should
-// understand the state of the research in under a minute, then drill.
-//
-// EVERY FACT IS CANONICAL. Statuses, counts, reason codes, evidence links,
-// exclusion reasons, classes and retrieval times are computed by
-// `audit-model.ts` from persisted rows. The model-generated projection
-// supplies section ORDER, short component LABELS and two sentences of
-// connective copy — and where it supplied none, canonical labels are used
-// and every section still renders.
+// EVERY FACT IS CANONICAL. The points are the Result's own surface model
+// over the persisted rows; the technical record is `audit-model.ts` over
+// the same rows. The model-generated projection supplies section ORDER,
+// short component LABELS and two sentences of connective copy inside the
+// technical record — and where it supplied none, canonical labels are
+// used and every section still renders.
 export function ResearchAudit({
   jobId,
-  projectName,
-  question,
-  researchedAt,
-  components,
-  evidence,
+  detail,
   projection,
 }: {
   jobId: string | null;
-  projectName: string | null;
-  question: string;
-  researchedAt: string | null;
-  components: AuditComponentRow[];
-  evidence: AuditEvidenceRow[];
+  detail: ResearchJobDetail;
   projection: AuditProjectionView | null;
 }) {
+  const surface = buildResultSurface(detail);
+  const projectName = detail.job.projectName ?? detail.job.projectTicker ?? "Research record";
   const usable = projection?.status === "VALID" ? projection : null;
   const content = buildAuditContent(
-    components,
-    evidence,
+    detail.components,
+    detail.evidence,
     usable
       ? {
           summary: usable.content.summary,
@@ -83,51 +80,180 @@ export function ResearchAudit({
   const sections = orderAuditSections(usable?.content.sectionOrder ?? null, available);
 
   return (
-    <div className="flex flex-col gap-4" data-testid="research-audit">
+    <div className="flex flex-col gap-10" data-testid="research-audit">
       {/* COMPACT CONTEXT ONLY. Enough to know which record this is —
           never a second copy of the Result the reader just left. */}
-      <header className="panel panel-raised px-5 py-5 sm:px-6" data-testid="audit-context">
-        <p className="eyebrow eyebrow-violet">Full research audit</p>
-        <h1 className="mt-2 text-[1.1rem] font-semibold tracking-tight sm:text-[1.25rem]">
-          {projectName ?? "Research record"}
+      <header data-testid="audit-context">
+        <p className="section-label">Full audit · {projectName}</p>
+        <h1 className="mt-2 text-[1.4rem] font-semibold leading-[1.25] tracking-tight sm:text-[1.75rem]">
+          {detail.job.originalQuestion}
         </h1>
-        <p className="mt-1.5 text-[0.82rem] leading-snug text-[var(--atlas-text-dim)]">
-          {question}
-        </p>
-        <p className="mt-2.5 text-[0.72rem] text-[var(--atlas-text-dim)]">
-          Research completed {retrievedOn(researchedAt) ?? "—"}
+        <p className="mt-3 text-[0.88rem] text-[var(--atlas-text-dim)]">
+          Research completed {retrievedOn(detail.job.finishedAt) ?? "—"}
           {projection ? ` · audit prepared ${retrievedOn(projection.createdAt) ?? "—"}` : ""}
         </p>
       </header>
 
-      {sections.map((id) => (
-        <AuditSection key={id} id={id}>
-          {id === "SUMMARY" && (
-            <Summary content={content} summary={usable?.content.summary ?? null} />
-          )}
-          {id === "COVERAGE" && <Coverage scope={content.scope} />}
-          {id === "EVIDENCE_MAP" && <EvidenceMap groups={content.evidenceMap} jobId={jobId} />}
-          {id === "SOURCE_REGISTER" && <Register register={content.register} jobId={jobId} />}
-          {id === "OPEN_QUESTIONS" && <OpenQuestions items={content.openItems} />}
-          {id === "ONCHAIN" && <Onchain entries={content.onchain.entries} />}
-          {id === "TRACE" && <Trace scope={content.scope} />}
-        </AuditSection>
-      ))}
+      {surface.table.length > 0 && (
+        <section data-testid="audit-points">
+          <h2 className="section-label">Research points</h2>
+          <ol className="mt-2 flex flex-col">
+            {surface.table.map((row) => (
+              <AuditPoint key={row.component} row={row} jobId={jobId} />
+            ))}
+          </ol>
+        </section>
+      )}
 
-      {projection && projection.status !== "VALID" && (
-        // A PRESENTATION FAILURE, SAID QUIETLY. The audit above is complete
-        // and canonical either way — what a failed projection costs is its
-        // labels and ordering, so the message says exactly that and implies
-        // nothing about the research.
-        <p
-          className="panel px-5 py-3 text-[0.76rem] leading-relaxed text-[var(--atlas-text-dim)]"
-          data-testid="audit-projection-failed"
-        >
-          Audit labels could not be prepared, so research points are shown under their
-          canonical names. The record itself is complete.
+      <details className="group border-t border-[var(--hairline)] pt-5" data-testid="technical-record">
+        <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[1rem] font-medium text-[var(--atlas-text-dim)] select-none hover:text-[var(--atlas-text)] [&::-webkit-details-marker]:hidden">
+          <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
+          Technical record
+        </summary>
+        <p className="mt-2 text-[0.9rem] text-[var(--atlas-text-dim)]">
+          Coverage, every source read, raw on-chain observations, exclusion reasons and the engine trace.
+        </p>
+        <div className="mt-5 flex flex-col gap-4">
+          {sections.map((id) => (
+            <AuditSection key={id} id={id}>
+              {id === "SUMMARY" && (
+                <Summary content={content} summary={usable?.content.summary ?? null} />
+              )}
+              {id === "COVERAGE" && <Coverage scope={content.scope} />}
+              {id === "EVIDENCE_MAP" && <EvidenceMap groups={content.evidenceMap} jobId={jobId} />}
+              {id === "SOURCE_REGISTER" && <Register register={content.register} jobId={jobId} />}
+              {id === "OPEN_QUESTIONS" && <OpenQuestions items={content.openItems} />}
+              {id === "ONCHAIN" && <Onchain entries={content.onchain.entries} />}
+              {id === "TRACE" && <Trace scope={content.scope} />}
+            </AuditSection>
+          ))}
+
+          {projection && projection.status !== "VALID" && (
+            // A PRESENTATION FAILURE, SAID QUIETLY. The record above is
+            // complete and canonical either way — what a failed projection
+            // costs is its labels and ordering, so the message says exactly
+            // that and implies nothing about the research.
+            <p
+              className="px-1 py-2 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]"
+              data-testid="audit-projection-failed"
+            >
+              Audit labels could not be prepared, so research points are shown under their
+              canonical names. The record itself is complete.
+            </p>
+          )}
+        </div>
+      </details>
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------- *
+ * RESEARCH POINTS — Question → Answer → Evidence → Limit
+ * ---------------------------------------------------------------- */
+
+// One point of the audit, in the Result's own words. The answer is the
+// row's established text; the evidence is every admitted card for the
+// row, each with what it tells and what it does not prove; the limit is
+// the row's boundary, only where there is one.
+function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | null }) {
+  return (
+    <li
+      className="border-b border-[var(--hairline)] py-6 last:border-b-0"
+      data-testid="audit-point"
+      data-component={row.component}
+    >
+      <p className="text-[0.95rem] font-medium text-[var(--atlas-text-dim)]" data-testid="audit-point-question">
+        {row.label}
+      </p>
+      <p className="mt-2 text-[1.08rem] leading-[1.45]" data-testid="audit-point-answer">
+        {row.established}
+      </p>
+      <p className="mt-1.5 flex items-center gap-1.5 text-[0.85rem] text-[var(--atlas-text-dim)]">
+        <span className={`dot dot-${row.tone}`} aria-hidden />
+        {row.statusLabel}
+      </p>
+
+      {row.restsOn.length > 0 && (
+        <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="audit-point-rests-on">
+          Also established: {row.restsOn.map((r) => r.phrase).join(", ")}.
         </p>
       )}
-    </div>
+
+      {row.evidence.length > 0 && (
+        <div className="mt-4" data-testid="audit-point-evidence">
+          <p className="section-label">Evidence</p>
+          <ul className="mt-2 flex flex-col gap-4">
+            {row.evidence.map((card) => (
+              <AuditEvidence key={card.id} card={card} jobId={jobId} />
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* THE LIMIT, ONLY WHERE IT ADDS INFORMATION. A substantive gap is
+          already explained by the answer above ("checked, not found" and
+          the persisted reason); a research limit or a missing source route
+          is something the answer cannot say, so it is stated here in the
+          same words the Result uses, with what it must never be read as. */}
+      {row.boundary && row.boundary.kind !== "SUBSTANTIVE" && (
+        <div className="mt-4" data-testid="audit-point-limit" data-kind={row.boundary.kind}>
+          <p className="section-label">Limit</p>
+          <p className="mt-1.5 text-[0.95rem] leading-[1.5] text-[var(--atlas-text)]/85">
+            {row.boundary.kind === "TECHNICAL" && row.boundary.remainingPaths !== null
+              ? `Research reached its configured limit before ${row.boundary.remainingPaths} known relevant ${row.boundary.remainingPaths === 1 ? "source" : "sources"} could be checked.`
+              : BOUNDARY_COPY[row.boundary.kind]}
+          </p>
+          <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">{BOUNDARY_NEVER[row.boundary.kind]}</p>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | null }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <li data-testid="audit-evidence" data-evidence-id={card.id} data-relation={card.relation}>
+      <p className="text-[0.85rem] text-[var(--atlas-text-dim)]">
+        <span className="font-medium text-[var(--atlas-text)]">{card.sourceName}</span>
+        {" · "}
+        {card.sourceClass}
+        {card.onchain?.network ? ` · ${card.onchain.network}` : ""}
+        {card.date ? ` · ${card.date.label} ${card.date.value}` : ""}
+        {card.relation === "CONTRADICTS" ? " · contradicts" : ""}
+      </p>
+      <p className="mt-1 text-[1rem] leading-[1.5]">{sourceSentence(card)}</p>
+      {card.doesNotProve && (
+        <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">Does not prove: {card.doesNotProve}</p>
+      )}
+      <p className="mt-1.5 flex flex-wrap gap-x-4 text-[0.85rem]">
+        {card.excerpt && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="text-[var(--atlas-cyan)] hover:underline"
+          >
+            {open ? "Hide excerpt" : "View excerpt"}
+          </button>
+        )}
+        {card.openable && (
+          <a href={card.url} target="_blank" rel="noopener noreferrer" className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)]">
+            Open original
+          </a>
+        )}
+        {card.snapshotHref && jobId && (
+          <Link href={card.snapshotHref} className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)]">
+            Snapshot
+          </Link>
+        )}
+      </p>
+      {open && card.excerpt && (
+        <blockquote className="mt-2 border-l-2 border-[var(--hairline-strong)] pl-4 text-[1rem] leading-[1.55] text-[var(--atlas-text)]/90">
+          {card.excerpt}
+        </blockquote>
+      )}
+    </li>
   );
 }
 
@@ -148,17 +274,15 @@ const OPEN_BY_DEFAULT: AuditSectionId[] = [
 function AuditSection({ id, children }: { id: AuditSectionId; children: React.ReactNode }) {
   if (OPEN_BY_DEFAULT.includes(id)) {
     return (
-      <section className="panel px-5 py-5 sm:px-6" data-testid={`audit-section-${id}`}>
-        <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-          {AUDIT_SECTION_TITLES[id]}
-        </p>
+      <section className="rounded-[0.9rem] border border-[var(--hairline)] px-5 py-5 sm:px-6" data-testid={`audit-section-${id}`}>
+        <p className="section-label">{AUDIT_SECTION_TITLES[id]}</p>
         <div className="mt-4">{children}</div>
       </section>
     );
   }
   return (
-    <details className="group panel px-5 py-4 sm:px-6" data-testid={`audit-section-${id}`}>
-      <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[0.8rem] text-[var(--atlas-text-dim)] select-none [&::-webkit-details-marker]:hidden">
+    <details className="group rounded-[0.9rem] border border-[var(--hairline)] px-5 py-4 sm:px-6" data-testid={`audit-section-${id}`}>
+      <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[0.9rem] text-[var(--atlas-text-dim)] select-none [&::-webkit-details-marker]:hidden">
         <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
         {AUDIT_SECTION_TITLES[id]}
       </summary>
@@ -194,7 +318,7 @@ function Summary({ content, summary }: { content: AuditContent; summary: string 
         {c.contradicted > 0 && <Stat n={c.contradicted} label="contradicted" tone="negative" />}
         <Stat n={c.unresolved} label="unresolved" tone="insufficient" />
       </div>
-      <div className="mt-4 border-t border-[var(--hairline)] pt-3.5 text-[0.78rem] leading-relaxed text-[var(--atlas-text-dim)]">
+      <div className="mt-4 border-t border-[var(--hairline)] pt-3.5 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
         {c.technicalLimitations > 0 && (
           <p data-testid="audit-blocked-note">
             {c.technicalLimitations} of the unresolved{" "}
@@ -231,7 +355,7 @@ function Stat({ n, label, tone }: { n: number; label: string; tone?: string }) {
       >
         {n}
       </p>
-      <p className="mt-1 text-[0.71rem] text-[var(--atlas-text-dim)]">{label}</p>
+      <p className="mt-1 text-[0.82rem] text-[var(--atlas-text-dim)]">{label}</p>
     </div>
   );
 }
@@ -274,13 +398,13 @@ function CoverageRow({ item }: { item: AuditScopeItem }) {
           {/* The one line that keeps "we could not reach it" from being
               read as "it is not there". */}
           {item.outcome === "RESEARCH_BLOCKED" && (
-            <span className="mt-0.5 block text-[0.73rem] text-[#fcd34d]">
+            <span className="mt-0.5 block text-[0.82rem] text-[#fcd34d]">
               ATLAS could not access the source this check required.
             </span>
           )}
         </span>
         <span
-          className="shrink-0 text-[0.73rem] font-medium tracking-wide uppercase"
+          className="shrink-0 text-[0.82rem] font-medium tracking-wide uppercase"
           style={{ color: outcomeColor(item.outcome) }}
           data-testid="audit-outcome"
         >
@@ -290,7 +414,7 @@ function CoverageRow({ item }: { item: AuditScopeItem }) {
 
       {open && (
         <div
-          className="mt-2 ml-[1.45rem] text-[0.75rem] leading-relaxed text-[var(--atlas-text-dim)]"
+          className="mt-2 ml-[1.45rem] text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]"
           data-testid="audit-coverage-detail"
         >
           {item.reason && <p>{item.reason}</p>}
@@ -345,7 +469,7 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
         />
         <span className="min-w-0 flex-1">
           <span className="block text-[0.85rem] font-medium">{group.label}</span>
-          <span className="mt-0.5 block text-[0.72rem] text-[var(--atlas-text-dim)]">
+          <span className="mt-0.5 block text-[0.82rem] text-[var(--atlas-text-dim)]">
             {group.admitted.length > 0
               ? group.admitted
                   .map(
@@ -362,7 +486,7 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
             )}
           </span>
         </span>
-        <span className="shrink-0 text-[0.72rem]" style={{ color: outcomeColor(auditOutcomeOf(group.status)) }}>
+        <span className="shrink-0 text-[0.82rem]" style={{ color: outcomeColor(auditOutcomeOf(group.status)) }}>
           {group.outcomeLabel}
         </span>
       </button>
@@ -371,11 +495,11 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
         <div className="mt-3 ml-[1.45rem] flex flex-col gap-3" data-testid="audit-evidence-detail">
           {group.admitted.map((l) => (
             <div key={`a:${l.sourceKey}`}>
-              <p className="text-[0.76rem] leading-snug text-[var(--atlas-text-dim)]">
+              <p className="text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">
                 <span className="text-[var(--atlas-text)]/75">What this establishes: </span>
                 {l.canEstablish ?? "Not classified."}
               </p>
-              <p className="mt-1 text-[0.76rem] leading-snug text-[var(--atlas-text-dim)]">
+              <p className="mt-1 text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">
                 <span className="text-[var(--atlas-text)]/75">Outside its scope: </span>
                 {l.doesNotProve ?? l.cannotEstablish ?? "Not recorded."}
               </p>
@@ -397,7 +521,7 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
           {group.excluded.map((l) => (
             <p
               key={`x:${l.sourceKey}`}
-              className="rounded-md border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.04)] px-3 py-2 text-[0.75rem] leading-snug text-[#fcd34d]"
+              className="rounded-md border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.04)] px-3 py-2 text-[0.85rem] leading-snug text-[#fcd34d]"
               data-testid="audit-excluded-summary"
             >
               {l.evidenceCount} {l.evidenceCount === 1 ? "item" : "items"} from {l.domain} not
@@ -423,7 +547,7 @@ function Register({ register, jobId }: { register: SourceRegister; jobId: string
   return (
     <div className="flex flex-col gap-5" data-testid="audit-source-register">
       <div>
-        <p className="text-[0.62rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
+        <p className="text-[0.82rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
           Sources used
         </p>
         <div className="mt-1" data-testid="audit-sources-used">
@@ -438,7 +562,7 @@ function Register({ register, jobId }: { register: SourceRegister; jobId: string
           {/* THE HALF A NORMAL RESULT NEVER SHOWS. Material the run read
               and did not rely on is where over-claiming would have
               happened and did not. */}
-          <p className="text-[0.62rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
+          <p className="text-[0.82rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
             Checked but not used
           </p>
           <div className="mt-1" data-testid="audit-sources-not-used">
@@ -477,7 +601,7 @@ function SourceRow({
         />
         <span className="min-w-0 flex-1">
           <span className="block text-[0.83rem] font-medium">{entry.domain}</span>
-          <span className="mt-0.5 block text-[0.72rem] text-[var(--atlas-text-dim)]">
+          <span className="mt-0.5 block text-[0.82rem] text-[var(--atlas-text-dim)]">
             {entry.sourceClassLabel}
             {entry.fetchedAt ? ` · retrieved ${retrievedOn(entry.fetchedAt)}` : ""}
             {entry.evidenceIds.length > 1 ? ` · ${entry.evidenceIds.length} items` : ""}
@@ -486,7 +610,7 @@ function SourceRow({
       </button>
 
       {open && (
-        <div className="mt-2 ml-[1.45rem] text-[0.75rem] leading-relaxed text-[var(--atlas-text-dim)]">
+        <div className="mt-2 ml-[1.45rem] text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
           {entry.contributedTo.length > 0 && (
             <p>
               <span className="text-[var(--atlas-text)]/75">Contributed to: </span>
@@ -547,7 +671,7 @@ function SourceActions({
       {link.hasSnapshot && evidenceId && jobId && (
         <Link
           href={`/research/${jobId}/source/${evidenceId}`}
-          className="text-[0.73rem] font-medium text-[var(--atlas-cyan)] hover:underline"
+          className="text-[0.82rem] font-medium text-[var(--atlas-cyan)] hover:underline"
           data-testid="audit-view-snapshot"
         >
           View source snapshot
@@ -557,7 +681,7 @@ function SourceActions({
         href={link.retrievedUrl}
         target="_blank"
         rel="noopener noreferrer"
-        className="text-[0.73rem] text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)] hover:underline"
+        className="text-[0.82rem] text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)] hover:underline"
         data-testid="audit-open-original"
       >
         Open original
@@ -592,16 +716,16 @@ function OpenQuestions({ items }: { items: AuditOpenItem[] }) {
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <p className="text-[0.85rem] font-medium">{i.label}</p>
             <span
-              className="text-[0.64rem] font-medium tracking-wider uppercase"
+              className="text-[0.82rem] font-medium tracking-wider uppercase"
               style={{ color: openItemColor(i.kind) }}
             >
               {OPEN_ITEM_TITLES[i.kind]}
             </span>
           </div>
-          <p className="mt-1.5 text-[0.78rem] leading-relaxed text-[var(--atlas-text-dim)]">
+          <p className="mt-1.5 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
             {i.detail}
           </p>
-          <p className="mt-1.5 text-[0.78rem] leading-relaxed text-[var(--atlas-text-dim)]">
+          <p className="mt-1.5 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
             <span className="text-[var(--atlas-text)]/75">Needed to resolve: </span>
             {i.needed}
           </p>
@@ -621,7 +745,7 @@ function Onchain({ entries }: { entries: { evidenceId: string; locator: string }
       {entries.map((e) => (
         <p
           key={e.evidenceId}
-          className="font-mono text-[0.72rem] break-all text-[var(--atlas-text)]/85"
+          className="font-mono text-[0.82rem] break-all text-[var(--atlas-text)]/85"
         >
           {e.locator}
         </p>
@@ -655,21 +779,21 @@ function Trace({ scope }: { scope: AuditScopeItem[] }) {
           <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <p className="text-[0.85rem] font-medium">{s.label}</p>
             <span
-              className="text-[0.72rem] font-medium tracking-wide uppercase"
+              className="text-[0.82rem] font-medium tracking-wide uppercase"
               style={{ color: outcomeColor(s.outcome) }}
             >
               {s.outcomeLabel}
             </span>
           </div>
           {s.reason && (
-            <p className="mt-1 text-[0.76rem] leading-relaxed text-[var(--atlas-text-dim)]">
+            <p className="mt-1 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
               {s.reason}
             </p>
           )}
-          <p className="mt-1 text-[0.76rem] text-[var(--atlas-text-dim)]">
+          <p className="mt-1 text-[0.85rem] text-[var(--atlas-text-dim)]">
             How far the check got: {s.coverageLabel.toLowerCase()}
           </p>
-          <p className="mt-0.5 text-[0.76rem] text-[var(--atlas-text-dim)]">
+          <p className="mt-0.5 text-[0.85rem] text-[var(--atlas-text-dim)]">
             Supporting: {s.supportingCount} · Conflicting: {s.contradictingCount} · Excluded:{" "}
             {s.excludedCount}
           </p>
@@ -678,11 +802,11 @@ function Trace({ scope }: { scope: AuditScopeItem[] }) {
               only place in the audit where a Pattern key or a reason code
               appears, and a reader has to ask for it. */}
           <details className="group mt-1.5">
-            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[0.7rem] text-[var(--atlas-text-dim)]/80 select-none [&::-webkit-details-marker]:hidden">
+            <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[0.82rem] text-[var(--atlas-text-dim)]/80 select-none [&::-webkit-details-marker]:hidden">
               <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
               Developer details
             </summary>
-            <dl className="mt-1.5 ml-4 font-mono text-[0.68rem] text-[var(--atlas-text-dim)]">
+            <dl className="mt-1.5 ml-4 font-mono text-[0.82rem] text-[var(--atlas-text-dim)]">
               <div>component: {s.component}</div>
               <div>pattern_step: {s.patternStep}</div>
               <div>status: {s.status}</div>

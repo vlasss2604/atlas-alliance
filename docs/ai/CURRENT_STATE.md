@@ -358,58 +358,67 @@ spelling; fixtures and real jobs, historical-semantics banner kept) and
 `/dev/verification-showcase` (`GOLDEN_AUDIT_FIXTURE`).
 
 **On the product result screen** (`/research/[id]`) a finished result is
-ONE Research object (Result Presentation V1, 2026-09-20, pending
-Founder visual review): the page renders `ResearchResult`
+ONE Research object (Result + App UX V3, 2026-09-20, pending Founder
+visual review): the page renders `ResearchResult`
 (`src/client/components/research-result.tsx`) from the detail payload,
 and `/dev/result-states?state=1..8` renders the same component from
-eight invented fixtures (`src/client/result-surface-fixtures.ts`:
-mostly confirmed, mixed, substantive not-established, technical
-recovery limit, configuration boundary, contradicted, documentary +
-on-chain, evidence-heavy). Everything is derived in
-`src/client/result-surface.ts` — pure, no fetch, no model — from
-persisted rows: PAGE <= PERSISTED VERIFIED RECORD. The first screen, in
-order: ANSWER (identity, the question as the heading, verdict badge,
-confidence word only with a verdict, two to four sentences — the
-briefing's finding sentences then ONE boundary sentence in the reader's
-terms — and a freshness footnote: when the evidence was checked and the
-newest admitted source's date; no source count); RESEARCH TABLE — the
-question projection's own rows plus the paper-vs-reality rows
-(MECHANISM_SPEC, CURRENT_STATE, EXECUTION_EVIDENCE whenever assessed;
-the Pattern ladder's rows when no projection resolved), each with a
-status word, one or two lines of what the evidence established (the
-engine's persisted reading of an admitted source; a chain reading
-translated, e.g. "FXT total supply observed: 100.0M"; for a
-not-established row the boundary sentence), the strongest admitted
-source, its date, and the admitted evidence one tap away inline; a
-supporting check folds under the finding that leans on it as a chip with
-its own status; PROOF MAP — every relevant check as a node in proof-path
-order (revenue → flow → mechanism → governance → active now → executed
-→ destination → recipient → supply effect → durability) with the same
-status; KEY EVIDENCE — contradicting first, then the Proof's citations,
-then on-chain readings, then supporting evidence, one card per document,
-at most five, each expanding in place to excerpt, why this source, what
-it does not prove, snapshot and original; WHAT IS NOT ESTABLISHED — one
-block grouped by kind from `proofs.bounded_by` (or, on a Proof written
-before the record existed, from the persisted reason codes and coverage):
-TECHNICAL "Research limit reached before every relevant evidence path
-could be checked." (+ N known sources left unread from `remainingPaths`),
-CONFIGURATION "Could not be verified with the currently supported
-evidence routes.", SUBSTANTIVE "Not established after checking the
-available evidence." with a reason shared by every row stated once, and
-under each group the sentence it must never be read as. Everything
-deeper sits behind ONE `<details>` "Full evidence and audit": the
-`ResultLadder`, `JobVerification`, the audit entry and the research
-process; `DeveloperDetails` stays after it on the page. The Proof read
-model (`services/proof-view.ts`) now carries `boundedBy` exactly as
-persisted (null on legacy Proofs). ONE STATUS VOCABULARY everywhere:
-Confirmed / Partially confirmed / Not established / Contradicted
-(`COMPONENT_STATUS_LABELS`, `RESULT_STATE_LABELS`, `PROOF_MAP_STATUS`,
-`PROOF_STATE`, the answer's "Confirmed:" / "Partially confirmed:"
-leads). No engine vocabulary reaches the surface
-(`FORBIDDEN_SURFACE_TOKENS`, scanned on every fixture and both Aave
-shapes). Pinned in `tests/ui-result-surface-v1.test.ts` (30); the
-older result pins were re-pointed at the component and the vocabulary.
-The question/audit projections still do not read `bounded_by`.
+eight invented fixtures (`src/client/result-surface-fixtures.ts`);
+`/dev/result-states/audit?state=1..8` renders `ResearchAudit` from the
+same fixtures. Everything is derived in `src/client/result-surface.ts` —
+pure, no fetch, no model — from persisted rows: PAGE <= PERSISTED
+VERIFIED RECORD. THE USER READS THE PROJECT, NOT THE ENGINE. Four
+sections and a door, in order: QUESTION + ANSWER (project as a label,
+the question as the h1, two to four typed sentences built from persisted
+statuses and reason codes through the same question phrases the rows use
+— what the evidence points against, what ATLAS established, what it
+found evidence for but could not fully confirm and exactly why, what it
+could not establish and, only where the run rather than the record is
+the limit, that boundary; then one quiet line: checked-on date, newest
+source date, verdict badge); WHAT ATLAS FOUND (question · answer ·
+source · as-of rows: the projection's own words for the rows it named,
+otherwise `questionLabelFor` — "What pays for the buyback?", "Who
+approved it?", "Is the buyback happening now?", "Where do the bought
+tokens go?", "Does total supply actually decrease?" — with the mechanism
+noun read from the question; a projection label the semantic-envelope
+guard refused, which `safeClaimLabel` degrades to the Pattern's claim
+label, falls back to the question; the answer cell is the fact, then for
+a partial the persisted reason for what could not be confirmed, for a
+not-established row the reason or the limit (`ROW_LIMIT_COPY`); status
+is a titled dot; confirmed supporting checks fold as "Also established:
+…", any other supporting check is PROMOTED to its own row; evidence
+inline); SOURCES (≤5, one sentence each — `sourceSentence` —, excerpt /
+original / snapshot); WHAT REMAINS UNCLEAR (TECHNICAL and CONFIGURATION
+groups only, from `proofs.bounded_by` or the legacy reason-code reading,
+once each with the checks and the never-read-as sentence; a substantive
+gap is the row's own sentence and is never grouped); OPEN FULL AUDIT.
+Nothing deeper on the result: no proof map, key findings, verification
+result, main gaps, ladder, research process or `?view=` state (those
+components survive only for the dev showcases). ONE STATUS VOCABULARY
+everywhere: Confirmed / Partially confirmed / Not established /
+Contradicted, and in the audit's technical record "Not established —
+research limit". No engine vocabulary or Pattern claim label reaches the
+surface (`FORBIDDEN_SURFACE_TOKENS`, scanned on every fixture and both
+Aave shapes). Pinned in `tests/ui-result-surface-v1.test.ts` (31); the
+older result pins were re-pointed at the V3 surface.
+
+**The Full Audit** (`/research/[id]/audit`, `research-audit.tsx`) is the
+same rows in the same words one level deeper — Question → Answer → status
+→ Evidence (every admitted card, what it tells, what it does not prove) →
+Limit (technical / configuration only) — with the complete technical
+record (counts, coverage, evidence map, source register with exclusion
+reasons, raw on-chain observations, open items, trace) behind one closed
+**Technical record** disclosure. No type below 0.82rem.
+
+**The app shell** (`app-chrome.tsx`, `app/(app)/layout.tsx`): a header
+with the ATLAS PROOF / Crypto Verification lockup, Research — AP orb
+(Home) — Analytics in the centre from 640px, Profile on the right; on a
+handset the three anchors are a bottom dock with the orb rising from its
+centre (hidden ≥640px by a rule in `globals.css`, because this file's
+unlayered rules outrank Tailwind utilities). `/analytics` is a real page
+with an honest empty state; Compare and Watchlist are not built. Home is
+the composer as hero plus Recent research rows; Research history is
+hairline rows. The question/audit projections still do not read
+`bounded_by`.
 
 Counting on the Verification page is over what is OPEN, not over the whole
 boundary: `open = boundary − components shown under WHAT STOOD UP` (a

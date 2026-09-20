@@ -74,7 +74,7 @@ export default function ResearchAuditPage() {
     return (
       <main className="enter flex flex-col gap-5 pb-6">
         <AtlasHeader compact back={back} />
-        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">
           Preparing research audit…
         </div>
       </main>
@@ -85,44 +85,17 @@ export default function ResearchAuditPage() {
     return (
       <main className="enter flex flex-col gap-5 pb-6">
         <AtlasHeader compact back={back} />
-        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">
           Full audit could not be prepared.
         </div>
       </main>
     );
   }
 
-  // The job-wide evidence, deliberately. Everywhere on the Result evidence
-  // is claim-scoped; the audit is the one surface that must also see what
-  // the run read and did NOT rely on.
-  const snapshotIds = new Set(detail.snapshotEvidenceIds);
-  const evidence = detail.evidence.map((e) => ({
-    id: e.id,
-    component: e.component,
-    summary: e.summary,
-    fragment: e.fragment,
-    doesNotProve: e.doesNotProve,
-    sourceClass: e.sourceClass,
-    officiality: e.officiality,
-    retrievedUrl: e.retrievedUrl,
-    sourceTitle: e.sourceTitle,
-    fetchedAt: e.fetchedAt,
-    hasSnapshot: snapshotIds.has(e.id),
-    links: e.links,
-  }));
-
   return (
     <main className="enter flex flex-col gap-4 pb-6">
       <AtlasHeader compact back={back} />
-      <ResearchAudit
-        jobId={jobId}
-        projectName={detail.job.projectName ?? detail.job.projectTicker}
-        question={detail.job.originalQuestion}
-        researchedAt={detail.job.finishedAt}
-        components={detail.components}
-        evidence={evidence}
-        projection={projection}
-      />
+      <ResearchAudit jobId={jobId} detail={detail} projection={projection} />
     </main>
   );
 }

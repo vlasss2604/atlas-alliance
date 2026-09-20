@@ -16,6 +16,7 @@ import {
   PROOF_PATH_ORDER,
   RESULT_STATUS_LABELS,
   resultStatus,
+  ROW_LIMIT_COPY,
   tableRows,
 } from "../src/client/result-surface";
 import { RESULT_FIXTURES, resultFixture } from "../src/client/result-surface-fixtures";
@@ -25,11 +26,11 @@ import { retrievedOn } from "../src/client/research-model";
 // as "Sept" are the runtime's, not ours), so expectations read it too.
 const on = (iso: string) => retrievedOn(iso)!;
 
-// RESULT PRESENTATION V1 — COMPLEX RESEARCH, SIMPLE SURFACE.
+// RESULT PRESENTATION — COMPLEX RESEARCH, SIMPLE SURFACE.
 //
-// One completed result, six sections: answer, research table, proof map,
-// key evidence, what is not established, full evidence. These tests pin
-// the presentation invariant on the new surface —
+// One completed result, four sections and a door: question and answer,
+// what ATLAS found, sources, what remains unclear, open full audit. These
+// tests pin the presentation invariant on the surface —
 //
 //   PAGE <= PERSISTED VERIFIED RECORD
 //
@@ -44,8 +45,18 @@ const count = (h: string, id: string) => h.match(new RegExp(`data-testid="${id}"
 // The visible text of a rendering — tags and attributes stripped, so a
 // data attribute carrying a canonical enum is not mistaken for copy.
 const textOf = (h: string) => h.replace(/<[^>]+>/g, " ").replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/\s+/g, " ");
-// The first screen: everything before the deep disclosure.
-const firstScreenOf = (h: string) => h.slice(0, h.indexOf('data-testid="full-evidence"'));
+// The first screen: the whole result up to the door into the audit — there
+// is no deep disclosure on this surface any more.
+const firstScreenOf = (h: string) => {
+  const at = h.indexOf('data-testid="audit-entry"');
+  return at === -1 ? h : h.slice(0, at);
+};
+// One section of the rendering, by the test ids that open and close it.
+const blockOf = (h: string, from: string, to: string) => {
+  const start = h.indexOf(`data-testid="${from}"`);
+  const end = h.indexOf(`data-testid="${to}"`);
+  return h.slice(start, end === -1 ? undefined : end);
+};
 const attrValues = (h: string, id: string, attr: string) =>
   [...h.matchAll(new RegExp(`data-testid="${id}"[^>]*data-${attr}="([^"]*)"`, "g"))].map((m) => m[1]);
 
@@ -286,14 +297,18 @@ describe("the boundary — three kinds, read from persisted truth", () => {
   });
 
   it("the copy for each kind says what it must and never what it must not", () => {
-    expect(BOUNDARY_COPY.TECHNICAL).toBe("Research limit reached before every relevant evidence path could be checked.");
-    expect(BOUNDARY_COPY.CONFIGURATION).toBe("Could not be verified with the currently supported evidence routes.");
-    expect(BOUNDARY_COPY.SUBSTANTIVE).toBe("Not established after checking the available evidence.");
+    expect(BOUNDARY_COPY.TECHNICAL).toBe("Research reached its configured limit before every relevant source could be checked.");
+    expect(BOUNDARY_COPY.CONFIGURATION).toBe("ATLAS currently has no supported source route that can independently verify this.");
+    expect(BOUNDARY_COPY.SUBSTANTIVE).toBe("ATLAS checked the available sources and found nothing that settles this.");
+    // The row's own one-line form of the same two limits.
+    expect(ROW_LIMIT_COPY.TECHNICAL).toBe("ATLAS reached its research limit before this could be checked.");
+    expect(ROW_LIMIT_COPY.CONFIGURATION).toBe("ATLAS has no supported source route that can verify this yet.");
     for (const kind of ["TECHNICAL", "CONFIGURATION"] as const) {
       expect(BOUNDARY_COPY[kind].toLowerCase()).not.toMatch(/no evidence exists|not executing|does not|absent/);
+      expect(ROW_LIMIT_COPY[kind].toLowerCase()).not.toMatch(/no evidence exists|not executing|does not|absent/);
     }
-    expect(BOUNDARY_NEVER.TECHNICAL).toContain("does not mean no evidence exists");
-    expect(BOUNDARY_NEVER.CONFIGURATION).toContain("does not mean the mechanism is not executing");
+    expect(BOUNDARY_NEVER.TECHNICAL).toContain("not a finding about the project");
+    expect(BOUNDARY_NEVER.CONFIGURATION).toContain("not a finding that the mechanism is not executing");
   });
 
   it("fixture 4 (technical): the boundary section leads with the research limit, counts the unread sources, and the stale finding stays visible beside it", () => {
@@ -306,42 +321,51 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     expect(technical.remainingPaths).toBe(4);
     const html = render(f.detail);
     const first = textOf(firstScreenOf(html));
-    expect(first).toContain(BOUNDARY_COPY.TECHNICAL);
-    expect(first).toContain("4 known sources were left unread.");
+    // The group's one sentence carries the count; the reading it must
+    // never be given stands beside it.
+    expect(first).toContain("Research reached its configured limit before 4 known relevant sources could be checked.");
     expect(first).toContain(BOUNDARY_NEVER.TECHNICAL);
     // The row itself says the same thing, not "no evidence".
     const cs = surface.table.find((r) => r.component === "CURRENT_STATE")!;
-    expect(cs.established).toBe(BOUNDARY_COPY.TECHNICAL);
+    expect(cs.established).toBe(ROW_LIMIT_COPY.TECHNICAL);
     expect(attrValues(html, "research-row", "boundary")).toContain("TECHNICAL");
     // The answer's boundary sentence names the run's limit, once.
-    expect(surface.answer.sentences.join(" ")).toContain("reached its limit before every relevant evidence path could be checked");
-    expect(surface.answer.sentences.join(" ").split("reached its limit").length - 1).toBe(1);
+    expect(surface.answer.sentences.join(" ")).toContain("reached its configured limit before every relevant source could be checked");
+    expect(surface.answer.sentences.join(" ").split("reached its configured limit").length - 1).toBe(1);
   });
 
-  it("a reason every row of a group shares is stated once for the group, never repeated per row (the real Aave shape: six checks, one exclusion reason)", () => {
-    const surface = buildResultSurface(aaveDetail("EXCLUDED"));
-    const group = surface.boundary.find((g) => g.kind === "SUBSTANTIVE")!;
-    expect(group.sharedDetail).toBe("Sources discussed this, but none met the standard this claim requires.");
-    expect(group.items.every((i) => i.detail === null)).toBe(true);
-    expect(group.items).toHaveLength(6);
-    // Within the boundary block the sentence appears exactly once; a row
-    // of the table may still carry it as its own explanation.
-    const html = render(aaveDetail("EXCLUDED"));
-    const block = html.slice(html.indexOf('data-testid="boundary-section"'), html.indexOf('data-testid="full-evidence"'));
-    expect(textOf(block).split("Sources discussed this, but none met the standard this claim requires.").length - 1).toBe(1);
+  it("a substantive gap is explained on its row and nowhere else (the real Aave shape: six checks, one exclusion reason, no boundary group)", () => {
+    const detail = aaveDetail("EXCLUDED");
+    const surface = buildResultSurface(detail);
+    // No group for it: the row already says what was not established and,
+    // from the persisted reason, why. A second block would be the same
+    // sentence twice.
+    expect(surface.boundary.some((g) => g.kind === "SUBSTANTIVE")).toBe(false);
+    const substantive = surface.table.filter((r) => r.status === "NOT_ESTABLISHED" && r.boundary?.kind === "SUBSTANTIVE");
+    expect(substantive.map((r) => r.component).sort()).toEqual(["DESTINATION", "FLOW_PATH", "GOVERNANCE_BASIS", "MECHANISM_SPEC", "RECIPIENT", "SOURCE_OF_VALUE"]);
+    for (const r of substantive) expect(r.established).toBe("Sources discussed this, but none met the standard this claim requires.");
+    // On the page: once per row, inside the findings; never in the
+    // unclear block, which holds only the configuration limit.
+    const html = render(detail);
+    expect(attrValues(html, "unclear-group", "kind")).toEqual(["CONFIGURATION"]);
+    expect(textOf(blockOf(html, "research-table", "sources")).split("Sources discussed this, but none met the standard this claim requires.").length - 1).toBe(6);
+    expect(textOf(blockOf(html, "unclear-section", "audit-entry"))).not.toContain("Sources discussed this");
   });
 
   it("fixture 3 (substantive): no technical or configuration group, the persisted reason on each item, and no research-limit language anywhere", () => {
     const f = resultFixture("3");
     const surface = buildResultSurface(f.detail);
-    expect(surface.boundary.map((g) => g.kind)).toEqual(["SUBSTANTIVE"]);
-    const group = surface.boundary[0];
-    expect(group.items.find((i) => i.component === "EXECUTION_EVIDENCE")?.detail).toBe("The mechanism is described, but nothing checked shows it actually running.");
-    const text = textOf(firstScreenOf(render(f.detail)));
-    expect(text).toContain(BOUNDARY_COPY.SUBSTANTIVE);
-    expect(text).not.toContain("Research limit reached");
-    expect(text).not.toContain("supported evidence routes");
-    expect(surface.answer.sentences.join(" ")).toContain("checked against the available evidence and not found there");
+    // No group at all: a substantive gap is the row's own sentence.
+    expect(surface.boundary).toEqual([]);
+    const exec = surface.table.find((r) => r.component === "EXECUTION_EVIDENCE")!;
+    expect(exec.boundary?.kind).toBe("SUBSTANTIVE");
+    expect(exec.established).toBe("The mechanism is described, but nothing checked shows it actually running.");
+    const html = render(f.detail);
+    expect(count(html, "unclear-section")).toBe(0);
+    const text = textOf(firstScreenOf(html));
+    expect(text).not.toContain("research limit");
+    expect(text).not.toContain("source route");
+    expect(surface.answer.sentences.join(" ")).toContain("from the sources it could rely on");
   });
 
   it("fixture 5 (configuration): reads as a limit of ATLAS's routes, never as 'not executing'", () => {
@@ -356,16 +380,16 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     // this must NOT be read that way.
     const claims = text.replace(BOUNDARY_NEVER.CONFIGURATION, "").toLowerCase();
     expect(claims).not.toMatch(/is not executing|not running|no buyback/);
-    expect(surface.answer.sentences.join(" ")).toContain("evidence routes ATLAS currently supports");
+    expect(surface.answer.sentences.join(" ")).toContain("no supported source route that can verify this");
   });
 
   it("the real Aave shapes, with no boundary record: excluded-only checks are substantive, budget-bounded checks are technical, execution is configuration", () => {
     const excluded = buildResultSurface(aaveDetail("EXCLUDED"));
     const byKind = (s: typeof excluded) => Object.fromEntries(s.boundary.map((g) => [g.kind, g.items.map((i) => i.component).sort()]));
-    expect(byKind(excluded)).toEqual({
-      CONFIGURATION: ["EXECUTION_EVIDENCE"],
-      SUBSTANTIVE: ["DESTINATION", "FLOW_PATH", "GOVERNANCE_BASIS", "MECHANISM_SPEC", "RECIPIENT", "SOURCE_OF_VALUE"],
-    });
+    expect(byKind(excluded)).toEqual({ CONFIGURATION: ["EXECUTION_EVIDENCE"] });
+    // The six documentary checks are substantive gaps: read as such on
+    // their rows, never grouped as a boundary.
+    expect(excluded.table.filter((r) => r.boundary?.kind === "SUBSTANTIVE").map((r) => r.component).sort()).toEqual(["DESTINATION", "FLOW_PATH", "GOVERNANCE_BASIS", "MECHANISM_SPEC", "RECIPIENT", "SOURCE_OF_VALUE"]);
     expect(excluded.boundaryFromRecord).toBe(false);
     const budget = buildResultSurface(aaveDetail("BUDGET"));
     expect(byKind(budget)).toEqual({
@@ -379,7 +403,7 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     for (const s of [excluded, budget]) {
       const exec = s.table.find((r) => r.component === "EXECUTION_EVIDENCE")!;
       expect(exec.kind).toBe("REALITY");
-      expect(exec.established).toBe(BOUNDARY_COPY.CONFIGURATION);
+      expect(exec.established).toBe(ROW_LIMIT_COPY.CONFIGURATION);
       expect(s.table.some((r) => r.status === "CONFIRMED")).toBe(false);
       expect(s.table.filter((r) => r.status === "PARTIAL").map((r) => r.component).sort()).toEqual(["CURRENT_STATE", "NET_EFFECT"]);
     }
@@ -399,10 +423,26 @@ describe("the research table — the question's own rows, in proof-path order", 
     for (let i = 1; i < order.length; i += 1) expect(index(order[i])).toBeGreaterThan(index(order[i - 1]));
     expect(surface.table.filter((r) => r.primary).map((r) => r.component).sort()).toEqual(["CURRENT_STATE", "DESTINATION", "MECHANISM_SPEC", "NET_EFFECT"]);
     expect(order).not.toContain("DURABILITY_BASIS");
-    // Primary rows carry the question's own words; supporting rows the
-    // canonical claim.
+    // Primary rows carry the question's own words; every other row a
+    // question in the reader's words, never the Pattern's noun.
     expect(surface.table.find((r) => r.component === "DESTINATION")?.label).toBe("Where do the bought-back FXT tokens go?");
-    expect(surface.table.find((r) => r.component === "SOURCE_OF_VALUE")?.label).toBe("Where the value comes from");
+    expect(surface.table.find((r) => r.component === "SOURCE_OF_VALUE")?.label).toBe("What pays for the buyback?");
+  });
+
+  it("a projection label the safety guard refused falls back to the reader's question, never to the Pattern's claim label", () => {
+    // Fixture 2 names NET_EFFECT as "Does the buyback reduce FXT supply?",
+    // which the semantic-envelope guard refuses (it asserts a direction).
+    // `safeClaimLabel` degrades it to "Effect on token supply" — the
+    // engine's noun. The surface must not show that noun.
+    const surface = buildResultSurface(resultFixture("2").detail);
+    const net = surface.table.find((r) => r.component === "NET_EFFECT")!;
+    expect(net.primary).toBe(true);
+    expect(net.label).toBe("Does total supply actually decrease?");
+    for (const f of RESULT_FIXTURES) {
+      for (const r of buildResultSurface(f.detail).table) {
+        expect(r.label, `${f.key}/${r.component}`).not.toMatch(/^(Where the value comes from|The path the value takes|Where the value is meant to go|Who receives it|Effect on token supply|How durable the arrangement is|It has been observed executing)$/);
+      }
+    }
   });
 
   it("without a projection the assessed Pattern rows stand in; a component with no persisted row is never a row", () => {
@@ -432,12 +472,16 @@ describe("the research table — the question's own rows, in proof-path order", 
     const shown = tableRows(surface.table);
     expect(count(html, "research-row")).toBe(shown.length);
     expect(attrValues(html, "research-row", "status")).toEqual(shown.map((r) => r.status));
-    expect(count(html, "row-established")).toBe(shown.length);
+    expect(count(html, "row-answer")).toBe(shown.length);
     expect(count(html, "row-source")).toBe(shown.length);
+    // Every folded check is named under the row that leans on it — as the
+    // thing it settles, in words — and nowhere else.
     const folded = surface.table.filter((r) => r.kind === "SUPPORTING").map((r) => r.component).sort();
-    expect(attrValues(html, "rests-on-item", "component").sort()).toEqual(folded);
+    expect(surface.table.flatMap((r) => r.restsOn.map((d) => d.component)).sort()).toEqual(folded);
+    for (const r of surface.table) for (const d of r.restsOn) expect(html).toContain(d.phrase);
     expect(shown.length + folded.length).toBe(surface.table.length);
-    expect(count(html, "proof-node")).toBe(surface.table.length);
+    // No proof map: the rows are the map.
+    expect(count(html, "proof-node")).toBe(0);
     // The question projection's label heads its row.
     expect(html).toContain("Is Fixture Protocol currently buying back FXT with fee revenue?");
     // A confirmed row states what the evidence established in the source's
@@ -497,12 +541,14 @@ describe("evidence — from persisted links only, translated for a reader", () =
   it("each card names source, kind, date and what it proves; a documentary card opens to its excerpt, why it was used and what it does not prove", () => {
     const f = resultFixture("7");
     const html = render(f.detail);
-    const key = html.slice(html.indexOf('data-testid="key-evidence"'), html.indexOf('data-testid="boundary-section"') === -1 ? html.indexOf('data-testid="full-evidence"') : html.indexOf('data-testid="boundary-section"'));
+    const key = blockOf(html, "sources", "unclear-section").includes('data-testid="audit-entry"') ? blockOf(html, "sources", "audit-entry") : blockOf(html, "sources", "unclear-section");
     expect(count(key, "evidence-card")).toBe(buildResultSurface(f.detail).keyEvidence.length);
     expect(key).toContain("Fixture Protocol documentation");
     expect(key).toContain("Official docs");
     expect(key).toContain(`Published ${on("2026-08-02T00:00:00.000Z")}`);
-    expect(key).toContain("What it proves");
+    // One sentence on what the source tells us — never a labelled field.
+    expect(count(key, "evidence-tells")).toBe(count(key, "evidence-card"));
+    expect(key).not.toContain("What it proves");
     expect(key).toContain('data-testid="evidence-open-original"');
     expect(key).toContain('data-testid="evidence-snapshot"');
     // Details are one click away, inline — nothing navigates.
@@ -525,8 +571,9 @@ describe("evidence — from persisted links only, translated for a reader", () =
     expect(surface.checkedOn).toBe(on("2026-09-18T14:20:00.000Z"));
     expect(surface.latestEvidence).toMatchObject({ label: "Published", value: on("2026-09-10T00:00:00.000Z") });
     const html = render(resultFixture("7").detail);
-    expect(count(html, "answer-freshness")).toBe(1);
-    expect(textOf(html)).toContain(`Evidence checked ${on("2026-09-18T14:20:00.000Z")}`);
+    expect(count(html, "answer-checked")).toBe(1);
+    expect(textOf(html)).toContain(`Checked ${on("2026-09-18T14:20:00.000Z")}`);
+    expect(textOf(html)).toContain(`Newest source published ${on("2026-09-10T00:00:00.000Z")}`);
     // A row with only a retrieval date says "Checked", never a guessed
     // publication date.
     const data = buildResultSurface(resultFixture("8").detail).table.find((r) => r.component === "RECIPIENT")!;
@@ -561,7 +608,13 @@ describe("evidence — from persisted links only, translated for a reader", () =
     const reading = aave.keyEvidence[0];
     expect(reading.onchain).toEqual({ observation: "FXL total supply observed: 16.0M", network: "Ethereum" });
     expect(reading.proves).toBe("FXL total supply observed: 16.0M");
-    expect(aave.table.find((r) => r.component === "CURRENT_STATE")!.established).toBe("FXL total supply observed: 16.0M.");
+    // The partial row: the fact first, then — in the same cell — exactly
+    // what could not be confirmed. Never the word "partial" on its own.
+    const aaveCurrent = aave.table.find((r) => r.component === "CURRENT_STATE")!;
+    expect(aaveCurrent.status).toBe("PARTIAL");
+    expect(aaveCurrent.established.startsWith("FXL total supply observed: 16.0M. ")).toBe(true);
+    expect(aaveCurrent.established).toContain(aaveCurrent.row.reason ?? "could not confirm");
+    expect(aaveCurrent.established.toLowerCase()).not.toMatch(/\bpartial\b/);
     const aaveFirst = textOf(firstScreenOf(render(aaveDetailExcluded)));
     for (const raw of ["16000000000000000000000000", "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9", "finalized block"]) expect(aaveFirst, raw).not.toContain(raw);
   });
@@ -603,12 +656,12 @@ describe("the surface never outruns the record", () => {
     const net = surface.table.find((r) => r.component === "NET_EFFECT")!;
     expect(net.status).toBe("CONTRADICTED");
     expect(net.statusLabel).toBe("Contradicted");
-    expect(net.established).toBe("Total FXT supply was higher at the end of the measured interval than at its start.");
+    expect(net.established).toBe("Total FXT supply was higher at the end of the measured interval than at its start. The evidence points the other way.");
     expect(surface.keyEvidence[0].relation).toBe("CONTRADICTS");
     expect(surface.boundary.flatMap((g) => g.items.map((i) => i.component))).not.toContain("NET_EFFECT");
-    expect(surface.answer.sentences[0]).toContain("the evidence indicates otherwise");
+    expect(surface.answer.sentences[0]).toContain("the evidence points the other way");
     const html = render(f.detail);
-    expect(attrValues(html, "proof-node", "status")).toContain("CONTRADICTED");
+    expect(attrValues(html, "research-row", "status")).toContain("CONTRADICTED");
     expect(textOf(firstScreenOf(html))).toContain("Contradicts");
   });
 
@@ -617,7 +670,7 @@ describe("the surface never outruns the record", () => {
       const { answer, boundary } = buildResultSurface(f.detail);
       expect(answer.sentences.length, f.key).toBeGreaterThanOrEqual(1);
       expect(answer.sentences.length, f.key).toBeLessThanOrEqual(4);
-      if (boundary.length > 0) expect(answer.sentences[answer.sentences.length - 1], f.key).toMatch(/limit|evidence routes|not found there/);
+      if (boundary.length > 0) expect(answer.sentences[answer.sentences.length - 1], f.key).toMatch(/limit|source route|sources it could rely on/);
       for (const s of answer.sentences) expect(s, f.key).not.toMatch(/Main limitation|[A-Z]{3,}_[A-Z]/);
     }
     // Confidence appears only with a verdict, in a word.
@@ -657,7 +710,7 @@ describe("presentation only", () => {
 
   it("the page renders the finished result through the one component; the dev route renders the same component from eight distinct fixtures and is gated out of production", () => {
     const page = readFileSync("app/(app)/research/[id]/page.tsx", "utf-8");
-    expect(page).toContain("<ResearchResult detail={detail} jobId={jobId} deepOpen={deepOpen} />");
+    expect(page).toContain("<ResearchResult detail={detail} jobId={jobId} />");
     expect(page).not.toContain("<ResultLadder");
     const dev = readFileSync("app/(app)/dev/result-states/page.tsx", "utf-8");
     expect(dev).toContain('if (process.env.NODE_ENV === "production") notFound();');
@@ -669,10 +722,13 @@ describe("presentation only", () => {
       return JSON.stringify([s.verdict, s.table.map((r) => `${r.component}:${r.status}`), s.boundary.map((g) => g.kind)]);
     });
     expect(new Set(signatures).size).toBe(8);
-    // Every fixture renders every first-screen section it has content for.
+    // Every fixture renders every section it has content for — and none
+    // of the surfaces the result no longer carries.
     for (const f of RESULT_FIXTURES) {
       const html = render(f.detail);
-      for (const id of ["answer-panel", "research-table", "proof-chain", "key-evidence", "full-evidence"]) expect(count(html, id), `${f.key}/${id}`).toBe(1);
+      for (const id of ["answer-panel", "research-table", "audit-entry"]) expect(count(html, id), `${f.key}/${id}`).toBe(1);
+      expect(count(html, "sources"), `${f.key}/sources`).toBe(buildResultSurface(f.detail).keyEvidence.length > 0 ? 1 : 0);
+      for (const id of ["proof-chain", "proof-node", "key-evidence", "full-evidence", "boundary-section", "verification-view"]) expect(count(html, id), `${f.key}/${id}`).toBe(0);
     }
     // Fixtures name no real project, token or address.
     const src = readFileSync("src/client/result-surface-fixtures.ts", "utf-8");

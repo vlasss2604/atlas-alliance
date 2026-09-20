@@ -17,19 +17,13 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 // WHILE THE RUN IS LIVE the subject, the question and the engine's own
 // progress lead. ONCE IT FINISHES the whole result is ONE component,
 // `ResearchResult` (components/research-result.tsx), composed from the
-// detail payload alone: answer → research table → proof map → key
-// evidence → what is not established → full evidence and audit. The same
+// detail payload alone: answer → what ATLAS found → sources → what
+// remains unclear → the full audit. The same
 // component renders the offline fixtures at /dev/result-states, so what
 // the Founder reviews there is byte-for-byte what a real result renders.
 //
 // ONE RESEARCH OBJECT. There is no Research | Verification switch and no
-// view state; a legacy `?view=verification` (or `?view=full`) link opens
-// the deep disclosure, nothing more.
-function deepOpenFromLocation(): boolean {
-  if (typeof window === "undefined") return false;
-  const view = new URLSearchParams(window.location.search).get("view");
-  return view === "verification" || view === "full";
-}
+// view state. The full audit is its own route.
 
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
@@ -37,11 +31,6 @@ export default function ResearchDetailPage() {
   const { refresh } = useApp();
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  // Initialised from the URL on the client; the server render has no
-  // location and defaults to closed. Nothing rendered before the payload
-  // loads depends on it, so the two cannot disagree on screen.
-  const [deepOpen] = useState<boolean>(deepOpenFromLocation);
-
   // Re-read the whole detail. Used when the job reaches a terminal state,
   // because the Proof only exists once the job has finished.
   const load = useCallback(() => {
@@ -118,7 +107,7 @@ export default function ResearchDetailPage() {
     return (
       <main className="enter flex flex-col gap-6">
         <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
-        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">Loading…</div>
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">Loading…</div>
       </main>
     );
   }
@@ -127,7 +116,7 @@ export default function ResearchDetailPage() {
     return (
       <main className="enter flex flex-col gap-6">
         <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
-        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">
           This research could not be loaded.
         </div>
       </main>
@@ -154,17 +143,17 @@ export default function ResearchDetailPage() {
               {projectName.slice(0, 2).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="eyebrow eyebrow-violet">Researching</p>
-              <p className="mt-1 text-[1.05rem] font-semibold leading-tight tracking-tight">{projectName}</p>
-              <p className="mt-1.5 text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</p>
+              <p className="section-label">Researching</p>
+              <p className="mt-1 text-[1.2rem] font-semibold leading-tight tracking-tight">{projectName}</p>
+              <p className="mt-1.5 text-[1rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</p>
             </div>
           </section>
-          <section className="panel panel-raised panel-hero p-5 sm:p-6" data-testid="live-banner">
+          <section className="panel p-5 sm:p-6" data-testid="live-banner">
             <div className="flex items-center gap-3">
               <span className="pulse-dot" aria-hidden />
-              <p className="text-[0.95rem] font-medium">Research in progress</p>
+              <p className="text-[1.05rem] font-medium">Research in progress</p>
             </div>
-            <p className="mt-2 text-[0.85rem] text-[var(--atlas-text-dim)]">
+            <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]">
               You can leave this screen. ATLAS keeps working and the result will be here when you come
               back.
             </p>
@@ -176,7 +165,7 @@ export default function ResearchDetailPage() {
       )}
 
       {/* ---- FINISHED: the one result surface. ------------------------ */}
-      {finished && <ResearchResult detail={detail} jobId={jobId} deepOpen={deepOpen} />}
+      {finished && <ResearchResult detail={detail} jobId={jobId} />}
 
       {/* ---- engine internals, behind an explicit opt-in ------------- */}
       <DeveloperDetails detail={detail} />

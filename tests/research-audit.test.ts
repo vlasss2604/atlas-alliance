@@ -230,7 +230,7 @@ describe("audit lifecycle — prepared only when a human asks", () => {
     // leaves the audit untouched. The entry is a LINK to its own route.
     expect(page).not.toContain("prepareAudit");
     expect(page).not.toContain("getAudit");
-    expect(page).toContain('href={`/research/${jobId}/audit`}');
+    expect(codeOf("src/client/components/research-result.tsx")).toContain('href={`/research/${jobId}/audit`}');
     // And on that route exactly one call site exists.
     const auditPage = codeOf(AUDIT_PAGE);
     expect(auditPage.split("prepareAudit(").length - 1).toBe(1);
@@ -614,7 +614,7 @@ describe("audit is a different surface, not the result repeated", () => {
     // And the Result no longer renders a second copy of itself as "audit".
     const page = codeOf(PAGE);
     expect(page).not.toContain("audit-full-ladder");
-    expect(page.split("<ResultLadder").length - 1).toBe(1);
+    expect(page).not.toContain("<ResultLadder");
 
     // The materially new information, all canonical and none of it on the
     // Result: coverage state, the technical/evidence distinction, source
@@ -665,7 +665,8 @@ describe("audit is a different surface, not the result repeated", () => {
     // Canonical status and coverage both survive on the row.
     const content = buildAuditContent(components, evidence, null);
     const blocked = content.scope.find((s) => s.component === "CURRENT_STATE");
-    expect(blocked?.outcomeLabel).toBe("Research blocked");
+    // The same words the Result uses — one vocabulary on both surfaces.
+    expect(blocked?.outcomeLabel).toBe("Not established — research limit");
     expect(blocked?.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(blocked?.coverage).toBe("BLOCKED");
   });

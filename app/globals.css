@@ -155,7 +155,7 @@ body {
    lifts the panel off the field. */
 .panel {
   position: relative;
-  border-radius: 1.5rem;
+  border-radius: 1.1rem;
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0) 42%),
     var(--surface-1);
@@ -254,18 +254,19 @@ body {
  * TYPOGRAPHY
  * ---------------------------------------------------------------- */
 
+/* One quiet label colour. The cyan and violet variants are kept as names
+   for older surfaces but no longer carry a colour of their own: a label
+   is a label, and colour is reserved for navigation, action and status. */
 .eyebrow {
-  font-size: 0.6875rem;
-  font-weight: 600;
-  letter-spacing: 0.18em;
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--atlas-text-dim);
 }
-.eyebrow-cyan {
-  color: rgba(103, 232, 249, 0.92);
-}
+.eyebrow-cyan,
 .eyebrow-violet {
-  color: rgba(196, 181, 253, 0.92);
+  color: var(--atlas-text-dim);
 }
 .wordmark {
   font-weight: 300;
@@ -631,47 +632,168 @@ body {
 }
 
 /* ---------------------------------------------------------------- *
- * NAVIGATION
+ * TYPE — the reading scale. Nothing that matters sits below 0.8rem.
  * ---------------------------------------------------------------- */
-.navbar {
-  background: rgba(8, 15, 27, 0.86);
-  border: 1px solid var(--hairline);
-  border-radius: 1.35rem;
-  backdrop-filter: blur(22px) saturate(140%);
-  -webkit-backdrop-filter: blur(22px) saturate(140%);
-  box-shadow: 0 20px 50px -24px rgba(0, 0, 0, 0.95);
-}
-.nav-item {
-  position: relative;
-  display: flex;
-  flex: 1 1 0;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.2rem;
-  padding: 0.6rem 0.25rem 0.55rem;
-  font-size: 0.6875rem;
+.section-label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
   color: var(--atlas-text-dim);
-  border-radius: 1rem;
+}
+
+/* ---------------------------------------------------------------- *
+ * HISTORY ROWS — a list a reader scans, not a stack of cards
+ * ---------------------------------------------------------------- */
+.history-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 0.95rem 0.25rem;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0.5rem;
+  transition: background-color var(--motion-micro) var(--ease-out);
+}
+li:last-child > .history-row {
+  border-bottom: 0;
+}
+.history-row:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+/* ---------------------------------------------------------------- *
+ * NAVIGATION — header on a wide screen, dock on a handset
+ * ---------------------------------------------------------------- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 0 0.6rem;
+  border-bottom: 1px solid var(--hairline);
+  margin-bottom: 0.75rem;
+}
+@media (min-width: 640px) {
+  .app-header {
+    padding: 1.1rem 0 0.9rem;
+    margin-bottom: 1.25rem;
+  }
+}
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.app-nav {
+  align-items: center;
+  gap: 1.75rem;
+}
+.app-nav-item {
+  position: relative;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+  padding: 0.35rem 0.1rem;
   transition: color var(--motion-transition) var(--ease-out);
 }
-.nav-item-active {
+.app-nav-item:hover {
+  color: var(--atlas-text);
+}
+.app-nav-item-active {
   color: var(--atlas-cyan);
 }
-.nav-item-active::after {
+.app-nav-item-active::after {
   content: "";
   position: absolute;
-  bottom: 0.15rem;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 1.6rem;
+  left: 0;
+  right: 0;
+  bottom: -0.15rem;
   height: 2px;
   border-radius: 9999px;
   background: var(--atlas-cyan);
-  box-shadow: 0 0 10px var(--atlas-cyan);
 }
-.nav-item-disabled {
-  opacity: 0.4;
-  cursor: default;
+/* The AP orb: the one glowing element, and the way home from anywhere. */
+.home-orb,
+.dock-home {
+  display: inline-flex;
+  border-radius: 9999px;
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.home-orb:hover,
+.dock-home:hover {
+  transform: translateY(-1px);
+}
+.home-orb:active,
+.dock-home:active {
+  transform: scale(0.97);
+}
+.home-orb-active > .orb,
+.dock-home.home-orb-active > .orb {
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.35),
+    0 0 26px rgba(34, 211, 238, 0.32);
+}
+.profile-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.9rem;
+  color: var(--atlas-text-dim);
+  padding: 0.45rem 0.55rem;
+  border-radius: 9999px;
+  transition: color var(--motion-transition) var(--ease-out);
+}
+.profile-link:hover {
+  color: var(--atlas-text);
+}
+.profile-link-active {
+  color: var(--atlas-cyan);
+}
+
+.dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-around;
+  padding: 0.35rem 1rem calc(env(safe-area-inset-bottom, 0px) + 0.55rem);
+  background: rgba(6, 12, 22, 0.9);
+  border-top: 1px solid var(--hairline);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+/* A handset control only — stated AFTER `.dock` so it wins on source order. Stated here, not with a utility class: this
+   file's rules are unlayered and outrank Tailwind's layered utilities, so
+   `sm:hidden` on the element could never win against `.dock`. */
+@media (min-width: 640px) {
+  .dock {
+    display: none;
+  }
+}
+.dock-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 4.5rem;
+  padding: 0.5rem 0.25rem 0.2rem;
+  font-size: 0.8rem;
+  color: var(--atlas-text-dim);
+  transition: color var(--motion-transition) var(--ease-out);
+}
+.dock-item-active {
+  color: var(--atlas-cyan);
+}
+.dock-home {
+  margin-top: -1.35rem;
+  padding: 0.25rem;
+  background: var(--atlas-bg);
+  border-radius: 9999px;
 }
 
 /* ---------------------------------------------------------------- *

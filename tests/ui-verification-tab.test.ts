@@ -85,30 +85,33 @@ describe("the result page is one Research object — no competing modes", () => 
   const page = codeOf(PAGE);
   const code = codeOf(RESULT);
 
-  it("carries no mode switch and no view state; the first screen is answer, research table, proof map, key evidence, boundary", () => {
+  it("carries no mode switch and no view state; the surface is question and answer, what ATLAS found, sources, what remains unclear, then the door into the audit", () => {
     for (const c of [page, code]) {
       expect(c).not.toContain('data-testid="view-switch"');
       expect(c).not.toContain("<ViewSwitch");
       expect(c).not.toContain("ResultView");
       expect(c).not.toContain('label: "Verification"');
     }
-    expect(page).toContain("<ResearchResult detail={detail} jobId={jobId} deepOpen={deepOpen} />");
+    expect(page).toContain("<ResearchResult detail={detail} jobId={jobId} />");
     const panelAt = code.indexOf("<AnswerPanel");
-    const tableAt = code.indexOf("<ResearchTable rows={surface.table} />");
-    const mapAt = code.indexOf("<ProofChainView nodes={surface.chain} />");
-    const evidenceAt = code.indexOf("<KeyEvidencePanel cards={surface.keyEvidence} />");
-    const openAt = code.indexOf("<BoundaryPanel groups={surface.boundary} />");
-    const deepAt = code.indexOf("<DeepEvidence");
+    const tableAt = code.indexOf("<FindingsTable rows={surface.table} />");
+    const sourcesAt = code.indexOf("<SourcesSection cards={surface.keyEvidence} />");
+    const openAt = code.indexOf("<UnclearSection groups={surface.boundary} />");
+    const doorAt = code.indexOf('data-testid="audit-entry"');
     expect(panelAt).toBeGreaterThan(-1);
     expect(tableAt).toBeGreaterThan(panelAt);
-    expect(mapAt).toBeGreaterThan(tableAt);
-    expect(evidenceAt).toBeGreaterThan(mapAt);
-    expect(openAt).toBeGreaterThan(evidenceAt);
-    expect(deepAt).toBeGreaterThan(openAt);
+    expect(sourcesAt).toBeGreaterThan(tableAt);
+    expect(openAt).toBeGreaterThan(sourcesAt);
+    expect(doorAt).toBeGreaterThan(openAt);
+    // Nothing deeper on this surface: no proof map, no ladder, no
+    // verification composition, no evidence pile.
+    for (const gone of ["<ProofChainView", "<ResultLadder", "<JobVerification", "<DeepEvidence", "<KeyEvidencePanel", "<BoundaryPanel"]) {
+      expect(code, gone).not.toContain(gone);
+    }
   });
 
-  it("the answer panel keeps identity, question, verdict, confidence, answer and the freshness footnote", () => {
-    for (const id of ["answer-panel", "result-question", "confidence-band", "answer-text", "answer-freshness"]) {
+  it("the answer panel keeps identity, question, answer and the checked-on line", () => {
+    for (const id of ["answer-panel", "result-question", "answer-text", "answer-meta", "answer-checked"]) {
       expect(code, id).toContain(`data-testid="${id}"`);
     }
     // The sentences are the surface model's own derivation; the component
@@ -116,29 +119,19 @@ describe("the result page is one Research object — no competing modes", () => 
     expect(code).toContain("{surface.answer.sentences.map((s) => (");
   });
 
-  it("everything deeper sits behind ONE disclosure: the ladder, the verification composition, the audit entry and the research process", () => {
-    const deep = code.slice(code.indexOf('data-testid="full-evidence"'), code.indexOf("</details>"));
-    expect(deep).toContain("<ResultLadder");
-    expect(deep).toContain('data-testid="verification-view"');
-    expect(deep).toContain("<JobVerification detail={detail} />");
-    expect(deep).toContain('data-testid="audit-entry"');
-    expect(deep).toContain("<ResearchProgress job={job} />");
-    expect(deep).toContain('data-testid="progress-slot-finished"');
-    // Exactly one ladder, one verification composition, one audit entry.
-    expect((code.match(/<ResultLadder/g) ?? []).length).toBe(1);
-    expect((code.match(/<JobVerification detail=\{detail\} \/>/g) ?? []).length).toBe(1);
+  it("nothing deeper sits on the result: the audit is its own route, entered through exactly one door", () => {
     expect((code.match(/data-testid="audit-entry"/g) ?? []).length).toBe(1);
-    // A failed or cancelled run has nothing to verify: the composition is
-    // gated, the rest of the disclosure is not.
-    expect(code).toContain('surface.outcomeKind !== "FAILED" && surface.outcomeKind !== "CANCELLED"');
-    expect(deep).toMatch(/\{verifiable && \(\s*<div data-testid="verification-view">/);
+    expect(code).toContain("href={`/research/${jobId}/audit`}");
+    for (const gone of ["<ResultLadder", "<JobVerification", "<ResearchProgress", "<details", 'data-testid="full-evidence"', 'data-testid="verification-view"', 'data-testid="progress-slot-finished"']) {
+      expect(code, gone).not.toContain(gone);
+    }
   });
 
-  it("a legacy ?view=verification link opens the disclosure; nothing navigates, nothing fetches", () => {
-    expect(page).toContain('view === "verification" || view === "full"');
-    expect(page).toContain("useState<boolean>(deepOpenFromLocation)");
-    expect(page).toContain("deepOpen={deepOpen}");
-    expect(code).toContain("open={open}");
+  it("carries no view state at all; nothing navigates, nothing fetches", () => {
+    for (const gone of ["deepOpenFromLocation", "deepOpen", "?view=", 'view === "verification"']) {
+      expect(page, gone).not.toContain(gone);
+    }
+    expect(code).not.toContain("deepOpen");
     for (const c of [page, code]) {
       expect(c).not.toContain("window.history.replaceState(");
       expect(c).not.toMatch(/router\.(push|replace)\(/);
@@ -221,9 +214,10 @@ describe("JobVerification is a pure projection of the detail payload", () => {
     // without the explicit flag — nothing here guesses from a date.
     expect(count(render(detailOf("A")), "verification-historical-note")).toBe(0);
     expect(count(render(detailOf("A"), false), "verification-historical-note")).toBe(0);
-    // The product surface passes no flag.
+    // The product surface no longer renders the composition at all, and
+    // passes no flag anywhere.
     const result = codeOf(RESULT);
-    expect(result).toContain("<JobVerification detail={detail} />");
+    expect(result).not.toContain("<JobVerification");
     expect(result).not.toContain("historicalNote");
     expect(codeOf(PAGE)).not.toContain("historicalNote");
     const src = codeOf(VERIFICATION);

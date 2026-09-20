@@ -111,7 +111,7 @@ describe("UI — research history grouping", () => {
     expect(groups[0].latestOutcome.verdict).toBe("INSUFFICIENT_EVIDENCE");
 
     const html = render(createElement(ResearchGroupCard, { group: groups[0] }));
-    expect(html).toContain("3 research runs");
+    expect(html).toContain("3 runs");
     expect(html).toContain("Fixture Project");
   });
 
@@ -199,15 +199,17 @@ describe("UI — answer first", () => {
     // The finished result is ONE component; the page renders it and keeps
     // the developer opt-in after it.
     const src = readFileSync("src/client/components/research-result.tsx", "utf-8");
-    const answerAt = src.indexOf('data-testid="answer-panel"');
-    const ladderAt = src.indexOf("<ResultLadder");
-    const auditAt = src.indexOf('data-testid="progress-slot-finished"');
-    for (const at of [answerAt, ladderAt, auditAt]) {
+    // Read at the composition site, where the order is decided.
+    const answerAt = src.indexOf("<AnswerPanel");
+    const foundAt = src.indexOf("<FindingsTable");
+    const auditAt = src.indexOf('data-testid="audit-entry"');
+    for (const at of [answerAt, foundAt, auditAt]) {
       expect(at).toBeGreaterThan(-1);
     }
-    // Answer → the findings → the full audit; then engine internals.
-    expect(answerAt).toBeLessThan(ladderAt);
-    expect(ladderAt).toBeLessThan(auditAt);
+    // Answer → what ATLAS found → the door into the full audit; then
+    // engine internals on the page.
+    expect(answerAt).toBeLessThan(foundAt);
+    expect(foundAt).toBeLessThan(auditAt);
     const page = readFileSync(RESULT_PAGE, "utf-8");
     expect(page.indexOf("<ResearchResult")).toBeLessThan(page.indexOf("<DeveloperDetails"));
     // The document inventory has left this page entirely. It used to sit
@@ -357,30 +359,22 @@ describe("UI — live research state", () => {
     ).toBe("ACTIVE");
   });
 
-  it("TEST 12: live progress is prominent, and TEST 11: finished progress is secondary", () => {
+  it("TEST 12: live progress is prominent, and TEST 11: finished progress is not part of reading the answer", () => {
     const src = readFileSync(RESULT_PAGE, "utf-8");
     const result = readFileSync("src/client/components/research-result.tsx", "utf-8");
     const liveAt = src.indexOf('data-testid="progress-slot-live"');
     const answerAt = src.indexOf("<ResearchResult");
-    const finishedAt = result.indexOf('data-testid="progress-slot-finished"');
-    const evidenceAt = result.indexOf('data-testid="key-evidence"');
     expect(liveAt).toBeGreaterThan(-1);
-    expect(finishedAt).toBeGreaterThan(-1);
 
     // While running, progress sits above the answer slot — it is what the
     // user is waiting on.
     expect(liveAt).toBeLessThan(answerAt);
-    // Once finished it is history: below the evidence, and collapsed.
-    expect(finishedAt).toBeGreaterThan(evidenceAt);
-    // Once finished it is history. The slot is no longer a <details> of
-    // its own because it now holds the audit ENTRY — a control that
-    // prepares a separate surface on demand — with the progress log
-    // beneath it. What matters is unchanged: nothing here is expanded,
-    // and the audit costs nothing until it is asked for.
-    const finishedBlock = result.slice(finishedAt, finishedAt + 900);
-    expect(finishedBlock).toContain('data-testid="audit-entry"');
-    expect(finishedBlock).toContain("<ResearchProgress");
-    expect(finishedBlock).not.toMatch(/<details[^>]*\sopen/);
+    // Once finished it is history, and history is not part of reading the
+    // answer: the finished result renders no research process at all. The
+    // trace lives in the audit's technical record, behind its own door.
+    expect(result).not.toContain("<ResearchProgress");
+    expect(result).not.toContain('data-testid="progress-slot-finished"');
+    expect(readFileSync("src/client/components/research-audit.tsx", "utf-8")).toContain('id === "TRACE"');
 
     // A terminal job renders no active stage at all.
     const html = render(

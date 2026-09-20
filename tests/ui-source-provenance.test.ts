@@ -285,8 +285,9 @@ describe("presentation only", () => {
       expect(stmt).toMatch(/ADD COLUMN|DROP CONSTRAINT IF EXISTS|ADD CONSTRAINT "[a-z_]+"\s+CHECK/i);
     }
     // The projection added one already-persisted column to a read. It did
-    // not touch admission, authority or the evidence link.
-    const page = readFileSync("src/client/components/research-result.tsx", "utf-8");
-    expect(page).toContain('if (link.role === "EXCLUDED") continue');
+    // not touch admission, authority or the evidence link — the surface
+    // model still reads the persisted link's role, and nothing else.
+    const surface = readFileSync("src/client/result-surface.ts", "utf-8");
+    expect(surface).toContain('if (link.role === "EXCLUDED") continue');
   });
 });

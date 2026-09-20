@@ -348,7 +348,7 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
     // The result surface no longer counts sources at all — a count invited
     // source arithmetic; the strongest source now sits beside each row.
     expect(result).not.toContain("usedDocs");
-    expect(result).toContain('{open ? "Hide evidence" : "Evidence"}');
+    expect(result).toContain('open ? "Hide evidence" : `Evidence · ${row.evidence.length}`');
     // The old three-names-for-one-idea vocabulary is gone from the normal
     // result: proof, evidence and support were all the same journey.
     const code = ladder
