@@ -480,8 +480,13 @@ describe("the research table — the question's own rows, in proof-path order", 
     expect(surface.table.flatMap((r) => r.restsOn.map((d) => d.component)).sort()).toEqual(folded);
     for (const r of surface.table) for (const d of r.restsOn) expect(html).toContain(d.phrase);
     expect(shown.length + folded.length).toBe(surface.table.length);
-    // No proof map: the rows are the map.
+    // The research path is a strip of one-word nodes in proof-path order —
+    // one per row of the table, supporting rows included — and never a
+    // second copy of a row's text.
     expect(count(html, "proof-node")).toBe(0);
+    expect(count(html, "path-node")).toBe(surface.table.length);
+    const pathText = textOf(blockOf(html, "research-path", "research-table"));
+    for (const r of surface.table) expect(pathText).not.toContain(r.established);
     // The question projection's label heads its row.
     expect(html).toContain("Is Fixture Protocol currently buying back FXT with fee revenue?");
     // A confirmed row states what the evidence established in the source's

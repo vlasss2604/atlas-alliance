@@ -11,15 +11,16 @@
 
 :root {
   /* Ground and surfaces — three depths, used consistently. */
-  --atlas-bg: #0b0f16;
-  --atlas-bg-top: #101620;
-  --atlas-bg-raised: #131a25;
-  --surface-1: #121824;
-  --surface-2: #171f2c;
-  --surface-3: #1d2736;
+  --atlas-bg: #090d15;
+  --atlas-bg-top: #0f1624;
+  --atlas-bg-raised: #131b2a;
+  --surface-1: #111827;
+  --surface-2: #172033;
+  --surface-3: #1e293d;
+  --surface-accent: #13202e; /* the one accent-tinted surface: the answer */
   --atlas-glass: var(--surface-1);
-  --hairline: rgba(255, 255, 255, 0.075);
-  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --hairline: rgba(160, 184, 214, 0.1);
+  --hairline-strong: rgba(160, 184, 214, 0.2);
   --atlas-border: var(--hairline);
 
   /* Text hierarchy — headline, body, muted, faint. */
@@ -33,6 +34,10 @@
   --atlas-cyan-strong: #93dfeb;
   --atlas-teal: #3cb9ab;
   --cyan-dim: rgba(79, 199, 220, 0.12);
+  /* Secondary accent — a quiet indigo for structure (the research path's
+     rail, tinted panel edges), never for state and never for action. */
+  --atlas-indigo: #7c8cf0;
+  --indigo-dim: rgba(124, 140, 240, 0.12);
 
   /* State colours — colour is meaning, one each. */
   --atlas-green: #4cc98f; /* confirmed / supported */
@@ -90,7 +95,9 @@ body {
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  background: linear-gradient(180deg, var(--atlas-bg-top) 0%, var(--atlas-bg) 42vh);
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(79, 199, 220, 0.07) 0%, transparent 60%),
+    linear-gradient(180deg, var(--atlas-bg-top) 0%, var(--atlas-bg) 48vh);
 }
 .atlas-grid,
 .atlas-arcs {
@@ -110,13 +117,31 @@ body {
   border-radius: 1.25rem;
   background: var(--surface-1);
   border: 1px solid var(--hairline);
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset;
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.035) inset,
+    0 14px 36px -22px rgba(0, 0, 0, 0.85);
 }
 .panel-raised {
   background: var(--surface-2);
 }
+/* The executive surface: one step more presence than any other panel —
+   an accent-tinted ground, a stronger edge, a light along the top. */
 .panel-hero {
-  border-color: var(--hairline-strong);
+  background:
+    linear-gradient(180deg, rgba(79, 199, 220, 0.06) 0%, rgba(79, 199, 220, 0) 38%),
+    var(--surface-accent);
+  border-color: rgba(79, 199, 220, 0.22);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
+    0 24px 60px -28px rgba(0, 0, 0, 0.9);
+}
+/* A section surface: a bordered area that groups rows or cards without
+   boxing each of them — findings, evidence, uncertainty. */
+.panel-section {
+  position: relative;
+  border-radius: 1.25rem;
+  background: rgba(17, 24, 39, 0.55);
+  border: 1px solid var(--hairline);
 }
 .tone-edge {
   overflow: hidden;
@@ -506,14 +531,138 @@ body {
 }
 
 /* ---------------------------------------------------------------- *
+ * EXECUTIVE STATS — the work behind the answer, in four figures.
+ * ---------------------------------------------------------------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+@media (min-width: 640px) {
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.stat {
+  border-radius: 0.9rem;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.025);
+  padding: 0.7rem 0.9rem;
+}
+.stat-n {
+  display: block;
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--atlas-text-strong);
+}
+.stat-l {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--atlas-text-dim);
+}
+
+/* ---------------------------------------------------------------- *
+ * RESEARCH PATH — the logic of the research as a compact strip.
+ * One node per check, in proof-path order, coloured by its state.
+ * Scrolls sideways on a handset instead of wrapping into a pile.
+ * ---------------------------------------------------------------- */
+.path {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding-bottom: 0.25rem;
+  scrollbar-width: none;
+}
+.path::-webkit-scrollbar {
+  display: none;
+}
+/* A handset sees the strip fade at its right edge: there is more. */
+@media (max-width: 767px) {
+  .path {
+    mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+  }
+}
+.path-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.45rem;
+  flex: 1 1 0;
+  min-width: 5.4rem;
+  padding: 0.2rem 0.35rem 0;
+  text-align: center;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--atlas-text);
+}
+.path-node::before {
+  content: "";
+  position: absolute;
+  top: 0.75rem;
+  left: 50%;
+  right: -50%;
+  height: 2px;
+  background: var(--hairline-strong);
+}
+.path-node:last-child::before {
+  display: none;
+}
+.path-mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  background: var(--surface-2);
+  border: 2px solid var(--node, var(--hairline-strong));
+  color: var(--node, var(--atlas-text-dim));
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+.path-mark-filled {
+  background: var(--node);
+  color: #0b1018;
+}
+/* On a desk every node fits the column; the words may take two lines. */
+@media (min-width: 768px) {
+  .path-node {
+    min-width: 0;
+  }
+}
+.path-state {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+}
+
+/* ---------------------------------------------------------------- *
  * FINDING ROWS — the "what ATLAS checked" list on the result.
  * Each row is one question and its answer; the status is a coloured
  * spine on the left, not a word to decode.
  * ---------------------------------------------------------------- */
 .finding {
   position: relative;
-  padding: 1.1rem 0 1.1rem 1.35rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem 1.5rem;
+  padding: 1.15rem 1.25rem 1.15rem 1.5rem;
   border-bottom: 1px solid var(--hairline);
+  transition: background-color var(--motion-micro) var(--ease-out);
+}
+@media (min-width: 640px) {
+  .finding {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+    padding: 1.3rem 1.5rem 1.3rem 1.75rem;
+  }
 }
 .finding:last-child {
   border-bottom: 0;
@@ -525,19 +674,85 @@ body {
   top: 1.35rem;
   bottom: 1.35rem;
   width: 3px;
-  border-radius: 9999px;
+  border-radius: 0 9999px 9999px 0;
   background: var(--row-accent, var(--hairline-strong));
 }
 .finding-open {
-  background: rgba(255, 255, 255, 0.025);
-  margin-left: -0.75rem;
-  margin-right: -0.75rem;
-  padding-left: 2.1rem;
-  padding-right: 0.75rem;
-  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.03);
 }
-.finding-open::before {
-  left: 0.75rem;
+/* The state line under a fact: a glyph in the state colour, the state in
+   words with its source kind, the date. */
+.state-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.6rem;
+  font-size: 0.88rem;
+  color: var(--atlas-text-dim);
+}
+.state-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #0b1018;
+  background: var(--row-accent, var(--atlas-slate));
+  flex: none;
+}
+.state-word {
+  font-weight: 600;
+  color: var(--atlas-text);
+}
+
+/* ---------------------------------------------------------------- *
+ * EVIDENCE CARDS — sources as evidence objects, two-up on a desk.
+ * ---------------------------------------------------------------- */
+.evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+@media (min-width: 768px) {
+  .evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .evidence-grid > .evidence-card-wide {
+    grid-column: 1 / -1;
+  }
+}
+.evidence-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  border-radius: 1rem;
+  border: 1px solid var(--hairline);
+  background: var(--surface-1);
+  padding: 1rem 1.15rem 1rem;
+  transition: border-color var(--motion-transition) var(--ease-out);
+}
+.evidence-card:hover {
+  border-color: var(--hairline-strong);
+}
+.evidence-card[data-relation="CONTRADICTS"] {
+  border-color: rgba(234, 111, 111, 0.35);
+}
+.kind {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 0.5rem;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--atlas-cyan-strong);
+  background: var(--cyan-dim);
+}
+.kind-onchain {
+  color: #b9c2ff;
+  background: var(--indigo-dim);
 }
 
 /* A quiet count strip: "3 confirmed · 1 partly · 2 unclear". */
@@ -689,8 +904,8 @@ li:last-child > .history-row {
   grid-template-columns: repeat(5, 1fr);
   align-items: end;
   padding: 0.4rem 0.5rem calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
-  background: rgba(14, 19, 28, 0.94);
-  border-top: 1px solid var(--hairline);
+  background: rgba(13, 19, 30, 0.96);
+  border-top: 1px solid var(--hairline-strong);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
@@ -717,6 +932,11 @@ li:last-child > .history-row {
 }
 .dock-item-active {
   color: var(--atlas-cyan-strong);
+}
+.dock-item-active > svg {
+  border-radius: 9999px;
+  box-shadow: 0 0 0 6px var(--cyan-dim);
+  background: var(--cyan-dim);
 }
 .dock-home {
   justify-self: center;

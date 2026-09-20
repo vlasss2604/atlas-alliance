@@ -418,17 +418,23 @@ left, Ask · Research · Home disc · Analytics in the centre, Profile on the
 right. Handset/desktop switching lives in `globals.css` (`.dock`,
 `.profile-link`, `.brand-lockup-home`), because this file's unlayered
 rules outrank Tailwind utilities. Home carries the brand itself (mark,
-wordmark, "Crypto Verification") above the composer, three "how it works"
-tiles and Recent research rows; the header lockup is hidden there. The
+wordmark, "Crypto Verification", one line on what ATLAS checks) above the
+composer — one large `panel-hero` with the input and three "Try asking"
+chips — and Recent research rows with outcome pills; the header lockup is
+hidden there. The
 ATLAS mark uses solid fills — a gradient referenced by id resolves to the
 first definition on the page, and a hidden first instance blanked every
 mark. `/analytics` is a real page with an honest empty state; Compare and
 Watchlist are not built. The question/audit projections still do not read
 `bounded_by`.
 
-**Visual system V4 "Graphite Navy"** (`app/globals.css`, the single source
-of tokens): ground `#0b0f16` with one quiet top light (the V1 blobs, grid
-and arcs are gone), three solid surfaces (`--surface-1/2/3`), white
+**Visual system V4→V5 "Graphite Navy"** (`app/globals.css`, the single
+source of tokens): blue-tinted ground `#090d15`→`#0f1624` with one quiet
+top light (the V1 blobs, grid and arcs are gone), three solid surfaces
+(`--surface-1/2/3`) plus the one accent-tinted surface for the answer and
+the composer (`--surface-accent`, `.panel-hero`), bordered section
+surfaces that group rows without boxing each (`.panel-section`), a quiet
+indigo secondary accent for structure only (`--atlas-indigo`), blue-grey
 hairlines, a text scale strong / body / dim / faint, one brand accent
 (`--atlas-cyan #4fc7dc`, `-strong #93dfeb`) for the active item, the
 primary action and the mark only, and four state colours: green confirmed
@@ -439,16 +445,33 @@ uppercase micro-labels: `.tone` pills are 0.875rem sentence case with a
 leading dot, nothing that matters below 0.85rem. Tone class names
 (`tone-*`, `dot-*`) are unchanged, so every colour-meaning pin holds.
 
-**The result (V4)**: the answer panel is project line → question (h1) →
-one outcome badge → the answer sentences with the first carrying the
-weight → the dates footnote. "What ATLAS checked" carries a count strip
-("1 confirmed · 6 partly · 2 unclear", derived from the rows' statuses)
-and rows with a coloured status spine: question in strong type, the fact,
-"Also established", then source · date · Evidence toggle on one quiet
-line; the status word is on the row as a title and for screen readers
-only. "No qualifying source" is the empty source state. Sources and What
-remains unclear (tinted panel) follow; the audit door is an outlined
-button. The audit keeps its structure with the same type scale.
+**The result (V5, 2026-09-20, pending Founder visual review)**: five
+areas and a door, all derived in `result-surface.ts`. (1) The executive
+answer on the one accent-tinted surface (`panel-hero`): project · "Research
+result" → question (h1) → outcome badge + confidence word → the answer
+sentences, first in strong type → four figures counted from the rows
+(checks, distinct sources by `canonicalDocumentKey`, evidence items,
+verified) → the dates footnote. (2) The research path (`research-path`,
+`path-node` per row of `surface.chain`, supporting rows included): one
+human word per check in proof-path order — Revenue · Flow · <mechanism
+noun or Design> · Approval · Active now · Execution · Destination ·
+Recipient · Supply impact · Durability — each a glyph in its state colour
+(✓ ◐ ✕, an open ring for unresolved); never a row's text. Fits the desk
+column, scrolls with a right-edge fade on a handset. (3) "What ATLAS
+checked", one `panel-section` with a count strip over every check and a
+two-column row per shown check: question | fact, then the state line —
+glyph, "Verified from official docs" / "Partly verified from governance" /
+"Contradicted by on-chain record" / "Unresolved", source name, date,
+Evidence toggle. Status words: Verified / Partly verified / Unresolved /
+Contradicted (`STATE_WORDS`); the canonical label stays on the row's
+title. "No qualifying source" is the empty source state. (4) Evidence:
+the key-evidence cards two-up from 768px (an odd last card spans), each
+with a kind chip (indigo for on-chain), date, source, what it
+establishes, View excerpt / Open original / Snapshot; a contradicting
+card has a red edge. (5) What remains unclear: one amber-edged
+`panel-section` per boundary kind — copy, the affected checks one per
+line with their persisted detail where one exists, the "never read as"
+note once. The audit keeps its structure on the same type scale.
 
 Counting on the Verification page is over what is OPEN, not over the whole
 boundary: `open = boundary − components shown under WHAT STOOD UP` (a

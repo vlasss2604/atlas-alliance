@@ -27,8 +27,7 @@ export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
         <span className="flex shrink-0 flex-col items-end gap-1.5 text-right text-[0.88rem] text-[var(--atlas-text-dim)]">
           <span>{relativeAge(job.finishedAt ?? job.createdAt)}</span>
           {terminal ? (
-            <span className="flex items-center gap-1.5" data-testid="history-outcome" data-verdict={outcome.verdict ?? "NONE"} data-outcome={outcome.kind}>
-              <span className={`dot dot-${outcome.tone}`} aria-hidden />
+            <span className={`tone tone-${outcome.tone} text-[0.8rem] px-2.5 py-1`} data-testid="history-outcome" data-verdict={outcome.verdict ?? "NONE"} data-outcome={outcome.kind}>
               {outcome.label}
             </span>
           ) : (

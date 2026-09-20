@@ -158,7 +158,7 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
                     void submit();
                   }
                 }}
-                placeholder="Type a question or paste a link…"
+                placeholder="Ask about a token or paste a link…"
                 maxLength={2000}
                 aria-label="Research question"
                 data-testid="composer-input"
@@ -178,15 +178,18 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
             </button>
           </div>
 
-          <ul className={`mt-4 flex flex-wrap gap-2 ${hero ? "justify-center" : ""}`} data-testid="composer-examples">
-            {EXAMPLES.map((ex) => (
-              <li key={ex.text}>
-                <button type="button" onClick={() => setQuestion(ex.text)} className="chip" data-testid="composer-example">
-                  {ex.text}
-                </button>
-              </li>
-            ))}
-          </ul>
+          <div className={`mt-5 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
+            <p className="text-[0.85rem] font-semibold uppercase tracking-[0.06em] text-[var(--atlas-text-dim)]">Try asking</p>
+            <ul className={`mt-2 flex flex-wrap gap-2 ${hero ? "justify-center" : ""}`} data-testid="composer-examples">
+              {EXAMPLES.map((ex) => (
+                <li key={ex.text}>
+                  <button type="button" onClick={() => setQuestion(ex.text)} className="chip" data-testid="composer-example">
+                    {ex.text}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
         </>
       ) : null}
 
