@@ -19,6 +19,7 @@ import {
   auditOutcome,
 } from "../audit-model";
 import { retrievedOn } from "../research-model";
+import { ChevronDownIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
 import {
   BOUNDARY_COPY,
   BOUNDARY_NEVER,
@@ -105,9 +106,11 @@ export function ResearchAudit({
         </section>
       )}
 
-      <details className="group border-t border-[var(--hairline)] pt-5" data-testid="technical-record">
+      <details className="group panel-section px-5 py-5 sm:px-6" data-testid="technical-record">
         <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[1.05rem] font-semibold text-[var(--atlas-text)] select-none hover:text-[var(--atlas-text-strong)] [&::-webkit-details-marker]:hidden">
-          <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
+          <span className="grid h-7 w-7 place-items-center rounded-full border border-[var(--hairline-strong)] text-[var(--atlas-cyan-strong)]">
+            <ChevronDownIcon size={14} className="transition-transform duration-200 group-open:rotate-180" />
+          </span>
           Technical record
         </summary>
         <p className="mt-2 text-[0.9rem] text-[var(--atlas-text-dim)]">
@@ -158,10 +161,12 @@ export function ResearchAudit({
 function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | null }) {
   return (
     <li
-      className="border-b border-[var(--hairline)] py-6 last:border-b-0"
+      className="relative border-b border-[var(--hairline)] py-6 pl-4 last:border-b-0"
+      style={{ "--row-accent": `var(--atlas-${row.tone === "supported" ? "green" : row.tone === "partial" ? "amber" : row.tone === "negative" ? "red" : "slate"})` } as React.CSSProperties}
       data-testid="audit-point"
       data-component={row.component}
     >
+      <span className="absolute left-0 top-7 bottom-7 w-[3px] rounded-r-full" style={{ background: "var(--row-accent)" }} aria-hidden />
       <p className="text-[1.05rem] font-semibold leading-snug text-[var(--atlas-text-strong)]" data-testid="audit-point-question">
         {row.label}
       </p>
@@ -214,36 +219,40 @@ function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | nu
   const [open, setOpen] = useState(false);
   return (
     <li data-testid="audit-evidence" data-evidence-id={card.id} data-relation={card.relation}>
-      <p className="text-[0.88rem] text-[var(--atlas-text-dim)]">
+      <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.88rem] text-[var(--atlas-text-dim)]">
+        <span className={`kind kind-${sourceKindFamily(card.sourceClass)}`}>
+          <SourceKindIcon label={card.sourceClass} size={13} />
+          {card.sourceClass}
+        </span>
         <span className="font-semibold text-[var(--atlas-text)]">{card.sourceName}</span>
-        {" · "}
-        {card.sourceClass}
-        {card.onchain?.network ? ` · ${card.onchain.network}` : ""}
-        {card.date ? ` · ${card.date.label} ${card.date.value}` : ""}
-        {card.relation === "CONTRADICTS" ? " · contradicts" : ""}
+        {card.onchain?.network && <span>{card.onchain.network}</span>}
+        {card.date && (
+          <span>
+            {card.date.label} {card.date.value}
+          </span>
+        )}
+        {card.relation === "CONTRADICTS" && <span className="font-semibold text-[var(--atlas-red)]">Contradicts</span>}
       </p>
       <p className="mt-1 text-[1rem] leading-[1.5]">{sourceSentence(card)}</p>
       {card.doesNotProve && (
         <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">Does not prove: {card.doesNotProve}</p>
       )}
-      <p className="mt-1.5 flex flex-wrap gap-x-4 text-[0.85rem]">
+      <p className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
         {card.excerpt && (
-          <button
-            type="button"
-            onClick={() => setOpen((v) => !v)}
-            aria-expanded={open}
-            className="text-[var(--atlas-cyan)] hover:underline"
-          >
+          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="btn-action">
+            <QuoteIcon size={13} />
             {open ? "Hide excerpt" : "View excerpt"}
           </button>
         )}
         {card.openable && (
-          <a href={card.url} target="_blank" rel="noopener noreferrer" className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)]">
+          <a href={card.url} target="_blank" rel="noopener noreferrer" className="link-action">
+            <ExternalIcon size={14} />
             Open original
           </a>
         )}
         {card.snapshotHref && jobId && (
-          <Link href={card.snapshotHref} className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)]">
+          <Link href={card.snapshotHref} className="link-action">
+            <SnapshotIcon size={14} />
             Snapshot
           </Link>
         )}

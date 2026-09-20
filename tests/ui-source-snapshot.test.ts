@@ -4,7 +4,10 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
+import { ResearchResult } from "../src/client/components/research-result";
 import { SnapshotDocumentView } from "../src/client/components/snapshot-document-view";
+import { resultFixture } from "../src/client/result-surface-fixtures";
+import { buildResultSurface } from "../src/client/result-surface";
 import {
   inlineText,
   MAX_BLOCK_DEPTH,
@@ -786,5 +789,45 @@ describe("source snapshot — reachable only where it exists, and only by its ow
     const service = codeOf(SERVICE);
     expect(service).not.toMatch(/\bfetch\(|axios|https?\.get/);
     expect(service).toContain("acquiredDocuments");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* THE SNAPSHOT ACTION IS OFFERED ONLY WHERE A ROUTE CAN SERVE IT       */
+/* ------------------------------------------------------------------ */
+
+// The surface builds a snapshot href from the detail payload's own job id.
+// On a real result that is the route's job and the link works; on a design
+// fixture it is a job that exists in no database, so the link used to land
+// on "no snapshot" — a dead clickable action reported by the Founder. The
+// route's jobId is the authority, exactly as in the audit.
+describe("the Snapshot action on the result", () => {
+  const renderResult = (jobId: string | null) => {
+    const { detail } = resultFixture("8");
+    return renderToStaticMarkup(createElement(ResearchResult, { detail, jobId }));
+  };
+  const count = (h: string, id: string) => h.match(new RegExp(`data-testid="${id}"`, "g"))?.length ?? 0;
+
+  it("is absent on a fixture (no route can serve it), though the payload claims snapshots", () => {
+    const { detail } = resultFixture("8");
+    expect(detail.snapshotEvidenceIds.length).toBeGreaterThan(0);
+    expect(buildResultSurface(detail).keyEvidence.some((c) => c.snapshotHref !== null)).toBe(true);
+    expect(count(renderResult(null), "evidence-snapshot")).toBe(0);
+  });
+
+  it("is present on a real result for exactly the key evidence that has a stored capture", () => {
+    const { detail } = resultFixture("8");
+    const withCapture = buildResultSurface(detail).keyEvidence.filter((c) => c.snapshotHref !== null).length;
+    expect(withCapture).toBeGreaterThan(0);
+    const html = renderResult(detail.job.id);
+    expect(count(html, "evidence-snapshot")).toBe(withCapture);
+    expect(html).toContain(`href="/research/${detail.job.id}/source/`);
+  });
+
+  it("the guard is the route's jobId, in both places the action renders", () => {
+    const result = readFileSync("src/client/components/research-result.tsx", "utf-8");
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(result).toContain("{card.snapshotHref && jobId && (");
+    expect(audit).toContain("{card.snapshotHref && jobId && (");
   });
 });

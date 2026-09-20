@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { AppProvider } from "@/src/client/app-context";
 import { AppHeader, AtlasDock } from "@/src/client/components/app-chrome";
+import { AtlasField } from "@/src/client/components/atlas-field";
 
 // THE SHELL. One calm page background, a header that carries the brand
 // and the three anchors, a single reading column, and — on a handset — a
@@ -10,9 +11,7 @@ import { AppHeader, AtlasDock } from "@/src/client/components/app-chrome";
 export default function AppLayout({ children }: { children: ReactNode }) {
   return (
     <AppProvider>
-      <div className="atlas-field" aria-hidden>
-        <span className="atlas-grid" />
-      </div>
+      <AtlasField />
       <div className="relative z-10 mx-auto w-full max-w-[920px] px-4 pb-32 sm:px-8 sm:pb-16">
         <AppHeader />
         {children}

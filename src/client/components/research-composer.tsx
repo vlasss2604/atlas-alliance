@@ -6,6 +6,7 @@ import { useState } from "react";
 import { api, ApiError, type GateView, type InterpretResult } from "../api";
 import { useApp } from "../app-context";
 import { canStartProof, proofBlockReason } from "../proof-gate";
+import { ArrowIcon, AskIcon } from "./icons";
 
 // THE INPUT IS THE HERO.
 //
@@ -148,7 +149,8 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
       {phase === "input" || phase === "thinking" ? (
         <>
           <div className={`mt-6 flex items-center gap-2.5 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
-            <div className="field flex flex-1 items-center gap-3 px-5 py-[0.95rem] text-left">
+            <div className="field flex flex-1 items-center gap-3 px-4 py-[0.95rem] text-left">
+              <AskIcon size={18} className="field-icon" />
               <input
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -158,7 +160,7 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
                     void submit();
                   }
                 }}
-                placeholder="Ask about a token or paste a link…"
+                placeholder="Ask or paste a link…"
                 maxLength={2000}
                 aria-label="Research question"
                 data-testid="composer-input"
@@ -174,7 +176,7 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
               data-testid="composer-submit"
               className="send-orb h-[54px] w-[54px] shrink-0"
             >
-              {phase === "thinking" ? <span className="pulse-dot" aria-hidden /> : <ArrowIcon />}
+              {phase === "thinking" ? <span className="pulse-dot" aria-hidden /> : <ArrowIcon size={20} />}
             </button>
           </div>
 
@@ -284,13 +286,5 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
 
       {error && <p className="mt-4 text-[0.98rem] text-[var(--atlas-amber)]">{error}</p>}
     </section>
-  );
-}
-
-function ArrowIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden>
-      <path d="M4 10h11m0 0-4.2-4.2M15 10l-4.2 4.2" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }

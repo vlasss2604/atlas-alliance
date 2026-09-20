@@ -532,7 +532,7 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
     // boundary groups. Nothing evidential is composed in the component.
     const page = readFileSync(RESULT, "utf-8");
     for (const prop of [
-      "<FindingsTable rows={surface.table} />",
+      "<FindingsTable rows={surface.table} jobId={jobId} />",
       "<UnclearSection groups={surface.boundary} />",
     ]) {
       expect(page, prop).toContain(prop);
@@ -575,7 +575,7 @@ describe("the deep result is intact beneath the new layer", () => {
     expect(readFileSync(PAGE, "utf-8")).toContain("<DeveloperDetails");
     // The surface's rows ARE the result — the findings table and the
     // unclear block, fed by the surface model, in that order.
-    expect(page.indexOf("<FindingsTable rows={surface.table} />")).toBeGreaterThan(-1);
+    expect(page.indexOf("<FindingsTable rows={surface.table} jobId={jobId} />")).toBeGreaterThan(-1);
     expect(page.indexOf("<UnclearSection groups={surface.boundary} />")).toBeGreaterThan(page.indexOf("<FindingsTable"));
   });
 

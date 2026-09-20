@@ -428,22 +428,46 @@ mark. `/analytics` is a real page with an honest empty state; Compare and
 Watchlist are not built. The question/audit projections still do not read
 `bounded_by`.
 
-**Visual system V4→V5 "Graphite Navy"** (`app/globals.css`, the single
-source of tokens): blue-tinted ground `#090d15`→`#0f1624` with one quiet
-top light (the V1 blobs, grid and arcs are gone), three solid surfaces
-(`--surface-1/2/3`) plus the one accent-tinted surface for the answer and
-the composer (`--surface-accent`, `.panel-hero`), bordered section
-surfaces that group rows without boxing each (`.panel-section`), a quiet
-indigo secondary accent for structure only (`--atlas-indigo`), blue-grey
-hairlines, a text scale strong / body / dim / faint, one brand accent
-(`--atlas-cyan #4fc7dc`, `-strong #93dfeb`) for the active item, the
-primary action and the mark only, and four state colours: green confirmed
-/ supported, amber partially confirmed (was violet), slate not established
-/ insufficient evidence (was amber), red contradicted / not supported;
-product fault keeps its own grey tone. No glows, no glass blur, no
-uppercase micro-labels: `.tone` pills are 0.875rem sentence case with a
-leading dot, nothing that matters below 0.85rem. Tone class names
-(`tone-*`, `dot-*`) are unchanged, so every colour-meaning pin holds.
+**Visual system V6, derived from the AP mark** (`app/globals.css`, the
+single source of tokens; the Founder's logo is the reference: near-black
+navy disc, electric cyan "A", brushed-silver "P", a thin luminous double
+ring with four cardinal ticks, a faint evidence network, one controlled
+glow). Ground `#060a12`→`#0b1424` with one radial cyan light at the top,
+a vignette and a static constellation (`atlas-field.tsx`: 42 seeded nodes
+and nearest-neighbour links in one SVG, masked out by 72vh, no filter, no
+animation). Surfaces: navy glass (`--surface-1/2/3`, `.panel`,
+`.panel-section`) and ONE cyan-lit hero (`.panel-hero`: cyan edge-light,
+top highlight, soft glow, a faint ring motif at the top-right corner) for
+the executive answer and the Home composer. Accents: electric cyan
+`--atlas-cyan #1ec5f5` / `-strong #8ee6ff` for the active, the verified
+and the primary action only, with `--cyan-glow` as its one light; silver
+`--atlas-silver` for the wordmark; indigo `--atlas-indigo` for governance
+and structure. States: `--atlas-green #35d1a2` verified, amber partly,
+red contradicted, slate unresolved. The mark (`AtlasMark`, `atlas-header.tsx`)
+draws the disc, double ring, ticks and the base AP letterforms in an
+inline SVG with per-instance gradient ids (`useId`); its halo is the
+`.orb` / `.orb-sm` / `.orb-hero` box-shadow. Icon family: `icons.tsx` —
+one 20-grid line set (source kinds, actions, places); `SourceKindIcon`
+and `sourceKindFamily` give every source kind an icon and one of four
+accent families (docs cyan, governance indigo, chain teal, data silver)
+used by the evidence cards' left edge and kind badge, on the result and in
+the audit. Controls: `.cta` / `.send-orb` cyan gradient with one glow,
+`.btn-secondary` outlined pill lighting its edge, `.btn-action` small
+cyan-edged pill for in-place actions (Evidence · N, View excerpt),
+`.link-action` icon+text for Open original / Snapshot, `.chip` lighting on
+hover, a single `:focus-visible` cyan ring. Research path nodes glow in
+their state colour (`color-mix`); finding rows have a luminous state rail
+and a cyan-tinted hover. Tone class names (`tone-*`, `dot-*`) are
+unchanged, so every colour-meaning pin holds.
+
+**Snapshot availability (fixed 2026-09-21).** The surface builds
+`snapshotHref` from the detail payload's own job id; on a design fixture
+that job exists in no database, so the result rendered a Snapshot link
+that landed on 404 / "no snapshot". Both the result (`EvidenceCardView`)
+and the audit now render the action only as `card.snapshotHref && jobId`
+— the route's job is the authority. Real captures work end-to-end
+(`/api/research-jobs/<job>/snapshots/<evidence>` 200; the page renders the
+extracted text). Pinned in `tests/ui-source-snapshot.test.ts`.
 
 **The result (V5, 2026-09-20, pending Founder visual review)**: five
 areas and a door, all derived in `result-surface.ts`. (1) The executive

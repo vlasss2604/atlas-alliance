@@ -18,6 +18,7 @@ import {
   type ResultSurface,
 } from "../result-surface";
 import { canonicalDocumentKey, type JobState, type VerdictTone } from "../research-model";
+import { CalendarIcon, ChevronDownIcon, ChevronIcon, EvidenceIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
 import { OutcomeBadge } from "./verdict-badge";
 
 // THE COMPLETED RESEARCH V5 — ONE SURFACE, FIVE AREAS AND A DOOR.
@@ -82,14 +83,14 @@ export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; j
     <article className="flex flex-col gap-8 sm:gap-10" data-testid="research-result">
       <AnswerPanel surface={surface} detail={detail} projectName={projectName} />
       <ResearchPath chain={surface.chain} noun={noun} />
-      <FindingsTable rows={surface.table} />
-      <SourcesSection cards={surface.keyEvidence} />
+      <FindingsTable rows={surface.table} jobId={jobId} />
+      <SourcesSection cards={surface.keyEvidence} jobId={jobId} />
       <UnclearSection groups={surface.boundary} />
       {jobId && (
         <p className="pb-2">
           <Link href={`/research/${jobId}/audit`} className="btn-secondary px-5 py-3 text-[0.98rem]" data-testid="audit-entry">
             Open full audit
-            <Chevron />
+            <ChevronIcon size={14} />
           </Link>
         </p>
       )}
@@ -138,7 +139,7 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
       {stats.length > 0 && (
         <div className="stats mt-7" data-testid="answer-stats">
           {stats.map((s) => (
-            <div key={s.label} className="stat">
+            <div key={s.label} className={`stat ${s.label === "verified" ? "stat-verified" : ""}`}>
               <span className="stat-n">{s.n}</span>
               <span className="stat-l">{s.label}</span>
             </div>
@@ -257,7 +258,7 @@ function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: stri
 // evidence a tap away in place. The count strip in the header says at a
 // glance how much of the story is settled — counted over every check,
 // folded supporting checks included, the same set the figures above use.
-function FindingsTable({ rows: all }: { rows: readonly ResearchTableRow[] }) {
+function FindingsTable({ rows: all, jobId }: { rows: readonly ResearchTableRow[]; jobId: string | null }) {
   const rows = tableRows(all);
   if (rows.length === 0) return null;
   const counts = COUNT_ORDER.map((status) => ({ status, n: all.filter((r) => r.status === status).length })).filter((c) => c.n > 0);
@@ -276,7 +277,7 @@ function FindingsTable({ rows: all }: { rows: readonly ResearchTableRow[] }) {
       </div>
       <ol className="flex flex-col">
         {rows.map((r) => (
-          <FindingRow key={r.component} row={r} />
+          <FindingRow key={r.component} row={r} jobId={jobId} />
         ))}
       </ol>
     </section>
@@ -297,7 +298,7 @@ function stateSentence(row: ResearchTableRow): string {
   return `${word} from ${kind}`;
 }
 
-function FindingRow({ row }: { row: ResearchTableRow }) {
+function FindingRow({ row, jobId }: { row: ResearchTableRow; jobId: string | null }) {
   const [open, setOpen] = useState(false);
   const color = TONE_COLORS[row.tone];
   const toggleLabel = open ? "Hide evidence" : `Evidence · ${row.evidence.length}`;
@@ -331,26 +332,35 @@ function FindingRow({ row }: { row: ResearchTableRow }) {
           <span className="state-word" data-testid="row-cue">
             {stateSentence(row)}
           </span>
-          <span data-testid="row-source" className="min-w-0">
-            {row.source ? <span>{row.source.name}</span> : <span>No qualifying source</span>}
+          <span data-testid="row-source" className="byline min-w-0">
+            {row.source ? (
+              <>
+                <SourceKindIcon label={row.source.kind} size={13} className="shrink-0 opacity-80" />
+                <span>{row.source.name}</span>
+              </>
+            ) : (
+              <span>No qualifying source</span>
+            )}
           </span>
-          <span data-testid="row-date">{row.date ? row.date.value : ""}</span>
+          {row.date && (
+            <span className="byline" data-testid="row-date">
+              <CalendarIcon size={13} className="shrink-0 opacity-70" />
+              {row.date.value}
+            </span>
+          )}
+          {!row.date && <span data-testid="row-date" />}
           {row.evidence.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className="font-medium text-[var(--atlas-cyan-strong)] hover:underline"
-              data-testid="row-evidence-toggle"
-            >
+            <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="btn-action" data-testid="row-evidence-toggle">
+              <EvidenceIcon size={13} />
               {toggleLabel}
+              <ChevronDownIcon size={12} className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`} />
             </button>
           )}
         </p>
         {open && (
-          <div className="mt-4 flex flex-col gap-4 border-t border-[var(--hairline)] pt-4" data-testid="row-evidence">
+          <div className="expand-enter mt-4 flex flex-col gap-4 border-t border-[var(--hairline)] pt-4" data-testid="row-evidence">
             {row.evidence.map((c) => (
-              <EvidenceCardView key={c.id} card={c} open compact />
+              <EvidenceCardView key={c.id} card={c} jobId={jobId} open compact />
             ))}
           </div>
         )}
@@ -373,7 +383,7 @@ function joinPhrases(items: readonly string[]): string {
 // what it establishes, and the excerpt, the original and the snapshot one
 // tap away. Two-up on a desk, stacked on a handset. A contradicting card
 // carries a red edge — the one thing a reader must not miss.
-function SourcesSection({ cards }: { cards: readonly EvidenceCard[] }) {
+function SourcesSection({ cards, jobId }: { cards: readonly EvidenceCard[]; jobId: string | null }) {
   if (cards.length === 0) return null;
   return (
     <section data-testid="sources">
@@ -385,8 +395,12 @@ function SourcesSection({ cards }: { cards: readonly EvidenceCard[] }) {
       </div>
       <ul className="evidence-grid mt-3">
         {cards.map((c, i) => (
-          <li key={c.id} className={`evidence-card ${cards.length % 2 === 1 && i === cards.length - 1 ? "evidence-card-wide" : ""}`} data-relation={c.relation}>
-            <EvidenceCardView card={c} />
+          <li
+            key={c.id}
+            className={`evidence-card kind-${sourceKindFamily(c.sourceClass)} ${cards.length % 2 === 1 && i === cards.length - 1 ? "evidence-card-wide" : ""}`}
+            data-relation={c.relation}
+          >
+            <EvidenceCardView card={c} jobId={jobId} />
           </li>
         ))}
       </ul>
@@ -399,16 +413,37 @@ function SourcesSection({ cards }: { cards: readonly EvidenceCard[] }) {
 // the exact excerpt (a chain reading stays translated), what it does not
 // prove only where the extractor recorded a specific limit, and the two
 // ways to read it in full. `compact` is the in-row form under a finding.
-export function EvidenceCardView({ card, open: openByDefault = false, compact = false }: { card: EvidenceCard; open?: boolean; compact?: boolean }) {
+//
+// SNAPSHOT IS OFFERED ONLY WHERE A ROUTE CAN SERVE IT. The surface builds
+// the snapshot href from the detail payload's own job id, which is right on
+// a real result and a dead end on a design fixture (a job that exists in
+// no database). The route's `jobId` is the authority, exactly as in the
+// audit: no route, no snapshot action — a truthful absence, never a click
+// that lands on "no snapshot".
+export function EvidenceCardView({
+  card,
+  jobId,
+  open: openByDefault = false,
+  compact = false,
+}: {
+  card: EvidenceCard;
+  jobId: string | null;
+  open?: boolean;
+  compact?: boolean;
+}) {
   const [open, setOpen] = useState(openByDefault);
   const contradicts = card.relation === "CONTRADICTS";
   return (
     <div data-testid="evidence-card" data-evidence-id={card.id} data-relation={card.relation} data-open={open ? "true" : "false"}>
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[0.88rem] text-[var(--atlas-text-dim)]">
-        <span className={`kind ${card.onchain ? "kind-onchain" : ""}`}>{card.sourceClass}</span>
+        <span className={`kind kind-${sourceKindFamily(card.sourceClass)}`}>
+          <SourceKindIcon label={card.sourceClass} size={13} />
+          {card.sourceClass}
+        </span>
         {card.onchain?.network && <span>{card.onchain.network}</span>}
         {card.date && (
-          <span>
+          <span className="byline">
+            <CalendarIcon size={13} className="opacity-70" />
             {card.date.label} {card.date.value}
           </span>
         )}
@@ -424,25 +459,28 @@ export function EvidenceCardView({ card, open: openByDefault = false, compact = 
       <p className="mt-1 text-[1rem] leading-[1.5] text-[var(--atlas-text)]/90" data-testid="evidence-tells">
         {sourceSentence(card)}
       </p>
-      <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.88rem] font-medium">
+      <p className="mt-3 flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
         {!card.onchain && (
-          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="text-[var(--atlas-cyan-strong)] hover:underline" data-testid="evidence-details-toggle">
+          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="btn-action" data-testid="evidence-details-toggle">
+            <QuoteIcon size={13} />
             {open ? "Hide excerpt" : "View excerpt"}
           </button>
         )}
         {card.openable && (
-          <a href={card.url} target="_blank" rel="noopener noreferrer" className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-text)] hover:underline" data-testid="evidence-open-original">
+          <a href={card.url} target="_blank" rel="noopener noreferrer" className="link-action" data-testid="evidence-open-original">
+            <ExternalIcon size={14} />
             Open original
           </a>
         )}
-        {card.snapshotHref && (
-          <Link href={card.snapshotHref} className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-text)] hover:underline" data-testid="evidence-snapshot">
+        {card.snapshotHref && jobId && (
+          <Link href={card.snapshotHref} className="link-action" data-testid="evidence-snapshot">
+            <SnapshotIcon size={14} />
             Snapshot
           </Link>
         )}
       </p>
       {open && !card.onchain && (
-        <div className="mt-3 flex flex-col gap-3" data-testid="evidence-details">
+        <div className="expand-enter mt-3 flex flex-col gap-3" data-testid="evidence-details">
           <blockquote className="border-l-2 border-[var(--hairline-strong)] pl-4 text-[1rem] leading-[1.55] text-[var(--atlas-text)]/85" data-testid="evidence-excerpt">
             {card.excerpt}
           </blockquote>
@@ -509,13 +547,5 @@ function UnclearSection({ groups }: { groups: readonly BoundaryGroup[] }) {
         ))}
       </div>
     </section>
-  );
-}
-
-function Chevron() {
-  return (
-    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden className="shrink-0">
-      <path d="m6 3 5 5-5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }

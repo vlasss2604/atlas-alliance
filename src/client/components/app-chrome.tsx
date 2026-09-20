@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 
 import { useApp } from "../app-context";
 import { AtlasMark } from "./atlas-header";
+import { AnalyticsIcon, AskIcon, ProfileIcon, ResearchIcon } from "./icons";
 
 // THE APP SHELL V4 — FIVE PLACES, HOME IN THE MIDDLE.
 //
@@ -34,12 +35,13 @@ export function AppHeader() {
   const pathname = usePathname();
   const { me } = useApp();
   const unread = (me?.unreadCount ?? 0) > 0;
-  const item = (key: keyof typeof ITEMS, extra = "") => (
+  const item = (key: keyof typeof ITEMS, icon: React.ReactNode, extra = "") => (
     <Link
       href={ITEMS[key].href}
       className={`app-nav-item ${isActive(pathname, ITEMS[key].href) ? "app-nav-item-active" : ""} ${extra}`}
       data-testid={`nav-${key}`}
     >
+      {icon}
       {ITEMS[key].label}
     </Link>
   );
@@ -69,8 +71,8 @@ export function AppHeader() {
       </Link>
 
       <nav className="app-nav hidden sm:flex" aria-label="Primary" data-testid="app-nav">
-        {item("ask")}
-        {item("research", unread ? "unread-dot" : "")}
+        {item("ask", <AskIcon size={16} />)}
+        {item("research", <ResearchIcon size={16} />, unread ? "unread-dot" : "")}
         <Link
           href="/home"
           className={`home-orb mx-2 ${pathname === "/home" ? "home-orb-active" : ""}`}
@@ -79,7 +81,7 @@ export function AppHeader() {
         >
           <AtlasMark size={42} />
         </Link>
-        {item("analytics")}
+        {item("analytics", <AnalyticsIcon size={16} />)}
       </nav>
 
       <Link
@@ -88,7 +90,7 @@ export function AppHeader() {
         aria-label="Profile"
         data-testid="nav-profile"
       >
-        <UserIcon />
+        <ProfileIcon size={16} />
         <span>Profile</span>
       </Link>
     </header>
@@ -111,8 +113,8 @@ export function AtlasDock() {
   );
   return (
     <nav className="dock sm:hidden" aria-label="Primary" data-testid="app-dock">
-      {item("ask", <AskIcon />)}
-      {item("research", <HistoryIcon />, unread ? "unread-dot" : "")}
+      {item("ask", <AskIcon size={22} />)}
+      {item("research", <ResearchIcon size={22} />, unread ? "unread-dot" : "")}
       <Link
         href="/home"
         className={`dock-home ${pathname === "/home" ? "home-orb-active" : ""}`}
@@ -121,43 +123,8 @@ export function AtlasDock() {
       >
         <AtlasMark size={56} />
       </Link>
-      {item("analytics", <ChartIcon />)}
-      {item("profile", <UserIcon />)}
+      {item("analytics", <AnalyticsIcon size={22} />)}
+      {item("profile", <ProfileIcon size={22} />)}
     </nav>
-  );
-}
-
-const stroke = { stroke: "currentColor", strokeWidth: 1.6, fill: "none" } as const;
-
-function AskIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden>
-      <circle cx="9" cy="9" r="5.5" {...stroke} />
-      <path d="m13.2 13.2 3.3 3.3" {...stroke} strokeLinecap="round" />
-    </svg>
-  );
-}
-function HistoryIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden>
-      <rect x="4.5" y="3" width="11" height="14" rx="2.5" {...stroke} />
-      <path d="M7.5 7.5h5M7.5 10.5h5M7.5 13.5h3" {...stroke} strokeLinecap="round" />
-    </svg>
-  );
-}
-function ChartIcon() {
-  return (
-    <svg width="22" height="22" viewBox="0 0 20 20" aria-hidden>
-      <path d="M3.5 16.5h13" {...stroke} strokeLinecap="round" />
-      <path d="M5.5 13.5v-4M9.5 13.5V6M13.5 13.5V9.5" {...stroke} strokeLinecap="round" />
-    </svg>
-  );
-}
-function UserIcon() {
-  return (
-    <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden>
-      <circle cx="10" cy="7.2" r="3" {...stroke} />
-      <path d="M4.4 16.4a5.8 5.8 0 0 1 11.2 0" {...stroke} strokeLinecap="round" />
-    </svg>
   );
 }

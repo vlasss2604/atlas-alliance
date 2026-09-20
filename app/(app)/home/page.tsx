@@ -37,7 +37,7 @@ export default function HomePage() {
     <main className="enter flex flex-col gap-10 pt-4 sm:gap-12 sm:pt-6">
       {/* THE BRAND, ONCE, IN THE MIDDLE — and one line on what it does. */}
       <section className="flex flex-col items-center text-center" data-testid="home-brand">
-        <AtlasMark size={64} />
+        <AtlasMark size={72} hero />
         <p className="wordmark mt-4 text-[1.05rem] leading-none text-[var(--atlas-text-strong)] sm:text-[1.2rem]">
           ATLAS <span className="text-[var(--atlas-cyan)]">PROOF</span>
         </p>
