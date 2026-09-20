@@ -7,19 +7,23 @@ import type { ResearchJobDetail } from "../api";
 import {
   buildResultSurface,
   sourceSentence,
+  statusTone,
   tableRows,
   type BoundaryGroup,
   type EvidenceCard,
   type ResearchTableRow,
+  type ResultStatus,
   type ResultSurface,
 } from "../result-surface";
 import { type JobState, type VerdictTone } from "../research-model";
 import { OutcomeBadge } from "./verdict-badge";
 
-// THE COMPLETED RESEARCH — ONE SURFACE, FOUR SECTIONS AND A DOOR.
+// THE COMPLETED RESEARCH V4 — ONE SURFACE, FOUR SECTIONS AND A DOOR.
 //
-//   1. QUESTION + ANSWER      the project, the question, 2–4 sentences
-//   2. WHAT ATLAS FOUND       one row per question the research turns on
+//   1. QUESTION + ANSWER      the project, the question, the state, and
+//                             2–4 sentences — the first one carries it
+//   2. WHAT ATLAS CHECKED     one row per question the research turns on,
+//                             with a count strip: confirmed · partly · unclear
 //   3. SOURCES                the 3–5 sources the answer rests on
 //   4. WHAT REMAINS UNCLEAR   only where the research boundary adds
 //                             something the rows cannot say
@@ -27,18 +31,28 @@ import { OutcomeBadge } from "./verdict-badge";
 //
 // THE USER READS THE PROJECT, NOT THE ENGINE. Every label is a question a
 // reader would ask; every cell is a fact in plain words; a status is a
-// small cue beside the fact and never the fact itself. Every value
+// coloured spine beside the fact and never the fact itself. Every value
 // arrives derived in `result-surface.ts` from persisted rows: nothing is
 // decided, written or chosen here. PAGE <= PERSISTED VERIFIED RECORD.
 
 const TONE_COLORS: Record<VerdictTone, string> = {
-  supported: "#5eead4",
-  partial: "#c4b5fd",
-  negative: "#fca5a5",
-  insufficient: "#fcd34d",
-  fault: "#cbd5e1",
-  neutral: "#cbd5e1",
+  supported: "var(--atlas-green)",
+  partial: "var(--atlas-amber)",
+  negative: "var(--atlas-red)",
+  insufficient: "var(--atlas-slate)",
+  fault: "var(--atlas-slate)",
+  neutral: "var(--atlas-slate)",
 };
+
+// The count strip's words — a reader's, not a status vocabulary. The
+// canonical status label stays on each row's cue as its title.
+const COUNT_WORDS: Record<ResultStatus, string> = {
+  CONFIRMED: "confirmed",
+  PARTIAL: "partly",
+  NOT_ESTABLISHED: "unclear",
+  CONTRADICTED: "contradicted",
+};
+const COUNT_ORDER: ResultStatus[] = ["CONFIRMED", "PARTIAL", "CONTRADICTED", "NOT_ESTABLISHED"];
 
 export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; jobId: string | null }) {
   const surface = buildResultSurface(detail);
@@ -53,7 +67,7 @@ export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; j
         <p className="pb-2">
           <Link
             href={`/research/${jobId}/audit`}
-            className="inline-flex items-center gap-2 text-[1rem] font-medium text-[var(--atlas-cyan)] hover:underline"
+            className="btn-secondary px-5 py-3 text-[0.98rem]"
             data-testid="audit-entry"
           >
             Open full audit
@@ -69,58 +83,76 @@ export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; j
 /* 1. QUESTION + ANSWER                                                */
 /* ------------------------------------------------------------------ */
 
-// THE ONE RAISED SURFACE ON THE PAGE. The question is the heading; the
-// answer is the largest running text on the screen; the status and the
-// dates are one quiet line beneath it — metadata, never the headline.
+// THE ONE RAISED SURFACE ON THE PAGE. The project is an identity line;
+// the question is the heading; the state is one badge beneath it; the
+// answer is the largest running text on the screen, its first sentence
+// carrying the weight; the dates are one quiet footnote — metadata,
+// never the headline.
 function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface; detail: ResearchJobDetail; projectName: string }) {
   const { job, proof } = detail;
+  const lead = surface.answer.sentences[0];
   return (
-    <section className="panel px-6 py-7 sm:px-9 sm:py-9" data-testid="answer-panel">
-      <p className="section-label">{projectName}</p>
-      <h1 className="mt-3 text-[1.4rem] font-semibold leading-[1.25] tracking-tight sm:text-[1.75rem]" data-testid="result-question">
+    <section className="panel px-5 py-6 sm:px-9 sm:py-9" data-testid="answer-panel">
+      <p className="text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">{projectName}</p>
+      <h1
+        className="display mt-2 text-[1.4rem] font-semibold leading-[1.2] text-[var(--atlas-text-strong)] sm:text-[1.9rem]"
+        data-testid="result-question"
+      >
         {job.originalQuestion}
       </h1>
-      <div className="mt-6 flex flex-col gap-3 text-[1.15rem] leading-[1.5] sm:text-[1.35rem] sm:leading-[1.45]" data-testid="answer-text">
+      <div className="mt-5 flex flex-wrap items-center gap-x-3 gap-y-2" data-testid="answer-state">
+        <OutcomeBadge job={{ state: job.state as JobState, verdict: proof?.verdict ?? null }} />
+      </div>
+      <div className="mt-5 flex flex-col gap-3 text-[1.15rem] leading-[1.5] sm:text-[1.25rem] sm:leading-[1.5]" data-testid="answer-text">
         {surface.answer.sentences.map((s) => (
-          <p key={s}>{s}</p>
+          <p key={s} className={s === lead ? "font-medium text-[var(--atlas-text-strong)]" : "text-[var(--atlas-text)]/90"}>
+            {s}
+          </p>
         ))}
       </div>
-      <p className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-2 border-t border-[var(--hairline)] pt-4 text-[0.88rem] text-[var(--atlas-text-dim)]" data-testid="answer-meta">
+      <p
+        className="mt-7 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-[var(--hairline)] pt-4 text-[0.88rem] text-[var(--atlas-text-dim)]"
+        data-testid="answer-meta"
+      >
         {surface.checkedOn && <span data-testid="answer-checked">Checked {surface.checkedOn}</span>}
         {surface.latestEvidence && (
           <span>
             Newest source {surface.latestEvidence.label.toLowerCase()} {surface.latestEvidence.value}
           </span>
         )}
-        <span className="ml-auto">
-          <OutcomeBadge job={{ state: job.state as JobState, verdict: proof?.verdict ?? null }} size="sm" />
-        </span>
       </p>
     </section>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/* 2. WHAT ATLAS FOUND                                                 */
+/* 2. WHAT ATLAS CHECKED                                               */
 /* ------------------------------------------------------------------ */
 
-// QUESTION · ANSWER · SOURCE · AS OF. The answer cell is the strongest
-// text in the row. The status is a dot in its gutter — a cue, not a word
-// the reader must decode: the sentence beside it already says what was
-// established and what was not.
+// ONE ROW PER QUESTION. The question is the strongest text in the row;
+// the answer beneath it is the fact; the status is the row's coloured
+// spine (titled with its word on the small cue) — a cue, not a word the
+// reader must decode. Source and date are one quiet line, with the
+// evidence a tap away in place. The count strip above says at a glance
+// how much of the story is settled.
 function FindingsTable({ rows: all }: { rows: readonly ResearchTableRow[] }) {
   const rows = tableRows(all);
   if (rows.length === 0) return null;
+  const counts = COUNT_ORDER.map((status) => ({ status, n: rows.filter((r) => r.status === status).length })).filter((c) => c.n > 0);
   return (
     <section data-testid="research-table">
-      <h2 className="section-label">What ATLAS found</h2>
-      <div className="mt-4 hidden grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)_minmax(0,0.75fr)_7rem] gap-x-6 border-b border-[var(--hairline)] pb-2 text-[0.78rem] uppercase tracking-[0.1em] text-[var(--atlas-text-dim)] sm:grid">
-        <span>Question</span>
-        <span>Answer</span>
-        <span>Source</span>
-        <span>As of</span>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6">
+        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">What ATLAS checked</h2>
+        <p className="counts" data-testid="research-counts">
+          {counts.map((c) => (
+            <span key={c.status}>
+              <span className="dot" style={{ background: TONE_COLORS[statusTone(c.status)] }} aria-hidden />
+              {c.n} {COUNT_WORDS[c.status]}
+            </span>
+          ))}
+        </p>
       </div>
-      <ol className="flex flex-col">
+      <ol className="mt-3 flex flex-col">
         {rows.map((r) => (
           <FindingRow key={r.component} row={r} />
         ))}
@@ -135,71 +167,57 @@ function FindingRow({ row }: { row: ResearchTableRow }) {
   const toggleLabel = open ? "Hide evidence" : `Evidence · ${row.evidence.length}`;
   return (
     <li
-      className="border-b border-[var(--hairline)] py-5 last:border-b-0"
+      className={`finding ${open ? "finding-open" : ""}`}
+      style={{ "--row-accent": color } as React.CSSProperties}
       data-testid="research-row"
       data-component={row.component}
       data-status={row.status}
       data-kind={row.kind}
       data-boundary={row.boundary?.kind ?? ""}
     >
-      <div className="grid grid-cols-1 gap-y-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)_minmax(0,0.75fr)_7rem] sm:gap-x-6">
-        <p className="text-[0.95rem] font-medium leading-snug text-[var(--atlas-text-dim)] sm:text-[var(--atlas-text)]/80" data-testid="row-label">
-          {row.label}
+      <p className="text-[1.05rem] font-semibold leading-snug text-[var(--atlas-text-strong)]" title={row.statusLabel} data-testid="row-label">
+        {/* The status cue: the row's coloured spine, with its word for a
+            screen reader. Optional reinforcement — remove it and the
+            sentence still says everything. */}
+        <span className="sr-only" data-testid="row-cue">
+          {row.statusLabel}:{" "}
+        </span>
+        {row.label}
+      </p>
+      <p className="mt-1.5 text-[1.02rem] leading-[1.5] text-[var(--atlas-text)]/90" data-testid="row-answer">
+        {row.established}
+      </p>
+      {row.restsOn.length > 0 && (
+        <p className="mt-1.5 text-[0.92rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="row-rests-on">
+          Also established: {joinPhrases(row.restsOn.map((d) => d.phrase))}.
         </p>
-        <div className="flex items-start gap-3">
-          {/* The status cue: a dot, titled with its word. Optional
-              reinforcement — remove it and the sentence still says
-              everything. */}
-          <span className="mt-[0.5rem] h-2 w-2 shrink-0 rounded-full" style={{ background: color }} title={row.statusLabel} aria-hidden data-testid="row-cue" />
-          <div className="min-w-0">
-            <p className="text-[1.05rem] leading-[1.45] text-[var(--atlas-text)] sm:text-[1.08rem]" data-testid="row-answer">
-              {row.established}
-            </p>
-            {row.restsOn.length > 0 && (
-              <p className="mt-1.5 text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="row-rests-on">
-                Also established: {joinPhrases(row.restsOn.map((d) => d.phrase))}.
-              </p>
-            )}
-            {row.evidence.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setOpen((v) => !v)}
-                aria-expanded={open}
-                className="mt-2 inline-flex items-center gap-1.5 text-[0.88rem] font-medium text-[var(--atlas-cyan)] hover:underline sm:hidden"
-                data-testid="row-evidence-toggle"
-              >
-                {toggleLabel}
-              </button>
-            )}
-          </div>
-        </div>
-        <p className="text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="row-source">
+      )}
+      <p className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.88rem] text-[var(--atlas-text-dim)]">
+        <span data-testid="row-source" className="min-w-0">
           {row.source ? (
             <>
-              <span className="text-[var(--atlas-text)]/85">{row.source.kind}</span>
-              <span className="block truncate">{row.source.name}</span>
+              <span className="text-[var(--atlas-text)]/80">{row.source.kind}</span>
+              <span> · {row.source.name}</span>
             </>
           ) : (
-            <span>No admitted source</span>
+            <span>No qualifying source</span>
           )}
-          {row.evidence.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setOpen((v) => !v)}
-              aria-expanded={open}
-              className="mt-1 hidden items-center gap-1.5 text-[0.88rem] font-medium text-[var(--atlas-cyan)] hover:underline sm:inline-flex"
-              data-testid="row-evidence-toggle-wide"
-            >
-              {toggleLabel}
-            </button>
-          )}
-        </p>
-        <p className="text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="row-date">
-          {row.date ? row.date.value : ""}
-        </p>
-      </div>
+        </span>
+        <span data-testid="row-date">{row.date ? row.date.value : ""}</span>
+        {row.evidence.length > 0 && (
+          <button
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="font-medium text-[var(--atlas-cyan-strong)] hover:underline"
+            data-testid="row-evidence-toggle"
+          >
+            {toggleLabel}
+          </button>
+        )}
+      </p>
       {open && (
-        <div className="mt-4 flex flex-col gap-4 sm:pl-[21.5%]" data-testid="row-evidence">
+        <div className="mt-4 flex flex-col gap-4" data-testid="row-evidence">
           {row.evidence.map((c) => (
             <EvidenceCardView key={c.id} card={c} open />
           ))}
@@ -225,10 +243,10 @@ function SourcesSection({ cards }: { cards: readonly EvidenceCard[] }) {
   if (cards.length === 0) return null;
   return (
     <section data-testid="sources">
-      <h2 className="section-label">Sources</h2>
-      <ul className="mt-2 flex flex-col">
+      <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Sources</h2>
+      <ul className="mt-1 flex flex-col">
         {cards.map((c) => (
-          <li key={c.id} className="border-b border-[var(--hairline)] py-5 last:border-b-0">
+          <li key={c.id} className="border-b border-[var(--hairline)] py-4 last:border-b-0">
             <EvidenceCardView card={c} />
           </li>
         ))}
@@ -248,7 +266,7 @@ export function EvidenceCardView({ card, open: openByDefault = false }: { card: 
   return (
     <div data-testid="evidence-card" data-evidence-id={card.id} data-relation={card.relation} data-open={open ? "true" : "false"}>
       <p className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-[1rem] font-medium text-[var(--atlas-text)]" data-testid="evidence-source">
+        <span className="text-[1rem] font-semibold text-[var(--atlas-text-strong)]" data-testid="evidence-source">
           {card.sourceName}
         </span>
         <span className="text-[0.88rem] text-[var(--atlas-text-dim)]">
@@ -257,34 +275,34 @@ export function EvidenceCardView({ card, open: openByDefault = false }: { card: 
           {card.date ? ` · ${card.date.label} ${card.date.value}` : ""}
         </span>
         {contradicts && (
-          <span className="text-[0.8rem] font-medium" style={{ color: TONE_COLORS.negative }}>
+          <span className="text-[0.85rem] font-semibold" style={{ color: TONE_COLORS.negative }}>
             Contradicts
           </span>
         )}
       </p>
-      <p className="mt-1.5 text-[1rem] leading-[1.5]" data-testid="evidence-tells">
+      <p className="mt-1.5 text-[1rem] leading-[1.5] text-[var(--atlas-text)]/90" data-testid="evidence-tells">
         {sourceSentence(card)}
       </p>
-      <p className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[0.88rem] font-medium">
+      <p className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.88rem] font-medium">
         {!card.onchain && (
-          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="text-[var(--atlas-cyan)] hover:underline" data-testid="evidence-details-toggle">
+          <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="text-[var(--atlas-cyan-strong)] hover:underline" data-testid="evidence-details-toggle">
             {open ? "Hide excerpt" : "View excerpt"}
           </button>
         )}
         {card.openable && (
-          <a href={card.url} target="_blank" rel="noopener noreferrer" className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)] hover:underline" data-testid="evidence-open-original">
+          <a href={card.url} target="_blank" rel="noopener noreferrer" className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-text)] hover:underline" data-testid="evidence-open-original">
             Open original
           </a>
         )}
         {card.snapshotHref && (
-          <Link href={card.snapshotHref} className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)] hover:underline" data-testid="evidence-snapshot">
+          <Link href={card.snapshotHref} className="text-[var(--atlas-text-dim)] hover:text-[var(--atlas-text)] hover:underline" data-testid="evidence-snapshot">
             Snapshot
           </Link>
         )}
       </p>
       {open && !card.onchain && (
         <div className="mt-3 flex flex-col gap-3" data-testid="evidence-details">
-          <blockquote className="border-l-2 border-[var(--hairline-strong)] pl-4 text-[1rem] leading-[1.55] text-[var(--atlas-text)]/90" data-testid="evidence-excerpt">
+          <blockquote className="border-l-2 border-[var(--hairline-strong)] pl-4 text-[1rem] leading-[1.55] text-[var(--atlas-text)]/85" data-testid="evidence-excerpt">
             {card.excerpt}
           </blockquote>
           {card.doesNotProve && (
@@ -317,11 +335,17 @@ function UnclearSection({ groups }: { groups: readonly BoundaryGroup[] }) {
   if (groups.length === 0) return null;
   return (
     <section data-testid="unclear-section">
-      <h2 className="section-label">What remains unclear</h2>
-      <div className="mt-2 flex flex-col">
+      <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">What remains unclear</h2>
+      <div className="mt-3 flex flex-col gap-3">
         {groups.map((g) => (
-          <div key={g.kind} className="border-b border-[var(--hairline)] py-5 last:border-b-0" data-testid="unclear-group" data-kind={g.kind}>
-            <p className="text-[1.02rem] font-medium leading-snug">{UNCLEAR_HEADINGS[g.kind]}</p>
+          <div
+            key={g.kind}
+            className="panel px-5 py-4 sm:px-6 sm:py-5"
+            style={{ borderColor: "rgba(226, 179, 79, 0.28)" }}
+            data-testid="unclear-group"
+            data-kind={g.kind}
+          >
+            <p className="text-[1.02rem] font-semibold leading-snug text-[var(--atlas-text-strong)]">{UNCLEAR_HEADINGS[g.kind]}</p>
             <p className="mt-1.5 text-[1rem] leading-[1.5] text-[var(--atlas-text)]/85" data-testid="unclear-copy">
               {g.kind === "TECHNICAL" && g.remainingPaths !== null
                 ? `Research reached its configured limit before ${g.remainingPaths} known relevant ${g.remainingPaths === 1 ? "source" : "sources"} could be checked.`

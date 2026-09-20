@@ -34,8 +34,8 @@ export default function ResearchListPage() {
   return (
     <main className="enter flex flex-col gap-8 pt-4">
       <div>
-        <h1 className="text-[1.6rem] font-semibold tracking-tight sm:text-[1.9rem]">Research</h1>
-        <p className="mt-1.5 text-[1rem] text-[var(--atlas-text-dim)]">Everything ATLAS has verified for you, grouped by project.</p>
+        <h1 className="display text-[1.7rem] font-semibold text-[var(--atlas-text-strong)] sm:text-[2rem]">Research</h1>
+        <p className="mt-1.5 text-[1.02rem] text-[var(--atlas-text-dim)]">Everything ATLAS has verified for you, grouped by project.</p>
       </div>
 
       {jobs === null && <p className="text-[0.95rem] text-[var(--atlas-text-dim)]">Loading…</p>}
@@ -43,7 +43,7 @@ export default function ResearchListPage() {
 
       {running.length > 0 && (
         <section>
-          <h2 className="section-label">In progress</h2>
+          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">In progress</h2>
           <ul className="mt-2 flex flex-col">
             {running.map((job) => (
               <RecentProofCard key={job.id} job={job} />
@@ -54,7 +54,7 @@ export default function ResearchListPage() {
 
       {groups.length > 0 && (
         <section>
-          <h2 className="section-label">Projects researched</h2>
+          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Projects researched</h2>
           <ul className="mt-2 flex flex-col">
             {groups.map((group) => (
               <ResearchGroupCard key={group.key} group={group} />

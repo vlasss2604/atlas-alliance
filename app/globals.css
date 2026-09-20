@@ -1,44 +1,53 @@
 @import "tailwindcss";
 
-/* ATLAS PROOF — визуальный язык и Motion System (phase-2-plan §5).
-   Тёмная research-intelligence атмосфера: near-black/navy фон, cyan/teal
-   акцент только для активного элемента и primary CTA, glass-панели,
-   pill-кнопки. Единый источник токенов — здесь.
-
-   UI V1 extends this with the premium surface layer: luminous hairline
-   borders, layered glass, the evidence-network field and the verdict tone
-   scale. Everything below is presentation only — no rule here decides
-   anything about research. */
+/* ATLAS PROOF — VISUAL SYSTEM V4 ("GRAPHITE NAVY").
+   One calm, deep graphite-navy ground; solid layered surfaces instead of
+   glass; a single brand accent (the ATLAS cyan, desaturated one step so it
+   reads premium rather than neon) used only for the active element, the
+   primary action and the brand mark; four state colours that mean one
+   thing each. No glows, no gradients washing over content, nothing that
+   matters below 0.85rem. Everything here is presentation — no rule in
+   this file decides anything about research. */
 
 :root {
-  /* Палитра */
-  --atlas-bg: #04070d; /* near-black / navy-black */
-  --atlas-bg-raised: #0a1220;
-  --atlas-glass: rgba(16, 28, 44, 0.6);
-  --atlas-border: rgba(94, 234, 212, 0.14); /* тонкий светящийся border */
-  --atlas-text: #e6edf5;
-  --atlas-text-dim: #8b9bb0;
-  --atlas-cyan: #22d3ee; /* активный элемент / primary CTA */
-  --atlas-teal: #14b8a6;
-  --atlas-green: #34d399; /* supported */
-  --atlas-amber: #fbbf24; /* nuance */
-  --atlas-red: #f87171; /* conflict */
+  /* Ground and surfaces — three depths, used consistently. */
+  --atlas-bg: #0b0f16;
+  --atlas-bg-top: #101620;
+  --atlas-bg-raised: #131a25;
+  --surface-1: #121824;
+  --surface-2: #171f2c;
+  --surface-3: #1d2736;
+  --atlas-glass: var(--surface-1);
+  --hairline: rgba(255, 255, 255, 0.075);
+  --hairline-strong: rgba(255, 255, 255, 0.16);
+  --atlas-border: var(--hairline);
 
-  /* UI V1 surface scale — three depths, used consistently. */
-  --surface-1: rgba(12, 22, 38, 0.82);
-  --surface-2: rgba(16, 29, 48, 0.9);
-  --surface-3: rgba(21, 37, 60, 0.85);
-  --hairline: rgba(148, 190, 220, 0.13);
-  --hairline-strong: rgba(120, 220, 245, 0.3);
-  --violet: #a78bfa;
-  --violet-dim: rgba(167, 139, 250, 0.16);
-  --cyan-dim: rgba(34, 211, 238, 0.14);
-  --amber-dim: rgba(251, 191, 36, 0.14);
-  --green-dim: rgba(52, 211, 153, 0.14);
-  --red-dim: rgba(248, 113, 113, 0.14);
+  /* Text hierarchy — headline, body, muted, faint. */
+  --atlas-text-strong: #ffffff;
+  --atlas-text: #e8edf4;
+  --atlas-text-dim: #9aa5b6;
+  --atlas-text-faint: #6d7889;
 
-  /* Motion System: durations в канонных диапазонах (100–180/150–250/200–350),
-     навигации 500ms+ нет. */
+  /* Brand accent — one hue, three strengths. */
+  --atlas-cyan: #4fc7dc;
+  --atlas-cyan-strong: #93dfeb;
+  --atlas-teal: #3cb9ab;
+  --cyan-dim: rgba(79, 199, 220, 0.12);
+
+  /* State colours — colour is meaning, one each. */
+  --atlas-green: #4cc98f; /* confirmed / supported */
+  --atlas-amber: #e2b34f; /* partially confirmed */
+  --atlas-red: #ea6f6f; /* contradicted / not supported */
+  --atlas-slate: #8e99ab; /* not established / insufficient evidence */
+  --violet: var(--atlas-amber);
+  --violet-dim: rgba(226, 179, 79, 0.14);
+  --green-dim: rgba(76, 201, 143, 0.14);
+  --amber-dim: rgba(226, 179, 79, 0.14);
+  --red-dim: rgba(234, 111, 111, 0.14);
+  --slate-dim: rgba(142, 153, 171, 0.14);
+
+  /* Motion System: durations in the canonical ranges (100–180 / 150–250 /
+     200–350); no 500ms+ navigation. */
   --motion-micro: 140ms;
   --motion-transition: 200ms;
   --motion-large: 280ms;
@@ -62,7 +71,7 @@ body {
   background: var(--atlas-bg);
   color: var(--atlas-text);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
-  /* Telegram viewport: динамическая высота, без прыжков клавиатуры */
+  /* Telegram viewport: dynamic height, no keyboard jumps */
   min-height: 100dvh;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
@@ -71,136 +80,44 @@ body {
 }
 
 /* ---------------------------------------------------------------- *
- * ATMOSPHERE — the evidence-network field.
- * Two wide, very low-opacity light sources (violet left, cyan right)
- * plus a faint grid. Fixed, non-interactive, behind everything.
+ * GROUND — one quiet vertical light, nothing else.
+ * The V1 evidence-network field (two colour blobs, a grid and arcs) is
+ * gone: it was the visual noise. What remains is a slightly lifted top
+ * so the page has depth without decoration. Fixed, non-interactive.
  * ---------------------------------------------------------------- */
 .atlas-field {
   position: fixed;
   inset: 0;
   z-index: 0;
   pointer-events: none;
-  overflow: hidden;
+  background: linear-gradient(180deg, var(--atlas-bg-top) 0%, var(--atlas-bg) 42vh);
 }
-.atlas-field::before,
-.atlas-field::after {
-  content: "";
-  position: absolute;
-  width: 78vmax;
-  height: 78vmax;
-  border-radius: 50%;
-  /* No filter: blur() here. The gradients are already soft, and a
-     full-viewport blur filter forces an expensive off-screen pass on every
-     paint — it made scrolling visibly stutter. */
-  opacity: 0.9;
-}
-.atlas-field::before {
-  top: -34vmax;
-  left: -30vmax;
-  background: radial-gradient(
-    circle at center,
-    rgba(139, 92, 246, 0.24) 0%,
-    rgba(76, 29, 149, 0.1) 42%,
-    transparent 68%
-  );
-}
-.atlas-field::after {
-  top: -30vmax;
-  right: -32vmax;
-  background: radial-gradient(
-    circle at center,
-    rgba(34, 211, 238, 0.22) 0%,
-    rgba(14, 116, 144, 0.09) 44%,
-    transparent 70%
-  );
-}
-.atlas-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgba(120, 190, 220, 0.045) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(120, 190, 220, 0.045) 1px, transparent 1px);
-  background-size: 64px 64px;
-  mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, #000 20%, transparent 78%);
-  -webkit-mask-image: radial-gradient(ellipse 90% 55% at 50% 0%, #000 20%, transparent 78%);
-}
-/* The evidence-network filaments: a few long, very faint arcs sweeping in
-   from both edges. Drawn as an SVG so the curves stay smooth at any width,
-   and masked so they never compete with content in the middle. */
+.atlas-grid,
 .atlas-arcs {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  opacity: 0.55;
-  mask-image: linear-gradient(90deg, #000 0%, transparent 34%, transparent 66%, #000 100%);
-  -webkit-mask-image: linear-gradient(90deg, #000 0%, transparent 34%, transparent 66%, #000 100%);
+  display: none;
 }
 
 /* ---------------------------------------------------------------- *
- * GLASS
+ * SURFACES — solid, layered, no blur.
  * ---------------------------------------------------------------- */
-
-/* Glass-панель */
 .glass {
-  background: var(--atlas-glass);
-  border: 1px solid var(--atlas-border);
-  border-radius: 1.25rem; /* очень большие радиусы */
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 1.25rem;
 }
-
-/* UI V1 panel — layered glass with a luminous top hairline and depth.
-   The ::before is the light catching the top edge; the shadow is what
-   lifts the panel off the field. */
 .panel {
   position: relative;
-  border-radius: 1.1rem;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0) 42%),
-    var(--surface-1);
+  border-radius: 1.25rem;
+  background: var(--surface-1);
   border: 1px solid var(--hairline);
-  /* Deliberately NO backdrop-filter. What sits behind every panel is the
-     smooth gradient field, and blurring a gradient looks identical to a
-     translucent fill — while costing a full re-rasterisation of the
-     stacking context on every scroll frame. The one place it earns its
-     price is the fixed navbar, which really does pass over content. */
-  box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
-    0 18px 44px -24px rgba(0, 0, 0, 0.9);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset;
 }
 .panel-raised {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 38%),
-    var(--surface-2);
-  box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.05) inset,
-    0 26px 60px -28px rgba(0, 0, 0, 0.95);
+  background: var(--surface-2);
 }
-/* The hero composer: a cyan-lit edge, one step brighter than any other
-   panel, because it is the one thing the product asks you to do. */
 .panel-hero {
-  border-color: rgba(56, 189, 248, 0.26);
-  box-shadow:
-    0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
-    0 0 0 1px rgba(34, 211, 238, 0.05),
-    0 30px 70px -30px rgba(8, 47, 73, 0.9);
+  border-color: var(--hairline-strong);
 }
-.panel-hero::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  background: radial-gradient(
-    120% 90% at 50% -20%,
-    rgba(34, 211, 238, 0.1) 0%,
-    transparent 60%
-  );
-}
-
-/* A tone-coloured edge on a panel — the verdict's colour, restated once at
-   the boundary of the block it belongs to, rather than washed over it. */
 .tone-edge {
   overflow: hidden;
 }
@@ -212,36 +129,19 @@ body {
   left: 0;
   width: 3px;
   background: var(--edge, transparent);
-  box-shadow: 0 0 22px 0 var(--edge, transparent);
 }
 
-/* A row that behaves like a link: lifts and lights its edge on hover. */
+/* A row that behaves like a link. */
 .row-card {
   position: relative;
   border-radius: 1.15rem;
-  /* Opaque rather than blurred: a list can hold dozens of these, and one
-     backdrop-filter per row is what turns a scroll into a slideshow. */
-  background: linear-gradient(180deg, rgba(255,255,255,0.025), rgba(255,255,255,0)) , rgba(11, 21, 36, 0.82);
+  background: var(--surface-1);
   border: 1px solid var(--hairline);
   transition:
     transform var(--motion-micro) var(--ease-out),
     border-color var(--motion-transition) var(--ease-out),
     background-color var(--motion-transition) var(--ease-out);
 }
-/* Larger, calmer typographic scale on real desktops. The mobile scale is
-   right for a handset and slightly undersized on a 1400px screen. */
-@media (min-width: 1024px) {
-  .eyebrow {
-    font-size: 0.72rem;
-  }
-  .ladder-item {
-    margin-left: -0.65rem;
-    margin-right: -0.65rem;
-    padding-left: 0.65rem;
-    padding-right: 0.65rem;
-  }
-}
-
 .row-card:hover {
   border-color: var(--hairline-strong);
   background: var(--surface-2);
@@ -253,14 +153,11 @@ body {
 /* ---------------------------------------------------------------- *
  * TYPOGRAPHY
  * ---------------------------------------------------------------- */
-
-/* One quiet label colour. The cyan and violet variants are kept as names
-   for older surfaces but no longer carry a colour of their own: a label
-   is a label, and colour is reserved for navigation, action and status. */
-.eyebrow {
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
+.eyebrow,
+.section-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--atlas-text-dim);
 }
@@ -269,126 +166,115 @@ body {
   color: var(--atlas-text-dim);
 }
 .wordmark {
-  font-weight: 300;
-  letter-spacing: 0.34em;
+  font-weight: 500;
+  letter-spacing: 0.3em;
   text-transform: uppercase;
 }
 .text-gradient-cyan {
-  background: linear-gradient(100deg, #67e8f9 0%, #22d3ee 45%, #7dd3fc 100%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--atlas-cyan-strong);
+}
+.display {
+  letter-spacing: -0.022em;
 }
 
 /* ---------------------------------------------------------------- *
- * LOGO ORB
+ * THE ATLAS MARK — a solid disc, no halo.
  * ---------------------------------------------------------------- */
 .orb {
   position: relative;
   display: grid;
   place-items: center;
   border-radius: 9999px;
-  background:
-    radial-gradient(circle at 50% 34%, rgba(34, 211, 238, 0.16) 0%, transparent 62%),
-    rgba(6, 14, 26, 0.9);
-  border: 1px solid rgba(34, 211, 238, 0.45);
-  box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.08),
-    0 0 28px rgba(34, 211, 238, 0.32),
-    0 0 60px rgba(34, 211, 238, 0.12) inset;
+  background: var(--surface-3);
+  border: 1px solid var(--hairline-strong);
 }
 .orb-sm {
-  box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.06),
-    0 0 14px rgba(34, 211, 238, 0.26);
+  background: var(--surface-2);
 }
 
 /* ---------------------------------------------------------------- *
- * TONE PILLS — verdict / status. Colour is meaning, so each tone is
- * declared once and reused everywhere it appears.
+ * TONES — verdict / status. Declared once, reused everywhere.
+ * Readable size, sentence case: a state is a word, not a stamp.
  * ---------------------------------------------------------------- */
 .tone {
   display: inline-flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.45rem;
   border-radius: 9999px;
   border: 1px solid transparent;
-  padding: 0.3rem 0.72rem;
-  font-size: 0.6875rem;
+  padding: 0.38rem 0.85rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
+  letter-spacing: 0.005em;
   white-space: nowrap;
+  line-height: 1.1;
+}
+.tone::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+  flex: none;
 }
 .tone-supported {
-  color: #5eead4;
+  color: #7fe0b2;
   background: var(--green-dim);
-  border-color: rgba(45, 212, 191, 0.34);
+  border-color: rgba(76, 201, 143, 0.3);
 }
 .tone-partial {
-  color: #c4b5fd;
-  background: var(--violet-dim);
-  border-color: rgba(167, 139, 250, 0.34);
+  color: #efcb7a;
+  background: var(--amber-dim);
+  border-color: rgba(226, 179, 79, 0.32);
 }
 .tone-insufficient {
-  color: #fcd34d;
-  background: var(--amber-dim);
-  border-color: rgba(251, 191, 36, 0.36);
+  color: #b6c0cf;
+  background: var(--slate-dim);
+  border-color: rgba(142, 153, 171, 0.3);
 }
 .tone-negative {
-  color: #fca5a5;
+  color: #f4a0a0;
   background: var(--red-dim);
-  border-color: rgba(248, 113, 113, 0.36);
+  border-color: rgba(234, 111, 111, 0.32);
 }
-/* A PRODUCT FAULT, not a finding. Deliberately its own tone: a run that
-   broke says nothing about the project, and must never be mistaken for the
-   red of a NOT_SUPPORTED verdict or the amber of insufficient evidence. */
+/* A PRODUCT FAULT, not a finding: its own tone, never red or amber. */
 .tone-fault {
-  color: #cbd5e1;
+  color: #c9d2de;
   background: rgba(100, 116, 139, 0.16);
-  border-color: rgba(148, 163, 184, 0.4);
+  border-color: rgba(148, 163, 184, 0.35);
 }
-.dot-fault {
-  background: rgba(148, 163, 184, 0.75);
-}
-
 .tone-neutral {
   color: var(--atlas-text-dim);
-  background: rgba(148, 163, 184, 0.1);
-  border-color: rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.09);
+  border-color: rgba(148, 163, 184, 0.2);
 }
 
 .dot {
-  width: 0.5rem;
-  height: 0.5rem;
+  width: 0.55rem;
+  height: 0.55rem;
   border-radius: 9999px;
   flex: none;
 }
 .dot-supported {
-  background: #34d399;
-  box-shadow: 0 0 10px rgba(52, 211, 153, 0.8);
+  background: var(--atlas-green);
 }
 .dot-partial {
-  background: #a78bfa;
-  box-shadow: 0 0 10px rgba(167, 139, 250, 0.75);
+  background: var(--atlas-amber);
 }
 .dot-insufficient {
-  background: #fbbf24;
-  box-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+  background: var(--atlas-slate);
 }
 .dot-negative {
-  background: #f87171;
-  box-shadow: 0 0 10px rgba(248, 113, 113, 0.7);
+  background: var(--atlas-red);
 }
+.dot-fault,
 .dot-neutral {
-  background: rgba(148, 163, 184, 0.5);
+  background: rgba(148, 163, 184, 0.6);
 }
 
 /* ---------------------------------------------------------------- *
  * CONTROLS
  * ---------------------------------------------------------------- */
-
-/* Pill-кнопки. Только transform/opacity в анимации. */
 .pill {
   border-radius: 9999px;
   transition:
@@ -399,48 +285,70 @@ body {
 .pill:active {
   transform: scale(0.97);
 }
-
 .cta {
   background: var(--atlas-cyan);
-  color: #04222b;
+  color: #06222a;
   font-weight: 600;
+}
+.cta:hover:not(:disabled) {
+  background: var(--atlas-cyan-strong);
 }
 .cta:disabled {
   opacity: 0.45;
 }
+/* A secondary action: an outlined pill, never competing with the CTA. */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--hairline-strong);
+  background: transparent;
+  color: var(--atlas-text);
+  font-weight: 500;
+  transition:
+    background-color var(--motion-micro) var(--ease-out),
+    border-color var(--motion-micro) var(--ease-out),
+    transform var(--motion-micro) var(--ease-out);
+}
+.btn-secondary:hover {
+  background: var(--surface-2);
+}
+.btn-secondary:active {
+  transform: scale(0.98);
+}
 
-/* The composer's send control — a gradient ring, not a filled blob. */
+/* The composer's send control — a filled accent disc. */
 .send-orb {
   display: grid;
   place-items: center;
   border-radius: 9999px;
-  color: #e6f9ff;
-  background:
-    radial-gradient(circle at 30% 25%, rgba(34, 211, 238, 0.28), transparent 65%),
-    rgba(8, 20, 34, 0.85);
-  border: 1px solid rgba(34, 211, 238, 0.55);
-  box-shadow: 0 0 18px rgba(34, 211, 238, 0.28);
+  color: #06222a;
+  background: var(--atlas-cyan);
   transition:
     transform var(--motion-micro) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out),
+    background-color var(--motion-micro) var(--ease-out),
     opacity var(--motion-micro) var(--ease-out);
 }
 .send-orb:hover:not(:disabled) {
-  box-shadow: 0 0 26px rgba(34, 211, 238, 0.5);
+  background: var(--atlas-cyan-strong);
 }
 .send-orb:active:not(:disabled) {
   transform: scale(0.95);
 }
 .send-orb:disabled {
-  opacity: 0.4;
-  box-shadow: none;
+  opacity: 0.35;
+}
+.send-orb .pulse-dot {
+  background: #06222a;
 }
 
 .field {
   width: 100%;
-  background: rgba(6, 14, 25, 0.7);
-  border: 1px solid var(--hairline);
-  border-radius: 1.1rem;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 1.25rem;
   color: var(--atlas-text);
   outline: none;
   transition:
@@ -448,52 +356,45 @@ body {
     box-shadow var(--motion-transition) var(--ease-out);
 }
 .field::placeholder {
-  color: rgba(139, 155, 176, 0.75);
+  color: var(--atlas-text-faint);
 }
-.field:focus {
-  border-color: rgba(34, 211, 238, 0.5);
-  box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.1);
+.field:focus,
+.field:focus-within {
+  border-color: rgba(79, 199, 220, 0.6);
+  box-shadow: 0 0 0 3px var(--cyan-dim);
 }
 
-/* Example chips — one accent hue each, kept low-saturation. */
+/* Example chips — quiet pills a reader can tap. */
 .chip {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  border-radius: 1rem;
-  padding: 0.7rem 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  padding: 0.55rem 0.95rem;
   text-align: left;
-  font-size: 0.8125rem;
+  font-size: 0.9rem;
   line-height: 1.3;
   border: 1px solid var(--hairline);
   background: var(--surface-1);
-  color: var(--atlas-text);
+  color: var(--atlas-text-dim);
   transition:
     border-color var(--motion-transition) var(--ease-out),
     background-color var(--motion-transition) var(--ease-out),
+    color var(--motion-transition) var(--ease-out),
     transform var(--motion-micro) var(--ease-out);
 }
 .chip:hover {
   background: var(--surface-2);
   border-color: var(--hairline-strong);
+  color: var(--atlas-text);
 }
 .chip:active {
   transform: scale(0.985);
 }
-.chip-violet {
-  color: #ddd6fe;
-  border-color: rgba(167, 139, 250, 0.4);
-  background: linear-gradient(180deg, rgba(167,139,250,0.09), rgba(167,139,250,0.02)), var(--surface-1);
-}
-.chip-cyan {
-  color: #cffafe;
-  border-color: rgba(34, 211, 238, 0.4);
-  background: linear-gradient(180deg, rgba(34,211,238,0.09), rgba(34,211,238,0.02)), var(--surface-1);
-}
+.chip-violet,
+.chip-cyan,
 .chip-teal {
-  color: #ccfbf1;
-  border-color: rgba(45, 212, 191, 0.4);
-  background: linear-gradient(180deg, rgba(45,212,191,0.09), rgba(45,212,191,0.02)), var(--surface-1);
+  color: var(--atlas-text);
 }
 
 /* ---------------------------------------------------------------- *
@@ -522,14 +423,12 @@ body {
   width: 1.5rem;
   height: 1.5rem;
   border-radius: 9999px;
-  border: 1px solid var(--hairline);
-  background: rgba(8, 18, 32, 0.9);
-  font-size: 0.625rem;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  font-size: 0.7rem;
   color: var(--atlas-text-dim);
   flex: none;
 }
-/* The connector is drawn from the mark itself, so it can never drift out
-   of alignment with the row it belongs to. */
 .rail-item:not(:last-child) .rail-mark::after {
   content: "";
   position: absolute;
@@ -538,28 +437,22 @@ body {
   width: 1px;
   height: 0.85rem;
   transform: translateX(-50%);
-  background: linear-gradient(180deg, var(--hairline), transparent);
+  background: var(--hairline);
 }
 .rail-mark-done {
-  border-color: rgba(45, 212, 191, 0.45);
-  color: #5eead4;
-  background: rgba(13, 42, 45, 0.8);
+  border-color: rgba(76, 201, 143, 0.5);
+  color: #7fe0b2;
+  background: var(--green-dim);
 }
 .rail-mark-active {
-  border-color: rgba(34, 211, 238, 0.75);
-  color: #a5f3fc;
-  background: rgba(8, 38, 52, 0.9);
-  box-shadow: 0 0 16px rgba(34, 211, 238, 0.4);
+  border-color: rgba(79, 199, 220, 0.8);
+  color: var(--atlas-cyan-strong);
+  background: var(--cyan-dim);
 }
 
 /* ---------------------------------------------------------------- *
- * RESULT LADDER
- * ----------------------------------------------------------------
- * Rows separated by a hairline rather than boxed individually. Ten
- * boxed cards read as ten separate problems; ten hairline rows read
- * as one list, which is what they are. Weight is carried by the row
- * label and its state colour, not by a border per row.
- */
+ * RESULT LADDER (deep surfaces)
+ * ---------------------------------------------------------------- */
 .ladder-item {
   margin-left: -0.5rem;
   margin-right: -0.5rem;
@@ -578,48 +471,29 @@ body {
 .ladder-item:hover {
   background: rgba(255, 255, 255, 0.025);
 }
-/* The open row is the one the reader is working on, so it holds a
-   visible seat while it is open rather than merely pushing content.
-   The left accent — the row's own state colour, passed in as
-   --row-accent — is what makes the explanation and proof beneath it
-   read as belonging to THIS finding: header and expansion share one
-   coloured spine instead of the expansion looking like a separate
-   block that happened to land under it. */
 .ladder-item-open {
-  background: rgba(255, 255, 255, 0.045);
+  background: rgba(255, 255, 255, 0.04);
   border-bottom-color: transparent;
   border-left-color: var(--row-accent, var(--hairline-strong));
 }
+@media (min-width: 1024px) {
+  .ladder-item {
+    margin-left: -0.65rem;
+    margin-right: -0.65rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+}
 
 /* ---------------------------------------------------------------- *
- * RESULT ANSWER DISCLOSURE
- * ----------------------------------------------------------------
- * The supporting paragraphs of a result answer are a disclosure on a
- * handset — four paragraphs there are the difference between a result
- * and a wall of text — and simply open on a wide screen, where there
- * is a column for them and a reader expects an analyst's reasoning to
- * be on the page rather than behind a click.
- *
- * ONE COPY OF THE TEXT. The alternative is rendering the paragraphs
- * twice and hiding one per breakpoint, which duplicates them for a
- * screen reader and for page search. This opens the one <details>
- * that is already there.
- *
- * GUARDED, because the failure mode matters. A browser without
- * ::details-content keeps both the summary and the closed disclosure —
- * the handset behaviour, which works everywhere — rather than ending
- * up with a hidden paragraph and no control to open it.
- */
-/* Safari — and therefore the iOS Mini App webview — draws its own
-   disclosure triangle from a `::-webkit-details-marker` that `list-style:
-   none` does not reach, which would put a second arrow beside ours. */
+ * RESULT ANSWER DISCLOSURE (one copy of the text; see research-result)
+ * ---------------------------------------------------------------- */
 .answer-detail > summary::-webkit-details-marker {
   display: none;
 }
 .answer-detail > summary::marker {
   content: "";
 }
-
 @supports selector(::details-content) {
   @media (min-width: 1024px) {
     .answer-detail > summary {
@@ -632,51 +506,89 @@ body {
 }
 
 /* ---------------------------------------------------------------- *
- * TYPE — the reading scale. Nothing that matters sits below 0.8rem.
+ * FINDING ROWS — the "what ATLAS checked" list on the result.
+ * Each row is one question and its answer; the status is a coloured
+ * spine on the left, not a word to decode.
  * ---------------------------------------------------------------- */
-.section-label {
-  font-size: 0.8rem;
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+.finding {
+  position: relative;
+  padding: 1.1rem 0 1.1rem 1.35rem;
+  border-bottom: 1px solid var(--hairline);
+}
+.finding:last-child {
+  border-bottom: 0;
+}
+.finding::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1.35rem;
+  bottom: 1.35rem;
+  width: 3px;
+  border-radius: 9999px;
+  background: var(--row-accent, var(--hairline-strong));
+}
+.finding-open {
+  background: rgba(255, 255, 255, 0.025);
+  margin-left: -0.75rem;
+  margin-right: -0.75rem;
+  padding-left: 2.1rem;
+  padding-right: 0.75rem;
+  border-radius: 1rem;
+}
+.finding-open::before {
+  left: 0.75rem;
+}
+
+/* A quiet count strip: "3 confirmed · 1 partly · 2 unclear". */
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  font-size: 0.92rem;
   color: var(--atlas-text-dim);
+}
+.counts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 /* ---------------------------------------------------------------- *
- * HISTORY ROWS — a list a reader scans, not a stack of cards
+ * HISTORY ROWS — a list a reader scans
  * ---------------------------------------------------------------- */
 .history-row {
   display: flex;
   align-items: flex-start;
   gap: 1rem;
-  padding: 0.95rem 0.25rem;
+  padding: 1rem 0.35rem;
   border-bottom: 1px solid var(--hairline);
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   transition: background-color var(--motion-micro) var(--ease-out);
 }
 li:last-child > .history-row {
   border-bottom: 0;
 }
 .history-row:hover {
-  background: rgba(255, 255, 255, 0.025);
+  background: rgba(255, 255, 255, 0.03);
 }
 
 /* ---------------------------------------------------------------- *
- * NAVIGATION — header on a wide screen, dock on a handset
+ * NAVIGATION — header on a wide screen, five-item bar on a handset
  * ---------------------------------------------------------------- */
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.9rem 0 0.6rem;
-  border-bottom: 1px solid var(--hairline);
-  margin-bottom: 0.75rem;
+  padding: 0.85rem 0 0.7rem;
+  margin-bottom: 0.5rem;
 }
 @media (min-width: 640px) {
   .app-header {
-    padding: 1.1rem 0 0.9rem;
+    padding: 1.1rem 0 1rem;
     margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--hairline);
   }
 }
 .brand-lockup {
@@ -685,35 +597,42 @@ li:last-child > .history-row {
   gap: 0.7rem;
   min-width: 0;
 }
+/* On Home the hero carries the brand: gone on a handset, an invisible
+   spacer on a wide screen so the centred nav stays centred. Stated here,
+   not with utilities — this file's rules outrank Tailwind's layer. */
+.brand-lockup-home {
+  display: none;
+}
+@media (min-width: 640px) {
+  .brand-lockup-home {
+    display: flex;
+    visibility: hidden;
+  }
+}
 .app-nav {
   align-items: center;
-  gap: 1.75rem;
+  gap: 0.35rem;
 }
 .app-nav-item {
   position: relative;
   font-size: 0.95rem;
   font-weight: 500;
   color: var(--atlas-text-dim);
-  padding: 0.35rem 0.1rem;
-  transition: color var(--motion-transition) var(--ease-out);
+  padding: 0.5rem 0.85rem;
+  border-radius: 9999px;
+  transition:
+    color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out);
 }
 .app-nav-item:hover {
   color: var(--atlas-text);
+  background: var(--surface-2);
 }
 .app-nav-item-active {
-  color: var(--atlas-cyan);
+  color: var(--atlas-text-strong);
+  background: var(--surface-3);
 }
-.app-nav-item-active::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -0.15rem;
-  height: 2px;
-  border-radius: 9999px;
-  background: var(--atlas-cyan);
-}
-/* The AP orb: the one glowing element, and the way home from anywhere. */
+/* The Home disc: the way home from anywhere, raised one step. */
 .home-orb,
 .dock-home {
   display: inline-flex;
@@ -730,25 +649,34 @@ li:last-child > .history-row {
 }
 .home-orb-active > .orb,
 .dock-home.home-orb-active > .orb {
-  box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.35),
-    0 0 26px rgba(34, 211, 238, 0.32);
+  border-color: var(--atlas-cyan);
+  box-shadow: 0 0 0 3px var(--cyan-dim);
 }
 .profile-link {
-  display: inline-flex;
+  display: none;
   align-items: center;
   gap: 0.45rem;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  font-weight: 500;
   color: var(--atlas-text-dim);
-  padding: 0.45rem 0.55rem;
+  padding: 0.5rem 0.85rem;
   border-radius: 9999px;
-  transition: color var(--motion-transition) var(--ease-out);
+  transition:
+    color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out);
+}
+@media (min-width: 640px) {
+  .profile-link {
+    display: inline-flex;
+  }
 }
 .profile-link:hover {
   color: var(--atlas-text);
+  background: var(--surface-2);
 }
 .profile-link-active {
-  color: var(--atlas-cyan);
+  color: var(--atlas-text-strong);
+  background: var(--surface-3);
 }
 
 .dock {
@@ -757,18 +685,17 @@ li:last-child > .history-row {
   right: 0;
   bottom: 0;
   z-index: 30;
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-around;
-  padding: 0.35rem 1rem calc(env(safe-area-inset-bottom, 0px) + 0.55rem);
-  background: rgba(6, 12, 22, 0.9);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: end;
+  padding: 0.4rem 0.5rem calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  background: rgba(14, 19, 28, 0.94);
   border-top: 1px solid var(--hairline);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
 }
-/* A handset control only — stated AFTER `.dock` so it wins on source order. Stated here, not with a utility class: this
-   file's rules are unlayered and outrank Tailwind's layered utilities, so
-   `sm:hidden` on the element could never win against `.dock`. */
+/* A handset control only — stated AFTER `.dock` so it wins on source
+   order (this file's unlayered rules outrank Tailwind's utilities). */
 @media (min-width: 640px) {
   .dock {
     display: none;
@@ -779,28 +706,34 @@ li:last-child > .history-row {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.25rem;
-  min-width: 4.5rem;
-  padding: 0.5rem 0.25rem 0.2rem;
-  font-size: 0.8rem;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  padding: 0.45rem 0.1rem 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 500;
   color: var(--atlas-text-dim);
+  border-radius: 0.9rem;
   transition: color var(--motion-transition) var(--ease-out);
 }
 .dock-item-active {
-  color: var(--atlas-cyan);
+  color: var(--atlas-cyan-strong);
 }
 .dock-home {
-  margin-top: -1.35rem;
-  padding: 0.25rem;
+  justify-self: center;
+  margin-top: -1.6rem;
+  padding: 0.3rem;
   background: var(--atlas-bg);
   border-radius: 9999px;
+}
+.dock-home > .orb {
+  background: var(--surface-3);
+  border-color: var(--hairline-strong);
+  box-shadow: 0 10px 24px -12px rgba(0, 0, 0, 0.8);
 }
 
 /* ---------------------------------------------------------------- *
  * MOTION
  * ---------------------------------------------------------------- */
-
-/* Motion-примитивы: enter/exit */
 @keyframes atlas-fade-up {
   from {
     opacity: 0;
@@ -828,20 +761,19 @@ li:last-child > .history-row {
   animation: atlas-sheet-up var(--motion-large) var(--ease-out) both;
 }
 
-/* Индикатор unread на ARI-кнопке */
+/* Unread indicator on a nav item */
 .unread-dot::after {
   content: "";
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 10px;
-  height: 10px;
+  top: 4px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
   border-radius: 9999px;
   background: var(--atlas-cyan);
-  box-shadow: 0 0 8px var(--atlas-cyan);
 }
 
-/* Честное ожидание: пульс живого запроса, без фейковых стадий прогресса */
+/* Honest waiting: the pulse of a live request, no fake progress stages */
 @keyframes atlas-pulse {
   0%,
   100% {
@@ -859,11 +791,10 @@ li:last-child > .history-row {
   height: 10px;
   border-radius: 9999px;
   background: var(--atlas-cyan);
-  box-shadow: 0 0 8px var(--atlas-cyan);
   animation: atlas-pulse 1.2s var(--ease-out) infinite;
 }
 
-/* Reduced motion: упрощение, не потеря функциональности */
+/* Reduced motion: simplification, not loss of function */
 @media (prefers-reduced-motion: reduce) {
   .enter,
   .sheet-enter {
@@ -877,7 +808,8 @@ li:last-child > .history-row {
   .pill:active,
   .chip,
   .row-card,
-  .send-orb {
+  .send-orb,
+  .btn-secondary {
     transition: none;
     transform: none;
   }
@@ -891,13 +823,13 @@ li:last-child > .history-row {
 /* Scrollbars, so a long evidence list does not look like a different app. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 190, 220, 0.22) transparent;
+  scrollbar-color: rgba(154, 165, 182, 0.25) transparent;
 }
 *::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(148, 190, 220, 0.22);
+  background: rgba(154, 165, 182, 0.25);
   border-radius: 9999px;
 }

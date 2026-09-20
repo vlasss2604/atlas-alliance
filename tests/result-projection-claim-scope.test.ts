@@ -434,8 +434,9 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
 
     // The honest empty state must exist rather than falling back to
     // whatever else the job happens to hold: a check with no admitted
-    // link says so on its own row.
-    expect(code).toContain("No admitted source");
+    // link says so on its own row (in a reader's words — "admitted" is the
+    // engine's).
+    expect(code).toContain("No qualifying source");
     // And no step count may come from mechanism branch structure.
     expect(code).not.toContain("mechanism.flows.length");
   });

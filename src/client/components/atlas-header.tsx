@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 
-// The ATLAS mark. Drawn, not imported: an inline SVG scales cleanly, costs
-// no request, and inherits the theme's colours instead of baking them in.
+// The ATLAS mark. Drawn, not imported: an inline SVG scales cleanly and
+// costs no request. Solid fills, deliberately: a gradient referenced by id
+// resolves to the FIRST definition on the page, and when that instance is
+// hidden (the header lockup on Home) every mark on the page paints nothing.
 export function AtlasMark({ size = 40 }: { size?: number }) {
   return (
     <span
@@ -18,18 +20,8 @@ export function AtlasMark({ size = 40 }: { size?: number }) {
         fill="none"
         aria-hidden
       >
-        <defs>
-          <linearGradient id="atlas-a" x1="0" y1="24" x2="18" y2="0">
-            <stop offset="0%" stopColor="#22d3ee" />
-            <stop offset="100%" stopColor="#7dd3fc" />
-          </linearGradient>
-          <linearGradient id="atlas-p" x1="12" y1="24" x2="24" y2="2">
-            <stop offset="0%" stopColor="#e2e8f0" />
-            <stop offset="100%" stopColor="#94a3b8" />
-          </linearGradient>
-        </defs>
-        <path d="M8.2 3.2 1.6 21h3.5l1.5-4.4h6.3L11.6 13H7.9l2.1-6 2.2 6.4L13.6 18l1 3h3.6L11.7 3.2z" fill="url(#atlas-a)" />
-        <path d="M15.6 3.2v17.9h3.2v-6.4h1.6c2.4 0 4-1.9 4-5.4 0-4-1.6-6.1-4.4-6.1zm3.2 3h1c1.1 0 1.6 1 1.6 3.1 0 1.9-.5 2.8-1.5 2.8h-1.1z" fill="url(#atlas-p)" />
+        <path d="M8.2 3.2 1.6 21h3.5l1.5-4.4h6.3L11.6 13H7.9l2.1-6 2.2 6.4L13.6 18l1 3h3.6L11.7 3.2z" fill="#4fc7dc" />
+        <path d="M15.6 3.2v17.9h3.2v-6.4h1.6c2.4 0 4-1.9 4-5.4 0-4-1.6-6.1-4.4-6.1zm3.2 3h1c1.1 0 1.6 1 1.6 3.1 0 1.9-.5 2.8-1.5 2.8h-1.1z" fill="#dfe6ef" />
       </svg>
     </span>
   );

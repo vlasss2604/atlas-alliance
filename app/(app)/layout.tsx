@@ -13,7 +13,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <div className="atlas-field" aria-hidden>
         <span className="atlas-grid" />
       </div>
-      <div className="relative z-10 mx-auto w-full max-w-[920px] px-4 pb-28 sm:px-8 sm:pb-16">
+      <div className="relative z-10 mx-auto w-full max-w-[920px] px-4 pb-32 sm:px-8 sm:pb-16">
         <AppHeader />
         {children}
       </div>

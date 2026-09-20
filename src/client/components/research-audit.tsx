@@ -84,8 +84,8 @@ export function ResearchAudit({
       {/* COMPACT CONTEXT ONLY. Enough to know which record this is —
           never a second copy of the Result the reader just left. */}
       <header data-testid="audit-context">
-        <p className="section-label">Full audit · {projectName}</p>
-        <h1 className="mt-2 text-[1.4rem] font-semibold leading-[1.25] tracking-tight sm:text-[1.75rem]">
+        <p className="text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">Full audit · {projectName}</p>
+        <h1 className="display mt-2 text-[1.4rem] font-semibold leading-[1.2] text-[var(--atlas-text-strong)] sm:text-[1.8rem]">
           {detail.job.originalQuestion}
         </h1>
         <p className="mt-3 text-[0.88rem] text-[var(--atlas-text-dim)]">
@@ -96,8 +96,8 @@ export function ResearchAudit({
 
       {surface.table.length > 0 && (
         <section data-testid="audit-points">
-          <h2 className="section-label">Research points</h2>
-          <ol className="mt-2 flex flex-col">
+          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Research points</h2>
+          <ol className="mt-1 flex flex-col">
             {surface.table.map((row) => (
               <AuditPoint key={row.component} row={row} jobId={jobId} />
             ))}
@@ -106,7 +106,7 @@ export function ResearchAudit({
       )}
 
       <details className="group border-t border-[var(--hairline)] pt-5" data-testid="technical-record">
-        <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[1rem] font-medium text-[var(--atlas-text-dim)] select-none hover:text-[var(--atlas-text)] [&::-webkit-details-marker]:hidden">
+        <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[1.05rem] font-semibold text-[var(--atlas-text)] select-none hover:text-[var(--atlas-text-strong)] [&::-webkit-details-marker]:hidden">
           <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
           Technical record
         </summary>
@@ -162,13 +162,13 @@ function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
       data-testid="audit-point"
       data-component={row.component}
     >
-      <p className="text-[0.95rem] font-medium text-[var(--atlas-text-dim)]" data-testid="audit-point-question">
+      <p className="text-[1.05rem] font-semibold leading-snug text-[var(--atlas-text-strong)]" data-testid="audit-point-question">
         {row.label}
       </p>
-      <p className="mt-2 text-[1.08rem] leading-[1.45]" data-testid="audit-point-answer">
+      <p className="mt-2 text-[1.02rem] leading-[1.5] text-[var(--atlas-text)]/90" data-testid="audit-point-answer">
         {row.established}
       </p>
-      <p className="mt-1.5 flex items-center gap-1.5 text-[0.85rem] text-[var(--atlas-text-dim)]">
+      <p className="mt-2 flex items-center gap-1.5 text-[0.88rem] text-[var(--atlas-text-dim)]">
         <span className={`dot dot-${row.tone}`} aria-hidden />
         {row.statusLabel}
       </p>
@@ -214,8 +214,8 @@ function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | nu
   const [open, setOpen] = useState(false);
   return (
     <li data-testid="audit-evidence" data-evidence-id={card.id} data-relation={card.relation}>
-      <p className="text-[0.85rem] text-[var(--atlas-text-dim)]">
-        <span className="font-medium text-[var(--atlas-text)]">{card.sourceName}</span>
+      <p className="text-[0.88rem] text-[var(--atlas-text-dim)]">
+        <span className="font-semibold text-[var(--atlas-text)]">{card.sourceName}</span>
         {" · "}
         {card.sourceClass}
         {card.onchain?.network ? ` · ${card.onchain.network}` : ""}

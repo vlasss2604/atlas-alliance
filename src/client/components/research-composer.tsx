@@ -15,9 +15,9 @@ import { canStartProof, proofBlockReason } from "../proof-gate";
 // server-side authority over whether a Proof may begin. Nothing here decides
 // eligibility; it renders what the gate returned.
 //
-// Around that flow there is now as little as possible: one question, one
-// field, three example questions as quiet text. No card, no second
-// headline, no brand restated beneath the header that already carries it.
+// Around that flow there is as little as possible: one question, one
+// field, three example questions as chips. `hero` centres it for Home,
+// where it sits under the brand.
 
 type Phase = "input" | "thinking" | "result" | "starting";
 
@@ -27,7 +27,7 @@ const EXAMPLES = [
   { text: "HYPE buyback mechanism" },
 ] as const;
 
-export function ResearchComposer() {
+export function ResearchComposer({ hero = false }: { hero?: boolean }) {
   const { dict, refresh } = useApp();
   const router = useRouter();
   const [question, setQuestion] = useState("");
@@ -134,20 +134,21 @@ export function ResearchComposer() {
   };
 
   const canStart = canStartProof(subject);
+  const centred = hero ? "text-center" : "";
 
   return (
-    <section data-testid="composer">
-      <h1 className="text-[1.5rem] font-semibold leading-[1.2] tracking-tight sm:text-[1.8rem]">
+    <section data-testid="composer" className={centred}>
+      <h1 className="display text-[1.7rem] font-semibold leading-[1.15] text-[var(--atlas-text-strong)] sm:text-[2.2rem]">
         What do you want to verify?
       </h1>
-      <p className="mt-2 text-[1rem] text-[var(--atlas-text-dim)]">
+      <p className="mt-2.5 text-[1.02rem] text-[var(--atlas-text-dim)] sm:text-[1.08rem]">
         Ask about a project, a token, a claim or a link.
       </p>
 
       {phase === "input" || phase === "thinking" ? (
         <>
-          <div className="mt-6 flex items-center gap-3">
-            <div className="field flex flex-1 items-center gap-3 px-5 py-4">
+          <div className={`mt-6 flex items-center gap-2.5 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
+            <div className="field flex flex-1 items-center gap-3 px-5 py-[0.95rem] text-left">
               <input
                 value={question}
                 onChange={(e) => setQuestion(e.target.value)}
@@ -157,12 +158,12 @@ export function ResearchComposer() {
                     void submit();
                   }
                 }}
-                placeholder="Type your question or paste a link…"
+                placeholder="Type a question or paste a link…"
                 maxLength={2000}
                 aria-label="Research question"
                 data-testid="composer-input"
                 disabled={phase === "thinking"}
-                className="w-full bg-transparent text-[1.05rem] outline-none placeholder:text-[rgba(139,155,176,0.75)]"
+                className="w-full bg-transparent text-[1.05rem] outline-none"
               />
             </div>
             <button
@@ -171,21 +172,16 @@ export function ResearchComposer() {
               disabled={!question.trim() || phase === "thinking"}
               aria-label={dict.ask.submit}
               data-testid="composer-submit"
-              className="send-orb h-[56px] w-[56px] shrink-0"
+              className="send-orb h-[54px] w-[54px] shrink-0"
             >
               {phase === "thinking" ? <span className="pulse-dot" aria-hidden /> : <ArrowIcon />}
             </button>
           </div>
 
-          <ul className="mt-5 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:gap-x-6" data-testid="composer-examples">
+          <ul className={`mt-4 flex flex-wrap gap-2 ${hero ? "justify-center" : ""}`} data-testid="composer-examples">
             {EXAMPLES.map((ex) => (
               <li key={ex.text}>
-                <button
-                  type="button"
-                  onClick={() => setQuestion(ex.text)}
-                  className="text-left text-[0.95rem] text-[var(--atlas-text-dim)] transition-colors hover:text-[var(--atlas-cyan)]"
-                  data-testid="composer-example"
-                >
+                <button type="button" onClick={() => setQuestion(ex.text)} className="chip" data-testid="composer-example">
                   {ex.text}
                 </button>
               </li>
@@ -195,20 +191,20 @@ export function ResearchComposer() {
       ) : null}
 
       {phase === "starting" && (
-        <div className="mt-6 flex items-center gap-3">
+        <div className={`mt-6 flex items-center gap-3 ${hero ? "justify-center" : ""}`}>
           <span className="pulse-dot" aria-hidden />
-          <p className="text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.ask.thinking}</p>
+          <p className="text-[0.98rem] text-[var(--atlas-text-dim)]">{dict.ask.thinking}</p>
         </div>
       )}
 
       {phase === "result" && interp && (
-        <div className="mt-6 flex flex-col gap-4">
+        <div className={`panel mt-6 flex flex-col gap-5 px-5 py-5 text-left sm:px-7 sm:py-6 ${hero ? "mx-auto w-full max-w-[640px]" : ""}`}>
           {interp.status === "READY" &&
             interp.understood &&
             interp.route === "DEEP_RESEARCH" && (
-              <div className="border-l-2 border-[var(--hairline-strong)] pl-4">
+              <div>
                 <p className="section-label">{dict.ask.understoodTitle}</p>
-                <p className="mt-2 text-[1.05rem] leading-[1.5]">{interp.understood.summary}</p>
+                <p className="mt-2 text-[1.08rem] leading-[1.5] text-[var(--atlas-text-strong)]">{interp.understood.summary}</p>
                 {interp.understood.assumptions.length > 0 && (
                   <ul className="mt-3 flex flex-col gap-1 text-[0.95rem] text-[var(--atlas-text-dim)]">
                     {interp.understood.assumptions.map((a) => (
@@ -220,16 +216,16 @@ export function ResearchComposer() {
             )}
 
           {interp.quickAnswer && (
-            <div className="border-l-2 border-[var(--hairline-strong)] pl-4">
+            <div>
               <p className="section-label">{dict.ask.quickTitle}</p>
-              <p className="mt-2 text-[1.05rem] leading-[1.5]">{interp.quickAnswer}</p>
+              <p className="mt-2 text-[1.08rem] leading-[1.5]">{interp.quickAnswer}</p>
             </div>
           )}
 
           {interp.status === "NEEDS_CLARIFICATION" && !limitReached && !clarifyClosed && (
-            <div className="border-l-2 border-[var(--hairline-strong)] pl-4">
+            <div>
               <p className="section-label">{dict.ask.clarifyTitle}</p>
-              <p className="mt-2 text-[1.05rem] leading-[1.5]">
+              <p className="mt-2 text-[1.08rem] leading-[1.5]">
                 {interp.clarificationQuestion ?? dict.ask.clarifyProjectFallback}
               </p>
               <textarea
@@ -244,46 +240,46 @@ export function ResearchComposer() {
                 type="button"
                 onClick={() => void sendClarification()}
                 disabled={!answer.trim()}
-                className="pill cta mt-3 w-full py-3 text-[0.95rem]"
+                className="pill cta mt-3 w-full py-3 text-[0.98rem]"
               >
                 {dict.ask.clarifySubmit}
               </button>
             </div>
           )}
 
-          {limitReached && <p className="text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.ask.clarifyLimit}</p>}
-          {interp.status === "OUT_OF_SCOPE" && <p className="text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.ask.outOfScope}</p>}
-          {interp.status === "INVALID" && <p className="text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.ask.invalid}</p>}
+          {limitReached && <p className="text-[0.98rem] text-[var(--atlas-text-dim)]">{dict.ask.clarifyLimit}</p>}
+          {interp.status === "OUT_OF_SCOPE" && <p className="text-[0.98rem] text-[var(--atlas-text-dim)]">{dict.ask.outOfScope}</p>}
+          {interp.status === "INVALID" && <p className="text-[0.98rem] text-[var(--atlas-text-dim)]">{dict.ask.invalid}</p>}
 
           {canStart ? (
             <button
               type="button"
               onClick={() => void startProof()}
               data-testid="start-proof"
-              className="pill cta w-full py-3.5 text-[1rem] font-semibold"
+              className="pill cta w-full py-3.5 text-[1.02rem] font-semibold"
             >
               {dict.ask.submit}
             </button>
           ) : blockedNote() ? (
             <>
-              <button type="button" disabled className="pill cta w-full py-3.5 text-[1rem]">
+              <button type="button" disabled className="pill cta w-full py-3.5 text-[1.02rem]">
                 {dict.ask.submit}
               </button>
-              <p className="text-center text-[0.9rem] text-[var(--atlas-text-dim)]">{blockedNote()}</p>
+              <p className="text-center text-[0.92rem] text-[var(--atlas-text-dim)]">{blockedNote()}</p>
             </>
           ) : null}
 
           <button
             type="button"
             onClick={reset}
-            className="py-2 text-[0.9rem] text-[var(--atlas-text-dim)] hover:text-[var(--atlas-text)]"
+            className="py-1 text-[0.92rem] text-[var(--atlas-text-dim)] hover:text-[var(--atlas-text)]"
           >
             {dict.ask.newQuestion}
           </button>
         </div>
       )}
 
-      {error && <p className="mt-4 text-[0.95rem] text-[var(--atlas-amber)]">{error}</p>}
+      {error && <p className="mt-4 text-[0.98rem] text-[var(--atlas-amber)]">{error}</p>}
     </section>
   );
 }

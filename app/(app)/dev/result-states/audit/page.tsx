@@ -31,10 +31,10 @@ export default async function DevAuditStatesPage({
     <main className="enter flex flex-col gap-4 pb-6" data-testid="audit-states-page">
       <section
         className="rounded-xl border px-3.5 py-2.5"
-        style={{ borderColor: "rgba(251, 191, 36, 0.32)", background: "rgba(251, 191, 36, 0.07)" }}
+        style={{ borderColor: "rgba(226, 179, 79, 0.32)", background: "rgba(226, 179, 79, 0.07)" }}
         data-testid="fixture-banner"
       >
-        <p className="text-[0.8rem] font-semibold uppercase tracking-[0.08em]" style={{ color: "#fcd34d" }}>
+        <p className="text-[0.8rem] font-semibold uppercase tracking-[0.08em]" style={{ color: "var(--atlas-amber)" }}>
           {RESULT_FIXTURE_NOTICE.title}
         </p>
         <p className="mt-0.5 text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">{RESULT_FIXTURE_NOTICE.body}</p>
@@ -47,8 +47,8 @@ export default async function DevAuditStatesPage({
             href={`/dev/result-states/audit?state=${f.key}`}
             className="rounded-lg border px-2.5 py-1 text-[0.82rem]"
             style={{
-              borderColor: f.key === fixture.key ? "#5eead4" : "var(--hairline)",
-              color: f.key === fixture.key ? "#5eead4" : "var(--atlas-text-dim)",
+              borderColor: f.key === fixture.key ? "var(--atlas-cyan)" : "var(--hairline)",
+              color: f.key === fixture.key ? "var(--atlas-cyan-strong)" : "var(--atlas-text-dim)",
             }}
           >
             {f.key} · {f.title}

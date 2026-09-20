@@ -19,12 +19,12 @@ export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
       <Link href={`/research/${job.id}`} className="history-row" data-testid={`proof-card-${job.id}`}>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
-            <span className="text-[1rem] font-medium">{title}</span>
+            <span className="text-[1.05rem] font-semibold text-[var(--atlas-text-strong)]">{title}</span>
             {job.unread && <span className="dot dot-partial" aria-hidden />}
           </span>
-          <span className="mt-0.5 block text-[0.95rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</span>
+          <span className="mt-1 block text-[0.98rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</span>
         </span>
-        <span className="flex shrink-0 flex-col items-end gap-1 text-right text-[0.85rem] text-[var(--atlas-text-dim)]">
+        <span className="flex shrink-0 flex-col items-end gap-1.5 text-right text-[0.88rem] text-[var(--atlas-text-dim)]">
           <span>{relativeAge(job.finishedAt ?? job.createdAt)}</span>
           {terminal ? (
             <span className="flex items-center gap-1.5" data-testid="history-outcome" data-verdict={outcome.verdict ?? "NONE"} data-outcome={outcome.kind}>

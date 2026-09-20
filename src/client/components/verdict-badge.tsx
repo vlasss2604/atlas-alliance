@@ -22,7 +22,7 @@ export function VerdictBadge({
   const tone = verdictTone(verdict);
   return (
     <span
-      className={`tone tone-${tone} ${size === "sm" ? "text-[0.625rem] px-2.5 py-1" : ""}`}
+      className={`tone tone-${tone} ${size === "sm" ? "text-[0.8rem] px-2.5 py-1" : ""}`}
       data-testid="verdict-badge"
       data-verdict={verdict ?? "NONE"}
       data-tone={tone}
@@ -46,7 +46,7 @@ export function OutcomeBadge({
   const outcome = jobOutcome(job);
   return (
     <span
-      className={`tone tone-${outcome.tone} ${size === "sm" ? "text-[0.625rem] px-2.5 py-1" : ""}`}
+      className={`tone tone-${outcome.tone} ${size === "sm" ? "text-[0.8rem] px-2.5 py-1" : ""}`}
       data-testid="outcome-badge"
       data-outcome={outcome.kind}
       data-verdict={outcome.verdict ?? "NONE"}

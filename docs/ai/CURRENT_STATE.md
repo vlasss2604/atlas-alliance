@@ -409,16 +409,46 @@ record (counts, coverage, evidence map, source register with exclusion
 reasons, raw on-chain observations, open items, trace) behind one closed
 **Technical record** disclosure. No type below 0.82rem.
 
-**The app shell** (`app-chrome.tsx`, `app/(app)/layout.tsx`): a header
-with the ATLAS PROOF / Crypto Verification lockup, Research — AP orb
-(Home) — Analytics in the centre from 640px, Profile on the right; on a
-handset the three anchors are a bottom dock with the orb rising from its
-centre (hidden ≥640px by a rule in `globals.css`, because this file's
-unlayered rules outrank Tailwind utilities). `/analytics` is a real page
-with an honest empty state; Compare and Watchlist are not built. Home is
-the composer as hero plus Recent research rows; Research history is
-hairline rows. The question/audit projections still do not read
+**The app shell (UI V4, 2026-09-20, pending Founder visual review)**
+(`app-chrome.tsx`, `app/(app)/layout.tsx`): five places — Ask · Research
+· **Home** · Analytics · Profile. On a handset a five-column bottom bar
+with the AP disc as Home raised from its centre and the brand lockup
+centred alone in the header; from 640px a header with the lockup on the
+left, Ask · Research · Home disc · Analytics in the centre, Profile on the
+right. Handset/desktop switching lives in `globals.css` (`.dock`,
+`.profile-link`, `.brand-lockup-home`), because this file's unlayered
+rules outrank Tailwind utilities. Home carries the brand itself (mark,
+wordmark, "Crypto Verification") above the composer, three "how it works"
+tiles and Recent research rows; the header lockup is hidden there. The
+ATLAS mark uses solid fills — a gradient referenced by id resolves to the
+first definition on the page, and a hidden first instance blanked every
+mark. `/analytics` is a real page with an honest empty state; Compare and
+Watchlist are not built. The question/audit projections still do not read
 `bounded_by`.
+
+**Visual system V4 "Graphite Navy"** (`app/globals.css`, the single source
+of tokens): ground `#0b0f16` with one quiet top light (the V1 blobs, grid
+and arcs are gone), three solid surfaces (`--surface-1/2/3`), white
+hairlines, a text scale strong / body / dim / faint, one brand accent
+(`--atlas-cyan #4fc7dc`, `-strong #93dfeb`) for the active item, the
+primary action and the mark only, and four state colours: green confirmed
+/ supported, amber partially confirmed (was violet), slate not established
+/ insufficient evidence (was amber), red contradicted / not supported;
+product fault keeps its own grey tone. No glows, no glass blur, no
+uppercase micro-labels: `.tone` pills are 0.875rem sentence case with a
+leading dot, nothing that matters below 0.85rem. Tone class names
+(`tone-*`, `dot-*`) are unchanged, so every colour-meaning pin holds.
+
+**The result (V4)**: the answer panel is project line → question (h1) →
+one outcome badge → the answer sentences with the first carrying the
+weight → the dates footnote. "What ATLAS checked" carries a count strip
+("1 confirmed · 6 partly · 2 unclear", derived from the rows' statuses)
+and rows with a coloured status spine: question in strong type, the fact,
+"Also established", then source · date · Evidence toggle on one quiet
+line; the status word is on the row as a title and for screen readers
+only. "No qualifying source" is the empty source state. Sources and What
+remains unclear (tinted panel) follow; the audit door is an outlined
+button. The audit keeps its structure with the same type scale.
 
 Counting on the Verification page is over what is OPEN, not over the whole
 boundary: `open = boundary − components shown under WHAT STOOD UP` (a

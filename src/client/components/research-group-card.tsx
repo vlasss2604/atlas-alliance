@@ -17,8 +17,8 @@ export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobLi
     <li className="list-none border-b border-[var(--hairline)] last:border-b-0" data-testid={`group-${group.key}`}>
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="history-row w-full text-left">
         <span className="min-w-0 flex-1">
-          <span className="block text-[1.05rem] font-medium">{group.projectName}</span>
-          <span className="mt-0.5 block text-[0.9rem] text-[var(--atlas-text-dim)]">
+          <span className="block text-[1.08rem] font-semibold text-[var(--atlas-text-strong)]">{group.projectName}</span>
+          <span className="mt-1 block text-[0.92rem] text-[var(--atlas-text-dim)]">
             <span data-testid="group-run-count">
               {group.runCount} {group.runCount === 1 ? "run" : "runs"}
             </span>
@@ -26,7 +26,7 @@ export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobLi
             <span> · last researched {relativeAge(group.lastAt)}</span>
           </span>
         </span>
-        <span className="flex shrink-0 items-center gap-3 text-[0.85rem] text-[var(--atlas-text-dim)]">
+        <span className="flex shrink-0 items-center gap-3 text-[0.88rem] text-[var(--atlas-text-dim)]">
           <span className="flex items-center gap-1.5" data-testid="group-latest" data-verdict={latest.verdict ?? "NONE"}>
             <span className={`dot dot-${latest.tone}`} aria-hidden />
             {latest.label}
@@ -38,7 +38,7 @@ export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobLi
         <div className="flex flex-col gap-5 pb-5 pl-1">
           {group.questions.map((q) => (
             <div key={q.key} data-testid="question-group">
-              <p className="text-[0.98rem] leading-snug">{q.question}</p>
+              <p className="text-[1rem] leading-snug text-[var(--atlas-text)]">{q.question}</p>
               <ul className="mt-1.5 flex flex-col">
                 {q.runs.map((run) => {
                   const o = jobOutcome(run);
