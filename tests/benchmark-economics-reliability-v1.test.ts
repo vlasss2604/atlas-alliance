@@ -29,7 +29,8 @@ import { __setOnchainRetriever, type OnchainRpcTransport } from "../src/server/e
 import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
 import type { ResearchBoundary } from "../src/server/engine/research-boundary";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
-import type { TargetedRecoveryPlan } from "../src/server/engine/targeted-recovery";
+import { loadJobContractView } from "../src/server/engine/job-contract-view";
+import { planTargetedRecovery, type TargetedRecoveryPlan } from "../src/server/engine/targeted-recovery";
 import { beginAcquisitionPhases, handleExtractingPhase, handleFetchingPhase, handleSearchingPhase, type PhaseWorkerContext } from "../src/server/jobs/acquisition-phase-worker";
 import { installOnchainResearchCapability, uninstallOnchainResearchCapability } from "../src/server/jobs/onchain-capability";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
@@ -647,6 +648,16 @@ interface RunResult {
   configBounded: string[];
   technicalCritical: string[];
   recovery: { planned: number; attempts: number } | null;
+  // C1 DECISION DATA — critical components whose FIRST attempt closed on
+  // the spent search axis, with their final S5 status; and the envelope
+  // actually reserved at finalize (search/opens) against its ceilings.
+  searchBoundedCritical: string[];
+  envelope: string;
+  // C2 DECISION DATA — unresolved critical components for which a known
+  // admissible path (sealed-unextracted, unopened candidate, unexplored
+  // confirmed route) was STILL available when the job finalized, read
+  // through the second-pass planner in audit mode.
+  unexploredAtFinalize: string[];
   calls: Counters;
   costUsd: number;
   latencyModelSec: number;
@@ -754,6 +765,22 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
     if (configurationBounded) configBounded.push(comp);
     if (worked || !technical || configurationBounded) criticalAttempted += 1;
   }
+  const searchBoundedCritical: string[] = [];
+  for (const comp of critical) {
+    const first = attempts.find((a) => a.component === comp && a.attemptNumber === 1);
+    if (!first) continue;
+    const head = (first.reason ?? "").split(";")[0].trim();
+    if (first.status === "SKIPPED" && head === "SEARCH_BUDGET_EXHAUSTED") searchBoundedCritical.push(`${comp}:${s5[comp] ?? "no row"}`);
+  }
+  const budget = job.budgetAtStart as { maxSearchQueries: number; maxSourceOpens: number };
+  const envelope = `s${job.searchQueriesReserved}/${budget.maxSearchQueries} o${job.sourceOpensReserved}/${budget.maxSourceOpens}`;
+  const { view } = await loadJobContractView(ctx.db, jobId);
+  const audit = await planTargetedRecovery(ctx.db, jobId, job.projectId, view.workQueue, { audit: true });
+  const unexploredAtFinalize = (audit?.items ?? []).map((i) => {
+    const kinds = new Map<string, number>();
+    for (const p of i.paths) kinds.set(p.kind, (kinds.get(p.kind) ?? 0) + 1);
+    return `${i.component}[${[...kinds].map(([k, n]) => `${k}=${n}`).join(",")}]`;
+  });
   const modelCalls = c.proposer + c.extract;
   const costUsd = modelCalls * PRICE_PER_MODEL_CALL_USD;
   const latencyModelSec = c.proposer * LAT.proposer + (c.search * LAT.search) / 4 + (c.fetch * LAT.fetch) / 4 + (c.extract * LAT.extract) / 4;
@@ -793,6 +820,9 @@ async function collect(scenario: Scenario, variant: Variant, runtime: RunResult[
     configBounded,
     technicalCritical,
     recovery,
+    searchBoundedCritical,
+    envelope,
+    unexploredAtFinalize,
     calls: c,
     costUsd,
     latencyModelSec,
@@ -836,7 +866,7 @@ describe("ECONOMICS RESEARCH RELIABILITY BENCHMARK V1", () => {
 
   it("REPORT — the benchmark table (structure + cost + latency model + C1/C2 data)", () => {
     const lines: string[] = [];
-    lines.push("scenario | variant | runtime | verdict | claim | crit attempted | tech-critical | recovery | proposer/search/fetch/extract/rpc | $ | lat s");
+    lines.push("scenario | variant | runtime | verdict | claim | crit attempted | tech-critical | recovery | search-bounded crit (first pass:final) | envelope | unexplored@finalize | proposer/search/fetch/extract/rpc | $ | lat s");
     let totalCritical = 0;
     let totalAttempted = 0;
     let runsWithRecovery = 0;
@@ -847,11 +877,19 @@ describe("ECONOMICS RESEARCH RELIABILITY BENCHMARK V1", () => {
       if (r.recovery) runsWithRecovery += 1;
       if (r.technicalCritical.length > 0) runsWithTechnicalCritical += 1;
       lines.push(
-        `${r.scenario} | ${r.variant} | ${r.runtime} | ${r.verdict} | ${r.claim} | ${r.criticalAttempted}/${r.critical.length} | ${r.technicalCritical.join(",") || "-"} | ${r.recovery ? `${r.recovery.attempts}/${r.recovery.planned}` : "-"} | ${r.calls.proposer}/${r.calls.search}/${r.calls.fetch}/${r.calls.extract}/${r.calls.rpc} | ${r.costUsd.toFixed(3)} | ${r.latencyModelSec.toFixed(1)}`,
+        `${r.scenario} | ${r.variant} | ${r.runtime} | ${r.verdict} | ${r.claim} | ${r.criticalAttempted}/${r.critical.length} | ${r.technicalCritical.join(",") || "-"} | ${r.recovery ? `${r.recovery.attempts}/${r.recovery.planned}` : "-"} | ${r.searchBoundedCritical.join(",") || "-"} | ${r.envelope} | ${r.unexploredAtFinalize.join(",") || "-"} | ${r.calls.proposer}/${r.calls.search}/${r.calls.fetch}/${r.calls.extract}/${r.calls.rpc} | ${r.costUsd.toFixed(3)} | ${r.latencyModelSec.toFixed(1)}`,
       );
     }
     lines.push(`runs: ${results.length}; critical attempted: ${totalAttempted}/${totalCritical} (${((100 * totalAttempted) / Math.max(1, totalCritical)).toFixed(1)}%)`);
     lines.push(`runs needing the targeted second pass: ${runsWithRecovery}; runs finalizing with a technical boundary on a critical node: ${runsWithTechnicalCritical}`);
+    // C1 / C2 decision data (measured, not asserted).
+    const searchBoundedRuns = results.filter((r) => r.searchBoundedCritical.length > 0);
+    const searchBoundedNodes = results.reduce((n, r) => n + r.searchBoundedCritical.length, 0);
+    const searchBoundedRecovered = results.reduce((n, r) => n + r.searchBoundedCritical.filter((x) => /:(SUPPORTED|PARTIALLY_SUPPORTED)$/.test(x)).length, 0);
+    const envelopeSpent = results.filter((r) => /^s(\d+)\/(\d+) /.test(r.envelope) && r.envelope.replace(/^s(\d+)\/(\d+) .*$/, "$1") === r.envelope.replace(/^s(\d+)\/(\d+) .*$/, "$2"));
+    const unexploredRuns = results.filter((r) => r.unexploredAtFinalize.length > 0);
+    lines.push(`C1: critical nodes whose first attempt closed SEARCH_BUDGET_EXHAUSTED: ${searchBoundedNodes} in ${searchBoundedRuns.length} runs; of those nodes established by finalize: ${searchBoundedRecovered}; runs with the search envelope fully reserved at finalize: ${envelopeSpent.length}`);
+    lines.push(`C2: runs finalizing with an unresolved critical node AND a known admissible path still unexplored: ${unexploredRuns.length}${unexploredRuns.length > 0 ? " — " + unexploredRuns.map((r) => `${r.scenario}/${r.variant}/${r.runtime}: ${r.unexploredAtFinalize.join(",")}`).join("; ") : ""}`);
     const avgCost = results.reduce((n, r) => n + r.costUsd, 0) / Math.max(1, results.length);
     const avgLat = results.reduce((n, r) => n + r.latencyModelSec, 0) / Math.max(1, results.length);
     lines.push(`avg model cost/run $${avgCost.toFixed(3)}; avg modelled latency ${avgLat.toFixed(1)} s`);

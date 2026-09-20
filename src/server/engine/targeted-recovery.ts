@@ -103,6 +103,12 @@ export async function planTargetedRecovery(
   jobId: string,
   projectId: string | null,
   workQueue: readonly ComponentWorkItem[],
+  // MEASUREMENT ONLY (Reliability Audit C2): `audit` lifts the
+  // one-recovery-per-component gate so a finished job can be asked, after
+  // the fact, whether a known admissible path was still unexplored for an
+  // unresolved critical component. Nothing runs on an audit plan; the
+  // runtime never passes it.
+  opts: { audit?: boolean } = {},
 ): Promise<TargetedRecoveryPlan | null> {
   if (workQueue.length === 0) return null;
   const items: TargetedRecoveryItem[] = [];
@@ -162,7 +168,7 @@ export async function planTargetedRecovery(
     if (!row || !UNRESOLVED_STATUSES.has(row.status)) continue;
     // One recovery per component, ever: a component already on its second
     // attempt is never planned again.
-    if ((maxAttempt.get(`${item.step}:${item.component}`) ?? 0) !== 1) continue;
+    if (!opts.audit && (maxAttempt.get(`${item.step}:${item.component}`) ?? 0) !== 1) continue;
     const plan = plans.get(`${item.step}:${item.component}`) ?? (await loadAcquisitionPlan(db, jobId, item.component, projectId));
     if (!plan.criticalComponents.has(item.component)) continue;
     const admits = new Set<EvidenceSourceClass>(plan.establishingClasses);

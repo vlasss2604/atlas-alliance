@@ -153,7 +153,42 @@ lifecycle, Memory, confidence or Proof-layer rule changed.
   the stored `atlas_dev` v2 content as SEMANTIC_DRIFT on exactly these
   eight entries plus the D-159 class change
   (`tests/pattern-semantic-drift-activation-v1.test.ts`, case F). That
-  activation is an owner act, not done here.
+  activation was Founder-authorized and performed on 2026-09-20:
+  `atlas_dev` now holds **v4 ACTIVE** (semantic fingerprint
+  `9324e5574a2331cd`, equal to the code contract), v1–v3 RETIRED with
+  content byte-identical; every historical table (jobs, Proofs, plans,
+  memory items, Evidence, S5, S7) fingerprinted identical before and
+  after. `scripts/activate-pattern-version.ts --apply` is the mechanism
+  (dry run without the flag).
+- **Reliability Audit C1/C2 — decision data, not decisions** (benchmark
+  after activation, 160 runs, `ATLAS_BENCH_REPORT_PATH` table).
+  C1: critical nodes whose first attempt closed SEARCH_BUDGET_EXHAUSTED:
+  0; critical attempted 672/672; the search envelope (12) is fully
+  reserved at finalize in the 40 phased runs (the SEARCH phase spends the
+  fair share deterministically) and at 10–11/12 in the unphased ones;
+  the axis that does bind is OPENS in phased OFFICIAL_LATE (3 runs at
+  24/24, 1 at 17/24) where NET_EFFECT keeps 3 sealed documents never
+  extracted for it. The budget was not raised.
+  C2: 48 runs finalize with an unresolved critical node while the
+  second-pass planner in audit mode still finds a known admissible path.
+  Two mechanisms, both verified on the persisted jobs, neither
+  implemented: (i) the targeted pass filters its planned items by
+  ATTEMPT success (`controller.ts`, `succeededKeys`), so a critical
+  component whose first attempt SUCCEEDED technically but whose Evidence
+  S5 excluded (9 STALE jobs, CURRENT_STATE / STALE_CURRENT_STATE, one
+  attempt each) never gets its second look although 5–7 sealed documents
+  remain unextracted for it; (ii) ROUTE_UNEXPLORED counts a confirmed
+  route on which a route-scoped query for the component already ran and
+  returned nothing (16 GOVERNANCE_BASIS second attempts after an empty
+  `site:vote.…` search, 10 of them spending one more search unit for
+  nothing). The remaining flagged runs are the one-recovery ceiling by
+  design (never a third pass) over other components' sealed documents.
+  Smallest deterministic change proposed for Founder decision: (i) when
+  `targetedRecovery` is set, the controller walks the plan's items
+  without the `succeededKeys` filter — the plan already selected
+  unresolved components from S5; (ii) the planner treats a route as
+  explored when the ledger holds an executed `site:<domain>` query for
+  this component. Nothing else.
 
 ## The phased pipeline's first live run, and the two generic gaps it exposed
 

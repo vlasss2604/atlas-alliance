@@ -96,7 +96,40 @@ PROCESS_START_FAILED on this machine. Both reproduce in isolation.
   skipped, 3 failing** (5190) — the three are the pre-existing catalog
   and renderer cases named above and in CURRENT_STATE (Repository).
 
+### Pattern activation (Founder decision, 2026-09-20)
+
+`atlas_dev`: v3 ACTIVE (fingerprint `1023fb72a10e7f85`) drifted from the
+code contract (`9324e5574a2331cd`) on exactly the eight
+`criticalComponents` entries; `activate-pattern-version.ts --apply`
+retired v3 (content unchanged) and inserted **v4 ACTIVE**. Verified after:
+one ACTIVE row; the planning read (`loadActivePatternVersion` → 4, parsed
+through `patternContentSchema`) yields the critical components for the
+eight Economics intents and none for UNKNOWN / SCENARIO_CAUSAL_IMPACT /
+CLAIM_FACT_CHECK; research_jobs (110), proofs (53), research_plans (86),
+project_memory_items (48), evidence (1634), research_component_results
+(644), research_claim_support (67) and the v1–v3 rows fingerprint
+identical before and after — no Lido / Raydium / pump.fun / Aave record
+rewritten. No live Research, $0.
+
+The benchmark gained C1/C2 decision columns (search-bounded critical
+nodes on the first pass with their final status; the envelope reserved at
+finalize; unresolved critical nodes with a known admissible path still
+unexplored at finalize, read through `planTargetedRecovery(…, { audit:
+true })` — a measurement flag that only lifts the one-recovery gate and
+runs nothing). See CURRENT_STATE for the C1/C2 data.
+
+### After activation — verified, $0
+
+- Regression set (every test importing plan-job, pattern-activation or
+  active-pattern, plus the reliability suites): 64 files, 945 passing.
+- Benchmark on the code contract (= v4, fingerprint verified): 161
+  passing; 672/672 critical nodes attempted; 63 runs used the second
+  pass; 3 runs finalize on a configuration boundary (EXECUTION_EVIDENCE,
+  CHAIN_EARLY, NO_ADMISSIBLE_ROUTE). C1/C2 data: CURRENT_STATE.
+
 ### Next
+- Founder decision on the two C2 changes proposed in CURRENT_STATE (not
+  implemented).
 
 - Founder review of the Research Reliability V1 semantics in CURRENT_STATE.
 - Any other environment running the phased workers needs 0055/0056
