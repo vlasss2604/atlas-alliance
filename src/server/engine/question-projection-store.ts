@@ -11,7 +11,7 @@ import {
   researchPatterns,
   researchQuestionProjections,
 } from "../db/schema";
-import { intentRequirementsFor, patternContentSchema } from "../domain/pattern";
+import { criticalComponentsFor, intentRequirementsFor, patternContentSchema } from "../domain/pattern";
 import {
   calculateActualCostMicro,
   loadModelCostProfile,
@@ -22,6 +22,7 @@ import {
   validateProjection,
   PROJECTION_VERSION,
   type ProjectionModelInput,
+  applyCriticalFloor,
 } from "./question-projection";
 import {
   createAnthropicQuestionProjector,
@@ -181,6 +182,8 @@ export async function generateQuestionProjection(
   // a missing or unparseable Pattern costs the requirement inputs and
   // nothing else. The component results alone are still a valid input.
   const requirements: { requirementId: string; kind: string; status: string; evidenceCount: number }[] = [];
+  // B3 — the question's critical proof path, for the projection floor.
+  let criticalComponents: string[] = [];
   if (claim) {
     try {
       const [patternRow] = await db
@@ -194,6 +197,7 @@ export async function generateQuestionProjection(
         );
       if (patternRow) {
         const content = patternContentSchema.parse(patternRow.content);
+        criticalComponents = criticalComponentsFor(content, claim.intent);
         const byId = new Map(
           intentRequirementsFor(content, claim.intent).requirements.map((r) => [r.requirementId, r.kind]),
         );
@@ -300,8 +304,9 @@ export async function generateQuestionProjection(
     return { kind: "FAILED_VALIDATION" };
   }
 
-  await persist("VALID", validated.findings, meta({}));
-  return { kind: "VALID", findingCount: validated.findings.length };
+  const findings = applyCriticalFloor(validated.findings, input, criticalComponents);
+  await persist("VALID", findings, meta({}));
+  return { kind: "VALID", findingCount: findings.length };
 }
 
 // The caller's wrapper: a projection failure must never surface as a

@@ -1207,9 +1207,14 @@ describe("G. job / attempt terminal states", () => {
     const later = new Date(now.getTime() + 60 * 60 * 1000);
     const result2 = await runS4ResearchJob(ctx.db, jobId, executorOf(project, {}, worked2), later);
     expect(result2.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
-    expect(worked2).toEqual(["3:MECHANISM_SPEC#2"]);
+    // Research Reliability V1 (B2): run 1 already spent ONE targeted
+    // recovery attempt (#2) on the critical component after its first walk
+    // — under the same fixture it failed the same way — so the retry's
+    // recovery attempt numbers itself after that history: #3.
+    expect(worked2).toEqual(["3:MECHANISM_SPEC#3"]);
     expect(await attemptsOf(jobId)).toContain("3:MECHANISM_SPEC#1=FAILED");
-    expect(await attemptsOf(jobId)).toContain("3:MECHANISM_SPEC#2=SUCCEEDED");
+    expect((await attemptsOf(jobId)).some((a) => a.startsWith("3:MECHANISM_SPEC#2="))).toBe(true);
+    expect(await attemptsOf(jobId)).toContain("3:MECHANISM_SPEC#3=SUCCEEDED");
     expect((await s5Of(jobId, "MECHANISM_SPEC")).status).toBe("SUPPORTED");
     const evidence2 = (await evidenceOf(jobId)).map((r) => r.id).sort();
     for (const id of evidence1) expect(evidence2).toContain(id);

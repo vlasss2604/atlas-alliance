@@ -642,7 +642,10 @@ describe("Research Memory -> Evidence adoption — the two-job scenario", () => 
     const runJob = readFileSync("src/server/engine/run-job.ts", "utf-8");
     expect(runJob).toContain("adoptReusedMemory(db, jobId, plannedView, now)");
     const phased = readFileSync("src/server/jobs/acquisition-phase-worker.ts", "utf-8");
-    expect(phased).toContain("items: adoption.workQueue");
+    // B2: a scoped second cycle narrows the same effective queue.
+    expect(phased).toContain("scopedWorkItems(scope, adoption.workQueue)");
+    expect(phased).toContain(": adoption.workQueue,");
+    expect(phased).not.toContain("items: view.workQueue");
     // Scope is re-checked on every axis at materialization time.
     expect(code).toContain("memory.projectId !== projectId");
     expect(code).toContain("memory.topicId !== topicId");

@@ -11,6 +11,7 @@ import {
   type ConfidenceBindingReason,
   type ConfidenceScore,
 } from "./proof-confidence";
+import { deriveResearchBoundary, type BoundaryAttemptInput, type ResearchBoundary } from "./research-boundary";
 
 // Phase 6, S8 — the Proof builder.
 //
@@ -79,6 +80,10 @@ export interface ProofBuilderInput {
   // dangling reference. Supplied by the caller because this module has no
   // DB access.
   existingEvidenceIds: readonly string[];
+  // A2 — the latest terminal attempt per component, for the boundary
+  // record. Optional: a caller without attempts gets a record derived from
+  // S5 codes alone.
+  attemptOutcomes?: readonly BoundaryAttemptInput[];
 }
 
 // One entry per canonical layer. `lines` is closed, templated content —
@@ -120,6 +125,10 @@ export interface ProofDraft {
   citedEvidenceIds: string[];
   citations: ProofCitation[];
   gaps: ProofGapEntry[];
+  // A2 — WHY THE RECORD STOPS WHERE IT STOPS, technical apart from
+  // substantive. Derived from persisted codes only; changes no verdict,
+  // no confidence, no layer.
+  boundedBy: ResearchBoundary;
 }
 
 // The Proof verdict vocabulary (schema enum `verdict`). Note that
@@ -370,6 +379,10 @@ export function buildProof(input: ProofBuilderInput): ProofBuildOutcome {
       citedEvidenceIds: sortedUnique(citedIds),
       citations,
       gaps,
+      boundedBy: deriveResearchBoundary({
+        components: input.componentResults.map((r) => ({ step: r.step, component: r.component, status: r.status, reasonCodes: r.reasonCodes })),
+        attempts: input.attemptOutcomes,
+      }),
     },
     refusal: null,
   };

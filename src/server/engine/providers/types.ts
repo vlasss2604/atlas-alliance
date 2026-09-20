@@ -151,6 +151,18 @@ export interface FetchedDocument {
   // recovery — the before/after pair is what makes the augmentation
   // auditable rather than invisible.
   staticTextLength?: number;
+  // B1 (Research Reliability V1) — the anchors and machine-readable
+  // identifiers the plain-text conversion discards, harvested at fetch
+  // time (safe-http from the raw HTML, the isolated renderer from the
+  // settled DOM). OBSERVATIONS ONLY: bounded site-local expansion reads
+  // them to admit a few same-route pages as ordinary candidates; nothing
+  // here is trusted, classified or promoted. Absent for non-HTML content.
+  documentLinks?: {
+    links: { href: string; text: string; host: string | null; heading?: string | null; context?: string | null; resolvedIdentifier?: string | null }[];
+    identifiers: { attribute: string; value: string; shape: string }[];
+    hosts: string[];
+    truncated: boolean;
+  } | null;
 }
 
 // S4 additive extension (phase-6-plan.md §19 S4, D-077/D-076): S1 shipped

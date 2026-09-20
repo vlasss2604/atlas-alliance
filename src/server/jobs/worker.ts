@@ -675,6 +675,10 @@ export async function dispatchExtractQueueMessage(
   }
 
   if (result.ran) {
+    // B2: the extraction cycle deferred a targeted second pass — the job
+    // has gone back to SEARCHING under a persisted scope. Nothing is
+    // final yet; the scoped second EXTRACTING delivery finishes it.
+    if (result.controller?.targetedRecoveryDeferred) return result;
     // The SAME terminal mapping the single-process path uses — one
     // vocabulary for one engine, whatever process it ran in.
     const outcome = result.budgetExhausted

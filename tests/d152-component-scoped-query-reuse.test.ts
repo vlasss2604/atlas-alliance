@@ -398,7 +398,10 @@ describe("D-152 — query reuse is scoped to the component that did the work", (
 
     await searchFor(project, jobId, c1, SHARED_QUERY, ["https://a.test/1"]);
     const afterFirst = await searchQueriesReserved(jobId);
-    expect(afterFirst).toBe(1);
+    // A1 parity: a classified-route project also runs the site-scoped
+    // query, so the first pass may reserve more than one unit; the point
+    // pinned here is that the SECOND component adds none.
+    expect(afterFirst).toBeGreaterThanOrEqual(1);
 
     // c2 proposes the SAME query against a live (metered) gateway. The unit
     // was already spent, so it is not spent again — the budget behaviour that
@@ -464,9 +467,12 @@ describe("D-152 — query reuse is scoped to the component that did the work", (
 
   it("TEST 8b: caps and the seed cap are untouched by this change", async () => {
     const { readFileSync } = await import("node:fs");
+    // A1 parity: the query/result caps are one shared contract now
+    // (acquisition-targeting.ts), read by both runtimes.
+    const targeting = readFileSync("src/server/engine/acquisition-targeting.ts", "utf-8");
+    expect(targeting).toContain("export const MAX_SEARCH_RESULTS_PER_QUERY = 5;");
+    expect(targeting).toContain("export const MAX_QUERIES_PER_ATTEMPT = 3;");
     const executor = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
-    expect(executor).toContain("const MAX_SEARCH_RESULTS_PER_QUERY = 5;");
-    expect(executor).toContain("const MAX_QUERIES_PER_ATTEMPT = 3;");
     expect(executor).toContain("const MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT = 6;");
     const resource = readFileSync("src/server/memory/source-resource.ts", "utf-8");
     expect(resource).toContain("MAX_SOURCE_RESOURCE_SEEDS = 3");

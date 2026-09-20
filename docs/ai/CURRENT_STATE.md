@@ -7,25 +7,153 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-08-29: **2442 passing, 4 skipped, 1 failing**
-  (2447 total). Run the suite ALONE — two concurrent `vitest run` invocations
-  share the one test database and produce mass spurious failures (observed:
-  193 "failures" that vanished on a clean serial run). Only the second item below failed on that run; the first passed
-  because the working copy happened to hold LF. Both are pre-existing and
-  unrelated to research behaviour:
-  - `first-real-run-stage2.test.ts` — a source-regex assertion against
-    `s4-executor.ts`. **Now understood: it is a line-ending artifact.** The
-    assertion matches `\n}\n`, and `core.autocrlf=true` checks the file out with
-    CRLF, so the regex finds nothing and the match is null. It passes whenever
-    the working copy happens to hold LF — which an editor rewriting the file can
-    cause — and fails again after any git round-trip restores CRLF. It says
-    nothing about the code either way;
-  - `s10-live-provider-enablement.test.ts` — a Windows path bug (`C:\C:\...`)
-    while scanning `src/server/services/`.
+- Full suite, last verified 2026-09-20 (Research Reliability V1 round):
+  **5183 passing, 4 skipped, 3 failing** (5190 total, 249 files, ~38 min).
+  Run the suite ALONE — two concurrent `vitest run` invocations share the
+  one test database and produce mass spurious failures (observed earlier:
+  193 "failures" that vanished on a clean serial run). The three failures
+  are pre-existing and unrelated to research behaviour; they reproduce in
+  isolation:
+  - `phase1.test.ts` (DoD 1) and `phase2.test.ts` (DoD 6) pin a
+    four-project seed catalog; the seed has carried `jupiter` and `aave`
+    since commit dca81ae (eight rows). A catalog decision, not a research
+    one — re-pin only with the owner;
+  - `renderer-launch-diagnosis.test.ts` "a corrupt browser binary is
+    diagnosed as a start failure": expects EXECUTABLE_NOT_FOUND, this
+    machine reports PROCESS_START_FAILED. Environment-specific.
+  Two older notes still apply: `first-real-run-stage2.test.ts` holds a
+  source-regex assertion that is a line-ending artifact (matches `\n}\n`;
+  `core.autocrlf=true` checks the file out with CRLF — check the file's
+  line endings before believing either result), and
+  `s10-live-provider-enablement.test.ts` has a Windows path bug
+  (`C:\C:\...`) while scanning `src/server/services/`; both passed on this
+  Linux run. Do not "fix" any of these opportunistically.
+- Benchmark (`tests/benchmark-economics-reliability-v1.test.ts`, part of
+  the suite): 161 passing. `ATLAS_BENCH_REPORT_PATH=<file>` makes the
+  REPORT test write its table (per-run verdict, critical nodes attempted,
+  technical boundaries, recovery, call counts, cost and latency model) to
+  that file, because the default reporter swallows test stdout.
 
-  Do not "fix" these opportunistically. Verify by stashing before blaming any new
-  change on them — and for the first one, check the file's line endings before
-  believing either result.
+## RESEARCH RELIABILITY V1: THE SAME RESEARCH IN BOTH RUNTIMES, A RECORD OF WHY IT STOPPED, AND ONE BOUNDED SECOND LOOK
+
+Six generic mechanisms, all offline-verified on the permanent benchmark
+(`tests/benchmark-economics-reliability-v1.test.ts`: ten Token Value
+Capture scenario families × twelve adversarial variants of discovery
+and provider behaviour in the unphased executor, four of them also in
+the phased three-worker pipeline; every run a whole Research through
+the production controller, reducer, assembler, claim evaluator and
+Proof builder on fixture providers; the suite fails on any CRITICAL —
+a verdict stronger than the corpus allows, a component established
+the corpus never supports — or MAJOR — a reachable critical node not
+established, or left on a technical boundary — and on any S5 status
+difference between the two runtimes). No verdict, admissibility,
+lifecycle, Memory, confidence or Proof-layer rule changed.
+
+- **A1 — Acquisition parity.** The per-attempt query and result caps are
+  one contract (`MAX_QUERIES_PER_ATTEMPT` = 3, `MAX_SEARCH_RESULTS_PER_QUERY`
+  = 5, `acquisition-targeting.ts`) read by the executor and the phase
+  worker; the phased SEARCH phase blends route-scoped queries
+  (`site:<confirmed domain>`) with the model's exactly as the executor
+  does (D-129/D-133), explorer locators excluded because the EXTRACTING
+  worker's retriever reads the chain fact; the FETCH phase opens
+  candidates on a CONFIRMED, CLASSIFIED route first, confirmed
+  unclassified next, everything else after (`confirmedRouteRank`,
+  `source-authority.ts` — the executor's D-155 rank at job level), stable
+  within a rank, so a 24-open ceiling no longer cuts the official pages a
+  later component surfaced.
+- **A2 — Research boundary record.** A Proof carries `proofs.bounded_by`
+  (migration 0055, nullable, never backfilled): for every component not
+  SUPPORTED, whether the record stops for a TECHNICAL reason (the bounded
+  Research never inspected the admissible material — SEARCH_BUDGET_EXHAUSTED,
+  NO_ADMISSIBLE_ROUTE, EXTRACTION_NOT_COMPLETED, SOURCE_UNAVAILABLE,
+  NO_QUERIES_PROPOSED) or a SUBSTANTIVE one (the material was attempted
+  and the evidence stayed insufficient, partial, unauthoritative or
+  contradicted). Derived in `research-boundary.ts` from the persisted S5
+  reason codes and the latest terminal attempt reason per component;
+  the technical vocabulary is closed and code-owned, anything unnamed is
+  substantive (the conservative direction). Verdict, confidence and
+  layers are byte-identical with or without it; nothing downstream reads
+  it yet.
+- **A3 — Replay-safe continuation.** The phased EXTRACTING replay fetcher
+  answers `canFetch(url)`; the executor cuts the ordered candidate list to
+  the sealed set BEFORE any open is planned and records the cut
+  (`REPLAY_UNSEALED_CANDIDATES_SKIPPED:n`), so the +1 continuation under a
+  replay only ever walks documents the FETCH phase sealed. A live
+  transport has no `canFetch` and its list is untouched.
+- **B1 — Bounded site-local expansion** (`site-local-expansion.ts`). From
+  the links a fetched document carries (`FetchedDocument.documentLinks`,
+  harvested at fetch time by `document-links.ts`; observations only), a
+  few pages on the SAME confirmed, classified documentary route (domain
+  equal, path under the confirmed prefix; OFFICIAL_DOCS, GOVERNANCE,
+  OFFICIAL_REPORT only; never a subdomain, redirect host, external site
+  or non-document) become ORDINARY candidates — recorded in the trace as
+  one synthetic SEARCH_EXECUTED per route (spending nothing) plus one
+  CANDIDATE_RETURNED per admitting component and url, opened only through
+  the existing caps, ledger, admissibility and extraction, never
+  recursively. Selection: every served component (pending critical
+  first, step order) takes its ONE most relevant page when the overlap
+  with its own vocabulary — its name and evidence goal, each term
+  weighted by 1 / the number of components whose vocabulary carries it,
+  a url path token counted twice — is worth at least one term unique to
+  it (`MIN_SPECIFIC_FOR_PICK`); then, under `MAX_SITE_LOCAL_PER_ROUTE`
+  (4), pages by overlap with the research task. Component picks are
+  bounded by the work queue, not the cap, so the admitted set is the
+  same whether the selection runs before the walk (phased FETCH, every
+  searched page already known) or inside an attempt (unphased, later
+  components' pages unknown and competing). Each component's rows are
+  recorded in its own relevance order; an unphased attempt appends the
+  candidates in its own order and opens one through the documentary
+  continuation; a later component adopts its rows from the ledger
+  (`SITE_LOCAL_CANDIDATES_ADOPTED:n`).
+- **B2 — Targeted second pass** (`targeted-recovery.ts`). After a complete
+  first walk, for each CRITICAL component still INSUFFICIENT_EVIDENCE on
+  its first attempt, the plan asks persisted state one question: does a
+  known, admissible path remain — a sealed document never extracted for
+  this component, an unopened candidate not known dead, or a confirmed
+  route for an admitted class on which this component never had a
+  candidate? Document paths are ranked by the shared component
+  vocabulary rule. If any remains: ONE recovery attempt under
+  `TARGETED_RECOVERY_BOUNDS` (2 searches, 3 opens, 3 extractions),
+  outside fair share, never a third; the first pass holds back
+  `recoveryReserve(reservedRecoverySteps)` on the search and opens axes
+  (allowance shaping only, never the reservation ceiling — D3's
+  job-level exhaustion is not manufactured by the reserve). A paths-only
+  attempt (no search needed) skips the proposer as
+  `TARGETED_PATHS_ONLY`, not as a spent axis. In-process where the
+  executor acquires live (`liveAcquisition`); under the phased runtime
+  the first EXTRACTING cycle persists the plan to
+  `research_jobs.acquisition_scope` (migration 0056) and the job goes
+  round SEARCHING → FETCHING → EXTRACTING once more under that scope
+  (only the planned items, only their paths, their bounds), and only the
+  scoped cycle finalizes. A component that stays unresolved after its
+  second look is a substantive gap, named as such — with one exception
+  the reconciliation store keeps (`component-reconciliation-store.ts`):
+  a document-local boundary outlives a later look. The second attempt
+  never re-reads a document whose extraction already failed, so when it
+  closes without Evidence and without a boundary of its own the
+  component's own document is still "read, not inspected" (Round 5.5,
+  Founder decision C) and S5 keeps EXTRACTION_NOT_COMPLETED; the two
+  search-stage boundaries do not persist this way, because the second
+  pass searched and opened exactly what they named. A first-run retry
+  after an in-process second pass numbers its recovery attempt after
+  that history (#3), still under `reservedRecoverySteps`.
+- **B3 — Critical proof paths** (`pattern.ts`, `intentRequirements[*].criticalComponents`).
+  Each intent declares the components a bounded Research may not leave
+  un-attempted while an admissible path remains (never every component;
+  UNKNOWN, SCENARIO_CAUSAL_IMPACT, CLAIM_FACT_CHECK declare none). Read
+  by acquisition priority (`intentRequiredComponents` joins them), the
+  second pass, and the result projection floor (`applyCriticalFloor`: a
+  critical component with a persisted row and no finding is appended
+  with the neutral label; under MAX_FINDINGS the last non-critical
+  finding gives way). NOT read by S7: a critical declaration changes what
+  the Research tries, never what it concludes. **The acquisition plan
+  reads the ACTIVE Pattern row, not the code**, so a live run has no
+  critical proof path until a Pattern version carrying
+  `criticalComponents` is activated; the activation rule already reports
+  the stored `atlas_dev` v2 content as SEMANTIC_DRIFT on exactly these
+  eight entries plus the D-159 class change
+  (`tests/pattern-semantic-drift-activation-v1.test.ts`, case F). That
+  activation is an owner act, not done here.
 
 ## The phased pipeline's first live run, and the two generic gaps it exposed
 

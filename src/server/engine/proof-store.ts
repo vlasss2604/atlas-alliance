@@ -1,8 +1,9 @@
-import { and, eq, inArray, isNull, notInArray } from "drizzle-orm";
+import { and, asc, eq, inArray, isNull, notInArray } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import {
   evidence,
+  researchAttempts,
   proofs,
   researchClaimSupport,
   researchComponentResults,
@@ -138,6 +139,11 @@ async function persistWithin(tx: Transaction, jobId: string): Promise<ProofPersi
     .select({ id: evidence.id })
     .from(evidence)
     .where(eq(evidence.researchJobId, jobId));
+  const attemptRows = await tx
+    .select({ patternStep: researchAttempts.patternStep, component: researchAttempts.component, status: researchAttempts.status, reason: researchAttempts.reason })
+    .from(researchAttempts)
+    .where(eq(researchAttempts.researchJobId, jobId))
+    .orderBy(asc(researchAttempts.attemptNumber));
 
   const outcome = buildProof({
     researchJobId: jobId,
@@ -159,6 +165,9 @@ async function persistWithin(tx: Transaction, jobId: string): Promise<ProofPersi
       excludedEvidence: asExcluded(r.excludedEvidence),
     })),
     existingEvidenceIds: evidenceRows.map((r) => r.id),
+    // A2 — the latest attempt per component, oldest first so the last
+    // write per key is the newest.
+    attemptOutcomes: attemptRows.map((a) => ({ step: a.patternStep, component: a.component, status: a.status, reason: a.reason })),
   });
 
   if (outcome.proof === null) {
@@ -183,6 +192,7 @@ async function persistWithin(tx: Transaction, jobId: string): Promise<ProofPersi
     confidence: draft.confidenceScore,
     layers: draft.layers,
     researchCutoff: null,
+    boundedBy: draft.boundedBy,
   };
 
   let proofId: string;

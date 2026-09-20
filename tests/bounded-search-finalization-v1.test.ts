@@ -730,22 +730,39 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
 
     const att = await attempts(jobId);
     expect(att.every((a) => a.status !== "STARTED")).toBe(true);
-    const bounded = att.filter((a) => a.status === "SKIPPED" && /^SEARCH_BUDGET_EXHAUSTED/.test(a.reason ?? ""));
-    expect(bounded.length).toBeGreaterThan(0);
-    // No provider call after the axis was spent: every bounded component
-    // has neither a proposer call nor a search in the counters.
-    for (const a of bounded) {
+    // B2 (Research Reliability V1): the LATEST attempt per component
+    // decides. A CRITICAL component bounded on the first pass may hold ONE
+    // targeted second attempt, fed by the recovery reserve the first pass
+    // held back (<= 2 searches, <= 3 opens), and never a third.
+    const latest = new Map<string, (typeof att)[number]>();
+    for (const a of att) {
+      const cur = latest.get(a.component);
+      if (!cur || a.attemptNumber > cur.attemptNumber) latest.set(a.component, a);
+    }
+    expect(Math.max(...att.map((a) => a.attemptNumber))).toBeLessThanOrEqual(2);
+    const firstPassBounded = att.filter((a) => a.attemptNumber === 1 && a.status === "SKIPPED" && /^SEARCH_BUDGET_EXHAUSTED/.test(a.reason ?? ""));
+    expect(firstPassBounded.length).toBeGreaterThan(0);
+    const recovered = att.filter((a) => a.attemptNumber === 2);
+    for (const a of recovered) {
+      expect(a.searchQueriesSpent, a.component).toBeLessThanOrEqual(2);
+      expect(a.sourceOpensSpent, a.component).toBeLessThanOrEqual(3);
+      expect(a.reason ?? "", a.component).toContain("TARGETED_RECOVERY_ATTEMPT");
+    }
+    const bounded = [...latest.values()].filter((a) => a.status === "SKIPPED" && /^SEARCH_BUDGET_EXHAUSTED/.test(a.reason ?? ""));
+    // No provider call after the axis was spent for a component that was
+    // never recovered: neither a proposer call nor a search in the counters.
+    for (const a of firstPassBounded) {
+      if (recovered.some((r) => r.component === a.component)) continue;
       const c = p.perComponent.get(a.component);
       expect(c?.proposer ?? 0, a.component).toBe(0);
       expect(c?.search ?? 0, a.component).toBe(0);
     }
     const rows = await trace(jobId);
     const skips = rows.filter((r) => r.operationType === "MODEL_CALL_SKIPPED" && r.reasonCode === "SEARCH_QUERY_BUDGET_EXHAUSTED");
-    // A component that already holds a chain reading and reaches the spent
-    // axis skips the proposer the same way but closes SUCCEEDED on the
-    // reading (Round 6.5, Founder decision 1) — its skip is traced too.
-    const foldedBounded = att.filter((a) => a.status === "SUCCEEDED" && /documentary pass SKIPPED: SEARCH_BUDGET_EXHAUSTED/.test(a.reason ?? ""));
-    expect(skips.length).toBe(bounded.filter((a) => (p.perComponent.get(a.component)?.search ?? 0) === 0).length + foldedBounded.length);
+    // Every first-pass bounded component wrote its skip row (a component
+    // that already holds a chain reading skips the proposer the same way
+    // but closes SUCCEEDED on the reading — Round 6.5, Founder decision 1).
+    expect(skips.length).toBeGreaterThanOrEqual(firstPassBounded.length);
 
     // C/D. earlier Evidence survives and is reduced normally; the bounded
     // components are INSUFFICIENT on the boundary, never contradicted.

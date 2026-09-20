@@ -142,10 +142,15 @@ export function intentRequiredComponents(
       relationshipFrom?: string;
       relationshipTo?: string;
     }>;
+    // B3 — the intent's declared critical proof path (pattern.ts). Joins
+    // the requirement-derived set so a critical component gets the same
+    // acquisition priority a required one does.
+    criticalComponents?: readonly string[];
   } | null,
 ): Set<string> {
   const out = new Set<string>();
   if (!requirementSet) return out;
+  for (const component of requirementSet.criticalComponents ?? []) out.add(component);
   for (const requirement of requirementSet.requirements) {
     if (requirement.optionality !== "REQUIRED") continue;
     for (const component of requirement.components ?? []) out.add(component);

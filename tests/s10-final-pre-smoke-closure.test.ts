@@ -179,8 +179,15 @@ describe("S10 final pre-smoke closure — HIGH-1: dimensional budget exhaustion 
   it("A. searchQueries=1 remaining, first Brave attempt transient failure, retry denied -> HTTP calls=1, the search axis closes bounded and the job finalizes", async () => {
     const p = await makeJob();
     // CORE envelope's maxSearchQueries is 40 (budget_core) — leave exactly
-    // 1 unit remaining so the retry's own reservation is denied.
-    await ctx.db.update(researchJobs).set({ searchQueriesReserved: 39 }).where(eq(researchJobs.id, p.jobId));
+    // 1 unit remaining so the retry's own reservation is denied. With no
+    // recovery reserve (Research Reliability V1 B2: a first pass holds
+    // reservedRecoverySteps × 2 search units back for the targeted second
+    // pass and closes bounded before the ceiling), so the FIRST attempt is
+    // the one that reaches the hard ceiling here.
+    await ctx.db
+      .update(researchJobs)
+      .set({ searchQueriesReserved: 39, budgetAtStart: { ...coreEntitlement().budget, reservedRecoverySteps: 0 } })
+      .where(eq(researchJobs.id, p.jobId));
     let calls = 0;
     const searchGateway: SearchGateway = {
       name: "fixture",

@@ -350,12 +350,26 @@ export async function reconcileAndPersistComponent(
 // starts with one of the two boundary codes yields a value. A missing
 // attempt row, any other status, or any other reason is null, and the
 // reducer runs exactly as before. Nothing here is spent or written.
+//
+// RESEARCH RELIABILITY V1 (B2) — THE DOCUMENT-LOCAL BOUNDARY OUTLIVES A
+// LATER LOOK. A targeted second attempt reads OTHER admissible documents
+// for the component; it never re-reads a document whose extraction
+// already failed (that document was extracted-attempted, so it is not a
+// remaining path). When that later attempt closes without Evidence and
+// without a boundary of its own, the component's own document is still
+// "read, not inspected" (Round 5.5, Founder decision C), and the record
+// keeps EXTRACTION_NOT_COMPLETED rather than paraphrasing it as "nothing
+// found". The two search-stage boundaries do NOT persist this way: the
+// second pass exists precisely to search and open what they named, so a
+// fruitless second look after them is a substantive absence. Only
+// Evidence lifts the document-local code — the reducer never reaches the
+// boundary when Evidence exists.
 async function loadAcquisitionBoundary(
   db: Database | Transaction,
   jobId: string,
   item: Pick<ComponentWorkItem, "step" | "component">,
 ): Promise<AcquisitionBoundary | null> {
-  const [latest] = await db
+  const attempts = await db
     .select({ status: researchAttempts.status, reason: researchAttempts.reason })
     .from(researchAttempts)
     .where(
@@ -365,9 +379,14 @@ async function loadAcquisitionBoundary(
         eq(researchAttempts.component, item.component),
       ),
     )
-    .orderBy(desc(researchAttempts.attemptNumber))
-    .limit(1);
-  return acquisitionBoundaryFromAttempt(latest);
+    .orderBy(desc(researchAttempts.attemptNumber));
+  const [latest] = attempts;
+  const boundary = acquisitionBoundaryFromAttempt(latest);
+  if (boundary !== null) return boundary;
+  for (const earlier of attempts.slice(1)) {
+    if (acquisitionBoundaryFromAttempt(earlier) === "EXTRACTION_NOT_COMPLETED") return "EXTRACTION_NOT_COMPLETED";
+  }
+  return null;
 }
 
 // HIGH-2 (deep audit) fix — the smallest deterministic recovery

@@ -452,8 +452,10 @@ describe("D-154 — an approved resource wins an equal-rank tie at the final ope
   it("TEST 12: no cap or budget moved", async () => {
     const { readFileSync } = await import("node:fs");
     const executor = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
-    expect(executor).toContain("const MAX_SEARCH_RESULTS_PER_QUERY = 5;");
-    expect(executor).toContain("const MAX_QUERIES_PER_ATTEMPT = 3;");
+    // A1 parity: the query/result caps are one shared contract (acquisition-targeting.ts).
+    const targeting = readFileSync("src/server/engine/acquisition-targeting.ts", "utf-8");
+    expect(targeting).toContain("export const MAX_SEARCH_RESULTS_PER_QUERY = 5;");
+    expect(targeting).toContain("export const MAX_QUERIES_PER_ATTEMPT = 3;");
     expect(executor).toContain("const MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT = 6;");
     // The open loop still breaks on the same allowance — priority reorders
     // the queue, it never lengthens it.

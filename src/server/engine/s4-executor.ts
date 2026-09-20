@@ -46,7 +46,7 @@ import {
   isExtractorFailureDiagnosticCode,
   type ExtractorFailureDiagnosticCode,
 } from "./providers/extractor-failure-diagnostics";
-import type { ComponentTarget, ExtractedFact, FetchedDocument, ModelUsage } from "./providers/types";
+import type { ComponentTarget, EvidenceSourceClass, ExtractedFact, FetchedDocument, ModelUsage } from "./providers/types";
 import { isOnchainExplorerUrl, resolveSourceClass, resolveSourceRoute, deriveSourceType } from "./source-authority";
 import { observeSourceRouteCandidate } from "./source-route-candidates";
 import {
@@ -57,6 +57,8 @@ import {
   genericSearchMayEstablish,
   modelQueriesCanBeUsed,
   orderCandidatesForComponent,
+  MAX_QUERIES_PER_ATTEMPT,
+  MAX_SEARCH_RESULTS_PER_QUERY,
 } from "./acquisition-targeting";
 import {
   approvedResourcesForComponent,
@@ -115,6 +117,8 @@ import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-sto
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
 import { extractionConcurrency, startWithConcurrency } from "./concurrency";
+import { TARGETED_RECOVERY_BOUNDS } from "./targeted-recovery";
+import { planSiteLocalExpansion } from "./site-local-expansion";
 
 // First Real Run, Stage 2 (pipeline-integration-stage2.md, D-115) — this
 // file's OWN instrumentation is additive-only: every recordTraceEvent
@@ -187,8 +191,6 @@ import { extractionConcurrency, startWithConcurrency } from "./concurrency";
 // propose — a LOCAL shaping bound, not a budget ceiling. The real ceiling
 // (maxSearchQueries as an actual SearchGateway call count, job-lifetime)
 // is enforced by reserveJobBudget() below, independently of this number.
-const MAX_QUERIES_PER_ATTEMPT = 3;
-const MAX_SEARCH_RESULTS_PER_QUERY = 5;
 // Local shaping bound on how many candidates one attempt will even try to
 // open — the real ceiling is reserveJobBudget("sourceOpens", ...).
 const MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT = 6;
@@ -1095,6 +1097,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
   // whether the capability is reachable.
   let consecutiveTransientlyFailedDocuments = 0;
   return {
+    // B2 — a replay fetcher cannot open anything new; run-job.ts defers the
+    // targeted second pass to a second phase cycle in that case.
+    liveAcquisition: !isReplayProvider(deps.contentFetcher),
     async execute(item: ComponentWorkItem, ctx): Promise<WorkExecutionResult> {
       const target: ComponentTarget = {
         step: item.step,
@@ -1106,7 +1111,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       };
       // Code-composed, deterministic — never free model text folded back
       // into control flow (D-070).
-      const hint = `state=${item.state}; blockers=${item.blockers.join(", ") || "none"}`;
+      // B2 — a targeted recovery attempt says so in the proposer's hint:
+      // this component stayed unresolved after the first pass, and these
+      // are the admissible paths that remain. Context only, never an
+      // admissibility input.
+      const targeted = ctx.targetedRecovery ?? null;
+      const hint = targeted
+        ? `state=${item.state}; blockers=${item.blockers.join(", ") || "none"}; targeted recovery of an unresolved critical component after the first pass; remaining admissible paths: ${targeted.paths.map((p) => p.kind + (p.domain ? `@${p.domain}` : "")).join(", ") || "none"}`
+        : `state=${item.state}; blockers=${item.blockers.join(", ") || "none"}`;
 
       const spent = { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 };
 
@@ -1116,6 +1128,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // — the existing, already-approved per-attempt observation channel
       // (research_attempts.reason), not a new learning system.
       const observations = new Set<string>();
+      if (targeted) observations.add("TARGETED_RECOVERY_ATTEMPT");
       function withObservations(reason: string): string {
         if (observations.size === 0) return reason;
         return `${reason}; source-route observations: ${[...observations].join(", ")}`;
@@ -1418,8 +1431,22 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // starved by earlier Pattern steps walking the queue first. Reads
       // the live reserved counter, never a stale snapshot.
       const reservedNow = await currentSearchQueriesReserved(deps.db, ctx.jobId);
-      const searchAllowance = componentSearchAllowance({
-        maxSearchQueries: ctx.budget.maxSearchQueries,
+      // B2 — a first pass shares the axis MINUS the recovery reserve; a
+      // targeted attempt takes at most its bound from whatever remains,
+      // outside fair share (it is the last consumer, by construction).
+      const searchReserve = targeted ? 0 : (ctx.recoveryReserve?.searchQueries ?? 0);
+      // The fair share treats the LAST pending component specially (it may
+      // take the per-attempt cap so the reservation layer can discover
+      // exhaustion). Under a first-pass reserve that would let the last
+      // component spend the units held for recovery, so the allowance is
+      // additionally capped at what remains BELOW the reserve.
+      const searchShapedRemaining = searchReserve > 0 ? Math.max(0, ctx.budget.maxSearchQueries - searchReserve - reservedNow) : Number.POSITIVE_INFINITY;
+      const searchAllowance = targeted
+        ? targeted.needsSearch
+          ? Math.min(TARGETED_RECOVERY_BOUNDS.searches, Math.max(0, ctx.budget.maxSearchQueries - reservedNow))
+          : 0
+        : Math.min(searchShapedRemaining, componentSearchAllowance({
+        maxSearchQueries: Math.max(0, ctx.budget.maxSearchQueries - searchReserve),
         alreadyReserved: reservedNow,
         workQueueSize: ctx.workQueueSize ?? 1,
         remainingComponents: ctx.remainingComponents ?? 1,
@@ -1433,7 +1460,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         intentRequiredPending: (ctx.pendingComponents ?? []).filter((c) =>
           plan.intentRequired.has(c),
         ).length,
-      });
+      }));
       // BOUNDED SEARCH FINALIZATION V1 — AN ALLOWANCE OF 0 IS THE JOB'S
       // SEARCH AXIS ALREADY SPENT, and that is now closed here, not thrown.
       //
@@ -1473,7 +1500,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // units before extraction began. A replay is bounded by what was
       // searched, never by what is left to search.
       const searchMetered = !isReplayProvider(searchGateway);
-      const searchAxisSpent = searchMetered && searchAllowance === 0;
+      // B2: a targeted attempt whose plan needs no search (its paths are
+      // sealed documents and unopened candidates) has an allowance of 0 by
+      // design — that is not a spent axis and is not recorded as one.
+      const targetedPathsOnly = targeted !== null && !targeted.needsSearch;
+      const searchAxisSpent = searchMetered && searchAllowance === 0 && !targetedPathsOnly;
       const effectiveAllowance = searchMetered ? Math.max(1, searchAllowance) : MAX_QUERIES_PER_ATTEMPT;
       let searchBudgetExhausted = searchAxisSpent;
 
@@ -1527,9 +1558,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       //                            Counts only locators the documentary path
       //                            can execute: a locator whose every result
       //                            this executor would refuse fills no slot.
-      const proposerSkip: "NO_ADMISSIBLE_ROUTE" | "SEARCH_BUDGET_EXHAUSTED" | "MODEL_QUERIES_UNUSABLE" | null =
+      const proposerSkip: "NO_ADMISSIBLE_ROUTE" | "SEARCH_BUDGET_EXHAUSTED" | "MODEL_QUERIES_UNUSABLE" | "TARGETED_PATHS_ONLY" | null =
         noAdmissibleRoute
           ? "NO_ADMISSIBLE_ROUTE"
+          : targetedPathsOnly
+            ? "TARGETED_PATHS_ONLY"
           : searchAxisSpent
             ? "SEARCH_BUDGET_EXHAUSTED"
             : modelQueriesCanBeUsed({
@@ -1552,6 +1585,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // nothing was reserved. The human-readable detail rides the
         // existing observations channel.
         if (proposerSkip === "MODEL_QUERIES_UNUSABLE") observations.add("MODEL_QUERIES_UNUSABLE_SKIPPED_PROPOSER");
+        if (proposerSkip === "TARGETED_PATHS_ONLY") observations.add("TARGETED_RECOVERY_PATHS_ONLY");
         if (proposerSkip === "SEARCH_BUDGET_EXHAUSTED") observations.add("SEARCH_BUDGET_EXHAUSTED");
         await recordTraceEvent(deps.db, {
           researchJobId: ctx.jobId,
@@ -1724,7 +1758,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // A proposer that RAN and returned nothing is still an unusable
       // attempt. A proposer that was deliberately skipped is not — the
       // deterministic locators below are this attempt's queries.
-      if (modelQueries.length === 0 && canUseModelQueries) {
+      // B2: a targeted attempt with known path urls has work to do without
+      // a single query — the sealed documents and unopened candidates the
+      // plan named. It proceeds to open them; nothing is proposed.
+      const targetedHasPathUrls = targeted !== null && targeted.paths.some((p) => typeof p.url === "string");
+      if (modelQueries.length === 0 && canUseModelQueries && !targetedHasPathUrls) {
         return closeDocumentaryPass({ status: "SKIPPED", reason: "NO_QUERIES_PROPOSED", spent });
       }
 
@@ -1764,7 +1802,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // plans NO query at all — not even a self-contained locator — so no
       // reservation is attempted and no provider is called.
       const queryCountBound =
-        proposerSkip === "NO_ADMISSIBLE_ROUTE" || proposerSkip === "SEARCH_BUDGET_EXHAUSTED"
+        proposerSkip === "NO_ADMISSIBLE_ROUTE" || proposerSkip === "SEARCH_BUDGET_EXHAUSTED" || proposerSkip === "TARGETED_PATHS_ONLY"
           ? 0
           : canUseModelQueries
             ? Math.min(effectiveAllowance, modelQueries.length)
@@ -1797,6 +1835,19 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // equals the real number of Brave HTTP attempts, never one
       // reservation authorizing two calls.
       const candidateUrls = new Map<string, { url: string }>();
+      // B2 — a targeted attempt starts from the known paths the plan found
+      // (sealed-but-unextracted documents, unopened candidates): they are
+      // this job's own discoveries and enter the same ordering, ledger and
+      // admissibility as any search result.
+      if (targeted) {
+        let seeded = 0;
+        for (const path of targeted.paths) {
+          if (!path.url || candidateUrls.has(path.url)) continue;
+          candidateUrls.set(path.url, { url: path.url });
+          seeded += 1;
+        }
+        if (seeded > 0) observations.add(`TARGETED_RECOVERY_PATH_CANDIDATES:${seeded}`);
+      }
       // LOW-A: keep the most recent typed provider failure reason around
       // so a terminal SKIPPED/FAILED result can surface it for
       // observability, instead of only a generic NO_SEARCH_CANDIDATES/
@@ -2041,6 +2092,25 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         candidateUrls.set(seed.canonicalUrl, { url: seed.canonicalUrl });
         observations.add("SOURCE_RESOURCE_SEED_ADMITTED");
       }
+      // B1 — candidates a bounded site-local expansion attributed to THIS
+      // component while another component's documents were being read
+      // (the phased FETCH phase and the unphased expansion below both
+      // record one CANDIDATE_RETURNED row per admitting component). They
+      // are this component's own discoveries in the ledger; adopted here
+      // as ordinary candidates, so the unphased walk sees exactly what the
+      // phased one does.
+      let adoptedSiteLocal = 0;
+      for (const [scopedKey, urls] of ledger.candidatesByQueryComponent) {
+        if (!scopedKey.startsWith(`${item.step}:${item.component}:route:`)) continue;
+        for (const url of urls) {
+          const canonical = canonicalTargetRef(url);
+          if (knownCandidates.has(canonical)) continue;
+          knownCandidates.add(canonical);
+          candidateUrls.set(url, { url });
+          adoptedSiteLocal += 1;
+        }
+      }
+      if (adoptedSiteLocal > 0) observations.add(`SITE_LOCAL_CANDIDATES_ADOPTED:${adoptedSiteLocal}`);
       if (candidateUrls.size === 0) {
         // THE TWO BOUNDED CLOSES, before the technical one. No admissible
         // documentary route, or a spent search axis, with no approved seed
@@ -2087,6 +2157,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         maxSourceOpens: ctx.budget.maxSourceOpens,
         onchainAcquisitionUnavailable,
       });
+      // B2 — the same reserve on the opens axis for a first pass. It
+      // shapes the ALLOWANCE (what this attempt proposes to open), never
+      // the reservation ceiling: a refused open reservation is D3's
+      // job-level exhaustion, and holding units back for recovery must not
+      // manufacture one.
+      const opensReserve = targeted ? 0 : (ctx.recoveryReserve?.sourceOpens ?? 0);
       const documentaryMaxSourceOpens = onchainReserve.documentaryCeiling;
       if (onchainReserve.reserved > 0) {
         observations.add("SOURCE_OPENS_RESERVED_FOR_ONCHAIN");
@@ -2121,17 +2197,29 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // applies, and extraction is still bounded by the axis that actually
       // pays for it — modelCostMicro — which reserves per extraction call
       // and is untouched here.
-      let openAllowance = fetchMetered
+      const opensReservedNow = fetchMetered ? await currentSourceOpensReserved(deps.db, ctx.jobId) : 0;
+      // Same rule as the search axis: under a first-pass reserve the last
+      // component's per-attempt cap may not reach into the held units.
+      // Floored at 1 like every first-pass allowance (a component that
+      // opens nothing produces nothing), so the reserve can be undercut by
+      // at most one unit per late component — never by a whole cap.
+      const opensShapedRemaining = opensReserve > 0 ? Math.max(0, documentaryMaxSourceOpens - opensReserve - opensReservedNow) : Number.POSITIVE_INFINITY;
+      let openAllowance = targeted && fetchMetered
+        ? Math.min(TARGETED_RECOVERY_BOUNDS.opens, Math.max(0, documentaryMaxSourceOpens - opensReservedNow))
+        : fetchMetered
         ? Math.max(
             1,
-            componentSearchAllowance({
-              maxSearchQueries: documentaryMaxSourceOpens,
-              alreadyReserved: await currentSourceOpensReserved(deps.db, ctx.jobId),
-              workQueueSize: ctx.workQueueSize ?? 1,
-              remainingComponents: ctx.remainingComponents ?? 1,
-              isIntentRequired: plan.intentRequired.has(item.component),
-              hardCapPerAttempt: MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT,
-            }),
+            Math.min(
+              opensShapedRemaining,
+              componentSearchAllowance({
+                maxSearchQueries: Math.max(0, documentaryMaxSourceOpens - opensReserve),
+                alreadyReserved: opensReservedNow,
+                workQueueSize: ctx.workQueueSize ?? 1,
+                remainingComponents: ctx.remainingComponents ?? 1,
+                isIntentRequired: plan.intentRequired.has(item.component),
+                hardCapPerAttempt: MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT,
+              }),
+            ),
           )
         : MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT;
       const fetchedDocs: Awaited<ReturnType<ContentFetcher["fetch"]>>[] = [];
@@ -2235,6 +2323,24 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
       // A url in the ledger with no sealed copy (sealed before this rule
       // existed, or refused by the size bound) falls through to the
       // ordinary paid fetch, exactly as before.
+      // A3 — REPLAY-SAFE CONTINUATION. Under the phased EXTRACTING replay
+      // the fetcher can serve only what the FETCH phase sealed. The
+      // candidate walk (and the +1 continuation it feeds) used to see the
+      // whole discovered list and would "open" an unsealed url into the
+      // replay's fail-closed throw. The list is cut to the replayable set
+      // BEFORE any open is planned, and the cut is recorded, so the
+      // continuation operates only on real documentary state and a
+      // phased run can never fail on its own shape. A live transport has
+      // no `canFetch` and the list is untouched.
+      if (!fetchMetered && typeof contentFetcher.canFetch === "function") {
+        const replayable = orderedCandidates.filter((url) => contentFetcher.canFetch!(url));
+        const unsealed = orderedCandidates.length - replayable.length;
+        if (unsealed > 0) {
+          observations.add(`REPLAY_UNSEALED_CANDIDATES_SKIPPED:${unsealed}`);
+          orderedCandidates.length = 0;
+          orderedCandidates.push(...replayable);
+        }
+      }
       let sealedByUrl: Map<string, FetchedDocument> | null = null;
       // D3 — SOURCE-OPEN EXHAUSTION IS HONOURED AFTER THE PAID WORK IS
       // READ. A refused reservation used to throw at the denial boundary,
@@ -2827,6 +2933,43 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         // set of documents that got a call can differ from the sequential
         // loop's. Total spend cannot: every unit is one atomic reservation
         // either way.
+        // B1 — BOUNDED SITE-LOCAL EXPANSION, unphased: from the links the
+        // documents just opened carry, a few same-route pages on the
+        // project's confirmed official routes become ordinary candidates
+        // of THIS component (recorded in the trace, appended to the
+        // ordered list). Opened only through the existing machinery — the
+        // continuation below, or the targeted second pass — never here.
+        // Under the phased replay the FETCH phase already did this.
+        if (acquisitionRound === 1 && fetchMetered) {
+          const harvested = fetchedDocs
+            .filter((d) => d.documentLinks && d.documentLinks.links.length > 0)
+            .map((d) => ({ url: d.finalUrl, links: d.documentLinks!.links.map((l) => ({ href: l.href, text: l.text })) }));
+          if (harvested.length > 0) {
+            // Selected and attributed exactly as the phased FETCH phase does
+            // it: ranked per component against each component's own
+            // vocabulary (pending critical first — this one included — so
+            // where in the walk the index was read never decides which
+            // page a later component gets), then against the task;
+            // recorded for EVERY work-queue component whose classes the
+            // route establishes (a later component adopts its rows from
+            // the ledger at the start of its own attempt, above). Appended
+            // to THIS attempt, in THIS component's relevance order, only
+            // where this component admits the route's class.
+            const expansion = await planSiteLocalExpansion(deps.db, ctx.jobId, deps.project.id, harvested, {
+              pendingComponents: [item.component, ...(ctx.pendingComponents ?? [])],
+              forComponent: { step: item.step, component: item.component },
+            });
+            let appended = 0;
+            for (const e of expansion) {
+              if (!plan.establishingClasses.includes(e.routeClass as EvidenceSourceClass)) continue;
+              if (candidateUrls.has(e.url)) continue;
+              candidateUrls.set(e.url, { url: e.url });
+              orderedCandidates.push(e.url);
+              appended += 1;
+            }
+            if (appended > 0) observations.add(`SITE_LOCAL_EXPANSION:${appended}`);
+          }
+        }
         const roundDocs = fetchedDocs.slice(extractedDocCount);
         // APPROVED SEMANTICS (Founder decision, speed+cost): max concurrency
         // 4; after a KNOWN fatal outcome no new extraction call starts and no
@@ -3475,7 +3618,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // the same ledgers the reservations below are made against, so a
           // continuation can never be the reservation that ends the job.
           const reservedNow = await readJobBudgetReserved(deps.db, ctx.jobId);
-          const roomToOpen = reservedNow !== null && reservedNow.sourceOpens < documentaryMaxSourceOpens;
+          const roomToOpen = reservedNow !== null && reservedNow.sourceOpens < documentaryMaxSourceOpens - opensReserve;
           const roomToExtract =
             reservedNow !== null &&
             reservedNow.modelCostMicro + evidenceExtractorCostMicro <= ctx.budget.maxModelCostMicro;

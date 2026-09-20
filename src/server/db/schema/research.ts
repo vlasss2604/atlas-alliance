@@ -79,6 +79,10 @@ export const researchJobs = pgTable(
     // without the commit.
     acquisitionPhase: researchAcquisitionPhase("acquisition_phase"),
     acquisitionPhaseAt: timestamp("acquisition_phase_at", { withTimezone: true }),
+    // B2 — the targeted second pass carried across a second phase cycle
+    // (targeted-recovery.ts TargetedRecoveryPlan). Null until the first
+    // EXTRACTING cycle plans one; never a third.
+    acquisitionScope: jsonb("acquisition_scope"),
     clarificationAttempts: smallint("clarification_attempts")
       .notNull()
       .default(0),

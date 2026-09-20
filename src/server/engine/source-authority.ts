@@ -511,6 +511,16 @@ export function isValidRouteClass(value: unknown): value is RouteClass {
 // escalation path from CLAIMED to CONFIRMED that does not go through a
 // human-approved ACTIVE row, and no way for routeClass to leak from a row
 // that did NOT match this exact project+domain.
+// A1 PARITY — THE ORDER A BOUNDED OPENS CAP CUTS, AT JOB LEVEL. Not an
+// admissibility decision: the executor already opens confirmed-route
+// candidates first per component (D-155); the phased FETCH phase applies
+// the same rank across the job's candidates. 0 = confirmed, classified
+// route; 1 = confirmed, unclassified; 2 = everything else.
+export function confirmedRouteRank(route: ResolvedSourceRoute): 0 | 1 | 2 {
+  if (route.officiality !== "CONFIRMED") return 2;
+  return route.routeClass ? 0 : 1;
+}
+
 export async function resolveSourceRoute(
   db: Database | Transaction,
   projectId: string | null,

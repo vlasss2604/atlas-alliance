@@ -172,6 +172,16 @@ export type RequirementKind = z.infer<typeof requirementKindSchema>;
 const intentRequirementSetSchema = z.object({
   requirements: z.array(claimRequirementSchema).min(1),
   ceiling: z.enum(["PARTIALLY_SUPPORTED"]).optional(),
+  // RESEARCH RELIABILITY V1 (B3) — THE CRITICAL PROOF PATH of a question
+  // with this intent: the components a bounded Research may not leave
+  // un-attempted while an admissible path to them remains. ONE canonical
+  // declaration, read by acquisition priority (budget-fairness.ts), the
+  // targeted second pass (B2), later completion checks and the result
+  // projection floor. It is NOT read by S7: `requirements` alone decides a
+  // verdict, so declaring a component critical changes what the Research
+  // TRIES, never what it CONCLUDES. Always a superset of the components the
+  // requirements themselves name (pinned).
+  criticalComponents: z.array(z.string().min(1)).optional(),
 });
 
 const intentRequirementsSchema = z.record(z.string(), intentRequirementSetSchema).optional();
@@ -329,6 +339,15 @@ export class IntentConfigurationError extends Error {
     );
     this.name = "IntentConfigurationError";
   }
+}
+
+// B3 — the critical proof path of an intent, or nothing for an intent the
+// Pattern has no entry for (UNKNOWN, SCENARIO_CAUSAL_IMPACT,
+// CLAIM_FACT_CHECK): a question with no declared path has no critical
+// nodes, so nothing is prioritised or recovered on its behalf.
+export function criticalComponentsFor(pattern: PatternContent, intent: string): string[] {
+  const entry = pattern.intentRequirements?.[intent as (typeof RESEARCH_INTENTS)[number]];
+  return entry?.criticalComponents ? [...entry.criticalComponents] : [];
 }
 
 export function intentRequirementsFor(
@@ -560,34 +579,49 @@ export const PATTERN_V1_CONTENT: PatternContent = {
   // S7 consumes these atoms and invents none. UNKNOWN, SCENARIO_CAUSAL_IMPACT,
   // and CLAIM_FACT_CHECK deliberately have no entry — see intentRequirementsFor.
   intentRequirements: {
+    // B3 — CRITICAL PROOF PATHS. A revenue-to-token question (PRT, VC, RS,
+    // UTL, PHO, TU) cannot be answered without the SOURCE of the value, the
+    // MECHANISM that moves it, whether it is CURRENTLY operating, and its
+    // DESTINATION; NET_EFFECT joins only where the intent asks about supply
+    // (VC-3, BSE-1). A current-state question keeps the four lifecycle
+    // states apart: DOCUMENTED (MECHANISM_SPEC), APPROVED (GOVERNANCE_BASIS),
+    // ACTIVATED (CURRENT_STATE), EXECUTING (EXECUTION_EVIDENCE). Never every
+    // component: FLOW_PATH, DURABILITY_BASIS and RECIPIENT stay ordinary
+    // unless a requirement names them.
     PROTOCOL_REVENUE_TO_TOKEN: {
       requirements: [
         { requirementId: "PRT-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
         { requirementId: "PRT-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
       ],
+      criticalComponents: ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "CURRENT_STATE", "DESTINATION"],
     },
     PASSIVE_HOLDER_OUTCOME: {
       requirements: [
         { requirementId: "PHO-1", kind: "FLOW_ATTRIBUTE", optionality: "REQUIRED", attribute: "recipientKind", expectedValues: ["PASSIVE_HOLDER"] },
       ],
+      criticalComponents: ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "DESTINATION", "RECIPIENT"],
     },
     REWARD_SOURCE: {
       requirements: [
         { requirementId: "RS-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
         { requirementId: "RS-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
       ],
+      criticalComponents: ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "CURRENT_STATE", "DESTINATION"],
     },
     BURN_OR_SUPPLY_EFFECT: {
       requirements: [{ requirementId: "BSE-1", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" }],
+      criticalComponents: ["MECHANISM_SPEC", "EXECUTION_EVIDENCE", "NET_EFFECT"],
     },
     MECHANISM_CURRENT_STATE: {
       requirements: [{ requirementId: "MCS-1", kind: "LIFECYCLE", optionality: "REQUIRED", expectedLifecycle: "CURRENT" }],
+      criticalComponents: ["MECHANISM_SPEC", "GOVERNANCE_BASIS", "CURRENT_STATE", "EXECUTION_EVIDENCE"],
     },
     USAGE_TO_TOKEN_LINKAGE: {
       requirements: [
         { requirementId: "UTL-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
         { requirementId: "UTL-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
       ],
+      criticalComponents: ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "CURRENT_STATE", "DESTINATION"],
     },
     VALUE_CAPTURE: {
       requirements: [
@@ -595,8 +629,10 @@ export const PATTERN_V1_CONTENT: PatternContent = {
         { requirementId: "VC-2", kind: "FLOW_RELATIONSHIP", optionality: "REQUIRED", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" },
         { requirementId: "VC-3", kind: "NET_EFFECT_ESTABLISHED", optionality: "REQUIRED" },
       ],
+      criticalComponents: ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "CURRENT_STATE", "DESTINATION", "NET_EFFECT"],
     },
     TOKEN_UTILITY: {
+      criticalComponents: ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "DESTINATION"],
       requirements: [
         { requirementId: "TU-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] },
         {

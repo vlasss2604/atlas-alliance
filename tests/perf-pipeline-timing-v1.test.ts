@@ -13,6 +13,7 @@ import {
   users,
 } from "../src/server/db/schema";
 import { loadActivePatternVersion } from "../src/server/engine/active-pattern";
+import { MAX_QUERIES_PER_ATTEMPT } from "../src/server/engine/acquisition-targeting";
 import {
   prepareExtractionReplayFetcher,
   prepareExtractionReplayProposer,
@@ -318,7 +319,12 @@ describe("PIPELINE TIMING MODEL — one normal Research through the real phased 
     // component.
     expect(c.proposer).toBeGreaterThan(0);
     expect(c.proposer).toBeLessThanOrEqual(t.components);
-    expect(c.search).toBe(c.proposer * 2);
+    // A1 parity: the phase blends route-scoped and model queries under the
+    // shared per-attempt cap and the job envelope; every search is one
+    // proposed query, never more than the cap per proposer call.
+    expect(c.search).toBeGreaterThanOrEqual(c.proposer);
+    expect(c.search).toBeLessThanOrEqual(c.proposer * MAX_QUERIES_PER_ATTEMPT);
+    expect(c.search).toBeLessThanOrEqual(INTERNAL_ALPHA_V1.maxSearchQueries);
     expect(c.fetch).toBe(t.uniqueUrls);
     expect(new Set(c.fetchedUrls).size).toBe(c.fetch);
     expect(new Set(c.extractPairs).size).toBe(c.extract);

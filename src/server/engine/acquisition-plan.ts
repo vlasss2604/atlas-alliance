@@ -49,6 +49,9 @@ export interface AcquisitionPlan {
   // single DB read for both purposes.
   confirmedIdentity: ConfirmedProjectIdentity | null;
   intentRequired: ReadonlySet<string>;
+  // B3 — the intent's declared critical proof path, for the targeted
+  // second pass and completion checks (a subset of intentRequired).
+  criticalComponents: ReadonlySet<string>;
   intent: string;
   // ACQUISITION MINIMUM SAFE V1 (A) — context that tells the provider
   // roles WHAT would resolve this component, not merely which project it
@@ -77,6 +80,7 @@ const EMPTY_PLAN: AcquisitionPlan = {
   onchainLocators: [],
   confirmedIdentity: null,
   intentRequired: new Set<string>(),
+  criticalComponents: new Set<string>(),
   intent: "UNKNOWN",
   evidenceGoal: null,
   researchTask: null,
@@ -232,6 +236,7 @@ export async function loadAcquisitionPlan(
       onchainLocators: onchainLocatorsFor(component, establishingClasses, confirmedIdentity),
       confirmedIdentity,
       intentRequired: intentRequiredComponents(requirementSet),
+      criticalComponents: new Set(requirementSet?.criticalComponents ?? []),
       intent,
       evidenceGoal,
       researchTask: normalizedTaskText(job.normalizedTask),

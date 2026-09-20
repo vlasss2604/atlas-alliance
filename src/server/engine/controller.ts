@@ -3,6 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { researchAttempts, researchJobs } from "../db/schema";
 import type { ComponentWorkItem, ContractView } from "./contract-view";
+import { planItemFor, type TargetedRecoveryItem, type TargetedRecoveryPlan } from "./targeted-recovery";
 import type { ComponentReconciliationResult } from "./component-reconciler";
 
 // Phase 6, S3 — ResearchController skeleton (phase-6-plan.md §19 S3, D-070,
@@ -87,8 +88,17 @@ export interface WorkExecutor {
       // requires is Pattern data resolved in acquisition-plan.ts, and this
       // stays a plain list of names.
       pendingComponents?: string[];
+      // B2 — set on a targeted recovery attempt: bounds and known paths.
+      targetedRecovery?: TargetedRecoveryItem | null;
+      // B2 — set on a first-pass attempt: what to hold back for recovery.
+      recoveryReserve?: { searchQueries: number; sourceOpens: number } | null;
     },
   ): Promise<WorkExecutionResult>;
+  // B2 — whether this executor can reach the network for search and opens
+  // (false for the phased EXTRACTING replay). run-job.ts decides from it
+  // whether a targeted second pass runs in-process or is deferred to a
+  // second phase cycle.
+  liveAcquisition?: boolean;
 }
 
 export type ControllerStopReason =
@@ -114,6 +124,15 @@ export interface ControllerRunInput {
   view: ContractView;
   executor: WorkExecutor;
   now: Date;
+  // B2 — TARGETED SECOND PASS. `pendingOverride` walks exactly these items
+  // instead of the whole queue; `targetedRecovery` is the plan whose
+  // bounds and known paths each item's attempt must honour (an attempt
+  // made under it is a recovery attempt with its own ceiling: one per
+  // planned item); `recoveryReserve` is what a FIRST pass holds back on
+  // the scarce axes so the second pass can still search and open.
+  pendingOverride?: readonly ComponentWorkItem[];
+  targetedRecovery?: TargetedRecoveryPlan | null;
+  recoveryReserve?: { searchQueries: number; sourceOpens: number } | null;
   // Test/operational seam for simulating an interrupted run — never used
   // to widen or narrow scope, only to cap how many NEW attempts this one
   // call makes before returning.
@@ -166,6 +185,12 @@ export interface ControllerRunResult {
     authorizedModelCostMicro: number;
   };
   recoveryAttemptsUsed: number;
+  // B2 — the targeted second pass: the plan that ran (in-process) or that
+  // was deferred to a second phase cycle (`targetedRecoveryDeferred`),
+  // and how many recovery attempts it made here.
+  targetedRecovery?: TargetedRecoveryPlan | null;
+  targetedRecoveryDeferred?: boolean;
+  targetedRecoveryAttempts?: number;
 }
 
 function componentKey(step: number, component: string): string {
@@ -367,6 +392,7 @@ async function claimAttempt(
   normalAttemptCeiling: number,
   now: Date,
   debugClaimDelayMs: number,
+  recoveryCeilingOverride?: number,
 ): Promise<ClaimOutcome> {
   return db.transaction(async (tx) => {
     // The row lock itself (not its columns) is what serializes concurrent
@@ -420,7 +446,9 @@ async function claimAttempt(
     // MEDIUM-A: normalCeiling is the deterministic work-set size, not
     // maxSearchQueries-derived — see the parameter doc comment above.
     const normalCeiling = normalAttemptCeiling;
-    const recoveryCeiling = budget.reservedRecoverySteps;
+    // B2: a targeted pass has its own ceiling — one recovery attempt per
+    // planned item on top of what the job had already used.
+    const recoveryCeiling = recoveryCeilingOverride ?? budget.reservedRecoverySteps;
     const attemptSlotExhausted = isRecoveryAttempt
       ? recoveryAttemptsUsedLifetime >= recoveryCeiling
       : normalAttemptsUsedLifetime >= normalCeiling;
@@ -478,9 +506,12 @@ export async function runResearchController(
   // job-locked transaction (R-1) and is re-checked fresh per item.
   const { succeededKeys } = await loadAttemptState(db, jobId);
 
-  const pending = view.workQueue.filter(
+  const pending = (input.pendingOverride ?? view.workQueue).filter(
     (item) => !succeededKeys.has(componentKey(item.step, item.component)),
   );
+  const recoveryCeilingOverride = input.targetedRecovery
+    ? (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime + pending.length
+    : undefined;
 
   if (
     pending.length === 0 &&
@@ -535,6 +566,7 @@ export async function runResearchController(
       view.workQueue.length,
       now,
       debugClaimDelayMs,
+      recoveryCeilingOverride,
     );
 
     if (!outcome.claimed) {
@@ -596,6 +628,8 @@ export async function runResearchController(
       remainingComponents: Math.max(1, pending.length - processedFromPending),
       // Everything after the current item in this run's pending set.
       pendingComponents: pending.slice(processedFromPending + 1).map((p) => p.component),
+      targetedRecovery: planItemFor(input.targetedRecovery, item.step, item.component),
+      recoveryReserve: input.targetedRecovery ? null : (input.recoveryReserve ?? null),
     });
     processedFromPending += 1;
     attemptsThisRun += 1;

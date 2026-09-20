@@ -30,6 +30,7 @@ import {
 } from "../src/server/engine/providers/token-gate";
 import type { ExtractedFact, FetchedDocument } from "../src/server/engine/providers/types";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
+import { TARGETED_RECOVERY_BOUNDS } from "../src/server/engine/targeted-recovery";
 import { confirmProjectIdentity } from "../src/server/memory/project-identity-confirmation";
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
@@ -848,9 +849,14 @@ describe("C. NO EVIDENCE != NOT EXTRACTED — the truthful diagnostic", () => {
       expect(o.state, how).toBe("SUCCEEDED");
       expect(o.s5.DESTINATION!.status, how).toBe("INSUFFICIENT_EVIDENCE");
       expect(o.s5.DESTINATION!.reasonCodes, how).toEqual(["NO_EVIDENCE_FOUND"]);
-      expect(o.calls.extract, how).toBe(ALL_COMPONENTS.length - 1);
+      // Research Reliability V1 (B2): DESTINATION is on the intent's
+      // critical proof path, so after the first walk ONE targeted recovery
+      // attempt reads up to TARGETED_RECOVERY_BOUNDS.extractions sealed
+      // documents other components surfaced on the admitted route — and
+      // finding nothing there is still NO_EVIDENCE_FOUND.
+      expect(o.calls.extract, how).toBe(ALL_COMPONENTS.length - 1 + TARGETED_RECOVERY_BOUNDS.extractions);
     }
-  });
+  }, 120_000);
 
   it("C3b. mixed: one document fails extraction and another for the same component is read and establishes — no boundary code, the component is SUPPORTED on the read row alone", async () => {
     const p = await makeProject();

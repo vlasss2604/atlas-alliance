@@ -950,7 +950,9 @@ describe("D-136 §7 — budgets (item 25)", () => {
 
     // Each phase reserved on the SAME job counters, through the same
     // primitives, for the external calls it actually made.
-    expect(afterSearch.searchQueriesReserved).toBe(1);
+    // A1 parity: the classified-route fixture now runs the site-scoped
+    // query beside the generic one — two units, reserved once each.
+    expect(afterSearch.searchQueriesReserved).toBe(2);
     expect(afterFetch.sourceOpensReserved).toBe(1);
     expect(afterFetch.searchQueriesReserved).toBe(afterSearch.searchQueriesReserved);
 
@@ -987,7 +989,7 @@ describe("D-136 §7 — budgets (item 25)", () => {
     await handleSearchingPhase(roleCtx(ROLE_A), jobId, SEARCH_PROVIDERS());
     await handleFetchingPhase(roleCtx(ROLE_B), jobId, fixtureFetcher({ n: 0, urls: [] }));
     const beforeExtraction = await jobRow(jobId);
-    expect(beforeExtraction.searchQueriesReserved).toBe(1);
+    expect(beforeExtraction.searchQueriesReserved).toBe(2); // A1: site-scoped + generic
     expect(beforeExtraction.sourceOpensReserved).toBe(1);
 
     await handleExtractingPhase(roleCtx(ROLE_A), jobId, () =>

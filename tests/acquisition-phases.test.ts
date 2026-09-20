@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -22,6 +23,7 @@ import {
   runSearchPhase,
 } from "../src/server/engine/acquisition-phases";
 import { loadAcquisitionPlan } from "../src/server/engine/acquisition-plan";
+import { MAX_QUERIES_PER_ATTEMPT, MAX_SEARCH_RESULTS_PER_QUERY } from "../src/server/engine/acquisition-targeting";
 import { persistAcquiredDocument } from "../src/server/engine/acquired-documents";
 import { buildAndPersistProof } from "../src/server/engine/proof-store";
 import { loadProofForJob } from "../src/server/services/proof-view";
@@ -36,6 +38,7 @@ import {
   researchClaimSupport,
   researchComponentResults,
   researchJobs,
+  researchTraceEvents,
   researchMechanismAssembly,
 } from "../src/server/db/schema";
 import { resolveSourceRoute } from "../src/server/engine/source-authority";
@@ -267,8 +270,10 @@ describe("PHASE 1 — SEARCHING persists a handoff and nothing else (items 2-5)"
       queryProposerCostProfile: COST,
     });
 
-    expect(searchCalls.n).toBe(1);
-    expect(out.executedQueries).toEqual(["q-alpha"]);
+    // A1 parity: a classified-route project also gets the executor's
+    // route-scoped query (`site:<domain> q-alpha`), so two searches run.
+    expect(searchCalls.n).toBe(2);
+    expect(out.executedQueries).toEqual([`site:${new URL(DOC_URL).hostname} q-alpha`, "q-alpha"]);
     expect(out.candidateUrls).toEqual([DOC_URL, OTHER_URL]);
 
     // 2. the handoff is readable back through the canonical typed reader.
@@ -303,8 +308,8 @@ describe("PHASE 1 — SEARCHING persists a handoff and nothing else (items 2-5)"
     await runSearchPhase(args);
     const second = await runSearchPhase(args);
 
-    expect(calls.n).toBe(1); // the second pass spent no search unit
-    expect(second.dedupedQueries).toEqual(["q-alpha"]);
+    expect(calls.n).toBe(2); // the second pass spent no search unit (A1: site: + generic on the first)
+    expect(second.dedupedQueries).toEqual([`site:${new URL(DOC_URL).hostname} q-alpha`, "q-alpha"]);
     expect(second.candidateUrls).toEqual([DOC_URL]);
     expect((await loadFetchTargets(ctx.db, jobId))).toEqual([DOC_URL]);
   }, 60_000);
@@ -365,6 +370,83 @@ describe("PHASE 1 — the proposer receives the same task context the executor g
       expect(t.projectSlug).toBe(project.slug);
       expect(t.projectName).toBe(project.name);
     }
+  }, 60_000);
+});
+
+describe("A1 — PHASED / UNPHASED ACQUISITION PARITY (Research Reliability V1)", () => {
+  it("the per-attempt caps are one shared contract: the phase worker reads the executor's constants, no second literal", () => {
+    expect(MAX_QUERIES_PER_ATTEMPT).toBe(3);
+    expect(MAX_SEARCH_RESULTS_PER_QUERY).toBe(5);
+    const worker = readFileSync("src/server/jobs/acquisition-phase-worker.ts", "utf-8");
+    expect(worker).toContain("maxQueriesPerComponent: opts?.maxQueriesPerComponent ?? MAX_QUERIES_PER_ATTEMPT");
+    expect(worker).toContain("maxResultsPerQuery: opts?.maxResultsPerQuery ?? MAX_SEARCH_RESULTS_PER_QUERY");
+    expect(worker).not.toMatch(/maxQueriesPerComponent \?\? 2\b/);
+    const executor = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
+    expect(executor).not.toMatch(/^const MAX_QUERIES_PER_ATTEMPT = /m);
+    expect(executor).not.toMatch(/^const MAX_SEARCH_RESULTS_PER_QUERY = /m);
+  });
+
+  it("the SEARCH phase steers a query at a CONFIRMED route domain (site:), exactly as the executor does; the generic slot is kept", async () => {
+    const project = await makeClassifiedProject();
+    const jobId = await makeJob(project.id);
+    const executed: string[] = [];
+    await runSearchPhase({
+      db: ctx.db,
+      jobId,
+      items: [ITEM],
+      target: targetFor(project),
+      queryProposer: fixtureProposer(["q-alpha", "q-beta"]),
+      searchGateway: {
+        name: "fixture-search",
+        async search(query: string) {
+          executed.push(query);
+          return [];
+        },
+      },
+      maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
+      maxResultsPerQuery: 5,
+      maxQueriesPerComponent: MAX_QUERIES_PER_ATTEMPT,
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
+    });
+    expect(executed.some((q) => q.startsWith(`site:${new URL(DOC_URL).hostname} `))).toBe(true);
+    expect(executed).toContain("q-alpha");
+    expect(executed.length).toBeLessThanOrEqual(MAX_QUERIES_PER_ATTEMPT);
+    // Every executed query is in the trace as proposed — the blended list,
+    // not the raw model output, is what this component searched.
+    const trace = await ctx.db.select().from(researchTraceEvents).where(eq(researchTraceEvents.researchJobId, jobId));
+    const proposed = trace.filter((t) => t.operationType === "QUERY_PROPOSED").map((t) => t.targetRef);
+    for (const q of executed) expect(proposed).toContain(q);
+  }, 60_000);
+
+  it("the FETCH phase opens a CONFIRMED-route candidate before an unrouted one discovered earlier (the executor's D-155 rank, at job level)", async () => {
+    const project = await makeClassifiedProject();
+    const jobId = await makeJob(project.id);
+    const unrouted = "https://blog.example-unrouted.test/post";
+    await runSearchPhase({
+      db: ctx.db,
+      jobId,
+      items: [ITEM],
+      target: targetFor(project),
+      queryProposer: fixtureProposer(["q-alpha"]),
+      // The same three results for whichever query runs (site-scoped or
+      // generic): only the ORDER under test matters here.
+      searchGateway: { name: "fixture-search", async search() { return [unrouted, OTHER_URL, DOC_URL].map((url) => ({ url, title: null, snippet: null })); } },
+      maxSearchQueries: INTERNAL_ALPHA_V1.maxSearchQueries,
+      maxResultsPerQuery: 5,
+      maxQueriesPerComponent: 1,
+      maxModelCostMicro: INTERNAL_ALPHA_V1.maxModelCostMicro,
+      projectId: project.id,
+      queryProposerCostProfile: COST,
+    });
+    const targets = await loadFetchTargets(ctx.db, jobId, project.id);
+    // DOC_URL is inside the confirmed, classified /mechanism prefix (rank
+    // 0); OTHER_URL is on the confirmed host but outside the classified
+    // prefix (confirmed, unclassified — rank 1); the blog host is on no
+    // route (rank 2). Discovery order was unrouted, OTHER, DOC; the rank
+    // reverses it, and the discovered order would decide only a tie.
+    expect(targets).toEqual([DOC_URL, OTHER_URL, unrouted]);
   }, 60_000);
 });
 

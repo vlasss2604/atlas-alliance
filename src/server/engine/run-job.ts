@@ -15,6 +15,7 @@ import { runSupplyDeltaMaterialization } from "./onchain-supply-delta-materializ
 import { assembleAndPersistMechanism } from "./mechanism-assembly-store";
 import { evaluateAndPersistClaimSupport } from "./claim-support-store";
 import { buildAndPersistProof } from "./proof-store";
+import { planTargetedRecovery, recoveryReserve, scopedWorkItems, type TargetedRecoveryPlan } from "./targeted-recovery";
 
 // Phase 6, S4 — the actual production wiring point: given a jobId, load
 // its frozen entitlement/budget, its persisted Research Boundary
@@ -64,11 +65,28 @@ import { buildAndPersistProof } from "./proof-store";
 // module keep working unchanged.
 export { MissingActivePatternError };
 
+// B2 — how the targeted second pass runs for this call:
+//   IN_PROCESS  plan it after the first walk and run it here (an executor
+//               with live search/fetch — alpha-run, tests);
+//   DEFER       plan it and RETURN the plan without finalizing, so the
+//               phased runtime can carry it through a second
+//               SEARCH → FETCH → EXTRACT cycle (the EXTRACTING replay
+//               cannot open anything new);
+//   OFF         never plan (a scoped second cycle passes `scope` instead,
+//               walks only the planned items, and finalizes).
+// Unset: IN_PROCESS when the executor reports live acquisition, DEFER
+// otherwise.
+export interface RunJobOptions {
+  targetedRecovery?: "IN_PROCESS" | "DEFER" | "OFF";
+  scope?: TargetedRecoveryPlan | null;
+}
+
 export async function runS4ResearchJob(
   db: Database | Transaction,
   jobId: string,
   executor: WorkExecutor,
   now: Date,
+  opts: RunJobOptions = {},
 ): Promise<ControllerRunResult> {
   // Lifted verbatim into job-contract-view.ts (D-136) so the search
   // phase derives the SAME work queue this controller run will walk.
@@ -95,6 +113,9 @@ export async function runS4ResearchJob(
   // exactly the components this controller will walk.
   const adoption = await adoptReusedMemory(db, jobId, plannedView, now);
   const view = { ...plannedView, workQueue: adoption.workQueue };
+  const targetedMode = opts.targetedRecovery ?? (executor.liveAcquisition === false ? "DEFER" : "IN_PROCESS");
+  const scope = opts.scope ?? null;
+  const scopedItems = scope ? scopedWorkItems(scope, view.workQueue) : null;
 
   let result: ControllerRunResult;
   try {
@@ -105,7 +126,13 @@ export async function runS4ResearchJob(
       executor,
       now,
       reconcile: reconcileAndPersistComponent,
+      // B2: a scoped second cycle walks the planned items under the plan's
+      // bounds; a first pass holds back the recovery reserve.
+      pendingOverride: scopedItems ?? undefined,
+      targetedRecovery: scope,
+      recoveryReserve: scope || targetedMode === "OFF" ? null : recoveryReserve(view.researchBudget.reservedRecoverySteps),
     });
+    if (scope) result = { ...result, targetedRecovery: scope, targetedRecoveryAttempts: result.attemptsThisRun };
   } catch (e) {
     // D-127 — dimensional budget exhaustion must still produce the derived
     // projections. s4-executor.ts signals an exhausted job budget AXIS
@@ -315,6 +342,47 @@ export async function runS4ResearchJob(
   // stop reason that is resumable — INTERRUPTED, a per-call attempt cap
   // this worker never sets — is the one case where documentary work could
   // still follow, and it withholds the declaration rather than guess.
+  // B2 — THE TARGETED SECOND PASS. After a complete first walk, for each
+  // unresolved CRITICAL component with a known admissible path left, one
+  // bounded recovery attempt — in-process where the executor can acquire,
+  // deferred to a second phase cycle where it cannot. Never a third pass:
+  // the plan excludes any component already on its second attempt.
+  if (!scope && targetedMode !== "OFF" && result.stopReason === "WORK_QUEUE_EXHAUSTED") {
+    const plan = await planTargetedRecovery(db, jobId, job.projectId, view.workQueue);
+    if (plan) {
+      if (targetedMode === "DEFER") {
+        return { ...result, targetedRecovery: plan, targetedRecoveryDeferred: true };
+      }
+      const second = await runResearchController({
+        db,
+        jobId,
+        view,
+        executor,
+        now,
+        reconcile: reconcileAndPersistComponent,
+        pendingOverride: scopedWorkItems(plan, view.workQueue),
+        targetedRecovery: plan,
+      });
+      result = {
+        ...second,
+        // A BUDGET_EXHAUSTED stop inside the bounded second pass is a
+        // bounded pass that spent what was left, not a job-level stop:
+        // the first walk finished the queue, and that is the terminal fact.
+        stopReason: second.stopReason === "BUDGET_EXHAUSTED" ? result.stopReason : second.stopReason,
+        attemptsThisRun: result.attemptsThisRun + second.attemptsThisRun,
+        succeeded: [...result.succeeded, ...second.succeeded],
+        failed: [...result.failed, ...second.failed],
+        skipped: [...result.skipped, ...second.skipped],
+        budgetSpent: {
+          searchQueries: result.budgetSpent.searchQueries + second.budgetSpent.searchQueries,
+          sourceOpens: result.budgetSpent.sourceOpens + second.budgetSpent.sourceOpens,
+          authorizedModelCostMicro: result.budgetSpent.authorizedModelCostMicro + second.budgetSpent.authorizedModelCostMicro,
+        },
+        targetedRecovery: plan,
+        targetedRecoveryAttempts: second.attemptsThisRun,
+      };
+    }
+  }
   const documentaryAcquisitionFinished = result.stopReason !== "INTERRUPTED";
   await runOnchainReactivationPass(db, {
     jobId,

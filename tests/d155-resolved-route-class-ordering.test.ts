@@ -421,8 +421,10 @@ describe("D-155 — an already-known route class reaches candidate ordering", ()
 
     const { readFileSync } = await import("node:fs");
     const exec = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
-    expect(exec).toContain("const MAX_SEARCH_RESULTS_PER_QUERY = 5;");
-    expect(exec).toContain("const MAX_QUERIES_PER_ATTEMPT = 3;");
+    // A1 parity: the query/result caps are one shared contract (acquisition-targeting.ts).
+    const targeting = readFileSync("src/server/engine/acquisition-targeting.ts", "utf-8");
+    expect(targeting).toContain("export const MAX_SEARCH_RESULTS_PER_QUERY = 5;");
+    expect(targeting).toContain("export const MAX_QUERIES_PER_ATTEMPT = 3;");
     expect(exec).toContain("const MAX_SOURCE_OPEN_ATTEMPTS_PER_ATTEMPT = 6;");
     expect(exec).toContain("if (opensAttempted >= openAllowance) break;");
     expect(readFileSync("src/server/memory/source-resource.ts", "utf-8")).toContain(

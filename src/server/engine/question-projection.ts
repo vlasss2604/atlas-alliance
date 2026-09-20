@@ -231,6 +231,61 @@ export function validateProjection(
 }
 
 /* ------------------------------------------------------------------ *
+ * B3 — THE CRITICAL-COMPONENT FLOOR
+ * ------------------------------------------------------------------ */
+
+// The model chooses which findings lead the result. It may not drop a
+// component the question's own critical proof path names: a reader who
+// asked where revenue goes must meet the SOURCE of that revenue on the
+// first screen even when the model found the destination more
+// interesting. A critical component with a persisted row and no finding
+// referencing it (primary or supporting) is appended with the shared
+// NEUTRAL label (projection-label-safety.ts) — a label that makes no claim,
+// so it can never strengthen anything. Under MAX_FINDINGS the last
+// finding whose primary is NOT critical gives way. Deterministic:
+// critical components in Pattern step order. Nothing here reads
+// evidence or decides a status.
+export function applyCriticalFloor(
+  findings: readonly ProjectionFinding[],
+  input: ProjectionModelInput,
+  criticalComponents: readonly string[],
+): ProjectionFinding[] {
+  const out = [...findings];
+  const critical = new Set(criticalComponents);
+  const referenced = () => {
+    const keys = new Set<string>();
+    for (const f of out) {
+      keys.add(f.primaryRef.component);
+      for (const r of f.supportingRefs) keys.add(r.component);
+    }
+    return keys;
+  };
+  const rows = [...input.components].sort((a, b) => a.step - b.step);
+  for (const row of rows) {
+    if (!critical.has(row.component)) continue;
+    if (referenced().has(row.component)) continue;
+    const finding: ProjectionFinding = {
+      userFacingLabel: neutralLabelFor(row.component),
+      primaryRef: { kind: "COMPONENT", step: row.step, component: row.component },
+      supportingRefs: [],
+    };
+    if (out.length < MAX_FINDINGS) {
+      out.push(finding);
+      continue;
+    }
+    let victim = -1;
+    for (let i = out.length - 1; i >= 0; i -= 1) {
+      if (!critical.has(out[i].primaryRef.component)) {
+        victim = i;
+        break;
+      }
+    }
+    if (victim >= 0) out.splice(victim, 1, finding);
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ *
  * RESOLVING A STORED PROJECTION AGAINST CANONICAL ROWS
  * ------------------------------------------------------------------ */
 

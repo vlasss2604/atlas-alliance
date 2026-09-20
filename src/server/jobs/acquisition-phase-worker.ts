@@ -4,7 +4,9 @@ import type { PgBoss } from "pg-boss";
 import { loadProductConfig } from "../config/product";
 import type { Database } from "../db/client";
 import { projects, researchJobs, researchPlans } from "../db/schema";
+import { MAX_QUERIES_PER_ATTEMPT, MAX_SEARCH_RESULTS_PER_QUERY } from "../engine/acquisition-targeting";
 import { BudgetExhaustedError } from "../engine/budget-exhausted-error";
+import { recoveryReserve, scopedWorkItems, type TargetedRecoveryPlan } from "../engine/targeted-recovery";
 import type { ControllerRunResult, WorkExecutor } from "../engine/controller";
 import {
   loadFetchTargets,
@@ -210,17 +212,29 @@ function budgetOf(job: JobRow): {
   maxSearchQueries: number;
   maxSourceOpens: number;
   maxModelCostMicro: number;
+  reservedRecoverySteps: number;
 } {
   const b = job.budgetAtStart as {
     maxSearchQueries: number;
     maxSourceOpens: number;
     maxModelCostMicro: number;
+    reservedRecoverySteps?: number;
   };
   return {
     maxSearchQueries: b.maxSearchQueries,
     maxSourceOpens: b.maxSourceOpens,
     maxModelCostMicro: b.maxModelCostMicro,
+    reservedRecoverySteps: b.reservedRecoverySteps ?? 0,
   };
+}
+
+// B2 — the targeted second pass persisted on the job for its second
+// SEARCH → FETCH → EXTRACT cycle (`research_jobs.acquisition_scope`).
+function scopeOf(job: JobRow): TargetedRecoveryPlan | null {
+  const raw = (job as { acquisitionScope?: unknown }).acquisitionScope;
+  if (!raw || typeof raw !== "object") return null;
+  const plan = raw as TargetedRecoveryPlan;
+  return plan.version === 1 && plan.round === 2 && Array.isArray(plan.items) ? plan : null;
 }
 
 // PHASE 1 — SEARCHING. Role: SEARCH_EXTRACT.
@@ -268,16 +282,25 @@ export async function handleSearchingPhase(
   // derivation at EXTRACTING re-reads what this one wrote.
   const adoption = await adoptReusedMemory(ctx.db, jobId, view, new Date());
 
+  const scope = scopeOf(job);
   const search = await runSearchPhase({
     db: ctx.db,
     jobId,
-    items: adoption.workQueue,
+    // Only the planned items whose remaining path needs a search; an
+    // item with sealed/unopened paths only is served by the FETCH and
+    // EXTRACT cycles and must not repeat a search.
+    items: scope
+      ? scopedWorkItems(scope, adoption.workQueue).filter((w) => scope.items.some((i) => i.step === w.step && i.component === w.component && i.needsSearch))
+      : adoption.workQueue,
+    recoveryReserve: scope ? null : recoveryReserve(budgetOf(job).reservedRecoverySteps),
+    scopeBounds: scope ? { searches: scope.bounds.searches } : null,
     target: targetFor(project),
     queryProposer: providers.queryProposer,
     searchGateway: providers.searchGateway,
     maxSearchQueries: budgetOf(job).maxSearchQueries,
-    maxResultsPerQuery: opts?.maxResultsPerQuery ?? 5,
-    maxQueriesPerComponent: opts?.maxQueriesPerComponent ?? 2,
+    // A1 parity: the same per-attempt caps the unphased executor uses.
+    maxResultsPerQuery: opts?.maxResultsPerQuery ?? MAX_SEARCH_RESULTS_PER_QUERY,
+    maxQueriesPerComponent: opts?.maxQueriesPerComponent ?? MAX_QUERIES_PER_ATTEMPT,
     // D-140 — one model envelope, shared with extraction; and the
     // project whose Pattern says which components the intent requires.
     maxModelCostMicro: budgetOf(job).maxModelCostMicro,
@@ -308,12 +331,15 @@ export async function handleFetchingPhase(
 
   let fetch: Awaited<ReturnType<typeof runFetchPhase>>;
   try {
+    const scope = scopeOf(job);
     fetch = await runFetchPhase({
       db: ctx.db,
       jobId,
       projectId: project.id,
       contentFetcher,
       maxSourceOpens: budgetOf(job).maxSourceOpens,
+      recoveryReserve: scope ? null : recoveryReserve(budgetOf(job).reservedRecoverySteps),
+      scope: scope ? { components: scope.items.map((i) => i.component), maxOpens: scope.items.length * scope.bounds.opens } : null,
     });
   } catch (e) {
     // AN UNEXPECTED FAILURE HERE ENDS THE JOB, IT DOES NOT ESCAPE.
@@ -395,7 +421,20 @@ export async function handleExtractingPhase(
   });
 
   try {
-    const controller = await runS4ResearchJob(ctx.db, jobId, executor, now);
+    // B2: the first EXTRACTING cycle plans the targeted second pass and
+    // DEFERS it (the replay cannot open anything new); when a plan comes
+    // back the job goes round once more — SEARCHING under that scope —
+    // and only the scoped second EXTRACTING finalizes.
+    const scope = scopeOf(admitted.job);
+    const controller = await runS4ResearchJob(ctx.db, jobId, executor, now, { targetedRecovery: scope ? "OFF" : "DEFER", scope });
+    if (controller.targetedRecoveryDeferred && controller.targetedRecovery) {
+      await ctx.db
+        .update(researchJobs)
+        .set({ acquisitionScope: controller.targetedRecovery })
+        .where(eq(researchJobs.id, jobId));
+      const advanced = await advancePhaseAndEnqueue(ctx.db, ctx.boss, jobId, "EXTRACTING", "SEARCHING");
+      return { ran: true, phase: "EXTRACTING", advancedTo: advanced ? "SEARCHING" : null, controller };
+    }
     return { ran: true, phase: "EXTRACTING", advancedTo: null, controller };
   } catch (e) {
     if (e instanceof BudgetExhaustedError) {

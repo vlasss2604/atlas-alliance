@@ -137,10 +137,23 @@ describe("the rule — what forces activation and what does not", () => {
     expect(v.reason).toBe("SEMANTIC_DRIFT");
     expect(v.differences).toEqual([
       'DIFFERS       content.componentRequirements.DURABILITY_BASIS.establishingClasses: db=["GOVERNANCE","OFFICIAL_DOCS"] code=["GOVERNANCE"]',
+      // RESEARCH RELIABILITY V1 (B3): the critical proof paths are Pattern
+      // data the stored v2 row does not carry — a semantic drift that
+      // forces activation of a new version before a live run can
+      // prioritise or recover a critical component.
+      'ONLY-IN-CODE  content.intentRequirements.BURN_OR_SUPPLY_EFFECT.criticalComponents = ["MECHANISM_SPEC","EXECUTION_EVIDENCE","NET_EFFECT"]',
+      'ONLY-IN-CODE  content.intentRequirements.MECHANISM_CURRENT_STATE.criticalComponents = ["MECHANISM_SPEC","GOVERNANCE_BASIS","CURRENT_STATE","EXECUTION_EVIDENCE"]',
+      'ONLY-IN-CODE  content.intentRequirements.PASSIVE_HOLDER_OUTCOME.criticalComponents = ["SOURCE_OF_VALUE","MECHANISM_SPEC","DESTINATION","RECIPIENT"]',
+      'ONLY-IN-CODE  content.intentRequirements.PROTOCOL_REVENUE_TO_TOKEN.criticalComponents = ["SOURCE_OF_VALUE","MECHANISM_SPEC","CURRENT_STATE","DESTINATION"]',
+      'ONLY-IN-CODE  content.intentRequirements.REWARD_SOURCE.criticalComponents = ["SOURCE_OF_VALUE","MECHANISM_SPEC","CURRENT_STATE","DESTINATION"]',
+      'ONLY-IN-CODE  content.intentRequirements.TOKEN_UTILITY.criticalComponents = ["SOURCE_OF_VALUE","MECHANISM_SPEC","DESTINATION"]',
+      'ONLY-IN-CODE  content.intentRequirements.USAGE_TO_TOKEN_LINKAGE.criticalComponents = ["SOURCE_OF_VALUE","MECHANISM_SPEC","CURRENT_STATE","DESTINATION"]',
+      'ONLY-IN-CODE  content.intentRequirements.VALUE_CAPTURE.criticalComponents = ["SOURCE_OF_VALUE","MECHANISM_SPEC","CURRENT_STATE","DESTINATION","NET_EFFECT"]',
     ]);
     // Same shape, same fingerprint: the fixture is the row, not a paraphrase.
     const rebuilt = clone();
     rebuilt.componentRequirements!.DURABILITY_BASIS.establishingClasses = ["GOVERNANCE", "OFFICIAL_DOCS"];
+    for (const entry of Object.values(rebuilt.intentRequirements ?? {})) delete entry.criticalComponents;
     expect(patternSemanticFingerprint(LIDO_V2)).toBe(patternSemanticFingerprint(rebuilt));
   });
 

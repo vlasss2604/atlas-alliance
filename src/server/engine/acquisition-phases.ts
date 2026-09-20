@@ -12,7 +12,7 @@ import {
   strategyAlreadyAttempted,
 } from "./acquisition-ledger";
 import { loadAcquisitionPlan } from "./acquisition-plan";
-import { documentaryReachability } from "./acquisition-targeting";
+import { blendQueries, buildTargetedQueries, documentaryReachability, genericSearchMayEstablish } from "./acquisition-targeting";
 import { selectApprovedSeedTargets } from "./source-resource-seeds";
 import { componentSearchAllowance } from "./budget-fairness";
 import {
@@ -63,7 +63,8 @@ import type { QueryProposer } from "./providers/query-proposer";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isReplayProvider } from "./providers/types";
 import type { ComponentTarget, FetchedDocument, ModelUsage } from "./providers/types";
-import { resolveSourceRoute } from "./source-authority";
+import { confirmedRouteRank, resolveSourceRoute } from "./source-authority";
+import { planSiteLocalExpansion, type HarvestedDocument } from "./site-local-expansion";
 import { canonicalTargetRef, isLossyTargetRef, recordTraceEvent } from "./trace-store";
 
 // D-136 — NETWORK-CAPABILITY PHASES.
@@ -126,6 +127,11 @@ export interface SearchPhaseResult {
 
 export interface FetchPhaseResult {
   sealedDocumentIds: string[];
+  // B1 — links harvested from the documents this pass sealed, and the
+  // same-route candidates the bounded site-local expansion admitted from
+  // them (already opened by this pass where the caps allowed).
+  harvestedLinks: HarvestedDocument[];
+  siteLocalCandidates: string[];
   // D-146 — urls whose every eligible strategy had already been attempted
   // in an earlier delivery, so this pass performed no external call.
   exhaustedUrls: string[];
@@ -184,6 +190,11 @@ export async function runSearchPhase(input: {
   // callback, so the audit row can carry real token counts. Absent for a
   // fixture proposer, exactly as in the executor.
   readProposerUsage?: () => ModelUsage | null | undefined;
+  // B2 — a first pass holds back the recovery reserve on the search axis;
+  // a scoped second cycle takes at most `scopeBounds.searches` per item
+  // from whatever remains, outside fair share.
+  recoveryReserve?: { searchQueries: number } | null;
+  scopeBounds?: { searches: number } | null;
 }): Promise<SearchPhaseResult> {
   const out: SearchPhaseResult = {
     budgetRefusedComponents: [],
@@ -265,9 +276,12 @@ export async function runSearchPhase(input: {
     }
 
     const othersPending = input.items.slice(index + 1);
-    const allowance = componentSearchAllowance({
-      maxSearchQueries: input.maxSearchQueries,
-      alreadyReserved: await currentSearchQueriesReserved(input.db, input.jobId),
+    const reservedNow = await currentSearchQueriesReserved(input.db, input.jobId);
+    const allowance = input.scopeBounds
+      ? Math.min(input.scopeBounds.searches, Math.max(0, input.maxSearchQueries - reservedNow))
+      : componentSearchAllowance({
+      maxSearchQueries: Math.max(0, input.maxSearchQueries - (input.recoveryReserve?.searchQueries ?? 0)),
+      alreadyReserved: reservedNow,
       workQueueSize: input.items.length,
       remainingComponents: input.items.length - index,
       isIntentRequired: plan.intentRequired.has(item.component),
@@ -357,7 +371,28 @@ export async function runSearchPhase(input: {
         usage && !usage.unsupportedBillingUsage ? calculateActualCostMicro(proposerProfile, usage) : null,
     });
 
-    for (const q of proposed) {
+    // A1 PARITY — ROUTE-SCOPED TARGETING (D-129/D-133), as the executor
+    // does: part of this component's allowance is steered at the domains
+    // the owner has CONFIRMED for a class this component admits
+    // (`site:<confirmed domain> <query>`). The generic slot is kept where a
+    // generic-reachable class exists. Explorer locators are deliberately
+    // NOT targeted here: in the phased runtime the chain fact is read by
+    // the EXTRACTING worker's retriever, and a phase search unit spent on
+    // an explorer page S5 would then exclude is a unit the documentary
+    // path lost. Admissibility itself is untouched.
+    const { targetedQueries } = buildTargetedQueries({
+      establishingClasses: plan.establishingClasses,
+      confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
+      onchainLocators: [],
+      baseQueries: proposed,
+    });
+    const blended = blendQueries(
+      targetedQueries,
+      proposed,
+      allowance,
+      genericSearchMayEstablish(plan.establishingClasses),
+    );
+    for (const q of blended) {
       await recordTraceEvent(input.db, {
         researchJobId: input.jobId,
         operationType: "QUERY_PROPOSED",
@@ -378,7 +413,7 @@ export async function runSearchPhase(input: {
     // metered gateway, so the second branch below preserves its budget
     // behaviour exactly: a query another component already paid for is still
     // never paid for twice.
-    const queryPlan = [...planQueries(proposed, ledger, { step: item.step, component: item.component })];
+    const queryPlan = [...planQueries(blended, ledger, { step: item.step, component: item.component })];
 
     // SPEED + COST — ONE COMPONENT'S SEARCHES OVERLAP. Three passes where
     // there was one loop, and every observable order is the loop's:
@@ -551,21 +586,32 @@ export async function loadFetchTargets(
     }
   }
 
+  // A1 PARITY — THE ORDER THE OPENS CAP CUTS. Candidates used to follow
+  // discovery order, so under a 24-open ceiling the official pages a LATER
+  // component surfaced were never opened at all (the first live phased run
+  // opened 19 of 60 candidates; every aave.com/docs page discovered by
+  // GOVERNANCE_BASIS or DESTINATION sat past the cut). The executor ranks
+  // by route class before it opens (D-155, `orderCandidatesForComponent`);
+  // this phase now does the same at job level: a candidate on a CONFIRMED,
+  // CLASSIFIED route first, a confirmed unclassified route next, everything
+  // else after — stable within a rank, so relevance order is kept, never
+  // overridden. Seeds stay first, as before. Dedup is canonical and shared
+  // with the seeds; a url leaves the list when ACQUIRED (D-146), never when
+  // one strategy failed on it.
+  const ranked: { url: string; rank: number; index: number }[] = [];
+  let index = 0;
   for (const urls of ledger.candidatesByQuery.values()) {
     for (const url of urls) {
       const canonical = canonicalTargetRef(url);
-      // Dedup is canonical and shared with the seeds above, so a url known
-      // both ways is one target and one budget spend, never two.
       if (seen.has(canonical)) continue;
       seen.add(canonical);
-      // D-146 — a url leaves the target list when it has been ACQUIRED,
-      // not when one strategy failed on it. Which strategies remain
-      // eligible is decided per url by the chain, from persisted trace,
-      // so a failed strategy is still never repeated.
       if (ledger.fetchedUrls.has(canonical)) continue;
-      out.push(url);
+      const rank = projectId ? confirmedRouteRank(await resolveSourceRoute(db, projectId, url)) : 2;
+      ranked.push({ url, rank, index: index++ });
     }
   }
+  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+  for (const r of ranked) out.push(r.url);
   return out;
 }
 
@@ -629,6 +675,12 @@ export async function runFetchPhase(input: {
   // this itself — an unknown capability must not release capacity that a
   // process which HAS it is going to need.
   onchainAcquisitionUnavailable?: boolean;
+  // B2 — a first pass holds back the recovery reserve on the opens axis; a
+  // scoped second cycle opens only targets that are candidates of the
+  // planned components (or on a confirmed classified route), at most
+  // `scope.maxOpens` of them.
+  recoveryReserve?: { sourceOpens: number } | null;
+  scope?: { components: readonly string[]; maxOpens: number } | null;
 }): Promise<FetchPhaseResult> {
   // THE STARVATION FIX, at the only place documentary acquisition spends
   // this axis in the phased architecture. The FETCH phase runs to
@@ -642,11 +694,13 @@ export async function runFetchPhase(input: {
   const reserve = await resolveOnchainSourceOpenReserve(input.db, {
     jobId: input.jobId,
     projectId: input.projectId,
-    maxSourceOpens: input.maxSourceOpens,
+    maxSourceOpens: input.scope ? input.maxSourceOpens : Math.max(0, input.maxSourceOpens - (input.recoveryReserve?.sourceOpens ?? 0)),
     onchainAcquisitionUnavailable: input.onchainAcquisitionUnavailable,
   });
   const out: FetchPhaseResult = {
     sealedDocumentIds: [],
+    harvestedLinks: [],
+    siteLocalCandidates: [],
     skippedUrls: [],
     failedUrls: [],
     refusedUrls: [],
@@ -659,7 +713,31 @@ export async function runFetchPhase(input: {
   // negotiation, render fallback and render upgrade alike — reserves
   // against THIS ceiling, so no documentary path can reach the floor.
   const documentaryInput = { ...input, maxSourceOpens: reserve.documentaryCeiling };
-  const targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
+  let targets = await loadFetchTargets(input.db, input.jobId, input.projectId);
+  if (input.scope) {
+    // B2 — a scoped second cycle: only the planned components' own
+    // candidates and confirmed classified-route pages, up to the scope's
+    // open bound. Everything else discovered stays in the ledger unopened.
+    const ledger = await loadAcquisitionLedger(input.db, input.jobId);
+    const scoped = new Set<string>();
+    for (const [key, urls] of ledger.candidatesByQueryComponent) {
+      const component = key.split(":")[1];
+      if (!input.scope.components.includes(component)) continue;
+      for (const url of urls) scoped.add(canonicalTargetRef(url));
+    }
+    const kept: string[] = [];
+    for (const url of targets) {
+      if (kept.length >= input.scope.maxOpens) break;
+      const canonical = canonicalTargetRef(url);
+      if (scoped.has(canonical)) {
+        kept.push(url);
+        continue;
+      }
+      const rank = confirmedRouteRank(await resolveSourceRoute(input.db, input.projectId, url));
+      if (rank === 0) kept.push(url);
+    }
+    targets = kept;
+  }
 
   // Fail closed before any transport call, in target order.
   const admissible: string[] = [];
@@ -699,6 +777,28 @@ export async function runFetchPhase(input: {
     },
     { shouldStart: () => !budgetExhausted },
   );
+  // B1 — BOUNDED SITE-LOCAL EXPANSION. From the links the sealed
+  // documents carry, a few same-route pages on the project's confirmed
+  // official routes are admitted as ordinary candidates (recorded in the
+  // trace like search results, attributed to the components whose classes
+  // the route establishes) and opened under the same caps. One level,
+  // never recursive: pages opened here are not harvested again.
+  if (!budgetExhausted && out.harvestedLinks.length > 0) {
+    const expansion = await planSiteLocalExpansion(input.db, input.jobId, input.projectId, out.harvestedLinks);
+    let admitted = expansion.map((e) => e.url);
+    if (input.scope) admitted = admitted.slice(0, Math.max(0, input.scope.maxOpens - targets.length));
+    out.siteLocalCandidates = admitted;
+    await mapWithConcurrency(
+      admitted,
+      acquisitionConcurrency(),
+      async (url) => {
+        if (budgetExhausted) return;
+        const outcome = await acquireOneUrl(documentaryInput, url, out);
+        if (outcome === "BUDGET_EXHAUSTED") budgetExhausted = true;
+      },
+      { shouldStart: () => !budgetExhausted },
+    );
+  }
   return out;
 }
 
@@ -1001,6 +1101,9 @@ async function sealDocument(
     return "FAILED";
   }
   out.sealedDocumentIds.push(stored.id);
+  if (doc.documentLinks && doc.documentLinks.links.length > 0) {
+    out.harvestedLinks.push({ url: doc.finalUrl, links: doc.documentLinks.links.map((l) => ({ href: l.href, text: l.text })) });
+  }
   await recordTraceEvent(input.db, {
     researchJobId: input.jobId,
     operationType: "FETCH_OK",
@@ -1075,6 +1178,9 @@ async function attemptRender(
     return "FAILED";
   }
   out.sealedDocumentIds.push(stored.id);
+  if (rendered.documentLinks && rendered.documentLinks.links.length > 0) {
+    out.harvestedLinks.push({ url: rendered.finalUrl, links: rendered.documentLinks.links.map((l) => ({ href: l.href, text: l.text })) });
+  }
   await recordTraceEvent(input.db, {
     researchJobId: input.jobId,
     operationType: "FETCH_OK",
@@ -1180,6 +1286,10 @@ export async function prepareExtractionReplayFetcher(
       // D-137: every document here was fetched and charged by the FETCH
       // phase. Replaying it performs no external open.
       metering: "REPLAY" as const,
+      // A3 — what this replay holds, asked before an open is planned.
+      canFetch(url: string): boolean {
+        return byUrl.has(canonicalTargetRef(url));
+      },
       async fetch(url: string): Promise<FetchedDocument> {
         const one = byUrl.get(canonicalTargetRef(url));
         if (!one) {

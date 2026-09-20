@@ -69,6 +69,10 @@ export const proofs = pgTable(
     // on Proofs verified before the columns existed.
     verifiedBy: uuid("verified_by").references(() => users.id, { onDelete: "set null" }),
     verifiedAt: timestamp("verified_at", { withTimezone: true }),
+    // A2 — RESEARCH BOUNDARY RECORD (research-boundary.ts): why the record
+    // stops where it stops, technical apart from substantive. Additive,
+    // nullable, never backfilled; nothing downstream reads it yet.
+    boundedBy: jsonb("bounded_by"),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

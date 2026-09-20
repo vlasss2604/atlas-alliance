@@ -38,6 +38,14 @@ import { canonicalTargetRef } from "./trace-store";
 // hide a genuinely authoritative source living on an unlisted host).
 export const MAX_TARGETED_QUERIES_PER_ATTEMPT = 2;
 
+// ACQUISITION PARITY (Research Reliability V1, A1). The per-attempt query
+// and result caps are ONE contract read by both runtimes — the unphased
+// executor and the phased SEARCH phase. They used to be two literals (3
+// here, 2 there), so the runtime users actually run searched less per
+// component than the one every historical live run used.
+export const MAX_QUERIES_PER_ATTEMPT = 3;
+export const MAX_SEARCH_RESULTS_PER_QUERY = 5;
+
 // Domains-per-class cap: one site: term per query, and we would rather
 // spend the scarce searchQueries axis across DIFFERENT classes than
 // enumerate every explorer for one class.

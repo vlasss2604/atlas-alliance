@@ -2,7 +2,7 @@ import { desc, eq } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { INTERNAL_ALPHA_V1 } from "../src/server/config/product";
-import { acquiredDocuments, evidence, projects, proofs, researchAttempts, researchJobs, researchPlans, researchTraceEvents, topics, users } from "../src/server/db/schema";
+import { acquiredDocuments, evidence, projects, proofs, researchAttempts, researchComponentResults, researchJobs, researchPlans, researchTraceEvents, topics, users } from "../src/server/db/schema";
 import { loadActivePatternVersion } from "../src/server/engine/active-pattern";
 import {
   prepareExtractionReplayFetcher,
@@ -95,11 +95,13 @@ function fixtureDoc(url: string): FetchedDocument {
   };
 }
 
-async function makeClassifiedProject() {
+async function makeClassifiedProject(opts: { identity?: boolean } = {}) {
   const slug = uniq("phased");
   const [project] = await ctx.db.insert(projects).values({ slug, name: "Phased Regression", status: "ACTIVE_CORE" }).returning();
-  const identity = await confirmProjectIdentity(ctx.db, { projectSlug: slug, chain: "solana", tokenAddress: MINT });
-  if (!identity.ok) throw new Error("identity failed");
+  if (opts.identity !== false) {
+    const identity = await confirmProjectIdentity(ctx.db, { projectSlug: slug, chain: "solana", tokenAddress: MINT });
+    if (!identity.ok) throw new Error("identity failed");
+  }
   const confirmed = await confirmSourceRoute(ctx.db, { projectSlug: slug, domain: HOST, pathPrefix: "/mechanism" });
   if (!confirmed.ok) throw new Error("route confirm failed: " + confirmed.refusal);
   const classified = await classifySourceRoute(ctx.db, { routeId: confirmed.itemId, routeClass: "OFFICIAL_DOCS" });
@@ -134,9 +136,31 @@ async function workQueueFor(jobId: string): Promise<ComponentWorkItem[]> {
   return [...buildContractView({ contract, mode: planRow.mode, capabilityAtStart: job.capabilityAtStart, activePatternVersion: activePatternVersion! }).workQueue];
 }
 
-async function runPhased() {
-  const counters = { proposer: 0, search: 0, fetch: 0, extract: 0 };
-  const project = await makeClassifiedProject();
+interface RunOpts {
+  identity?: boolean;
+  maxSourceOpens?: number;
+  // What the extractor returns for a document; default one fact per call.
+  facts?: (url: string, component: string) => ExtractedFact[] | null;
+}
+function defaultFact(step: number, component: string): ExtractedFact {
+  return {
+    step,
+    component,
+    statement: SENTENCE,
+    supportFragment: SENTENCE,
+    mechanismState: null,
+    directness: "DIRECT",
+    publishedAt: null,
+    doesNotProve: "does not establish that any buyback executed",
+    relationship: "SUPPORTS",
+    onchainLocator: null,
+    onchainLocators: null,
+  };
+}
+
+async function runPhased(opts: RunOpts = {}) {
+  const counters = { proposer: 0, search: 0, fetch: 0, extract: 0, extractPairs: [] as string[] };
+  const project = await makeClassifiedProject({ identity: opts.identity });
   const jobId = await makeAlphaJob(project.id);
   const target = (item: ComponentWorkItem): ComponentTarget => ({
     step: item.step,
@@ -185,7 +209,7 @@ async function runPhased() {
         return fixtureDoc(url);
       },
     },
-    maxSourceOpens: INTERNAL_ALPHA_V1.maxSourceOpens,
+    maxSourceOpens: opts.maxSourceOpens ?? INTERNAL_ALPHA_V1.maxSourceOpens,
   });
   const replay = await prepareExtractionReplayFetcher(ctx.db, jobId);
   const executor = createS4WorkExecutor({
@@ -198,20 +222,10 @@ async function runPhased() {
       name: "fixture-extractor",
       async extract(input) {
         counters.extract += 1;
-        const fact: ExtractedFact = {
-          step: input.target.step,
-          component: input.target.component,
-          statement: SENTENCE,
-          supportFragment: SENTENCE,
-          mechanismState: null,
-          directness: "DIRECT",
-          publishedAt: null,
-          doesNotProve: "does not establish that any buyback executed",
-          relationship: "SUPPORTS",
-          onchainLocator: null,
-          onchainLocators: null,
-        };
-        return [fact];
+        counters.extractPairs.push(`${input.target.component}|${input.document.finalUrl}`);
+        const custom = opts.facts?.(input.document.finalUrl, input.target.component);
+        if (custom) return custom;
+        return [defaultFact(input.target.step, input.target.component)];
       },
     },
     queryProposerCostProfile: COST,
@@ -219,7 +233,58 @@ async function runPhased() {
     chainAcquisition: "DOCUMENTARY_ONLY",
   });
   await runS4ResearchJob(ctx.db, jobId, executor, new Date());
-  return { jobId, counters, items };
+  return { jobId, counters, items, project };
+}
+
+// The SAME research through the unphased executor: live fixture providers
+// in one process, the controller walking the same queue. Used to pin that
+// a documentary continuation decides identically in both runtimes when
+// the documents it can reach are the same.
+async function runUnphased(opts: RunOpts = {}) {
+  const counters = { proposer: 0, search: 0, fetch: 0, extract: 0, extractPairs: [] as string[] };
+  const project = await makeClassifiedProject({ identity: opts.identity });
+  const jobId = await makeAlphaJob(project.id);
+  await runMemoryPlanningStage(ctx.db, jobId);
+  const executor = createS4WorkExecutor({
+    db: ctx.db,
+    project: { id: project.id, name: project.name, slug: project.slug, ticker: null },
+    queryProposer: {
+      name: "fixture-proposer",
+      async proposeQueries(input) {
+        counters.proposer += 1;
+        return queriesFor(input.target.component);
+      },
+    },
+    searchGateway: {
+      name: "fixture-search",
+      async search(query) {
+        counters.search += 1;
+        return urlsFor(query).map((url) => ({ url, title: null, snippet: null }));
+      },
+    },
+    contentFetcher: {
+      name: "fixture-transport",
+      async fetch(url: string) {
+        counters.fetch += 1;
+        return fixtureDoc(url);
+      },
+    },
+    evidenceExtractor: {
+      name: "fixture-extractor",
+      async extract(input) {
+        counters.extract += 1;
+        counters.extractPairs.push(`${input.target.component}|${input.document.finalUrl}`);
+        const custom = opts.facts?.(input.document.finalUrl, input.target.component);
+        if (custom) return custom;
+        return [defaultFact(input.target.step, input.target.component)];
+      },
+    },
+    queryProposerCostProfile: COST,
+    evidenceExtractorCostProfile: COST,
+    chainAcquisition: "DOCUMENTARY_ONLY",
+  });
+  await runS4ResearchJob(ctx.db, jobId, executor, new Date());
+  return { jobId, counters, project };
 }
 
 describe("phased EXTRACTING replay under a spent search axis — the Aave live shape, generically", () => {
@@ -325,4 +390,63 @@ describe("phased EXTRACTING replay under a spent search axis — the Aave live s
     const [after] = await ctx.db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
     expect(after.searchQueriesReserved).toBe(INTERNAL_ALPHA_V1.maxSearchQueries);
   }, 120_000);
+});
+
+/* ------------------------------------------------------------------ */
+/* A3 — REPLAY-SAFE DOCUMENTARY CONTINUATION                           */
+/* ------------------------------------------------------------------ */
+
+describe("A3 — the documentary continuation under replay operates only on sealed state", () => {
+  it("when the FETCH phase sealed fewer candidates than were discovered, the replay walk is cut to the sealed set, the cut is recorded, and the job finalizes — no throw from the replay's own shape", async () => {
+    // One open for the whole job: exactly one document is sealed while
+    // every component discovered two candidates. Every extraction returns
+    // nothing, so each component reaches the continuation decision with
+    // an unsealed second candidate in front of it.
+    const { jobId, counters } = await runPhased({ identity: false, maxSourceOpens: 1, facts: () => [] });
+    const docs = await ctx.db.select().from(acquiredDocuments).where(eq(acquiredDocuments.acquiringJobId, jobId));
+    expect(docs.length).toBe(1);
+    const attempts = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+    expect(attempts.length).toBeGreaterThan(0);
+    // No attempt ended on the replay's fail-closed error, none is left STARTED.
+    for (const a of attempts) {
+      expect(a.status).not.toBe("STARTED");
+      expect(a.reason ?? "").not.toContain("no sealed document");
+    }
+    const cut = attempts.filter((a) => (a.reason ?? "").includes("REPLAY_UNSEALED_CANDIDATES_SKIPPED"));
+    expect(cut.length, "the cut was recorded on the attempts that met an unsealed candidate").toBeGreaterThan(0);
+    // The only document was replayed, never anything else; the continuation
+    // had no sealed candidate to open and did not pretend to.
+    const extractedUrls = new Set(counters.extractPairs.map((p) => p.split("|")[1]));
+    expect([...extractedUrls]).toEqual([docs[0].finalUrl]);
+    for (const a of attempts) expect(a.reason ?? "").not.toContain("DOCUMENTARY_CANDIDATE_CONTINUATION;");
+    const [proof] = await ctx.db.select().from(proofs).where(eq(proofs.researchJobId, jobId));
+    expect(proof).toBeDefined();
+  }, 120_000);
+
+  it("when every candidate is sealed, replay and unphased reach the same per-component picture: same S5 statuses, same evidence per component, no cut recorded", async () => {
+    // The first url in the pool yields nothing; everything else yields one
+    // fact. Unphased, a component whose ration is one open continues to
+    // its second candidate (+1, documentary-candidate-continuation);
+    // under replay every sealed candidate is already readable within the
+    // attempt's open cap, so the continuation is subsumed rather than
+    // repeated — and the picture the reducer sees is the same either way.
+    const facts = (url: string) => (url === URL_POOL[0] ? [] : null);
+    const phased = await runPhased({ identity: false, facts });
+    const unphased = await runUnphased({ identity: false, facts });
+    const picture = async (jobId: string) => {
+      const rows = await ctx.db.select().from(researchComponentResults).where(eq(researchComponentResults.researchJobId, jobId));
+      const ev = await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, jobId));
+      const perComponent: Record<string, { status: string; evidence: number }> = {};
+      for (const r of rows) perComponent[r.component] = { status: r.status, evidence: ev.filter((e) => e.component === r.component).length > 0 ? 1 : 0 };
+      return perComponent;
+    };
+    const [pp, pu] = await Promise.all([picture(phased.jobId), picture(unphased.jobId)]);
+    expect(pp).toEqual(pu);
+    const attempts = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, phased.jobId));
+    for (const a of attempts) {
+      expect(a.status).not.toBe("STARTED");
+      expect(a.reason ?? "").not.toContain("REPLAY_UNSEALED_CANDIDATES_SKIPPED");
+      expect(a.reason ?? "").not.toContain("no sealed document");
+    }
+  }, 180_000);
 });

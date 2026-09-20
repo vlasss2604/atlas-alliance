@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+
+import { extractDocumentLinks } from "./document-links";
 import { lookup as dnsLookup } from "node:dns/promises";
 import * as http from "node:http";
 import * as https from "node:https";
@@ -48,6 +50,13 @@ const ACCEPT_HEADERS: Record<AcceptPreference, string> = {
 export interface ContentFetcher extends MeteredProvider {
   readonly name: string;
   fetch(url: string, opts?: FetchOptions): Promise<FetchedDocument>;
+  // A3 (Research Reliability V1) — a REPLAY fetcher can say in advance
+  // which urls it holds. The executor asks before it plans an open, so a
+  // documentary continuation under replay only ever walks documents the
+  // FETCH phase actually sealed; a url the replay set lacks is skipped and
+  // recorded, never "opened" into the fetcher's fail-closed throw. A live
+  // transport leaves this undefined: it can open anything admissible.
+  canFetch?(url: string): boolean;
 }
 
 export interface FetchOptions {
@@ -725,6 +734,9 @@ export function createContentFetcher(
         // visible HTML or was augmented from embedded payloads.
         embeddedPayload,
         staticTextLength: staticText.length,
+        // B1 — harvested from the raw HTML the fetcher already holds; a
+        // pure, bounded extraction (document-links.ts), no second fetch.
+        documentLinks: contentType === "text/html" ? extractDocumentLinks(rawText) : null,
       };
     },
   };

@@ -614,6 +614,11 @@ describe("ISSUE 2 — control-vs-fallback fresh acquisition parity", () => {
     }
     // The two entry points still derive the effective queue through adoption.
     expect(readFileSync("src/server/engine/run-job.ts", "utf-8")).toContain("adoptReusedMemory(db, jobId, plannedView, now)");
-    expect(readFileSync("src/server/jobs/acquisition-phase-worker.ts", "utf-8")).toContain("items: adoption.workQueue");
+    // B2: a scoped second cycle narrows the SAME effective queue; both
+    // branches derive from adoption, never from the planned view.
+    const worker = readFileSync("src/server/jobs/acquisition-phase-worker.ts", "utf-8");
+    expect(worker).toContain("scopedWorkItems(scope, adoption.workQueue)");
+    expect(worker).toContain(": adoption.workQueue,");
+    expect(worker).not.toContain("items: view.workQueue");
   });
 });

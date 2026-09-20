@@ -1,0 +1,17 @@
+-- RESEARCH RELIABILITY V1 (A2) — RESEARCH BOUNDARY RECORD.
+--
+-- A Proof records WHY the record stops where it stops, technical apart
+-- from substantive (src/server/engine/research-boundary.ts):
+--   technical    acquisition never inspected the admissible material
+--                (search axis spent before this component, no confirmed
+--                route for its only establishing classes, documents opened
+--                but not read through, provider failure);
+--   substantive  the material was attempted and the evidence stayed
+--                insufficient, partial, unauthoritative or contradicted.
+-- Derived only from persisted S5 reason codes and terminal attempt
+-- reasons. Changes no verdict, no confidence, no layer.
+--
+-- NULLABLE, ADDITIVE, NEVER BACKFILLED. A Proof built before this column
+-- existed carries NULL: its boundary was never recorded, and deriving one
+-- now would be a claim about a run this code did not observe.
+ALTER TABLE "proofs" ADD COLUMN "bounded_by" jsonb;
