@@ -417,11 +417,14 @@ centred alone in the header; from 640px a header with the lockup on the
 left, Ask · Research · Home disc · Analytics in the centre, Profile on the
 right. Handset/desktop switching lives in `globals.css` (`.dock`,
 `.profile-link`, `.brand-lockup-home`), because this file's unlayered
-rules outrank Tailwind utilities. Home carries the brand itself (mark,
-wordmark, "Crypto Verification", one line on what ATLAS checks) above the
-composer — one large `panel-hero` with the input and three "Try asking"
-chips — and Recent research rows with outcome pills; the header lockup is
-hidden there. The
+rules outrank Tailwind utilities. Home carries the brand itself (mark
+with the hero halo, wordmark, the `CRYPTO VERIFICATION` tagline; no
+paragraph) above a compact `panel-hero` composer with the input and four
+"Try asking" chips, then "Previously researched": project-first rows with
+a deterministic initials avatar (`project-avatar.tsx` — no asset, no
+fetch), the question, "Checked <date>" and the outcome pill, a skeleton
+while loading and one-sentence empty state; the header lockup is hidden
+there. The
 ATLAS mark uses solid fills — a gradient referenced by id resolves to the
 first definition on the page, and a hidden first instance blanked every
 mark. `/analytics` is a real page with an honest empty state; Compare and
@@ -459,6 +462,16 @@ hover, a single `:focus-visible` cyan ring. Research path nodes glow in
 their state colour (`color-mix`); finding rows have a luminous state rail
 and a cyan-tinted hover. Tone class names (`tone-*`, `dot-*`) are
 unchanged, so every colour-meaning pin holds.
+
+**Evidence interactions (final cleanup, 2026-09-21).** "Evidence · N"
+opens a tinted, cyan-edged `.row-evidence` block beneath the finding
+("Evidence behind this answer · N sources", one card per admitted source,
+excerpts open); `FindingRow` takes a presentation-only `defaultOpen`.
+"Open original" renders only for an http(s) URL and, inside Telegram,
+opens through the platform adapter's `openExternal` (`WebApp.openLink`),
+falling back to the `_blank` anchor on the web. Pinned in
+`tests/ui-result-interactions.test.ts`; clicked through in
+`e2e/result-interactions.spec.ts`.
 
 **Snapshot availability (fixed 2026-09-21).** The surface builds
 `snapshotHref` from the detail payload's own job id; on a design fixture

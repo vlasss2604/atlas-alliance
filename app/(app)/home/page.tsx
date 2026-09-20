@@ -9,14 +9,14 @@ import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
 import { groupResearchRuns } from "@/src/client/research-model";
 
-// HOME V5 — THE CENTRAL ENTRY POINT, WITH PRODUCT CHARACTER.
+// HOME — FINAL COMPOSITION.
 //
-// Top to bottom: the brand, centred and alone, with one line on what
-// ATLAS verifies; the composer as one large raised surface — the thing
-// the product asks you to do — with three suggested questions inside it;
-// recent research as rows with their outcome. No marketing cards. Every
-// row is a real record from the server; no verdict is invented for a job
-// that has none.
+// Top to bottom: the brand, centred and alone (the brand says what the
+// product is — no paragraph); the composer as one compact raised surface
+// with four research examples; the projects ATLAS has already researched,
+// one row each with an avatar, the question and when it was checked. No
+// marketing cards, no statistics. Every row is a real record from the
+// server; no verdict is invented for a job that has none.
 
 export default function HomePage() {
   const [jobs, setJobs] = useState<ResearchJobListItem[] | null>(null);
@@ -34,39 +34,46 @@ export default function HomePage() {
     .slice(0, 6);
 
   return (
-    <main className="enter flex flex-col gap-10 pt-4 sm:gap-12 sm:pt-6">
-      {/* THE BRAND, ONCE, IN THE MIDDLE — and one line on what it does. */}
+    <main className="enter flex flex-col gap-7 pt-2 sm:gap-9 sm:pt-4">
+      {/* THE BRAND, ONCE, IN THE MIDDLE. The mark, the wordmark, the line
+          beneath — the brand says what the product is. */}
       <section className="flex flex-col items-center text-center" data-testid="home-brand">
-        <AtlasMark size={72} hero />
-        <p className="wordmark mt-4 text-[1.05rem] leading-none text-[var(--atlas-text-strong)] sm:text-[1.2rem]">
+        <AtlasMark size={64} hero />
+        <p className="wordmark mt-4 text-[1.25rem] leading-none sm:text-[1.45rem]">
           ATLAS <span className="text-[var(--atlas-cyan)]">PROOF</span>
         </p>
-        <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]">Crypto Verification</p>
-        <p className="mt-4 max-w-[44ch] text-[1rem] leading-[1.5] text-[var(--atlas-text)]/85" data-testid="home-line">
-          ATLAS checks what a token actually earns and where the value goes — from official sources, governance and
-          on-chain data — and shows the proof.
-        </p>
+        <p className="tagline mt-2.5">Crypto Verification</p>
       </section>
 
-      <section className="panel panel-hero px-5 py-6 sm:px-9 sm:py-8" data-testid="home-composer">
+      <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-6" data-testid="home-composer">
         <ResearchComposer hero />
       </section>
 
       <section data-testid="recent-research">
-        <div className="flex items-baseline justify-between">
-          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Recent research</h2>
+        <div className="flex items-baseline justify-between px-1">
+          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Previously researched</h2>
           <Link href="/research" className="text-[0.92rem] font-medium text-[var(--atlas-cyan-strong)] hover:underline">
             View all
           </Link>
         </div>
         {jobs === null ? (
-          <p className="mt-4 text-[0.98rem] text-[var(--atlas-text-dim)]">Loading…</p>
+          <ul className="mt-2 flex flex-col" aria-busy data-testid="recent-loading">
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="history-row">
+                <span className="skeleton h-10 w-10 rounded-full" />
+                <span className="flex-1">
+                  <span className="skeleton block h-4 w-32" />
+                  <span className="skeleton mt-2 block h-3.5 w-3/4" />
+                </span>
+              </li>
+            ))}
+          </ul>
         ) : recent.length === 0 ? (
-          <p className="mt-4 text-[0.98rem] text-[var(--atlas-text-dim)]">
-            No research yet. Ask a question above and ATLAS will verify it.
+          <p className="mt-3 px-1 text-[0.98rem] text-[var(--atlas-text-dim)]">
+            Nothing researched yet — ask a question above and the project will appear here.
           </p>
         ) : (
-          <ul className="mt-3 flex flex-col">
+          <ul className="mt-2 flex flex-col">
             {recent.map((job) => (
               <RecentProofCard key={job.id} job={job} />
             ))}

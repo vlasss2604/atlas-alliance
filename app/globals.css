@@ -832,6 +832,28 @@ body {
 .finding-open {
   background: rgba(30, 197, 245, 0.045);
 }
+/* The evidence block a tap on "Evidence · N" opens beneath a finding —
+   its own tinted surface, so the change of state is unmistakable. */
+.row-evidence {
+  margin-top: 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(30, 197, 245, 0.2);
+  background:
+    linear-gradient(180deg, rgba(30, 197, 245, 0.06) 0%, rgba(30, 197, 245, 0.02) 100%),
+    rgba(6, 10, 18, 0.35);
+  padding: 0.9rem 1rem 1rem;
+  box-shadow: 0 1px 0 0 rgba(142, 230, 255, 0.08) inset;
+}
+.row-evidence-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--atlas-cyan-strong);
+}
 .state-line {
   display: flex;
   flex-wrap: wrap;
@@ -957,6 +979,65 @@ body {
 }
 .kind-onchain {
   --kind: var(--atlas-teal);
+}
+
+/* ---------------------------------------------------------------- *
+ * PROJECT AVATAR — initials on a navy disc, one deterministic hue.
+ * ---------------------------------------------------------------- */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 9999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: hsl(var(--hue, 190) 70% 78%);
+  background:
+    radial-gradient(circle at 50% 30%, hsl(var(--hue, 190) 55% 22% / 0.9) 0%, transparent 70%),
+    var(--surface-2);
+  border: 1px solid hsl(var(--hue, 190) 60% 60% / 0.35);
+  box-shadow: 0 0 0 1px hsl(var(--hue, 190) 60% 60% / 0.06);
+}
+/* The tagline under the wordmark: small, tracked, a hairline either side. */
+.tagline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--atlas-text-dim);
+}
+.tagline::before,
+.tagline::after {
+  content: "";
+  width: 1.75rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--hairline-strong));
+}
+.tagline::after {
+  background: linear-gradient(90deg, var(--hairline-strong), transparent);
+}
+/* A loading placeholder that keeps the row's shape. */
+.skeleton {
+  border-radius: 0.5rem;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  background-size: 200% 100%;
+  animation: atlas-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes atlas-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
 }
 
 /* ---------------------------------------------------------------- *

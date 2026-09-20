@@ -18,6 +18,7 @@ import {
   type SourceRegister,
   auditOutcome,
 } from "../audit-model";
+import { getPlatform } from "../platform";
 import { retrievedOn } from "../research-model";
 import { ChevronDownIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
 import {
@@ -245,7 +246,15 @@ function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | nu
           </button>
         )}
         {card.openable && (
-          <a href={card.url} target="_blank" rel="noopener noreferrer" className="link-action">
+          <a
+            href={card.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="link-action"
+            onClick={(e) => {
+              if (getPlatform().openExternal(card.url)) e.preventDefault();
+            }}
+          >
             <ExternalIcon size={14} />
             Open original
           </a>

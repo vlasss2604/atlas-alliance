@@ -22,10 +22,15 @@ import { ArrowIcon, AskIcon } from "./icons";
 
 type Phase = "input" | "thinking" | "result" | "starting";
 
+// Four research examples in the product's own domain — Token Value
+// Capture. A tap fills the input; the reader edits or sends. The fourth
+// names no project on purpose: the interpreter asks which, exactly as it
+// would for any reader's question.
 const EXAMPLES = [
-  { text: "Does PUMP buyback reduce supply?" },
+  { text: "Does PUMP buyback actually reduce supply?" },
   { text: "Where do Raydium trading fees go?" },
-  { text: "HYPE buyback mechanism" },
+  { text: "Does HYPE revenue actually reach token holders?" },
+  { text: "Are bought-back tokens burned or held?" },
 ] as const;
 
 export function ResearchComposer({ hero = false }: { hero?: boolean }) {
@@ -139,17 +144,15 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
 
   return (
     <section data-testid="composer" className={centred}>
-      <h1 className="display text-[1.7rem] font-semibold leading-[1.15] text-[var(--atlas-text-strong)] sm:text-[2.2rem]">
+      <h1 className="display text-[1.55rem] font-semibold leading-[1.15] text-[var(--atlas-text-strong)] sm:text-[1.9rem]">
         What do you want to verify?
       </h1>
-      <p className="mt-2.5 text-[1.02rem] text-[var(--atlas-text-dim)] sm:text-[1.08rem]">
-        Ask about a project, a token, a claim or a link.
-      </p>
+      <p className="mt-1.5 text-[1rem] text-[var(--atlas-text-dim)]">Ask about a project, a token, a claim or a link.</p>
 
       {phase === "input" || phase === "thinking" ? (
         <>
-          <div className={`mt-6 flex items-center gap-2.5 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
-            <div className="field flex flex-1 items-center gap-3 px-4 py-[0.95rem] text-left">
+          <div className={`mt-4 flex items-center gap-2.5 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
+            <div className="field flex flex-1 items-center gap-3 px-4 py-[0.85rem] text-left">
               <AskIcon size={18} className="field-icon" />
               <input
                 value={question}
@@ -174,14 +177,14 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
               disabled={!question.trim() || phase === "thinking"}
               aria-label={dict.ask.submit}
               data-testid="composer-submit"
-              className="send-orb h-[54px] w-[54px] shrink-0"
+              className="send-orb h-[50px] w-[50px] shrink-0"
             >
               {phase === "thinking" ? <span className="pulse-dot" aria-hidden /> : <ArrowIcon size={20} />}
             </button>
           </div>
 
-          <div className={`mt-5 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
-            <p className="text-[0.85rem] font-semibold uppercase tracking-[0.06em] text-[var(--atlas-text-dim)]">Try asking</p>
+          <div className={`mt-4 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
+            <p className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-[var(--atlas-text-faint)]">Try asking</p>
             <ul className={`mt-2 flex flex-wrap gap-2 ${hero ? "justify-center" : ""}`} data-testid="composer-examples">
               {EXAMPLES.map((ex) => (
                 <li key={ex.text}>

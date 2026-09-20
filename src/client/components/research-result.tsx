@@ -17,6 +17,7 @@ import {
   type ResultStatus,
   type ResultSurface,
 } from "../result-surface";
+import { getPlatform } from "../platform";
 import { canonicalDocumentKey, type JobState, type VerdictTone } from "../research-model";
 import { CalendarIcon, ChevronDownIcon, ChevronIcon, EvidenceIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
 import { OutcomeBadge } from "./verdict-badge";
@@ -298,8 +299,10 @@ function stateSentence(row: ResearchTableRow): string {
   return `${word} from ${kind}`;
 }
 
-function FindingRow({ row, jobId }: { row: ResearchTableRow; jobId: string | null }) {
-  const [open, setOpen] = useState(false);
+// `defaultOpen` is presentation state for tests and fixtures — the row
+// opens exactly as a tap on "Evidence · N" opens it.
+export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchTableRow; jobId: string | null; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   const color = TONE_COLORS[row.tone];
   const toggleLabel = open ? "Hide evidence" : `Evidence · ${row.evidence.length}`;
   return (
@@ -357,11 +360,24 @@ function FindingRow({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
             </button>
           )}
         </p>
+        {/* THE PROOF BEHIND THIS ANSWER, IN PLACE. A tap on "Evidence · N"
+            opens this block directly beneath the finding: its own tinted
+            surface, a title that says what it is, one card per admitted
+            source with the excerpt already open. */}
         {open && (
-          <div className="expand-enter mt-4 flex flex-col gap-4 border-t border-[var(--hairline)] pt-4" data-testid="row-evidence">
-            {row.evidence.map((c) => (
-              <EvidenceCardView key={c.id} card={c} jobId={jobId} open compact />
-            ))}
+          <div className="row-evidence expand-enter" data-testid="row-evidence">
+            <p className="row-evidence-title">
+              <EvidenceIcon size={14} />
+              Evidence behind this answer
+              <span className="font-normal text-[var(--atlas-text-dim)]">
+                · {row.evidence.length} {row.evidence.length === 1 ? "source" : "sources"}
+              </span>
+            </p>
+            <div className="mt-3 flex flex-col gap-4">
+              {row.evidence.map((c) => (
+                <EvidenceCardView key={c.id} card={c} jobId={jobId} open compact />
+              ))}
+            </div>
           </div>
         )}
       </div>
@@ -466,8 +482,21 @@ export function EvidenceCardView({
             {open ? "Hide excerpt" : "View excerpt"}
           </button>
         )}
+        {/* Only a real http(s) original is offered — a chain locator has no
+            page. The anchor opens a new tab on the web; inside Telegram the
+            Mini App API opens it, since a plain _blank is not honoured by
+            every client. */}
         {card.openable && (
-          <a href={card.url} target="_blank" rel="noopener noreferrer" className="link-action" data-testid="evidence-open-original">
+          <a
+            href={card.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="link-action"
+            data-testid="evidence-open-original"
+            onClick={(e) => {
+              if (getPlatform().openExternal(card.url)) e.preventDefault();
+            }}
+          >
             <ExternalIcon size={14} />
             Open original
           </a>

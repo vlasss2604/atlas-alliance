@@ -2,72 +2,85 @@
 
 > Overwrite this file each round. Never append.
 
-## UI/UX V6 — VISUAL BRAND POLISH FROM THE AP MARK + SNAPSHOT FIX (awaiting Founder visual review)
+## FINAL UI CLEANUP BEFORE LIVE ACCEPTANCE — HOME + EVIDENCE INTERACTIONS (awaiting Founder review)
 
-A visual / brand / interaction pass on the accepted V5 structure. The
-result's information hierarchy, question/answer logic, findings and
-evidence structure, the surface model and every research semantic are
-untouched. $0, no live Research. What changed: `app/globals.css` (V6
-tokens and treatments), `atlas-header.tsx` (the mark), `atlas-field.tsx`
-(new: the constellation ground), `icons.tsx` (new: the icon family),
-`app-chrome.tsx` (icons), `research-result.tsx` / `research-audit.tsx` /
-`research-composer.tsx` (icons, action controls, evidence identity, the
-snapshot guard), Home's hero mark, three test pins, one new test block.
+Two goals only, on the accepted V5/V6 result: finish Home; make the
+Evidence / View excerpt / Open original / Snapshot interactions visibly
+work. Result structure, palette, navigation, surface model and every
+research semantic: untouched. $0, no live Research.
 
-### The brand, translated (reference: the Founder's AP logo)
+### Home — exact changes (`app/(app)/home/page.tsx`, composer, recent row)
 
-- **Mark** — the logo's disc, thin double cyan ring, four cardinal ticks,
-  cyan "A", silver "P", drawn in an inline SVG with per-instance gradient
-  ids; the halo is a stylesheet decision (`.orb-hero` on Home, `.orb-sm`
-  in the header, the raised disc in the bottom bar). The mark is the
-  brightest object on every screen.
-- **Ground** — one radial cyan light at the top, a vignette, and a faint
-  static constellation of 42 nodes and links (one SVG, no filter, no
-  animation) that fades out before the first result.
-- **Surfaces** — navy glass; ONE cyan-lit hero (executive answer, Home
-  composer) with edge-light, top highlight, soft glow and a faint ring
-  motif; bordered section surfaces for findings and uncertainty.
-- **Cyan has meaning** — active item, verified state, primary action,
-  in-place actions. Silver for the wordmark. Indigo for governance.
-- **Evidence identity** — every source kind has an icon and one of four
-  accent families (docs cyan · governance indigo · chain teal · data
-  silver) on the card's left edge and kind badge, on the result and in
-  the audit.
-- **Controls** — cyan-gradient primary with one glow; outlined secondary
-  that lights its edge; small cyan-edged action pills (Evidence · N,
-  View excerpt); icon+text links (Open original, Snapshot); chips that
-  light on hover; one keyboard focus ring; 140–200 ms transitions;
-  reduced-motion honoured.
-- **Path and rows** — verified nodes glow in their state colour over a
-  gradient connector; rows have a luminous state rail and a cyan-tinted
-  hover; evidence expands with a 200 ms fade.
+- Brand area: AP mark (hero halo), `ATLAS PROOF` wordmark larger (1.25 /
+  1.45 rem), `CRYPTO VERIFICATION` as a small tracked tagline with a
+  hairline either side (`.tagline`). The explanatory paragraph is gone;
+  nothing replaces it.
+- Composer: same headline and input, tighter spacing (smaller panel
+  padding, 50 px send disc, no text size reduced), placed directly under
+  the brand.
+- Suggested questions: four, in the product's domain — "Does PUMP buyback
+  actually reduce supply?", "Where do Raydium trading fees go?", "Does
+  HYPE revenue actually reach token holders?", "Are bought-back tokens
+  burned or held?" — as cyan-lit chips; a tap fills the input and sending
+  goes through the existing interpret → gate → start flow (the fourth
+  names no project on purpose: the interpreter asks which).
+- Previously researched: real history, project-first rows — a
+  deterministic initials avatar (`project-avatar.tsx`: ticker or name
+  initials, one hue from the project's stable key; no asset fetching, no
+  icon service), project name, the question, "Checked <date>" for a
+  finished run (relative age while live), the persisted outcome as a
+  pill. Loading is a three-row skeleton; the empty state is one sentence.
 
-### Snapshot — investigated and fixed
+### Evidence interactions — investigated, then fixed
 
-Cause: the surface builds `snapshotHref` from the detail payload's own
-job id. On the design fixtures that job exists in no database, so the
-result rendered a Snapshot link that landed on a 404 — a dead action.
-Real captures were never broken: verified end-to-end on the Lido job
-`58952f45…` (API 200, page renders the extracted text). Fix: the result
-renders the action only as `card.snapshotHref && jobId` (the route's
-job), exactly as the audit already did — a truthful absence on a
-fixture, the working link on a real result. Test: three cases in
-`tests/ui-source-snapshot.test.ts`.
+Driven in a real browser on the persisted Lido result before any change:
+Evidence · N toggled `aria-expanded` and rendered the block; View
+excerpt toggled the quotation; Open original opened a new tab with the
+lido.fi URL (`_blank`, `noopener noreferrer`); Snapshot linked to this
+job's source route. So the mechanics were sound; what was wrong:
 
-### Verified ($0)
+- **Evidence · N** — the opened state was too quiet. It now opens a
+  tinted, cyan-edged block directly beneath the finding, titled
+  "Evidence behind this answer · N sources", one card per admitted source
+  with the excerpt already open, 200 ms fade. `FindingRow` takes a
+  presentation-only `defaultOpen` so the open state is unit-testable.
+- **View excerpt** — unchanged mechanics; the control is the cyan action
+  pill, expanded state styled; the persisted excerpt renders as a
+  quotation with "Does not prove" beneath.
+- **Open original** — rendered only for a real http(s) URL (a chain
+  locator has no page). Inside Telegram a `_blank` anchor is not honoured
+  by every client, so the platform adapter gained `openExternal(url)`:
+  Telegram → `WebApp.openLink`, web → the anchor. The URL is never
+  rewritten. (On the design fixtures the URLs are fixture domains — that
+  is data, and those pages do not exist.)
+- **Snapshot** — verified from the real Lido result: the action opens
+  `/research/58952f45…/source/f5266d4b…`, which renders the captured
+  extracted text (API 200). No snapshot → no button; fixture → no link.
 
-- `npx tsc --noEmit` clean; `npm run lint` 0 errors.
+### Tests
+
+- New `tests/ui-result-interactions.test.ts` (18 cases): Evidence closed /
+  open (count, `aria-expanded`, the block inside the row with every
+  source), View excerpt closed / open (the exact persisted excerpt, no
+  raw record), chain readings have no excerpt control, Open original
+  only for http(s) with `_blank` + safe rel, no dead source action across
+  four fixtures, the Telegram/web link contract, Home rows (avatar
+  initials, "Checked", outcome, live-job stage), the avatar invents
+  nothing, Home has no marketing paragraph and has skeleton + empty
+  states, the four suggested questions and their flow.
+- `tests/ui-source-snapshot.test.ts` keeps the three snapshot cases.
+- New `e2e/result-interactions.spec.ts` clicks the whole sequence on the
+  fixture page; NOT run here — `playwright.config.ts` pins a Chromium
+  binary this machine does not have. The same clicks were driven with
+  Playwright's own Chromium in a scratch script (Evidence, excerpt, Open
+  original popup, Snapshot href) on the real Lido result.
 - Presentation + snapshot + projection-safety + Round 12/13 (incl. DB
-  variants): 25 files, **579 passing**. Pins re-pointed:
-  `ui-result-briefing`, `ui-verification-tab` (the two section calls now
-  carry `jobId`; order invariant unchanged).
-- Screenshots at 390×844 and 1120×900 of Home, states 1/2/8, the fixture
-  audit, the persisted Aave result, the real Lido result with Snapshot
-  actions and the Snapshot page itself: every page renders, no console
-  errors beyond the pre-existing hydration note and the first
-  unauthenticated call. Fixed before review: the Home hero mark carried
-  the small halo; the handset placeholder was clipped.
-- NOT run: Playwright e2e (resets the dev user); its dock ids still exist.
+  variants): 26 files, **595 passing**; `tsc` clean; lint 0 errors.
+- Screenshots at 390 and 1120: Home, the real Lido result with the
+  evidence block open, the fixture open on a handset — no horizontal
+  overflow, bottom bar unobstructed, no console errors beyond the
+  pre-existing Telegram `--tg-viewport-height` hydration note and the
+  first unauthenticated call.
 
 ### The shell (`app-chrome.tsx`)
 
@@ -96,7 +109,7 @@ startResearch); only its JSX changed.
 Until WSL localhost forwarding is reset, use the Ubuntu address instead
 of localhost (see the recovery report): `http://172.23.202.170:3000/…`.
 
-- `/home` — brand hero, composer, recent rows
+- `/home` — brand, compact composer, suggested questions, previously researched projects
 - `/research` — history
 - `/dev/result-states?state=1` (strong), `=2` (mixed), `=4` (technical
   boundary), `=8` (evidence-heavy); `=3, 5, 6, 7` also exist
