@@ -2,6 +2,26 @@
 
 > Overwrite this file each round. Never append.
 
+## BLIND LIVE ACCEPTANCE BATCH — PREPARED, AWAITING FOUNDER AUTHORIZATION
+
+Preparation only; nothing run. The frozen batch — candidate pool, five
+projects plus one optional boundary test, one verbatim question each, the
+run order, prerequisites, cost and time estimates from persisted traces,
+the failure / reset policy and the pre-flight status — is
+`docs/ai/BLIND_BATCH_V1.md`. LIVE CALLS MADE: 0. SPEND: $0.
+
+Before any live call the Founder decides: the batch and its cap
+(recommended $5.00 including one restart), the per-project prerequisites
+(catalog rows, allowlist lines, known-asset lines, owner-confirmed
+identities, route confirmation + classification), and whether GOVERNANCE
+routes are confirmed for Uniswap / Jito.
+
+Accepted and frozen beneath it: Research Reliability V1 (offline), Result
+UI/UX V5/V6, Evidence / Snapshot interactions, human-language copy — HEAD
+`6b4f836` before this preparation.
+
+---
+
 ## FINAL COPY ROUND — HUMAN LANGUAGE, EXACT TRUTH (awaiting Founder review)
 
 Copy only, on the frozen UI. Layout, palette, navigation, interactions,

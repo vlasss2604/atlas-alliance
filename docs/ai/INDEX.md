@@ -22,6 +22,7 @@ Those three are the whole normal startup set.
 | `ARCHITECTURE.md` | You need the shape of the research pipeline, or where a concept lives before you go looking in source. | You already know which file to open — go straight to the source. |
 | `PUMP_CASE.md` | The task is PUMP research, or you need the live-validation (MantaRay) procedure. | The task is generic engineering. PUMP facts must never drive generic code. |
 | `BACKLOG.md` | `CURRENT_TASK.md` explicitly points you at a backlog item. | Any other time. Backlog items are not free work. |
+| `BLIND_BATCH_V1.md` | The task is authorizing, preparing or running the blind live acceptance batch (frozen projects, questions, run order, cost/time estimates, failure policy). | Any engineering task — the batch is frozen data, never a source of rules. |
 | `VALIDATION_PANEL_V1.md` | The task is preparing, launching or auditing a scenario of the frozen final validation panel (questions, prerequisites, stop rules, cost/latency capture). | Any engineering task — the panel is frozen data, never a source of rules. |
 | `RESEARCH_CORE_HARDENING_V1.md` | You are adding an adversarial case, deciding whether a reducer behaviour is a defect or a pinned policy boundary, or need the regression file for a known live incident. | You are not touching research semantics or their tests. |
 
