@@ -1,5 +1,10 @@
 # Blind Live Acceptance Batch V1 (FROZEN — preparation only, nothing run)
 
+> 2026-09-22 Founder decision: **5 CORE runs + 1 OPTIONAL** (not "4 vs 6").
+> Zero-spend preparation approved; live spend NOT yet approved; Project 1 is
+> not launched. §11 records what was prepared and what the Founder still
+> has to supply or decide.
+
 Prepared 2026-09-21 at HEAD `6b4f836` (git clean). No provider, search, model
 or RPC call was made to prepare it. Every figure below is read from
 `atlas_dev` (persisted traces), from code, or is marked as an estimate.
@@ -66,7 +71,7 @@ logic anywhere in the engine.
 | — | Pump.fun, Raydium, Lido, Aave, Morpho | — | — | — | tuning / live targets | — | high | — | EXCLUDE (weaken blindness) |
 | — | SUI, TAO, Bitcoin | — | — | not Token Value Capture questions; SUI storage fund is a skill example | — | — | high | — | EXCLUDE |
 
-## 2. Final batch (5 + 1 optional) — frozen questions, verbatim
+## 2. Final batch — 5 CORE + 1 OPTIONAL — frozen questions, verbatim
 
 | Run | Project | Chain | Question | Categories covered |
 |---|---|---|---|---|
@@ -145,21 +150,26 @@ Full 10-component runs under current code (`research_trace_events.actual_cost_mi
 
 Benchmark (offline, 160 runs, same envelope): average modelled cost $0.186.
 
-- Normal run: expected **$0.20**, range $0.15–$0.30.
-- Complex run (deep Solana chain path or heavy documentary corpus): expected
-  **$0.35**, range $0.25–$0.50.
-- 4 projects (2 normal + 2 complex): expected **≈ $1.10**, range $0.80–$1.60.
-- 6 projects (3 + 3): expected **≈ $1.65**, range $1.20–$2.40.
-- Per-run stop: actual model cost above $0.50 is reported before the next
-  launch. System cap per run stays $2.00 (never approached).
-- **Recommended hard authorization cap: $5.00** — six runs at their upper
-  bound ($2.40) plus one full restart from project 1 after a generic fix
-  ($2.40), rounded. Not a target.
-- Uncertainty: search-API (Brave) and RPC usage are on existing plans and are
-  **not metered in the traces**; the figures above are model cost only.
-  Solana runs with a deep account chain have not been measured under the
-  current code (earlier Solana runs were budget-limited early and are not
-  representative), so their upper bound is an estimate.
+- Normal run (Uniswap, Pendle, GMX): expected **$0.20**, range $0.15–$0.30.
+- Complex run (Jupiter, Jito, Sky — deep Solana chain path or two-token /
+  heavy documentary corpus): expected **$0.35**, range $0.25–$0.50.
+- **5 CORE runs** (3 complex + 2 normal): expected **≈ $1.45**, range
+  $1.05–$2.10.
+- **6 runs** (core + GMX): expected **≈ $1.65**, range $1.20–$2.40.
+- Per-run policy: if one completed run exceeds the **$0.50 expected-run
+  ceiling**, STOP before launching the next project and report. An
+  in-progress provider call cannot be interrupted exactly at $0.50; the
+  per-run system cap ($2.00 model, 12 searches, 24 opens, 900 s) is what
+  bounds a run while it is running.
+- **Cumulative hard cap: $5.00** (kept). Six runs at their upper bound
+  ($2.40) plus one full restart from project 1 after a generic fix ($2.40)
+  = $4.80 ≤ $5.00; the recalculation gives no reason to change it.
+- Flat-plan usage reported separately from metered model spend: Brave
+  search calls (`SEARCH_EXECUTED` rows) and RPC reads (`FETCH_*` rows with
+  the RPC provider) are on existing plans and are **not metered in the
+  traces**; every "$" above is Anthropic model cost only. Solana runs with
+  a deep account chain have not been measured under the current code, so
+  their upper bound is an estimate.
 
 ## 7. Time — from measured runs only
 
@@ -168,10 +178,24 @@ Completed full runs measured 211 s (Aave, current code) to 430 s (Lido):
 not met by any measured live run; the batch records actuals and does not
 optimize.
 
-- Active batch time: 4 runs ≈ 15–30 min; 6 runs ≈ 22–45 min.
+- Active batch time: **5 core runs ≈ 18–38 min; 6 runs ≈ 21–45 min.**
 - Elapsed including the between-run audit of the persisted result (no
-  fixes, ≈ 10 min each) and identity/route confirmation done beforehand:
-  **≈ 1–2.5 hours** for 4–6 runs.
+  fixes, ≈ 10 min each), identity/route confirmation done beforehand:
+  **≈ 1–2.2 h for 5 runs, ≈ 1.2–2.6 h for 6.**
+- Performance is an acceptance metric, reported separately from quality
+  and not redefined during the batch. Per run, from persisted rows only:
+  wall-clock (`research_jobs.finished_at − started_at`); acquisition
+  duration where available (per component `research_attempts.completed_at
+  − created_at`; `SEARCH_EXECUTED` / `FETCH_ATTEMPTED → FETCH_OK|FAILED` /
+  `EXTRACT_ATTEMPTED` timestamp gaps); extraction / reasoning duration where
+  available (`EXTRACT_ATTEMPTED → MODEL_CALL_ATTEMPTED(EXTRACT)` gaps;
+  finalization = `finished_at − max(attempt completed_at)`); model cost
+  (`Σ actual_cost_micro`); search / open / extract counts; whether a
+  technical boundary was reached (`proofs.bounded_by`); final Research
+  quality by the §9 rubric. A semantically clean run that materially
+  exceeds ≤ 60 s (normal) / ≤ 120 s (complex) is **not** silently counted
+  as fully accepted: quality PASS and performance MISS are reported as two
+  separate verdicts.
 
 ## 8. Failure and reset policy (frozen)
 
@@ -224,5 +248,79 @@ whether a technical boundary was reached.
 | Background monitors / workers | none (no worker, alpha-run, vitest, poller or playwright process) |
 | UI / reliability work in progress | none — all rounds committed |
 | Interpreter gateway | `MODEL_GATEWAY` unset (live Anthropic for the product); `alpha-run.ts` uses the fake gateway in both modes, so the batch spends nothing on interpretation |
+
+## 11. Prerequisite status after the 2026-09-22 preparation (zero spend)
+
+Applied (commit on this HEAD), each classified as exactly one permitted class:
+
+| Addition | File / store | Class |
+|---|---|---|
+| catalog rows `jito`, `sky`, `pendle`, `gmx` (name only, ticker null, ACTIVE_CORE) | `src/server/db/seed.ts` → `projects` (seeded locally, `onConflictDoNothing`) | CATALOG |
+| allowlist slugs `uniswap`, `jito`, `sky`, `pendle`, `gmx` | `src/server/engine/live-executor.ts` | ALLOWLIST |
+| known-asset names `Jito`, `Sky`, `Pendle`, `GMX` (word-bounded) | `src/server/interpreter/fake.ts` | IDENTITY (name level) |
+| allowlist enumeration pin re-pointed | `tests/documentary-only-mode.test.ts` | test pin, no logic |
+
+ANSWER_HINT / EXPECTED_MECHANISM / EXPECTED_DESTINATION / EXPECTED_VERDICT /
+PROJECT_SPECIFIC_LOGIC: **zero**. No engine file branches on any slug; the
+diff is three fixture lists and their comments.
+
+NOT applied, because every value would have to come from official material
+that this task forbids reading (a live HTTP call) and must not come from
+memory (reporting discipline: no unverified exact value):
+
+| Project | Identity (chain + token) | OFFICIAL_DOCS route | Governance route |
+|---|---|---|---|
+| Jupiter | chain solana; **token mint: owner supplies** | 3 routes exist, **classification pending** (route ids `c7f10f9c…`, `cd44ef2f…`, `81237c90…`) | — |
+| Uniswap | chain ethereum; **contract: owner supplies** | **host + prefix: owner supplies** | **Founder decision** |
+| Jito | chain solana; **mint: owner supplies** | **owner supplies** | **Founder decision** |
+| Sky | chain ethereum; **ONE subject: Founder decision (see below)**; contract: owner supplies | **owner supplies** | — |
+| Pendle | chain ethereum; **contract: owner supplies** | **owner supplies** | — |
+| GMX (optional) | chain arbitrum; **contract: owner supplies** | **owner supplies** | — |
+
+A chain-only identity was deliberately NOT confirmed now: an ACTIVE
+identity is never superseded automatically (`ACTIVE_IDENTITY_EXISTS`), so
+confirming without the token would block the later confirmation with it.
+
+Exact commands, once the Founder supplies the values (each is offline —
+a local DB write, no provider call):
+
+```
+npx tsx scripts/confirm-project-identity.ts --project=jupiter --chain=solana   --token=<JUP mint>     --ticker=JUP    --actor=<founder>
+npx tsx scripts/classify-source-route.ts    --route-id=<jupiter route id> --class=OFFICIAL_DOCS --actor=<founder>   # per route the Founder deems official docs
+npx tsx scripts/confirm-project-identity.ts --project=uniswap --chain=ethereum --token=<UNI contract> --ticker=UNI    --actor=<founder>
+npx tsx scripts/confirm-project-identity.ts --project=jito    --chain=solana   --token=<JTO mint>     --ticker=JTO    --actor=<founder>
+npx tsx scripts/confirm-project-identity.ts --project=sky     --chain=ethereum --token=<frozen subject contract> --ticker=<SKY|MKR> --actor=<founder>
+npx tsx scripts/confirm-project-identity.ts --project=pendle  --chain=ethereum --token=<PENDLE contract> --ticker=PENDLE --actor=<founder>
+npx tsx scripts/confirm-project-identity.ts --project=gmx     --chain=arbitrum --token=<GMX contract>  --ticker=GMX    --actor=<founder>   # optional sixth only
+npx tsx scripts/confirm-source-route.ts     --project=<slug>  --domain=<official docs host> --prefix=</path> --actor=<founder>
+npx tsx scripts/classify-source-route.ts    --route-id=<id returned above> --class=OFFICIAL_DOCS --actor=<founder>
+```
+
+**Sky — the identity ambiguity, reported rather than chosen.** The project
+now called Sky is the former MakerDAO, and at the identity level it has two
+governance tokens: the legacy MKR and the newer SKY introduced with the
+rebrand. Which one the frozen question's "its token" and "total supply"
+refer to is exactly the kind of fact that can only be settled from
+official identity material — reading that material is a live call this
+task forbids, and which token the buyback mechanism actually targets is the
+economic answer that must stay blind. Identity confirmation takes ONE
+token per project, and it decides which supply `TOKEN_SUPPLY` observes.
+Options for the Founder: (a) freeze **SKY** — the token the project
+currently names as its governance token, matching the question's subject
+"Sky"; if the research finds the mechanism acts on the other token, that is
+a finding the run reports, not a preparation error; (b) freeze **MKR** — the
+legacy token; (c) if both are materially required to phrase the question
+truthfully, the question must be re-frozen by the Founder (the only
+identity-driven change §3's rule allows). The question text itself is not
+literally ambiguous under (a) or (b) and is left unchanged.
+
+**Governance routes (Uniswap, Jito) — Founder decision.** Today a
+governance portal classifies GOVERNANCE without a route (officiality
+CLAIMED) and the reducer already caps what a CLAIMED page may strengthen.
+Options: (a) confirm no GOVERNANCE route for the batch — the accepted
+semantics run as they are; (b) confirm a GOVERNANCE route on the project's
+official governance host (owner supplies host + prefix). Recommendation on
+preparation grounds only: (a), so the batch tests the accepted system
+rather than a route decision made the day before.
 
 **LIVE CALLS MADE: 0. SPEND: $0.**

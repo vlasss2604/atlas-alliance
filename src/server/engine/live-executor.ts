@@ -71,4 +71,14 @@ export const INTERNAL_ALPHA_LIVE_PROJECT_SLUGS = new Set<string>([
   // Founder-approved 2026-09-19: the two final live acceptance targets.
   "jupiter",
   "aave",
+  // Founder-approved 2026-09-22: Blind Live Acceptance Batch V1 — the five
+  // core runs (Jupiter above) and the optional sixth (GMX, a documentary-only
+  // supported-boundary case: identity on arbitrum, no chain acquisition
+  // implemented there). ALLOWLIST class: membership is approval to spend;
+  // nothing in the engine branches on any of these identities.
+  "uniswap",
+  "jito",
+  "sky",
+  "pendle",
+  "gmx",
 ]);

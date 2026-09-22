@@ -50,6 +50,15 @@ export async function seed(db: Database): Promise<void> {
     // acts (confirm-project-identity / confirm-source-route).
     { slug: "jupiter", name: "Jupiter", ticker: null },
     { slug: "aave", name: "Aave", ticker: null },
+    // Founder-approved 2026-09-22: Blind Live Acceptance Batch V1
+    // (docs/ai/BLIND_BATCH_V1.md) — three core projects never used to drive
+    // a rule or a run, and the optional supported-boundary case. Catalog
+    // entries only (CATALOG class): no identity, no route, no resource, no
+    // ticker — WHO the project is; nothing about what will be found.
+    { slug: "jito", name: "Jito", ticker: null },
+    { slug: "sky", name: "Sky", ticker: null },
+    { slug: "pendle", name: "Pendle", ticker: null },
+    { slug: "gmx", name: "GMX", ticker: null },
   ] as const;
 
   for (const p of catalogProjects) {

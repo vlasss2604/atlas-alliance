@@ -41,6 +41,15 @@ const KNOWN_ASSETS: Record<string, string[]> = {
   Lido: ["lido"],
   // Founder-approved 2026-09-19 (final live acceptance, Solana).
   Jupiter: ["jupiter"],
+  // Founder-approved 2026-09-22: Blind Live Acceptance Batch V1. Name
+  // recognition only (IDENTITY class at the name level): the fake gateway
+  // routes a question naming one of these to DEEP_RESEARCH exactly as it
+  // does for every other known asset. Word-bounded, so "sky" never matches
+  // inside another word.
+  Jito: ["jito"],
+  Sky: ["sky"],
+  Pendle: ["pendle"],
+  GMX: ["gmx"],
   Hyperliquid: ["hyperliquid"],
   Uniswap: ["uniswap"],
   Aave: ["aave"],

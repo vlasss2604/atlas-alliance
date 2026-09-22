@@ -166,13 +166,26 @@ describe("1/2/11. the internal-alpha live allowlist stays closed", () => {
   it("2. an unrelated CATALOG project remains disabled", () => {
     // uniswap and hyperliquid are in the catalog and in research scope —
     // only the allowlist keeps them out of live execution.
-    expect(INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has("uniswap")).toBe(false);
+    // uniswap joined the allowlist with Blind Batch V1 (Founder-approved
+    // 2026-09-22); hyperliquid is the catalog project that stays outside it.
     expect(INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has("hyperliquid")).toBe(false);
     expect(INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has("some_random_project")).toBe(false);
   });
 
   it("it is an enumerated set, not a rule that could admit a project by shape", () => {
-    expect([...INTERNAL_ALPHA_LIVE_PROJECT_SLUGS].sort()).toEqual(["aave", "jupiter", "lido", "morpho", "pump_fun", "raydium"]);
+    expect([...INTERNAL_ALPHA_LIVE_PROJECT_SLUGS].sort()).toEqual([
+      "aave",
+      "gmx",
+      "jito",
+      "jupiter",
+      "lido",
+      "morpho",
+      "pendle",
+      "pump_fun",
+      "raydium",
+      "sky",
+      "uniswap",
+    ]);
   });
 });
 

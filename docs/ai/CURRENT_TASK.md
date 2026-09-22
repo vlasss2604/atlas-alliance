@@ -10,11 +10,16 @@ run order, prerequisites, cost and time estimates from persisted traces,
 the failure / reset policy and the pre-flight status — is
 `docs/ai/BLIND_BATCH_V1.md`. LIVE CALLS MADE: 0. SPEND: $0.
 
-Before any live call the Founder decides: the batch and its cap
-(recommended $5.00 including one restart), the per-project prerequisites
-(catalog rows, allowlist lines, known-asset lines, owner-confirmed
-identities, route confirmation + classification), and whether GOVERNANCE
-routes are confirmed for Uniswap / Jito.
+2026-09-22: Founder froze 5 CORE + 1 OPTIONAL (Jupiter, Uniswap, Jito, Sky,
+Pendle; GMX optional), the questions and the order, the $0.50 per-run
+ceiling and the $5.00 cumulative cap; approved zero-spend preparation.
+Applied: catalog rows, allowlist lines, known-asset names (CATALOG /
+ALLOWLIST / IDENTITY-name only; zero answer-aware logic). Still needed from
+the Founder before any live call (§11 of the batch doc): token addresses
+and official-docs hosts for every project (owner-supplied, never from
+memory), the ONE Sky subject (SKY vs MKR — reported, not chosen), the
+GOVERNANCE-route decision for Uniswap / Jito, and the live-spend approval
+itself. Project 1 is not launched.
 
 Accepted and frozen beneath it: Research Reliability V1 (offline), Result
 UI/UX V5/V6, Evidence / Snapshot interactions, human-language copy — HEAD
