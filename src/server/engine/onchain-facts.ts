@@ -43,7 +43,7 @@ import {
 // hand, alongside the Pattern's evidenceGoal data — never generated.
 export const ONCHAIN_DOES_NOT_PROVE = {
   TOKEN_SUPPLY:
-    "This is the token's total supply as recorded on-chain at the observed slot. It does not establish " +
+    "This is the token's total supply as recorded at the observed point on-chain. It does not establish " +
     "circulating supply, which is a definitional and economic concept rather than a chain value; it does not " +
     "show how the supply changed over time; and it does not establish why any change occurred.",
   ACCOUNT_INFO:
@@ -114,10 +114,10 @@ export const ONCHAIN_DOES_NOT_PROVE = {
   // B2 — the arithmetic ceiling of an interval, stated as narrowly as the
   // arithmetic itself. The number is exact and says nothing about cause.
   TOTAL_SUPPLY_DELTA:
-    "This is the exact change in the token's on-chain total supply between two observed slots, computed from " +
+    "This is the exact change in the token's on-chain total supply between two observed readings, computed from " +
     "two deterministic total-supply readings. It does not establish WHY the supply changed, what was minted " +
     "or burned inside the interval, or that any mechanism, buyback or policy caused any part of the change: " +
-    "the number is the NET of everything that happened between the two slots. It does not establish " +
+    "the number is the NET of everything that happened between the two readings. It does not establish " +
     "circulating supply, which is a definitional and economic concept rather than a chain value. A decrease " +
     "is not proof of a burn, an increase is not proof of an issuance policy, and no change is not proof that " +
     "nothing happened.",
@@ -345,8 +345,10 @@ const ESTABLISHING_COMPONENTS_BY_KIND: Record<OnchainFactKind, readonly string[]
   // so a holding answers it; WHO economically receives or controls them is
   // what RECIPIENT asks, and a balance cannot say. That split is the whole
   // distinction between the two components.
-  TOKEN_ACCOUNT_BALANCE: ["CURRENT_STATE", "DESTINATION"],
-  TOKEN_ACCOUNTS_BY_OWNER: ["CURRENT_STATE", "DESTINATION"],
+  // POINT-IN-TIME BALANCE ≠ MECHANISM EXECUTION: a holding says where tokens
+  // sit, never whether a mechanism is operating now, so not CURRENT_STATE.
+  TOKEN_ACCOUNT_BALANCE: ["DESTINATION"],
+  TOKEN_ACCOUNTS_BY_OWNER: ["DESTINATION"],
   // A list of transactions touching an address: discovery, not a finding.
   SIGNATURES_FOR_ADDRESS: ESTABLISHES_NOTHING,
   // One transaction's content. "It does not establish the economic purpose
@@ -522,6 +524,8 @@ export function synthesizeOnchainFacts(
 ): SynthesizedFact[] {
   const r = artifact.result;
   const slot = artifact.provenance.slot;
+  // The chain's own word for its position: a slot on Solana, a block on EVM.
+  const position = artifact.provenance.chain === "solana" ? "slot" : "block";
 
   switch (r.kind) {
     case "TOKEN_SUPPLY":
@@ -530,7 +534,7 @@ export function synthesizeOnchainFacts(
           target,
           "TOKEN_SUPPLY",
           `On-chain total supply of token ${r.mint} is ${formatTokenAmount(r.amountRaw, r.decimals)} ` +
-            `(raw ${r.amountRaw}, ${r.decimals} decimals) as observed at slot ${slot}.`,
+            `(raw ${r.amountRaw}, ${r.decimals} decimals) as observed at ${position} ${slot}.`,
           fragmentFor(artifact, ["mint", "amountRaw", "decimals"]),
           ONCHAIN_DOES_NOT_PROVE.TOKEN_SUPPLY,
         ),
@@ -554,7 +558,7 @@ export function synthesizeOnchainFacts(
           target,
           "ACCOUNT_INFO",
           `Account ${r.address} exists on-chain and is owned by program ${r.ownerProgram ?? "unknown"} ` +
-            `as observed at slot ${slot}.`,
+            `as observed at ${position} ${slot}.`,
           fragmentFor(artifact, ["address", "exists", "ownerProgram"]),
           ONCHAIN_DOES_NOT_PROVE.ACCOUNT_INFO,
         ),
@@ -585,10 +589,10 @@ export function synthesizeOnchainFacts(
             isAnchorMint
               ? `Account ${r.address} is an SPL token account for mint ${parsed.mint}, this project's ` +
                   `confirmed mint, held under program ${r.ownerProgram ?? "unknown"}${ownerClause}, ` +
-                  `as observed at slot ${slot}.`
+                  `as observed at ${position} ${slot}.`
               : `Account ${r.address} is an SPL token account for mint ${parsed.mint}, which is NOT this ` +
                   `project's confirmed mint ${anchor}, held under program ${r.ownerProgram ?? "unknown"}` +
-                  `${ownerClause}, as observed at slot ${slot}.`,
+                  `${ownerClause}, as observed at ${position} ${slot}.`,
             fragmentFor(artifact, ["address", "tokenAccountRelation", "tokenAccount"]),
             isAnchorMint
               ? ONCHAIN_DOES_NOT_PROVE.ACCOUNT_TOKEN_RELATION
@@ -609,7 +613,7 @@ export function synthesizeOnchainFacts(
           target,
           "TOKEN_ACCOUNT_BALANCE",
           `Token account ${r.account} holds ${formatTokenAmount(r.amountRaw, r.decimals)} ` +
-            `(raw ${r.amountRaw}, ${r.decimals} decimals) as observed at slot ${slot}.`,
+            `(raw ${r.amountRaw}, ${r.decimals} decimals) as observed at ${position} ${slot}.`,
           fragmentFor(artifact, ["account", "amountRaw", "decimals"]),
           ONCHAIN_DOES_NOT_PROVE.TOKEN_ACCOUNT_BALANCE,
         ),
@@ -628,7 +632,7 @@ export function synthesizeOnchainFacts(
           "TOKEN_ACCOUNTS_BY_OWNER",
           `Address ${r.owner} owns SPL token account ${a.account} for mint ${r.mint} with balance ` +
             `${formatTokenAmount(a.amountRaw, a.decimals)} (raw ${a.amountRaw}, ${a.decimals} decimals) ` +
-            `as observed at slot ${slot}.`,
+            `as observed at ${position} ${slot}.`,
           // A PER-ACCOUNT fragment, not the whole result: two accounts of
           // the same owner must not quote identical bytes, or they would
           // deduplicate into one fact downstream.

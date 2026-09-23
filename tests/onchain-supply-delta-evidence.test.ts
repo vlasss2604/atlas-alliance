@@ -764,7 +764,7 @@ describe("20/22..26. boundaries", () => {
     for (const phrase of [
       "does not establish WHY the supply changed",
       "that any mechanism, buyback or policy caused any part of the change",
-      "the NET of everything that happened between the two slots",
+      "the NET of everything that happened between the two readings",
       "It does not establish circulating supply",
       "A decrease is not proof of a burn",
     ]) {

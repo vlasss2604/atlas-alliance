@@ -8,6 +8,15 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
+- **A measured supply decrease without a burn can read weaker than it is.**
+  NET_EFFECT with only a SUPPORTS `TOTAL_SUPPLY_DELTA` (no burn) is
+  PARTIALLY_SUPPORTED with `SUPPLY_REDUCTION_NOT_ESTABLISHED`, and
+  `surfaceAnswer` renders that code as "does not show that total supply
+  actually decreases" — although the decrease was measured. The client cannot
+  tell this case from a documentary claim: the detail payload projects
+  `factKind` for `TOKEN_SUPPLY` only. Conservative direction (never an
+  overclaim); recorded by Founder decision 2026-09-23, not fixed.
+
 - ~~**`candidatesByQuery` is keyed by query string alone**~~ **CLOSED
   2026-09-01** by D-152: reuse identity is now (canonical query, patternStep,
   component), both the new-search and reused-query paths reach the same

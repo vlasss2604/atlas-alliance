@@ -152,9 +152,9 @@ describe("visibility and establishment are separate axes", () => {
   });
 
   it("the two predicates disagree exactly where they should", () => {
-    // A holding may establish CURRENT_STATE but may never be READ across.
-    expect(onchainFactCanEstablishComponent("TOKEN_ACCOUNT_BALANCE", "CURRENT_STATE")).toBe(true);
-    expect(onchainFactAppliesToComponent("TOKEN_ACCOUNT_BALANCE", "CURRENT_STATE")).toBe(false);
+    // A holding may establish DESTINATION but may never be READ across.
+    expect(onchainFactCanEstablishComponent("TOKEN_ACCOUNT_BALANCE", "DESTINATION")).toBe(true);
+    expect(onchainFactAppliesToComponent("TOKEN_ACCOUNT_BALANCE", "DESTINATION")).toBe(false);
     // Null kind: unrestricted for establishment, never visible across.
     expect(onchainFactCanEstablishComponent(null, "NET_EFFECT")).toBe(true);
     expect(onchainFactAppliesToComponent(null, "NET_EFFECT")).toBe(false);
@@ -294,6 +294,20 @@ describe("a supply level establishes no component", () => {
     expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(r.excludedEvidence.map((x) => x.reason)).toContain("FACT_KIND_CANNOT_ESTABLISH");
     expect(r.supportingEvidenceIds).toHaveLength(0);
+  });
+
+  it("POINT-IN-TIME BALANCE != MECHANISM EXECUTION: a balance or an owner's accounts cannot establish CURRENT_STATE, and still establish DESTINATION", () => {
+    for (const kind of ["TOKEN_ACCOUNT_BALANCE", "TOKEN_ACCOUNTS_BY_OWNER"] as const) {
+      expect(establishableComponentsForFactKind(kind), kind).toEqual(["DESTINATION"]);
+      expect(onchainFactCanEstablishComponent(kind, "CURRENT_STATE"), kind).toBe(false);
+      const r = reconcile(5, "CURRENT_STATE", [onchainAt("CURRENT_STATE", kind)], { requiresCurrentState: false });
+      expect(r.status, kind).toBe("INSUFFICIENT_EVIDENCE");
+      expect(r.excludedEvidence.map((x) => x.reason), kind).toContain("FACT_KIND_CANNOT_ESTABLISH");
+    }
+  });
+
+  it("no on-chain fact kind establishes CURRENT_STATE: a chain observation carries no mechanism state", () => {
+    expect(ONCHAIN_FACT_KINDS.filter((k) => establishableComponentsForFactKind(k).includes("CURRENT_STATE"))).toEqual([]);
   });
 
   it("TOKEN_SUPPLY does not establish SOURCE_OF_VALUE", () => {

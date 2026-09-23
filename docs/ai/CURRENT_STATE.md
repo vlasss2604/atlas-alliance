@@ -7,9 +7,14 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-20 (Research Reliability V1 final
-  offline acceptance, on the final tree after every test-pin change):
-  **5203 passing, 4 skipped, 3 failing** (5210 total, 251 files, ~35 min).
+- Full suite, last verified 2026-09-23 (point-in-time supply fix,
+  `643d89d`): **5251 passing, 4 skipped, 6 failing** (253 files, ~30 min);
+  two of the six were re-pointed / reproduced green in isolation afterwards
+  (`bounded-search-finalization-v1`, `first-real-run-stage2` #17 — flaky
+  under load). The four standing failures reproduce on a clean `06af2aa`:
+  the two seed-count pins below, the renderer one, and
+  `gates-owner-alpha` D (pins `uniswap` as non-allowlisted; it was added to
+  the live allowlist in `06af2aa`).
   Run the suite ALONE — two concurrent `vitest run` invocations share the
   one test database and produce mass spurious failures (observed earlier:
   193 "failures" that vanished on a clean serial run). The three failures

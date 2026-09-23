@@ -26,9 +26,9 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Technical failure ≠ stronger project reality.** Technical degradation
   (an RPC down, a provider unreachable) must never make the semantic Research
   result stronger than it is with everything working. A deterministic chain
-  read closes a component's acquisition only when its rows carry what the
-  component reports; a reading that carries no mechanism state never
-  suppresses the documentary pass that can.
+  read closes a component's acquisition only when its rows can establish the
+  component under the reducer's own rules and carry what it reports; a
+  reading that cannot never suppresses the documentary pass that can.
 - **Excluded evidence ≠ confidence.** Evidence that S5 excludes may stay
   visible in the audit record and never strengthens verdict, support,
   confidence or citations: a Proof over the control plus inadmissible-only
@@ -83,6 +83,9 @@ willing to assert. Collapsing any two of these is the most common failure.
   whether a mechanism operates now and observes no change. A change reaches
   NET_EFFECT only as a measured interval; a saved Proof resting on a lone
   reading is shown as not established.
+- **Point-in-time balance ≠ mechanism execution.** A balance or an owner's
+  token accounts say where tokens sit (DESTINATION), never that a mechanism
+  is operating now. No chain observation establishes CURRENT_STATE.
 - **Proposal made ≠ proposal passed.** An official governance venue is not a
   decision; a post on it establishes what was proposed, never that governance
   approved it. `PROPOSED` ≠ `APPROVED` ≠ `ACTIVATED` ≠ `EXECUTING`.

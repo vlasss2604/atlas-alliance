@@ -335,7 +335,7 @@ function observationRef(o: TokenSupplyObservation): TotalSupplyObservationRef {
 //   * the presence or absence of unlocks, mints or burns not visible in the
 //     two readings themselves.
 export const TOTAL_SUPPLY_DELTA_DOES_NOT_PROVE =
-  "This is the change in the token's total supply as recorded on-chain between two observed slots, " +
+  "This is the change in the token's total supply as recorded on-chain between two observed readings, " +
   "which is the net of all minting and all burning in that interval. It does not establish circulating " +
   "supply or any change in it; it does not show what individual events occurred inside the interval; it " +
   "does not establish that any particular burn, buyback or mechanism caused the change; and it does not " +
