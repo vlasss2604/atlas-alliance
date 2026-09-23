@@ -146,14 +146,15 @@ describe("visibility and establishment are separate axes", () => {
       (k) => establishableComponentsForFactKind(k).length > 0,
     );
     expect(establishing.length).toBeGreaterThan(1);
-    expect(establishing).toContain("TOKEN_SUPPLY");
     expect(establishing).toContain("TOKEN_ACCOUNTS_BY_OWNER");
+    // A point-in-time supply level establishes nothing (see §6).
+    expect(establishing).not.toContain("TOKEN_SUPPLY");
   });
 
   it("the two predicates disagree exactly where they should", () => {
-    // TOKEN_SUPPLY may establish CURRENT_STATE but may never be READ across.
-    expect(onchainFactCanEstablishComponent("TOKEN_SUPPLY", "CURRENT_STATE")).toBe(true);
-    expect(onchainFactAppliesToComponent("TOKEN_SUPPLY", "CURRENT_STATE")).toBe(false);
+    // A holding may establish CURRENT_STATE but may never be READ across.
+    expect(onchainFactCanEstablishComponent("TOKEN_ACCOUNT_BALANCE", "CURRENT_STATE")).toBe(true);
+    expect(onchainFactAppliesToComponent("TOKEN_ACCOUNT_BALANCE", "CURRENT_STATE")).toBe(false);
     // Null kind: unrestricted for establishment, never visible across.
     expect(onchainFactCanEstablishComponent(null, "NET_EFFECT")).toBe(true);
     expect(onchainFactAppliesToComponent(null, "NET_EFFECT")).toBe(false);
@@ -280,17 +281,19 @@ describe("movement is a path, not a receipt", () => {
 });
 
 /* ------------------------------------------------------------------ *
- * 6. TOKEN_SUPPLY / CURRENT_STATE PRESERVED
+ * 6. POINT-IN-TIME STATE != MECHANISM EXECUTION
  * ------------------------------------------------------------------ */
 
-describe("a supply level is current state", () => {
-  it("TOKEN_SUPPLY establishes CURRENT_STATE", () => {
-    expect(onchainFactCanEstablishComponent("TOKEN_SUPPLY", "CURRENT_STATE")).toBe(true);
+describe("a supply level establishes no component", () => {
+  it("TOKEN_SUPPLY alone cannot establish CURRENT_STATE", () => {
+    expect(establishableComponentsForFactKind("TOKEN_SUPPLY")).toEqual([]);
+    expect(onchainFactCanEstablishComponent("TOKEN_SUPPLY", "CURRENT_STATE")).toBe(false);
     const r = reconcile(5, "CURRENT_STATE", [onchainAt("CURRENT_STATE", "TOKEN_SUPPLY")], {
       requiresCurrentState: false,
     });
-    expect(r.excludedEvidence.map((x) => x.reason)).not.toContain("FACT_KIND_CANNOT_ESTABLISH");
-    expect(r.supportingEvidenceIds).toHaveLength(1);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.excludedEvidence.map((x) => x.reason)).toContain("FACT_KIND_CANNOT_ESTABLISH");
+    expect(r.supportingEvidenceIds).toHaveLength(0);
   });
 
   it("TOKEN_SUPPLY does not establish SOURCE_OF_VALUE", () => {
@@ -311,10 +314,10 @@ describe("NET_EFFECT owns its own typed qualification", () => {
     }
   });
 
-  it("every non-BURN kind stays SUPPORTING evidence at NET_EFFECT", () => {
-    // B1's architecture, unchanged: a non-qualifying row remains support and
-    // is capped by a reason code — it is never excluded. The generic gate
-    // would have emptied this set and, with it, blinded B2.
+  it("every kind but a point-in-time supply reading stays SUPPORTING evidence at NET_EFFECT", () => {
+    // B1's architecture, kept: a non-qualifying row remains support and is
+    // capped by a reason code. The one exception (Founder decision): a single
+    // TOKEN_SUPPLY reading observes no change at all and establishes nothing.
     const rows = ONCHAIN_FACT_KINDS.map((k) => onchainAt("NET_EFFECT", k));
     const r = reconcileComponent({
       jobId: JOB,
@@ -326,8 +329,23 @@ describe("NET_EFFECT owns its own typed qualification", () => {
       now: NOW,
       freshnessPolicyDays: FRESHNESS,
     });
-    expect(r.supportingEvidenceIds).toHaveLength(rows.length);
-    expect(r.excludedEvidence.map((x) => x.reason)).not.toContain("FACT_KIND_CANNOT_ESTABLISH");
+    const kindOf = new Map(rows.map((row, i) => [row.id, ONCHAIN_FACT_KINDS[i]]));
+    expect(r.supportingEvidenceIds).toHaveLength(rows.length - 1);
+    expect(r.supportingEvidenceIds.map((id) => kindOf.get(id))).not.toContain("TOKEN_SUPPLY");
+    expect(r.excludedEvidence.map((x) => [kindOf.get(x.evidenceId), x.reason])).toEqual([["TOKEN_SUPPLY", "FACT_KIND_CANNOT_ESTABLISH"]]);
+  });
+
+  it("TOKEN_SUPPLY alone cannot make NET_EFFECT PARTIALLY_SUPPORTED", () => {
+    const r = reconcileComponent({
+      jobId: JOB,
+      item: { step: 7, component: "NET_EFFECT" },
+      requirements: requirements("NET_EFFECT", { establishingClasses: ["ONCHAIN_VERIFIABLE"] }),
+      evidence: [onchainAt("NET_EFFECT", "TOKEN_SUPPLY")],
+      now: NOW,
+      freshnessPolicyDays: FRESHNESS,
+    });
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.supportingEvidenceIds).toEqual([]);
   });
 
   it("TOTAL_SUPPLY_DELTA stays in the NET_EFFECT establishing pool", () => {

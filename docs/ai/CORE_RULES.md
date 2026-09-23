@@ -78,6 +78,11 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Transfer ≠ buyback.** Transfer ≠ burn.
 - **Buyback ≠ burn.**
 - **Burn claim ≠ actual on-chain Burn/BurnChecked.**
+- **Point-in-time state ≠ mechanism execution.** One total-supply reading
+  establishes neither CURRENT_STATE nor NET_EFFECT: it says nothing about
+  whether a mechanism operates now and observes no change. A change reaches
+  NET_EFFECT only as a measured interval; a saved Proof resting on a lone
+  reading is shown as not established.
 - **Proposal made ≠ proposal passed.** An official governance venue is not a
   decision; a post on it establishes what was proposed, never that governance
   approved it. `PROPOSED` ≠ `APPROVED` ≠ `ACTIVATED` ≠ `EXECUTING`.

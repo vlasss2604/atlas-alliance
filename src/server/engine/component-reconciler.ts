@@ -1,6 +1,7 @@
 import {
   onchainFactAppliesToComponent,
   onchainFactCanEstablishComponent,
+  onchainFactCanEstablishSupplyEffect,
   type OnchainFactKind,
 } from "./onchain-facts";
 import { evaluateNetSupplyEffect, type NetSupplyEffect } from "./net-supply-effect";
@@ -268,6 +269,16 @@ export function requiresSupplyEffectQualification(component: string): boolean {
 // a reader finds, and so a second such component has one place to be added.
 export function componentOwnsTypedEstablishmentQualification(component: string): boolean {
   return requiresSupplyEffectQualification(component);
+}
+
+// Topical fitness, one authority: may a row of this KIND establish
+// `component`? Asked by the reducer below and by the S4 executor before it
+// lets a chain read close a component, so acquisition never stops on a row
+// the reducer will not count.
+export function onchainFactMayEstablish(kind: string | null | undefined, component: string): boolean {
+  return componentOwnsTypedEstablishmentQualification(component)
+    ? onchainFactCanEstablishSupplyEffect(kind)
+    : onchainFactCanEstablishComponent(kind, component);
 }
 
 // WHICH COMPONENT CLAIMS GOVERNANCE AUTHORISATION.
@@ -928,11 +939,11 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     // IS. `does_not_prove` is not read here or anywhere in this file. And a
     // null kind is unrestricted, so documentary, data-provider and
     // model-extracted rows behave exactly as before.
-    if (
-      row.relationship === "SUPPORTS" &&
-      !componentOwnsTypedEstablishmentQualification(item.component) &&
-      !onchainFactCanEstablishComponent(row.onchainFactKind, item.component)
-    ) {
+    //
+    // NET_EFFECT is exempt from the map, not from topical fitness: a single
+    // point-in-time supply reading is not a supply effect and establishes
+    // nothing there. Every other kind keeps B1/B2 as it was.
+    if (row.relationship === "SUPPORTS" && !onchainFactMayEstablish(row.onchainFactKind, item.component)) {
       excluded.set(row.id, "FACT_KIND_CANNOT_ESTABLISH");
       continue;
     }

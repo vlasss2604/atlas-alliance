@@ -420,6 +420,10 @@ export interface ResearchTableRow {
   // is not established — the plain reason it stopped there.
   established: string;
   boundary: BoundaryReading | null;
+  // A partly supported row whose own claim the persisted reason says is not
+  // shown (CLAIM_NOT_SHOWN_CODES). The answer then says what the evidence
+  // does not show, never "there is evidence that …".
+  claimNotShown?: true;
   // The strongest admitted source behind the row, immediately visible.
   source: { kind: string; name: string } | null;
   date: EvidenceCard["date"];
@@ -461,6 +465,34 @@ const SOURCE_PRECEDENCE = [
 ];
 
 const MAX_ESTABLISHED = 220;
+
+// POINT-IN-TIME STATE ≠ MECHANISM EXECUTION, ON EVERY RECORD. The engine no
+// longer lets a single supply reading establish any component
+// (onchain-facts.ts), but Proofs persisted before that rule still carry
+// CURRENT_STATE / NET_EFFECT rows whose only support is one. They are never
+// recomputed, so the surface applies the same ceiling when it reads them: a
+// row resting only on level readings is shown as not established. Never the
+// other way — this can only weaken a row.
+const LEVEL_READING_FACT_KINDS: ReadonlySet<string> = new Set(["TOKEN_SUPPLY"]);
+const LEVEL_READING_LIMIT = "A single reading of total supply cannot show this.";
+
+function restsOnlyOnLevelReadings(
+  supportingEvidenceIds: readonly string[] | undefined,
+  quantityByEvidence: ReadonlyMap<string, QuantityLike>,
+): boolean {
+  const ids = supportingEvidenceIds ?? [];
+  return ids.length > 0 && ids.every((id) => LEVEL_READING_FACT_KINDS.has(quantityByEvidence.get(id)?.factKind ?? ""));
+}
+
+// A partly supported row whose persisted reason says its OWN claim is not
+// shown — no supply reduction, no net change, or measured intervals that
+// disagree. Something real may stand behind the row (a burn, say), but the
+// answer must not say there is evidence for the claim itself.
+const CLAIM_NOT_SHOWN_CODES: ReadonlySet<string> = new Set([
+  "SUPPLY_REDUCTION_NOT_ESTABLISHED",
+  "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",
+  "CONFLICTING_SUPPLY_DELTA",
+]);
 
 function firstSentence(text: string): string {
   const trimmed = text.trim();
@@ -506,6 +538,13 @@ function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: Bou
   const kind = boundary?.kind ?? "SUBSTANTIVE";
   if (kind !== "SUBSTANTIVE") return ROW_LIMIT_COPY[kind];
   return row.reason ?? "The available evidence does not settle this.";
+}
+
+// The reading itself, then why it cannot answer the row.
+function levelOnlyText(evidence: EvidenceCard[]): string {
+  const reading = evidence.find((e) => e.relation === "SUPPORTS")?.proves;
+  const fact = reading && firstSentence(reading).length <= MAX_ESTABLISHED ? firstSentence(reading) : null;
+  return fact ? `${fact} ${LEVEL_READING_LIMIT}` : LEVEL_READING_LIMIT;
 }
 
 export interface SurfaceInput {
@@ -574,14 +613,21 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
 
   const rows: ResearchTableRow[] = [];
   for (const [component, { row, kind, restsOn }] of selected) {
-    const status = resultStatus(row.state);
-    if (status === null) continue;
+    const persistedStatus = resultStatus(row.state);
+    if (persistedStatus === null) continue;
+    const persisted = input.components.find((c) => c.component === component);
+    const levelOnly =
+      (persistedStatus === "CONFIRMED" || persistedStatus === "PARTIAL") &&
+      restsOnlyOnLevelReadings(persisted?.supportingEvidenceIds, quantityByEvidence);
+    const status: ResultStatus = levelOnly ? "NOT_ESTABLISHED" : persistedStatus;
     const evidence = (admittedByComponent[component] ?? []).map(({ e, relation }) =>
       evidenceCard(e, relation, { jobId: input.jobId, quantity: quantityByEvidence.get(e.id) ?? null, ticker: input.ticker, component }),
     );
-    const boundary = status === "NOT_ESTABLISHED"
-      ? boundaryOf({ component, reasonCodes: input.components.find((c) => c.component === component)?.reasonCodes, coverage: row.coverage, boundary: input.boundary })
+    const boundary = status === "NOT_ESTABLISHED" && !levelOnly
+      ? boundaryOf({ component, reasonCodes: persisted?.reasonCodes, coverage: row.coverage, boundary: input.boundary })
       : null;
+    const claimNotShown =
+      status === "PARTIAL" && (persisted?.reasonCodes ?? []).some((c) => typeof c === "string" && CLAIM_NOT_SHOWN_CODES.has(c));
     const strongestClass = SOURCE_PRECEDENCE.find((cls) => evidence.some((e) => e.sourceClass === sourceClassLabel(cls)));
     const strongest = strongestClass ? evidence.find((e) => e.sourceClass === sourceClassLabel(strongestClass)) ?? null : evidence[0] ?? null;
     // The question projection's own words for the rows it named; a
@@ -598,8 +644,9 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       status,
       statusLabel: RESULT_STATUS_LABELS[status],
       tone: statusTone(status),
-      established: establishedText(row, evidence, boundary),
+      established: levelOnly ? levelOnlyText(evidence) : establishedText(row, evidence, boundary),
       boundary,
+      ...(claimNotShown ? { claimNotShown: true as const } : {}),
       source: strongest ? { kind: strongest.sourceClass, name: strongest.sourceName } : null,
       date: latestDate(evidence),
       evidence,
@@ -845,13 +892,16 @@ export function surfaceAnswer(input: {
   if (confirmed.length > 0) {
     sentences.push(`The sources confirm ${joinPhrases(confirmed.map(phrase).slice(0, 4))}.`);
   }
-  const partial = by("PARTIAL");
+  // "There is evidence that <claim>" only for a partial row whose claim the
+  // evidence actually bears on; one whose reason says the claim itself is
+  // not shown is said with what the evidence does not show.
+  const partial = by("PARTIAL").filter((r) => !r.claimNotShown);
   if (partial.length > 0) {
     const lead = partial[0];
     const gap = lead.row.reason ? ` ${lead.row.reason}` : "";
     sentences.push(`There is evidence ${joinPhrases(partial.map(phrase).slice(0, 2))}, but it is not fully confirmed.${gap}`);
   }
-  const open = by("NOT_ESTABLISHED");
+  const open = rows.filter((r) => r.status === "NOT_ESTABLISHED" || (r.status === "PARTIAL" && r.claimNotShown));
   if (open.length > 0) {
     const kinds = new Set(open.map((r) => r.boundary?.kind ?? "SUBSTANTIVE"));
     const what = `The available evidence does not show ${joinPhrases(open.map(phrase).slice(0, 3), "or")}.`;

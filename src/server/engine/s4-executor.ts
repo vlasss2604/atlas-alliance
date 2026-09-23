@@ -68,6 +68,7 @@ import {
   planQueries,
 } from "./acquisition-ledger";
 import { componentAdmitsOnchainAcquisition, runStructuredOnchainAcquisition } from "./onchain-acquisition";
+import { onchainFactMayEstablish } from "./component-reconciler";
 import { normalizeMechanismState } from "../domain/mechanism-state";
 import {
   deterministicCeilingForComponent,
@@ -1322,14 +1323,21 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // bounds, and the attempt closes on the rows it holds (see
           // closeDocumentaryPass). Generic: Pattern data and row state, no
           // intent, no project, no fact kind named here.
+          //
+          // THE SAME FOR TOPICAL FITNESS. A read whose rows cannot establish
+          // the component at all (a single TOKEN_SUPPLY level for NET_EFFECT
+          // or CURRENT_STATE) closes nothing either: S5 will not count them,
+          // so stopping here would leave the component unestablished with
+          // its documentary path never tried — the chain-UP world weaker
+          // than the chain-DOWN one. One authority: `onchainFactMayEstablish`.
+          const readRows = await deps.db
+            .select({ mechanismState: evidence.mechanismState, onchainFactKind: evidence.onchainFactKind })
+            .from(evidence)
+            .where(inArray(evidence.id, onchainOutcome.evidenceIds));
+          const fitRows = readRows.filter((r) => onchainFactMayEstablish(r.onchainFactKind, item.component));
           const closesComponent =
-            !plan.reportsMechanismState ||
-            (
-              await deps.db
-                .select({ mechanismState: evidence.mechanismState })
-                .from(evidence)
-                .where(inArray(evidence.id, onchainOutcome.evidenceIds))
-            ).some((r) => normalizeMechanismState(r.mechanismState) !== "UNKNOWN");
+            fitRows.length > 0 &&
+            (!plan.reportsMechanismState || fitRows.some((r) => normalizeMechanismState(r.mechanismState) !== "UNKNOWN"));
           if (closesComponent) {
             return {
               status: "SUCCEEDED",
@@ -1338,7 +1346,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             };
           }
           onchainEvidenceIds = [...onchainOutcome.evidenceIds];
-          observations.add("ONCHAIN_EVIDENCE_WITHOUT_MECHANISM_STATE");
+          observations.add(
+            fitRows.length > 0 ? "ONCHAIN_EVIDENCE_WITHOUT_MECHANISM_STATE" : "ONCHAIN_EVIDENCE_CANNOT_ESTABLISH_COMPONENT",
+          );
         }
       }
 

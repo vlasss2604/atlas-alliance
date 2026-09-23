@@ -138,12 +138,13 @@ describe("net effect — movement, position and level are never a reduction", ()
     }
   });
 
-  it("TEST 6: a single token-supply reading is a level, never a change", () => {
+  it("TEST 6: a single token-supply reading is a level, never a change — it establishes nothing, not even partly", () => {
     // The one that looks most like an answer and is not: it is the supply
-    // AT a slot, with nothing to compare it to.
+    // AT a slot, with nothing to compare it to (Founder decision).
     const r = reconcile([onchain("TOKEN_SUPPLY")]);
-    expect(r.status).toBe("PARTIALLY_SUPPORTED");
-    expect(r.reasonCodes).toContain("SUPPLY_REDUCTION_NOT_ESTABLISHED");
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.supportingEvidenceIds).toEqual([]);
+    expect(r.excludedEvidence.map((x) => x.reason)).toEqual(["FACT_KIND_CANNOT_ESTABLISH"]);
   });
 
   it("even every non-burn kind together establishes no reduction", () => {
@@ -157,7 +158,8 @@ describe("net effect — movement, position and level are never a reduction", ()
     // stays supporting evidence and the component stays open, never
     // CONTRADICTED.
     expect(r.status).not.toBe("CONTRADICTED");
-    expect(r.supportingEvidenceIds.length).toBe(rows.length);
+    // Every one but the point-in-time supply level, which establishes nothing.
+    expect(r.supportingEvidenceIds.length).toBe(rows.length - 1);
   });
 });
 

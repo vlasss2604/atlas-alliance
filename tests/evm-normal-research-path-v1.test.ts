@@ -296,13 +296,13 @@ describe("normal Research → EVM TOKEN_SUPPLY — the ordinary S4 path consumes
     expect(traced.some((t) => t.component === "CURRENT_STATE" && t.budgetAxis === "sourceOpens")).toBe(true);
 
     // 7. reconciliation, through the same generic S5 path a Solana reading
-    // takes: a lone CONFIRMED-bound ONCHAIN_VERIFIABLE row establishes the
-    // component at CLAIMED authority (D-074), never more.
+    // takes: the row is admitted to the record, and a point-in-time supply
+    // level establishes nothing about CURRENT_STATE (POINT-IN-TIME STATE !=
+    // MECHANISM EXECUTION).
     const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 5, component: "CURRENT_STATE" }, new Date());
-    expect(result.status).toBe("PARTIALLY_SUPPORTED");
-    expect(result.reasonCodes).toContain("INSUFFICIENT_AUTHORITY");
-    expect(result.supportingEvidenceIds).toEqual([rows[0].id]);
-    expect(result.excludedEvidence).toEqual([]);
+    expect(result.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(result.supportingEvidenceIds).toEqual([]);
+    expect(result.excludedEvidence).toEqual([{ evidenceId: rows[0].id, reason: "FACT_KIND_CANNOT_ESTABLISH" }]);
   });
 
   it("NET_EFFECT addresses the same anchor with its own TOKEN_SUPPLY intent — a second read, not a same-job reuse", async () => {

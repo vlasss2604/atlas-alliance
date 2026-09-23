@@ -684,7 +684,9 @@ describe("F8. technical-failure monotonicity", () => {
       ["ONCHAIN_VERIFIABLE", "CLAIMED", "CONFIRMED", "TOKEN_SUPPLY", null],
     ]);
     expect(up.s5.CURRENT_STATE!.status).toBe("SUPPORTED");
-    expect(up.s5.CURRENT_STATE!.supporting.length).toBe(2);
+    // The reading stays in the record; only the page establishes the state
+    // (a supply level establishes nothing about CURRENT_STATE).
+    expect(up.s5.CURRENT_STATE!.supporting.length).toBe(1);
     expect(up.verdict).toBe("SUPPORTED");
     expect(up.requirements).toEqual(["MCS-1:SATISFIED"]);
     // The chain down: the documentary path alone, the same answer.

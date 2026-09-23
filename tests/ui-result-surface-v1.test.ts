@@ -406,7 +406,10 @@ describe("the boundary — three kinds, read from persisted truth", () => {
       expect(exec.kind).toBe("REALITY");
       expect(exec.established).toBe(ROW_LIMIT_COPY.CONFIGURATION);
       expect(s.table.some((r) => r.status === "CONFIRMED")).toBe(false);
-      expect(s.table.filter((r) => r.status === "PARTIAL").map((r) => r.component).sort()).toEqual(["CURRENT_STATE", "NET_EFFECT"]);
+      // Persisted PARTIALLY_SUPPORTED on a single supply reading only: shown
+      // as not established (POINT-IN-TIME STATE != MECHANISM EXECUTION).
+      expect(s.table.filter((r) => r.status === "PARTIAL")).toEqual([]);
+      for (const c of ["CURRENT_STATE", "NET_EFFECT"]) expect(s.table.find((r) => r.component === c)?.status, c).toBe("NOT_ESTABLISHED");
     }
     expect(boundaryOf({ component: "EXECUTION_EVIDENCE", reasonCodes: ["NO_ADMISSIBLE_ROUTE"], coverage: "NOT_ATTEMPTED", boundary: null }).kind).toBe("CONFIGURATION");
   });
@@ -614,15 +617,84 @@ describe("evidence — from persisted links only, translated for a reader", () =
     const reading = aave.keyEvidence[0];
     expect(reading.onchain).toEqual({ observation: "FXL total supply observed: 16.0M", network: "Ethereum" });
     expect(reading.proves).toBe("FXL total supply observed: 16.0M");
-    // The partial row: the fact first, then — in the same cell — exactly
-    // what could not be confirmed. Never the word "partial" on its own.
+    // The row a supply reading was persisted under: the reading first, then
+    // — in the same cell — why it cannot answer the row.
     const aaveCurrent = aave.table.find((r) => r.component === "CURRENT_STATE")!;
-    expect(aaveCurrent.status).toBe("PARTIAL");
-    expect(aaveCurrent.established.startsWith("FXL total supply observed: 16.0M. ")).toBe(true);
-    expect(aaveCurrent.established).toContain(aaveCurrent.row.reason ?? "could not confirm");
+    expect(aaveCurrent.status).toBe("NOT_ESTABLISHED");
+    expect(aaveCurrent.established).toBe("FXL total supply observed: 16.0M. A single reading of total supply cannot show this.");
     expect(aaveCurrent.established.toLowerCase()).not.toMatch(/\bpartial\b/);
     const aaveFirst = textOf(firstScreenOf(render(aaveDetailExcluded)));
     for (const raw of ["16000000000000000000000000", "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9", "finalized block"]) expect(aaveFirst, raw).not.toContain(raw);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 4b. POINT-IN-TIME SUPPLY: NEVER A CHANGE, NEVER A RUNNING MECHANISM */
+/* ------------------------------------------------------------------ */
+
+const STRENGTH: Record<string, number> = { NOT_ESTABLISHED: 0, PARTIAL: 1, CONFIRMED: 2, CONTRADICTED: 2 };
+const PERSISTED_STRENGTH: Record<string, number> = { INSUFFICIENT_EVIDENCE: 0, PARTIALLY_SUPPORTED: 1, SUPPORTED: 2, CONTRADICTED: 2 };
+
+function withComponent(detail: ResearchJobDetail, component: string, patch: Record<string, unknown>, dropQuantity = false): ResearchJobDetail {
+  const target = detail.components.find((c) => c.component === component)!;
+  const evidenceIds = new Set(target.supportingEvidenceIds);
+  return {
+    ...detail,
+    components: detail.components.map((c) => (c.component === component ? { ...c, ...patch } : c)),
+    quantities: dropQuantity ? detail.quantities.filter((q) => !evidenceIds.has(q.evidenceId)) : detail.quantities,
+  };
+}
+
+describe("a point-in-time supply reading, on a record persisted before the engine refused it", () => {
+  it("the saved Aave shape never says total supply decreases or that the buyback is happening now", () => {
+    for (const variant of ["EXCLUDED", "BUDGET"] as const) {
+      const d = aaveDetail(variant);
+      const answer = buildResultSurface(d).answer.sentences.join(" ");
+      expect(answer, variant).not.toMatch(/There is evidence/);
+      expect(answer, variant).not.toMatch(/evidence that total supply actually decreases/);
+      expect(answer, variant).not.toMatch(/evidence that the buyback is happening now/);
+      const first = textOf(firstScreenOf(render(d)));
+      expect(first, variant).not.toMatch(/There is evidence that/);
+    }
+  });
+
+  it("a partly supported supply effect whose own claim is not shown is said as what the evidence does not show", () => {
+    // A burn is established, net change is not: the row stays partly
+    // verified, and the answer never claims evidence that supply decreased.
+    for (const code of ["SUPPLY_REDUCTION_NOT_ESTABLISHED", "NET_SUPPLY_CHANGE_NOT_ESTABLISHED", "CONFLICTING_SUPPLY_DELTA"]) {
+      const d = withComponent(aaveDetail("EXCLUDED"), "NET_EFFECT", { reasonCodes: [code] }, true);
+      const s = buildResultSurface(d);
+      expect(s.table.find((r) => r.component === "NET_EFFECT")?.status, code).toBe("PARTIAL");
+      const answer = s.answer.sentences.join(" ");
+      expect(answer, code).not.toMatch(/There is evidence[^.]*total supply/);
+    }
+  });
+
+  it("existing valid partial cases stay partial and keep their sentence — a measured decrease, and non-supply current state", () => {
+    // B2: burn + measured decrease, unattributed — the measurement is real.
+    const measured = withComponent(aaveDetail("EXCLUDED"), "NET_EFFECT", { reasonCodes: ["NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"] }, true);
+    const m = buildResultSurface(measured);
+    expect(m.table.find((r) => r.component === "NET_EFFECT")?.status).toBe("PARTIAL");
+    expect(m.answer.sentences.join(" ")).toContain("There is evidence that total supply actually decreases, but it is not fully confirmed.");
+    // Current state partly supported by evidence that is not a level reading.
+    const documented = withComponent(aaveDetail("EXCLUDED"), "CURRENT_STATE", {}, true);
+    const c = buildResultSurface(documented);
+    expect(c.table.find((r) => r.component === "CURRENT_STATE")?.status).toBe("PARTIAL");
+    expect(c.answer.sentences.join(" ")).toContain("There is evidence that the buyback is happening now");
+  });
+
+  it("the surface is never stronger than the persisted record, on any fixture or real shape", () => {
+    const details = [...RESULT_FIXTURES.map((f) => f.detail), aaveDetail("EXCLUDED"), aaveDetail("BUDGET")];
+    for (const d of details) {
+      const s = buildResultSurface(d);
+      for (const row of s.table) {
+        const persisted = d.components.find((c) => c.component === row.component)!;
+        expect(STRENGTH[row.status], `${d.job.id}: ${row.component}`).toBeLessThanOrEqual(PERSISTED_STRENGTH[persisted.status]);
+      }
+      // Every clause of "There is evidence that …" belongs to a row shown partly verified.
+      const partialSentence = s.answer.sentences.find((x) => x.startsWith("There is evidence "));
+      if (partialSentence) expect(s.table.some((r) => r.status === "PARTIAL" && !r.claimNotShown), d.job.id).toBe(true);
+    }
   });
 });
 

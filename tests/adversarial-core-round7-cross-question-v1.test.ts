@@ -588,8 +588,9 @@ describe("B. buyback / burn / net effect over one evidence world", () => {
     const burnAndDelta = ask([...docs, burnExecuted(), netDeltaDown()], { identity: IDENTITY });
     laws(deltaOnly, "B7");
     expect(s5(deltaOnly, "NET_EFFECT").reasonCodes).toEqual(["SUPPLY_REDUCTION_NOT_ESTABLISHED"]);
-    expect(s5(readingOnly, "NET_EFFECT").reasonCodes).toEqual(["SUPPLY_REDUCTION_NOT_ESTABLISHED"]);
-    expect(verdicts(deltaOnly)).toEqual(verdicts(readingOnly));
+    // A single reading observes no change at all: below the delta, never above it.
+    expect(s5(readingOnly, "NET_EFFECT").status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(VERDICT_RANK[verdicts(readingOnly).BURN_OR_SUPPLY_EFFECT]).toBeLessThanOrEqual(VERDICT_RANK[verdicts(deltaOnly).BURN_OR_SUPPLY_EFFECT]);
     expect(VERDICT_RANK[verdicts(deltaOnly).BURN_OR_SUPPLY_EFFECT]).toBeLessThanOrEqual(VERDICT_RANK[verdicts(burnAndDelta).BURN_OR_SUPPLY_EFFECT]);
     expect(deltaOnly.BURN_OR_SUPPLY_EFFECT.proof.confidenceScore).toBeLessThanOrEqual(burnAndDelta.BURN_OR_SUPPLY_EFFECT.proof.confidenceScore);
   });
@@ -945,12 +946,13 @@ describe("G. supply consistency — every combination, every supply question", (
     const m = ask([...docs, csSupply(), netSupply()], { identity: IDENTITY });
     laws(m, "G1");
     nonNegative(m, "G1");
-    expect(s5(m, "CURRENT_STATE").status).toBe("SUPPORTED");
+    // A level establishes neither: not "is it operating now?", not "did it change?".
+    expect(s5(m, "CURRENT_STATE").status).toBe("INSUFFICIENT_EVIDENCE");
     expect(s5(m, "CURRENT_STATE").currentState).toBeNull();
     expect(flow0(m).lifecycle).toBe("NOT_ESTABLISHED");
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
-    expect(s5(m, "NET_EFFECT").reasonCodes).toEqual(["SUPPLY_REDUCTION_NOT_ESTABLISHED"]);
-    expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("PARTIALLY_SUPPORTED");
+    expect(s5(m, "NET_EFFECT").status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("INSUFFICIENT_EVIDENCE");
   });
 
   it("G2. two comparable readings without a materialized delta are two levels: the supply question reads exactly as with one reading", () => {
@@ -958,8 +960,8 @@ describe("G. supply consistency — every combination, every supply question", (
     const two = ask([...base(), netSupply(), netSupply()], { identity: IDENTITY });
     laws(two, "G2");
     expect(verdicts(two)).toEqual(verdicts(one));
-    expect(s5(two, "NET_EFFECT").reasonCodes).toEqual(["SUPPLY_REDUCTION_NOT_ESTABLISHED"]);
-    expect(s5(two, "NET_EFFECT").supportingEvidenceIds.length).toBe(2);
+    expect(s5(two, "NET_EFFECT").status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(s5(two, "NET_EFFECT").supportingEvidenceIds.length).toBe(0);
   });
 
   it("G3. the 2x2x2 of {burn, decrease, attribution-evidence}: attribution is a capability nobody has built, so no cell reaches SUPPORTED; every cell's code is the NET_EFFECT reducer's own; the refutation cell is the only negative one", () => {
@@ -1075,7 +1077,7 @@ describe("H. historical vs current over one evidence world", () => {
   it("H7. a state-less chain reading at CURRENT_STATE beside a proven execution never makes the mechanism current: 'is it current?' stays INSUFFICIENT with the level established", () => {
     const m = ask([...docs(), burnExecuted(), csSupply()], { identity: IDENTITY });
     laws(m, "H7");
-    expect(s5(m, "CURRENT_STATE").status).toBe("SUPPORTED");
+    expect(s5(m, "CURRENT_STATE").status).toBe("INSUFFICIENT_EVIDENCE");
     expect(flow0(m).lifecycle).toBe("NOT_ESTABLISHED");
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
   });
@@ -1465,10 +1467,12 @@ describe("M. independent review — two questions ATLAS answers differently from
     const change = chain("NET_EFFECT", { onchainFactKind: "TOKEN_SUPPLY", fragment: '{"supply":"1000"}' });
     const m = ask([...docs(), level, change], { identity: IDENTITY });
     laws(m, "M5");
-    expect(s5(m, "CURRENT_STATE").supportingEvidenceIds).toEqual([level.id]);
-    expect(s5(m, "NET_EFFECT").supportingEvidenceIds).toEqual([change.id]);
+    // Decided (POINT-IN-TIME STATE != MECHANISM EXECUTION): the level
+    // establishes neither component, and neither question cites it.
+    expect(s5(m, "CURRENT_STATE").supportingEvidenceIds).toEqual([]);
+    expect(s5(m, "NET_EFFECT").supportingEvidenceIds).toEqual([]);
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
-    expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("PARTIALLY_SUPPORTED");
-    expect(m.BURN_OR_SUPPLY_EFFECT.proof.citedEvidenceIds).toEqual([change.id]);
+    expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("INSUFFICIENT_EVIDENCE");
+    expect(m.BURN_OR_SUPPLY_EFFECT.proof.citedEvidenceIds).not.toContain(change.id);
   });
 });

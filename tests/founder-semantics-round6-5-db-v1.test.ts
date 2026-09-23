@@ -447,7 +447,9 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
       ["OFFICIAL_DOCS", null, "LIVE"],
       ["ONCHAIN_VERIFIABLE", "TOKEN_SUPPLY", null],
     ]);
-    expect(up.s5.CURRENT_STATE!.supporting.sort()).toEqual(csUp.map((r) => r.id).sort());
+    // Both rows persisted; only the page establishes the state — a supply
+    // level establishes nothing about CURRENT_STATE.
+    expect(up.s5.CURRENT_STATE!.supporting).toEqual(csUp.filter((r) => r.onchainFactKind === null).map((r) => r.id));
     expect(up.s5.CURRENT_STATE!.status).toBe("SUPPORTED");
     expect(up.s5.CURRENT_STATE!.currentState).toBe("LIVE");
     expect(up.calls.fetchedUrls).toContain(docUrl(project, "CURRENT_STATE"));
@@ -461,11 +463,10 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
     // reason says why the chain read did not close the component.
     const attempts = await attemptsOf(up.jobId, "CURRENT_STATE");
     expect(attempts.map((a) => a.status)).toEqual(["SUCCEEDED"]);
-    expect(attempts[0].reason).toContain("ONCHAIN_EVIDENCE_WITHOUT_MECHANISM_STATE");
+    expect(attempts[0].reason).toContain("ONCHAIN_EVIDENCE_CANNOT_ESTABLISH_COMPONENT");
     expect(attempts[0].reason).toMatch(/extracted 1 evidence candidate/);
-    // The chain row is cited as support for the state beside the page,
-    // never instead of it.
-    expect(up.cited.filter((c) => c.component === "CURRENT_STATE").length).toBe(2);
+    // The page is what the state is cited on; the reading never stands in.
+    expect(up.cited.filter((c) => c.component === "CURRENT_STATE").map((c) => c.id)).toEqual(up.s5.CURRENT_STATE!.supporting);
   });
 
   it("B2. the same pair for the revenue intent — the live EVM shape Round 6 measured: the two CURRENT_STATE rows are two slots and the lineage forks there, yet the page rows after the fork attach to both branches, the supply reading attaches to its own, and PRT-2 is exactly the RPC-down world's (PARTIAL, never UNSATISFIED). Decisions 1 and 3 together", async () => {
@@ -473,8 +474,7 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
     const up = await research(project, { docs: canonDocs(project), intent: "PROTOCOL_REVENUE_TO_TOKEN" });
     const down = await research(project, { docs: canonDocs(project), intent: "PROTOCOL_REVENUE_TO_TOKEN", rpc: "down" });
     expect(up.s5.CURRENT_STATE!.status).toBe("SUPPORTED");
-    expect(up.s5.CURRENT_STATE!.supporting.length).toBe(2);
-    expect(up.flows).toBeGreaterThan(down.flows);
+    expect(up.s5.CURRENT_STATE!.supporting.length).toBe(1);
     // Round 6 measured DESTINATION / RECIPIENT / NET_EFFECT / DURABILITY_BASIS
     // all BRANCH_ATTRIBUTION_UNRESOLVED after this fork. Now: the page rows
     // name no branch and continue the trunk on both; the NET_EFFECT reading
@@ -484,14 +484,16 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
     for (const c of ["SOURCE_OF_VALUE", "FLOW_PATH", "MECHANISM_SPEC", "GOVERNANCE_BASIS", "DESTINATION", "RECIPIENT", "DURABILITY_BASIS"]) {
       expect(up.gaps, c).not.toContain(`BRANCH_ATTRIBUTION_UNRESOLVED@${c}`);
     }
-    expect(up.gaps).toContain("PARTIAL_COMPONENT@NET_EFFECT");
+    // The NET_EFFECT reading establishes nothing, so its page is read exactly
+    // as in the RPC-down world and the component reads the same there.
+    expect(up.gaps.filter((g) => g.endsWith("@NET_EFFECT"))).toEqual(down.gaps.filter((g) => g.endsWith("@NET_EFFECT")));
     expect(up.requirements).toEqual(down.requirements);
     expect(up.confidence).toBe(down.confidence);
     expect(up.requirements.find((r) => r.startsWith("PRT-2:"))).toBe("PRT-2:PARTIAL");
     expect(up.verdict).toBe(down.verdict);
     noStrongerThan(down, up, "revenue: down vs up");
     for (const c of ALL_COMPONENTS) {
-      if (c === "NET_EFFECT" || c === "CURRENT_STATE") continue;
+      if (c === "CURRENT_STATE") continue;
       expect([up.s5[c]!.status, up.s5[c]!.reasonCodes], c).toEqual([down.s5[c]!.status, down.s5[c]!.reasonCodes]);
     }
   });
@@ -503,14 +505,20 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
     const up = await research(project, { docs, intent: "MECHANISM_CURRENT_STATE" });
     expect(up.state).toBe("SUCCEEDED");
     const attempts = await attemptsOf(up.jobId, "CURRENT_STATE");
-    expect(attempts.map((a) => a.status)).toEqual(["SUCCEEDED"]);
+    // The first attempt closes on the rows it holds. The reading answers
+    // nothing about CURRENT_STATE, so the component is genuinely open and
+    // may take the job's one targeted recovery look — never more.
+    expect(attempts[0].status).toBe("SUCCEEDED");
+    expect(attempts.length).toBeLessThanOrEqual(2);
+    for (const a of attempts.slice(1)) expect(a.reason).toContain("TARGETED_RECOVERY_ATTEMPT");
     expect(attempts[0].reason).toMatch(/^ONCHAIN_EVIDENCE_ESTABLISHED; documentary pass SKIPPED: /);
-    expect(attempts[0].reason).toContain("ONCHAIN_EVIDENCE_WITHOUT_MECHANISM_STATE");
+    expect(attempts[0].reason).toContain("ONCHAIN_EVIDENCE_CANNOT_ESTABLISH_COMPONENT");
     expect(up.calls.fetchedUrls).toContain(docUrl(project, "CURRENT_STATE"));
     const cs = await evidenceOf(up.jobId, "CURRENT_STATE");
     expect(cs.map((r) => [r.sourceClass, r.onchainFactKind])).toEqual([["ONCHAIN_VERIFIABLE", "TOKEN_SUPPLY"]]);
-    expect(up.s5.CURRENT_STATE!.status).toBe("PARTIALLY_SUPPORTED");
-    expect(up.s5.CURRENT_STATE!.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
+    // The reading alone establishes nothing about "is it operating now?".
+    expect(up.s5.CURRENT_STATE!.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(up.s5.CURRENT_STATE!.supporting).toEqual([]);
     expect(up.s5.CURRENT_STATE!.currentState).toBeNull();
     expect(up.verdict).toBe("INSUFFICIENT_EVIDENCE");
     expect(up.requirements).toEqual(["MCS-1:UNSATISFIED"]);
@@ -523,13 +531,13 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
     const down = await research(project, { docs: canonDocs(project), intent: "PROTOCOL_REVENUE_TO_TOKEN", rpc: "down" });
     const ne = await attemptsOf(up.jobId, "NET_EFFECT");
     expect(ne.map((a) => a.status)).toEqual(["SUCCEEDED"]);
-    expect(ne[0].reason).toMatch(/^ONCHAIN_EVIDENCE_ESTABLISHED/);
-    expect(ne[0].reason).not.toContain("documentary pass");
-    expect(up.calls.fetchedUrls).not.toContain(docUrl(project, "NET_EFFECT"));
-    expect((await evidenceOf(up.jobId, "NET_EFFECT")).every((r) => r.sourceClass === "ONCHAIN_VERIFIABLE")).toBe(true);
-    // Bounds: the chain-up world reads the current-state page (Decision 1)
-    // and skips the net-effect page (the pre-emption kept); the chain-down
-    // world reads both. Never more opens with the chain working.
+    // A single supply reading cannot establish NET_EFFECT, so it no longer
+    // closes acquisition: the net-effect page is read as it is with the RPC
+    // down, and the attempt says why the documentary pass went on.
+    expect(ne[0].reason).toContain("ONCHAIN_EVIDENCE_CANNOT_ESTABLISH_COMPONENT");
+    expect(up.calls.fetchedUrls).toContain(docUrl(project, "NET_EFFECT"));
+    // Bounds: the chain-up world reads what the chain-down world reads.
+    // Never more opens with the chain working.
     expect(up.calls.fetch).toBeLessThanOrEqual(down.calls.fetch);
     expect(up.calls.search).toBeLessThanOrEqual(down.calls.search);
     expect(up.calls.extract).toBeLessThanOrEqual(down.calls.extract);

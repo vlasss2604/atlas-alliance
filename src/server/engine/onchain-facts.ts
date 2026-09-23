@@ -325,9 +325,11 @@ export function applicableFactKindsForComponent(component: string): readonly Onc
 const ESTABLISHES_NOTHING: readonly string[] = [];
 
 const ESTABLISHING_COMPONENTS_BY_KIND: Record<OnchainFactKind, readonly string[]> = {
-  // A level at a slot: the quantity that exists now. It is current state,
-  // and it is never a change — NET_EFFECT's own reducer owns that.
-  TOKEN_SUPPLY: ["CURRENT_STATE"],
+  // A level at one moment. POINT-IN-TIME STATE ≠ MECHANISM EXECUTION: how
+  // many tokens exist says nothing about whether any mechanism is operating
+  // now (CURRENT_STATE asks exactly that), and one reading is never a change
+  // (NET_EFFECT — see POINT_IN_TIME_SUPPLY_LEVEL_KINDS below).
+  TOKEN_SUPPLY: ESTABLISHES_NOTHING,
   // Existence and owner program, and nothing else. "It does not establish
   // who controls the account, what role it plays in any mechanism, or
   // whether it is a treasury, a vault, a burn address or an ordinary
@@ -411,6 +413,22 @@ export function onchainFactCanEstablishComponent(
 // consequences — and so its totality can be checked against ONCHAIN_FACT_KINDS.
 export function establishableComponentsForFactKind(kind: OnchainFactKind): readonly string[] {
   return ESTABLISHING_COMPONENTS_BY_KIND[kind];
+}
+
+// A LEVEL IS NOT A SUPPLY EFFECT. NET_EFFECT is exempt from the map above
+// because its B1/B2 reducer (net-supply-effect.ts) is the authority on what
+// its rows mean for supply, and B1 keeps a non-reducing row as support capped
+// by a reason code. One exception, by Founder decision: a single point-in-time
+// supply reading observes no change of any kind, so admitted as support it
+// made NET_EFFECT PARTIALLY_SUPPORTED on nothing. It establishes nothing
+// there; a comparable pair reaches NET_EFFECT only as TOTAL_SUPPLY_DELTA.
+export const POINT_IN_TIME_SUPPLY_LEVEL_KINDS: readonly OnchainFactKind[] = ["TOKEN_SUPPLY"];
+
+// Same null asymmetry as onchainFactCanEstablishComponent: documentary rows
+// carry no kind and are not restricted here.
+export function onchainFactCanEstablishSupplyEffect(kind: string | null | undefined): boolean {
+  if (kind === null || kind === undefined) return true;
+  return !(POINT_IN_TIME_SUPPLY_LEVEL_KINDS as readonly string[]).includes(kind);
 }
 
 // A deterministic fact plus the kind it was synthesized as. Separate from

@@ -271,11 +271,12 @@ describe("B. economic reading of chain facts at S5 (typed, never lexical)", () =
     }
   });
 
-  it("B4. POINT-IN-TIME SUPPLY != SUPPLY CHANGE: a TOKEN_SUPPLY reading at NET_EFFECT is capped, never SUPPORTED", () => {
+  it("B4. POINT-IN-TIME SUPPLY != SUPPLY CHANGE: a TOKEN_SUPPLY reading alone leaves NET_EFFECT INSUFFICIENT_EVIDENCE — not even partly supported", () => {
     const supply = row("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY" });
     const r = reconcile("NET_EFFECT", [supply]);
-    expect(r.status).toBe("PARTIALLY_SUPPORTED");
-    expect(r.reasonCodes[0]).toBe("SUPPLY_REDUCTION_NOT_ESTABLISHED");
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.supportingEvidenceIds).toEqual([]);
+    expect(exclusionOf(r, supply.id)).toBe("FACT_KIND_CANNOT_ESTABLISH");
   });
 
   it("B5. BURN != NET DEFLATION: a deterministic BURN alone leaves net change unestablished", () => {
@@ -405,11 +406,19 @@ describe("D. freshness and the temporal basis", () => {
   });
 
   it("D4. an on-chain observation's temporal basis is its fetch time — a fresh chain read establishes current state (capped as CLAIMED)", () => {
-    const read = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY", publishedAt: null, mechanismState: "LIVE" });
+    const read = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_ACCOUNT_BALANCE", publishedAt: null, mechanismState: "LIVE" });
     const r = reconcile("CURRENT_STATE", [read]);
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
     expect(r.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
     expect(r.temporalBasis?.basisField).toBe("fetched_at");
+  });
+
+  it("D5. POINT-IN-TIME STATE != MECHANISM EXECUTION: a fresh TOKEN_SUPPLY reading establishes nothing about CURRENT_STATE", () => {
+    const read = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY", publishedAt: null, mechanismState: "LIVE" });
+    const r = reconcile("CURRENT_STATE", [read]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.supportingEvidenceIds).toEqual([]);
+    expect(exclusionOf(r, read.id)).toBe("FACT_KIND_CANNOT_ESTABLISH");
   });
 });
 
@@ -543,13 +552,22 @@ describe("F. the full chain: nothing strengthens a Proof beyond its evidence", (
 
   it("F5. a PARTIALLY_SUPPORTED current state (CLAIMED chain read) cannot make MECHANISM_CURRENT_STATE fully SUPPORTED", () => {
     const pool = documentedMechanismPool({
-      CURRENT_STATE: { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY", officiality: "CLAIMED", publishedAt: null, mechanismState: "LIVE" },
+      CURRENT_STATE: { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_ACCOUNT_BALANCE", officiality: "CLAIMED", publishedAt: null, mechanismState: "LIVE" },
     });
     const { claim, byComponent, assembly } = runChain("MECHANISM_CURRENT_STATE", pool);
     expect(byComponent.get("CURRENT_STATE")!.status).toBe("PARTIALLY_SUPPORTED");
     expect(assembly.flows[0].lifecycle).toBe("CURRENT");
     expect(claim.status).not.toBe("SUPPORTED");
     expect(claim.requirementResults[0].status).toBe("PARTIAL");
+  });
+
+  it("F5b. a TOKEN_SUPPLY reading offered as current state leaves CURRENT_STATE unestablished through the whole chain", () => {
+    const pool = documentedMechanismPool({
+      CURRENT_STATE: { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY", officiality: "CLAIMED", publishedAt: null, mechanismState: "LIVE" },
+    });
+    const { claim, byComponent } = runChain("MECHANISM_CURRENT_STATE", pool);
+    expect(byComponent.get("CURRENT_STATE")!.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(claim.status).not.toBe("SUPPORTED");
   });
 
   it("F6. NOT_ESTABLISHED != CONTRADICTED: a missing source of value yields INSUFFICIENT_EVIDENCE with LOW confidence, never NOT_SUPPORTED", () => {

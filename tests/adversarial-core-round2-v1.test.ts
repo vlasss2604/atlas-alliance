@@ -396,7 +396,7 @@ describe("T. temporal boundaries", () => {
   });
 
   it("T6. a chain read fetched in the future relative to `now` is not a negative-age loophole for staleness — it is accepted as a basis but never dated before its fetch", () => {
-    const future = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_SUPPLY", mechanismState: "LIVE", publishedAt: null, fetchedAt: new Date(NOW.getTime() + DAY) });
+    const future = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "TOKEN_ACCOUNT_BALANCE", mechanismState: "LIVE", publishedAt: null, fetchedAt: new Date(NOW.getTime() + DAY) });
     const r = reconcile("CURRENT_STATE", [future]);
     expect(r.temporalBasis?.basisField).toBe("fetched_at");
     expect(r.status).toBe("PARTIALLY_SUPPORTED");

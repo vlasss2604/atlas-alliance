@@ -537,12 +537,11 @@ describe("P2. the same documents with a working chain — the supply and current
     const by = await askAll(project, canonDocs(project), "ENABLED");
     persistedLaws(by, "P2a");
     const s5 = by.BURN_OR_SUPPLY_EFFECT.s5;
-    expect(s5.NET_EFFECT?.status).toBe("PARTIALLY_SUPPORTED");
-    // The specific supply code first; a chain read is CLAIMED authority by
-    // design (D-074), so the general authority caveat follows it.
-    expect(s5.NET_EFFECT?.reasonCodes).toEqual(["SUPPLY_REDUCTION_NOT_ESTABLISHED", "INSUFFICIENT_AUTHORITY"]);
-    expect(by.BURN_OR_SUPPLY_EFFECT.verdict).toBe("PARTIALLY_SUPPORTED");
-    expect(by.BURN_OR_SUPPLY_EFFECT.confidence).toBeLessThanOrEqual(40);
+    // A single reading observes no change: 'did supply change?' reads exactly
+    // as in the documentary-only world (P1a) — never partly supported on it.
+    expect(s5.NET_EFFECT?.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(s5.NET_EFFECT?.supporting).toEqual([]);
+    expect(by.BURN_OR_SUPPLY_EFFECT.verdict).toBe("INSUFFICIENT_EVIDENCE");
     expect(s5.CURRENT_STATE?.status).toBe("SUPPORTED");
     expect(by.MECHANISM_CURRENT_STATE.verdict).toBe("SUPPORTED");
     // The current question rests on the official page's LIVE state; the

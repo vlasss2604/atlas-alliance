@@ -679,11 +679,10 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
     }
     // 4. the route-unreachable obligation spends nothing.
     expect(per.get("EXECUTION_EVIDENCE")).toBeUndefined();
-    // NET_EFFECT establishes deterministically, no documentary spend.
-    // CURRENT_STATE's TOKEN_SUPPLY reading carries no mechanism state, so
-    // since Round 6.5 (Founder decision 1) its documentary pass runs beside
-    // the reading, within the same cap.
-    expect(per.get("NET_EFFECT")).toBeUndefined();
+    // A TOKEN_SUPPLY reading establishes neither NET_EFFECT nor
+    // CURRENT_STATE (POINT-IN-TIME STATE != MECHANISM EXECUTION), so both
+    // run their documentary pass beside the reading, within the same cap.
+    expect(per.get("NET_EFFECT")?.proposer).toBe(1);
     expect(per.get("CURRENT_STATE")?.proposer).toBe(1);
     expect(searched("CURRENT_STATE")).toBeGreaterThan(0);
     expect(evm.calls.length).toBeGreaterThan(0);

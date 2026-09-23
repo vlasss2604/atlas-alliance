@@ -508,10 +508,21 @@ describe("F. THE EXISTENTIAL RULE IS NOT CHERRY-PICKING", () => {
       const common = sets.reduce((acc, s) => new Set([...acc].filter((x) => s.has(x))));
       expect(common.size, "VC SUPPORTED with no common flow").toBeGreaterThan(0);
     }
-    // And it is never stronger than its weakest conjunct.
-    expect(VERDICT_RANK[verdicts(m).VALUE_CAPTURE]).toBeLessThanOrEqual(
-      Math.min(VERDICT_RANK[verdicts(m).PROTOCOL_REVENUE_TO_TOKEN], VERDICT_RANK[verdicts(m).BURN_OR_SUPPLY_EFFECT]),
+    // And it is never stronger than its revenue conjunct, and never SUPPORTED
+    // while its net-effect atom is unmet. The single supply reading adds
+    // nothing: it establishes no net effect (POINT-IN-TIME SUPPLY != SUPPLY
+    // CHANGE), so the verdict is exactly the no-reading world's. (A compound
+    // with some atoms met and one unmet is PARTIALLY_SUPPORTED by the claim
+    // evaluator's own rule, which is why it is not compared with the
+    // single-atom supply question here.)
+    expect(VERDICT_RANK[verdicts(m).VALUE_CAPTURE]).toBeLessThanOrEqual(VERDICT_RANK[verdicts(m).PROTOCOL_REVENUE_TO_TOKEN]);
+    expect(req(m.VALUE_CAPTURE, "VC-3").status).not.toBe("SATISFIED");
+    expect(verdicts(m).VALUE_CAPTURE).not.toBe("SUPPORTED");
+    const withoutReading = ask(
+      [...sovProven(), flowPath(), specLive(), csLive(), destBurn(), destHolders(), rcptEntitled()],
+      { identity: IDENTITY },
     );
+    expect(verdicts(m).VALUE_CAPTURE).toBe(verdicts(withoutReading).VALUE_CAPTURE);
   });
 });
 
