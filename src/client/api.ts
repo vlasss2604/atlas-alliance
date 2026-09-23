@@ -165,6 +165,9 @@ export interface ResearchEvidenceView {
   valueSource: string | null;
   sourceClass: string | null;
   officiality: string | null;
+  // Typed chain fact kind; null on documentary rows. Optional: older
+  // payloads and fixtures do not carry it.
+  onchainFactKind?: string | null;
   observedAt: string | null;
   dataAsOf: string | null;
   publishedAt: string | null;

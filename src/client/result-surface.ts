@@ -322,6 +322,7 @@ export interface EvidenceCard {
 }
 
 export interface EvidenceLike extends EvidenceItemLike {
+  onchainFactKind?: string | null;
   publishedAt?: string | null;
   observedAt?: string | null;
   dataAsOf?: string | null;
@@ -484,6 +485,41 @@ function restsOnlyOnLevelReadings(
   return ids.length > 0 && ids.every((id) => LEVEL_READING_FACT_KINDS.has(quantityByEvidence.get(id)?.factKind ?? ""));
 }
 
+// BURN EVENT ≠ CLAIMED MECHANISM EXECUTION, ON EVERY RECORD. A burn shows
+// that tokens were destroyed, never that the researched mechanism did it;
+// the engine no longer lets a burn establish EXECUTION_EVIDENCE, and a
+// saved row resting only on burn events is shown as not established.
+const BURN_EVENT_ONLY_LIMIT =
+  "A burn of the project token was observed, but the available evidence does not establish that it was executed by the claimed mechanism.";
+
+function restsOnlyOnBurnEvents(
+  component: string,
+  supportingEvidenceIds: readonly string[] | undefined,
+  kindByEvidence: ReadonlyMap<string, string | null>,
+): boolean {
+  const ids = supportingEvidenceIds ?? [];
+  return component === "EXECUTION_EVIDENCE" && ids.length > 0 && ids.every((id) => kindByEvidence.get(id) === "BURN");
+}
+
+// THE SURFACE CEILING, ONE PLACE. What the engine no longer lets these
+// rows establish, read off a saved record: a lone level reading (any
+// component) or burn events only (EXECUTION_EVIDENCE). Used by the table
+// and by the non-verdict answer, which reads component statuses directly.
+type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | null;
+
+function surfaceCeilingOf(
+  component: string,
+  persistedStatus: string,
+  supportingEvidenceIds: readonly string[] | undefined,
+  quantityByEvidence: ReadonlyMap<string, QuantityLike>,
+  kindByEvidence: ReadonlyMap<string, string | null>,
+): SurfaceCeiling {
+  if (persistedStatus !== "SUPPORTED" && persistedStatus !== "PARTIALLY_SUPPORTED") return null;
+  if (restsOnlyOnLevelReadings(supportingEvidenceIds, quantityByEvidence)) return "LEVEL_ONLY";
+  if (restsOnlyOnBurnEvents(component, supportingEvidenceIds, kindByEvidence)) return "BURN_ONLY";
+  return null;
+}
+
 // A partly supported row whose persisted reason says its OWN claim is not
 // shown — no supply reduction, no net change, or measured intervals that
 // disagree. Something real may stand behind the row (a burn, say), but the
@@ -584,6 +620,7 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
     }
   }
   const quantityByEvidence = new Map(input.quantities.map((q) => [q.evidenceId, q]));
+  const kindByEvidence = new Map(input.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
 
   const ladder = deriveResultLadder(input.components, classesByComponent);
   const ladderRows = new Map([...ladder.mechanism, ...ladder.value].map((r) => [r.component, r]));
@@ -616,14 +653,16 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
     const persistedStatus = resultStatus(row.state);
     if (persistedStatus === null) continue;
     const persisted = input.components.find((c) => c.component === component);
-    const levelOnly =
-      (persistedStatus === "CONFIRMED" || persistedStatus === "PARTIAL") &&
-      restsOnlyOnLevelReadings(persisted?.supportingEvidenceIds, quantityByEvidence);
-    const status: ResultStatus = levelOnly ? "NOT_ESTABLISHED" : persistedStatus;
+    const ceiling = persistedStatus === "CONFIRMED" || persistedStatus === "PARTIAL"
+      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence)
+      : null;
+    const levelOnly = ceiling === "LEVEL_ONLY";
+    const burnOnly = ceiling === "BURN_ONLY";
+    const status: ResultStatus = ceiling !== null ? "NOT_ESTABLISHED" : persistedStatus;
     const evidence = (admittedByComponent[component] ?? []).map(({ e, relation }) =>
       evidenceCard(e, relation, { jobId: input.jobId, quantity: quantityByEvidence.get(e.id) ?? null, ticker: input.ticker, component }),
     );
-    const boundary = status === "NOT_ESTABLISHED" && !levelOnly
+    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly
       ? boundaryOf({ component, reasonCodes: persisted?.reasonCodes, coverage: row.coverage, boundary: input.boundary })
       : null;
     const claimNotShown =
@@ -644,7 +683,7 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       status,
       statusLabel: RESULT_STATUS_LABELS[status],
       tone: statusTone(status),
-      established: levelOnly ? levelOnlyText(evidence) : establishedText(row, evidence, boundary),
+      established: levelOnly ? levelOnlyText(evidence) : burnOnly ? BURN_EVENT_ONLY_LIMIT : establishedText(row, evidence, boundary),
       boundary,
       ...(claimNotShown ? { claimNotShown: true as const } : {}),
       source: strongest ? { kind: strongest.sourceClass, name: strongest.sourceName } : null,
@@ -953,6 +992,14 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
     coverage: c.coverage,
   }));
   const snapshotIds = new Set(detail.snapshotEvidenceIds);
+  const quantityByEvidence = new Map(detail.quantities.map((q) => [q.evidenceId, q]));
+  const kindByEvidence = new Map(detail.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
+  const answerStatusOf = (c: ResearchJobDetail["components"][number]): string => {
+    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence) !== null) return "INSUFFICIENT_EVIDENCE";
+    const claimNotShown =
+      c.status === "PARTIALLY_SUPPORTED" && (c.reasonCodes ?? []).some((x) => typeof x === "string" && CLAIM_NOT_SHOWN_CODES.has(x));
+    return claimNotShown ? "INSUFFICIENT_EVIDENCE" : c.status;
+  };
   const table = buildResearchTable({
     jobId: detail.job.id,
     ticker: detail.job.projectTicker,
@@ -973,7 +1020,11 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
       verdict: outcome.verdict,
       confidenceBand: detail.proof?.confidence.band ?? null,
       projectName: detail.job.projectName,
-      components: detail.components.map((c) => ({ component: c.component, status: c.status })),
+      // The non-verdict answer reads statuses directly, so it gets the same
+      // ceiling the table applies: never "partly confirmed" off a lone
+      // level reading, burn events only, or a claim its reason says is not
+      // shown.
+      components: detail.components.map((c) => ({ component: c.component, status: answerStatusOf(c) })),
       rows: table,
       question: detail.job.originalQuestion,
     }),

@@ -289,7 +289,10 @@ function laws(m: Matrix, label: string): void {
   // of S5, never excluded, never contradicting, never foreign; the
   // stronger question cites everything its prerequisite cites.
   const supporting = new Set(PRT.results.flatMap((r) => r.supportingEvidenceIds));
-  const excluded = new Set(PRT.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)));
+  // Exclusion is per component: a row excluded where it cannot establish (a
+  // burn at EXECUTION_EVIDENCE) may still support where it can (NET_EFFECT).
+  // A citation is illegitimate when the reducer rejected the row everywhere.
+  const excluded = new Set(PRT.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)).filter((id) => !supporting.has(id)));
   const contradicting = new Set(PRT.results.flatMap((r) => r.contradictingEvidenceIds));
   const foreign = new Set(PRT.pool.filter((r) => r.researchJobId !== JOB).map((r) => r.id));
   for (const i of INTENTS) {
@@ -528,8 +531,11 @@ describe("B. buyback / burn / net effect over one evidence world", () => {
     const burn = burnExecuted();
     const m = ask([...docs, burn]);
     laws(m, "B3");
-    expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("SUPPORTED");
-    expect(flow0(m).edges.every((e) => e.executed)).toBe(true);
+    // BURN EVENT != CLAIMED MECHANISM EXECUTION: the burn is not execution
+    // evidence for the mechanism, and no edge reads executed on it.
+    expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(s5(m, "EXECUTION_EVIDENCE").excludedEvidence.find((x) => x.evidenceId === burn.id)?.reason).toBe("FACT_KIND_CANNOT_ESTABLISH");
+    expect(flow0(m).edges.some((e) => e.executed)).toBe(false);
     expect(s5(m, "NET_EFFECT").status).toBe("PARTIALLY_SUPPORTED");
     expect(s5(m, "NET_EFFECT").reasonCodes).toEqual(["NET_SUPPLY_CHANGE_NOT_ESTABLISHED"]);
     expect(s5(m, "NET_EFFECT").supportingEvidenceIds).toEqual([burn.id]);
@@ -558,7 +564,9 @@ describe("B. buyback / burn / net effect over one evidence world", () => {
     expect(s5(m, "NET_EFFECT").reasonCodes).toEqual(["NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"]);
     expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("PARTIALLY_SUPPORTED");
     expect(m.BURN_OR_SUPPLY_EFFECT.proof.confidenceScore).toBeLessThanOrEqual(40);
-    expect(m.BURN_OR_SUPPLY_EFFECT.proof.confidenceBindingReasons).toContain("NET_SUPPLY_CHANGE_NOT_ATTRIBUTED");
+    // The burn is not execution evidence for the mechanism, so the missing
+    // execution binds the band (it is at or below the NET code's cap).
+    expect(m.BURN_OR_SUPPLY_EFFECT.proof.confidenceBindingReasons).toContain("MISSING_EXECUTION_EVIDENCE");
     expect(verdicts(m).VALUE_CAPTURE).toBe("PARTIALLY_SUPPORTED");
   });
 
@@ -573,7 +581,7 @@ describe("B. buyback / burn / net effect over one evidence world", () => {
     expect(s5(m, "NET_EFFECT").reasonCodes).toEqual(["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"]);
     expect(s5(m, "NET_EFFECT").supportingEvidenceIds).toEqual([burn.id]);
     expect(s5(m, "NET_EFFECT").contradictingEvidenceIds).toEqual([delta.id]);
-    expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("SUPPORTED");
+    expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
     expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("NOT_SUPPORTED");
     expect(verdicts(m).VALUE_CAPTURE).toBe("NOT_SUPPORTED");
     expect(m.BURN_OR_SUPPLY_EFFECT.proof.citedEvidenceIds).toEqual([burn.id]);
@@ -666,7 +674,8 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
   });
 
   it("C3. the complete documentary + mechanical world: revenue -> token SUPPORTED, holders SUPPORTED, current SUPPORTED, and the compound value-capture claim is still PARTIAL because net effect is never established — the strongest question is exactly its conjuncts, never more", () => {
-    const m = ask([...sovProven(), flowPath(), specLive(), govApproved(), burnExecuted(), csLive(), destHolders(), rcptHolders(), netSupply(), durability()], { identity: IDENTITY });
+    // Execution from an official report; the burn is what NET_EFFECT reads.
+    const m = ask([...sovProven(), flowPath(), specLive(), govApproved(), reportExecuted(5), burnExecuted(), csLive(), destHolders(), rcptHolders(), netSupply(), durability()], { identity: IDENTITY });
     laws(m, "C3");
     expect(verdicts(m)).toEqual({
       PROTOCOL_REVENUE_TO_TOKEN: "SUPPORTED",
@@ -792,7 +801,7 @@ describe("D. governance lifecycle over one evidence world", () => {
 
   it("D4. executing (fresh LIVE + a burn): the execution edge reads executed, NET_EFFECT reads the burn, and the current-state question is exactly as in D3 — execution strengthens the supply questions only", () => {
     const activated = ask([...withState(holderDocs(), "LIVE"), govApproved(), csLive()]);
-    const executing = ask([...withState(holderDocs(), "LIVE"), govApproved(), csLive(), burnExecuted()]);
+    const executing = ask([...withState(holderDocs(), "LIVE"), govApproved(), csLive(), reportExecuted(5), burnExecuted()]);
     laws(executing, "D4");
     expect(flow0(executing).edges.every((e) => e.executed)).toBe(true);
     onlyTheseChange(activated, executing, ["BURN_OR_SUPPLY_EFFECT", "VALUE_CAPTURE"], "D4");
@@ -850,8 +859,10 @@ describe("E. documentation vs execution over one evidence world", () => {
     const before = ask(docs, { identity: IDENTITY });
     const after = ask([...docs, burnExecuted()], { identity: IDENTITY });
     laws(after, "E3");
-    expect(s5(after, "EXECUTION_EVIDENCE").status).toBe("SUPPORTED");
-    expect(flow0(after).edges.every((e) => e.executed)).toBe(true);
+    // BURN EVENT != CLAIMED MECHANISM EXECUTION: the burn reaches NET_EFFECT
+    // only; execution stays unestablished and no edge reads executed.
+    expect(s5(after, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(flow0(after).edges.some((e) => e.executed)).toBe(false);
     expect(verdicts(after).BURN_OR_SUPPLY_EFFECT).toBe("PARTIALLY_SUPPORTED");
     onlyTheseChange(before, after, ["BURN_OR_SUPPLY_EFFECT", "VALUE_CAPTURE"], "E3");
     expect(verdicts(after).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
@@ -1005,7 +1016,7 @@ describe("G. supply consistency — every combination, every supply question", (
     expect(verdicts(burnOnly).BURN_OR_SUPPLY_EFFECT).toBe(verdicts(measured).BURN_OR_SUPPLY_EFFECT);
     expect(burnOnly.BURN_OR_SUPPLY_EFFECT.proof.confidenceScore).toBe(measured.BURN_OR_SUPPLY_EFFECT.proof.confidenceScore);
     expect(s5(burnOnly, "NET_EFFECT").status).not.toBe("CONTRADICTED");
-    expect(s5(notReduced, "EXECUTION_EVIDENCE").status).toBe("SUPPORTED");
+    expect(s5(notReduced, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
     expect(notReduced.BURN_OR_SUPPLY_EFFECT.proof.citedEvidenceIds.length).toBe(1);
     expect(verdicts(notReduced).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
   });
@@ -1016,7 +1027,7 @@ describe("H. historical vs current over one evidence world", () => {
   const docs = () => [...sovProven(), flowPath(), specLive(), govApproved(), destHolders(), rcptHolders(), durability()];
 
   it("H1. historical execution proven, current execution not: 'has it ever executed?' is established (EXECUTION_EVIDENCE, executed edges), 'is it active now / executing now?' is INSUFFICIENT — never SUPPORTED, never refuted", () => {
-    const m = ask([...docs(), burnExecuted()], { identity: IDENTITY });
+    const m = ask([...docs(), reportExecuted()], { identity: IDENTITY });
     laws(m, "H1");
     nonNegative(m, "H1");
     expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("SUPPORTED");
@@ -1045,8 +1056,8 @@ describe("H. historical vs current over one evidence world", () => {
   });
 
   it("H4. executed then paused (fresh official PAUSED): the lifecycle is HISTORICAL — 'has it executed?' yes, 'is it current?' positively refuted (NOT_SUPPORTED, TEMPORAL_SCOPE_MISMATCH, citing both the state and the execution) — and the structural questions read exactly as with the mechanism live", () => {
-    const live = ask([...docs(), burnExecuted(), csLive()], { identity: IDENTITY });
-    const paused = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
+    const live = ask([...docs(), reportExecuted(), csLive()], { identity: IDENTITY });
+    const paused = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
     laws(paused, "H4");
     expect(flow0(paused).lifecycle).toBe("HISTORICAL");
     expect(verdicts(paused).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
@@ -1063,15 +1074,21 @@ describe("H. historical vs current over one evidence world", () => {
     laws(report, "H5");
     expect(flow0(report).lifecycle).toBe("HISTORICAL");
     expect(verdicts(report).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
-    expect(verdicts(report).MECHANISM_CURRENT_STATE).toBe(verdicts(burn).MECHANISM_CURRENT_STATE);
+    // A burn is not the mechanism executing, so beside PAUSED it cannot
+    // make the picture historical: 'is it current?' stays unanswered.
+    expect(flow0(burn).lifecycle).toBe("NOT_ESTABLISHED");
+    expect(verdicts(burn).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
   });
 
   it("H6. a chain BURN read today beside a PAUSED page published yesterday still reads HISTORICAL: a chain row's temporal basis is its READ time, not the event's, so nothing licenses 'the burn is newer than the pause' — observed, not a defect", () => {
+    // Decided since (BURN EVENT != CLAIMED MECHANISM EXECUTION): a burn read
+    // today establishes no EXECUTION_EVIDENCE at all, so it can neither date
+    // the execution nor make the picture historical.
     const m = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
-    expect(s5(m, "EXECUTION_EVIDENCE").temporalBasis?.basisField).toBe("fetched_at");
-    expect(new Date(s5(m, "EXECUTION_EVIDENCE").temporalBasis!.at).getTime()).toBeGreaterThan(new Date(s5(m, "CURRENT_STATE").temporalBasis!.at).getTime());
-    expect(flow0(m).lifecycle).toBe("HISTORICAL");
-    expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
+    expect(s5(m, "EXECUTION_EVIDENCE").status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(s5(m, "EXECUTION_EVIDENCE").temporalBasis).toBeNull();
+    expect(flow0(m).lifecycle).toBe("NOT_ESTABLISHED");
+    expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
   });
 
   it("H7. a state-less chain reading at CURRENT_STATE beside a proven execution never makes the mechanism current: 'is it current?' stays INSUFFICIENT with the level established", () => {
@@ -1089,7 +1106,7 @@ describe("I. positive / negative boundaries — NOT_ESTABLISHED != CONTRADICTED"
 
   it("I1. 'is it active?' vs 'is it inactive?': the second is not a supported question form; the record that would answer it (a fresh official PAUSED) makes 'is it active?' INSUFFICIENT without an execution record (H6) and NOT_SUPPORTED with one — and in neither case is anything else refuted", () => {
     const noExec = ask([...docs(), csPaused()], { identity: IDENTITY });
-    const withExec = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
+    const withExec = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
     laws(noExec, "I1 no exec");
     laws(withExec, "I1 exec");
     expect(s5(noExec, "CURRENT_STATE").currentState).toBe("PAUSED");
@@ -1117,14 +1134,14 @@ describe("I. positive / negative boundaries — NOT_ESTABLISHED != CONTRADICTED"
   });
 
   it("I3. a lone CONTRADICTS-labelled row establishes nothing: 'the mechanism is paused' labelled against the claim is excluded as non-supporting and the world reads as if the row were absent — a counter-row without a counterpart is absence, not refutation", () => {
-    const absent = ask([...docs(), burnExecuted()], { identity: IDENTITY });
-    const counter = ask([...docs(), burnExecuted(), row("CURRENT_STATE", { relationship: "CONTRADICTS", fragment: "the allocation is paused", mechanismState: "PAUSED" })], { identity: IDENTITY });
+    const absent = ask([...docs(), reportExecuted()], { identity: IDENTITY });
+    const counter = ask([...docs(), reportExecuted(), row("CURRENT_STATE", { relationship: "CONTRADICTS", fragment: "the allocation is paused", mechanismState: "PAUSED" })], { identity: IDENTITY });
     laws(counter, "I3");
     expect(s5(counter, "CURRENT_STATE").reasonCodes).toEqual(["MISSING_CURRENT_STATE"]);
     expect(verdicts(counter)).toEqual(verdicts(absent));
     // The same passage labelled SUPPORTS (the state IS paused) is the
     // positive finding I1 pins: the label is not the fact, the state is.
-    const supports = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
+    const supports = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
     expect(verdicts(supports).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
   });
 
@@ -1234,7 +1251,7 @@ describe("J. Proof consistency across related questions", () => {
 
 // ====================================================================
 describe("K. confidence consistency across related questions", () => {
-  const full = () => [...sovProven(), flowPath(), specLive(), govApproved(), burnExecuted(), csLive(), destHolders(), rcptHolders(), netSupply(), durability()];
+  const full = () => [...sovProven(), flowPath(), specLive(), govApproved(), reportExecuted(5), burnExecuted(), csLive(), destHolders(), rcptHolders(), netSupply(), durability()];
 
   it("K1. the band is a job-wide function of persisted component state plus the verdict ceiling and gap flags: over one world, two questions with the same verdict and the same gap flags carry the same band and the same binding reasons", () => {
     const pools = [full(), full().filter((r) => r.component !== "CURRENT_STATE"), [...full().filter((r) => r.component !== "RECIPIENT"), rcptTreasury()], buybackDocs()];
@@ -1405,7 +1422,7 @@ describe("M. independent review — two questions ATLAS answers differently from
   const docs = () => [...sovProven(), flowPath(), specLive(), govApproved(), destHolders(), rcptHolders(), durability()];
 
   it("M1. structural intents carry no lifecycle atom: a mechanism positively refuted as current (HISTORICAL) still reads 'revenue reaches the token' SUPPORTED and 'holders receive value' SUPPORTED — consistent with Pattern v1's requirement sets, pinned so a lifecycle dependency is a named decision", () => {
-    const m = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
+    const m = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
     expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
     // Round 7.5 (M3) bounds the holder question for its own reason; the

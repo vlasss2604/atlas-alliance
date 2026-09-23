@@ -281,7 +281,9 @@ describe("N. attacks that held — kept as regressions", () => {
     expect(live.claim.status).toBe("SUPPORTED");
     expect(live.proof.citedEvidenceIds).toEqual([current.id]);
 
-    const executed = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" });
+    // Execution is an official report of the programme running; a bare burn
+    // is not the mechanism executing (BURN EVENT != CLAIMED MECHANISM EXECUTION).
+    const executed = row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the programme executed its distributions on schedule", mechanismState: "LIVE" });
     const deprecated = row("CURRENT_STATE", { mechanismState: "DEPRECATED", fragment: "the programme was deprecated" });
     const historical = runChain("MECHANISM_CURRENT_STATE", [executed, deprecated]);
     expect(historical.claim.status).toBe("NOT_SUPPORTED");
@@ -289,14 +291,24 @@ describe("N. attacks that held — kept as regressions", () => {
   });
 
   it("N3. a lifecycle that is HISTORICAL (executed, now deprecated) positively refutes 'current' — and rests on CURRENT_STATE", () => {
+    const deprecated = row("CURRENT_STATE", { mechanismState: "DEPRECATED", fragment: "the buyback programme was deprecated" });
     const pool = [
-      row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" }),
-      row("CURRENT_STATE", { mechanismState: "DEPRECATED", fragment: "the buyback programme was deprecated" }),
+      row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback programme executed its purchases", mechanismState: "LIVE" }),
+      deprecated,
     ];
     const { assembly, claim } = runChain("MECHANISM_CURRENT_STATE", pool);
     expect(assembly.flows[0].lifecycle).toBe("HISTORICAL");
     expect(claim.status).toBe("NOT_SUPPORTED");
     expect(claim.requirementResults[0].reasonCodes).toEqual(["TEMPORAL_SCOPE_MISMATCH"]);
+    // A bare burn is not the programme executing: beside the same
+    // deprecation it makes nothing historical, and 'is it current?' stays
+    // unanswered rather than refuted.
+    const burnOnly = runChain("MECHANISM_CURRENT_STATE", [
+      row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" }),
+      row("CURRENT_STATE", { mechanismState: "DEPRECATED", fragment: "the buyback programme was deprecated" }),
+    ]);
+    expect(burnOnly.assembly.flows[0].lifecycle).toBe("NOT_ESTABLISHED");
+    expect(burnOnly.claim.status).toBe("INSUFFICIENT_EVIDENCE");
   });
 
   it("N4. a partial basis never softens a positive incompatibility: an INDIRECT-only treasury recipient still CONTRADICTS a passive-holder claim", () => {

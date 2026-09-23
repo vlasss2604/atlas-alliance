@@ -192,7 +192,10 @@ function noWeakerThan(t: ChainResult, c: ChainResult, label = ""): void {
 }
 function provenanceHolds(c: ChainResult): void {
   const supporting = new Set(c.results.flatMap((r) => r.supportingEvidenceIds));
-  const excluded = new Set(c.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)));
+  // Exclusion is per component: a row excluded where it cannot establish (a
+  // burn at EXECUTION_EVIDENCE) may still support where it can (NET_EFFECT).
+  // A citation is illegitimate when the reducer rejected the row everywhere.
+  const excluded = new Set(c.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)).filter((id) => !supporting.has(id)));
   const contradicting = new Set(c.results.flatMap((r) => r.contradictingEvidenceIds));
   for (const id of c.proof.citedEvidenceIds) {
     expect(supporting.has(id), `cited ${id} not supporting`).toBe(true);
@@ -210,7 +213,7 @@ function world(): EvidenceRow[] {
     row("FLOW_PATH", { fragment: "fee revenue is routed from the fee collector to the distributor contract" }),
     row("MECHANISM_SPEC", { fragment: "50% of protocol fees are distributed to token holders weekly", mechanismState: "LIVE" }),
     confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", fragment: "the proposal to distribute fees passed", mechanismState: "APPROVED" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
     row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),

@@ -246,7 +246,10 @@ function nonNegative(c: ChainResult): void {
 // job is anywhere in the admitted picture.
 function provenanceHolds(c: ChainResult): void {
   const supporting = new Set(c.results.flatMap((r) => r.supportingEvidenceIds));
-  const excluded = new Set(c.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)));
+  // Exclusion is per component: a row excluded where it cannot establish (a
+  // burn at EXECUTION_EVIDENCE) may still support where it can (NET_EFFECT).
+  // A citation is illegitimate when the reducer rejected the row everywhere.
+  const excluded = new Set(c.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)).filter((id) => !supporting.has(id)));
   const contradicting = new Set(c.results.flatMap((r) => r.contradictingEvidenceIds));
   for (const id of c.proof.citedEvidenceIds) {
     expect(supporting.has(id), `cited ${id} not supporting`).toBe(true);
@@ -281,7 +284,7 @@ function world(): EvidenceRow[] {
     row("FLOW_PATH", { fragment: "fee revenue is routed from the fee collector to the distributor contract" }),
     row("MECHANISM_SPEC", { fragment: "50% of protocol fees are distributed to token holders weekly", mechanismState: "LIVE" }),
     confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", fragment: "the proposal to distribute fees passed", mechanismState: "APPROVED" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
     row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
@@ -378,7 +381,7 @@ describe("F1. adding weak, foreign, inadmissible or irrelevant evidence must not
       { label: "second official SOURCE_OF_VALUE page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { fragment: "protocol fees paid by users generate the revenue", sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "second official FLOW_PATH page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("FLOW_PATH", { sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "weak CLAIMED governance row for SOURCE_OF_VALUE", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", publishedAt: older(2) })], downstream: "DESTINATION" },
-      { label: "four more distinct burns at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null })), downstream: "NET_EFFECT" },
+      { label: "four more distinct official execution reports at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" })), downstream: "NET_EFFECT" },
     ];
     for (const k of cases) {
       const control = runChain(k.intent, base);
@@ -447,10 +450,10 @@ describe("F2. duplication must not create confidence", () => {
   it("F2c. on-chain duplicates: five identical burn observations (same unit) reduce to one; five DISTINCT burns establish exactly what one does — no stronger execution, no stronger net effect", () => {
     const base = world();
     const control = runChain("BURN_OR_SUPPLY_EFFECT", base);
-    const sameUnit = Array.from({ length: 4 }, (_, i) => confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null, extractionUnitKey: control.pool.find((r) => r.component === "EXECUTION_EVIDENCE")!.extractionUnitKey, contentHash: `b-${i}` }));
+    const sameUnit = Array.from({ length: 4 }, (_, i) => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE", extractionUnitKey: control.pool.find((r) => r.component === "EXECUTION_EVIDENCE")!.extractionUnitKey, contentHash: `b-${i}` }));
     const t1 = runChain("BURN_OR_SUPPLY_EFFECT", [...base, ...sameUnit]);
     expect(shape(t1)).toEqual(shape(control));
-    const distinct = Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }));
+    const distinct = Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }));
     const distinctNet = Array.from({ length: 4 }, () => confirmed("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null }));
     // Distinct NET_EFFECT burns (the terminal slot): the same conclusion.
     const t2 = runChain("BURN_OR_SUPPLY_EFFECT", [...base, ...distinctNet]);
@@ -550,7 +553,10 @@ describe("F3. removing evidence must not strengthen", () => {
     const control = runChain("BURN_OR_SUPPLY_EFFECT", base);
     const unbound = base.map((r) => (r.sourceClass === "ONCHAIN_VERIFIABLE" ? { ...r, entityBinding: "UNVERIFIED" as const } : r));
     const t = runChain("BURN_OR_SUPPLY_EFFECT", unbound);
-    expect(t.byComponent.get("EXECUTION_EVIDENCE")!.status).toBe("INSUFFICIENT_EVIDENCE");
+    // Execution rests on an official report here (a burn is not execution
+    // evidence), so unbinding the chain rows leaves it exactly as it was;
+    // the unbound burn establishes nothing at NET_EFFECT.
+    expect(t.byComponent.get("EXECUTION_EVIDENCE")!.status).toBe(control.byComponent.get("EXECUTION_EVIDENCE")!.status);
     expect(t.byComponent.get("NET_EFFECT")!.status).toBe("INSUFFICIENT_EVIDENCE");
     noStrongerThan(t, control);
     nonNegative(t);
@@ -894,7 +900,7 @@ describe("F12. confidence invariants", () => {
   it("F12b. DECIDED (Round 6.5, Founder decision 2) — adding ONLY inadmissible rows (social posts) to components that had nothing leaves the band exactly where bare absence leaves it: 20 -> 20 on a SUPPORTED verdict, the exclusion recorded, nothing new cited. The full pin is founder-semantics-round6-5-v1 (C, D, E)", () => {
     const supported = [
       row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
-      confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
       row("CURRENT_STATE", { mechanismState: "LIVE" }),
     ];
     const empty = runChain("PASSIVE_HOLDER_OUTCOME", supported);
@@ -930,7 +936,7 @@ describe("F12. confidence invariants", () => {
     const soc = (c: string) => row(c, { sourceClass: "SOCIAL", officiality: "CLAIMED" });
     const pool = [
       row("MECHANISM_SPEC", { mechanismState: "LIVE" }),
-      confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
       row("CURRENT_STATE", { mechanismState: "LIVE", publishedAt: older(2) }),
       confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", mechanismState: "APPROVED" }),
       ...["SOURCE_OF_VALUE", "FLOW_PATH", "DESTINATION", "RECIPIENT", "NET_EFFECT", "DURABILITY_BASIS"].map(soc),

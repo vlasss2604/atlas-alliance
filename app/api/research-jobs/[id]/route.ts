@@ -183,6 +183,9 @@ export async function GET(
         valueSource: evidence.valueSource,
         sourceClass: evidence.sourceClass,
         officiality: evidence.officiality,
+        // The typed chain kind (null on documentary rows), so the surface can
+        // hold a saved row to what its kind can establish today.
+        onchainFactKind: evidence.onchainFactKind,
         observedAt: evidence.observedAt,
         dataAsOf: evidence.dataAsOf,
         publishedAt: evidence.publishedAt,

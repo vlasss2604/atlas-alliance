@@ -367,13 +367,17 @@ const ESTABLISHING_COMPONENTS_BY_KIND: Record<OnchainFactKind, readonly string[]
   // exactly the row that carries it. Refusing it here would leave
   // MECHANICAL_PROVENANCE_NOT_ESTABLISHED permanently unclearable.
   TOKEN_TRANSFER: ["SOURCE_OF_VALUE", "FLOW_PATH"],
-  // The one observation that destroys tokens: it establishes that the burn
-  // executed. NET_EFFECT is deliberately NOT listed — that component is
-  // exempt from this gate and its B1/B2 reducer is the sole authority on
-  // what a burn means for supply. COUPLING, STATED: if that exemption is
-  // ever removed, BURN and TOTAL_SUPPLY_DELTA must be granted NET_EFFECT
-  // here first, or `evaluateNetSupplyEffect` loses the rows it reads.
-  BURN: ["EXECUTION_EVIDENCE"],
+  // The one observation that destroys tokens. BURN EVENT ≠ CLAIMED MECHANISM
+  // EXECUTION: it shows that a burn of the mint occurred, never that the
+  // researched mechanism performed it — nothing here ties the burned
+  // account or the transaction to the mechanism beyond sharing one — so it
+  // establishes no EXECUTION_EVIDENCE. What it means for supply is
+  // NET_EFFECT's: that component is exempt from this gate and its B1/B2
+  // reducer reads the burn directly (applicability map above). COUPLING,
+  // STATED: if that exemption is ever removed, BURN and TOTAL_SUPPLY_DELTA
+  // must be granted NET_EFFECT here first, or `evaluateNetSupplyEffect`
+  // loses the rows it reads.
+  BURN: ESTABLISHES_NOTHING,
   // Two movements in one transaction. "Two unrelated transfers batched into
   // one transaction produce exactly this picture."
   RECIPROCAL_ASSET_FLOW: ESTABLISHES_NOTHING,
@@ -712,8 +716,9 @@ export function synthesizeOnchainFacts(
             JSON.stringify({ signature: r.signature, slot: r.slot, burn: r.burns[index] }),
             isAnchorMint ? ONCHAIN_DOES_NOT_PROVE.BURN : FOREIGN_MINT_BURN_DOES_NOT_PROVE,
             isAnchorMint
-              ? // A confirmed on-chain execution is the mechanism running, which
-                // is what EXECUTION_EVIDENCE's live-state gate asks for.
+              ? // The burn instruction executed (LIVE). This is the burn's own
+                // state, not the researched mechanism's: the kind establishes
+                // no EXECUTION_EVIDENCE (ESTABLISHING_COMPONENTS_BY_KIND).
                 { mechanismState: "LIVE" }
               : // CONTEXT is inert in reconciliation: it establishes nothing,
                 // so it can never reach §B1's establishing set however the

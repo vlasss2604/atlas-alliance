@@ -78,6 +78,13 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Transfer ≠ buyback.** Transfer ≠ burn.
 - **Buyback ≠ burn.**
 - **Burn claim ≠ actual on-chain Burn/BurnChecked.**
+- **Burn event ≠ claimed mechanism execution.** A deterministic BURN shows
+  that tokens of the mint were destroyed; it establishes no
+  EXECUTION_EVIDENCE for the researched mechanism, because nothing ties the
+  burned account or the transaction to the mechanism beyond sharing one. It
+  still carries NET_EFFECT under B1/B2. A row whose kind cannot establish a
+  component supersedes nothing there. Saved rows resting on burns only are
+  shown as not established.
 - **Point-in-time state ≠ mechanism execution.** One total-supply reading
   establishes neither CURRENT_STATE nor NET_EFFECT: it says nothing about
   whether a mechanism operates now and observes no change. A change reaches

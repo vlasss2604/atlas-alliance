@@ -406,11 +406,32 @@ describe("D. freshness and the temporal basis", () => {
   });
 
   it("D4. an on-chain observation's temporal basis is its fetch time — a fresh chain read establishes what it can (capped as CLAIMED)", () => {
-    const read = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null, mechanismState: "LIVE" });
+    // An untyped chain-class row: the §6.2 basis rule is keyed on the class.
+    const read = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", officiality: "CLAIMED", publishedAt: null, mechanismState: "LIVE" });
     const r = reconcile("EXECUTION_EVIDENCE", [read]);
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
     expect(r.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
     expect(r.temporalBasis?.basisField).toBe("fetched_at");
+  });
+
+  it("D6. BURN EVENT != CLAIMED MECHANISM EXECUTION: a burn alone establishes no EXECUTION_EVIDENCE, yet still carries NET_EFFECT at the approved B5 rung", () => {
+    const burn = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null, mechanismState: "LIVE" });
+    const execution = reconcile("EXECUTION_EVIDENCE", [burn]);
+    expect(execution.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(exclusionOf(execution, burn.id)).toBe("FACT_KIND_CANNOT_ESTABLISH");
+    const net = reconcile("NET_EFFECT", [row("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN" })]);
+    expect(net.status).toBe("PARTIALLY_SUPPORTED");
+    expect(net.reasonCodes[0]).toBe("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
+  });
+
+  it("D7. a row whose kind cannot establish the component supersedes nothing: a newer burn never pushes aside an older official execution report", () => {
+    const report = row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback executed on schedule", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 10 * DAY) });
+    const burn = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null, mechanismState: "LIVE" });
+    const r = reconcile("EXECUTION_EVIDENCE", [report, burn]);
+    expect(r.supportingEvidenceIds).toEqual([report.id]);
+    expect(exclusionOf(r, report.id)).toBeNull();
+    expect(exclusionOf(r, burn.id)).toBe("FACT_KIND_CANNOT_ESTABLISH");
+    expect(r.status).toBe("SUPPORTED");
   });
 
   it("D5. POINT-IN-TIME STATE / BALANCE != MECHANISM EXECUTION: a fresh supply reading, balance or owner's accounts establishes nothing about CURRENT_STATE", () => {
@@ -531,11 +552,11 @@ describe("F. the full chain: nothing strengthens a Proof beyond its evidence", (
   });
 
   it("F3. a burn-only NET_EFFECT keeps BURN_OR_SUPPLY_EFFECT partial and confidence LIMITED", () => {
-    // Execution is established by the same deterministic burn, so no
-    // bare-absence code masks the supply cap under test.
+    // Execution is established by an official report (a burn is not the
+    // mechanism executing), so no bare-absence code masks the supply cap.
     const pool = [
       ...documentedMechanismPool(),
-      row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" }),
+      row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback-and-burn executed on schedule", mechanismState: "LIVE" }),
       row("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN" }),
     ];
     const { claim, proof } = runChain("BURN_OR_SUPPLY_EFFECT", pool);

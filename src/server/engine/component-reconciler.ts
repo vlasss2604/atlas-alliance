@@ -744,8 +744,16 @@ function evaluateCoreEligibility(
 // fully qualifies supersedes regardless of A's own capability (scenario
 // X); a B that doesn't qualify supersedes nothing, ever (scenario W,
 // and P1a-d in the deep audit).
-function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict): boolean {
-  return v.eligibleCore && row.relationship === "SUPPORTS" && row.directness === "DIRECT";
+// Topical fitness belongs to the threshold too: a row whose KIND cannot
+// establish this component (a burn at EXECUTION_EVIDENCE) is never "at
+// least as capable" as a row that can, so it supersedes nothing.
+function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict, component: string): boolean {
+  return (
+    v.eligibleCore &&
+    row.relationship === "SUPPORTS" &&
+    row.directness === "DIRECT" &&
+    onchainFactMayEstablish(row.onchainFactKind, component)
+  );
 }
 
 // The three reasons an S4 attempt may close on that the reducer must not
@@ -886,7 +894,7 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       if (a.id === b.id) continue;
       const vb = verdictByRowId.get(b.id)!;
       if (vb.temporalBasis!.at.getTime() <= va.temporalBasis!.at.getTime()) continue; // b must be strictly newer
-      if (!isEstablishmentEligible(b, vb)) continue;
+      if (!isEstablishmentEligible(b, vb, item.component)) continue;
       supersededIds.add(a.id);
       break;
     }

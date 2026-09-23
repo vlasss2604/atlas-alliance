@@ -190,7 +190,7 @@ function messyPool(): EvidenceRow[] {
     row("MECHANISM_SPEC", { extractionUnitKey: "dup-unit", mechanismState: "LIVE" }),
     row("MECHANISM_SPEC", { extractionUnitKey: "dup-unit", mechanismState: "LIVE" }),
     row("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", mechanismState: "APPROVED" }),
-    row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+    row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 2 * DAY) }),
     row("CURRENT_STATE", { mechanismState: "PAUSED", publishedAt: new Date(NOW.getTime() - 1 * DAY) }),
     row("CURRENT_STATE", { relationship: "CONTRADICTS", mechanismState: "REMOVED", publishedAt: new Date(NOW.getTime() - 10 * DAY) }),
@@ -327,8 +327,9 @@ describe("M. mixed pools — weak rows beside strong rows", () => {
   });
 
   it("M6. an unbound chain read beside a bound one: only the bound row establishes, and the foreign one is not silently merged", () => {
-    const bound = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE" });
-    const foreign = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", entityBinding: "UNVERIFIED" });
+    // Untyped chain-class rows: the binding rule is keyed on the class.
+    const bound = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE" });
+    const foreign = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", entityBinding: "UNVERIFIED" });
     const r = reconcile("EXECUTION_EVIDENCE", [foreign, bound]);
     expect(r.supportingEvidenceIds).toEqual([bound.id]);
     expect(exclusionOf(r, foreign.id)).toBe("ENTITY_NOT_CONFIRMED");
@@ -396,7 +397,7 @@ describe("T. temporal boundaries", () => {
   });
 
   it("T6. a chain read fetched in the future relative to `now` is not a negative-age loophole for staleness — it is accepted as a basis but never dated before its fetch", () => {
-    const future = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null, fetchedAt: new Date(NOW.getTime() + DAY) });
+    const future = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", publishedAt: null, fetchedAt: new Date(NOW.getTime() + DAY) });
     const r = reconcile("EXECUTION_EVIDENCE", [future]);
     expect(r.temporalBasis?.basisField).toBe("fetched_at");
     expect(r.status).toBe("PARTIALLY_SUPPORTED");

@@ -306,25 +306,19 @@ describe("3. the real reconciler, on the row production would have written", () 
     freshnessPolicyDays: FRESHNESS_POLICY,
   });
 
-  it("EXECUTION_EVIDENCE is ESTABLISHED — and capped at PARTIALLY_SUPPORTED", () => {
-    // The burn row IS the establishing element: it survives every gate and
-    // is returned as supporting. What it cannot do is reach SUPPORTED,
-    // because D-074 (LOCKED) caps any component whose best establishing
-    // element carries officiality CLAIMED — and production writes CLAIMED
-    // for every on-chain fact, deliberately: a canonical chain read is not
-    // the project's own published claim.
-    expect(outcome.status).toBe("PARTIALLY_SUPPORTED");
-    expect(outcome.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
-    expect(outcome.supportingEvidenceIds).toEqual([rows[0].id]);
-    expect(outcome.excludedEvidence).toHaveLength(0);
+  it("BURN EVENT != CLAIMED MECHANISM EXECUTION: the burn row is kept in the record and establishes no EXECUTION_EVIDENCE", () => {
+    // The row passes every quality gate; what excludes it is its KIND. A
+    // burn shows that tokens of the mint were destroyed, never that the
+    // researched mechanism destroyed them.
+    expect(outcome.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(outcome.supportingEvidenceIds).toEqual([]);
+    expect(outcome.excludedEvidence).toEqual([{ evidenceId: rows[0].id, reason: "FACT_KIND_CANNOT_ESTABLISH" }]);
     expect(outcome.contradictingEvidenceIds).toHaveLength(0);
   });
 
-  it("the cap is the officiality axis alone, not the burn", () => {
-    // Same row, officiality CONFIRMED: SUPPORTED. Nothing else changes.
-    // This is what isolates the cap — and it is why a test that hands the
-    // reconciler a CONFIRMED on-chain row is testing a shape production
-    // never writes.
+  it("the exclusion is the kind, not the authority: a CONFIRMED burn establishes no execution either", () => {
+    // Same row, officiality CONFIRMED: still nothing. Authority was never
+    // the only thing between a burn and "the mechanism executed".
     const confirmed = { ...rows[0], officiality: "CONFIRMED" as const };
     const out = reconcileComponent({
       jobId: JOB,
@@ -334,8 +328,8 @@ describe("3. the real reconciler, on the row production would have written", () 
       now: new Date("2026-08-27T00:00:00Z"),
       freshnessPolicyDays: FRESHNESS_POLICY,
     });
-    expect(out.status).toBe("SUPPORTED");
-    expect(out.reasonCodes).toEqual([]);
+    expect(out.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(out.excludedEvidence.map((x) => x.reason)).toEqual(["FACT_KIND_CANNOT_ESTABLISH"]);
   });
 
   it("there is no route from an on-chain URI to CONFIRMED officiality", () => {
@@ -346,21 +340,19 @@ describe("3. the real reconciler, on the row production would have written", () 
     expect(CANONICAL_URI).not.toContain(".");
   });
 
-  it("it passes the live-state gate, which is what ordinary transfers cannot", () => {
+  it("the burn's own LIVE state is the instruction executing, and it reports no mechanism state", () => {
     const req = requirements(COMPONENT);
     expect(req.requiresLiveMechanismState).toBe(true);
-    expect(req.establishingClasses).toContain("ONCHAIN_VERIFIABLE");
-    expect(outcome.currentState).toBe("LIVE");
+    expect(rows[0].mechanismState).toBe("LIVE");
+    expect(outcome.currentState).toBeNull();
   });
 
-  it("no freshness window applies, so a days-old retrieval is not stale", () => {
-    // EXECUTION_EVIDENCE sets requiresCurrentState=false. The temporal
-    // basis is still recorded, and it is the artifact's OWN retrievedAt —
-    // reuse can never make evidence look fresher than it is.
+  it("a days-old retrieval is excluded for its kind, never as stale", () => {
+    // EXECUTION_EVIDENCE sets requiresCurrentState=false: age is not the
+    // reason, the kind is.
     expect(requirements(COMPONENT).requiresCurrentState).toBe(false);
-    expect(outcome.temporalBasis?.basisField).toBe("fetched_at");
-    expect(outcome.temporalBasis?.at).toBe(RETRIEVED_AT.toISOString());
-    expect(outcome.requiresFreshEvidence).toBe(false);
+    expect(outcome.excludedEvidence.map((x) => x.reason)).not.toContain("STALE_FOR_CURRENT_STATE");
+    expect(outcome.temporalBasis).toBeNull();
   });
 
   it("an unbound row of the same fact establishes nothing", () => {

@@ -213,7 +213,10 @@ function noWeakerThan(t: ChainResult, c: ChainResult, label = ""): void {
 }
 function provenanceHolds(c: ChainResult): void {
   const supporting = new Set(c.results.flatMap((r) => r.supportingEvidenceIds));
-  const excluded = new Set(c.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)));
+  // Exclusion is per component: a row excluded where it cannot establish (a
+  // burn at EXECUTION_EVIDENCE) may still support where it can (NET_EFFECT).
+  // A citation is illegitimate when the reducer rejected the row everywhere.
+  const excluded = new Set(c.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)).filter((id) => !supporting.has(id)));
   const contradicting = new Set(c.results.flatMap((r) => r.contradictingEvidenceIds));
   for (const id of c.proof.citedEvidenceIds) {
     expect(supporting.has(id), `cited ${id} not supporting`).toBe(true);
@@ -235,7 +238,7 @@ function world(): EvidenceRow[] {
     row("FLOW_PATH", { fragment: "fee revenue is routed from the fee collector to the distributor contract" }),
     row("MECHANISM_SPEC", { fragment: "50% of protocol fees are distributed to token holders weekly", mechanismState: "LIVE" }),
     confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", fragment: "the proposal to distribute fees passed", mechanismState: "APPROVED" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
     row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
@@ -254,7 +257,7 @@ function world(): EvidenceRow[] {
 function singleAtomWorld(): EvidenceRow[] {
   return [
     row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { mechanismState: "LIVE" }),
   ];
 }
@@ -489,13 +492,13 @@ describe("Decision 3 — MORE AGREEING ADMISSIBLE EVIDENCE != WEAKER PROOF (D-10
     provenanceHolds(all);
   });
 
-  it("G. the exact Round 6 F1c fork shapes — a second official SOURCE_OF_VALUE page, a second official FLOW_PATH page, a weak CLAIMED governance row for SOURCE_OF_VALUE, four more distinct burns at EXECUTION_EVIDENCE: the lineage still forks (D-101 slot identity is untouched), no row after the fork is BRANCH_ATTRIBUTION_UNRESOLVED, and the claim is exactly the control's (PARTIAL stays PARTIAL, never UNSATISFIED)", () => {
+  it("G. the exact Round 6 F1c fork shapes — a second official SOURCE_OF_VALUE page, a second official FLOW_PATH page, a weak CLAIMED governance row for SOURCE_OF_VALUE, four more distinct official execution reports at EXECUTION_EVIDENCE: the lineage still forks (D-101 slot identity is untouched), no row after the fork is BRANCH_ATTRIBUTION_UNRESOLVED, and the claim is exactly the control's (PARTIAL stays PARTIAL, never UNSATISFIED)", () => {
     const base = world();
     const cases: { label: string; intent: string; rows: EvidenceRow[]; downstream: string }[] = [
       { label: "second official SOURCE_OF_VALUE page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { fragment: "protocol fees paid by users generate the revenue", sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "second official FLOW_PATH page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("FLOW_PATH", { sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "weak CLAIMED governance row for SOURCE_OF_VALUE", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", publishedAt: older(2) })], downstream: "DESTINATION" },
-      { label: "four more distinct burns at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", mechanismState: "LIVE", publishedAt: null })), downstream: "NET_EFFECT" },
+      { label: "four more distinct official execution reports at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" })), downstream: "NET_EFFECT" },
     ];
     for (const k of cases) {
       const control = runChain(k.intent, base);

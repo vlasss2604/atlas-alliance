@@ -130,7 +130,10 @@ describe("applicability — a BURN acquired for execution can qualify net effect
       freshnessPolicyDays: FRESHNESS,
     });
     expect(net.supportingEvidenceIds).toEqual([burn.id]);
-    expect(execution.supportingEvidenceIds).toEqual([burn.id]);
+    // BURN EVENT != CLAIMED MECHANISM EXECUTION: the same row supports the
+    // supply effect and is excluded, for its kind, as execution evidence.
+    expect(execution.supportingEvidenceIds).toEqual([]);
+    expect(execution.excludedEvidence).toEqual([{ evidenceId: burn.id, reason: "FACT_KIND_CANNOT_ESTABLISH" }]);
     // Its persisted home is unchanged: still step 4 / EXECUTION_EVIDENCE.
     expect(burn.patternStep).toBe(4);
     expect(burn.component).toBe("EXECUTION_EVIDENCE");

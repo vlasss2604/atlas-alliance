@@ -593,9 +593,12 @@ describe("13/14 + PART D. the full chain, end to end, with no network", () => {
     ).toContain(burnRows[0].id);
 
     // 13. Reconciliation sees the new Evidence — for the component that
-    // acquired it AND, through typed applicability, for NET_EFFECT.
+    // acquired it AND, through typed applicability, for NET_EFFECT. At
+    // EXECUTION_EVIDENCE it is excluded for its kind (BURN EVENT != CLAIMED
+    // MECHANISM EXECUTION); NET_EFFECT reads it as B1/B2 always did.
     const execution = await reconcileAndPersistComponent(ctx.db, jobId, EXECUTION, NOW);
-    expect(execution.supportingEvidenceIds).toContain(burnRows[0].id);
+    expect(execution.supportingEvidenceIds).not.toContain(burnRows[0].id);
+    expect(execution.excludedEvidence).toContainEqual({ evidenceId: burnRows[0].id, reason: "FACT_KIND_CANNOT_ESTABLISH" });
 
     const after = await reconcileAndPersistComponent(ctx.db, jobId, NET_EFFECT, NOW);
     expect(after.supportingEvidenceIds).toContain(burnRows[0].id);

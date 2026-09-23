@@ -554,7 +554,9 @@ describe("C. PROVENANCE CLOSURE — no truth without a traceable local lineage",
       laws(m, label);
       const supporting = new Set(m.PROTOCOL_REVENUE_TO_TOKEN.results.flatMap((r) => r.supportingEvidenceIds));
       const contradicting = new Set(m.PROTOCOL_REVENUE_TO_TOKEN.results.flatMap((r) => r.contradictingEvidenceIds));
-      const excluded = new Set(m.PROTOCOL_REVENUE_TO_TOKEN.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)));
+      // Exclusion is per component (a burn excluded at EXECUTION_EVIDENCE may
+      // support NET_EFFECT); illegitimate only when rejected everywhere.
+      const excluded = new Set(m.PROTOCOL_REVENUE_TO_TOKEN.results.flatMap((r) => r.excludedEvidence.map((e) => e.evidenceId)).filter((id) => !supporting.has(id)));
       const own = new Set(pool.filter((r) => r.researchJobId === JOB).map((r) => r.id));
       for (const intent of INTENTS) {
         for (const req of m[intent].claim.requirementResults) {

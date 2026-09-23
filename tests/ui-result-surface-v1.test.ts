@@ -645,6 +645,69 @@ function withComponent(detail: ResearchJobDetail, component: string, patch: Reco
   };
 }
 
+describe("a burn, on a record persisted before the engine refused it as execution evidence", () => {
+  function burnOnlyExecution(): ResearchJobDetail {
+    const d = aaveDetail("EXCLUDED");
+    const burnEvidence = {
+      ...d.evidence.find((e) => e.id === "ev-cs")!,
+      id: "ev-burn",
+      patternStep: 4,
+      component: "EXECUTION_EVIDENCE",
+      onchainFactKind: "BURN",
+      fragment: '{"signature":"sig","burn":{"mint":"0x7Fc6","amountRaw":"1000"}}',
+      summary: "Transaction sig executed an SPL Token BurnChecked instruction destroying 1000 of mint 0x7Fc6.",
+      mechanismState: "LIVE",
+      links: [{ patternStep: 4, component: "EXECUTION_EVIDENCE", role: "SUPPORTING" as const, exclusionReason: null }],
+    };
+    return {
+      ...d,
+      components: d.components.map((c) =>
+        c.component === "EXECUTION_EVIDENCE"
+          ? { ...c, status: "PARTIALLY_SUPPORTED", reasonCodes: ["INSUFFICIENT_AUTHORITY"], supportingEvidenceIds: ["ev-burn"], coverage: "COMPLETED" as const }
+          : c,
+      ),
+      evidence: [...d.evidence, burnEvidence],
+    };
+  }
+
+  it("a burn-only execution row is shown not established, with what the burn does and does not show", () => {
+    const d = burnOnlyExecution();
+    const s = buildResultSurface(d);
+    const exec = s.table.find((r) => r.component === "EXECUTION_EVIDENCE")!;
+    expect(exec.status).toBe("NOT_ESTABLISHED");
+    expect(exec.established).toBe(
+      "A burn of the project token was observed, but the available evidence does not establish that it was executed by the claimed mechanism.",
+    );
+    const answer = s.answer.sentences.join(" ");
+    expect(answer).not.toMatch(/There is evidence[^.]*(executed|execut)/);
+    const first = textOf(firstScreenOf(render(d)));
+    expect(first).not.toContain("There is evidence that the buyback has actually executed");
+    for (const row of s.table) {
+      const persisted = d.components.find((c) => c.component === row.component)!;
+      expect(STRENGTH[row.status], row.component).toBeLessThanOrEqual(PERSISTED_STRENGTH[persisted.status]);
+    }
+  });
+
+  it("a run that ended without a verdict gets the same ceiling in its answer: never 'partly confirmed' off burns only or a lone supply reading", () => {
+    for (const state of ["FAILED", "BUDGET_LIMIT_REACHED"]) {
+      for (const base of [burnOnlyExecution(), aaveDetail("EXCLUDED")]) {
+        const d = { ...base, job: { ...base.job, state }, proof: state === "FAILED" ? null : base.proof };
+        const answer = buildResultSurface(d).answer.sentences.join(" ");
+        expect(answer, `${state}`).not.toMatch(/confirmed[^.]*(has actually executed|happening now|total supply actually decreases)/);
+      }
+    }
+  });
+
+  it("an execution row that rests on anything besides burns keeps its persisted status", () => {
+    const d = burnOnlyExecution();
+    const withReport = {
+      ...d,
+      components: d.components.map((c) => (c.component === "EXECUTION_EVIDENCE" ? { ...c, supportingEvidenceIds: ["ev-burn", "ex-SOURCE_OF_VALUE"] } : c)),
+    };
+    expect(buildResultSurface(withReport).table.find((r) => r.component === "EXECUTION_EVIDENCE")?.status).toBe("PARTIAL");
+  });
+});
+
 describe("a point-in-time supply reading, on a record persisted before the engine refused it", () => {
   it("the saved Aave shape never says total supply decreases or that the buyback is happening now", () => {
     for (const variant of ["EXCLUDED", "BUDGET"] as const) {
