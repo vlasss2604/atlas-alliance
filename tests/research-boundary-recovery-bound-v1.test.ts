@@ -16,13 +16,14 @@ import { deriveResearchBoundary, KNOWN_PATHS_UNEXPLORED, RECOVERY_BOUND_REACHED,
 import type { ClaimReasonCode, ClaimRequirementResult, ClaimSupportStatus, MechanismGapRef } from "../src/server/engine/claim-evaluator";
 import { runS4ResearchJob } from "../src/server/engine/run-job";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
-import { auditRemainingKnownPaths, TARGETED_RECOVERY_BOUNDS } from "../src/server/engine/targeted-recovery";
+import { auditRemainingKnownPaths, planTargetedRecovery, TARGETED_RECOVERY_BOUNDS, type TargetedRecoveryPlan } from "../src/server/engine/targeted-recovery";
 import { recordTraceEvent } from "../src/server/engine/trace-store";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
 import { setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 
 // RESEARCH RELIABILITY V1 — FINAL OFFLINE ACCEPTANCE: THE BOUNDARY INVARIANT.
 //
@@ -66,6 +67,9 @@ const COST: ModelCostProfile = {
   priceVersion: "test-fixture-not-production",
 };
 const GENEROUS_BUDGET = { ...INTERNAL_ALPHA_V1, maxSearchQueries: 40, maxSourceOpens: 60, reservedRecoverySteps: 1 };
+// The same envelope with a model-cost axis too small for recovery to read
+// every known page: the first recovery round runs out of it mid-attempt.
+const COST_BOUNDED_BUDGET = { ...GENEROUS_BUDGET, maxModelCostMicro: 600_000 };
 const INTENT = "PROTOCOL_REVENUE_TO_TOKEN";
 const CRITICAL = new Set(criticalComponentsFor(PATTERN_V1_CONTENT, INTENT));
 const DAY_MS = 24 * 3600 * 1000;
@@ -207,10 +211,29 @@ const entryFor = (side: ResearchBoundary["technical"], component: string) => sid
 /* 1 + 5. RECOVERY EXHAUSTED, KNOWN PATHS REMAIN → TECHNICAL MARKER    */
 /* ------------------------------------------------------------------ */
 
-describe("B — bounded exhaustion: an unresolved critical component with known paths still open after its one recovery carries a technical marker", () => {
-  it("stale/excluded Evidence on every read + recovery spent + sealed route documents unread → RECOVERY_BOUND_REACHED with the remaining paths; the stale finding stays on the substantive side; verdict and confidence unchanged by the marker", async () => {
+describe("B — bounded exhaustion: an unresolved critical component whose recovery the hard envelope stopped with known paths still open carries a technical marker", () => {
+  it("recovery continues while it consumes known paths: with room in the envelope it reads every sealed route page, and the stale finding closes the record as substantive — no technical marker", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project);
+    const result = await runS4ResearchJob(
+      ctx.db,
+      jobId,
+      executor(project, { search: searchOwn, extract: (_url, step, component) => (component === "CURRENT_STATE" ? [stale(step, component)] : [fresh(step, component)]) }),
+      new Date(),
+    );
+    expect(result.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
+    const att = await attemptsOf(jobId);
+    expect(att.filter((a) => a.component === "CURRENT_STATE").length).toBeGreaterThan(2);
+    await expectRecoveryRanToCompletion(ctx.db, jobId, project.id);
+    expect((await auditRemainingKnownPaths(ctx.db, jobId, project.id)).find((a) => a.component === "CURRENT_STATE")).toBeUndefined();
+    const { bounded } = await proofOf(jobId);
+    expect(entryFor(bounded.technical, "CURRENT_STATE")).toBeNull();
+    expect(entryFor(bounded.substantive, "CURRENT_STATE")?.codes).toContain("STALE_CURRENT_STATE");
+  }, 180_000);
+
+  it("stale/excluded Evidence on every read + recovery stopped by the hard envelope + sealed route documents unread → RECOVERY_BOUND_REACHED with the remaining paths; the stale finding stays on the substantive side; verdict and confidence unchanged by the marker", async () => {
+    const project = await makeProject();
+    const jobId = await makeJob(project, COST_BOUNDED_BUDGET);
     const result = await runS4ResearchJob(
       ctx.db,
       jobId,
@@ -218,16 +241,18 @@ describe("B — bounded exhaustion: an unresolved critical component with known 
         search: searchOwn,
         // Every page yields only a stale observation for CURRENT_STATE and
         // a fresh one for everything else: CURRENT_STATE is excluded at
-        // S5 on every read, and after its one recovery (three
-        // extractions) the other components' sealed pages remain unread
-        // for it.
+        // S5 on every read, and its recovery runs out of the model-cost
+        // axis with the other components' sealed pages unread for it.
         extract: (_url, step, component) => (component === "CURRENT_STATE" ? [stale(step, component)] : [fresh(step, component)]),
       }),
       new Date(),
     );
     expect(result.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
     const att = await attemptsOf(jobId);
-    expect(att.filter((a) => a.component === "CURRENT_STATE").map((a) => a.attemptNumber).sort()).toEqual([1, 2]);
+    const cs = att.filter((a) => a.component === "CURRENT_STATE").sort((a, b) => a.attemptNumber - b.attemptNumber);
+    expect(cs.map((a) => a.attemptNumber)).toEqual([1, 2]);
+    // The round the envelope stopped is closed, never left STARTED.
+    expect([cs[1].status, cs[1].reason]).toEqual(["SKIPPED", "RECOVERY_BUDGET_EXHAUSTED:modelCostMicro"]);
     const s5 = await s5Of(jobId);
     expect(s5.get("CURRENT_STATE")?.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(s5.get("CURRENT_STATE")?.reasonCodes as string[]).toContain("STALE_CURRENT_STATE");
@@ -281,9 +306,40 @@ describe("B — bounded exhaustion: an unresolved critical component with known 
     }
   }, 180_000);
 
+  it("the progress rule: a recovered component is planned again only when the round that just ran consumed at least one of its paths", async () => {
+    const project = await makeProject();
+    const jobId = await makeJob(project, COST_BOUNDED_BUDGET);
+    await runS4ResearchJob(
+      ctx.db,
+      jobId,
+      executor(project, { search: searchOwn, extract: (_url, step, component) => (component === "CURRENT_STATE" ? [stale(step, component)] : [fresh(step, component)]) }),
+      new Date(),
+    );
+    const queue = [{ step: 5, component: "CURRENT_STATE" }];
+    const open = await planTargetedRecovery(ctx.db, jobId, project.id, queue, { audit: true });
+    const item = open!.items[0];
+    expect(item.paths.length).toBeGreaterThan(0);
+    // Without the round that just ran, a recovered component is never planned.
+    expect(await planTargetedRecovery(ctx.db, jobId, project.id, queue)).toBeNull();
+    // The round planned after attempt 1 was given exactly what is still open:
+    // it consumed nothing, so there is no new round.
+    const noProgress: TargetedRecoveryPlan = { version: 1, round: 2, bounds: { ...TARGETED_RECOVERY_BOUNDS }, items: [{ ...item, afterAttempt: 1 }] };
+    expect(await planTargetedRecovery(ctx.db, jobId, project.id, queue, { previous: noProgress })).toBeNull();
+    // Had it been given one more path that is now gone, it made progress:
+    // the component is planned again, after its current attempt.
+    const consumed = { kind: "SEALED_UNEXTRACTED" as const, url: `https://${HOST}/mechanism/already-read` };
+    const progress: TargetedRecoveryPlan = { ...noProgress, items: [{ ...item, afterAttempt: 1, paths: [...item.paths, consumed] }] };
+    const next = await planTargetedRecovery(ctx.db, jobId, project.id, queue, { previous: progress });
+    expect(next?.items.map((i) => [i.component, i.afterAttempt])).toEqual([["CURRENT_STATE", 2]]);
+    // A plan that is not the round just run (planned after another attempt)
+    // licenses nothing.
+    const stale_: TargetedRecoveryPlan = { ...progress, items: [{ ...progress.items[0], afterAttempt: 2 }] };
+    expect(await planTargetedRecovery(ctx.db, jobId, project.id, queue, { previous: stale_ })).toBeNull();
+  }, 180_000);
+
   it("6: projection helpers cannot erase the distinction — generating the question and audit projections and rebuilding the DRAFT Proof leave the persisted marker byte-identical", async () => {
     const project = await makeProject();
-    const jobId = await makeJob(project);
+    const jobId = await makeJob(project, COST_BOUNDED_BUDGET);
     await runS4ResearchJob(
       ctx.db,
       jobId,

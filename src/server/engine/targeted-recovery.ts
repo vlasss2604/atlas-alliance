@@ -83,6 +83,24 @@ export interface TargetedRecoveryItem {
   paths: KnownPath[];
   needsSearch: boolean;
   needsOpen: boolean;
+  // The component's attempt number when this item was planned. A targeted
+  // pass may claim the component only while that is still its latest
+  // attempt, so a redelivered cycle can never add a second attempt for the
+  // same round. Absent on plans persisted before recovery could continue
+  // (read as 1: the first pass).
+  afterAttempt?: number;
+}
+
+// The planned attempt number a targeted item was planned after.
+export function afterAttemptOf(item: Pick<TargetedRecoveryItem, "afterAttempt">): number {
+  return typeof item.afterAttempt === "number" && item.afterAttempt >= 1 ? item.afterAttempt : 1;
+}
+
+// A path's identity across planning rounds: consumed paths (extracted,
+// opened, proven dead, route explored) never come back, so a path missing
+// from the next plan was used.
+function pathKey(p: KnownPath): string {
+  return p.url ? `${p.kind === "ROUTE_UNEXPLORED" ? "R" : "U"}:${canonicalTargetRef(p.url)}` : `R:${(p.domain ?? "").toLowerCase()}:${p.routeClass ?? ""}`;
 }
 
 export interface TargetedRecoveryPlan {
@@ -114,7 +132,15 @@ export async function planTargetedRecovery(
   // the fact, whether a known admissible path was still unexplored for an
   // unresolved critical component. Nothing runs on an audit plan; the
   // runtime never passes it.
-  opts: { audit?: boolean } = {},
+  //
+  // `previous`: the plan whose round just ran. RECOVERY CONTINUES WHILE IT
+  // MAKES PROGRESS. A component that already had a recovery attempt is
+  // planned again only if that attempt was planned by `previous` and
+  // consumed at least one of the paths `previous` gave it — consumed paths
+  // never return, so every continuing round uses up at least one of a
+  // finite set, and the job's hard envelope bounds every round. Without
+  // `previous`, a recovered component is not planned again.
+  opts: { audit?: boolean; previous?: TargetedRecoveryPlan | null } = {},
 ): Promise<TargetedRecoveryPlan | null> {
   if (workQueue.length === 0) return null;
   const items: TargetedRecoveryItem[] = [];
@@ -172,9 +198,10 @@ export async function planTargetedRecovery(
   for (const item of workQueue) {
     const row = results.find((r) => r.step === item.step && r.component === item.component);
     if (!row || !UNRESOLVED_STATUSES.has(row.status)) continue;
-    // One recovery per component, ever: a component already on its second
-    // attempt is never planned again.
-    if (!opts.audit && (maxAttempt.get(`${item.step}:${item.component}`) ?? 0) !== 1) continue;
+    const attemptsSoFar = maxAttempt.get(`${item.step}:${item.component}`) ?? 0;
+    if (!opts.audit && attemptsSoFar < 1) continue;
+    const previousItem = attemptsSoFar > 1 ? planItemFor(opts.previous, item.step, item.component) : null;
+    if (!opts.audit && attemptsSoFar > 1 && (!previousItem || afterAttemptOf(previousItem) !== attemptsSoFar - 1)) continue;
     const plan = plans.get(`${item.step}:${item.component}`) ?? (await loadAcquisitionPlan(db, jobId, item.component, projectId));
     if (!plan.criticalComponents.has(item.component)) continue;
     const admits = new Set<EvidenceSourceClass>(plan.establishingClasses);
@@ -230,6 +257,13 @@ export async function planTargetedRecovery(
       }
     }
     if (paths.length === 0) continue;
+    // NO PROGRESS, NO NEW ROUND: the round that just ran used none of the
+    // paths it was given (every one is still open), so another would only
+    // repeat it.
+    if (!opts.audit && previousItem) {
+      const now = new Set(paths.map(pathKey));
+      if (previousItem.paths.every((p) => now.has(pathKey(p)))) continue;
+    }
     // RANK THE DOCUMENT PATHS BY RELEVANCE TO THIS COMPONENT. A recovery
     // attempt opens at most TARGETED_RECOVERY_BOUNDS.opens of them, so the
     // order decides what it reads. Primary key: overlap of the url's path
@@ -271,6 +305,7 @@ export async function planTargetedRecovery(
       paths,
       needsSearch,
       needsOpen,
+      afterAttempt: attemptsSoFar,
     });
   }
   if (items.length === 0) return null;

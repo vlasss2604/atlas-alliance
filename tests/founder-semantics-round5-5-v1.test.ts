@@ -37,6 +37,7 @@ import { confirmSourceRoute } from "../src/server/memory/source-route-confirmati
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 
 // ROUND 5.5 — FOUNDER SEMANTIC HARDENING: CROSS-PROJECT BINDING AND
 // PROVIDER FAILURE TRUTHFULNESS.
@@ -850,11 +851,13 @@ describe("C. NO EVIDENCE != NOT EXTRACTED — the truthful diagnostic", () => {
       expect(o.s5.DESTINATION!.status, how).toBe("INSUFFICIENT_EVIDENCE");
       expect(o.s5.DESTINATION!.reasonCodes, how).toEqual(["NO_EVIDENCE_FOUND"]);
       // Research Reliability V1 (B2): DESTINATION is on the intent's
-      // critical proof path, so after the first walk ONE targeted recovery
-      // attempt reads up to TARGETED_RECOVERY_BOUNDS.extractions sealed
-      // documents other components surfaced on the admitted route — and
-      // finding nothing there is still NO_EVIDENCE_FOUND.
-      expect(o.calls.extract, how).toBe(ALL_COMPONENTS.length - 1 + TARGETED_RECOVERY_BOUNDS.extractions);
+      // critical proof path, so after the first walk targeted recovery
+      // reads the sealed documents other components surfaced on the
+      // admitted route, TARGETED_RECOVERY_BOUNDS.extractions per round,
+      // until none is left — and finding nothing there is still
+      // NO_EVIDENCE_FOUND.
+      expect(o.calls.extract, how).toBeGreaterThanOrEqual(ALL_COMPONENTS.length - 1 + TARGETED_RECOVERY_BOUNDS.extractions);
+      await expectRecoveryRanToCompletion(ctx.db, o.jobId, p.id);
     }
   }, 120_000);
 

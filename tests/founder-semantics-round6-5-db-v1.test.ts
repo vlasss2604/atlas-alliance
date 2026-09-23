@@ -30,6 +30,7 @@ import { confirmSourceRoute } from "../src/server/memory/source-route-confirmati
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 
 // ROUND 6.5 — FOUNDER SEMANTIC HARDENING, THE PERSISTED RESEARCH.
 //
@@ -507,9 +508,9 @@ describe("Decision 1 — TECHNICAL FAILURE != STRONGER PROJECT REALITY (F8b)", (
     const attempts = await attemptsOf(up.jobId, "CURRENT_STATE");
     // The first attempt closes on the rows it holds. The reading answers
     // nothing about CURRENT_STATE, so the component is genuinely open and
-    // may take the job's one targeted recovery look — never more.
+    // takes targeted recovery rounds while they consume known paths.
     expect(attempts[0].status).toBe("SUCCEEDED");
-    expect(attempts.length).toBeLessThanOrEqual(2);
+    await expectRecoveryRanToCompletion(ctx.db, up.jobId, project.id);
     for (const a of attempts.slice(1)) expect(a.reason).toContain("TARGETED_RECOVERY_ATTEMPT");
     expect(attempts[0].reason).toMatch(/^ONCHAIN_EVIDENCE_ESTABLISHED; documentary pass SKIPPED: /);
     expect(attempts[0].reason).toContain("ONCHAIN_EVIDENCE_CANNOT_ESTABLISH_COMPONENT");

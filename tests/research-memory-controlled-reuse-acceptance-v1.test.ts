@@ -390,20 +390,31 @@ async function attemptsOf(jobId: string): Promise<string[]> {
 // for the intent, requires current state) closes INSUFFICIENT_EVIDENCE /
 // MISSING_CURRENT_STATE after a technically completed attempt, with the
 // confirmed route's other sealed pages a known path it never read. That
-// earns exactly ONE bounded recovery (paths only: no proposer, no search,
-// no transport open — the sealed copies are served; at most
-// TARGETED_RECOVERY_BOUNDS.extractions extractions), which finds nothing
-// for it either. Identical in the fresh, control and Memory Researches,
-// so every Memory-vs-control comparison below is unaffected by it.
+// earns targeted recovery (paths only: no proposer, no search, no transport
+// open — the sealed copies are served; at most
+// TARGETED_RECOVERY_BOUNDS.extractions extractions per round), round after
+// round until every one of those pages is read, and it finds nothing for
+// it. Identical in the fresh, control and Memory Researches, so every
+// Memory-vs-control comparison below is unaffected by it.
 async function recoveryAttemptsOf(jobId: string): Promise<string[]> {
   const rows = await ctx.db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
   return rows.filter((r) => r.attemptNumber > 1).map((r) => `${r.patternStep}:${r.component}:#${r.attemptNumber}`).sort();
 }
-const ONE_RECOVERY = ["5:CURRENT_STATE:#2"];
+// Every page this Research sealed on the confirmed documentation route,
+// except CURRENT_STATE's own, is a known path for it, read
+// TARGETED_RECOVERY_BOUNDS.extractions per round until none is left. The
+// count is the run's own: A seals 8 (RECIPIENT reads the governance page),
+// the control C seals 9, the Memory Research B seals 8 (DESTINATION is
+// reused, so its page is never opened).
+function recoveryRounds(routePages: number): string[] {
+  return Array.from({ length: Math.ceil(routePages / TARGETED_RECOVERY_BOUNDS.extractions) }, (_, i) => `5:CURRENT_STATE:#${i + 2}`);
+}
 const ONE_ATTEMPT = { proposer: 1, search: 1, fetch: 1, extract: 1 };
-const ONE_ATTEMPT_PLUS_RECOVERY = { proposer: 1, search: 1, fetch: 1, extract: 1 + TARGETED_RECOVERY_BOUNDS.extractions };
-function expectedFreshCounters(c: Component) {
-  return c === "CURRENT_STATE" ? ONE_ATTEMPT_PLUS_RECOVERY : ONE_ATTEMPT;
+function attemptPlusRecovery(routePages: number) {
+  return { proposer: 1, search: 1, fetch: 1, extract: 1 + routePages };
+}
+function expectedFreshCounters(c: Component, routePages: number) {
+  return c === "CURRENT_STATE" ? attemptPlusRecovery(routePages) : ONE_ATTEMPT;
 }
 
 async function traceCountsOf(jobId: string): Promise<Record<string, number>> {
@@ -488,9 +499,9 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     expect(handledA.claimed).toBe(true);
     expect((await ledgerOf(jobA)).state).toBe("SUCCEEDED");
     expect(await attemptsOf(jobA)).toEqual(ALL_COMPONENTS.map((c) => `${STEP_OF[c]}:${c}`).sort());
-    expect(await recoveryAttemptsOf(jobA)).toEqual(ONE_RECOVERY);
+    expect(await recoveryAttemptsOf(jobA)).toEqual(recoveryRounds(8));
     for (const c of ALL_COMPONENTS) {
-      expect(runA.counters[c]).toEqual(expectedFreshCounters(c));
+      expect(runA.counters[c]).toEqual(expectedFreshCounters(c, 8));
       const rows = await evidenceOf(jobA, c);
       expect(rows.length).toBe(1);
       expect(rows[0].officiality).toBe("CONFIRMED");
@@ -604,8 +615,8 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     expect(viewC.reused).toEqual([]);
     expect(viewC.workQueue.length).toBe(10);
     expect(await attemptsOf(jobC)).toEqual(ALL_COMPONENTS.map((c) => `${STEP_OF[c]}:${c}`).sort());
-    expect(await recoveryAttemptsOf(jobC)).toEqual(ONE_RECOVERY);
-    for (const c of ALL_COMPONENTS) expect(runC.counters[c]).toEqual(expectedFreshCounters(c));
+    expect(await recoveryAttemptsOf(jobC)).toEqual(recoveryRounds(9));
+    for (const c of ALL_COMPONENTS) expect(runC.counters[c]).toEqual(expectedFreshCounters(c, 9));
     const [retrievalC] = await ctx.db.select().from(memoryRetrievals).where(eq(memoryRetrievals.researchJobId, jobC));
     expect(retrievalC.retrievedCount).toBe(0);
 
@@ -690,7 +701,7 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     const currentRowsB = await evidenceOf(jobB, "CURRENT_STATE");
     expect(currentRowsB.length).toBe(1);
     expect(currentRowsB[0].reusedFromMemoryId).toBeNull();
-    expect(runB.counters.CURRENT_STATE).toEqual(ONE_ATTEMPT_PLUS_RECOVERY);
+    expect(runB.counters.CURRENT_STATE).toEqual(attemptPlusRecovery(8));
     //    OBSERVED-only and never-observed components: no memory, fresh.
     for (const c of ["SOURCE_OF_VALUE", "MECHANISM_SPEC", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE", "NET_EFFECT", "DURABILITY_BASIS"] as const) {
       const rows = await evidenceOf(jobB, c);
@@ -699,7 +710,7 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
       expect(runB.counters[c]).toEqual({ proposer: 1, search: 1, fetch: 1, extract: 1 });
     }
     expect(await attemptsOf(jobB)).toEqual(ALL_COMPONENTS.filter((c) => c !== "DESTINATION").map((c) => `${STEP_OF[c]}:${c}`).sort());
-    expect(await recoveryAttemptsOf(jobB)).toEqual(ONE_RECOVERY);
+    expect(await recoveryAttemptsOf(jobB)).toEqual(recoveryRounds(8));
 
     // 12. COST / WORK — per component, Memory never pays more than control;
     //     for the reused obligation it pays nothing; in total it pays less.
@@ -707,10 +718,14 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
       for (const op of ["proposer", "search", "fetch", "extract"] as const) {
         expect(runB.counters[c][op]).toBeLessThanOrEqual(runC.counters[c][op]);
       }
-      if (c !== "DESTINATION") expect(runB.counters[c]).toEqual(runC.counters[c]);
+      // Equal wherever Memory changed nothing — DESTINATION is reused, and
+      // CURRENT_STATE's recovery reads one sealed page fewer because of it.
+      if (c !== "DESTINATION" && c !== "CURRENT_STATE") expect(runB.counters[c]).toEqual(runC.counters[c]);
     }
+    // DESTINATION's one attempt is saved on every operation; its unopened
+    // page also leaves CURRENT_STATE's recovery one sealed page fewer to read.
     for (const op of ["proposer", "search", "fetch", "extract"] as const) {
-      expect(totalOf(runB.counters, op)).toBe(totalOf(runC.counters, op) - 1);
+      expect(totalOf(runB.counters, op)).toBe(totalOf(runC.counters, op) - (op === "extract" ? 2 : 1));
     }
     const traceB = await traceCountsOf(jobB);
     const traceC = await traceCountsOf(jobC);
@@ -718,7 +733,8 @@ describe("CONTROLLED ACTIVE MEMORY REUSE ACCEPTANCE V1 — the loop on the real 
     expect(traceC.DESTINATION).toBeGreaterThan(0);
     for (const c of ALL_COMPONENTS) {
       if (c === "DESTINATION") continue;
-      expect(traceB[c]).toBe(traceC[c]);
+      if (c === "CURRENT_STATE") expect(traceB[c]).toBeLessThanOrEqual(traceC[c]);
+      else expect(traceB[c]).toBe(traceC[c]);
     }
     const ledgerB = await ledgerOf(jobB);
     const ledgerC = await ledgerOf(jobC);

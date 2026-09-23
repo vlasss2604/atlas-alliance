@@ -49,6 +49,7 @@ import { confirmProjectIdentity } from "../src/server/memory/project-identity-co
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 
 // BOUNDED SEARCH FINALIZATION + ROUTE-AWARE ACQUISITION V1 — regression
 // coverage for two Founder-approved semantics (2026-09-15):
@@ -730,18 +731,19 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
     const att = await attempts(jobId);
     expect(att.every((a) => a.status !== "STARTED")).toBe(true);
     // B2 (Research Reliability V1): the LATEST attempt per component
-    // decides. A CRITICAL component bounded on the first pass may hold ONE
-    // targeted second attempt, fed by the recovery reserve the first pass
-    // held back (<= 2 searches, <= 3 opens), and never a third.
+    // decides. A CRITICAL component bounded on the first pass may hold
+    // targeted recovery rounds — each within its bounds (<= 2 searches,
+    // <= 3 opens) and all inside the same hard envelope — while it consumes
+    // known paths.
     const latest = new Map<string, (typeof att)[number]>();
     for (const a of att) {
       const cur = latest.get(a.component);
       if (!cur || a.attemptNumber > cur.attemptNumber) latest.set(a.component, a);
     }
-    expect(Math.max(...att.map((a) => a.attemptNumber))).toBeLessThanOrEqual(2);
+    await expectRecoveryRanToCompletion(ctx.db, jobId, project.id);
     const firstPassBounded = att.filter((a) => a.attemptNumber === 1 && a.status === "SKIPPED" && /^SEARCH_BUDGET_EXHAUSTED/.test(a.reason ?? ""));
     expect(firstPassBounded.length).toBeGreaterThan(0);
-    const recovered = att.filter((a) => a.attemptNumber === 2);
+    const recovered = att.filter((a) => a.attemptNumber > 1);
     for (const a of recovered) {
       expect(a.searchQueriesSpent, a.component).toBeLessThanOrEqual(2);
       expect(a.sourceOpensSpent, a.component).toBeLessThanOrEqual(3);
@@ -768,7 +770,15 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
     const s5rows = await s5(jobId);
     expect([...s5rows.values()].some((r) => r.status === "SUPPORTED" || r.status === "PARTIALLY_SUPPORTED")).toBe(true);
     for (const a of bounded) {
-      expect(s5rows.get(a.component), a.component).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["SEARCH_BUDGET_EXHAUSTED"], contradictingEvidenceIds: [] });
+      // Bounded on the first pass, nothing ever read: the boundary itself.
+      // A component whose RECOVERY the axis stopped read material in its
+      // earlier rounds, so its S5 code is what that material showed; the
+      // remaining paths carry RECOVERY_BOUND_REACHED on the Proof instead.
+      if (a.attemptNumber === 1) {
+        expect(s5rows.get(a.component), a.component).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["SEARCH_BUDGET_EXHAUSTED"], contradictingEvidenceIds: [] });
+      } else {
+        expect(s5rows.get(a.component), a.component).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", contradictingEvidenceIds: [] });
+      }
     }
     expect([...s5rows.values()].every((r) => r.status !== "CONTRADICTED")).toBe(true);
     const s7 = await ctx.db.select().from(researchClaimSupport).where(eq(researchClaimSupport.researchJobId, jobId));

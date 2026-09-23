@@ -421,12 +421,14 @@ export async function handleExtractingPhase(
   });
 
   try {
-    // B2: the first EXTRACTING cycle plans the targeted second pass and
-    // DEFERS it (the replay cannot open anything new); when a plan comes
-    // back the job goes round once more — SEARCHING under that scope —
-    // and only the scoped second EXTRACTING finalizes.
+    // B2: an EXTRACTING cycle plans the next targeted round and DEFERS it
+    // (the replay cannot open anything new); when a plan comes back the job
+    // goes round once more — SEARCHING under that scope. A scoped cycle
+    // plans again against the round it just ran, so recovery continues
+    // only while it consumes known paths (targeted-recovery.ts); the cycle
+    // that plans nothing finalizes.
     const scope = scopeOf(admitted.job);
-    const controller = await runS4ResearchJob(ctx.db, jobId, executor, now, { targetedRecovery: scope ? "OFF" : "DEFER", scope });
+    const controller = await runS4ResearchJob(ctx.db, jobId, executor, now, { targetedRecovery: "DEFER", scope });
     if (controller.targetedRecoveryDeferred && controller.targetedRecovery) {
       await ctx.db
         .update(researchJobs)

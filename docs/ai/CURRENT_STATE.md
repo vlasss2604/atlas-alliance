@@ -7,9 +7,9 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-23 (burn != mechanism execution, on
-  the final tree): **5262 passing, 4 skipped, 4 failing** (254 files,
-  ~31 min). `first-real-run-stage2` #17 has failed once under load and
+- Full suite, last verified 2026-09-23 (recovery continues while it
+  consumes known paths, on the final tree): **5264 passing, 4 skipped,
+  4 failing** (254 files, ~31 min). `first-real-run-stage2` #17 has failed once under load and
   passes in isolation. The four standing failures reproduce on a clean `06af2aa`:
   the two seed-count pins below, the renderer one, and
   `gates-owner-alpha` D (pins `uniswap` as non-allowlisted; it was added to

@@ -3,7 +3,7 @@ import { and, eq, sql } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { researchAttempts, researchJobs } from "../db/schema";
 import type { ComponentWorkItem, ContractView } from "./contract-view";
-import { planItemFor, type TargetedRecoveryItem, type TargetedRecoveryPlan } from "./targeted-recovery";
+import { afterAttemptOf, planItemFor, type TargetedRecoveryItem, type TargetedRecoveryPlan } from "./targeted-recovery";
 import type { ComponentReconciliationResult } from "./component-reconciler";
 
 // Phase 6, S3 — ResearchController skeleton (phase-6-plan.md §19 S3, D-070,
@@ -393,10 +393,12 @@ async function claimAttempt(
   now: Date,
   debugClaimDelayMs: number,
   recoveryCeilingOverride?: number,
-  // B2/C2 — true on a targeted second pass: the item was selected by the
-  // plan from persisted S5 state, and the only thing that still excludes
-  // it here is the one-recovery maximum (see the guard below).
+  // B2/C2 — true on a targeted pass: the item was selected by the plan from
+  // persisted S5 state, and the only thing that still excludes it here is
+  // the round guard below.
   targetedPass = false,
+  // The attempt number the plan item was planned after (afterAttemptOf).
+  targetedAfterAttempt = 1,
 ): Promise<ClaimOutcome> {
   return db.transaction(async (tx) => {
     // The row lock itself (not its columns) is what serializes concurrent
@@ -436,10 +438,10 @@ async function claimAttempt(
     // technically while every Evidence it produced was excluded at S5
     // (stale, inadmissible) has not resolved it. The technical status of
     // the first attempt therefore does not exclude the component here;
-    // the one-recovery maximum does: a component that already has an
-    // attempt numbered above 1 is never claimed again, so a redelivered
-    // scoped cycle cannot produce a third attempt.
-    if (targetedPass ? (maxAttemptByKey.get(key) ?? 0) > 1 : succeededKeys.has(key)) {
+    // the round guard does: the component is claimed only while its latest
+    // attempt is still the one the plan was made after, so a redelivered
+    // scoped cycle can never add a second attempt for the same round.
+    if (targetedPass ? (maxAttemptByKey.get(key) ?? 0) !== targetedAfterAttempt : succeededKeys.has(key)) {
       return { claimed: false, reason: "ALREADY_CLAIMED" };
     }
     const latest = latestAttemptByKey.get(key);
@@ -528,9 +530,13 @@ export async function runResearchController(
   // technically but whose Evidence S5 excluded does not remove the item —
   // the same rule claimAttempt applies under the job lock.
   const targetedPass = input.targetedRecovery != null;
+  const afterAttemptFor = (item: { step: number; component: string }): number => {
+    const planned = planItemFor(input.targetedRecovery, item.step, item.component);
+    return planned ? afterAttemptOf(planned) : 1;
+  };
   const pending = (input.pendingOverride ?? view.workQueue).filter((item) => {
     const key = componentKey(item.step, item.component);
-    return targetedPass ? (maxAttemptByKey.get(key) ?? 0) <= 1 : !succeededKeys.has(key);
+    return targetedPass ? (maxAttemptByKey.get(key) ?? 0) === afterAttemptFor(item) : !succeededKeys.has(key);
   });
   const recoveryCeilingOverride = targetedPass
     ? (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime + pending.length
@@ -591,6 +597,7 @@ export async function runResearchController(
       debugClaimDelayMs,
       recoveryCeilingOverride,
       targetedPass,
+      afterAttemptFor(item),
     );
 
     if (!outcome.claimed) {

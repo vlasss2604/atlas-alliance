@@ -13,6 +13,7 @@ import type { ResearchBoundary } from "../src/server/engine/research-boundary";
 import { runS4ResearchJob } from "../src/server/engine/run-job";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { recoveryReserve, TARGETED_RECOVERY_BOUNDS, type TargetedRecoveryPlan } from "../src/server/engine/targeted-recovery";
+import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 import { beginAcquisitionPhases, handleExtractingPhase, handleFetchingPhase, handleSearchingPhase, type PhaseWorkerContext } from "../src/server/jobs/acquisition-phase-worker";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { parseWorkerCapabilities, type PhaseCapability } from "../src/server/jobs/worker-capabilities";
@@ -268,7 +269,7 @@ describe("B2 — unphased: a starved critical component gets one bounded recover
     }
   }, 180_000);
 
-  it("honest boundary: when the second pass reads the remaining path and finds nothing, the component stays unresolved as a SUBSTANTIVE gap — and there is no third pass", async () => {
+  it("honest boundary: when recovery reads the remaining paths and finds nothing, the component stays unresolved as a SUBSTANTIVE gap — and recovery stops when the paths are used up", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project);
     await runMemoryPlanningStage(ctx.db, jobId);
@@ -276,7 +277,7 @@ describe("B2 — unphased: a starved critical component gets one bounded recover
     const result = await runS4ResearchJob(ctx.db, jobId, liveExecutor(project, c, () => []), new Date());
     expect(result.stopReason).toBe("WORK_QUEUE_EXHAUSTED");
     const att = await attemptsOf(jobId);
-    expect(Math.max(...att.map((a) => a.attemptNumber))).toBeLessThanOrEqual(2);
+    await expectRecoveryRanToCompletion(ctx.db, jobId, project.id);
     const second = att.filter((a) => a.attemptNumber === 2);
     expect(second.length).toBeGreaterThan(0);
     const s5 = await s5Of(jobId);

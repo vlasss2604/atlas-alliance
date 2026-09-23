@@ -1,7 +1,7 @@
-import { eq } from "drizzle-orm";
+import { and, eq, gt } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { researchComponentResults } from "../db/schema";
+import { researchAttempts, researchComponentResults } from "../db/schema";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
 import { runResearchController } from "./controller";
 import type { ControllerRunResult, WorkExecutor } from "./controller";
@@ -81,6 +81,20 @@ export interface RunJobOptions {
   scope?: TargetedRecoveryPlan | null;
 }
 
+// A RECOVERY ROUND STOPPED BY THE HARD ENVELOPE. The executor signals an
+// exhausted budget axis by throwing, mid-attempt, so the recovery attempt
+// it was running is still STARTED. The first walk of the job is complete
+// (a recovery round only ever runs after it), so this is a bounded recovery
+// that spent what was left, not a job-level stop: the attempt is closed
+// deterministically and the job finalizes on what it established. The
+// remaining known paths stay on the record as RECOVERY_BOUND_REACHED.
+async function closeRecoveryStoppedByBudget(db: Database | Transaction, jobId: string, axis: string, now: Date): Promise<void> {
+  await db
+    .update(researchAttempts)
+    .set({ status: "SKIPPED", reason: `RECOVERY_BUDGET_EXHAUSTED:${axis}`, completedAt: now })
+    .where(and(eq(researchAttempts.researchJobId, jobId), eq(researchAttempts.status, "STARTED"), gt(researchAttempts.attemptNumber, 1)));
+}
+
 export async function runS4ResearchJob(
   db: Database | Transaction,
   jobId: string,
@@ -118,6 +132,9 @@ export async function runS4ResearchJob(
   const scopedItems = scope ? scopedWorkItems(scope, view.workQueue) : null;
 
   let result: ControllerRunResult;
+  // Set when a recovery round is stopped by the hard envelope: no further
+  // round is planned, in this process or in a deferred phased cycle.
+  let recoveryStoppedByBudget = false;
   try {
     result = await runResearchController({
       db,
@@ -134,183 +151,201 @@ export async function runS4ResearchJob(
     });
     if (scope) result = { ...result, targetedRecovery: scope, targetedRecoveryAttempts: result.attemptsThisRun };
   } catch (e) {
-    // D-127 — dimensional budget exhaustion must still produce the derived
-    // projections. s4-executor.ts signals an exhausted job budget AXIS
-    // (searchQueries/sourceOpens/modelCostMicro) by THROWING
-    // BudgetExhaustedError, which propagated straight past the S5 sweep /
-    // S6 assembly / S7 claim-support steps below and left the job with
-    // evidence and component results persisted but NO mechanism and NO
-    // research_claim_support row at all — a blank "stopped, no finding"
-    // screen despite fully paid-for research.
-    //
-    // That contradicts the terminal contract worker.ts already documents
-    // for this exact case: "budget exhaustion with incomplete evidence is
-    // NOT a system/provider failure — research_claim_support may
-    // legitimately be INSUFFICIENT_EVIDENCE for this job, and that is an
-    // honest evidentiary outcome". The controller's OWN attempt-count
-    // BUDGET_EXHAUSTED stop reason (returned, not thrown) already reaches
-    // those steps normally — so the same logical condition produced two
-    // different behaviours depending only on which mechanism detected it.
-    //
-    // These three steps are pure derived projections over ALREADY-persisted
-    // rows (see their own doc comments: "never re-spends S4 budget or
-    // repeats paid research"), so running them here spends nothing, calls
-    // no provider, and cannot manufacture evidence or support. The
-    // exception is re-thrown unchanged afterwards, so the job's terminal
-    // state stays exactly BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED.
-    //
-    // Deliberately NARROW in two independent ways:
-    //
-    //  1. Only BudgetExhaustedError. A CapabilityFatalError or any other
-    //     exception still propagates untouched — a broken capability is
-    //     not an evidentiary outcome. The `else` branch below runs the
-    //     zero-spend S5 sweep for it and nothing else: no S6, no S7, no
-    //     Proof.
-    //
-    //  2. Only when the S5 sweep actually produced component results.
-    //     A job whose budget was refused before ANY component reached a
-    //     terminal S4 attempt has genuinely nothing to project: it stopped
-    //     before S7 with no research performed, and inventing an empty
-    //     assembly + claim-support row for it would assert an evidentiary
-    //     conclusion about work that never happened. That "stopped before
-    //     S7" case is an accepted S10 outcome (D-120) and stays exactly as
-    //     it was. Only a job that DID do real, already-paid-for research
-    //     before running out of budget gets its projection.
-    if (e instanceof BudgetExhaustedError) {
-      // PROTECTED DETERMINISTIC WORK STILL RUNS, and the premise that said
-      // otherwise is what changed.
-      //
-      // This path used to skip the three stages below, reasoning that "the
-      // job's axis is spent, so a pass here could only spend components'
-      // one opportunity on reservations that are certain to be refused".
-      // That was true when ONE flat floor was held back from documentary
-      // work alone. It is not true now: the reservation is the contract's
-      // own remaining deterministic demand and is enforced per spender, so
-      // documentary exhaustion means the UNPROTECTED pool is gone while
-      // every component's protected units are still there, untouched, still
-      // reserved for exactly this work.
-      //
-      // Skipping them threw away capacity that had been protected precisely
-      // so it would survive this moment — and with it the burn a
-      // reactivated component would have established, the one bounded
-      // reading that closes an interval, and the delta that needs neither.
-      //
-      // NOTHING IS GRANTED HERE. Each stage passes the same derived ceiling
-      // it always passes: per-component for reactivation, the unprotected
-      // remainder for the opportunistic supply read, and none at all for
-      // materialization, which acquires nothing. All of it goes through the
-      // one ledger mutator, and a stage that cannot reserve refuses and
-      // traces it exactly as on the ordinary path. Documentary work gains
-      // nothing: it is not resumed, and its ceiling is unchanged.
-      //
-      // THE JOB STILL ENDS THE WAY IT ENDED. `e` is re-thrown below
-      // unchanged, so the terminal state stays
-      // BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED and no exhausted job is
-      // converted into a successful one.
-      try {
-        // Documentary acquisition is over: the throw came from the
-        // reservation boundary and nothing here resumes it, so a component
-        // with no admissible subject by now will never have one. Declaring
-        // that lets the reservation release what it was holding for such a
-        // component (D2) instead of stranding it — on the first fresh
-        // Raydium run five of twenty-four units ended the job held for a
-        // chain that had no subject and no way left to get one.
-        await runOnchainReactivationPass(db, {
-          jobId,
-          projectId: job.projectId,
-          workQueue: view.workQueue,
-          maxSourceOpens: view.researchBudget.maxSourceOpens,
-          documentaryAcquisitionFinished: true,
-        });
-        await runPostEventSupplyCompletion(db, {
-          jobId,
-          projectId: job.projectId,
-          maxSourceOpens: view.researchBudget.maxSourceOpens,
-          documentaryAcquisitionFinished: true,
-        });
-        await runSupplyDeltaMaterialization(db, { jobId, projectId: job.projectId });
-      } catch (continuation) {
-        // A failure in a continuation stage must NOT replace the terminal
-        // reason. The job stopped because documentary capacity ran out, and
-        // that stays the answer; surfacing a secondary provider or database
-        // error here would rename an honest budget outcome after whatever
-        // happened last. It is reported rather than hidden, and the
-        // original `e` is what propagates.
-        console.error(
-          "[run-job] on-chain continuation after budget exhaustion did not complete:",
-          continuation,
-        );
-      }
-
-      // ACQUISITION HAS DEFINITIVELY STOPPED HERE, and that is what the flag
-      // says. The throw came from the reservation boundary, so the work loop
-      // aborted mid-queue and every component after it has no attempt row and
-      // never will — including the one the three stages above may have just
-      // written evidence into. Zero-cost reconciliation of an
-      // EVIDENCE-BACKED pending component is therefore the difference between
-      // reporting what this job deterministically established and discarding
-      // it. A pending component with no persisted inputs stays untouched.
-      await reconcileOutstandingComponents(db, jobId, view.workQueue, now, {
-        acquisitionStopped: true,
-      });
-      const reconciled = await db
-        .select({ id: researchComponentResults.id })
-        .from(researchComponentResults)
-        .where(eq(researchComponentResults.researchJobId, jobId))
-        .limit(1);
-      if (reconciled.length > 0) {
-        await assembleAndPersistMechanism(db, jobId, now);
-        await evaluateAndPersistClaimSupport(db, jobId, now);
-        // S8 belongs on this path for the same reason S6/S7 do: a job
-        // that did real, already-paid-for research before running out of
-        // budget has a projectable result, and its Proof will honestly
-        // carry whatever gaps the exhausted budget left behind.
-        await buildAndPersistProof(db, jobId);
-      }
+    // A scoped (phased) recovery cycle that hit the hard envelope is a
+    // recovery round stopped by the budget, exactly as in the loop below.
+    if (scope && e instanceof BudgetExhaustedError) {
+      await closeRecoveryStoppedByBudget(db, jobId, e.axis, now);
+      recoveryStoppedByBudget = true;
+      result = {
+        stopReason: "WORK_QUEUE_EXHAUSTED",
+        attemptsThisRun: 0,
+        succeeded: [],
+        failed: [],
+        skipped: [],
+        budgetSpent: { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 },
+        recoveryAttemptsUsed: 0,
+        targetedRecovery: scope,
+        targetedRecoveryAttempts: 0,
+      };
     } else {
-      // TECHNICAL FAILURE != PROJECT REALITY.
+      // D-127 — dimensional budget exhaustion must still produce the derived
+      // projections. s4-executor.ts signals an exhausted job budget AXIS
+      // (searchQueries/sourceOpens/modelCostMicro) by THROWING
+      // BudgetExhaustedError, which propagated straight past the S5 sweep /
+      // S6 assembly / S7 claim-support steps below and left the job with
+      // evidence and component results persisted but NO mechanism and NO
+      // research_claim_support row at all — a blank "stopped, no finding"
+      // screen despite fully paid-for research.
       //
-      // Any other exception — a capability down, a rejected database
-      // write, an internal invariant — is a fault of the RUN, and the job
-      // ends FAILED/SYSTEM_OR_PROVIDER_FAILURE at the worker's boundary.
-      // Nothing substantive may be derived from it: S6/S7/S8 do NOT run
-      // here, because claim support over a queue that was never walked to
-      // its end would grade every unexecuted component as a gap and write
-      // a Proof whose INSUFFICIENT_EVIDENCE speaks about the project when
-      // only the run broke. Absence of completed research is not evidence
-      // of absence. The continuation stages do not run either: they may
-      // spend an on-chain read, and a job that just failed for an unknown
-      // reason is not licensed to spend anything further.
+      // That contradicts the terminal contract worker.ts already documents
+      // for this exact case: "budget exhaustion with incomplete evidence is
+      // NOT a system/provider failure — research_claim_support may
+      // legitimately be INSUFFICIENT_EVIDENCE for this job, and that is an
+      // honest evidentiary outcome". The controller's OWN attempt-count
+      // BUDGET_EXHAUSTED stop reason (returned, not thrown) already reaches
+      // those steps normally — so the same logical condition produced two
+      // different behaviours depending only on which mechanism detected it.
       //
-      // ONE THING DOES RUN, AND IT SPENDS NOTHING: the same S5 sweep the
-      // ordinary path runs after the controller, over components whose
-      // S4 attempt is already terminal. The per-attempt hook cannot
-      // survive a crash between an attempt's terminal UPDATE and its own
-      // persistence (HIGH-2, see the module comment) — the sweep is the
-      // designed repair for that, and it ran on every path except this
-      // one. A FAILED job is never picked up again, so this catch is the
-      // last moment its finished work can be reconciled at all. The sweep
-      // is a derived-projection upsert over Evidence already persisted for
-      // components S4 actually finished: no executor, no provider, no
-      // reservation, idempotent for a component the hook already wrote.
+      // These three steps are pure derived projections over ALREADY-persisted
+      // rows (see their own doc comments: "never re-spends S4 budget or
+      // repeats paid research"), so running them here spends nothing, calls
+      // no provider, and cannot manufacture evidence or support. The
+      // exception is re-thrown unchanged afterwards, so the job's terminal
+      // state stays exactly BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED.
       //
-      // DELIBERATELY NOT `acquisitionStopped`. The component whose attempt
-      // was cut off mid-way keeps no result row: the closed S5 vocabulary
-      // has no NOT_EVALUATED, and a status computed from a truncated
-      // Evidence set would be indistinguishable from an honest one. "Work
-      // never finished" stays a missing row, which the result screen
-      // already renders as not assessed rather than as insufficient.
+      // Deliberately NARROW in two independent ways:
       //
-      // The sweep's own failure is reported, never allowed to replace `e`:
-      // the job stopped because of the first fault, and that stays the
-      // answer. `e` is re-thrown unchanged either way.
-      try {
-        await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
-      } catch (sweep) {
-        console.error("[run-job] S5 sweep after technical failure did not complete:", sweep);
+      //  1. Only BudgetExhaustedError. A CapabilityFatalError or any other
+      //     exception still propagates untouched — a broken capability is
+      //     not an evidentiary outcome. The `else` branch below runs the
+      //     zero-spend S5 sweep for it and nothing else: no S6, no S7, no
+      //     Proof.
+      //
+      //  2. Only when the S5 sweep actually produced component results.
+      //     A job whose budget was refused before ANY component reached a
+      //     terminal S4 attempt has genuinely nothing to project: it stopped
+      //     before S7 with no research performed, and inventing an empty
+      //     assembly + claim-support row for it would assert an evidentiary
+      //     conclusion about work that never happened. That "stopped before
+      //     S7" case is an accepted S10 outcome (D-120) and stays exactly as
+      //     it was. Only a job that DID do real, already-paid-for research
+      //     before running out of budget gets its projection.
+      if (e instanceof BudgetExhaustedError) {
+        // PROTECTED DETERMINISTIC WORK STILL RUNS, and the premise that said
+        // otherwise is what changed.
+        //
+        // This path used to skip the three stages below, reasoning that "the
+        // job's axis is spent, so a pass here could only spend components'
+        // one opportunity on reservations that are certain to be refused".
+        // That was true when ONE flat floor was held back from documentary
+        // work alone. It is not true now: the reservation is the contract's
+        // own remaining deterministic demand and is enforced per spender, so
+        // documentary exhaustion means the UNPROTECTED pool is gone while
+        // every component's protected units are still there, untouched, still
+        // reserved for exactly this work.
+        //
+        // Skipping them threw away capacity that had been protected precisely
+        // so it would survive this moment — and with it the burn a
+        // reactivated component would have established, the one bounded
+        // reading that closes an interval, and the delta that needs neither.
+        //
+        // NOTHING IS GRANTED HERE. Each stage passes the same derived ceiling
+        // it always passes: per-component for reactivation, the unprotected
+        // remainder for the opportunistic supply read, and none at all for
+        // materialization, which acquires nothing. All of it goes through the
+        // one ledger mutator, and a stage that cannot reserve refuses and
+        // traces it exactly as on the ordinary path. Documentary work gains
+        // nothing: it is not resumed, and its ceiling is unchanged.
+        //
+        // THE JOB STILL ENDS THE WAY IT ENDED. `e` is re-thrown below
+        // unchanged, so the terminal state stays
+        // BUDGET_LIMIT_REACHED/BUDGET_EXHAUSTED and no exhausted job is
+        // converted into a successful one.
+        try {
+          // Documentary acquisition is over: the throw came from the
+          // reservation boundary and nothing here resumes it, so a component
+          // with no admissible subject by now will never have one. Declaring
+          // that lets the reservation release what it was holding for such a
+          // component (D2) instead of stranding it — on the first fresh
+          // Raydium run five of twenty-four units ended the job held for a
+          // chain that had no subject and no way left to get one.
+          await runOnchainReactivationPass(db, {
+            jobId,
+            projectId: job.projectId,
+            workQueue: view.workQueue,
+            maxSourceOpens: view.researchBudget.maxSourceOpens,
+            documentaryAcquisitionFinished: true,
+          });
+          await runPostEventSupplyCompletion(db, {
+            jobId,
+            projectId: job.projectId,
+            maxSourceOpens: view.researchBudget.maxSourceOpens,
+            documentaryAcquisitionFinished: true,
+          });
+          await runSupplyDeltaMaterialization(db, { jobId, projectId: job.projectId });
+        } catch (continuation) {
+          // A failure in a continuation stage must NOT replace the terminal
+          // reason. The job stopped because documentary capacity ran out, and
+          // that stays the answer; surfacing a secondary provider or database
+          // error here would rename an honest budget outcome after whatever
+          // happened last. It is reported rather than hidden, and the
+          // original `e` is what propagates.
+          console.error(
+            "[run-job] on-chain continuation after budget exhaustion did not complete:",
+            continuation,
+          );
+        }
+
+        // ACQUISITION HAS DEFINITIVELY STOPPED HERE, and that is what the flag
+        // says. The throw came from the reservation boundary, so the work loop
+        // aborted mid-queue and every component after it has no attempt row and
+        // never will — including the one the three stages above may have just
+        // written evidence into. Zero-cost reconciliation of an
+        // EVIDENCE-BACKED pending component is therefore the difference between
+        // reporting what this job deterministically established and discarding
+        // it. A pending component with no persisted inputs stays untouched.
+        await reconcileOutstandingComponents(db, jobId, view.workQueue, now, {
+          acquisitionStopped: true,
+        });
+        const reconciled = await db
+          .select({ id: researchComponentResults.id })
+          .from(researchComponentResults)
+          .where(eq(researchComponentResults.researchJobId, jobId))
+          .limit(1);
+        if (reconciled.length > 0) {
+          await assembleAndPersistMechanism(db, jobId, now);
+          await evaluateAndPersistClaimSupport(db, jobId, now);
+          // S8 belongs on this path for the same reason S6/S7 do: a job
+          // that did real, already-paid-for research before running out of
+          // budget has a projectable result, and its Proof will honestly
+          // carry whatever gaps the exhausted budget left behind.
+          await buildAndPersistProof(db, jobId);
+        }
+      } else {
+        // TECHNICAL FAILURE != PROJECT REALITY.
+        //
+        // Any other exception — a capability down, a rejected database
+        // write, an internal invariant — is a fault of the RUN, and the job
+        // ends FAILED/SYSTEM_OR_PROVIDER_FAILURE at the worker's boundary.
+        // Nothing substantive may be derived from it: S6/S7/S8 do NOT run
+        // here, because claim support over a queue that was never walked to
+        // its end would grade every unexecuted component as a gap and write
+        // a Proof whose INSUFFICIENT_EVIDENCE speaks about the project when
+        // only the run broke. Absence of completed research is not evidence
+        // of absence. The continuation stages do not run either: they may
+        // spend an on-chain read, and a job that just failed for an unknown
+        // reason is not licensed to spend anything further.
+        //
+        // ONE THING DOES RUN, AND IT SPENDS NOTHING: the same S5 sweep the
+        // ordinary path runs after the controller, over components whose
+        // S4 attempt is already terminal. The per-attempt hook cannot
+        // survive a crash between an attempt's terminal UPDATE and its own
+        // persistence (HIGH-2, see the module comment) — the sweep is the
+        // designed repair for that, and it ran on every path except this
+        // one. A FAILED job is never picked up again, so this catch is the
+        // last moment its finished work can be reconciled at all. The sweep
+        // is a derived-projection upsert over Evidence already persisted for
+        // components S4 actually finished: no executor, no provider, no
+        // reservation, idempotent for a component the hook already wrote.
+        //
+        // DELIBERATELY NOT `acquisitionStopped`. The component whose attempt
+        // was cut off mid-way keeps no result row: the closed S5 vocabulary
+        // has no NOT_EVALUATED, and a status computed from a truncated
+        // Evidence set would be indistinguishable from an honest one. "Work
+        // never finished" stays a missing row, which the result screen
+        // already renders as not assessed rather than as insufficient.
+        //
+        // The sweep's own failure is reported, never allowed to replace `e`:
+        // the job stopped because of the first fault, and that stays the
+        // answer. `e` is re-thrown unchanged either way.
+        try {
+          await reconcileOutstandingComponents(db, jobId, view.workQueue, now);
+        } catch (sweep) {
+          console.error("[run-job] S5 sweep after technical failure did not complete:", sweep);
+        }
       }
+      throw e;
     }
-    throw e;
   }
 
   // DYNAMIC SUBJECT REACTIVATION — one bounded on-chain opportunity for a
@@ -347,22 +382,50 @@ export async function runS4ResearchJob(
   // bounded recovery attempt — in-process where the executor can acquire,
   // deferred to a second phase cycle where it cannot. Never a third pass:
   // the plan excludes any component already on its second attempt.
-  if (!scope && targetedMode !== "OFF" && result.stopReason === "WORK_QUEUE_EXHAUSTED") {
-    const plan = await planTargetedRecovery(db, jobId, job.projectId, view.workQueue);
-    if (plan) {
+  //
+  // RECOVERY CONTINUES WHILE IT MAKES PROGRESS. After each round the plan is
+  // made again against the round that just ran (`previous`): a component
+  // stays in only if that round consumed at least one of its known
+  // admissible paths and some remain (targeted-recovery.ts). Every round
+  // therefore uses up at least one path of a finite set, spends from the
+  // same hard envelope (claimAttempt / budget reservation), and stops when
+  // paths or budget run out. A scoped phased cycle plans its next round the
+  // same way and defers it into another cycle.
+  //
+  // LOOP GUARD, NOT A BUDGET: no run can make more rounds than the envelope
+  // has search and open units, since a productive round spends or consumes
+  // at least one of them. Reaching it means something above is wrong, and
+  // the job simply finalizes on what it has.
+  const maxRecoveryRounds = view.researchBudget.maxSearchQueries + view.researchBudget.maxSourceOpens;
+  let previousPlan: TargetedRecoveryPlan | null = scope;
+  let recoveryRounds = 0;
+  while (!recoveryStoppedByBudget && targetedMode !== "OFF" && result.stopReason === "WORK_QUEUE_EXHAUSTED" && recoveryRounds < maxRecoveryRounds) {
+    const plan = await planTargetedRecovery(db, jobId, job.projectId, view.workQueue, { previous: previousPlan });
+    if (!plan) break;
+    recoveryRounds += 1;
+    {
       if (targetedMode === "DEFER") {
         return { ...result, targetedRecovery: plan, targetedRecoveryDeferred: true };
       }
-      const second = await runResearchController({
-        db,
-        jobId,
-        view,
-        executor,
-        now,
-        reconcile: reconcileAndPersistComponent,
-        pendingOverride: scopedWorkItems(plan, view.workQueue),
-        targetedRecovery: plan,
-      });
+      let second: ControllerRunResult;
+      try {
+        second = await runResearchController({
+          db,
+          jobId,
+          view,
+          executor,
+          now,
+          reconcile: reconcileAndPersistComponent,
+          pendingOverride: scopedWorkItems(plan, view.workQueue),
+          targetedRecovery: plan,
+        });
+      } catch (e) {
+        if (!(e instanceof BudgetExhaustedError)) throw e;
+        await closeRecoveryStoppedByBudget(db, jobId, e.axis, now);
+        recoveryStoppedByBudget = true;
+        result = { ...result, targetedRecovery: plan };
+        break;
+      }
       result = {
         ...second,
         // A BUDGET_EXHAUSTED stop inside the bounded second pass is a
@@ -379,8 +442,14 @@ export async function runS4ResearchJob(
           authorizedModelCostMicro: result.budgetSpent.authorizedModelCostMicro + second.budgetSpent.authorizedModelCostMicro,
         },
         targetedRecovery: plan,
-        targetedRecoveryAttempts: second.attemptsThisRun,
+        targetedRecoveryAttempts: (result.targetedRecoveryAttempts ?? 0) + second.attemptsThisRun,
       };
+      // A round that claimed nothing (budget refused every item) cannot
+      // make progress; one that spent the axis stops the loop via the
+      // stopReason above on its next check only if it changed it, so stop
+      // here explicitly.
+      if (second.attemptsThisRun === 0 || second.stopReason !== "WORK_QUEUE_EXHAUSTED") break;
+      previousPlan = plan;
     }
   }
   const documentaryAcquisitionFinished = result.stopReason !== "INTERRUPTED";

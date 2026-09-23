@@ -732,7 +732,12 @@ async function runOne(scenario: Scenario, variant: Variant, runtime: "UNPHASED" 
       jobId = await newJob(project, scenario, { enqueue: true });
       await beginAcquisitionPhases(ctx.db, ctx.boss, jobId);
       const p = providers(project, corpus, c);
-      for (let cycle = 1; cycle <= 2; cycle += 1) {
+      // Cycles run exactly as the worker runs them: until an EXTRACTING
+      // cycle plans no further round. The guard is a loop detector, not a
+      // bound on research: a job still deferring after it fails the run.
+      const MAX_PHASED_CYCLES = 40;
+      let finished = false;
+      for (let cycle = 1; cycle <= MAX_PHASED_CYCLES; cycle += 1) {
         await handleSearchingPhase(roleCtx(ROLE_SE), jobId, { queryProposer: p.queryProposer, searchGateway: p.searchGateway, queryProposerCostProfile: COST });
         await handleFetchingPhase(roleCtx(ROLE_FETCH), jobId, p.contentFetcher);
         const extract = await handleExtractingPhase(roleCtx(ROLE_SE), jobId, (replay) =>
@@ -750,10 +755,15 @@ async function runOne(scenario: Scenario, variant: Variant, runtime: "UNPHASED" 
         );
         if (!extract.ran) throw new Error("phased extraction refused: " + extract.refusal);
         if (extract.controller?.targetedRecovery) {
-          recovery = { planned: extract.controller.targetedRecovery.items.length, attempts: extract.controller.targetedRecoveryAttempts ?? 0 };
+          const prev: { planned: number; attempts: number } = recovery ?? { planned: 0, attempts: 0 };
+          recovery = { planned: Math.max(prev.planned, extract.controller.targetedRecovery.items.length), attempts: prev.attempts + (extract.controller.targetedRecoveryAttempts ?? 0) };
         }
-        if (extract.advancedTo === null) break;
+        if (extract.advancedTo === null) {
+          finished = true;
+          break;
+        }
       }
+      if (!finished) throw new Error(`phased job ${jobId} still deferring recovery after ${MAX_PHASED_CYCLES} cycles`);
       // The worker would finalize the job state here; the phased handler
       // already persisted S5..S8. Mark SUCCEEDED the way the worker does
       // for a WORK_QUEUE_EXHAUSTED controller stop.

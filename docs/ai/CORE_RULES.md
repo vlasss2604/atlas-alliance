@@ -36,6 +36,13 @@ willing to assert. Collapsing any two of these is the most common failure.
   (`ALL_EVIDENCE_EXCLUDED`, `MISSING_CURRENT_STATE`, `STALE_CURRENT_STATE`,
   `MISSING_EXECUTION_EVIDENCE`) caps exactly where bare absence caps.
 - Absence of a mechanism *is* a valid finding, when you actually looked.
+- **A known path left unused ≠ looked.** An unresolved critical component is
+  not finalized while a known admissible path (sealed-unextracted, unopened
+  candidate, unexplored confirmed route) remains and the hard envelope
+  allows another attempt: recovery continues round by round while each
+  round consumes at least one path. It stops when the paths are used up,
+  when a round consumes nothing, or when the envelope is spent — the last
+  recorded as RECOVERY_BOUND_REACHED, never as a finding.
 - **Zero balance ≠ burn.** Zero balance ≠ proof that tokens never existed.
 
 ## Authority and identity

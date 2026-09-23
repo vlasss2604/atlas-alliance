@@ -13,6 +13,7 @@ import { reconcileAndPersistComponent } from "../src/server/engine/component-rec
 import { runS4ResearchJob } from "../src/server/engine/run-job";
 import { createS4WorkExecutor } from "../src/server/engine/s4-executor";
 import { planTargetedRecovery, scopedWorkItems, TARGETED_RECOVERY_BOUNDS, type TargetedRecoveryPlan } from "../src/server/engine/targeted-recovery";
+import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 import { recordTraceEvent } from "../src/server/engine/trace-store";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
@@ -298,7 +299,7 @@ describe("C2/1 — recovery eligibility is the persisted evidence state, not the
     expect(Math.max(...att.map((a) => a.attemptNumber))).toBe(2);
   }, 180_000);
 
-  it("A2: the recovery runs at most once even when it also closes technically SUCCEEDED on excluded Evidence — a stale observation stays stale, no third attempt, and a re-walk of the same scope claims nothing", async () => {
+  it("A2: recovery continues round by round while it consumes known paths, even when each round closes technically SUCCEEDED on excluded Evidence — a stale observation stays stale, it stops when the paths are used up, and a re-walk of the same scope claims nothing", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project);
     const c = counters();
@@ -317,8 +318,9 @@ describe("C2/1 — recovery eligibility is the persisted evidence state, not the
     expect(plan?.items.some((i) => i.component === "CURRENT_STATE")).toBe(true);
     const att = await attemptsOf(jobId);
     const cs = att.filter((a) => a.component === "CURRENT_STATE").sort((a, b) => a.attemptNumber - b.attemptNumber);
-    expect(cs.map((a) => a.attemptNumber)).toEqual([1, 2]);
-    // Both attempts completed technically; neither resolved the component.
+    expect(cs.length).toBeGreaterThanOrEqual(2);
+    await expectRecoveryRanToCompletion(ctx.db, jobId, project.id);
+    // Every attempt completed technically; none resolved the component.
     expect(cs[0].status).toBe("SUCCEEDED");
     const s5 = await s5Of(jobId);
     expect(s5.get("CURRENT_STATE")?.status).toBe("INSUFFICIENT_EVIDENCE");
@@ -328,8 +330,8 @@ describe("C2/1 — recovery eligibility is the persisted evidence state, not the
     const { view } = await loadJobContractView(ctx.db, jobId);
     const again = await planTargetedRecovery(ctx.db, jobId, project.id, view.workQueue);
     expect(again?.items.some((i) => i.component === "CURRENT_STATE") ?? false).toBe(false);
-    // … and a redelivered scoped walk of the SAME plan claims nothing: the
-    // one-recovery maximum holds in the controller too, whatever the
+    // … and a redelivered scoped walk of the SAME (last) plan claims
+    // nothing: the round guard holds in the controller too, whatever the
     // attempts' technical statuses.
     const rewalk = await runResearchController({
       db: ctx.db,
@@ -343,7 +345,7 @@ describe("C2/1 — recovery eligibility is the persisted evidence state, not the
     });
     expect(rewalk.attemptsThisRun).toBe(0);
     const attAfter = await attemptsOf(jobId);
-    expect(Math.max(...attAfter.map((a) => a.attemptNumber))).toBe(2);
+    expect(Math.max(...attAfter.map((a) => a.attemptNumber))).toBe(cs.length);
   }, 180_000);
 });
 
