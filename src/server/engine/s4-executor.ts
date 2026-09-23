@@ -259,9 +259,22 @@ const LOCATOR_TRACE_REASON: Record<
 
 // Exported for the offline traceability regressions; the executor is its
 // only runtime caller.
+//
+// TYPOGRAPHIC QUOTES ARE THE SAME QUOTE. The extractor writes "protocol's"
+// where the page wrote "protocol’s"; the excerpt is still literal. Both
+// sides fold exactly ’ ‘ -> ' and “ ” -> " before containment and nothing
+// else — no other punctuation, no spacing, no markup. This lives here and
+// only here: stored text, stored fragments and the extraction-unit /
+// observation keys (normalizeForContainment) are untouched.
+function foldTypographicQuotes(s: string): string {
+  return s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
+}
+
 export function isTraceable(documentText: string, supportFragment: string): boolean {
   if (supportFragment.trim().length === 0) return false;
-  return normalizeForContainment(documentText).includes(normalizeForContainment(supportFragment));
+  return foldTypographicQuotes(normalizeForContainment(documentText)).includes(
+    foldTypographicQuotes(normalizeForContainment(supportFragment)),
+  );
 }
 
 // Word-boundary tokenizer — splits on anything that isn't ASCII

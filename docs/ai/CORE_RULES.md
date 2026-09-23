@@ -62,7 +62,11 @@ willing to assert. Collapsing any two of these is the most common failure.
   character references are decoded when a document's text is built, so a
   literal excerpt is checked against what the page says ("users' stake"),
   never against its encoding ("users&#x27; stake"). Traceability itself stays
-  strict literal containment.
+  strict literal containment, with exactly one equivalence inside the
+  comparison: typographic quotes are the same quote (’ ‘ ≡ ', “ ” ≡ "). No
+  other character, spacing or markup is folded, and stored text, stored
+  fragments and extraction-unit / observation keys keep the characters as
+  written.
 - Model output is not authoritative for a deterministic fact. Chain data is read
   by code, never restated by a model.
 - **A subdomain is a different host.** Confirming a domain confirms that host and
