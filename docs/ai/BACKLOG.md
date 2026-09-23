@@ -8,6 +8,16 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
+- **Traceability gaps left after entity decoding (2026-09-23).** Decoding
+  covers the decoder's table (`amp lt gt quot apos nbsp hellip mldr middot
+  ndash mdash`) and every numeric reference. Still literal and still able to
+  fail a correct excerpt: other NAMED references (`&rsquo;` 203 occurrences
+  in 19 saved documents, `&copy;`, `&rarr;`, `&times;`, `&ldquo;`/`&rdquo;`,
+  `&bull;`); typographic quotes the page itself writes (’ vs '); markdown
+  syntax from embedded-payload recovery (`[text](url)`, `**bold**`). Each is
+  a separate Founder decision, not a defect of D-076. Rejected fragments are
+  still not persisted, so the share of genuine D-076 rejections is unmeasured.
+
 - **A measured supply decrease without a burn can read weaker than it is.**
   NET_EFFECT with only a SUPPORTS `TOTAL_SUPPLY_DELTA` (no burn) is
   PARTIALLY_SUPPORTED with `SUPPLY_REDUCTION_NOT_ESTABLISHED`, and

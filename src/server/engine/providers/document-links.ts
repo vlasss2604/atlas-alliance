@@ -145,7 +145,10 @@ const NAMED_ENTITIES: Record<string, string> = {
   mdash: "—",
 };
 
-function decodeEntities(raw: string): string {
+// Exported for the one other place text is built from HTML: the fetcher's
+// normalizeHtmlToText (content-fetcher.ts), so a document's text and its
+// links are decoded by the same rule.
+export function decodeEntities(raw: string): string {
   return raw.replace(/&(#[0-9]+|#[xX][0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]{1,31});/g, (whole, body: string) => {
     if (body.startsWith("#")) {
       const hex = body[1] === "x" || body[1] === "X";

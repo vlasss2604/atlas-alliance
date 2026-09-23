@@ -257,7 +257,9 @@ const LOCATOR_TRACE_REASON: Record<
   NOT_LITERAL_IN_DOCUMENT: "LOCATOR_NOT_IN_DOCUMENT",
 };
 
-function isTraceable(documentText: string, supportFragment: string): boolean {
+// Exported for the offline traceability regressions; the executor is its
+// only runtime caller.
+export function isTraceable(documentText: string, supportFragment: string): boolean {
   if (supportFragment.trim().length === 0) return false;
   return normalizeForContainment(documentText).includes(normalizeForContainment(supportFragment));
 }

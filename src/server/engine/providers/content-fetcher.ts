@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 
-import { extractDocumentLinks } from "./document-links";
+import { decodeEntities, extractDocumentLinks } from "./document-links";
 import { lookup as dnsLookup } from "node:dns/promises";
 import * as http from "node:http";
 import * as https from "node:https";
@@ -391,13 +391,19 @@ export function replaceNullCharacters(text: string): string {
   return text.includes("\u0000") ? text.replace(/\u0000/g, "\uFFFD") : text;
 }
 
+// THE TEXT A READER SEES. The extractor and the D-076 traceability check
+// both read exactly this string, so it must be the human-readable text:
+// "users' stake", never "users&#x27; stake". HTML character references are
+// decoded once, AFTER tags are removed, so a decoded "&lt;" is text and can
+// never be re-read as markup. Nothing else is rewritten: typographic quotes
+// and every other character stay exactly as the page wrote them.
 export function normalizeHtmlToText(html: string): string {
-  return html
+  const withoutMarkup = html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
+    .replace(/<[^>]+>/g, " ");
+  return decodeEntities(withoutMarkup)
     .replace(/\s+/g, " ")
     .trim();
 }

@@ -58,6 +58,11 @@ willing to assert. Collapsing any two of these is the most common failure.
   not the account where a mechanism operates.
 - Social sources cannot independently establish a conclusion, however many of
   them agree.
+- **The extractor and D-076 read the same human-readable text.** HTML
+  character references are decoded when a document's text is built, so a
+  literal excerpt is checked against what the page says ("users' stake"),
+  never against its encoding ("users&#x27; stake"). Traceability itself stays
+  strict literal containment.
 - Model output is not authoritative for a deterministic fact. Chain data is read
   by code, never restated by a model.
 - **A subdomain is a different host.** Confirming a domain confirms that host and
