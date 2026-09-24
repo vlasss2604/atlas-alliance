@@ -77,9 +77,7 @@ describe("D-076 stays strict literal containment beyond the four quote character
     expect(isTraceable("the `fee` field", "the 'fee' field")).toBe(false);
   });
 
-  it("punctuation spacing and markdown are not normalized in this task", () => {
-    expect(isTraceable(LIDO_PROTOCOL_FEE, "Consensus Layer rewards : Determined by network rules.")).toBe(true);
-    expect(isTraceable(LIDO_PROTOCOL_FEE, "Consensus Layer rewards: Determined by network rules.")).toBe(false);
+  it("markdown is not normalized (punctuation spacing: traceability-punctuation-spacing.test.ts)", () => {
     expect(isTraceable("see [Lido V3](https://lido.fi/v3) for details", "see Lido V3 for details")).toBe(false);
   });
 

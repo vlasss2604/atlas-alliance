@@ -270,11 +270,25 @@ function foldTypographicQuotes(s: string): string {
   return s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"');
 }
 
+// A SPACE OUR HTML NORMALIZER INSERTED IS NOT PART OF THE EXCERPT.
+// normalizeHtmlToText replaces every tag with a space, so
+// "<strong>rewards</strong>: Determined" becomes "rewards : Determined" and
+// "(<code>LDO</code>)" becomes "( LDO )" — spacing no reader sees. Both
+// sides drop exactly one space before , . ; : ! ? ) and exactly one space
+// after ( — nothing else: never a space after a period or comma, never any
+// other whitespace. Runs on normalizeForContainment output, where every
+// whitespace run is already a single space.
+function foldPunctuationSpacing(s: string): string {
+  return s.replace(/ ([,.;:!?)])/g, "$1").replace(/\( /g, "(");
+}
+
+function traceabilityForm(s: string): string {
+  return foldPunctuationSpacing(foldTypographicQuotes(normalizeForContainment(s)));
+}
+
 export function isTraceable(documentText: string, supportFragment: string): boolean {
   if (supportFragment.trim().length === 0) return false;
-  return foldTypographicQuotes(normalizeForContainment(documentText)).includes(
-    foldTypographicQuotes(normalizeForContainment(supportFragment)),
-  );
+  return traceabilityForm(documentText).includes(traceabilityForm(supportFragment));
 }
 
 // Word-boundary tokenizer — splits on anything that isn't ASCII

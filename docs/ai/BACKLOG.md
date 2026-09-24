@@ -13,11 +13,13 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   ndash mdash`) and every numeric reference. Still literal and still able to
   fail a correct excerpt: other NAMED references (`&rsquo;` 203 occurrences
   in 19 saved documents, `&copy;`, `&rarr;`, `&times;`, `&ldquo;`/`&rdquo;`,
-  `&bull;`); spaces left where inline tags were removed (`rewards : Determined`,
-  `( LDO )`); zero-width characters (U+200B heading anchors); markdown/MDX
+  `&bull;`); spaces left where inline tags were removed at positions the
+  spacing fold does not cover (inside quotes `“ LP fee ”`, after a period
+  `Pump . fun`); zero-width characters (U+200B heading anchors); markdown/MDX
   syntax from embedded-payload recovery (`[text](url)`, `**bold**`,
-  `:::staking-info`). Typographic quotes (’ vs ') are no longer in this list:
-  D-076 compares them as the same quote. Each remaining gap is
+  `:::staking-info`). Typographic quotes (’ vs ') and a space before
+  , . ; : ! ? ) or after ( are no longer in this list: D-076 folds them. Each
+  remaining gap is
   a separate Founder decision, not a defect of D-076. Rejected fragments are
   still not persisted, so the share of genuine D-076 rejections is unmeasured.
 
