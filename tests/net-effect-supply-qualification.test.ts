@@ -148,12 +148,21 @@ describe("net effect — movement, position and level are never a reduction", ()
   });
 
   it("even every non-burn kind together establishes no reduction", () => {
-    const rows = ONCHAIN_FACT_KINDS.filter((k) => !isGrossSupplyReductionFact(k)).map((k) =>
-      onchain(k),
-    );
+    // EVM V1: a zero-address transfer ANCHORS a measured interval, so with a
+    // decreasing delta present it changes WHICH limitation applies (its own,
+    // attributing nothing). Without it the old answer stands exactly; with
+    // it the component is still never SUPPORTED and never a burn outcome.
+    const rows = ONCHAIN_FACT_KINDS.filter(
+      (k) => !isGrossSupplyReductionFact(k) && k !== "ZERO_ADDRESS_TRANSFER",
+    ).map((k) => onchain(k));
     const r = reconcile(rows);
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
     expect(r.reasonCodes).toContain("SUPPLY_REDUCTION_NOT_ESTABLISHED");
+    const anchored = reconcile([...rows, onchain("ZERO_ADDRESS_TRANSFER")]);
+    expect(anchored.status).toBe("PARTIALLY_SUPPORTED");
+    expect(anchored.reasonCodes).toContain("ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED");
+    expect(anchored.reasonCodes).not.toContain("NET_SUPPLY_CHANGE_NOT_ATTRIBUTED");
+    expect(anchored.reasonCodes).not.toContain("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
     // Absence of a burn is not evidence that no burn happened — the row
     // stays supporting evidence and the component stays open, never
     // CONTRADICTED.

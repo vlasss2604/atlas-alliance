@@ -48,8 +48,16 @@ export function onchainIntentPath(kind: OnchainIntent["kind"]): string {
   return INTENT_PATH[kind];
 }
 
+// AN EXPLICIT BLOCK IS PART OF THE TARGET. A read of the finalized head and
+// a read at a named historical block are different acquisition targets, so
+// the selector travels in the URI as `?block=<n>` — and ONLY when the
+// intent carries one. An intent without it builds exactly the URI it always
+// did, so every existing identity, source row and trace marker is unchanged.
+const BLOCK_SELECTOR = "?block=";
+const CANONICAL_BLOCK = /^(?:0|[1-9][0-9]*)$/;
+
 export function buildCanonicalOnchainUri(intent: OnchainIntent): string {
-  return [
+  const base = [
     `${SCHEME}//${intent.chain}`,
     intent.network,
     "project",
@@ -58,6 +66,23 @@ export function buildCanonicalOnchainUri(intent: OnchainIntent): string {
     intent.subject,
     INTENT_PATH[intent.kind],
   ].join("/");
+  return intent.block === undefined ? base : `${base}${BLOCK_SELECTOR}${intent.block}`;
+}
+
+// WHAT IS OBSERVED, WITHOUT WHERE. A pinned read and a head read of the same
+// token's supply observe one thing at two positions, exactly as two head
+// reads at two slots always did — so they share one source row, and only the
+// artifact (and its trace) carries the position. Identity for a URI with no
+// selector.
+export function onchainSourceUriOf(canonicalUri: string): string {
+  const at = canonicalUri.indexOf(BLOCK_SELECTOR);
+  return at === -1 ? canonicalUri : canonicalUri.slice(0, at);
+}
+
+// The pinned-read URI prefix for a base target, for a query that must find
+// every explicit-block read of it and nothing else.
+export function pinnedOnchainUriPrefix(baseUri: string): string {
+  return `${baseUri}${BLOCK_SELECTOR}`;
 }
 
 export interface ParsedOnchainUri {
@@ -67,6 +92,8 @@ export interface ParsedOnchainUri {
   subjectKind: string;
   subject: string;
   intentPath: string;
+  // The explicit block selector, or null for a head read.
+  block: number | null;
 }
 
 // Parses a canonical URI back into its parts. Returns null for anything
@@ -85,7 +112,19 @@ export function parseCanonicalOnchainUri(uri: string): ParsedOnchainUri | null {
   // network / "project" / anchor / subjectKind / subject / intentPath
   if (segments.length !== 6 || segments[1] !== "project") return null;
   if (!chain) return null;
+  if (parsed.hash !== "") return null;
+  // Nothing but the one selector this module writes. Any other query is not
+  // a URI this code generated, and fails closed rather than parsing partly.
+  let block: number | null = null;
+  if (parsed.search !== "") {
+    if (!parsed.search.startsWith(BLOCK_SELECTOR)) return null;
+    const value = parsed.search.slice(BLOCK_SELECTOR.length);
+    if (!CANONICAL_BLOCK.test(value)) return null;
+    block = Number(value);
+    if (!Number.isSafeInteger(block)) return null;
+  }
   return {
+    block,
     chain,
     network: segments[0],
     projectAnchor: segments[2],

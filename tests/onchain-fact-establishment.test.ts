@@ -135,8 +135,11 @@ describe("establishment map — total, closed, fails closed", () => {
 describe("visibility and establishment are separate axes", () => {
   it("visibility remains exactly one declared pair", () => {
     const visible = ONCHAIN_FACT_KINDS.filter((k) => applicableComponentsForFactKind(k).length > 0);
-    expect(visible).toEqual(["BURN"]);
+    // EVM V1 (Founder-approved) is the one addition: readable, never establishing.
+    expect(visible).toEqual(["BURN", "ZERO_ADDRESS_TRANSFER"]);
     expect(applicableComponentsForFactKind("BURN")).toEqual(["NET_EFFECT"]);
+    expect(applicableComponentsForFactKind("ZERO_ADDRESS_TRANSFER")).toEqual(["NET_EFFECT"]);
+    expect(establishableComponentsForFactKind("ZERO_ADDRESS_TRANSFER")).toEqual([]);
   });
 
   it("establishment is broader than visibility and does not mirror it", () => {
@@ -328,7 +331,7 @@ describe("NET_EFFECT owns its own typed qualification", () => {
     }
   });
 
-  it("every kind but a point-in-time supply reading stays SUPPORTING evidence at NET_EFFECT", () => {
+  it("every kind but a point-in-time supply reading or an interval anchor stays SUPPORTING evidence at NET_EFFECT", () => {
     // B1's architecture, kept: a non-qualifying row remains support and is
     // capped by a reason code. The one exception (Founder decision): a single
     // TOKEN_SUPPLY reading observes no change at all and establishes nothing.
@@ -344,9 +347,16 @@ describe("NET_EFFECT owns its own typed qualification", () => {
       freshnessPolicyDays: FRESHNESS,
     });
     const kindOf = new Map(rows.map((row, i) => [row.id, ONCHAIN_FACT_KINDS[i]]));
-    expect(r.supportingEvidenceIds).toHaveLength(rows.length - 1);
+    // EVM V1: a zero-address transfer is an interval ANCHOR, never support.
+    expect(r.supportingEvidenceIds).toHaveLength(rows.length - 2);
     expect(r.supportingEvidenceIds.map((id) => kindOf.get(id))).not.toContain("TOKEN_SUPPLY");
-    expect(r.excludedEvidence.map((x) => [kindOf.get(x.evidenceId), x.reason])).toEqual([["TOKEN_SUPPLY", "FACT_KIND_CANNOT_ESTABLISH"]]);
+    expect(r.supportingEvidenceIds.map((id) => kindOf.get(id))).not.toContain("ZERO_ADDRESS_TRANSFER");
+    expect(
+      r.excludedEvidence.map((x) => [kindOf.get(x.evidenceId), x.reason]).sort(),
+    ).toEqual([
+      ["TOKEN_SUPPLY", "FACT_KIND_CANNOT_ESTABLISH"],
+      ["ZERO_ADDRESS_TRANSFER", "FACT_KIND_CANNOT_ESTABLISH"],
+    ]);
   });
 
   it("TOKEN_SUPPLY alone cannot make NET_EFFECT PARTIALLY_SUPPORTED", () => {

@@ -17,7 +17,7 @@ import type { LocatorShape } from "./documentary-locator";
 import { brandOnchainArtifact, isOnchainArtifact } from "./providers/onchain-types";
 import { validateOnchainBinding } from "./onchain-binding";
 import { synthesizeOnchainFacts } from "./onchain-facts";
-import { buildCanonicalOnchainUri, subjectKindOf } from "./onchain-uri";
+import { buildCanonicalOnchainUri, onchainSourceUriOf, subjectKindOf } from "./onchain-uri";
 import { reserveJobBudget } from "./budget-reservation";
 import {
   persistDerivedOnchainSubjects,
@@ -1092,13 +1092,17 @@ export async function persistOnchainArtifact(input: {
   // descriptive only; it grants no class by itself.
   let sourceId: string | null = null;
   if (origin.kind === "RESEARCH_JOB") {
-    const urlHash = hashUrl(artifact.canonicalUri);
+    // The SOURCE is the observed target without its position: a read pinned
+    // to an explicit block observes the same thing as a head read, so both
+    // share one source row. Identity for every URI with no block selector.
+    const sourceUri = onchainSourceUriOf(artifact.canonicalUri);
+    const urlHash = hashUrl(sourceUri);
     const [existingSource] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
     sourceId = existingSource?.id ?? null;
     if (!sourceId) {
       const [created] = await db
         .insert(sources)
-        .values({ url: artifact.canonicalUri, urlHash, sourceType: "ONCHAIN" })
+        .values({ url: sourceUri, urlHash, sourceType: "ONCHAIN" })
         .onConflictDoNothing({ target: sources.urlHash })
         .returning({ id: sources.id });
       if (created) sourceId = created.id;

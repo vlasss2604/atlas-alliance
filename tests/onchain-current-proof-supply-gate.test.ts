@@ -636,7 +636,9 @@ describe("15/16/17/18. boundaries", () => {
     // this Research" means, and it is a select, never a write.
     expect(await codeOf(GATE)).not.toContain("evidence");
     const store = await codeOf(STORE);
-    expect(store).toContain('eq(evidence.onchainFactKind, "BURN")');
+    // EVM V1: the read names exactly the two anchor kinds — a BURN, or a
+    // ZERO_ADDRESS_TRANSFER — and still only reads.
+    expect(store).toContain('inArray(evidence.onchainFactKind, ["BURN", "ZERO_ADDRESS_TRANSFER"])');
     expect(store).not.toContain("SUPPLY_DELTA");
     const { readFile } = await import("node:fs/promises");
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");

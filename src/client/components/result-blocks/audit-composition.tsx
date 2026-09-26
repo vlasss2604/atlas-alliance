@@ -50,6 +50,8 @@ export const SHORT_REASON: Record<string, string> = {
   NET_SUPPLY_CHANGE_NOT_ATTRIBUTED: "Supply fell · cause not attributed",
   NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL: "Supply not lower over interval",
   CONFLICTING_SUPPLY_DELTA: "Supply measurements disagree",
+  ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED: "0x0 transfer · supply fell · not linked",
+  ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED: "0x0 transfer · supply not lower",
 };
 
 function shortReason(codes: readonly string[]): string | null {

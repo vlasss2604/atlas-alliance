@@ -311,12 +311,14 @@ describe("10. the map stays closed, tiny and project-blind", () => {
         expect(applicableFactKindsForComponent(component)).toContain(kind);
       }
     }
-    expect([...applicableFactKindsForComponent("NET_EFFECT")]).toEqual(["BURN"]);
+    // EVM V1 (Founder-approved) added exactly one pair: a zero-address
+    // transfer is READABLE by NET_EFFECT, as an interval anchor only.
+    expect([...applicableFactKindsForComponent("NET_EFFECT")]).toEqual(["BURN", "ZERO_ADDRESS_TRANSFER"]);
     // Exactly one pair exists, and nothing else does.
     const pairs = ONCHAIN_FACT_KINDS.flatMap((k) =>
       applicableComponentsForFactKind(k).map((c) => `${k}->${c}`),
     );
-    expect(pairs).toEqual(["BURN->NET_EFFECT"]);
+    expect(pairs).toEqual(["BURN->NET_EFFECT", "ZERO_ADDRESS_TRANSFER->NET_EFFECT"]);
   });
 
   it("a component with no mapped kind loads exactly what it always loaded", () => {

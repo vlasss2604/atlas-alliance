@@ -103,6 +103,19 @@ together they stopped project #2 before it could start. Kept for context.
   **Whether to add an EVM read transport is an owner decision, not a backlog
   item to pick up.**
 
+- **EVM V1 (ZERO_ADDRESS_TRANSFER) is proven offline only.** Not validated
+  against a live node: that a finalized `totalSupply` read at block B
+  includes block B's transactions (why t0 is taken at `event − 1` and the
+  right bound stays strict); how a real non-archive endpoint fails a
+  historical `eth_call` (today any error is `RETRIEVAL_FAILED`, with no
+  distinct archive-unavailable code); and whether an official document's
+  transaction hash reaches EXECUTION_EVIDENCE as a SIGNATURE_LIKE locator in
+  a live run. The new kind is not in the result surface's quantity or
+  economic-step maps (`FACT_KIND_LABEL`, `ECONOMIC_STEPS_A_FACT_KIND_CAN_CARRY`),
+  so it shows as an evidence card only — adding it there is a UI decision.
+  The pinned-read branch of the historical loader matches by `LIKE` prefix,
+  which the URI index does not serve; bounded by the other predicates.
+
 ### Data / migrations
 
 - **Stale Drizzle snapshot metadata for hand-authored migrations** — the snapshot

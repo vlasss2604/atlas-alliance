@@ -84,6 +84,9 @@ const ENGINE_REASON_CODES = [
   "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED",
   "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL",
   "CONFLICTING_SUPPLY_DELTA",
+  // EVM V1 — the zero-address-anchored interval's two codes.
+  "ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED",
+  "ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED",
 ];
 
 describe("V2 — every persisted reason code has human copy", () => {

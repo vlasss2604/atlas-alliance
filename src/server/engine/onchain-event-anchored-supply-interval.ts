@@ -6,11 +6,13 @@ import {
   type SupplyMeasurementDomain,
   type TotalSupplyDelta,
 } from "./onchain-supply-delta";
-import type {
-  BurnInstructionRef,
-  OnchainArtifact,
-  TokenSupplyResult,
-  TransactionDetailResult,
+import { parseCanonicalOnchainUri } from "./onchain-uri";
+import {
+  EVM_ZERO_ADDRESS,
+  type BurnInstructionRef,
+  type OnchainArtifact,
+  type TokenSupplyResult,
+  type TransactionDetailResult,
 } from "./providers/onchain-types";
 
 // EVENT-ANCHORED SUPPLY INTERVAL — which two observations, and why those.
@@ -75,10 +77,19 @@ export interface PersistedObservation {
 // establishes no attribution, and LOCATOR_BOUND_BURN is deliberately not
 // required — a burn need not be bound to a documented identifier to say
 // truthfully when it happened.
+//
+// EVM V1 adds ONE other anchor kind, ZERO_ADDRESS_TRANSFER, under the same
+// containment-only discipline: it says when a transfer of the project token
+// to the zero address happened, and nothing about destruction or cause.
+// `eventKind` absent means BURN, so every existing caller is unchanged; for
+// a ZERO_ADDRESS_TRANSFER, `burnIndex` indexes `evmTokenTransfers`.
+export type AnchorEventKind = "BURN" | "ZERO_ADDRESS_TRANSFER";
+
 export interface AnchorBurnEvent {
   artifact: OnchainArtifact;
   burnIndex: number;
   researchJobId: string | null;
+  eventKind?: AnchorEventKind;
 }
 
 export interface EventAnchoredSupplyIntervalInput {
@@ -111,6 +122,7 @@ export interface SupplyObservationRef {
 }
 
 export interface AnchorBurnRef {
+  eventKind: AnchorEventKind;
   researchJobId: string;
   signature: string;
   slot: number;
@@ -118,7 +130,8 @@ export interface AnchorBurnRef {
   sourceAccount: string;
   amountRaw: string;
   decimals: number | null;
-  instructionType: BurnInstructionRef["instructionType"];
+  // "Transfer" only for a ZERO_ADDRESS_TRANSFER anchor.
+  instructionType: BurnInstructionRef["instructionType"] | "Transfer";
   canonicalUri: string;
   rawResponseHash: string;
   artifactHash: string;
@@ -252,11 +265,37 @@ export function anchorBurnRef(
   artifact: OnchainArtifact,
   burnIndex: number,
   researchJobId: string,
+  eventKind: AnchorEventKind = "BURN",
 ): AnchorBurnRef | null {
   if (!isTransaction(artifact)) return null;
+  if (eventKind === "ZERO_ADDRESS_TRANSFER") {
+    // A transfer anchors only when it is exactly what the fact kind means:
+    // a successful transaction, a Transfer of the artifact's own anchor
+    // token, to exactly the zero address. Anything else is not this event.
+    if (!artifact.result.succeeded) return null;
+    const transfer = artifact.result.evmTokenTransfers?.[burnIndex];
+    if (!transfer) return null;
+    if (transfer.to !== EVM_ZERO_ADDRESS) return null;
+    if (transfer.token !== artifact.provenance.projectAnchor) return null;
+    return {
+      eventKind,
+      researchJobId,
+      signature: artifact.result.signature,
+      slot: artifact.provenance.slot,
+      mint: transfer.token,
+      sourceAccount: transfer.from,
+      amountRaw: transfer.amountRaw,
+      decimals: null,
+      instructionType: "Transfer",
+      canonicalUri: artifact.canonicalUri,
+      rawResponseHash: artifact.provenance.rawResponseHash,
+      artifactHash: artifact.provenance.artifactHash,
+    };
+  }
   const burn: BurnInstructionRef | undefined = artifact.result.burns[burnIndex];
   if (!burn) return null;
   return {
+    eventKind,
     researchJobId,
     signature: artifact.result.signature,
     slot: artifact.provenance.slot,
@@ -269,6 +308,16 @@ export function anchorBurnRef(
     rawResponseHash: artifact.provenance.rawResponseHash,
     artifactHash: artifact.provenance.artifactHash,
   };
+}
+
+// A TOKEN_SUPPLY read pinned to an explicit block: its canonical URI names
+// the block, and the observation sits exactly at it. A head read (no
+// selector) is never one, so no Solana reading and no existing EVM reading
+// can satisfy this.
+export function isExplicitBlockSupplyRead(artifact: OnchainArtifact): boolean {
+  if (artifact.result.kind !== "TOKEN_SUPPLY") return false;
+  const parsed = parseCanonicalOnchainUri(artifact.canonicalUri);
+  return parsed !== null && parsed.block !== null && parsed.block === artifact.provenance.slot;
 }
 
 // ELIGIBILITY, as its own step. Returns the candidates that may take part
@@ -307,9 +356,15 @@ export function filterTemporalSupplyEligibility(input: {
       excluded.push({ index, reason: "STANDALONE_OBSERVATION_NOT_ELIGIBLE" });
       continue;
     }
-    if (researchJobId === input.currentResearchJobId) {
+    if (researchJobId === input.currentResearchJobId && !isExplicitBlockSupplyRead(artifact)) {
       // t0 must come from a PRIOR job. An earlier reading inside this same
       // job is not a historical observation; it is this run observing twice.
+      //
+      // ONE EXCEPTION (EVM V1, Founder-approved): a reading this Research
+      // took AT AN EXPLICIT HISTORICAL BLOCK is an observation of the past,
+      // not a second look at the present — it is positioned by the block it
+      // names, and the ordinary strictly-before-the-event rule below still
+      // decides whether it may serve.
       excluded.push({ index, reason: "HISTORICAL_OBSERVATION_NOT_PRIOR_JOB" });
       continue;
     }
@@ -412,8 +467,19 @@ export function selectEventAnchoredSupplyInterval(
   if (!isTransaction(eventArtifact)) {
     return { selected: false, reason: "INVALID_EVENT", excluded: none };
   }
-  const burn: BurnInstructionRef | undefined = eventArtifact.result.burns[input.event.burnIndex];
-  if (!burn || typeof burn.sourceAccount !== "string" || burn.sourceAccount.length === 0) {
+  // The same resolution every B2 layer uses, so a BURN reads exactly as it
+  // did and a ZERO_ADDRESS_TRANSFER is admitted on the same terms.
+  const eventRef = anchorBurnRef(
+    eventArtifact,
+    input.event.burnIndex,
+    input.currentResearchJobId,
+    input.event.eventKind ?? "BURN",
+  );
+  if (
+    eventRef === null ||
+    typeof eventRef.sourceAccount !== "string" ||
+    eventRef.sourceAccount.length === 0
+  ) {
     return { selected: false, reason: "INVALID_EVENT", excluded: none };
   }
   const eventSlot = eventArtifact.provenance.slot;
@@ -424,7 +490,7 @@ export function selectEventAnchoredSupplyInterval(
     return { selected: false, reason: "EVENT_NOT_CURRENT_JOB", excluded: none };
   }
   if (
-    burn.mint !== input.currentProjectAnchor ||
+    eventRef.mint !== input.currentProjectAnchor ||
     eventArtifact.provenance.projectAnchor !== input.currentProjectAnchor
   ) {
     return { selected: false, reason: "EVENT_MINT_MISMATCH", excluded: none };
@@ -495,7 +561,7 @@ export function selectEventAnchoredSupplyInterval(
       // reading must be able to say so.
       historical: supplyRef(t0, chosen.selected.researchJobId as string),
       current: supplyRef(t1, input.currentResearchJobId),
-      event: anchorBurnRef(eventArtifact, input.event.burnIndex, input.currentResearchJobId)!,
+      event: eventRef,
       delta: delta.delta,
       candidatesConsidered: input.historical.length,
       eligibleCandidates: eligible.length,

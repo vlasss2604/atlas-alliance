@@ -131,7 +131,10 @@ export type NodeQualification =
   | "SUPPLY_REDUCTION_NOT_ESTABLISHED"
   | "NET_SUPPLY_CHANGE_NOT_ESTABLISHED"
   | "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"
-  | "CONFLICTING_SUPPLY_DELTA";
+  | "CONFLICTING_SUPPLY_DELTA"
+  // EVM V1 — the zero-address-anchored measured decrease: a genuine basis
+  // for partial support, exactly as NET_SUPPLY_CHANGE_NOT_ATTRIBUTED is.
+  | "ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED";
 
 // EVERY code S5 can attach to a PARTIALLY_SUPPORTED result, and nothing
 // else. The step-2 invariant in assembleMechanism reads "a partial result
@@ -150,6 +153,7 @@ const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
   "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",
   "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED",
   "CONFLICTING_SUPPLY_DELTA",
+  "ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED",
 ]);
 
 export interface Provenance {

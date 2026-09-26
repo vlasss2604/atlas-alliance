@@ -7,9 +7,13 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-23 (HTML entities decoded in
-  normalizedText, on the final tree): **5274 passing, 4 skipped, 4 failing**
-  (255 files, ~31 min). `first-real-run-stage2` #17 has failed once under load and
+- Full suite, last verified 2026-09-27 (EVM V1 ZERO_ADDRESS_TRANSFER):
+  **5328 passing, 4 skipped, 6 failing** (258 files, ~57 min). The 6: the
+  four standing failures below; `evidence-environment-seam-v1` L, a
+  URI-parse pin re-pointed after the run (the file then passes, 26/26);
+  and `adversarial-core-round6-metamorphic-db-v1` F8a, which hit the 30 s
+  test timeout under load — it takes 29.0 s alone on a clean `39e8132` and
+  29.4 s on this tree, and passes alone. `first-real-run-stage2` #17 has failed once under load and
   passes in isolation. The four standing failures reproduce on a clean `06af2aa`:
   the two seed-count pins below, the renderer one, and
   `gates-owner-alpha` D (pins `uniswap` as non-allowlisted; it was added to
@@ -3002,9 +3006,14 @@ null artifact id, did not come from it.)
 environments, declared in the code-owned table in
 `engine/onchain-environment.ts`: `solana/mainnet` (implementation #1, the full
 intent set) and `ethereum/mainnet` (implementation #2,
-`providers/onchain-evm.ts`, **TOKEN_SUPPLY only** — `eth_chainId` must be 1,
-finalized block by tag, `totalSupply()`/`decimals()` pinned to that block,
-BigInt decoding; no balances, logs, receipts, transfers, proxies or burns).
+`providers/onchain-evm.ts`, **TOKEN_SUPPLY and TRANSACTION_DETAIL** —
+`eth_chainId` must be 1; `totalSupply()`/`decimals()` at the finalized block,
+or at an explicit finalized block when the intent names one (URI
+`…/supply?block=N`; archive state required); a receipt for a named
+transaction hash, finalized and canonical, reduced to its status and the
+confirmed token's ERC-20 Transfer logs; BigInt decoding; no balances, no
+`eth_getLogs`, no proxies, no burns. EVM V1 adds the ZERO_ADDRESS_TRANSFER
+fact kind — see CORE_RULES and CURRENT_TASK).
 The retriever registry (`providers/onchain-retriever.ts`) is keyed by
 `(chain, network)` and resolves that key only, with no cross-chain fallback.
 `SUPPORTED_CHAINS` still admits six other EVM chains **for identity only**:

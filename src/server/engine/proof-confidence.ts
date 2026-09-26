@@ -149,6 +149,11 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // CONFLICTING_SUPPLY_DELTA: the record contradicts itself about the
   // measurement. Nothing about that footing is strong.
   CONFLICTING_SUPPLY_DELTA: CONFIDENCE_BANDS.LIMITED,
+  // EVM V1 — the zero-address-anchored counterparts of the two B2 codes
+  // above, at the same missing-structure band: a measured decrease around a
+  // transfer is not a burn and is not attributed, so nothing here is strong.
+  ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED: CONFIDENCE_BANDS.LIMITED,
+  ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED: CONFIDENCE_BANDS.LIMITED,
   // Exclusion-shaped absence too (see ALL_EVIDENCE_EXCLUDED): the
   // current-state rows offered were all undated or otherwise inadmissible.
   MISSING_CURRENT_STATE: CONFIDENCE_BANDS.LOW,

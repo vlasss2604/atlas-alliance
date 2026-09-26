@@ -1,10 +1,10 @@
 import { isComparableSupplyObservation } from "./onchain-supply-delta";
-import type {
-  AnchorBurnEvent,
-  PersistedObservation,
+import {
+  anchorBurnRef,
+  type AnchorBurnEvent,
+  type PersistedObservation,
 } from "./onchain-event-anchored-supply-interval";
 import type {
-  BurnInstructionRef,
   OnchainArtifact,
   TokenSupplyResult,
   TransactionDetailResult,
@@ -128,7 +128,14 @@ function isTransaction(
 function usableEventSlot(event: AnchorBurnEvent, input: PostEventSupplyPlanInput): number | null {
   const artifact = event.artifact;
   if (!isTransaction(artifact)) return null;
-  const burn: BurnInstructionRef | undefined = artifact.result.burns[event.burnIndex];
+  // Resolved exactly as the selector resolves it (a BURN reads the decoded
+  // burn; a ZERO_ADDRESS_TRANSFER the anchor token's transfer to 0x0).
+  const burn = anchorBurnRef(
+    artifact,
+    event.burnIndex,
+    input.currentResearchJobId,
+    event.eventKind ?? "BURN",
+  );
   if (!burn || typeof burn.sourceAccount !== "string" || burn.sourceAccount.length === 0) {
     return null;
   }

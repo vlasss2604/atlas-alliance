@@ -497,4 +497,8 @@ export const onchainFactKind = pgEnum("onchain_fact_kind", [
   // evidence_onchain_artifact_inputs, and evidence.onchain_artifact_id is
   // NULL for such a row because no single artifact established it.
   "TOTAL_SUPPLY_DELTA",
+  // EVM V1 — a successful ERC-20 Transfer of the confirmed project token to
+  // the zero address. Not a burn and not mechanism execution; an interval
+  // anchor only (onchain-facts.ts). Added by migration 0057.
+  "ZERO_ADDRESS_TRANSFER",
 ]);

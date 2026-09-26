@@ -1,4 +1,8 @@
-import { isGrossSupplyReductionFact, type OnchainFactKind } from "./onchain-facts";
+import {
+  isGrossSupplyReductionFact,
+  isSupplyIntervalAnchorOnlyFact,
+  type OnchainFactKind,
+} from "./onchain-facts";
 
 // WHAT THIS RESEARCH ESTABLISHED ABOUT NET SUPPLY, AND WHERE IT STOPS.
 //
@@ -20,6 +24,12 @@ import { isGrossSupplyReductionFact, type OnchainFactKind } from "./onchain-fact
 // drifted up" become "the burn was a lie". So without a typed BURN among the
 // establishing evidence this function says only that no gross reduction was
 // established, exactly as it did before deltas existed.
+//
+// ONE BOUNDED EXCEPTION (EVM V1, Founder-approved): a ZERO_ADDRESS_TRANSFER
+// that passed every quality gate may ANCHOR the interval in place of a burn.
+// It is not a gross reduction and is never treated as one; its outcomes are
+// its own two kinds, and the strongest says a decrease was measured around
+// the transfer and attributes it to nothing.
 //
 // DIRECTION IS READ FROM THE RELATIONSHIP, NOT FROM TEXT. A delta filed at
 // NET_EFFECT carries SUPPORTS when the measured change was a decrease and
@@ -54,7 +64,14 @@ export type NetSupplyEffect =
   | { kind: "MEASURED_NOT_REDUCED"; deltaEvidenceIds: readonly string[] }
   // Two measured intervals disagree about the direction. Never averaged,
   // never resolved by picking the favourable one.
-  | { kind: "CONFLICTING_INTERVALS"; deltaEvidenceIds: readonly string[] };
+  | { kind: "CONFLICTING_INTERVALS"; deltaEvidenceIds: readonly string[] }
+  // EVM V1 — NO burn is established, a ZERO_ADDRESS_TRANSFER anchors the
+  // interval, and total supply decreased across it. The decrease is
+  // measured; neither destruction by that transfer nor any cause is.
+  | { kind: "ZERO_ADDRESS_INTERVAL_DECREASE"; deltaEvidenceIds: readonly string[] }
+  // The same anchor, and total supply did NOT decrease across the interval.
+  // Contradicts a net-reduction claim; says nothing about the transfer.
+  | { kind: "ZERO_ADDRESS_INTERVAL_NOT_REDUCED"; deltaEvidenceIds: readonly string[] };
 
 const isDelta = (row: SupplyEffectRow): boolean => row.onchainFactKind === "TOTAL_SUPPLY_DELTA";
 
@@ -63,17 +80,40 @@ export function evaluateNetSupplyEffect(input: {
   establishing: readonly SupplyEffectRow[];
   // Rows eligible to bear a contradiction: CONTRADICTS + DIRECT + core.
   contradictionCapable: readonly SupplyEffectRow[];
+  // EVM V1 — rows of an anchor-only kind (ZERO_ADDRESS_TRANSFER) that passed
+  // every quality gate and were withheld from establishment by their kind.
+  // They never establish anything; they only say an interval is anchored.
+  // Optional, so every existing caller is unchanged.
+  intervalAnchors?: readonly SupplyEffectRow[];
 }): NetSupplyEffect {
-  // The burn gate, asked first and asked of the ESTABLISHING set: a delta is
-  // interpreted only alongside a gross reduction this Research established.
-  if (!input.establishing.some((r) => isGrossSupplyReductionFact(r.onchainFactKind))) {
-    return { kind: "NO_GROSS_REDUCTION" };
-  }
-
   const decreased = input.establishing.filter(isDelta).map((r) => r.id);
   const notReduced = input.contradictionCapable
     .filter((r) => isDelta(r) && r.relationship === "CONTRADICTS")
     .map((r) => r.id);
+
+  // The burn gate, asked first and asked of the ESTABLISHING set: a delta is
+  // interpreted only alongside a gross reduction this Research established.
+  if (!input.establishing.some((r) => isGrossSupplyReductionFact(r.onchainFactKind))) {
+    // No burn. A zero-address transfer can anchor the interval instead, and
+    // then the outcome says only what was measured around it — its own
+    // kinds, never the burn outcomes, so no burn wording can follow from it.
+    // Without such an anchor, or without a measured interval, the answer is
+    // exactly what it always was.
+    const anchored = (input.intervalAnchors ?? []).some((r) =>
+      isSupplyIntervalAnchorOnlyFact(r.onchainFactKind),
+    );
+    if (!anchored) return { kind: "NO_GROSS_REDUCTION" };
+    if (decreased.length > 0 && notReduced.length > 0) {
+      return { kind: "CONFLICTING_INTERVALS", deltaEvidenceIds: [...decreased, ...notReduced].sort() };
+    }
+    if (notReduced.length > 0) {
+      return { kind: "ZERO_ADDRESS_INTERVAL_NOT_REDUCED", deltaEvidenceIds: [...notReduced].sort() };
+    }
+    if (decreased.length > 0) {
+      return { kind: "ZERO_ADDRESS_INTERVAL_DECREASE", deltaEvidenceIds: [...decreased].sort() };
+    }
+    return { kind: "NO_GROSS_REDUCTION" };
+  }
 
   // FAIL CLOSED ON DISAGREEMENT. One interval per Research is what the
   // materializer produces, and identity makes a recomputation idempotent — so
@@ -100,4 +140,5 @@ export const NET_SUPPLY_EFFECT_DOES_NOT_PROVE = [
   "an unchanged supply does NOT establish which issuance offset the burn",
   "no outcome here establishes circulating supply, which is not a chain value",
   "an absent interval is a limit on what was observed, never a statement about the token",
+  "a zero-address transfer is NOT a burn, and a decrease around it is NOT attributed to it",
 ] as const;

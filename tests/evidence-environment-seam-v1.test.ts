@@ -628,6 +628,8 @@ describe("canonical URI and binding — chain/network-qualified, unchanged for S
       subjectKind: "token",
       subject: EVM_ADDRESS,
       intentPath: "supply",
+      // A head read carries no explicit block selector (EVM V1).
+      block: null,
     });
   });
 

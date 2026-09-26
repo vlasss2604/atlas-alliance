@@ -634,6 +634,8 @@ describe("17..24. boundaries", () => {
       "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED",
       "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL",
       "CONFLICTING_SUPPLY_DELTA",
+      "ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED",
+      "ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED",
     ]) {
       expect(client, `${code} needs user-facing copy`).toContain(`${code}:`);
       expect(confidence, `${code} needs a confidence cap`).toContain(`${code}: CONFIDENCE_BANDS`);

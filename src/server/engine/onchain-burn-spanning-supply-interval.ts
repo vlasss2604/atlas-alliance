@@ -152,7 +152,12 @@ export function deriveBurnEventSpan(input: {
   let eventCount = 0;
   for (const event of input.events) {
     if (event.researchJobId !== input.currentResearchJobId) continue;
-    const ref = anchorBurnRef(event.artifact, event.burnIndex, input.currentResearchJobId);
+    const ref = anchorBurnRef(
+      event.artifact,
+      event.burnIndex,
+      input.currentResearchJobId,
+      event.eventKind ?? "BURN",
+    );
     if (ref === null) continue;
     if (!Number.isInteger(ref.slot) || ref.slot < 0) continue;
     if (

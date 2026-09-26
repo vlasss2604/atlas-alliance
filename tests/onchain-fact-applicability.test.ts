@@ -159,6 +159,8 @@ describe("applicability — the map is closed, tiny and typed", () => {
   it("TEST 3 + 4 + 5 + 6: no other kind can qualify supply reduction", () => {
     for (const kind of ONCHAIN_FACT_KINDS) {
       if (kind === "BURN") continue;
+      // EVM V1: the one other readable kind, asserted on its own below.
+      if (kind === "ZERO_ADDRESS_TRANSFER") continue;
       const r = reconcileNetEffect([executionRow(kind)]);
       // Not applicable, so not even visible to NET_EFFECT: it is refused
       // at the component gate, which is a REASONED exclusion rather than
@@ -171,6 +173,16 @@ describe("applicability — the map is closed, tiny and typed", () => {
       // be mistaken for a reduction that merely failed to net out.
       expect(r.reasonCodes, kind).not.toContain("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
     }
+  });
+
+  it("EVM V1: a zero-address transfer is READABLE by NET_EFFECT and still establishes nothing there", () => {
+    const r = reconcileNetEffect([executionRow("ZERO_ADDRESS_TRANSFER")]);
+    expect(onchainFactAppliesToComponent("ZERO_ADDRESS_TRANSFER", "NET_EFFECT")).toBe(true);
+    expect(r.supportingEvidenceIds).toHaveLength(0);
+    expect(r.excludedEvidence.map((x) => x.reason)).toEqual(["FACT_KIND_CANNOT_ESTABLISH"]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.reasonCodes).not.toContain("NET_SUPPLY_CHANGE_NOT_ESTABLISHED");
+    expect(r.reasonCodes).not.toContain("ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED");
   });
 
   it("the named boundaries, each on its own", () => {

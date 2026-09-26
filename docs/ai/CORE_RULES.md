@@ -111,6 +111,16 @@ willing to assert. Collapsing any two of these is the most common failure.
 - **Point-in-time balance ≠ mechanism execution.** A balance or an owner's
   token accounts say where tokens sit (DESTINATION), never that a mechanism
   is operating now. No chain observation establishes CURRENT_STATE.
+- **Zero-address transfer ≠ burn ≠ mechanism execution.** An ERC-20 Transfer
+  of the confirmed token to exactly 0x000…000 (successful receipt, emitted
+  by the confirmed contract) is ZERO_ADDRESS_TRANSFER: it establishes no
+  component. At NET_EFFECT it can only anchor a measured interval; a
+  decrease across it is PARTIALLY_SUPPORTED with its own code and is never
+  attributed to the transfer. A transfer to 0x…dEaD is a TOKEN_TRANSFER.
+- **Measured supply decrease around an event ≠ causal attribution.** Two
+  readings bound the interval; the delta is the net of everything in it.
+  A reading taken by this Research at an explicit historical block is
+  history and may be t0; a head reading of this Research never is.
 - **Proposal made ≠ proposal passed.** An official governance venue is not a
   decision; a post on it establishes what was proposed, never that governance
   approved it. `PROPOSED` ≠ `APPROVED` ≠ `ACTIVATED` ≠ `EXECUTING`.

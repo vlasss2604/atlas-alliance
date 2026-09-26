@@ -1,11 +1,15 @@
-import { and, desc, eq, inArray, isNotNull, lt, ne } from "drizzle-orm";
+import { and, desc, eq, inArray, isNotNull, like, lt, ne, or } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, onchainArtifacts, researchJobs } from "../db/schema";
 import { REAL_RESEARCH_ACQUISITION_ORIGINS } from "./research-acquisition-origin";
 import type { PersistedObservation } from "./onchain-event-anchored-supply-interval";
-import { buildCanonicalOnchainUri } from "./onchain-uri";
-import { brandOnchainArtifact } from "./providers/onchain-types";
+import {
+  buildCanonicalOnchainUri,
+  parseCanonicalOnchainUri,
+  pinnedOnchainUriPrefix,
+} from "./onchain-uri";
+import { brandOnchainArtifact, EVM_ZERO_ADDRESS } from "./providers/onchain-types";
 import type {
   BurnInstructionRef,
   OnchainArtifact,
@@ -14,7 +18,10 @@ import type {
   OnchainNetwork,
   TransactionDetailResult,
 } from "./providers/onchain-types";
-import type { AnchorBurnEvent } from "./onchain-event-anchored-supply-interval";
+import type {
+  AnchorBurnEvent,
+  AnchorEventKind,
+} from "./onchain-event-anchored-supply-interval";
 
 // HISTORICAL t0 CANDIDATE RETRIEVAL — rows, never a winner.
 //
@@ -121,17 +128,30 @@ export async function loadHistoricalSupplyCandidates(
   // is not an admitted Research-acquisition origin, is not a candidate and
   // is not returned. `inArray` over the allowlist is the positive form —
   // a future origin is excluded until it is added to the set.
+  // EXPLICIT-BLOCK READS (EVM V1). A read pinned to a named historical
+  // block has the same target plus a `?block=` selector, and is retrieved
+  // alongside head reads — including one THIS job took, because a pinned
+  // read observes the past rather than re-observing the present. Whether it
+  // may serve is still B2b2's rule (isExplicitBlockSupplyRead). A target
+  // with no pinned reads — every Solana one — returns exactly what it did.
+  // A LIKE prefix, with the pattern characters escaped so the target is
+  // matched literally.
+  const pinnedPrefix = pinnedOnchainUriPrefix(canonicalUri).replace(/[\\%_]/g, (c) => `\\${c}`);
+  const isPinned = like(onchainArtifacts.canonicalUri, `${pinnedPrefix}%`);
   const rows = await db
     .select({ artifact: onchainArtifacts })
     .from(onchainArtifacts)
     .innerJoin(researchJobs, eq(researchJobs.id, onchainArtifacts.researchJobId))
     .where(
       and(
-        eq(onchainArtifacts.canonicalUri, canonicalUri),
+        or(eq(onchainArtifacts.canonicalUri, canonicalUri), isPinned),
         lt(onchainArtifacts.slot, query.beforeSlot),
         eq(onchainArtifacts.originKind, "RESEARCH_JOB"),
         isNotNull(onchainArtifacts.researchJobId),
-        ne(onchainArtifacts.researchJobId, query.currentResearchJobId),
+        or(
+          ne(onchainArtifacts.researchJobId, query.currentResearchJobId),
+          and(eq(onchainArtifacts.researchJobId, query.currentResearchJobId), isPinned),
+        ),
         inArray(researchJobs.origin, [...REAL_RESEARCH_ACQUISITION_ORIGINS]),
       ),
     )
@@ -156,6 +176,9 @@ function toSupplyObservation(row: ArtifactRow): LoadedSupplyObservation | null {
   if (result === null) return null;
   if (row.researchJobId === null) return null;
   const supply = { kind: "TOKEN_SUPPLY" as const, ...result };
+  // The explicit block, when the stored target names one, so the rebuilt
+  // intent is the intent that was issued.
+  const block = parseCanonicalOnchainUri(row.canonicalUri)?.block ?? null;
   return {
     onchainArtifactId: row.id,
     observation: {
@@ -167,6 +190,7 @@ function toSupplyObservation(row: ArtifactRow): LoadedSupplyObservation | null {
           projectAnchor: row.projectAnchor,
           subjectKind: "token",
           subject: row.subject,
+          ...(block === null ? {} : { block }),
         },
         canonicalUri: row.canonicalUri,
         result: supply,
@@ -259,6 +283,16 @@ function readTransactionResult(normalized: unknown): TransactionDetailResult | n
   if (typeof row.signature !== "string" || row.signature.length === 0) return null;
   if (!Number.isInteger(row.slot)) return null;
   if (!Array.isArray(row.burns)) return null;
+  if (row.evmTokenTransfers !== undefined) {
+    if (!Array.isArray(row.evmTokenTransfers)) return null;
+    for (const transfer of row.evmTokenTransfers) {
+      if (typeof transfer !== "object" || transfer === null) return null;
+      const t = transfer as Record<string, unknown>;
+      for (const key of ["token", "from", "to", "amountRaw"]) {
+        if (typeof t[key] !== "string" || (t[key] as string).length === 0) return null;
+      }
+    }
+  }
   for (const burn of row.burns) {
     if (typeof burn !== "object" || burn === null) return null;
     const b = burn as Record<string, unknown>;
@@ -280,6 +314,12 @@ function readTransactionResult(normalized: unknown): TransactionDetailResult | n
 // It emits ONE candidate per decoded burn of the ACTIVE mint, and ranks
 // none of them. Which event an interval is anchored on is the pure layer's
 // decision; which slot bounds acquisition coverage is the gate's.
+//
+// EVM V1: a ZERO_ADDRESS_TRANSFER fact makes its artifact an event source
+// the same way, and emits one ZERO_ADDRESS_TRANSFER candidate per Transfer
+// of the active token to the zero address. Each kind is emitted only from an
+// artifact a fact OF THAT KIND points at, so a BURN-only job loads exactly
+// the events it always did.
 export async function loadCurrentJobBurnEvents(
   db: Database | Transaction,
   query: {
@@ -288,18 +328,23 @@ export async function loadCurrentJobBurnEvents(
   },
 ): Promise<AnchorBurnEvent[]> {
   const established = await db
-    .selectDistinct({ artifactId: evidence.onchainArtifactId })
+    .selectDistinct({ artifactId: evidence.onchainArtifactId, kind: evidence.onchainFactKind })
     .from(evidence)
     .where(
       and(
         eq(evidence.researchJobId, query.currentResearchJobId),
-        eq(evidence.onchainFactKind, "BURN"),
+        inArray(evidence.onchainFactKind, ["BURN", "ZERO_ADDRESS_TRANSFER"]),
         isNotNull(evidence.onchainArtifactId),
       ),
     );
-  const artifactIds = established
-    .map((r) => r.artifactId)
-    .filter((id): id is string => id !== null);
+  const kindsByArtifact = new Map<string, Set<AnchorEventKind>>();
+  for (const r of established) {
+    if (r.artifactId === null) continue;
+    const kinds = kindsByArtifact.get(r.artifactId) ?? new Set<AnchorEventKind>();
+    kinds.add(r.kind === "ZERO_ADDRESS_TRANSFER" ? "ZERO_ADDRESS_TRANSFER" : "BURN");
+    kindsByArtifact.set(r.artifactId, kinds);
+  }
+  const artifactIds = [...kindsByArtifact.keys()];
   if (artifactIds.length === 0) return [];
 
   const rows = await db
@@ -332,10 +377,25 @@ export async function loadCurrentJobBurnEvents(
       normalizedText: JSON.stringify(result),
       provenance: provenanceOf(row),
     });
-    result.burns.forEach((burn: BurnInstructionRef, burnIndex: number) => {
-      if (burn.mint !== query.projectAnchor) return;
-      out.push({ artifact, burnIndex, researchJobId: row.researchJobId });
-    });
+    const kinds = kindsByArtifact.get(row.id);
+    if (kinds?.has("BURN")) {
+      result.burns.forEach((burn: BurnInstructionRef, burnIndex: number) => {
+        if (burn.mint !== query.projectAnchor) return;
+        out.push({ artifact, burnIndex, researchJobId: row.researchJobId });
+      });
+    }
+    if (kinds?.has("ZERO_ADDRESS_TRANSFER") && result.succeeded) {
+      (result.evmTokenTransfers ?? []).forEach((transfer, transferIndex) => {
+        if (transfer.token !== query.projectAnchor) return;
+        if (transfer.to !== EVM_ZERO_ADDRESS) return;
+        out.push({
+          artifact,
+          burnIndex: transferIndex,
+          researchJobId: row.researchJobId,
+          eventKind: "ZERO_ADDRESS_TRANSFER",
+        });
+      });
+    }
   }
   return out;
 }

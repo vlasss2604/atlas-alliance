@@ -77,6 +77,14 @@ export interface OnchainIntent {
   subject: string;
   // Bounded, intent-specific parameters. Never a free-form RPC payload.
   limit?: number;
+  // AN EXPLICIT CHAIN POSITION, for a historical read. Absent means "the
+  // finalized head", which is what every read meant before this field
+  // existed, and an intent without it keeps its canonical URI byte for byte.
+  // Present only on an EVM TOKEN_SUPPLY read at a named block; the adapter
+  // refuses it anywhere else and refuses a block that is not finalized.
+  // Part of the canonical target, so two reads at two blocks are two
+  // acquisition targets rather than one deduplicated read.
+  block?: number;
 }
 
 // ---- typed results ---------------------------------------------------
@@ -369,6 +377,35 @@ export interface TransactionDetailResult {
   rawInstructions?: RawInstructionRef[];
   preTokenBalances: TokenBalanceRef[];
   postTokenBalances: TokenBalanceRef[];
+  // EVM ONLY: the ERC-20 Transfer logs the transaction's receipt carries
+  // FROM THE CONFIRMED PROJECT-TOKEN CONTRACT, decoded and never
+  // interpreted. A log of any other contract is not in this list at all.
+  //
+  // OPTIONAL, AND THE DIFFERENCE MATTERS, exactly as for rawInstructions:
+  // absent means a Solana transaction or an artifact stored before this
+  // field existed; empty means an EVM receipt was read and carried no such
+  // log. Neither is a finding that nothing moved.
+  evmTokenTransfers?: EvmTokenTransferRef[];
+}
+
+// The EVM zero address, exactly. Only this address makes a Transfer a
+// ZERO_ADDRESS_TRANSFER; conventional "dead" addresses are not it.
+export const EVM_ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+// ONE ERC-20 Transfer(address,address,uint256) log, as the receipt reported
+// it. A movement, never a destruction: a transfer to the zero address is
+// still a transfer, and whether the token contract destroyed anything is not
+// something this log says.
+export interface EvmTokenTransferRef {
+  // Position of the log in the block, as the node reported it.
+  logIndex: number;
+  // The emitting contract — always the project anchor, as confirmed.
+  token: string;
+  // Lowercase 20-byte addresses decoded from the indexed topics.
+  from: string;
+  to: string;
+  // uint256, as an integer string. Never a number.
+  amountRaw: string;
 }
 
 export type OnchainResult =

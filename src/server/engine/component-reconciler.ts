@@ -2,6 +2,7 @@ import {
   onchainFactAppliesToComponent,
   onchainFactCanEstablishComponent,
   onchainFactCanEstablishSupplyEffect,
+  isSupplyIntervalAnchorOnlyFact,
   type OnchainFactKind,
 } from "./onchain-facts";
 import { evaluateNetSupplyEffect, type NetSupplyEffect } from "./net-supply-effect";
@@ -193,7 +194,21 @@ export type ResultReasonCode =
   | "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"
   // CONFLICTING_SUPPLY_DELTA: two measured intervals disagree about the
   // direction. Never averaged, never resolved in the favourable direction.
-  | "CONFLICTING_SUPPLY_DELTA";
+  | "CONFLICTING_SUPPLY_DELTA"
+  // EVM V1 — the interval is anchored on a ZERO_ADDRESS_TRANSFER, not a burn.
+  //
+  // ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED: total supply
+  // decreased across the interval containing a zero-address transfer of the
+  // project token. The decrease is measured; that the transfer destroyed
+  // anything, that it caused the decrease, and that the claimed mechanism
+  // executed are all NOT established. Caps at PARTIALLY_SUPPORTED, like its
+  // burn-anchored counterpart, and never clears.
+  | "ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED"
+  // ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED: total supply did not decrease
+  // across that interval. Contradicts a net-reduction claim. A separate code
+  // from NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL only because that one's reader
+  // copy states that tokens were destroyed, which here is not established.
+  | "ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED";
 
 // §11.1 — the row shape S5 reads. A deliberately narrow projection of
 // `evidence` (proof.ts) — only what this file's rules actually use.
@@ -908,6 +923,9 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // --- Step 5: establishing / partial / contradiction-capable classification
   const fullEstablishing: EvidenceRow[] = [];
   const partialEstablishing: EvidenceRow[] = [];
+  // EVM V1 — zero-address transfers that passed every gate, for the typed
+  // supply evaluation only (never establishing, never supporting).
+  const supplyIntervalAnchors: EvidenceRow[] = [];
   const contradictionCapable: EvidenceRow[] = [];
   // MEDIUM-2 fix: a DIRECT CONTRADICTS row's final disposition (excluded
   // vs. actively contradiction-bearing) cannot be decided until AFTER
@@ -953,6 +971,16 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     // nothing there. Every other kind keeps B1/B2 as it was.
     if (row.relationship === "SUPPORTS" && !onchainFactMayEstablish(row.onchainFactKind, item.component)) {
       excluded.set(row.id, "FACT_KIND_CANNOT_ESTABLISH");
+      // EVM V1: a zero-address transfer that got this far passed every
+      // quality gate. It establishes nothing, and it may still ANCHOR the
+      // supply interval for the typed evaluation below — nothing more.
+      if (
+        requiresSupplyEffectQualification(item.component) &&
+        isSupplyIntervalAnchorOnlyFact(row.onchainFactKind) &&
+        row.directness === "DIRECT"
+      ) {
+        supplyIntervalAnchors.push(row);
+      }
       continue;
     }
     if (row.relationship === "SUPPORTS" || row.relationship === "CONTRADICTS") {
@@ -1020,10 +1048,14 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     ? evaluateNetSupplyEffect({
         establishing: [...fullEstablishing, ...partialEstablishing],
         contradictionCapable,
+        intervalAnchors: supplyIntervalAnchors,
       })
     : null;
   const supplyContradictingIds = new Set(
-    supplyEffect?.kind === "MEASURED_NOT_REDUCED" ? supplyEffect.deltaEvidenceIds : [],
+    supplyEffect?.kind === "MEASURED_NOT_REDUCED" ||
+      supplyEffect?.kind === "ZERO_ADDRESS_INTERVAL_NOT_REDUCED"
+      ? supplyEffect.deltaEvidenceIds
+      : [],
   );
 
   // MEDIUM-2 fix, continued: finalize the deferred CONTRADICTS disposition
@@ -1092,7 +1124,13 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // The burn gate lives inside evaluateNetSupplyEffect, so this outcome is
   // unreachable without a typed gross reduction among the establishing rows —
   // and therefore `establishing` below is non-empty by construction.
-  if (supplyEffect?.kind === "MEASURED_NOT_REDUCED") {
+  // The zero-address-anchored interval follows the same path with its own
+  // code; its supporting set holds no burn (there is none), only whatever
+  // else was established.
+  if (
+    supplyEffect?.kind === "MEASURED_NOT_REDUCED" ||
+    supplyEffect?.kind === "ZERO_ADDRESS_INTERVAL_NOT_REDUCED"
+  ) {
     const supportingRows = [...fullEstablishing, ...partialEstablishing].sort(compareDeterministic);
     const tokenStateMentions = new Set<string>();
     for (const row of supportingRows) {
@@ -1107,7 +1145,11 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       step: item.step,
       component: item.component,
       status: "CONTRADICTED",
-      reasonCodes: ["NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"],
+      reasonCodes: [
+        supplyEffect.kind === "MEASURED_NOT_REDUCED"
+          ? "NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL"
+          : "ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED",
+      ],
       supportingEvidenceIds: supportingRows.map((r) => r.id),
       contradictingEvidenceIds: [...supplyEffect.deltaEvidenceIds],
       excludedEvidence,
@@ -1252,6 +1294,10 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
           ? // Supply fell across an interval containing the burn. The
             // measurement is established; the cause is not observed at all.
             "NET_SUPPLY_CHANGE_NOT_ATTRIBUTED"
+          : supplyEffect.kind === "ZERO_ADDRESS_INTERVAL_DECREASE"
+            ? // Supply fell across an interval containing a zero-address
+              // transfer. Measured; nothing destroyed or attributed.
+              "ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED"
           : supplyEffect.kind === "CONFLICTING_INTERVALS"
             ? "CONFLICTING_SUPPLY_DELTA"
             : // A burn happened. What did NOT happen is an observation of

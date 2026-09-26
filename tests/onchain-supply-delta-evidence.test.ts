@@ -777,10 +777,10 @@ describe("20/22..26. boundaries", () => {
     expect(GROSS_SUPPLY_REDUCTION_FACT_KINDS).not.toContain("TOTAL_SUPPLY_DELTA");
   });
 
-  it("25. BURN -> NET_EFFECT is still the only applicability pair", async () => {
+  it("25. BURN -> NET_EFFECT, plus the one EVM V1 anchor pair, are the only applicability pairs", async () => {
     expect(applicableComponentsForFactKind("TOTAL_SUPPLY_DELTA")).toEqual([]);
     expect(applicableComponentsForFactKind("BURN")).toEqual(["NET_EFFECT"]);
-    expect(applicableFactKindsForComponent("NET_EFFECT")).toEqual(["BURN"]);
+    expect(applicableFactKindsForComponent("NET_EFFECT")).toEqual(["BURN", "ZERO_ADDRESS_TRANSFER"]);
     const { readFile } = await import("node:fs/promises");
     const facts = await readFile("src/server/engine/onchain-facts.ts", "utf-8");
     expect(facts).toContain('BURN: ["NET_EFFECT"]');

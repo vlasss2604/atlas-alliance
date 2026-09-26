@@ -1156,6 +1156,13 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
     "Tokens were destroyed, and the total supply was not lower at the end of the measured period than at the start — so at least as much was issued over that period as was destroyed.",
   CONFLICTING_SUPPLY_DELTA:
     "The supply measurements recorded for this period disagree about which way the total moved, so neither was used.",
+  // EVM V1 — the interval is anchored on a transfer of the token to the zero
+  // address. Neither sentence says tokens were destroyed: the transfer is
+  // stated as a transfer, and the measured change is stated as measured.
+  ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED:
+    "A transfer of the project token to the zero address was observed, and the total supply was lower at the end of the measured period than at the start — but the evidence does not establish that this transfer brought it down or that the claimed mechanism executed.",
+  ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED:
+    "A transfer of the project token to the zero address was observed, and the total supply was not lower at the end of the measured period than at the start.",
 };
 
 // The FIRST recognised code wins. `reasonCodes` arrives in the order S5

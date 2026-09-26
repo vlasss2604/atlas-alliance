@@ -382,6 +382,8 @@ describe("canonical TOKEN_SUPPLY — one semantic shape for both chains", () => 
       subjectKind: "token",
       subject: TOKEN,
       intentPath: "supply",
+      // A head read carries no explicit block selector.
+      block: null,
     });
     expect(artifact.intent).toEqual(supplyIntent());
     expect(artifact.provenance).toMatchObject({
@@ -520,24 +522,30 @@ describe("binding and finality — the generic rules stay authoritative", () => 
 // ---------------------------------------------------------------------
 
 describe("Q. the closed primitive — no other EVM read exists", () => {
-  it("supports() and retrieve() refuse every intent kind but TOKEN_SUPPLY", async () => {
+  it("supports() and retrieve() refuse every intent kind but TOKEN_SUPPLY and TRANSACTION_DETAIL", async () => {
+    // EVM V1 (Founder-approved) added exactly one primitive: the receipt of
+    // a transaction. Every other kind is still refused before any call.
     const { adapter, calls } = evmAdapter();
     for (const kind of [
       "ACCOUNT_INFO",
       "TOKEN_ACCOUNT_BALANCE",
       "SIGNATURES_FOR_ADDRESS",
-      "TRANSACTION_DETAIL",
       "TOKEN_ACCOUNTS_BY_OWNER",
     ] as const) {
       expect(adapter.supports("ethereum", "mainnet", kind), kind).toBe(false);
       await expect(
-        adapter.retrieve(supplyIntent({ kind, subjectKind: kind === "TRANSACTION_DETAIL" ? "tx" : "account" })),
-      ).rejects.toThrow(/TOKEN_SUPPLY only/);
+        adapter.retrieve(supplyIntent({ kind, subjectKind: "account" })),
+      ).rejects.toThrow(/TOKEN_SUPPLY and TRANSACTION_DETAIL only/);
     }
+    expect(adapter.supports("ethereum", "mainnet", "TRANSACTION_DETAIL")).toBe(true);
+    // A transaction read against a non-transaction subject is refused too.
+    await expect(
+      adapter.retrieve(supplyIntent({ kind: "TRANSACTION_DETAIL", subjectKind: "account" })),
+    ).rejects.toThrow(/TOKEN_SUPPLY and TRANSACTION_DETAIL only/);
     expect(calls).toHaveLength(0);
   });
 
-  it("the adapter's source carries exactly two selectors and no balance, log, receipt, transfer, event, proxy or burn mechanics", () => {
+  it("the adapter's source carries exactly two selectors and no balance, log discovery, proxy or burn mechanics", () => {
     const raw = readFileSync("src/server/engine/providers/onchain-evm.ts", "utf-8");
     const code = raw
       .split("\n")
@@ -546,30 +554,36 @@ describe("Q. the closed primitive — no other EVM read exists", () => {
     const selectors = new Set(code.match(/0x[0-9a-f]{8}\b/g) ?? []);
     expect([...selectors].sort()).toEqual(["0x18160ddd", "0x313ce567"]);
     const methods = new Set(code.match(/eth_[a-zA-Z]+/g) ?? []);
-    expect([...methods].sort()).toEqual(["eth_call", "eth_chainId", "eth_getBlockByNumber"]);
+    // EVM V1: the receipt is the one added method. Logs are read only from a
+    // receipt the caller named — never discovered.
+    expect([...methods].sort()).toEqual([
+      "eth_call",
+      "eth_chainId",
+      "eth_getBlockByNumber",
+      "eth_getTransactionReceipt",
+    ]);
     for (const banned of [
       "balanceOf",
       "0x70a08231",
       "eth_getLogs",
       "getLogs",
-      "eth_getTransactionReceipt",
-      "Receipt",
       "eth_getTransactionByHash",
-      "Transfer(",
       "0xa9059cbb",
-      "topics",
       "implementation",
       "eip1967",
       "1967",
-      "burn",
       "Burn",
       "0x000000000000000000000000000000000000dEaD",
-      "archive",
+      "dEaD",
       "eth_getStorageAt",
       "eth_getCode",
     ]) {
       expect(code, banned).not.toContain(banned);
     }
+    // "burn" appears only as the empty Solana-shaped field of a transaction
+    // result: nothing here decodes, infers or names a burn.
+    expect(code.match(/burn/gi) ?? []).toEqual(["burn"]);
+    expect(code).toContain("burns: [],");
     // No generic contract-call surface: the only place a selector reaches
     // eth_call is a literal constant, never a parameter.
     expect(code).not.toMatch(/data:\s*intent\./);

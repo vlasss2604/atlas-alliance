@@ -5,7 +5,10 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Database, Transaction } from "../db/client";
 import { evidence, evidenceOnchainArtifactInputs, onchainArtifacts } from "../db/schema";
 import { ONCHAIN_DOES_NOT_PROVE } from "./onchain-facts";
-import type { PersistedObservation } from "./onchain-event-anchored-supply-interval";
+import {
+  isExplicitBlockSupplyRead,
+  type PersistedObservation,
+} from "./onchain-event-anchored-supply-interval";
 import { deriveTotalSupplyDelta, type TotalSupplyDelta } from "./onchain-supply-delta";
 import type { OnchainArtifact, TokenSupplyResult } from "./providers/onchain-types";
 
@@ -197,10 +200,13 @@ export function totalSupplyDeltaStatement(delta: TotalSupplyDelta): string {
       : delta.direction === "DECREASED"
         ? `changed by ${delta.deltaRaw} (decrease)`
         : `changed by ${delta.deltaRaw} (increase)`;
+  // The chain's own word for its position: a slot on Solana, a block on EVM.
+  // A Solana statement is byte-for-byte what it always was.
+  const position = delta.chain === "solana" ? "slot" : "block";
   return (
-    `On-chain total supply of token ${delta.mint} ${movement} between slot ${delta.from.slot} and ` +
-    `slot ${delta.to.slot} (raw units, ${delta.decimals} decimals), a span of ${delta.slotSpan} slots, ` +
-    `computed from two deterministic total-supply observations.`
+    `On-chain total supply of token ${delta.mint} ${movement} between ${position} ${delta.from.slot} and ` +
+    `${position} ${delta.to.slot} (raw units, ${delta.decimals} decimals), a span of ${delta.slotSpan} ` +
+    `${position}s, computed from two deterministic total-supply observations.`
   );
 }
 
@@ -236,7 +242,12 @@ export async function persistTotalSupplyDeltaEvidence(
   ) {
     return { persisted: false, reason: "FROM_NOT_RESEARCH_ORIGIN" };
   }
-  if (input.from.observation.researchJobId === input.currentResearchJobId) {
+  // EVM V1: this job's own reading is history only when it was taken AT AN
+  // EXPLICIT HISTORICAL BLOCK — the same rule B2b2's eligibility applies.
+  if (
+    input.from.observation.researchJobId === input.currentResearchJobId &&
+    !isExplicitBlockSupplyRead(fromArtifact)
+  ) {
     return { persisted: false, reason: "FROM_NOT_PRIOR_RESEARCH_JOB" };
   }
   if (

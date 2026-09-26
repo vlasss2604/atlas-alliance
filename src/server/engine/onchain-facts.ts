@@ -4,7 +4,7 @@ import {
   type EvidenceProvenanceMetadata,
 } from "./onchain-invocation-provenance";
 import type { ExtractedFact } from "./providers/types";
-import type { OnchainArtifact } from "./providers/onchain-types";
+import { EVM_ZERO_ADDRESS, type OnchainArtifact } from "./providers/onchain-types";
 import {
   deriveDecodedExchange,
   EXCHANGE_DOES_NOT_PROVE,
@@ -121,6 +121,17 @@ export const ONCHAIN_DOES_NOT_PROVE = {
     "circulating supply, which is a definitional and economic concept rather than a chain value. A decrease " +
     "is not proof of a burn, an increase is not proof of an issuance policy, and no change is not proof that " +
     "nothing happened.",
+  // EVM V1. A Transfer log to 0x000…000 is a MOVEMENT to an address nobody
+  // is known to control. Whether the token contract reduced its supply in
+  // doing so is the contract's own behaviour, which this log does not state
+  // — so the sentence never says the tokens stopped existing.
+  ZERO_ADDRESS_TRANSFER:
+    "This is an ERC-20 Transfer log, emitted by this project's confirmed token contract in one successful " +
+    "transaction, moving the stated amount to the zero address. It does not establish that the tokens were " +
+    "destroyed or that total supply fell because of this transfer; it does not establish who funded or " +
+    "decided the transfer; and it does not establish that the transfer belongs to any mechanism or policy " +
+    "the project describes. A supply decrease measured around it is the net of everything in that interval " +
+    "and is not attributed to this transfer.",
 } as const;
 
 // A BURN OF A TOKEN THAT IS NOT THIS PROJECT'S IS NOT THIS PROJECT'S
@@ -177,6 +188,14 @@ export const ONCHAIN_FACT_KINDS = [
   // across components yet). Whether a delta may ever qualify NET_EFFECT is
   // a separate, unapproved decision.
   "TOTAL_SUPPLY_DELTA",
+  // EVM V1 (Founder-approved). A successful ERC-20 Transfer of the confirmed
+  // project token to 0x0000000000000000000000000000000000000000.
+  // ZERO_ADDRESS_TRANSFER ≠ BURN, ≠ MECHANISM EXECUTION. It is absent from
+  // GROSS_SUPPLY_REDUCTION_FACT_KINDS on purpose, establishes no component,
+  // and reaches NET_EFFECT only as the ANCHOR of a measured supply interval
+  // (SUPPLY_INTERVAL_ANCHOR_ONLY_KINDS below). A transfer to any other
+  // address — 0x…dEaD included — is a TOKEN_TRANSFER.
+  "ZERO_ADDRESS_TRANSFER",
 ] as const;
 
 export type OnchainFactKind = (typeof ONCHAIN_FACT_KINDS)[number];
@@ -246,6 +265,10 @@ export function isGrossSupplyReductionFact(kind: string | null | undefined): boo
 // liberty.
 const APPLICABLE_COMPONENTS_BY_KIND: Partial<Record<OnchainFactKind, readonly string[]>> = {
   BURN: ["NET_EFFECT"],
+  // Founder-approved (EVM V1): readable by NET_EFFECT so it can anchor a
+  // measured interval there. Readable is not establishing — see
+  // SUPPLY_INTERVAL_ANCHOR_ONLY_KINDS.
+  ZERO_ADDRESS_TRANSFER: ["NET_EFFECT"],
 };
 
 // May a row of this kind, filed under some other component, be READ when
@@ -388,6 +411,10 @@ const ESTABLISHING_COMPONENTS_BY_KIND: Record<OnchainFactKind, readonly string[]
   // The arithmetic net of an interval, read only by NET_EFFECT's own exempt
   // reducer. It independently establishes nothing, here or anywhere.
   TOTAL_SUPPLY_DELTA: ESTABLISHES_NOTHING,
+  // A movement of the token to the zero address. ZERO_ADDRESS_TRANSFER ≠
+  // MECHANISM EXECUTION, so never EXECUTION_EVIDENCE; and it is not a burn,
+  // so it carries NET_EFFECT only as an interval anchor, never as support.
+  ZERO_ADDRESS_TRANSFER: ESTABLISHES_NOTHING,
 };
 
 // May a row of this KIND establish `component`?
@@ -434,7 +461,23 @@ export const POINT_IN_TIME_SUPPLY_LEVEL_KINDS: readonly OnchainFactKind[] = ["TO
 // carry no kind and are not restricted here.
 export function onchainFactCanEstablishSupplyEffect(kind: string | null | undefined): boolean {
   if (kind === null || kind === undefined) return true;
+  if ((SUPPLY_INTERVAL_ANCHOR_ONLY_KINDS as readonly string[]).includes(kind)) return false;
   return !(POINT_IN_TIME_SUPPLY_LEVEL_KINDS as readonly string[]).includes(kind);
+}
+
+// AN ANCHOR IS NOT SUPPORT. A zero-address transfer says WHEN something
+// happened to the token, never that supply fell: on its own it establishes
+// nothing at NET_EFFECT (excluded as FACT_KIND_CANNOT_ESTABLISH). What it can
+// do there is position a measured interval — the reconciler hands the rows of
+// these kinds that passed every quality gate to evaluateNetSupplyEffect as
+// interval anchors, and only a TOTAL_SUPPLY_DELTA across them can move the
+// component.
+export const SUPPLY_INTERVAL_ANCHOR_ONLY_KINDS: readonly OnchainFactKind[] = ["ZERO_ADDRESS_TRANSFER"];
+
+export function isSupplyIntervalAnchorOnlyFact(kind: string | null | undefined): boolean {
+  return kind !== null && kind !== undefined
+    ? (SUPPLY_INTERVAL_ANCHOR_ONLY_KINDS as readonly string[]).includes(kind)
+    : false;
 }
 
 // A deterministic fact plus the kind it was synthesized as. Separate from
@@ -951,6 +994,54 @@ export function synthesizeOnchainFacts(
           ),
           onchainProvenance: provenance,
         });
+      }
+
+      // EVM V1 — THE PROJECT TOKEN'S ERC-20 TRANSFER LOGS.
+      //
+      // The adapter kept only logs emitted by the confirmed contract; the
+      // anchor is compared again here, where both sides are machine-owned, so
+      // a foreign token's log can never qualify however it arrived.
+      //
+      // TO 0x000…000 → ZERO_ADDRESS_TRANSFER, and never BURN: whether the
+      // contract destroyed anything is its own behaviour, which the log does
+      // not state. SUPPORTS, so that at NET_EFFECT it passes every quality
+      // gate and can anchor a measured interval — while the kind establishes
+      // nothing, there or at EXECUTION_EVIDENCE.
+      //
+      // TO ANY OTHER ADDRESS (0x…dEaD included) → TOKEN_TRANSFER, offered as
+      // CONTEXT like every other movement. A conventional "dead" address is a
+      // documentary label, never a chain fact.
+      for (const [index, t] of (r.evmTokenTransfers ?? []).entries()) {
+        if (!anchorUsable || t.token !== burnAnchor) continue;
+        const fragment = JSON.stringify({
+          signature: r.signature,
+          block: r.slot,
+          transfer: r.evmTokenTransfers![index],
+        });
+        if (t.to === EVM_ZERO_ADDRESS) {
+          facts.push(
+            fact(
+              target,
+              "ZERO_ADDRESS_TRANSFER",
+              `Transaction ${r.signature} (block ${r.slot}) emitted an ERC-20 Transfer log from token contract ` +
+                `${t.token} moving ${t.amountRaw} raw units from ${t.from} to the zero address ${EVM_ZERO_ADDRESS}.`,
+              fragment,
+              ONCHAIN_DOES_NOT_PROVE.ZERO_ADDRESS_TRANSFER,
+            ),
+          );
+        } else {
+          facts.push(
+            fact(
+              target,
+              "TOKEN_TRANSFER",
+              `Transaction ${r.signature} (block ${r.slot}) emitted an ERC-20 Transfer log from token contract ` +
+                `${t.token} moving ${t.amountRaw} raw units from ${t.from} to ${t.to}.`,
+              fragment,
+              ONCHAIN_DOES_NOT_PROVE.TOKEN_TRANSFER,
+              { relationship: "CONTEXT" },
+            ),
+          );
+        }
       }
 
       return facts;

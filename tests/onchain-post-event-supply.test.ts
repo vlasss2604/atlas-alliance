@@ -966,8 +966,9 @@ describe("21..25. boundaries", () => {
     for (const banned of ["while (", "setTimeout", "setInterval", "sleep", "for (;;)"]) {
       expect(code, `must not reference ${banned}`).not.toContain(banned);
     }
-    // Exactly one retrieve call site.
-    expect((code.match(/retriever\.retrieve\(/g) ?? []).length).toBe(1);
+    // Exactly two retrieve call sites: the one t1 read, and the one EVM V1
+    // explicit-block t0 read. Each is guarded by its own one-shot marker.
+    expect((code.match(/retriever\.retrieve\(/g) ?? []).length).toBe(2);
   });
 
   it("22. it creates no research_attempts row", async () => {
