@@ -391,6 +391,11 @@ export const evidenceDocumentaryLocators = pgTable(
     literallyPresent: boolean("literally_present").notNull(),
     // The deterministic validation outcome that admitted this row.
     validationResult: text("validation_result").notNull(),
+    // True only for an EVM transaction-shaped value the document ALSO
+    // presented in an explicit transaction path (`/tx/<hash>`). Orders
+    // admission so such a reference cannot be crowded out; it admits nothing
+    // and refuses nothing. Existing rows read false (migration 0058).
+    transactionStructured: boolean("transaction_structured").notNull().default(false),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),

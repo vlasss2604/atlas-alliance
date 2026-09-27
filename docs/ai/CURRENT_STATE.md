@@ -7,17 +7,11 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-27 (EVM V1 ZERO_ADDRESS_TRANSFER):
-  **5328 passing, 4 skipped, 6 failing** (258 files, ~57 min). The 6: the
-  four standing failures below; `evidence-environment-seam-v1` L, a
-  URI-parse pin re-pointed after the run (the file then passes, 26/26);
-  and `adversarial-core-round6-metamorphic-db-v1` F8a, which hit the 30 s
-  test timeout under load — it takes 29.0 s alone on a clean `39e8132` and
-  29.4 s on this tree, and passes alone. `first-real-run-stage2` #17 has failed once under load and
-  passes in isolation. The four standing failures reproduce on a clean `06af2aa`:
-  the two seed-count pins below, the renderer one, and
-  `gates-owner-alpha` D (pins `uniswap` as non-allowlisted; it was added to
-  the live allowlist in `06af2aa`).
+- Full suite, last verified 2026-09-27 (EVM transaction-hash admission
+  reliability, on the final tree): **5354 passing, 4 skipped, 4 failing**
+  (259 files, ~32 min) — exactly the four standing failures below.
+  `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
+  timeout (29.0 s alone on `39e8132`) and can time out under load.
   Run the suite ALONE — two concurrent `vitest run` invocations share the
   one test database and produce mass spurious failures (observed earlier:
   193 "failures" that vanished on a clean serial run). The three failures

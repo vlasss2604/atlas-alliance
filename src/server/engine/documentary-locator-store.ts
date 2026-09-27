@@ -13,6 +13,7 @@ import {
   type DocumentaryLocatorOutcome,
   type LocatorRejection,
   type LocatorShape,
+  type StructuredLink,
 } from "./documentary-locator";
 
 // ONE FACT, MANY LOCATORS — validation and persistence.
@@ -41,6 +42,9 @@ import {
 export interface ConfirmedLocator {
   value: string;
   shape: LocatorShape;
+  // See evidence_documentary_locators.transaction_structured. Optional so a
+  // producer that makes no statement about structure writes false.
+  transactionStructured?: boolean;
 }
 
 // WHAT AN ADMITTED LOCATOR CARRIES BACK.
@@ -85,6 +89,8 @@ export function validateFactLocators(input: {
   // The project's confirmed chain, when one exists — passed through to the
   // validator unchanged so the family rule is decided in one place.
   chain?: SupportedChain | null;
+  // The page's structured links, when available — passed through unchanged.
+  links?: readonly StructuredLink[] | null;
 }): LocatorValidationOutcome {
   const confirmed: ConfirmedLocator[] = [];
   const rejected: RejectedLocator[] = [];
@@ -96,11 +102,16 @@ export function validateFactLocators(input: {
       claimedLocator: claimed,
       documentText: input.documentText,
       chain: input.chain ?? null,
+      links: input.links ?? null,
     });
     if (outcome.locator === "CONFIRMED") {
       if (seen.has(outcome.value)) continue;
       seen.add(outcome.value);
-      confirmed.push({ value: outcome.value, shape: outcome.shape });
+      confirmed.push(
+        outcome.transactionStructured === undefined
+          ? { value: outcome.value, shape: outcome.shape }
+          : { value: outcome.value, shape: outcome.shape, transactionStructured: outcome.transactionStructured },
+      );
       continue;
     }
     // A fact that simply claims nothing is the ordinary case, not a
@@ -131,6 +142,7 @@ export async function persistFactLocators(
     shape: l.shape,
     literallyPresent: true,
     validationResult: "CONFIRMED",
+    transactionStructured: l.transactionStructured === true,
   }));
   await db
     .insert(evidenceDocumentaryLocators)
@@ -315,6 +327,7 @@ export async function admittedLocatorsForJob(
       value: evidenceDocumentaryLocators.value,
       shape: evidenceDocumentaryLocators.shape,
       ordinal: evidenceDocumentaryLocators.ordinal,
+      transactionStructured: evidenceDocumentaryLocators.transactionStructured,
       evidenceId: evidence.id,
       sourceId: sources.id,
       researchJobId: researchJobs.id,
@@ -349,7 +362,14 @@ export async function admittedLocatorsForJob(
   // Evidence row that established it, chosen the same way every time.
   const seen = new Set<string>();
   const out: AdmittedLocator[] = [];
+  // PRIORITY, THEN THE OLD ORDER. A value the document presented in an
+  // explicit transaction path comes first, so bare or excluded-structure
+  // candidates can never crowd it out of the cap. Everything else keeps the
+  // previous deterministic order exactly — with no transaction-structured
+  // value present, the result is unchanged. A value structured in ANY of its
+  // rows is structured (the sort puts that row first, the dedupe keeps it).
   for (const r of [...rows].sort((a, b) => {
+    if (a.transactionStructured !== b.transactionStructured) return a.transactionStructured ? -1 : 1;
     if (a.value !== b.value) return a.value.localeCompare(b.value);
     if (a.ordinal !== b.ordinal) return a.ordinal - b.ordinal;
     // Two Evidence rows can document the same account at the same ordinal.

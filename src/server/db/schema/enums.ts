@@ -425,6 +425,10 @@ export const traceReasonCode = pgEnum("trace_reason_code", [
   "LOCATOR_TRUNCATED",
   "LOCATOR_INCOMPLETE",
   "LOCATOR_NOT_IN_DOCUMENT",
+  // EVM 0x+64-hex value whose every known occurrence is deterministically
+  // not a transaction reference (Snapshot proposal path, Safe internal id,
+  // exact known constant). Migration 0058.
+  "LOCATOR_NOT_TRANSACTION_REFERENCE",
   // Why a subject was not promoted.
   "PROMOTION_DEPTH_LIMIT",
   "PROMOTION_NO_ELIGIBLE_SUBJECT",

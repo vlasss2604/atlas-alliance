@@ -69,6 +69,16 @@ willing to assert. Collapsing any two of these is the most common failure.
   "rewards : Determined" ≡ "rewards: Determined"). No other character,
   spacing or markup is folded, and stored text, stored fragments and
   extraction-unit / observation keys keep the characters as written.
+- **A 32-byte hex value is not a transaction by its shape.** An EVM 0x+64-hex
+  locator is refused (`NOT_A_TRANSACTION_REFERENCE`) only when EVERY known
+  occurrence is deterministic non-transaction structure — the value after a
+  `/proposal/` URL segment, a Safe `id=multisig_<safe>_<hash>` identifier or
+  `/multisig-transactions/<hash>` path, or an exact code-owned constant
+  (all-zero, well-known event signatures, EIP-1967 slots). Any bare-prose,
+  unrecognised or `/tx/` occurrence keeps it admissible; no nearby word is
+  read and no RPC classifies it. A value the page also presents in a `/tx/`
+  or `/transaction/` path is admitted first, so it cannot be crowded out of
+  the unchanged cap. Link structure classifies the identifier, never the claim.
 - Model output is not authoritative for a deterministic fact. Chain data is read
   by code, never restated by a model.
 - **A subdomain is a different host.** Confirming a domain confirms that host and

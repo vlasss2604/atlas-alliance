@@ -2,57 +2,29 @@
 
 > Overwrite this file each round. Never append.
 
-## EVM V1 — ZERO_ADDRESS_TRANSFER, IMPLEMENTED OFFLINE (awaiting Founder review)
+## EVM TRANSACTION-HASH ADMISSION RELIABILITY — IMPLEMENTED OFFLINE (awaiting Founder review)
 
-Founder-approved 2026-09-24 (the V1 design and the fact kind) and 2026-09-27
-(Extension 1: one explicit-block t0 read; Extension 2: an optional block
-selector in the canonical target). LIVE CALLS MADE: 0. Not pushed.
+Founder-approved 2026-09-27. LIVE CALLS MADE: 0. Not pushed.
 
-### What it answers
+- **Exclusion-only filter** (`documentary-locator.ts`,
+  `classifyEvmTransactionReference`): an EVM 0x+64-hex locator is refused as
+  `NOT_A_TRANSACTION_REFERENCE` only when every known occurrence — in the
+  document text, in the rendered link appendix, and in the fetch's structured
+  `documentLinks` — is a `/proposal/` path value, a Safe
+  `id=multisig_<safe>_<hash>` or `/multisig-transactions/<hash>` value, or an
+  exact code-owned constant (all-zero, five event signatures, three EIP-1967
+  slots; each re-derived from its preimage in the tests). Bare prose, other
+  URLs and `/tx/` / `/transaction/` paths keep it admissible. Solana values
+  and addresses are untouched.
+- **Ordering**: a value presented in a `/tx/` or `/transaction/` path is
+  stored `transaction_structured = true` and admitted first; everything else
+  keeps the old order. Cap (8) and on-chain request budget unchanged.
+- **Migration 0058**: trace reason `LOCATOR_NOT_TRANSACTION_REFERENCE`, and
+  the ordering column `evidence_documentary_locators.transaction_structured`
+  (boolean, default false; existing rows read false, none rewritten).
 
-"Were tokens actually burned, and did total supply decrease?" for an
-Ethereum-mainnet project, from a transaction hash an admitted official
-source names. The strongest answer it can give:
-
-> A transfer of the project token to the zero address was observed, and the
-> total supply was lower at the end of the measured period than at the
-> start — but the evidence does not establish that this transfer brought it
-> down or that the claimed mechanism executed.
-
-It never says the tokens were burned and never says the mechanism executed.
-
-### The semantic model
-
-- **ZERO_ADDRESS_TRANSFER** (new `onchain_fact_kind`, migration 0057): a
-  successful receipt, an ERC-20 Transfer log emitted by the confirmed token
-  contract (3 topics, 32-byte data), `to` exactly 0x000…000. Establishes no
-  component (not EXECUTION_EVIDENCE); readable by NET_EFFECT as an interval
-  anchor only. `0x…dEaD` and every other destination → TOKEN_TRANSFER
-  (CONTEXT). A reverted transaction or a foreign contract's log → nothing.
-- **Interval**: anchored on the zero-address transfer exactly as on a burn
-  (`t0 < event < t1`, strict). This Research's own reading may be t0 only
-  when taken at an explicit historical block before the event.
-- **Reads**: at most one t0 (block = earliest event − 1, EVM mainnet only,
-  only when every usable event is a zero-address transfer, only when the
-  budget can also pay for the t1 the interval still needs) and at most one
-  t1, both one-shot, from the unchanged unprotected budget, no retry. No
-  archive state → `RETRIEVAL_FAILED`, a technical stop.
-- **NET_EFFECT**: decrease → PARTIALLY_SUPPORTED,
-  `ZERO_ADDRESS_TRANSFER_SUPPLY_DECREASE_NOT_ATTRIBUTED`; not lower →
-  CONTRADICTED, `ZERO_ADDRESS_TRANSFER_SUPPLY_NOT_REDUCED`; no interval → as
-  before. BURN outcomes, Solana and every head-read URI are unchanged.
-
-### One deviation from the approved plan, stated
-
-The plan said the non-decrease case would reuse
-`NET_SUPPLY_NOT_REDUCED_OVER_INTERVAL`. Its reader copy begins "Tokens were
-destroyed…", which is false here, so the case has its own code with the same
-semantics (CONTRADICTED) and copy that says only what was measured.
-
-### Still waiting on the Founder (unchanged)
-
-The Blind Live Acceptance Batch V1 inputs in `docs/ai/BLIND_BATCH_V1.md` §11
-(token addresses, official-docs hosts, SKY vs MKR, governance routes, live
-spend). Nothing here was validated live; see BACKLOG "EVM V1 … offline only".
+Still waiting on the Founder: EVM V1 live validation has no admissible
+positive candidate (see the discovery report); the Blind Batch V1 inputs in
+`docs/ai/BLIND_BATCH_V1.md` §11.
 
 STOP here until the Founder reviews. No push, no live call.

@@ -250,11 +250,15 @@ function hashUrl(url: string): string {
 // so a refusal can never silently become untraceable.
 const LOCATOR_TRACE_REASON: Record<
   Exclude<LocatorRejection, "NOT_CLAIMED">,
-  "LOCATOR_TRUNCATED" | "LOCATOR_INCOMPLETE" | "LOCATOR_NOT_IN_DOCUMENT"
+  | "LOCATOR_TRUNCATED"
+  | "LOCATOR_INCOMPLETE"
+  | "LOCATOR_NOT_IN_DOCUMENT"
+  | "LOCATOR_NOT_TRANSACTION_REFERENCE"
 > = {
   TRUNCATED_DISPLAY_FORM: "LOCATOR_TRUNCATED",
   NOT_A_COMPLETE_IDENTIFIER: "LOCATOR_INCOMPLETE",
   NOT_LITERAL_IN_DOCUMENT: "LOCATOR_NOT_IN_DOCUMENT",
+  NOT_A_TRANSACTION_REFERENCE: "LOCATOR_NOT_TRANSACTION_REFERENCE",
 };
 
 // Exported for the offline traceability regressions; the executor is its
@@ -3500,6 +3504,11 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               claimed: [fact.onchainLocator, ...(fact.onchainLocators ?? [])],
               documentText: doc.normalizedText,
               chain: plan.confirmedIdentity?.chain ?? null,
+              // The page's structured links, when this fetch produced them —
+              // used only to classify an EVM transaction-shaped identifier,
+              // never as authority. A saved document has none: the text
+              // alone decides, and a bare value stays admissible.
+              links: doc.documentLinks?.links ?? null,
             });
             for (const refused of locatorOutcome.rejected) {
               await recordTraceEvent(deps.db, {
