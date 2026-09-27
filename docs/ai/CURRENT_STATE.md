@@ -7,8 +7,9 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-27 (D-160 narrow supersession fix, on
-  the final tree): **5419 passing, 4 skipped, 4 failing** (262 files) —
+- Full suite, last verified 2026-09-27 (D-161 pre-activation and
+  multi-match fixes, on the final tree): **5444 passing, 4 skipped, 4
+  failing** (263 files) —
   exactly the four standing failures below.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
   timeout (29.0 s alone on `39e8132`) and can time out under load.

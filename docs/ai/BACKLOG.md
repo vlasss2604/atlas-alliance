@@ -103,17 +103,33 @@ together they stopped project #2 before it could start. Kept for context.
   **Whether to add an EVM read transport is an owner decision, not a backlog
   item to pick up.**
 
-- **Same-state value / destination changes are invisible (design review).**
-  Since D-160, supersession erases an older row only for a trusted-dated
-  change of mechanism STATE; two rows stating the same state both stay. But
-  contradiction also compares states only, so "30% of revenue" beside "50%",
-  or "sent to the treasury" beside "burned", both stay as agreeing support
-  with no conflict and no "was then / is now" reading. Fixing it needs claim
-  identity (when two rows speak about the same claim) and a representation
-  of historical vs current non-temporal facts. Not started; requires a
-  separate Founder design review. Jobs persisted before D-160 keep the old
-  supersession behaviour (19 saved Lido supersessions) and are not
-  re-reconciled.
+- **Claim identity and historical fact versioning (deferred design area).**
+  ATLAS has no notion of "the same claim": row, memory and S6 slot identity
+  are all passage-based (D-101), `research_memory.claim_key` is in practice
+  the component name, `evidence.claim_key` is written only by memory
+  adoption and `evidence.value_source` is never written. So a changed
+  mechanism appears as coexisting branches, each read as current:
+  30% → 50% of revenue (no numeric field at all), treasury → burn, stakers →
+  treasury, v1 → v2 contract destinations. Not implemented, deliberately:
+  claim slots / property-value identity, numeric share extraction, value
+  and destination history with validity periods, conditional or phased
+  rules ("until activation … after"), multi-destination splits with shares
+  (today such a passage is UNKNOWN, D-161), broad-vs-narrow refinement,
+  subject-predicate-object identity, and linking a governance approval to
+  the mechanism it changes. A detection-only first step (closed
+  destination/recipient kinds per passage plus a closed value-stream
+  qualifier, surfacing a gap rather than merging) was assessed as the
+  smallest safe vertical; full versioning is a new subsystem. Revisit only
+  if real Research shows it is materially needed (Founder, 2026-09-27).
+  Existing Memory stays unslotted; `claim_key` is not repurposed. Jobs
+  persisted before D-160 keep the old supersession behaviour (19 saved Lido
+  supersessions) and are not re-reconciled.
+- **H2 — a pending state beside an activated one is a state conflict.** Since
+  D-161 a newer PROPOSED/APPROVED row no longer supersedes an older
+  IMPLEMENTING/LIVE one, so the pair always reaches the existing H2 rule:
+  CONTRADICTED, and a required component so contradicted makes a structural
+  claim NOT_SUPPORTED. The other reasonable rule (a pending state as a rung
+  below LIVE — "pending change", not a conflict) is an open Founder decision.
 
 - **On-chain evidence is dated by read time, not block time (latent).**
   Outside supply-interval reasoning, an ONCHAIN_VERIFIABLE row's temporal

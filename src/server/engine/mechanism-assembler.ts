@@ -466,19 +466,26 @@ export function classifyValueSource(text: string): ValueSource {
 // existence — this is only called on already-established DESTINATION
 // text.
 const DESTINATION_KIND_PHRASES: [DestinationKind, string[]][] = [
-  ["BURN", ["burn", "burned", "burning"]],
+  ["BURN", ["burn", "burns", "burned", "burning"]],
   ["BUYBACK_HOLD", ["buyback and hold", "bought back and held", "held in reserve"]],
   ["TREASURY", ["treasury", "protocol treasury"]],
   ["DISTRIBUTION", ["distributed to holders", "distribution to holders", "paid out to holders"]],
   ["LP", ["liquidity pool", "added to liquidity"]],
 ];
 
-export function classifyDestinationKind(text: string): DestinationKind {
+// MULTI-MATCH FAILS CLOSED (Founder decision). A passage that matches MORE
+// THAN ONE distinct kind ("70% goes to the treasury and 30% is burned",
+// "held in the treasury before being burned") names no single destination
+// or recipient, and dictionary order is not evidence: it is UNKNOWN, never
+// the first match. Exactly one distinct kind classifies as before.
+function soleMatchingKind<K extends string>(text: string, dictionary: [K, string[]][]): K | "UNKNOWN" {
   const tokens = tokenizeForClassifier(text);
-  for (const [value, phrases] of DESTINATION_KIND_PHRASES) {
-    if (phrases.some((p) => containsPhrase(tokens, p))) return value;
-  }
-  return "UNKNOWN";
+  const matched = dictionary.filter(([, phrases]) => phrases.some((p) => containsPhrase(tokens, p))).map(([value]) => value);
+  return matched.length === 1 ? matched[0] : "UNKNOWN";
+}
+
+export function classifyDestinationKind(text: string): DestinationKind {
+  return soleMatchingKind(text, DESTINATION_KIND_PHRASES);
 }
 
 // Plan §9.1 dictionary, verbatim. §9 rule 1: PASSIVE_HOLDER only from a
@@ -493,11 +500,7 @@ const RECIPIENT_KIND_PHRASES: [RecipientKind, string[]][] = [
 ];
 
 export function classifyRecipientKind(text: string): RecipientKind {
-  const tokens = tokenizeForClassifier(text);
-  for (const [value, phrases] of RECIPIENT_KIND_PHRASES) {
-    if (phrases.some((p) => containsPhrase(tokens, p))) return value;
-  }
-  return "UNKNOWN";
+  return soleMatchingKind(text, RECIPIENT_KIND_PHRASES);
 }
 
 // FOUNDER DECISION M3 — "HOLDERS RECEIVE SOMETHING" != "PASSIVE HOLDING

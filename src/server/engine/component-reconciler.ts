@@ -840,6 +840,13 @@ function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict, component: str
 //      that is not itself CONFIRMED. No source-class ranking is implied.
 //   6. Memory guides, fresh evidence verifies: a memory-adopted row never
 //      erases a row freshly acquired by this job.
+//   7. A pending change never replaces an activated state: a newer PROPOSED
+//      or APPROVED row never erases an older IMPLEMENTING or LIVE row, however
+//      trusted its date. Both stay; the proposal is pending evidence, not
+//      current reality.
+const PRE_ACTIVATION_STATES: ReadonlySet<MechanismState> = new Set(["PROPOSED", "APPROVED"]);
+const ACTIVATED_STATES: ReadonlySet<MechanismState> = new Set(["IMPLEMENTING", "LIVE"]);
+
 function supersedes(b: RowVerdict, a: RowVerdict, component: string): boolean {
   if (!isEstablishmentEligible(b.row, b, component)) return false;
   if (!a.eligibleCore) return false;
@@ -849,6 +856,7 @@ function supersedes(b: RowVerdict, a: RowVerdict, component: string): boolean {
   if (b.trustedTemporalBasis.at.getTime() <= a.trustedTemporalBasis.at.getTime()) return false;
   if (a.row.officiality === "CONFIRMED" && b.row.officiality !== "CONFIRMED") return false;
   if (isMemoryAdopted(b.row) && !isMemoryAdopted(a.row)) return false;
+  if (PRE_ACTIVATION_STATES.has(b.normalizedState) && ACTIVATED_STATES.has(a.normalizedState)) return false;
   return true;
 }
 

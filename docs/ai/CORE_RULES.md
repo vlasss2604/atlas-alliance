@@ -152,9 +152,15 @@ willing to assert. Collapsing any two of these is the most common failure.
   trusted and the newer row is strictly newer; never over a row already
   excluded for another reason (it keeps that reason); never a CONFIRMED
   official row by a newer row that is not CONFIRMED; never a fresh row by a
-  memory-adopted one. Otherwise both rows stay and ordinary reconciliation
-  decides coexistence or conflict. Same-state value or destination changes
+  memory-adopted one; never an IMPLEMENTING or LIVE row by a newer PROPOSED
+  or APPROVED one (D-161: a pending change is not current reality, whatever
+  its date). Otherwise both rows stay and ordinary reconciliation decides
+  coexistence or conflict. Same-state value or destination changes
   are not detected — see BACKLOG.
+- **One passage, several kinds → unresolved (D-161).** A passage that
+  matches more than one distinct destination or recipient kind in the closed
+  dictionaries classifies UNKNOWN, never the first match; the passage stays
+  as evidence and no single destination or recipient is invented.
 - **Stopped later ≠ never executed.** DEPRECATED and REMOVED are durable
   lifecycle stops (they outlive the current-state freshness window until a
   newer trusted state says otherwise): trusted, newer than the latest LIVE,
