@@ -258,7 +258,8 @@ describe("Fix 3 — durable stops, non-durable pauses, trusted ordering", () => 
 });
 
 describe("what did not change", () => {
-  it("14. non-temporal supersession still orders by published_at, marked or not (S2)", () => {
+  // D-160 replaced the S2 pin: same-state rows never supersede, marked or not.
+  it("14. non-temporal same-state rows both stay, marked or not (D-160)", () => {
     const olderLive = row("SOURCE_OF_VALUE", { mechanismState: "LIVE", publishedAt: older(300), fragment: "fees pay for it (old)" });
     const newerLive = row("SOURCE_OF_VALUE", { mechanismState: "LIVE", publishedAt: older(10), fragment: "fees pay for it (new)" });
     const marked = run([olderLive, newerLive]).by.get("SOURCE_OF_VALUE")!;
@@ -266,7 +267,8 @@ describe("what did not change", () => {
     expect(unmarked.status).toBe(marked.status);
     expect(unmarked.supportingEvidenceIds).toEqual(marked.supportingEvidenceIds);
     expect(unmarked.excludedEvidence).toEqual(marked.excludedEvidence);
-    expect(unmarked.excludedEvidence.map((x) => x.reason)).toEqual(["SUPERSEDED_BY_NEWER"]);
+    expect(unmarked.excludedEvidence).toEqual([]);
+    expect([...unmarked.supportingEvidenceIds].sort()).toEqual([olderLive.id, newerLive.id].sort());
   });
 
   it("15. an on-chain row keeps its fetched_at basis and is never a lifecycle signal", () => {

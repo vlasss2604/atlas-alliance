@@ -624,10 +624,18 @@ describe("F4. adding contradiction must not disappear", () => {
   it("F4c. a NEWER positive row does supersede an OLDER counter-row (recency, D-093): the conflict resolves by time, is recorded as SUPERSEDED_BY_NEWER, and the result equals the control — a stale disagreement is not a live one", () => {
     const base = world();
     const control = runChain("MECHANISM_CURRENT_STATE", base);
-    const oldCounter = row("CURRENT_STATE", { relationship: "CONTRADICTS", mechanismState: "PAUSED", publishedAt: older(20) });
+    // Inside the freshness window: a trusted, different-state, newer row
+    // supersedes it (D-160 keeps this).
+    const oldCounter = row("CURRENT_STATE", { relationship: "CONTRADICTS", mechanismState: "PAUSED", publishedAt: older(2) });
     const t = runChain("MECHANISM_CURRENT_STATE", [...base, oldCounter]);
     expect(exclusionOf(t.byComponent.get("CURRENT_STATE")!, oldCounter.id)).toBe("SUPERSEDED_BY_NEWER");
     sameConclusion(t, control);
+    // Already stale for CURRENT_STATE: it keeps that reason (D-160 rule 3),
+    // and the conclusion is the same.
+    const staleCounter = row("CURRENT_STATE", { relationship: "CONTRADICTS", mechanismState: "PAUSED", publishedAt: older(20) });
+    const u = runChain("MECHANISM_CURRENT_STATE", [...base, staleCounter]);
+    expect(exclusionOf(u.byComponent.get("CURRENT_STATE")!, staleCounter.id)).toBe("STALE_FOR_CURRENT_STATE");
+    sameConclusion(u, control);
   });
 });
 
@@ -728,7 +736,7 @@ describe("F6. authority monotonicity", () => {
     expect(t2.byComponent.get("CURRENT_STATE")!.status).toBe("CONTRADICTED");
   });
 
-  it("F6c. BOUNDARY H4 IN METAMORPHIC FORM — a NEWER CLAIMED page (explorer over HTTP, bound) saying LIVE, added beside an OLDER CONFIRMED official statement saying PAUSED: recency supersedes officiality (D-093 forbids an authority ranking), the official row is excluded, and 'is it current?' moves from NOT_SUPPORTED to PARTIALLY_SUPPORTED on the weaker source (pinned pending the Founder's H4 decision)", () => {
+  it("F6c. BOUNDARY H4 IN METAMORPHIC FORM, DECIDED (D-160) — a NEWER CLAIMED page (explorer over HTTP, bound) saying LIVE, added beside an OLDER CONFIRMED official statement saying PAUSED: CONFIRMED official evidence is never erased by a merely CLAIMED newer source, the official row stays, the two states conflict, and 'is it current?' is never lifted onto the weaker source", () => {
     const base = world();
     const paused = base.map((r) => (r.component === "CURRENT_STATE" ? { ...r, mechanismState: "PAUSED", publishedAt: older(2) } : r));
     const control = runChain("MECHANISM_CURRENT_STATE", paused);
@@ -737,11 +745,11 @@ describe("F6. authority monotonicity", () => {
     const newerClaimed = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", officiality: "CLAIMED", mechanismState: "LIVE", publishedAt: older(1) });
     const t = runChain("MECHANISM_CURRENT_STATE", [...paused, newerClaimed]);
     const official = paused.find((r) => r.component === "CURRENT_STATE")!;
-    expect(exclusionOf(t.byComponent.get("CURRENT_STATE")!, official.id)).toBe("SUPERSEDED_BY_NEWER");
-    expect(t.byComponent.get("CURRENT_STATE")!.status).toBe("PARTIALLY_SUPPORTED");
-    expect(t.byComponent.get("CURRENT_STATE")!.reasonCodes).toContain("INSUFFICIENT_AUTHORITY");
-    expect(t.proof.verdict).toBe("PARTIALLY_SUPPORTED");
-    expect(t.proof.confidenceScore).toBeLessThanOrEqual(40);
+    expect(exclusionOf(t.byComponent.get("CURRENT_STATE")!, official.id)).toBeNull();
+    expect(t.byComponent.get("CURRENT_STATE")!.status).toBe("CONTRADICTED");
+    expect(t.byComponent.get("CURRENT_STATE")!.reasonCodes).toContain("CONFLICTING_STATE");
+    expect(t.proof.verdict).not.toBe("PARTIALLY_SUPPORTED");
+    expect(t.proof.verdict).not.toBe("SUPPORTED");
     // What the rule does NOT do: an unbound explorer page, an INDIRECT row,
     // a CONTEXT / LIMITS row or a foreign row never supersedes anything.
     for (const weak of [

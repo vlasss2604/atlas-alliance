@@ -193,7 +193,9 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
     const r = reconcile([old, fresh], reqs, { item: { step: 5, component: "CURRENT_STATE" } });
     expect(r.status).toBe("SUPPORTED");
     expect(r.currentState).toBe("DEPRECATED");
-    expect(r.excludedEvidence.find((e) => e.evidenceId === old.id)?.reason).toBe("SUPERSEDED_BY_NEWER");
+    // D-160: the 2025 row is already stale for CURRENT_STATE, so it keeps
+    // that reason; supersession never relabels an already-excluded row.
+    expect(r.excludedEvidence.find((e) => e.evidenceId === old.id)?.reason).toBe("STALE_FOR_CURRENT_STATE");
   });
 
   it("G. два элемента одного периода, LIVE против DEPRECATED, оба устанавливающие -> CONTRADICTED, оба id предъявлены", () => {

@@ -145,8 +145,16 @@ willing to assert. Collapsing any two of these is the most common failure.
   under the strict rule; NULL is legacy. Only a marked documentary date can
   make CURRENT_STATE current (freshness), order LIVE against a stop for the
   lifecycle, or raise TEMPORAL_STATE_MISMATCH; an unmarked date stays
-  provenance. Memory reuse copies the marker exactly. (Not applied to
-  global supersession of non-temporal components — see BACKLOG.)
+  provenance. Memory reuse copies the marker exactly.
+- **A newer date alone never erases an older fact (D-160).** Supersession
+  (§8.1) removes an older row only for a change of stated state (PROPOSED →
+  LIVE), never between rows stating the same state; only when both dates are
+  trusted and the newer row is strictly newer; never over a row already
+  excluded for another reason (it keeps that reason); never a CONFIRMED
+  official row by a newer row that is not CONFIRMED; never a fresh row by a
+  memory-adopted one. Otherwise both rows stay and ordinary reconciliation
+  decides coexistence or conflict. Same-state value or destination changes
+  are not detected — see BACKLOG.
 - **Stopped later ≠ never executed.** DEPRECATED and REMOVED are durable
   lifecycle stops (they outlive the current-state freshness window until a
   newer trusted state says otherwise): trusted, newer than the latest LIVE,

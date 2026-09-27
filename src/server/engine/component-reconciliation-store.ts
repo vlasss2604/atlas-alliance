@@ -175,6 +175,7 @@ function toEvidenceRow(r: typeof evidence.$inferSelect): EvidenceRow {
     fetchedAt: r.fetchedAt,
     publishedAt: r.publishedAt,
     publishedAtRuleVersion: r.publishedAtRuleVersion,
+    reusedFromMemoryId: r.reusedFromMemoryId,
     extractionUnitKey: r.extractionUnitKey,
     contentHash: r.contentHash,
   };

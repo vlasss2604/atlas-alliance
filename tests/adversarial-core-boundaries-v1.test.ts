@@ -184,13 +184,18 @@ describe("H. documented boundaries — current behaviour, Founder decision pendi
     expect(classifyRecipientKind("no token holder receives anything")).toBe("PASSIVE_HOLDER");
   });
 
-  it("H4. recency wins over officiality in supersession: a newer CLAIMED governance record with a state supersedes an older CONFIRMED official statement (D-093 forbids an authority ranking)", () => {
+  it("H4 (DECIDED, D-160): a newer CLAIMED governance record with a different state does NOT supersede an older CONFIRMED official statement — the official row stays and the two states conflict (still no source-class ranking)", () => {
     const officialOlder = row("MECHANISM_SPEC", { mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 30 * DAY) });
     const governanceNewer = row("MECHANISM_SPEC", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", mechanismState: "DEPRECATED", publishedAt: new Date(NOW.getTime() - 1 * DAY) });
     const r = reconcile("MECHANISM_SPEC", [officialOlder, governanceNewer]);
-    expect(exclusionOf(r, officialOlder.id)).toBe("SUPERSEDED_BY_NEWER");
-    expect(r.supportingEvidenceIds).toEqual([governanceNewer.id]);
-    expect(r.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
+    expect(exclusionOf(r, officialOlder.id)).toBeNull();
+    expect(r.status).toBe("CONTRADICTED");
+    expect([...r.contradictingEvidenceIds].sort()).toEqual([officialOlder.id, governanceNewer.id].sort());
+    // The same governance record, CONFIRMED, supersedes as before.
+    const confirmedNewer = { ...governanceNewer, officiality: "CONFIRMED" as const };
+    const r2 = reconcile("MECHANISM_SPEC", [officialOlder, confirmedNewer]);
+    expect(exclusionOf(r2, officialOlder.id)).toBe("SUPERSEDED_BY_NEWER");
+    expect(r2.supportingEvidenceIds).toEqual([confirmedNewer.id]);
   });
 
   it("H5 (DECIDED, Round 6.5): reasoned exclusion is exclusion-shaped absence and caps like absence — a SUPPORTED single-atom claim sits at LOW while every unrelated component holds only excluded (SOCIAL) evidence, exactly where it sits with those components empty", () => {

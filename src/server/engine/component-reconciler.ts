@@ -255,9 +255,14 @@ export interface EvidenceRow {
   publishedAt: Date | null;
   // Which rule produced published_at: 1 = the strict publication-date rule;
   // null / absent = legacy or unknown. Read ONLY where a documentary date
-  // creates temporal truth (trustedTemporalBasisOf); supersession and ordering
-  // keep reading publishedAt as before.
+  // creates temporal truth (trustedTemporalBasisOf) and where a date may
+  // erase an older row (supersession, §8.1); ordering keeps reading
+  // publishedAt as before.
   publishedAtRuleVersion?: number | null;
+  // The research_memory row this Evidence was adopted from, or null / absent
+  // for a row freshly acquired by this job. Read only by supersession: memory
+  // guides, fresh evidence verifies, so an adopted row never erases a fresh one.
+  reusedFromMemoryId?: string | null;
   extractionUnitKey: string | null;
   contentHash: string;
 }
@@ -655,9 +660,9 @@ function temporalBasisOf(row: EvidenceRow): { basisField: "published_at" | "fetc
 // TRUTH. The same basis as temporalBasisOf, with one extra condition on a
 // documentary publication date: it must have been produced under the strict
 // rule (publishedAtRuleVersion === 1). A legacy date stays provenance — it
-// still orders supersession (§8.1) for every component exactly as before —
-// but it can never make a row current, and it is never reported as the basis
-// the lifecycle orders states by. On-chain rows keep their fetched_at basis
+// still orders output deterministically — but it can never make a row
+// current, never erases an older row (supersession, §8.1), and it is never
+// reported as the basis the lifecycle orders states by. On-chain rows keep their fetched_at basis
 // unchanged (no on-chain kind can establish a current-state component).
 export const TRUSTED_PUBLISHED_AT_RULE_VERSION = 1;
 
@@ -817,6 +822,40 @@ function isEstablishmentEligible(row: EvidenceRow, v: RowVerdict, component: str
   );
 }
 
+// §8.1 AS AMENDED (Founder decision, D-078/D-093): WHEN A NEWER ROW B ERASES
+// AN OLDER ROW A. Supersession exists to resolve a state CONFLICT over time
+// (PROPOSED then LIVE); a newer date alone never means "the same fact,
+// updated". So every condition below must hold, and any doubt keeps both
+// rows for ordinary reconciliation, which handles coexistence and conflict
+// conservatively:
+//   1. B could establish this component itself (isEstablishmentEligible).
+//   2. A was itself admitted by the core gates. A row already excluded for
+//      another reason keeps that reason; supersession never relabels it.
+//   3. The two rows state DIFFERENT known states. LIVE beside LIVE is two
+//      facts, not an update, and neither erases the other.
+//   4. Both dates are trusted (trustedTemporalBasisOf) and B is strictly
+//      newer. An untrusted date cannot prove "stated later" any more than it
+//      can prove "live now".
+//   5. Authority: CONFIRMED official evidence is never erased by a newer row
+//      that is not itself CONFIRMED. No source-class ranking is implied.
+//   6. Memory guides, fresh evidence verifies: a memory-adopted row never
+//      erases a row freshly acquired by this job.
+function supersedes(b: RowVerdict, a: RowVerdict, component: string): boolean {
+  if (!isEstablishmentEligible(b.row, b, component)) return false;
+  if (!a.eligibleCore) return false;
+  if (a.normalizedState === "UNKNOWN" || b.normalizedState === "UNKNOWN") return false;
+  if (a.normalizedState === b.normalizedState) return false;
+  if (a.trustedTemporalBasis === null || b.trustedTemporalBasis === null) return false;
+  if (b.trustedTemporalBasis.at.getTime() <= a.trustedTemporalBasis.at.getTime()) return false;
+  if (a.row.officiality === "CONFIRMED" && b.row.officiality !== "CONFIRMED") return false;
+  if (isMemoryAdopted(b.row) && !isMemoryAdopted(a.row)) return false;
+  return true;
+}
+
+function isMemoryAdopted(row: EvidenceRow): boolean {
+  return row.reusedFromMemoryId !== null && row.reusedFromMemoryId !== undefined;
+}
+
 // The three reasons an S4 attempt may close on that the reducer must not
 // paraphrase as "nothing was found". `acquisitionBoundaryFromAttempt` is
 // the ONE reduction from a persisted attempt to this value: the attempt's
@@ -942,21 +981,13 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     });
   }
 
-  // --- Step 4: supersession (§8.1) — HIGH-3 fix: condition 4 now requires
-  // the FULL establishment threshold from B (isEstablishmentEligible), not
-  // class membership alone — see that function's doc comment. -------------
+  // --- Step 4: supersession (§8.1, as amended) — see `supersedes`. -------
   const supersededIds = new Set<string>();
-  const candidatesForSupersession = survivingAfterDedup.filter((r) => {
-    const v = verdictByRowId.get(r.id)!;
-    return v.normalizedState !== "UNKNOWN" && v.temporalBasis !== null;
-  });
-  for (const a of candidatesForSupersession) {
+  for (const a of survivingAfterDedup) {
     const va = verdictByRowId.get(a.id)!;
-    for (const b of candidatesForSupersession) {
+    for (const b of survivingAfterDedup) {
       if (a.id === b.id) continue;
-      const vb = verdictByRowId.get(b.id)!;
-      if (vb.temporalBasis!.at.getTime() <= va.temporalBasis!.at.getTime()) continue; // b must be strictly newer
-      if (!isEstablishmentEligible(b, vb, item.component)) continue;
+      if (!supersedes(verdictByRowId.get(b.id)!, va, item.component)) continue;
       supersededIds.add(a.id);
       break;
     }
