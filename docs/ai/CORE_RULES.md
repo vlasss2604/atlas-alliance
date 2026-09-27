@@ -140,6 +140,20 @@ willing to assert. Collapsing any two of these is the most common failure.
   document itself, else null; never a fetch date, an "as of" data date, a
   governance or transaction date. Saved results resting only on stateless
   rows are shown as not established.
+- **Untrusted documentary dates must not create current or lifecycle temporal
+  truth.** `evidence.published_at_rule_version = 1` marks a date produced
+  under the strict rule; NULL is legacy. Only a marked documentary date can
+  make CURRENT_STATE current (freshness), order LIVE against a stop for the
+  lifecycle, or raise TEMPORAL_STATE_MISMATCH; an unmarked date stays
+  provenance. Memory reuse copies the marker exactly. (Not applied to
+  global supersession of non-temporal components — see BACKLOG.)
+- **Stopped later ≠ never executed.** DEPRECATED and REMOVED are durable
+  lifecycle stops (they outlive the current-state freshness window until a
+  newer trusted state says otherwise): trusted, newer than the latest LIVE,
+  with execution observed → HISTORICAL. PAUSED is never durable and never
+  makes a flow HISTORICAL; a newer trusted stop of any kind blocks CURRENT;
+  same-date conflicting states settle nothing (NOT_ESTABLISHED). Execution
+  evidence is never re-read by a later stop.
 - **Historical execution ≠ executing now.** Execution evidence shows that
   execution happened by its date; the surface says so and never implies it
   continues. An approval later paused, deprecated or removed by a newer

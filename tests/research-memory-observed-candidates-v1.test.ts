@@ -152,6 +152,11 @@ async function insertRow(jobId: string, sourceId: string, item: { step: number; 
       onchainFactKind: (o.onchainFactKind ?? null) as never,
       fetchedAt: new Date(),
       publishedAt: new Date(),
+      // Strict-rule dates everywhere except FLOW_PATH, which is left LEGACY
+      // (unmarked) so the adoption test below can prove the marker is copied
+      // exactly — a legacy date stays legacy in the adopting job. FLOW_PATH
+      // asks nothing about "now", so its reconciliation is unaffected.
+      publishedAtRuleVersion: item.component === "FLOW_PATH" ? null : 1,
       doesNotProve: "does not prove distribution to holders",
       retrievedUrl: DOC_URL,
       contentHash: `sha256:${uniq("content")}`,
@@ -380,6 +385,13 @@ describe("VERIFIED Research -> OBSERVED Research Memory candidates", () => {
     expect(adopted.reusedFromMemoryId).toBe(flowRow.id);
     expect(adopted.extractionUnitKey).toBe(extractionUnitKey(jobB, src.id, 2, "FLOW_PATH", FRAGMENT));
     expect(adopted.fragment).toBe(FRAGMENT);
+    // The date and its provenance travel together: the origin was legacy
+    // (unmarked), so the adopted row is too — never upgraded by adoption.
+    const [flowProv] = await ctx.db.select().from(researchMemoryProvenance).where(eq(researchMemoryProvenance.memoryId, flowRow.id));
+    const [flowOrigin] = await ctx.db.select().from(evidence).where(eq(evidence.id, flowProv.originEvidenceId!));
+    expect(flowOrigin.publishedAtRuleVersion).toBeNull();
+    expect(adopted.publishedAtRuleVersion).toBeNull();
+    expect(adopted.publishedAt?.toISOString()).toBe(flowOrigin.publishedAt?.toISOString());
     expect(adopted.sourceClass).toBe("OFFICIAL_DOCS");
     expect(adopted.officiality).toBe("CONFIRMED");
     const s5B = await s5Of(jobB, "FLOW_PATH");

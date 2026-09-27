@@ -2,11 +2,19 @@ import { and, desc, eq, inArray, ne } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchComponentResults, researchJobs, researchMechanismAssembly, researchPatterns, researchPlans } from "../db/schema";
-import { patternContentSchema } from "../domain/pattern";
+import { patternContentSchema, type PatternContent } from "../domain/pattern";
 import { parseContract } from "../memory/contract";
 import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
 import type { ComponentReconciliationResult, ComponentReconciliationStatus, ExclusionReason, ResultReasonCode } from "./component-reconciler";
-import { assembleMechanism, MechanismAssemblyInvariantError, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "./mechanism-assembler";
+import {
+  assembleMechanism,
+  deriveLifecycleStateSignals,
+  lifecycleSignalCandidateIds,
+  MechanismAssemblyInvariantError,
+  type AssemblyEvidenceProjection,
+  type LifecycleStateSignal,
+  type MechanismAssemblyResult,
+} from "./mechanism-assembler";
 
 // Phase 6, S6 (phase-6-s6-plan.md §3.2, §18a, §20) — the ONLY module that
 // touches the DB for mechanism assembly: loads exactly what
@@ -131,6 +139,36 @@ async function loadAdmittedEvidence(
   }));
 }
 
+// FOUNDER OPTION (a): the lifecycle reads the relevant rows directly — the
+// supporting, contradicting and temporally-excluded rows of CURRENT_STATE and
+// EXECUTION_EVIDENCE — and derives its trusted signals from them. Nothing is
+// copied into the exclusion record.
+async function loadLifecycleStateSignals(
+  db: Database | Transaction,
+  jobId: string,
+  pattern: PatternContent,
+  componentResults: ComponentReconciliationResult[],
+): Promise<LifecycleStateSignal[]> {
+  const ids = lifecycleSignalCandidateIds(componentResults);
+  if (ids.length === 0) return [];
+  const rows = await db
+    .select({
+      id: evidence.id,
+      component: evidence.component,
+      relationship: evidence.relationship,
+      directness: evidence.directness,
+      onchainFactKind: evidence.onchainFactKind,
+      sourceClass: evidence.sourceClass,
+      mechanismState: evidence.mechanismState,
+      publishedAt: evidence.publishedAt,
+      fetchedAt: evidence.fetchedAt,
+      publishedAtRuleVersion: evidence.publishedAtRuleVersion,
+    })
+    .from(evidence)
+    .where(and(eq(evidence.researchJobId, jobId), inArray(evidence.id, ids)));
+  return deriveLifecycleStateSignals({ pattern, componentResults, rows });
+}
+
 async function persistAssembly(
   db: Database | Transaction,
   jobId: string,
@@ -186,6 +224,7 @@ export async function assembleAndPersistMechanism(
   const { content: pattern, version: patternVersion } = await loadActivePatternContentForJob(db, jobId);
   const componentResults = await loadComponentResults(db, jobId);
   const admittedEvidence = await loadAdmittedEvidence(db, jobId, componentResults);
+  const lifecycleStateSignals = await loadLifecycleStateSignals(db, jobId, pattern, componentResults);
 
   const result = assembleMechanism({
     researchJobId: jobId,
@@ -194,6 +233,7 @@ export async function assembleAndPersistMechanism(
     contractView: { patternVersion },
     componentResults,
     admittedEvidence,
+    lifecycleStateSignals,
   });
 
   await persistAssembly(db, jobId, patternVersion, result, now);

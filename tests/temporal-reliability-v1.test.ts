@@ -28,6 +28,8 @@ function row(over: Partial<EvidenceRow>): EvidenceRow {
     researchJobId: "job",
     sourceId: `src-${seq}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: 5,
     component: "CURRENT_STATE",
     relationship: "SUPPORTS",

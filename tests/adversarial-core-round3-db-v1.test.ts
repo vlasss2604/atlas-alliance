@@ -295,6 +295,7 @@ async function insertRow(jobId: string, project: Pick<Project, "id" | "host">, c
       onchainFactKind: null,
       fetchedAt: now,
       publishedAt: spec.publishedAt === undefined ? now : spec.publishedAt,
+      publishedAtRuleVersion: 1,
       doesNotProve: "does not prove the size of the effect",
       retrievedUrl: url,
       contentHash: `sha256:${url}`,

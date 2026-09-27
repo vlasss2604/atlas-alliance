@@ -7,7 +7,7 @@ import {
   type ComponentReconciliationResult,
   type EvidenceRow,
 } from "../src/server/engine/component-reconciler";
-import { assembleMechanism, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
+import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
 import { parseModelPublishedAt } from "../src/server/engine/providers/evidence-extractor-anthropic";
 
@@ -58,6 +58,8 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: STEP_OF[component],
     component,
     relationship: "SUPPORTS",
@@ -124,6 +126,8 @@ function runChain(intent: string, pool: EvidenceRow[], existing: string[] = pool
     contractView: { patternVersion: 1 },
     componentResults: results,
     admittedEvidence: pool.filter((r) => admitted.has(r.id)).map(projection),
+    // As the production store does (option a): lifecycle signals from the rows.
+    lifecycleStateSignals: deriveLifecycleStateSignals({ pattern: PATTERN_V1_CONTENT, componentResults: results, rows: pool }),
   });
   const claim = evaluateClaimSupport({
     researchJobId: JOB,

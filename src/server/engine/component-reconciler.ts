@@ -253,6 +253,11 @@ export interface EvidenceRow {
   onchainProvenance?: EvidenceProvenanceMetadata | null;
   fetchedAt: Date;
   publishedAt: Date | null;
+  // Which rule produced published_at: 1 = the strict publication-date rule;
+  // null / absent = legacy or unknown. Read ONLY where a documentary date
+  // creates temporal truth (trustedTemporalBasisOf); supersession and ordering
+  // keep reading publishedAt as before.
+  publishedAtRuleVersion?: number | null;
   extractionUnitKey: string | null;
   contentHash: string;
 }
@@ -646,6 +651,27 @@ function temporalBasisOf(row: EvidenceRow): { basisField: "published_at" | "fetc
   return null;
 }
 
+// UNTRUSTED DOCUMENTARY DATES MUST NOT CREATE CURRENT OR LIFECYCLE TEMPORAL
+// TRUTH. The same basis as temporalBasisOf, with one extra condition on a
+// documentary publication date: it must have been produced under the strict
+// rule (publishedAtRuleVersion === 1). A legacy date stays provenance — it
+// still orders supersession (§8.1) for every component exactly as before —
+// but it can never make a row current, and it is never reported as the basis
+// the lifecycle orders states by. On-chain rows keep their fetched_at basis
+// unchanged (no on-chain kind can establish a current-state component).
+export const TRUSTED_PUBLISHED_AT_RULE_VERSION = 1;
+
+export function trustedTemporalBasisOf(
+  row: EvidenceRow,
+): { basisField: "published_at" | "fetched_at"; at: Date } | null {
+  const basis = temporalBasisOf(row);
+  if (basis === null) return null;
+  if (basis.basisField === "published_at" && row.publishedAtRuleVersion !== TRUSTED_PUBLISHED_AT_RULE_VERSION) {
+    return null;
+  }
+  return basis;
+}
+
 function isFreshEnough(
   basis: { basisField: "published_at" | "fetched_at"; at: Date },
   now: Date,
@@ -711,6 +737,9 @@ interface RowVerdict {
   exclusionReason: ExclusionReason | null;
   normalizedState: MechanismState;
   temporalBasis: { basisField: "published_at" | "fetched_at"; at: Date } | null;
+  // The same, only when the date is trusted (trustedTemporalBasisOf). The
+  // basis a component result REPORTS — the lifecycle orders states by it.
+  trustedTemporalBasis: { basisField: "published_at" | "fetched_at"; at: Date } | null;
   // True only for a row eligible to independently establish (or
   // contradict) THIS component per §4/§5/§6 — directness/relationship
   // agnostic; used only internally to decide supportingEvidenceIds vs.
@@ -749,7 +778,9 @@ function evaluateCoreEligibility(
     }
   }
   if (requirements.requiresCurrentState) {
-    const basis = temporalBasisOf(row);
+    // Trusted only: an unmarked documentary date cannot make a row current.
+    // It reads as "no usable publication date", exactly as a missing one.
+    const basis = trustedTemporalBasisOf(row);
     if (basis === null) return { ok: false, reason: "MISSING_PUBLICATION_DATE" };
     if (!isFreshEnough(basis, now, requirements.freshnessClass, freshnessPolicyDays)) {
       return { ok: false, reason: "STALE_FOR_CURRENT_STATE" };
@@ -906,6 +937,7 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       exclusionReason: core.ok ? null : core.reason,
       normalizedState,
       temporalBasis,
+      trustedTemporalBasis: trustedTemporalBasisOf(row),
       eligibleCore: core.ok,
     });
   }
@@ -1367,7 +1399,11 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       const chosen = stateRows[0];
       const v = verdictByRowId.get(chosen.id)!;
       currentState = v.normalizedState;
-      temporalBasis = v.temporalBasis ? { basisField: v.temporalBasis.basisField, at: v.temporalBasis.at.toISOString() } : null;
+      // The REPORTED basis is the trusted one: the lifecycle orders states by
+      // it, and an unmarked documentary date must not order anything there.
+      temporalBasis = v.trustedTemporalBasis
+        ? { basisField: v.trustedTemporalBasis.basisField, at: v.trustedTemporalBasis.at.toISOString() }
+        : null;
     }
   }
 

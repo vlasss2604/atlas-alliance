@@ -712,6 +712,9 @@ async function materializeOne(
       observedAt: prov.observedAt,
       dataAsOf: prov.dataAsOf,
       publishedAt: origin.publishedAt,
+      // The date's provenance travels with the date: a legacy (unmarked)
+      // publication date stays legacy when adopted into a new job.
+      publishedAtRuleVersion: origin.publishedAtRuleVersion,
       claimKey: memory.claimKey,
       freshnessClass: memory.freshnessClass,
       retrievedUrl: prov.retrievedUrl,

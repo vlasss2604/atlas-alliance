@@ -171,6 +171,9 @@ export interface ResearchEvidenceView {
   observedAt: string | null;
   dataAsOf: string | null;
   publishedAt: string | null;
+  // 1 = produced under the strict publication-date rule; null = legacy.
+  // Optional: older payloads and fixtures do not carry it (read as legacy).
+  publishedAtRuleVersion?: number | null;
   retrievedUrl: string;
   fetchedAt: string;
   sourceTitle: string | null;

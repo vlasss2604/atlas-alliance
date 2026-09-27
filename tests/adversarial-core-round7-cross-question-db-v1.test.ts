@@ -504,14 +504,14 @@ describe("P1. one document set, eight persisted Researches", () => {
     for (const i of INTENTS) expect(by[i].verdict, i).not.toBe("NOT_SUPPORTED");
   }, 300_000);
 
-  it("P1c. executed then paused (an OFFICIAL_REPORT of execution, a fresh official PAUSED page): 'is it current?' is NOT_SUPPORTED in its own persisted Proof — HISTORICAL lifecycle, citing that job's current-state and execution rows — while every other question over the same documents keeps its P1a verdict; nothing else is refuted", async () => {
+  it("P1c. executed then deprecated (an OFFICIAL_REPORT of execution, a fresh official DEPRECATED page — a durable stop; PAUSED is not one, Founder Fix 3): 'is it current?' is NOT_SUPPORTED in its own persisted Proof — HISTORICAL lifecycle, citing that job's current-state and execution rows — while every other question over the same documents keeps its P1a verdict; nothing else is refuted", async () => {
     const project = await makeProject();
     const report: Doc = {
       url: `https://${project.reportHost}/reports/epoch-12`,
       text: `${project.name} — epoch 12 report. ${CANON.EXECUTION_EVIDENCE}.`,
       facts: { EXECUTION_EVIDENCE: [{ fragment: CANON.EXECUTION_EVIDENCE, mechanismState: "LIVE", publishedAt: daysAgo(45) }] },
     };
-    const docs = [...canonDocs(project, { EXECUTION_EVIDENCE: null, CURRENT_STATE: [{ fragment: "the buyback mechanism is paused pending a governance review", mechanismState: "PAUSED" }] }), report];
+    const docs = [...canonDocs(project, { EXECUTION_EVIDENCE: null, CURRENT_STATE: [{ fragment: "the buyback mechanism has been deprecated and will not resume", mechanismState: "DEPRECATED" }] }), report];
     const by = await askAll(project, docs);
     persistedLaws(by, "P1c");
     const mcs = by.MECHANISM_CURRENT_STATE;

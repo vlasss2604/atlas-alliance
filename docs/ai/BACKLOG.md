@@ -103,6 +103,19 @@ together they stopped project #2 before it could start. Kept for context.
   **Whether to add an EVM read transport is an owner decision, not a backlog
   item to pick up.**
 
+- **Global supersession still orders by unmarked documentary dates (reliability).**
+  The reconciler's supersession (§8.1, "a newer fully-eligible dated row with
+  a stated state removes an older one") runs for EVERY component and reads
+  `published_at` whether or not it carries `published_at_rule_version = 1`.
+  So for non-temporal components (SOURCE_OF_VALUE, DESTINATION, RECIPIENT,
+  …) a legacy, possibly model-chosen date still decides which row wins. 19
+  saved supersessions use this legacy behaviour today (15 SOURCE_OF_VALUE, 2
+  DESTINATION, 2 RECIPIENT; 16 newer LIVE over older LIVE, 3 newer LIVE over
+  older PROPOSED). Requiring the marker there would turn PROPOSED→LIVE pairs
+  into CONFLICTING_STATE and change non-temporal outcomes, so it was
+  deliberately NOT done in the temporal-reliability round (Founder, S2,
+  2026-09-27). NOT resolved; a separate Founder decision.
+
 - **On-chain evidence is dated by read time, not block time (latent).**
   Outside supply-interval reasoning, an ONCHAIN_VERIFIABLE row's temporal
   basis is `fetched_at` (the RPC read), even when the observation is a

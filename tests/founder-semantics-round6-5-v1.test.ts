@@ -8,7 +8,7 @@ import {
   type ComponentReconciliationResult,
   type EvidenceRow,
 } from "../src/server/engine/component-reconciler";
-import { assembleMechanism, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
+import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
 import { computeProofConfidence } from "../src/server/engine/proof-confidence";
 
@@ -76,6 +76,8 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: STEP_OF[component],
     component,
     relationship: "SUPPORTS",
@@ -144,6 +146,8 @@ function runChain(intent: string, pool: EvidenceRow[], opts: { pattern?: Pattern
     contractView: { patternVersion: 1 },
     componentResults: results,
     admittedEvidence: pool.filter((r) => admitted.has(r.id)).map(projection),
+    // As the production store does (option a): lifecycle signals from the rows.
+    lifecycleStateSignals: deriveLifecycleStateSignals({ pattern: pattern, componentResults: results, rows: pool }),
   });
   const claim = evaluateClaimSupport({ researchJobId: JOB, patternVersion: 1, pattern, intent, taskType: null, requirementSetVersion: 1, assembly });
   const built = buildProof({
@@ -687,7 +691,17 @@ describe("No false semantics", () => {
             // says the contradiction threshold IS the establishment
             // threshold: a row that cannot establish cannot contradict.
             expect(exclusionOf(t.byComponent.get(component)!, counter.id), `${intent} / ${component} counter`).toBe("NOT_CURRENT_STATE_BEARING");
-            expect(strength(t), `${intent} / ${component} counter`).toEqual(strength(control));
+            // The component is untouched; the LIFECYCLE reads the trusted
+            // PAUSED row (Founder, Fix 3 — option a), and a PAUSED dated the
+            // same day as the LIVE is a same-date conflict: NOT_ESTABLISHED.
+            expect(strength(t).s5, `${intent} / ${component} counter s5`).toEqual(strength(control).s5);
+            expect(strength(t).lifecycle, `${intent} / ${component} counter lifecycle`).toEqual(["NOT_ESTABLISHED"]);
+            if (intent === "MECHANISM_CURRENT_STATE") {
+              // The lifecycle IS this question's answer: unanswered, never refuted.
+              expect(t.proof.verdict, `${intent} / ${component} counter verdict`).toBe("INSUFFICIENT_EVIDENCE");
+            } else {
+              expect({ ...strength(t), lifecycle: strength(control).lifecycle }, `${intent} / ${component} counter`).toEqual(strength(control));
+            }
           } else {
             expect(t.byComponent.get(component)!.status, `${intent} / ${component} counter`).toBe("CONTRADICTED");
           }

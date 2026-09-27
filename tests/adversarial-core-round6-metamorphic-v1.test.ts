@@ -8,7 +8,7 @@ import {
   type ComponentReconciliationResult,
   type EvidenceRow,
 } from "../src/server/engine/component-reconciler";
-import { assembleMechanism, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
+import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 6: METAMORPHIC INVARIANTS,
@@ -76,6 +76,8 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: STEP_OF[component],
     component,
     relationship: "SUPPORTS",
@@ -151,6 +153,8 @@ function runChain(
     contractView: { patternVersion: 1 },
     componentResults: results,
     admittedEvidence: pool.filter((r) => admitted.has(r.id)).map(projection),
+    // As the production store does (option a): lifecycle signals from the rows.
+    lifecycleStateSignals: deriveLifecycleStateSignals({ pattern: pattern, componentResults: results, rows: pool }),
   });
   const claim = evaluateClaimSupport({ researchJobId: JOB, patternVersion: 1, pattern, intent, taskType: null, requirementSetVersion: 1, assembly });
   const built = buildProof({
@@ -728,7 +732,8 @@ describe("F6. authority monotonicity", () => {
     const base = world();
     const paused = base.map((r) => (r.component === "CURRENT_STATE" ? { ...r, mechanismState: "PAUSED", publishedAt: older(2) } : r));
     const control = runChain("MECHANISM_CURRENT_STATE", paused);
-    expect(control.proof.verdict).toBe("NOT_SUPPORTED");
+    // PAUSED is not an end (Founder, Fix 3): unanswered, never refuted.
+    expect(control.proof.verdict).toBe("INSUFFICIENT_EVIDENCE");
     const newerClaimed = row("CURRENT_STATE", { sourceClass: "ONCHAIN_VERIFIABLE", officiality: "CLAIMED", mechanismState: "LIVE", publishedAt: older(1) });
     const t = runChain("MECHANISM_CURRENT_STATE", [...paused, newerClaimed]);
     const official = paused.find((r) => r.component === "CURRENT_STATE")!;
@@ -783,7 +788,8 @@ describe("F6. authority monotonicity", () => {
     const oldLive = row("CURRENT_STATE", { mechanismState: "LIVE", publishedAt: older(2) });
     const b = runChain("MECHANISM_CURRENT_STATE", [...nowPaused, oldLive]);
     sameConclusion(b, pausedControl);
-    expect(b.proof.verdict).toBe("NOT_SUPPORTED");
+    // PAUSED is not an end (Founder, Fix 3): the answer is unknown, not refuted.
+    expect(b.proof.verdict).toBe("INSUFFICIENT_EVIDENCE");
   });
 });
 
@@ -936,13 +942,14 @@ describe("F12. confidence invariants", () => {
     const soc = (c: string) => row(c, { sourceClass: "SOCIAL", officiality: "CLAIMED" });
     const pool = [
       row("MECHANISM_SPEC", { mechanismState: "LIVE" }),
-      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
+      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE", publishedAt: older(400) }),
       row("CURRENT_STATE", { mechanismState: "LIVE", publishedAt: older(2) }),
       confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", mechanismState: "APPROVED" }),
       ...["SOURCE_OF_VALUE", "FLOW_PATH", "DESTINATION", "RECIPIENT", "NET_EFFECT", "DURABILITY_BASIS"].map(soc),
     ];
     const govConflict = confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", relationship: "CONTRADICTS", mechanismState: "REMOVED" });
-    const refuted = row("CURRENT_STATE", { mechanismState: "PAUSED", publishedAt: older(1) });
+    // A durable stop refutes "current"; PAUSED no longer does (Founder, Fix 3).
+    const refuted = row("CURRENT_STATE", { mechanismState: "DEPRECATED", publishedAt: older(1) });
     const clean = runChain("MECHANISM_CURRENT_STATE", [...pool, refuted]);
     expect(clean.proof.verdict).toBe("NOT_SUPPORTED");
     const withUnrelated = runChain("MECHANISM_CURRENT_STATE", [...pool, refuted, govConflict]);

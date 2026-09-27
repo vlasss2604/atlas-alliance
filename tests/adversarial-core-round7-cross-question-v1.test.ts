@@ -9,7 +9,7 @@ import {
   type ComponentReconciliationResult,
   type EvidenceRow,
 } from "../src/server/engine/component-reconciler";
-import { assembleMechanism, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
+import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { applicableFactKindsForComponent } from "../src/server/engine/onchain-facts";
 import { __setInstructionRegistryOverlay } from "../src/server/engine/onchain-instruction-registry";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
@@ -94,6 +94,8 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: STEP_OF[component],
     component,
     relationship: "SUPPORTS",
@@ -188,6 +190,8 @@ function runChain(intent: string, pool: EvidenceRow[], opts: RunOptions = {}): C
     contractView: { patternVersion: 1 },
     componentResults: results,
     admittedEvidence: pool.filter((r) => admitted.has(r.id)).map(projection),
+    // As the production store does (option a): lifecycle signals from the rows.
+    lifecycleStateSignals: deriveLifecycleStateSignals({ pattern: pattern, componentResults: results, rows: pool }),
   });
   const claim = evaluateClaimSupport({ researchJobId: JOB, patternVersion: 1, pattern, intent, taskType: null, requirementSetVersion: 1, assembly });
   const built = buildProof({
@@ -392,6 +396,9 @@ const burnExecuted = () => chain("EXECUTION_EVIDENCE", { onchainFactKind: "BURN"
 const reportExecuted = (days = 400) => row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the epoch allocation was executed on schedule", mechanismState: "LIVE", publishedAt: older(days) });
 const csLive = (days = 1) => row("CURRENT_STATE", { fragment: "the allocation mechanism is live", mechanismState: "LIVE", publishedAt: older(days) });
 const csPaused = () => row("CURRENT_STATE", { fragment: "the allocation mechanism is paused", mechanismState: "PAUSED" });
+// A durable stop (Founder, temporal reliability Fix 3): DEPRECATED / REMOVED
+// end a mechanism until newer evidence says otherwise; PAUSED does not.
+const csDeprecated = () => row("CURRENT_STATE", { fragment: "the allocation mechanism was deprecated", mechanismState: "DEPRECATED" });
 const csApproved = () => row("CURRENT_STATE", { fragment: "the allocation has been approved and awaits activation", mechanismState: "APPROVED" });
 const csSupply = () => chain("CURRENT_STATE", { onchainFactKind: "TOKEN_SUPPLY" });
 const destBurn = () => row("DESTINATION", { fragment: "bought back tokens are burned" });
@@ -1055,25 +1062,34 @@ describe("H. historical vs current over one evidence world", () => {
     onlyTheseChange(before, m, ["MECHANISM_CURRENT_STATE"], "H3");
   });
 
-  it("H4. executed then paused (fresh official PAUSED): the lifecycle is HISTORICAL — 'has it executed?' yes, 'is it current?' positively refuted (NOT_SUPPORTED, TEMPORAL_SCOPE_MISMATCH, citing both the state and the execution) — and the structural questions read exactly as with the mechanism live", () => {
+  it("H4. executed then paused (fresh official PAUSED): PAUSED is not an end (Founder, Fix 3) — the lifecycle is NOT_ESTABLISHED and 'is it current?' is unanswered, never refuted; executed then DEPRECATED is HISTORICAL — 'is it current?' positively refuted (NOT_SUPPORTED, TEMPORAL_SCOPE_MISMATCH, citing both the state and the execution); the structural questions read exactly as with the mechanism live", () => {
     const live = ask([...docs(), reportExecuted(), csLive()], { identity: IDENTITY });
     const paused = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
     laws(paused, "H4");
-    expect(flow0(paused).lifecycle).toBe("HISTORICAL");
-    expect(verdicts(paused).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
-    expect(req(paused.MECHANISM_CURRENT_STATE, "MCS-1").reasonCodes).toEqual(["TEMPORAL_SCOPE_MISMATCH"]);
-    expect(paused.MECHANISM_CURRENT_STATE.proof.citations.map((c) => c.component).sort()).toEqual(["CURRENT_STATE", "EXECUTION_EVIDENCE"]);
+    expect(flow0(paused).lifecycle).toBe("NOT_ESTABLISHED");
+    expect(verdicts(paused).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
     onlyTheseChange(live, paused, ["MECHANISM_CURRENT_STATE"], "H4");
-    expect(verdicts(paused).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
-    expect(verdicts(paused).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED"); // Round 7.5, M3
+    const deprecated = ask([...docs(), reportExecuted(), csDeprecated()], { identity: IDENTITY });
+    laws(deprecated, "H4 deprecated");
+    expect(flow0(deprecated).lifecycle).toBe("HISTORICAL");
+    expect(verdicts(deprecated).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
+    expect(req(deprecated.MECHANISM_CURRENT_STATE, "MCS-1").reasonCodes).toEqual(["TEMPORAL_SCOPE_MISMATCH"]);
+    expect(deprecated.MECHANISM_CURRENT_STATE.proof.citations.map((c) => c.component).sort()).toEqual(["CURRENT_STATE", "EXECUTION_EVIDENCE"]);
+    onlyTheseChange(live, deprecated, ["MECHANISM_CURRENT_STATE"], "H4 deprecated");
+    expect(verdicts(deprecated).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
+    expect(verdicts(deprecated).PASSIVE_HOLDER_OUTCOME).toBe("PARTIALLY_SUPPORTED"); // Round 7.5, M3
   });
 
   it("H5. a two-year-old OFFICIAL_REPORT of execution beside a fresh PAUSED page reads the same HISTORICAL picture as a chain burn would — the execution component has no freshness window (documented boundary), and only CURRENT_STATE decides 'now'", () => {
-    const report = ask([...docs(), reportExecuted(700), csPaused()], { identity: IDENTITY });
+    const report = ask([...docs(), reportExecuted(700), csDeprecated()], { identity: IDENTITY });
     const burn = ask([...docs(), burnExecuted(), csPaused()], { identity: IDENTITY });
     laws(report, "H5");
+    // A two-year-old execution report beside a fresh DEPRECATED page: durable
+    // stop, so HISTORICAL. The same report beside a fresh PAUSED page is not.
     expect(flow0(report).lifecycle).toBe("HISTORICAL");
     expect(verdicts(report).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
+    const pausedReport = ask([...docs(), reportExecuted(700), csPaused()], { identity: IDENTITY });
+    expect(flow0(pausedReport).lifecycle).toBe("NOT_ESTABLISHED");
     // A burn is not the mechanism executing, so beside PAUSED it cannot
     // make the picture historical: 'is it current?' stays unanswered.
     expect(flow0(burn).lifecycle).toBe("NOT_ESTABLISHED");
@@ -1111,7 +1127,8 @@ describe("I. positive / negative boundaries — NOT_ESTABLISHED != CONTRADICTED"
     laws(withExec, "I1 exec");
     expect(s5(noExec, "CURRENT_STATE").currentState).toBe("PAUSED");
     expect(verdicts(noExec).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
-    expect(verdicts(withExec).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
+    // PAUSED is not an end (Founder, Fix 3): with execution it is still unanswered.
+    expect(verdicts(withExec).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
     for (const i of INTENTS) if (i !== "MECHANISM_CURRENT_STATE") expect(verdicts(withExec)[i]).not.toBe("NOT_SUPPORTED");
   });
 
@@ -1141,7 +1158,7 @@ describe("I. positive / negative boundaries — NOT_ESTABLISHED != CONTRADICTED"
     expect(verdicts(counter)).toEqual(verdicts(absent));
     // The same passage labelled SUPPORTS (the state IS paused) is the
     // positive finding I1 pins: the label is not the fact, the state is.
-    const supports = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
+    const supports = ask([...docs(), reportExecuted(), csDeprecated()], { identity: IDENTITY });
     expect(verdicts(supports).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
   });
 
@@ -1422,7 +1439,7 @@ describe("M. independent review — two questions ATLAS answers differently from
   const docs = () => [...sovProven(), flowPath(), specLive(), govApproved(), destHolders(), rcptHolders(), durability()];
 
   it("M1. structural intents carry no lifecycle atom: a mechanism positively refuted as current (HISTORICAL) still reads 'revenue reaches the token' SUPPORTED and 'holders receive value' SUPPORTED — consistent with Pattern v1's requirement sets, pinned so a lifecycle dependency is a named decision", () => {
-    const m = ask([...docs(), reportExecuted(), csPaused()], { identity: IDENTITY });
+    const m = ask([...docs(), reportExecuted(), csDeprecated()], { identity: IDENTITY });
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("NOT_SUPPORTED");
     expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("SUPPORTED");
     // Round 7.5 (M3) bounds the holder question for its own reason; the

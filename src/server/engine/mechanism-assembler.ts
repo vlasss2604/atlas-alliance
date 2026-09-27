@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import type { EvidenceSourceClass } from "./providers/types";
 import type { PatternContent } from "../domain/pattern";
 import { componentRequirementsFor } from "../domain/pattern";
-import type { MechanismState } from "../domain/mechanism-state";
 import type {
   ComponentReconciliationResult,
   ComponentReconciliationStatus,
@@ -54,6 +53,115 @@ export interface MechanismAssemblyInput {
   contractView: { patternVersion: number };
   componentResults: ComponentReconciliationResult[];
   admittedEvidence: AssemblyEvidenceProjection[];
+  // The trusted, dated, state-bearing documentary rows the lifecycle orders
+  // (deriveLifecycleStateSignals). Optional: absent means none, and the
+  // lifecycle then rests on the component results alone.
+  lifecycleStateSignals?: readonly LifecycleStateSignal[];
+}
+
+// ---- LIFECYCLE STATE SIGNALS ----------------------------------------------
+//
+// UNTRUSTED DOCUMENTARY DATES MUST NOT CREATE CURRENT OR LIFECYCLE TEMPORAL
+// TRUTH. The lifecycle orders stated states in time — old LIVE, newer
+// DEPRECATED, still newer LIVE — and it may do so only with dates produced
+// under the strict publication-date rule. A signal is one documentary row of
+// a lifecycle component (CURRENT_STATE, EXECUTION_EVIDENCE) that:
+//
+//   - S5 kept (supporting / contradicting) or excluded ONLY for a temporal or
+//     state reason (a stop state at EXECUTION_EVIDENCE's live gate, a stale
+//     current state, a superseded row) — never one refused for its class,
+//     binding, relationship or directness;
+//   - is of a class the Pattern admits for that component, DIRECT, SUPPORTS
+//     or CONTRADICTS, and not a chain observation;
+//   - states LIVE, IMPLEMENTING, PAUSED, DEPRECATED or REMOVED;
+//   - carries a published_at no later than its fetch, produced under rule 1.
+//
+// Read directly from the rows (Founder option a); nothing is copied into the
+// exclusion record. A signal never changes a component result: execution that
+// was observed stays observed, whatever a later record says.
+export type LifecycleComponent = "CURRENT_STATE" | "EXECUTION_EVIDENCE";
+
+export interface LifecycleStateSignal {
+  evidenceId: string;
+  component: LifecycleComponent;
+  state: "LIVE" | "IMPLEMENTING" | "PAUSED" | "DEPRECATED" | "REMOVED";
+  // ISO timestamp of the trusted publication date.
+  at: string;
+}
+
+export interface LifecycleSignalEvidence {
+  id: string;
+  component: string | null;
+  relationship: string;
+  directness: string | null;
+  onchainFactKind: string | null;
+  sourceClass: string | null;
+  mechanismState: string | null;
+  publishedAt: Date | null;
+  fetchedAt: Date;
+  publishedAtRuleVersion?: number | null;
+}
+
+const LIFECYCLE_COMPONENTS: readonly LifecycleComponent[] = ["CURRENT_STATE", "EXECUTION_EVIDENCE"];
+const LIFECYCLE_SIGNAL_EXCLUSIONS: ReadonlySet<string> = new Set([
+  "NOT_CURRENT_STATE_BEARING",
+  "STALE_FOR_CURRENT_STATE",
+  "SUPERSEDED_BY_NEWER",
+]);
+const LIFECYCLE_SIGNAL_STATES: ReadonlySet<string> = new Set(["LIVE", "IMPLEMENTING", "PAUSED", "DEPRECATED", "REMOVED"]);
+const TRUSTED_RULE_VERSION = 1;
+// Durable until something newer states otherwise.
+const DURABLE_STOP_STATES: ReadonlySet<string> = new Set(["DEPRECATED", "REMOVED"]);
+// Any stated stop, durable or not, newer than the current state blocks CURRENT.
+const STOP_STATES: ReadonlySet<string> = new Set(["PAUSED", "DEPRECATED", "REMOVED"]);
+
+// The row ids S5 left relevant to the lifecycle, per lifecycle component.
+export function lifecycleSignalCandidateIds(componentResults: readonly ComponentReconciliationResult[]): string[] {
+  const ids = new Set<string>();
+  for (const r of componentResults) {
+    if (!(LIFECYCLE_COMPONENTS as readonly string[]).includes(r.component)) continue;
+    for (const id of r.supportingEvidenceIds) ids.add(id);
+    for (const id of r.contradictingEvidenceIds) ids.add(id);
+    for (const x of r.excludedEvidence) if (LIFECYCLE_SIGNAL_EXCLUSIONS.has(x.reason)) ids.add(x.evidenceId);
+  }
+  return [...ids].sort();
+}
+
+export function deriveLifecycleStateSignals(input: {
+  pattern: PatternContent;
+  componentResults: readonly ComponentReconciliationResult[];
+  rows: readonly LifecycleSignalEvidence[];
+}): LifecycleStateSignal[] {
+  const candidates = new Set(lifecycleSignalCandidateIds(input.componentResults));
+  const out: LifecycleStateSignal[] = [];
+  for (const row of input.rows) {
+    if (!candidates.has(row.id)) continue;
+    const component = row.component as LifecycleComponent;
+    if (!(LIFECYCLE_COMPONENTS as readonly string[]).includes(component)) continue;
+    if (row.onchainFactKind !== null) continue;
+    if (row.relationship !== "SUPPORTS" && row.relationship !== "CONTRADICTS") continue;
+    if (row.directness !== "DIRECT") continue;
+    const admits = componentRequirementsFor(input.pattern, component).establishingClasses as readonly string[];
+    if (row.sourceClass === null || !admits.includes(row.sourceClass)) continue;
+    const state = (row.mechanismState ?? "").trim().toUpperCase();
+    if (!LIFECYCLE_SIGNAL_STATES.has(state)) continue;
+    if (row.publishedAt === null || row.publishedAtRuleVersion !== TRUSTED_RULE_VERSION) continue;
+    if (row.publishedAt.getTime() > row.fetchedAt.getTime()) continue;
+    out.push({ evidenceId: row.id, component, state: state as LifecycleStateSignal["state"], at: row.publishedAt.toISOString() });
+  }
+  return out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : a.evidenceId < b.evidenceId ? -1 : 1));
+}
+
+// The latest trusted stated state, or a conflict when rows dated the same
+// latest day disagree. Same-date conflicting states settle nothing.
+function latestTrustedState(
+  signals: readonly LifecycleStateSignal[],
+): { signal: LifecycleStateSignal; conflict: false } | { conflict: true } | null {
+  if (signals.length === 0) return null;
+  const newest = signals.reduce((m, s) => (s.at > m ? s.at : m), signals[0].at);
+  const atNewest = signals.filter((s) => s.at === newest);
+  if (new Set(atNewest.map((s) => s.state)).size > 1) return { conflict: true };
+  return { signal: atNewest[0], conflict: false };
 }
 
 // §5.2 — closed dictionaries. Every one carries UNKNOWN as a legitimate,
@@ -234,6 +342,10 @@ export interface MechanismFlow {
   sharedPrefixId: string | null;
   branchPointStep: number | null;
   lifecycle: FlowLifecycle;
+  // The latest trusted stated state the lifecycle was decided from — present
+  // only when one exists and no same-date conflict hides it. Lets a reader
+  // say "latest official state: paused (dated …)" without re-deriving it.
+  latestStatedState?: { state: LifecycleStateSignal["state"]; at: string; evidenceId: string; component: LifecycleComponent };
   nodes: MechanismNode[];
   edges: MechanismEdge[];
   shape: FlowShape;
@@ -1081,7 +1193,8 @@ export function assembleMechanism(input: MechanismAssemblyInput): MechanismAssem
   // per final lineage. branchSlotPath is sort-only internal state (§19) —
   // it is not part of the public MechanismFlow schema, so pairs are
   // sorted before the internal WorkingLineage is discarded.
-  const flowPairs = active.map((l) => ({ flow: buildFlow(l, byKey, evidenceById), branchSlotPath: l.branchSlotPath }));
+  const signals = input.lifecycleStateSignals ?? [];
+  const flowPairs = active.map((l) => ({ flow: buildFlow(l, byKey, evidenceById, signals), branchSlotPath: l.branchSlotPath }));
   flowPairs.sort(compareFlowPairs);
   const flows: MechanismFlow[] = flowPairs.map((p) => p.flow);
 
@@ -1113,8 +1226,14 @@ function buildFlow(
   l: WorkingLineage,
   byKey: Map<string, ComponentReconciliationResult>,
   evidenceById: Map<string, AssemblyEvidenceProjection>,
+  allSignals: readonly LifecycleStateSignal[] = [],
 ): MechanismFlow {
   const gaps = [...l.gaps];
+  // Every trusted signal of the researched mechanism — deliberately NOT only
+  // those of components in this lineage: a stale or excluded stop is exactly
+  // the row whose component did not establish, and dropping it would let a
+  // durable stop vanish because it was not "current".
+  const signals = allSignals;
   const nodes: MechanismNode[] = [];
   const edges: MechanismEdge[] = [];
 
@@ -1410,11 +1529,12 @@ function buildFlow(
   // newer temporal basis. computeLifecycle already degrades the lifecycle
   // for exactly this conflict; the conflict itself must also be a
   // machine-readable gap, not only an implicit lifecycle downgrade.
-  const temporalConflict = detectTemporalStateMismatch(l, byKey);
+  const temporalConflict = detectTemporalStateMismatch(l, byKey, signals);
   if (temporalConflict) gaps.push(temporalConflict);
 
   // §10.1 lifecycle.
-  const lifecycle = computeLifecycle(l, byKey);
+  const lifecycle = computeLifecycle(l, byKey, signals);
+  const latest = latestTrustedState(signals);
 
   gaps.sort(compareGaps);
 
@@ -1435,6 +1555,16 @@ function buildFlow(
     sharedPrefixId,
     branchPointStep: l.branchPointStep,
     lifecycle,
+    ...(latest !== null && !latest.conflict
+      ? {
+          latestStatedState: {
+            state: latest.signal.state,
+            at: latest.signal.at,
+            evidenceId: latest.signal.evidenceId,
+            component: latest.signal.component,
+          },
+        }
+      : {}),
     nodes: nodes.sort((a, b) => stepOf[a.component] - stepOf[b.component] || (a.component < b.component ? -1 : 1)),
     edges: edges.sort((a, b) => (a.basisComponent < b.basisComponent ? -1 : 1)),
     shape: gaps.length === 0 ? "COMPLETE_PATH" : "PARTIAL_PATH",
@@ -1452,6 +1582,7 @@ function buildFlow(
 function detectTemporalStateMismatch(
   l: WorkingLineage,
   byKey: Map<string, ComponentReconciliationResult>,
+  signals: readonly LifecycleStateSignal[],
 ): MechanismGap | null {
   const currentStateStep = lineageStepFor(l, "CURRENT_STATE");
   const currentStateResult = resultFor(byKey, 5, "CURRENT_STATE");
@@ -1464,65 +1595,72 @@ function detectTemporalStateMismatch(
   }
   const cs = currentStateResult.currentState;
   if (cs !== "LIVE" && cs !== "IMPLEMENTING") return null;
-  const csAt = currentStateResult.temporalBasis ? new Date(currentStateResult.temporalBasis.at).getTime() : null;
+  // The reported basis is trusted by construction (component-reconciler):
+  // an unmarked documentary date is never one.
+  const csAt = currentStateResult.temporalBasis ? currentStateResult.temporalBasis.at : null;
   if (csAt === null) return null;
-
-  for (const step of l.lineage) {
-    if (step.component === "CURRENT_STATE") continue;
-    const r = resultFor(byKey, step.step, step.component);
-    if (!r?.currentState || !r.temporalBasis) continue;
-    if (
-      (r.currentState === "DEPRECATED" || r.currentState === "REMOVED") &&
-      new Date(r.temporalBasis.at).getTime() > csAt
-    ) {
-      return {
-        kind: "TEMPORAL_STATE_MISMATCH",
-        component: "CURRENT_STATE",
-        afterStep: 5,
-        provenance: {
-          componentResults: [
-            { step: 5, component: "CURRENT_STATE" },
-            { step: step.step, component: step.component },
-          ],
-          evidenceIds: sortedIds([...currentStateStep.evidenceIds, ...step.evidenceIds]),
-        },
-      };
-    }
-  }
-  return null;
+  const newerDurableStop = signals.find(
+    (s) => DURABLE_STOP_STATES.has(s.state) && new Date(s.at).getTime() > new Date(csAt).getTime(),
+  );
+  if (!newerDurableStop) return null;
+  const stopStep = lineageStepFor(l, newerDurableStop.component);
+  return {
+    kind: "TEMPORAL_STATE_MISMATCH",
+    component: "CURRENT_STATE",
+    afterStep: 5,
+    provenance: {
+      componentResults: [
+        { step: 5, component: "CURRENT_STATE" },
+        ...(newerDurableStop.component === "CURRENT_STATE" || !stopStep
+          ? []
+          : [{ step: stopStep.step, component: stopStep.component }]),
+      ],
+      evidenceIds: sortedIds([...currentStateStep.evidenceIds, newerDurableStop.evidenceId]),
+    },
+  };
 }
 
-function computeLifecycle(l: WorkingLineage, byKey: Map<string, ComponentReconciliationResult>): FlowLifecycle {
+// §10.1 LIFECYCLE, ORDERED ONLY BY TRUSTED DATES.
+//
+//   CURRENT         CURRENT_STATE is established LIVE (or IMPLEMENTING with
+//                   its qualification) and no trusted stop — PAUSED,
+//                   DEPRECATED or REMOVED — is dated after it.
+//   HISTORICAL      execution was observed, AND the latest trusted stated
+//                   state is DEPRECATED or REMOVED. Durable: it stays the
+//                   answer however old it is, until a newer trusted state
+//                   says otherwise. PAUSED is never durable and never makes a
+//                   flow HISTORICAL — a pause is not an end.
+//   NOT_ESTABLISHED everything else: no trusted state, a stale LIVE, a
+//                   PAUSED (fresh or stale), or rows dated the same latest day
+//                   that disagree.
+//
+// Execution evidence is never re-read here: STOPPED LATER ≠ NEVER EXECUTED.
+function computeLifecycle(
+  l: WorkingLineage,
+  byKey: Map<string, ComponentReconciliationResult>,
+  signals: readonly LifecycleStateSignal[] = [],
+): FlowLifecycle {
   const currentStateStep = lineageStepFor(l, "CURRENT_STATE");
   const currentStateResult = resultFor(byKey, 5, "CURRENT_STATE");
   const executionEstablished = !!lineageStepFor(l, "EXECUTION_EVIDENCE");
-
-  const relevantStates: { state: MechanismState | null; at: Date | null }[] = [];
-  for (const step of l.lineage) {
-    const r = resultFor(byKey, step.step, step.component);
-    if (r?.currentState) relevantStates.push({ state: r.currentState, at: r.temporalBasis ? new Date(r.temporalBasis.at) : null });
-  }
+  const latest = latestTrustedState(signals);
+  if (latest?.conflict) return "NOT_ESTABLISHED";
 
   if (currentStateStep && currentStateResult && (currentStateResult.status === "SUPPORTED" || currentStateResult.status === "PARTIALLY_SUPPORTED")) {
     const cs = currentStateResult.currentState;
     const csAt = currentStateResult.temporalBasis ? new Date(currentStateResult.temporalBasis.at).getTime() : null;
     const csQualifiesLive =
       cs === "LIVE" || (cs === "IMPLEMENTING" && qualificationsOf(currentStateResult.reasonCodes).includes("STATE_NOT_FULLY_LIVE"));
-    const newerConflict = relevantStates.some(
-      (s) =>
-        (s.state === "DEPRECATED" || s.state === "REMOVED") &&
-        s.at !== null &&
-        csAt !== null &&
-        s.at.getTime() > csAt,
+    // With no trusted date on the current state, any trusted stop blocks it:
+    // an unordered LIVE is not newer than anything.
+    const newerStop = signals.some(
+      (s) => STOP_STATES.has(s.state) && (csAt === null || new Date(s.at).getTime() > csAt),
     );
-    if (csQualifiesLive && !newerConflict) return "CURRENT";
+    if (csQualifiesLive && !newerStop) return "CURRENT";
   }
 
-  if (executionEstablished) {
-    const cs = currentStateResult?.currentState ?? null;
-    const historicalState = cs === "DEPRECATED" || cs === "REMOVED" || cs === "PAUSED";
-    const newerConflict = relevantStates.some((s) => s.state === "DEPRECATED" || s.state === "REMOVED");
-    if (historicalState || newerConflict) return "HISTORICAL";
+  if (executionEstablished && latest && !latest.conflict && DURABLE_STOP_STATES.has(latest.signal.state)) {
+    return "HISTORICAL";
   }
 
   return "NOT_ESTABLISHED";

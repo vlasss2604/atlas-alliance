@@ -127,6 +127,9 @@ function build(opts: {
       summary: spec.summary,
       doesNotProve: spec.doesNotProve ?? null,
       mechanismState: spec.state ?? null,
+      // Fixtures model what the engine writes today: dates produced under
+      // the strict publication-date rule.
+      publishedAtRuleVersion: 1,
       valueSource: null,
       sourceClass: src.sourceClass,
       officiality: spec.kind === "DOCS" || spec.kind === "GOV" || spec.kind === "REPORT" ? "CONFIRMED" : "CLAIMED",

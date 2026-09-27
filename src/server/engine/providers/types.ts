@@ -30,6 +30,15 @@
 // Deliberately NOT how replay is detected: instanceof, a class or file
 // name, the job's acquisition phase, the worker's role, or anything about
 // the network. A provider states what it does; nothing infers it.
+// THE PUBLICATION-DATE RULE documentary extraction runs under. 1 = the strict
+// rule stated in the extractor prompt (evidence-extractor-anthropic.ts,
+// "PUBLICATION DATE."): an explicit publication or last-updated date of the
+// document itself, else null. Written onto every documentary Evidence row the
+// executor persists (evidence.published_at_rule_version); a row without it is
+// legacy, and its date never creates temporal truth. Bump it only together
+// with a change to that rule.
+export const PUBLISHED_AT_RULE_VERSION = 1;
+
 export const PROVIDER_METERING = ["LIVE", "REPLAY"] as const;
 export type ProviderMetering = (typeof PROVIDER_METERING)[number];
 

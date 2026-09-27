@@ -50,6 +50,8 @@ function row(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `source-${id}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: COMPONENT_STEP[component ?? ""] ?? 3,
     component: "MECHANISM_SPEC",
     relationship: "SUPPORTS",

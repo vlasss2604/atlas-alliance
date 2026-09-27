@@ -174,6 +174,7 @@ function toEvidenceRow(r: typeof evidence.$inferSelect): EvidenceRow {
     onchainProvenance: (r.onchainProvenance ?? null) as EvidenceRow["onchainProvenance"],
     fetchedAt: r.fetchedAt,
     publishedAt: r.publishedAt,
+    publishedAtRuleVersion: r.publishedAtRuleVersion,
     extractionUnitKey: r.extractionUnitKey,
     contentHash: r.contentHash,
   };

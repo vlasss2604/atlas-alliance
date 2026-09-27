@@ -235,6 +235,14 @@ export const evidence = pgTable(
     observedAt: timestamp("observed_at", { withTimezone: true }),
     dataAsOf: timestamp("data_as_of", { withTimezone: true }),
     publishedAt: timestamp("published_at", { withTimezone: true }),
+    // WHICH RULE PRODUCED published_at. 1 = the strict publication-date rule
+    // (an explicit publication or last-updated date of the document itself,
+    // else null; commit ac67257). NULL = legacy / unknown provenance: the date
+    // may have been chosen by the model under the earlier prompt. Only a
+    // marked date may create CURRENT or lifecycle temporal truth; an unmarked
+    // one stays provenance. Never inferred from created_at, never backfilled
+    // (migration 0059).
+    publishedAtRuleVersion: smallint("published_at_rule_version"),
     // Мост к кандидату памяти без повторного разбора (§6.2); nullable —
     // не каждое Evidence метит claim заранее известного словаря.
     // D-158 PHASE 2 — machine-owned invocation provenance for a

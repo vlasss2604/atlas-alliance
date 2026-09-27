@@ -227,7 +227,13 @@ describe("S6 acceptance scenarios (phase-6-s6-plan.md §26)", () => {
         temporalBasis: { basisField: "published_at", at: "2026-01-01T00:00:00.000Z" },
       }),
     });
-    const r = assemble(results, evidence);
+    // The lifecycle orders the trusted, dated stated ROWS (option a).
+    const r = assemble(results, evidence, {
+      lifecycleStateSignals: [
+        { evidenceId: "e5", component: "EXECUTION_EVIDENCE", state: "LIVE", at: "2025-06-01T00:00:00.000Z" },
+        { evidenceId: "e6", component: "CURRENT_STATE", state: "DEPRECATED", at: "2026-01-01T00:00:00.000Z" },
+      ],
+    });
     expect(r.flows[0].lifecycle).toBe("HISTORICAL");
   });
 
@@ -375,16 +381,19 @@ describe("S6 acceptance scenarios (phase-6-s6-plan.md §26)", () => {
   it("I2. CURRENT_STATE itself LIVE, but ANOTHER lineage component reports a newer DEPRECATED -> lifecycle=HISTORICAL, not CURRENT", () => {
     const evidence = [...completeChainEvidence(), ev("e5b", "s4b", "mechanism superseded", { sourceId: "s4" })];
     const results = completeChainResults({
-      EXECUTION_EVIDENCE: cr(4, "EXECUTION_EVIDENCE", "SUPPORTED", ["e5"], {
-        currentState: "DEPRECATED",
-        temporalBasis: { basisField: "published_at", at: "2026-06-01T00:00:00.000Z" },
-      }),
       CURRENT_STATE: cr(5, "CURRENT_STATE", "SUPPORTED", ["e6"], {
         currentState: "LIVE",
         temporalBasis: { basisField: "published_at", at: "2025-01-01T00:00:00.000Z" },
       }),
     });
-    const r = assemble(results, evidence);
+    // The newer DEPRECATED is a ROW the lifecycle reads (option a) — an
+    // execution result never states a stop (its live gate excludes one).
+    const r = assemble(results, evidence, {
+      lifecycleStateSignals: [
+        { evidenceId: "e6", component: "CURRENT_STATE", state: "LIVE", at: "2025-01-01T00:00:00.000Z" },
+        { evidenceId: "e5b", component: "EXECUTION_EVIDENCE", state: "DEPRECATED", at: "2026-06-01T00:00:00.000Z" },
+      ],
+    });
     expect(r.flows[0].lifecycle).toBe("HISTORICAL");
   });
 

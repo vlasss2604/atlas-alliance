@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
 import type { ComponentReconciliationResult } from "../src/server/engine/component-reconciler";
 import {
-  assembleMechanism,
+  assembleMechanism, type LifecycleStateSignal,
   MechanismAssemblyInvariantError,
   type AssemblyEvidenceProjection,
 } from "../src/server/engine/mechanism-assembler";
@@ -59,7 +59,11 @@ function cr(
   };
 }
 
-function assemble(results: ComponentReconciliationResult[], evidenceRows: AssemblyEvidenceProjection[]) {
+function assemble(
+  results: ComponentReconciliationResult[],
+  evidenceRows: AssemblyEvidenceProjection[],
+  lifecycleStateSignals: LifecycleStateSignal[] = [],
+) {
   return assembleMechanism({
     researchJobId: "job-1",
     patternVersion: 1,
@@ -67,6 +71,7 @@ function assemble(results: ComponentReconciliationResult[], evidenceRows: Assemb
     contractView: { patternVersion: 1 },
     componentResults: results,
     admittedEvidence: evidenceRows,
+    lifecycleStateSignals,
   });
 }
 
@@ -308,7 +313,11 @@ describe("MEDIUM-4 — TEMPORAL_STATE_MISMATCH is a real, emitted gap", () => {
         temporalBasis: { basisField: "published_at", at: "2025-01-01T00:00:00.000Z" },
       }),
     ];
-    const r = assemble(results, evidenceRows);
+    // The lifecycle orders ROWS (option a): the trusted, dated stated states.
+    const r = assemble(results, evidenceRows, [
+      { evidenceId: "z6", component: "CURRENT_STATE", state: "LIVE", at: "2025-01-01T00:00:00.000Z" },
+      { evidenceId: "z5", component: "EXECUTION_EVIDENCE", state: "DEPRECATED", at: "2026-06-01T00:00:00.000Z" },
+    ]);
     const gap = r.flows[0].gaps.find((g) => g.kind === "TEMPORAL_STATE_MISMATCH");
     expect(gap).toBeDefined();
     expect(gap!.provenance.componentResults).toContainEqual({ step: 4, component: "EXECUTION_EVIDENCE" });
@@ -325,7 +334,10 @@ describe("MEDIUM-4 — TEMPORAL_STATE_MISMATCH is a real, emitted gap", () => {
         temporalBasis: { basisField: "published_at", at: "2026-01-01T00:00:00.000Z" },
       }),
     ];
-    const r = assemble(results, evidenceRows);
+    const r = assemble(results, evidenceRows, [
+      { evidenceId: "z5", component: "EXECUTION_EVIDENCE", state: "LIVE", at: "2025-06-01T00:00:00.000Z" },
+      { evidenceId: "z6", component: "CURRENT_STATE", state: "DEPRECATED", at: "2026-01-01T00:00:00.000Z" },
+    ]);
     expect(r.flows[0].gaps.find((g) => g.kind === "TEMPORAL_STATE_MISMATCH")).toBeUndefined();
     expect(r.flows[0].lifecycle).toBe("HISTORICAL");
   });

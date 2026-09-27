@@ -327,6 +327,8 @@ export interface EvidenceLike extends EvidenceItemLike {
   // older payloads may not carry it, and absence reads as "no known state".
   mechanismState?: string | null;
   publishedAt?: string | null;
+  // 1 = strict publication-date rule; null / absent = legacy provenance.
+  publishedAtRuleVersion?: number | null;
   observedAt?: string | null;
   dataAsOf?: string | null;
 }
@@ -428,6 +430,9 @@ export interface ResearchTableRow {
   // shown (CLAIM_NOT_SHOWN_CODES). The answer then says what the evidence
   // does not show, never "there is evidence that …".
   claimNotShown?: true;
+  // A CURRENT_STATE row established as a stop — PAUSED, DEPRECATED or
+  // REMOVED. The answer then says so, never "happening now".
+  statedStop?: StopState;
   // The strongest admitted source behind the row, immediately visible.
   source: { kind: string; name: string } | null;
   date: EvidenceCard["date"];
@@ -524,18 +529,108 @@ export const KNOWN_STATED_STATES: ReadonlySet<string> = new Set([
 const CURRENT_CLAIM_COMPONENTS: ReadonlySet<string> = new Set(["CURRENT_STATE"]);
 const STATE_UNSTATED_LIMIT =
   "The sources checked do not state whether this is happening now; a recent page date alone cannot show it.";
+// UNTRUSTED DOCUMENTARY DATES MUST NOT CREATE CURRENT TEMPORAL TRUTH, ON EVERY
+// RECORD. A saved CURRENT_STATE established on documentary rows whose
+// publication date was not produced under the strict rule (unmarked: legacy)
+// is shown as not established; the rows and their dates stay visible.
+const DATE_UNTRUSTED_LIMIT =
+  "The sources checked carry no publication date that can show this is happening now.";
+const TRUSTED_RULE_VERSION = 1;
 
-function restsOnlyOnUnstatedState(
+type CurrentClaimCeiling = "STATE_UNSTATED" | "DATE_UNTRUSTED" | null;
+
+function currentClaimCeilingOf(
   component: string,
   supportingEvidenceIds: readonly string[] | undefined,
-  stateByEvidence: ReadonlyMap<string, string | null>,
-): boolean {
-  if (!CURRENT_CLAIM_COMPONENTS.has(component)) return false;
+  evidenceById: ReadonlyMap<string, EvidenceLike>,
+): CurrentClaimCeiling {
+  if (!CURRENT_CLAIM_COMPONENTS.has(component)) return null;
   const ids = supportingEvidenceIds ?? [];
-  return (
-    ids.length > 0 &&
-    ids.every((id) => !KNOWN_STATED_STATES.has((stateByEvidence.get(id) ?? "").trim().toUpperCase()))
+  if (ids.length === 0) return null;
+  let allStateless = true;
+  for (const id of ids) {
+    const e = evidenceById.get(id);
+    const stated = KNOWN_STATED_STATES.has((e?.mechanismState ?? "").trim().toUpperCase());
+    if (!stated) continue;
+    allStateless = false;
+    // A chain row is held to its own ceilings (a level reading, a burn); this
+    // one is about DOCUMENTARY publication dates only.
+    if (e!.onchainFactKind || e!.sourceClass === "ONCHAIN_VERIFIABLE") return null;
+    const trusted = e!.publishedAt != null && e!.publishedAtRuleVersion === TRUSTED_RULE_VERSION;
+    if (trusted) return null;
+  }
+  return allStateless ? "STATE_UNSTATED" : "DATE_UNTRUSTED";
+}
+
+// ---- stop states, and the latest trusted state the lifecycle read ---------
+export type StopState = "PAUSED" | "DEPRECATED" | "REMOVED";
+const STOP_STATE_SET: ReadonlySet<string> = new Set(["PAUSED", "DEPRECATED", "REMOVED"]);
+
+export interface LatestStatedState {
+  state: string;
+  at: string;
+}
+
+// The unanimous stop state a CURRENT_STATE row's supporting evidence states,
+// or null (a live state, a mixture, or no known state).
+function statedStopOf(evidence: readonly EvidenceLike[]): StopState | null {
+  const states = new Set(
+    evidence.map((e) => (e.mechanismState ?? "").trim().toUpperCase()).filter((s) => KNOWN_STATED_STATES.has(s)),
   );
+  if (states.size !== 1) return null;
+  const only = [...states][0];
+  return STOP_STATE_SET.has(only) ? (only as StopState) : null;
+}
+
+export function stopStatePhrase(state: StopState, noun: string): string {
+  if (state === "PAUSED") return `that ${noun} is currently paused`;
+  if (state === "DEPRECATED") return `that ${noun} has been deprecated`;
+  return `that ${noun} has been removed`;
+}
+
+// For a CURRENT_STATE row established as a stop. "Latest" only when the
+// lifecycle's own latest trusted state agrees; otherwise just what was stated.
+function establishedStopNote(state: StopState, latest: LatestStatedState | null): string {
+  const isLatest = latest !== null && latest.state === state;
+  const when = isLatest ? retrievedOn(latest.at) : null;
+  if (state === "PAUSED") {
+    return isLatest
+      ? `The latest official state is paused${when ? ` (dated ${when})` : ""}; this does not show it happening now.`
+      : "An official record states it is paused; this does not show it happening now.";
+  }
+  const word = state === "DEPRECATED" ? "deprecated" : "removed";
+  return isLatest
+    ? `An official record${when ? ` dated ${when}` : ""} states it was ${word}; nothing newer shows it active again.`
+    : `An official record states it was ${word}.`;
+}
+
+// For a CURRENT_STATE row that is NOT established, from the lifecycle's latest
+// trusted stated state. A stale LIVE, a paused record of any age, and a durable
+// stop each say what the latest trusted record said — never that it holds now.
+function latestStateNote(latest: LatestStatedState): string | null {
+  const when = retrievedOn(latest.at);
+  if (!when) return null;
+  const state = latest.state.toUpperCase();
+  if (state === "PAUSED") return `It was last recorded as paused on ${when}; its current state is unknown.`;
+  if (state === "DEPRECATED" || state === "REMOVED") {
+    return `An official record dated ${when} states it was ${state === "DEPRECATED" ? "deprecated" : "removed"}; nothing newer shows it active again.`;
+  }
+  if (state === "LIVE" || state === "IMPLEMENTING") {
+    return `The latest record saying it is active is dated ${when}; nothing recent confirms it is active now.`;
+  }
+  return null;
+}
+
+// The latest trusted stated state from the persisted mechanism flows, when
+// the assembly recorded one. Older assemblies carry none.
+export function latestStatedStateOf(flows: readonly unknown[] | null | undefined): LatestStatedState | null {
+  for (const f of flows ?? []) {
+    const v = (f as { latestStatedState?: unknown } | null)?.latestStatedState as
+      | { state?: unknown; at?: unknown }
+      | undefined;
+    if (v && typeof v.state === "string" && typeof v.at === "string") return { state: v.state, at: v.at };
+  }
+  return null;
 }
 
 // THE SURFACE CEILING, ONE PLACE. What the engine no longer lets these
@@ -543,7 +638,7 @@ function restsOnlyOnUnstatedState(
 // component), burn events only (EXECUTION_EVIDENCE), or rows stating no
 // known state (CURRENT_STATE). Used by the table and by the non-verdict
 // answer, which reads component statuses directly.
-type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | "STATE_UNSTATED" | null;
+type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | "STATE_UNSTATED" | "DATE_UNTRUSTED" | null;
 
 function surfaceCeilingOf(
   component: string,
@@ -551,13 +646,12 @@ function surfaceCeilingOf(
   supportingEvidenceIds: readonly string[] | undefined,
   quantityByEvidence: ReadonlyMap<string, QuantityLike>,
   kindByEvidence: ReadonlyMap<string, string | null>,
-  stateByEvidence: ReadonlyMap<string, string | null> = new Map(),
+  evidenceById: ReadonlyMap<string, EvidenceLike> = new Map(),
 ): SurfaceCeiling {
   if (persistedStatus !== "SUPPORTED" && persistedStatus !== "PARTIALLY_SUPPORTED") return null;
   if (restsOnlyOnLevelReadings(supportingEvidenceIds, quantityByEvidence)) return "LEVEL_ONLY";
   if (restsOnlyOnBurnEvents(component, supportingEvidenceIds, kindByEvidence)) return "BURN_ONLY";
-  if (restsOnlyOnUnstatedState(component, supportingEvidenceIds, stateByEvidence)) return "STATE_UNSTATED";
-  return null;
+  return currentClaimCeilingOf(component, supportingEvidenceIds, evidenceById);
 }
 
 // A partly supported row whose persisted reason says its OWN claim is not
@@ -616,6 +710,26 @@ function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: Bou
   return row.reason ?? "The available evidence does not settle this.";
 }
 
+// A CURRENT_STATE row either established as a stop (its note says what was
+// stated, and "latest" only when the lifecycle agrees), or not established
+// with a latest trusted state the lifecycle recorded. Every other row is
+// returned unchanged.
+function withCurrentStateNote(
+  component: string,
+  status: ResultStatus,
+  statedStop: StopState | null,
+  latest: LatestStatedState | null,
+  text: string,
+): string {
+  if (!CURRENT_CLAIM_COMPONENTS.has(component)) return text;
+  if (statedStop !== null) return `${text} ${establishedStopNote(statedStop, latest)}`;
+  if (status === "NOT_ESTABLISHED" && latest !== null) {
+    const note = latestStateNote(latest);
+    return note ? `${text} ${note}` : text;
+  }
+  return text;
+}
+
 // HISTORICAL EXECUTION ≠ EXECUTING NOW. Execution evidence shows that the
 // mechanism executed at the time of the evidence; it never shows that it
 // continues. A confirmed or partly confirmed execution row therefore says
@@ -657,6 +771,8 @@ export interface SurfaceInput {
   })[];
   quantities: readonly QuantityLike[];
   boundary: ProofBoundaryView | null | undefined;
+  // The lifecycle's latest trusted stated state, when the assembly has one.
+  latestStatedState?: LatestStatedState | null;
 }
 
 // THE ROWS THE QUESTION TURNS ON. Where the question projection resolved,
@@ -680,7 +796,8 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
   }
   const quantityByEvidence = new Map(input.quantities.map((q) => [q.evidenceId, q]));
   const kindByEvidence = new Map(input.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
-  const stateByEvidence = new Map(input.evidence.map((e) => [e.id, e.mechanismState ?? null]));
+  const evidenceById = new Map<string, EvidenceLike>(input.evidence.map((e) => [e.id, e]));
+  const latestStated = input.latestStatedState ?? null;
 
   const ladder = deriveResultLadder(input.components, classesByComponent);
   const ladderRows = new Map([...ladder.mechanism, ...ladder.value].map((r) => [r.component, r]));
@@ -714,20 +831,25 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
     if (persistedStatus === null) continue;
     const persisted = input.components.find((c) => c.component === component);
     const ceiling = persistedStatus === "CONFIRMED" || persistedStatus === "PARTIAL"
-      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence, stateByEvidence)
+      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence, evidenceById)
       : null;
     const levelOnly = ceiling === "LEVEL_ONLY";
     const burnOnly = ceiling === "BURN_ONLY";
     const stateUnstated = ceiling === "STATE_UNSTATED";
+    const dateUntrusted = ceiling === "DATE_UNTRUSTED";
     const status: ResultStatus = ceiling !== null ? "NOT_ESTABLISHED" : persistedStatus;
     const evidence = (admittedByComponent[component] ?? []).map(({ e, relation }) =>
       evidenceCard(e, relation, { jobId: input.jobId, quantity: quantityByEvidence.get(e.id) ?? null, ticker: input.ticker, component }),
     );
-    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly && !stateUnstated
+    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly && !stateUnstated && !dateUntrusted
       ? boundaryOf({ component, reasonCodes: persisted?.reasonCodes, coverage: row.coverage, boundary: input.boundary })
       : null;
     const claimNotShown =
       status === "PARTIAL" && (persisted?.reasonCodes ?? []).some((c) => typeof c === "string" && CLAIM_NOT_SHOWN_CODES.has(c));
+    const statedStop =
+      CURRENT_CLAIM_COMPONENTS.has(component) && (status === "CONFIRMED" || status === "PARTIAL")
+        ? statedStopOf((persisted?.supportingEvidenceIds ?? []).map((id) => evidenceById.get(id)).filter((e): e is EvidenceLike => !!e))
+        : null;
     const strongestClass = SOURCE_PRECEDENCE.find((cls) => evidence.some((e) => e.sourceClass === sourceClassLabel(cls)));
     const strongest = strongestClass ? evidence.find((e) => e.sourceClass === sourceClassLabel(strongestClass)) ?? null : evidence[0] ?? null;
     // The question projection's own words for the rows it named; a
@@ -750,9 +872,18 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
           ? BURN_EVENT_ONLY_LIMIT
           : stateUnstated
             ? STATE_UNSTATED_LIMIT
-            : withExecutionTimeNote(component, status, establishedText(row, evidence, boundary), evidence),
+            : dateUntrusted
+              ? DATE_UNTRUSTED_LIMIT
+              : withCurrentStateNote(
+                  component,
+                  status,
+                  statedStop,
+                  latestStated,
+                  withExecutionTimeNote(component, status, establishedText(row, evidence, boundary), evidence),
+                ),
       boundary,
       ...(claimNotShown ? { claimNotShown: true as const } : {}),
+      ...(statedStop ? { statedStop } : {}),
       source: strongest ? { kind: strongest.sourceClass, name: strongest.sourceName } : null,
       date: latestDate(evidence),
       evidence,
@@ -778,7 +909,7 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       const dep = byComponent.get(c);
       if (!dep || dep.kind !== "SUPPORTING" || folded.has(c)) continue;
       folded.add(c);
-      r.restsOn.push({ component: c, label: questionLabelFor(c, noun), phrase: statementPhraseFor(c, noun), status: dep.status, statusLabel: dep.statusLabel, tone: dep.tone });
+      r.restsOn.push({ component: c, label: questionLabelFor(c, noun), phrase: dep.statedStop ? stopStatePhrase(dep.statedStop, noun) : statementPhraseFor(c, noun), status: dep.status, statusLabel: dep.statusLabel, tone: dep.tone });
     }
     r.restsOn.sort((a, b) => pathIndex(a.component) - pathIndex(b.component));
   }
@@ -986,7 +1117,10 @@ export function surfaceAnswer(input: {
   }
   const rows = [...input.rows].sort((a, b) => pathIndex(a.component) - pathIndex(b.component));
   const noun = mechanismNounOf([input.question, ...rows.filter((r) => r.primary).map((r) => r.label)]);
-  const phrase = (r: ResearchTableRow) => statementPhraseFor(r.component, noun);
+  // A current state established as a stop is said as that stop, never as
+  // "happening now".
+  const phrase = (r: ResearchTableRow) =>
+    r.statedStop ? stopStatePhrase(r.statedStop, noun) : statementPhraseFor(r.component, noun);
   const by = (status: ResultStatus) => rows.filter((r) => r.status === status);
   const sentences: string[] = [];
 
@@ -1061,9 +1195,9 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
   const snapshotIds = new Set(detail.snapshotEvidenceIds);
   const quantityByEvidence = new Map(detail.quantities.map((q) => [q.evidenceId, q]));
   const kindByEvidence = new Map(detail.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
-  const stateByEvidence = new Map(detail.evidence.map((e) => [e.id, e.mechanismState ?? null]));
+  const evidenceById = new Map<string, EvidenceLike>(detail.evidence.map((e) => [e.id, e]));
   const answerStatusOf = (c: ResearchJobDetail["components"][number]): string => {
-    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence, stateByEvidence) !== null) return "INSUFFICIENT_EVIDENCE";
+    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence, evidenceById) !== null) return "INSUFFICIENT_EVIDENCE";
     const claimNotShown =
       c.status === "PARTIALLY_SUPPORTED" && (c.reasonCodes ?? []).some((x) => typeof x === "string" && CLAIM_NOT_SHOWN_CODES.has(x));
     return claimNotShown ? "INSUFFICIENT_EVIDENCE" : c.status;
@@ -1077,6 +1211,7 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
     evidence: detail.evidence.map((e) => ({ ...e, hasSnapshot: snapshotIds.has(e.id) })),
     quantities: detail.quantities,
     boundary: detail.proof?.boundedBy ?? null,
+    latestStatedState: latestStatedStateOf(detail.mechanism?.flows),
   });
   const cited = new Set((detail.proof?.citations ?? []).map((c) => c.evidenceId));
   const cards = keyEvidence(table, cited);

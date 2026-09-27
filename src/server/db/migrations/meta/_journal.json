@@ -414,6 +414,13 @@
       "when": 1789948800000,
       "tag": "0058_evm_transaction_reference_locators",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1790035200000,
+      "tag": "0059_published_at_rule_version",
+      "breakpoints": true
     }
   ]
 }

@@ -67,6 +67,8 @@ function forumRow(component: string, overrides: Partial<EvidenceRow> = {}): Evid
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `source-${id}`,
     evidenceContractVersion: 2,
+    // Models current extraction: dates produced under the strict rule.
+    publishedAtRuleVersion: 1,
     patternStep: STEP[component],
     component,
     relationship: "SUPPORTS",

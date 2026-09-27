@@ -6,7 +6,7 @@ import { loadProductConfig } from "../config/product";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
 import { readJobBudgetReserved, reserveJobBudget } from "./budget-reservation";
-import { isReplayProvider } from "./providers/types";
+import { isReplayProvider, PUBLISHED_AT_RULE_VERSION } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
 import {
@@ -3556,6 +3556,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 documentaryLocator: locatorOutcome.confirmed[0]?.value ?? null,
                 fetchedAt: doc.fetchedAt,
                 publishedAt: fact.publishedAt,
+                // Extracted under the strict publication-date rule — the only
+                // rule this executor's extraction path runs.
+                publishedAtRuleVersion: PUBLISHED_AT_RULE_VERSION,
                 doesNotProve: fact.doesNotProve,
                 retrievedUrl: doc.finalUrl,
                 contentHash: doc.contentHash,

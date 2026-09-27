@@ -189,6 +189,9 @@ export async function GET(
         observedAt: evidence.observedAt,
         dataAsOf: evidence.dataAsOf,
         publishedAt: evidence.publishedAt,
+        // Which rule produced publishedAt (1 = strict; null = legacy), so the
+        // surface never presents an unmarked date as proof of "now".
+        publishedAtRuleVersion: evidence.publishedAtRuleVersion,
         retrievedUrl: evidence.retrievedUrl,
         fetchedAt: evidence.fetchedAt,
         sourceTitle: sources.title,
