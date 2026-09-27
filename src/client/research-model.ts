@@ -1135,6 +1135,10 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
     "The sources describe this as a proposal, not as something adopted or in force.",
   APPROVAL_NOT_ESTABLISHED:
     "The sources show governance discussing or describing this, but nothing checked shows a decision approving it.",
+  // The earlier approval is not denied: it happened. What the later record
+  // says is that it no longer stands.
+  APPROVAL_LATER_WITHDRAWN:
+    "An earlier governance record approved this, and a later governance record paused, deprecated or withdrew it, so an approval in force now is not shown.",
   CONFLICTING_STATE: "The sources disagree about the current state.",
   TOKEN_STATE_UNQUALIFIED:
     "Token state is mentioned, but not precisely enough to settle the effect in question.",
@@ -1319,7 +1323,9 @@ const MECHANISM_ROWS = [
   { component: "MECHANISM_SPEC", label: "The project documents the mechanism" },
   { component: "GOVERNANCE_BASIS", label: "A governing decision authorises it" },
   { component: "CURRENT_STATE", label: "It is currently active" },
-  { component: "EXECUTION_EVIDENCE", label: "It has been observed executing" },
+  // Tense-neutral: execution evidence shows that execution happened at the
+  // time of the evidence, never that it continues now.
+  { component: "EXECUTION_EVIDENCE", label: "Execution has been observed" },
 ] as const;
 
 const VALUE_ROWS = [
@@ -1941,8 +1947,8 @@ function shortAnswerFor(input: BriefingInput, rows: readonly ResultRow[]): strin
     const detail = boundary.coverage === "BLOCKED" ? boundary.limitation : boundary.reason;
     // THE SUBJECT IS THE PHRASE, NOT THE ROW LABEL.
     //
-    // A ladder label is a CLAIM — "It has been observed executing" — and
-    // reading "Main limitation — It has been observed executing: …" says
+    // A ladder label is a CLAIM — "Execution has been observed" — and
+    // reading "Main limitation — Execution has been observed: …" says
     // the opposite of what is meant. The component phrase is a noun phrase
     // written to sit inside a sentence, so it slots in and stays true.
     const subjectPhrase = COMPONENT_PHRASES[boundary.component] ?? null;

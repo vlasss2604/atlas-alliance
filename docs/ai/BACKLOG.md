@@ -103,6 +103,14 @@ together they stopped project #2 before it could start. Kept for context.
   **Whether to add an EVM read transport is an owner decision, not a backlog
   item to pick up.**
 
+- **On-chain evidence is dated by read time, not block time (latent).**
+  Outside supply-interval reasoning, an ONCHAIN_VERIFIABLE row's temporal
+  basis is `fetched_at` (the RPC read), even when the observation is a
+  historical transaction whose `blockTime` is known. Today no on-chain kind
+  can establish CURRENT_STATE or EXECUTION_EVIDENCE, so nothing reads it as
+  "now"; if a kind is ever granted either, a 2021 transaction read today
+  would look current. Founder decision (2026-09-27): record, do not change.
+
 - **EVM V1 (ZERO_ADDRESS_TRANSFER) is proven offline only.** Not validated
   against a live node: that a finalized `totalSupply` read at block B
   includes block B's transactions (why t0 is taken at `event − 1` and the

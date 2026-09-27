@@ -131,6 +131,20 @@ willing to assert. Collapsing any two of these is the most common failure.
   readings bound the interval; the delta is the net of everything in it.
   A reading taken by this Research at an explicit historical block is
   history and may be t0; a head reading of this Research never is.
+- **Fresh document ≠ current claim.** A component that asks what is true NOW
+  (CURRENT_STATE) is answered only by a row that states a known state; a
+  fresh publication date proves when a page was written, never that its
+  excerpt speaks about the present ("cumulative total since launch" on a
+  page dated yesterday is historical content). `published_at` is document
+  metadata only — an explicit publication or last-updated date of the
+  document itself, else null; never a fetch date, an "as of" data date, a
+  governance or transaction date. Saved results resting only on stateless
+  rows are shown as not established.
+- **Historical execution ≠ executing now.** Execution evidence shows that
+  execution happened by its date; the surface says so and never implies it
+  continues. An approval later paused, deprecated or removed by a newer
+  governance record is named (`APPROVAL_LATER_WITHDRAWN`), never "no
+  approval seen".
 - **Proposal made ≠ proposal passed.** An official governance venue is not a
   decision; a post on it establishes what was proposed, never that governance
   approved it. `PROPOSED` ≠ `APPROVED` ≠ `ACTIVATED` ≠ `EXECUTING`.

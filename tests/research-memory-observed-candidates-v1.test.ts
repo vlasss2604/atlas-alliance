@@ -143,7 +143,9 @@ async function insertRow(jobId: string, sourceId: string, item: { step: number; 
       directness: o.directness ?? "DIRECT",
       fragment,
       summary: "protocol fees accrue to the treasury",
-      mechanismState: null,
+      // CURRENT_STATE is established only by a row stating a known state
+      // (FRESH DOCUMENT ≠ CURRENT CLAIM); the fixture's row for it says so.
+      mechanismState: item.component === "CURRENT_STATE" ? "LIVE" : null,
       sourceClass: (o.sourceClass ?? "OFFICIAL_DOCS") as "OFFICIAL_DOCS",
       officiality: o.officiality ?? "CONFIRMED",
       entityBinding: o.entityBinding ?? null,

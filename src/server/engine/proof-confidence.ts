@@ -180,6 +180,8 @@ const REASON_CODE_CAP: Record<ResultReasonCode, ConfidenceScore | null> = {
   // the decision itself, not a stronger source for one already taken.
   PROPOSED_STATE_ONLY: CONFIDENCE_BANDS.LIMITED,
   APPROVAL_NOT_ESTABLISHED: CONFIDENCE_BANDS.LIMITED,
+  // The same missing decision, named more precisely: an approval in force now.
+  APPROVAL_LATER_WITHDRAWN: CONFIDENCE_BANDS.LIMITED,
 };
 
 // Why a band ended where it did. Closed vocabulary: every member is

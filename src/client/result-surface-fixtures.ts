@@ -51,6 +51,8 @@ interface EvidenceSpec {
   doesNotProve?: string;
   publishedAt?: string | null;
   observedAt?: string | null;
+  // The lifecycle state the excerpt itself states, when it states one.
+  state?: string | null;
   cited?: boolean;
   quantity?: { amountRaw: string; decimals: number };
 }
@@ -124,7 +126,7 @@ function build(opts: {
       fragment: spec.fragment,
       summary: spec.summary,
       doesNotProve: spec.doesNotProve ?? null,
-      mechanismState: null,
+      mechanismState: spec.state ?? null,
       valueSource: null,
       sourceClass: src.sourceClass,
       officiality: spec.kind === "DOCS" || spec.kind === "GOV" || spec.kind === "REPORT" ? "CONFIRMED" : "CLAIMED",
@@ -153,7 +155,7 @@ function build(opts: {
         summary: spec.summary,
         fragment: spec.fragment,
         doesNotProve: spec.doesNotProve ?? null,
-        mechanismState: null,
+        mechanismState: spec.state ?? null,
         sourceClass: src.sourceClass,
         officiality: "CONFIRMED",
         entityBinding: "CONFIRMED",
@@ -277,6 +279,8 @@ const DOC_ACTIVE: EvidenceSpec = {
   fragment: "Active modules: Lending v3, Swap v2, Buyback (since epoch 118).",
   doesNotProve: "does not show a purchase transaction",
   publishedAt: "2026-09-10T00:00:00.000Z",
+  // "listed as active" — the excerpt states the mechanism is live.
+  state: "LIVE",
   cited: true,
 };
 const CHAIN_SUPPLY: EvidenceSpec = {

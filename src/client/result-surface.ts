@@ -323,6 +323,9 @@ export interface EvidenceCard {
 
 export interface EvidenceLike extends EvidenceItemLike {
   onchainFactKind?: string | null;
+  // The row's stated lifecycle state, as persisted. Optional: fixtures and
+  // older payloads may not carry it, and absence reads as "no known state".
+  mechanismState?: string | null;
   publishedAt?: string | null;
   observedAt?: string | null;
   dataAsOf?: string | null;
@@ -501,11 +504,46 @@ function restsOnlyOnBurnEvents(
   return component === "EXECUTION_EVIDENCE" && ids.length > 0 && ids.every((id) => kindByEvidence.get(id) === "BURN");
 }
 
+// FRESH DOCUMENT ≠ CURRENT CLAIM, ON EVERY RECORD. The engine now lets a
+// "what is true now" component be established only by a row that STATES a
+// known state; Proofs saved before that rule may carry CURRENT_STATE as
+// established on rows that state none — a cumulative total on a freshly
+// dated page, say. They are never recomputed, so the surface reads them the
+// way the engine now would: not established. Never the other way — this can
+// only weaken a row. The known-state vocabulary is the engine's own
+// (domain/mechanism-state.ts), pinned equal by a test.
+export const KNOWN_STATED_STATES: ReadonlySet<string> = new Set([
+  "PROPOSED",
+  "APPROVED",
+  "IMPLEMENTING",
+  "LIVE",
+  "DEPRECATED",
+  "REMOVED",
+  "PAUSED",
+]);
+const CURRENT_CLAIM_COMPONENTS: ReadonlySet<string> = new Set(["CURRENT_STATE"]);
+const STATE_UNSTATED_LIMIT =
+  "The sources checked do not state whether this is happening now; a recent page date alone cannot show it.";
+
+function restsOnlyOnUnstatedState(
+  component: string,
+  supportingEvidenceIds: readonly string[] | undefined,
+  stateByEvidence: ReadonlyMap<string, string | null>,
+): boolean {
+  if (!CURRENT_CLAIM_COMPONENTS.has(component)) return false;
+  const ids = supportingEvidenceIds ?? [];
+  return (
+    ids.length > 0 &&
+    ids.every((id) => !KNOWN_STATED_STATES.has((stateByEvidence.get(id) ?? "").trim().toUpperCase()))
+  );
+}
+
 // THE SURFACE CEILING, ONE PLACE. What the engine no longer lets these
 // rows establish, read off a saved record: a lone level reading (any
-// component) or burn events only (EXECUTION_EVIDENCE). Used by the table
-// and by the non-verdict answer, which reads component statuses directly.
-type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | null;
+// component), burn events only (EXECUTION_EVIDENCE), or rows stating no
+// known state (CURRENT_STATE). Used by the table and by the non-verdict
+// answer, which reads component statuses directly.
+type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | "STATE_UNSTATED" | null;
 
 function surfaceCeilingOf(
   component: string,
@@ -513,10 +551,12 @@ function surfaceCeilingOf(
   supportingEvidenceIds: readonly string[] | undefined,
   quantityByEvidence: ReadonlyMap<string, QuantityLike>,
   kindByEvidence: ReadonlyMap<string, string | null>,
+  stateByEvidence: ReadonlyMap<string, string | null> = new Map(),
 ): SurfaceCeiling {
   if (persistedStatus !== "SUPPORTED" && persistedStatus !== "PARTIALLY_SUPPORTED") return null;
   if (restsOnlyOnLevelReadings(supportingEvidenceIds, quantityByEvidence)) return "LEVEL_ONLY";
   if (restsOnlyOnBurnEvents(component, supportingEvidenceIds, kindByEvidence)) return "BURN_ONLY";
+  if (restsOnlyOnUnstatedState(component, supportingEvidenceIds, stateByEvidence)) return "STATE_UNSTATED";
   return null;
 }
 
@@ -576,6 +616,25 @@ function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: Bou
   return row.reason ?? "The available evidence does not settle this.";
 }
 
+// HISTORICAL EXECUTION ≠ EXECUTING NOW. Execution evidence shows that the
+// mechanism executed at the time of the evidence; it never shows that it
+// continues. A confirmed or partly confirmed execution row therefore says
+// when its evidence is from, or that the evidence carries no date of its own.
+function withExecutionTimeNote(
+  component: string,
+  status: ResultStatus,
+  text: string,
+  evidence: EvidenceCard[],
+): string {
+  if (component !== "EXECUTION_EVIDENCE" || (status !== "CONFIRMED" && status !== "PARTIAL")) return text;
+  const dated = latestDate(evidence.filter((e) => e.relation === "SUPPORTS"));
+  const note =
+    dated && dated.label !== "Checked"
+      ? `The supporting evidence is dated ${dated.value}: it shows that execution had happened by then, not that it continues now.`
+      : "The supporting evidence carries no date of its own: it shows that execution happened, not that it continues now.";
+  return `${text} ${note}`;
+}
+
 // The reading itself, then why it cannot answer the row.
 function levelOnlyText(evidence: EvidenceCard[]): string {
   const reading = evidence.find((e) => e.relation === "SUPPORTS")?.proves;
@@ -621,6 +680,7 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
   }
   const quantityByEvidence = new Map(input.quantities.map((q) => [q.evidenceId, q]));
   const kindByEvidence = new Map(input.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
+  const stateByEvidence = new Map(input.evidence.map((e) => [e.id, e.mechanismState ?? null]));
 
   const ladder = deriveResultLadder(input.components, classesByComponent);
   const ladderRows = new Map([...ladder.mechanism, ...ladder.value].map((r) => [r.component, r]));
@@ -654,15 +714,16 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
     if (persistedStatus === null) continue;
     const persisted = input.components.find((c) => c.component === component);
     const ceiling = persistedStatus === "CONFIRMED" || persistedStatus === "PARTIAL"
-      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence)
+      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence, stateByEvidence)
       : null;
     const levelOnly = ceiling === "LEVEL_ONLY";
     const burnOnly = ceiling === "BURN_ONLY";
+    const stateUnstated = ceiling === "STATE_UNSTATED";
     const status: ResultStatus = ceiling !== null ? "NOT_ESTABLISHED" : persistedStatus;
     const evidence = (admittedByComponent[component] ?? []).map(({ e, relation }) =>
       evidenceCard(e, relation, { jobId: input.jobId, quantity: quantityByEvidence.get(e.id) ?? null, ticker: input.ticker, component }),
     );
-    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly
+    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly && !stateUnstated
       ? boundaryOf({ component, reasonCodes: persisted?.reasonCodes, coverage: row.coverage, boundary: input.boundary })
       : null;
     const claimNotShown =
@@ -683,7 +744,13 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       status,
       statusLabel: RESULT_STATUS_LABELS[status],
       tone: statusTone(status),
-      established: levelOnly ? levelOnlyText(evidence) : burnOnly ? BURN_EVENT_ONLY_LIMIT : establishedText(row, evidence, boundary),
+      established: levelOnly
+        ? levelOnlyText(evidence)
+        : burnOnly
+          ? BURN_EVENT_ONLY_LIMIT
+          : stateUnstated
+            ? STATE_UNSTATED_LIMIT
+            : withExecutionTimeNote(component, status, establishedText(row, evidence, boundary), evidence),
       boundary,
       ...(claimNotShown ? { claimNotShown: true as const } : {}),
       source: strongest ? { kind: strongest.sourceClass, name: strongest.sourceName } : null,
@@ -994,8 +1061,9 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
   const snapshotIds = new Set(detail.snapshotEvidenceIds);
   const quantityByEvidence = new Map(detail.quantities.map((q) => [q.evidenceId, q]));
   const kindByEvidence = new Map(detail.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
+  const stateByEvidence = new Map(detail.evidence.map((e) => [e.id, e.mechanismState ?? null]));
   const answerStatusOf = (c: ResearchJobDetail["components"][number]): string => {
-    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence) !== null) return "INSUFFICIENT_EVIDENCE";
+    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence, stateByEvidence) !== null) return "INSUFFICIENT_EVIDENCE";
     const claimNotShown =
       c.status === "PARTIALLY_SUPPORTED" && (c.reasonCodes ?? []).some((x) => typeof x === "string" && CLAIM_NOT_SHOWN_CODES.has(x));
     return claimNotShown ? "INSUFFICIENT_EVIDENCE" : c.status;

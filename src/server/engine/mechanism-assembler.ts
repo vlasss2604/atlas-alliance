@@ -117,6 +117,7 @@ export type NodeQualification =
   // computeLifecycle: a proposal never moves a flow toward CURRENT.
   | "PROPOSED_STATE_ONLY"
   | "APPROVAL_NOT_ESTABLISHED"
+  | "APPROVAL_LATER_WITHDRAWN"
   | "TOKEN_STATE_UNQUALIFIED"
   // B1/B2 — NET_EFFECT's typed supply qualifications. Each is a genuine
   // basis for partial support: the component has admissible evidence and
@@ -148,6 +149,7 @@ const NODE_QUALIFICATION_CODES = new Set<ResultReasonCode>([
   "STATE_NOT_FULLY_LIVE",
   "PROPOSED_STATE_ONLY",
   "APPROVAL_NOT_ESTABLISHED",
+  "APPROVAL_LATER_WITHDRAWN",
   "TOKEN_STATE_UNQUALIFIED",
   "SUPPLY_REDUCTION_NOT_ESTABLISHED",
   "NET_SUPPLY_CHANGE_NOT_ESTABLISHED",

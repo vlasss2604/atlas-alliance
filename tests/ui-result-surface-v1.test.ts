@@ -739,8 +739,13 @@ describe("a point-in-time supply reading, on a record persisted before the engin
     const m = buildResultSurface(measured);
     expect(m.table.find((r) => r.component === "NET_EFFECT")?.status).toBe("PARTIAL");
     expect(m.answer.sentences.join(" ")).toContain("There is evidence that total supply actually decreases, but it is not fully confirmed.");
-    // Current state partly supported by evidence that is not a level reading.
-    const documented = withComponent(aaveDetail("EXCLUDED"), "CURRENT_STATE", {}, true);
+    // Current state partly supported by evidence that is not a level reading
+    // and that STATES a known state — the only kind that may answer "now".
+    const base = withComponent(aaveDetail("EXCLUDED"), "CURRENT_STATE", {}, true);
+    const documented = {
+      ...base,
+      evidence: base.evidence.map((e) => (e.id === "ev-cs" ? { ...e, mechanismState: "LIVE" } : e)),
+    };
     const c = buildResultSurface(documented);
     expect(c.table.find((r) => r.component === "CURRENT_STATE")?.status).toBe("PARTIAL");
     expect(c.answer.sentences.join(" ")).toContain("There is evidence that the buyback is happening now");

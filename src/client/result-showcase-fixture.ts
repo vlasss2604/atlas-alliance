@@ -317,7 +317,7 @@ export const FIXTURE_DEEP_PROOF: { label: string; state: ProofState; sources: nu
   { label: "The project documents the mechanism", state: "ESTABLISHED", sources: 3 },
   { label: "A governing decision authorises it", state: "ESTABLISHED", sources: 1 },
   { label: "It is currently active", state: "PARTLY_ESTABLISHED", sources: 2 },
-  { label: "The mechanism has been observed executing", state: "NOT_ESTABLISHED", sources: 0 },
+  { label: "Execution of the mechanism has been observed", state: "NOT_ESTABLISHED", sources: 0 },
   { label: "Where the value comes from", state: "ESTABLISHED", sources: 4 },
   { label: "Net reduction in token supply", state: "CONTRADICTED", sources: 2 },
 ];

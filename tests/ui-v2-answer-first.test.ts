@@ -70,6 +70,8 @@ const ENGINE_REASON_CODES = [
   // proposal-capped step with no stated reason.
   "PROPOSED_STATE_ONLY",
   "APPROVAL_NOT_ESTABLISHED",
+  // Temporal reliability — the same cap, naming a later withdrawal.
+  "APPROVAL_LATER_WITHDRAWN",
   "CONFLICTING_STATE",
   "TOKEN_STATE_UNQUALIFIED",
   // B1 — NET_EFFECT supply qualification. Listed here deliberately:

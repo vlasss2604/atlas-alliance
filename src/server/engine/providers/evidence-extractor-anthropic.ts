@@ -225,6 +225,14 @@ project. A post on a governance forum is not an approved decision because it app
 an operating mechanism because it documents one; an official page is not a live state because it is official. When the
 excerpt does not settle the state, UNKNOWN is the correct answer, never the most likely state.
 
+PUBLICATION DATE. publishedAt is DOCUMENT METADATA, not a fact the document reports. Set it ONLY from an explicit
+publication date or explicit last-updated date that the document states about ITSELF (for example "Published 3 March
+2026", "Last updated: 2026-03-03", a dated byline or post timestamp). If the document states no such date, set publishedAt
+to null. Never take publishedAt from: the date the document was fetched; any date mentioned inside the facts or excerpts;
+a report, data or dashboard "as of" date; a governance vote, proposal or execution date; a transaction or block date; or
+any other date in the page content that is not explicitly the page's own publication or update date. An "as of" date is
+evidence content, not publication metadata. When unsure, null is the correct answer.
+
 Output must be a JSON object matching the provided schema. No prose, no explanation.`;
 
 // Exposed for offline contract tests — the exact system prompt the

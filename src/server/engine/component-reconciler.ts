@@ -147,6 +147,13 @@ export type ResultReasonCode =
   // has not established that one was.
   | "PROPOSED_STATE_ONLY"
   | "APPROVAL_NOT_ESTABLISHED"
+  // APPROVAL_LATER_WITHDRAWN: the same cap as APPROVAL_NOT_ESTABLISHED, in the
+  // one case the record says more: an approval-bearing row WAS admitted and
+  // was superseded by a newer establishing row stating PAUSED, DEPRECATED or
+  // REMOVED. The earlier approval stays historically true; what is not
+  // established is an approval in force now. Same status, same support —
+  // only the reason names what the later governance record did.
+  | "APPROVAL_LATER_WITHDRAWN"
   | "CONFLICTING_STATE"
   | "TOKEN_STATE_UNQUALIFIED"
   // B1 — supply qualification for NET_EFFECT. Two codes, deliberately, for
@@ -324,6 +331,14 @@ export const APPROVAL_BEARING_STATES: ReadonlySet<MechanismState> = new Set<Mech
   "APPROVED",
   "IMPLEMENTING",
   "LIVE",
+]);
+
+// What a later record can say became of an authorised mechanism. Read only
+// to NAME the reason above; it grants and removes nothing.
+const WITHDRAWAL_STATES: ReadonlySet<MechanismState> = new Set<MechanismState>([
+  "PAUSED",
+  "DEPRECATED",
+  "REMOVED",
 ]);
 
 // Every normalized state that is past "merely proposed" — the states a
@@ -969,6 +984,25 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     // NET_EFFECT is exempt from the map, not from topical fitness: a single
     // point-in-time supply reading is not a supply effect and establishes
     // nothing there. Every other kind keeps B1/B2 as it was.
+    // FRESH DOCUMENT ≠ CURRENT CLAIM (Founder decision). A component that
+    // asks what is true NOW (requiresCurrentState) is answered only by a row
+    // that STATES a known state — LIVE, PAUSED, DEPRECATED, any of them, per
+    // the component's own semantics. A fresh publication date proves when the
+    // page was written, never that the excerpt speaks about the present: a
+    // cumulative total "since launch" on a page dated yesterday is historical
+    // content. Such a row stays in the record and establishes nothing here.
+    // Asked after the date gates and alongside the kind gate, so a stale,
+    // undated or wrong-kind row keeps the reason it always had.
+    if (
+      row.relationship === "SUPPORTS" &&
+      requirements.requiresCurrentState &&
+      verdictByRowId.get(row.id)!.normalizedState === "UNKNOWN" &&
+      // A row whose KIND cannot establish this component keeps that reason.
+      onchainFactMayEstablish(row.onchainFactKind, item.component)
+    ) {
+      excluded.set(row.id, "NOT_CURRENT_STATE_BEARING");
+      continue;
+    }
     if (row.relationship === "SUPPORTS" && !onchainFactMayEstablish(row.onchainFactKind, item.component)) {
       excluded.set(row.id, "FACT_KIND_CANNOT_ESTABLISH");
       // EVM V1: a zero-address transfer that got this far passed every
@@ -1220,7 +1254,13 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
     requiresGovernanceApproval(item.component) &&
     !establishingStates.some((s) => APPROVAL_BEARING_STATES.has(s))
   ) {
-    reasonCodes.push("APPROVAL_NOT_ESTABLISHED");
+    const approvalSuperseded = [...supersededIds].some((id) =>
+      APPROVAL_BEARING_STATES.has(verdictByRowId.get(id)!.normalizedState),
+    );
+    const laterWithdrawal = establishingStates.some((s) => WITHDRAWAL_STATES.has(s));
+    reasonCodes.push(
+      approvalSuperseded && laterWithdrawal ? "APPROVAL_LATER_WITHDRAWN" : "APPROVAL_NOT_ESTABLISHED",
+    );
   }
 
   // §9.1 — token-state qualification. Detection ALWAYS runs over the

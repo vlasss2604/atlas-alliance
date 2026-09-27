@@ -277,7 +277,11 @@ async function insertRow(jobId: string, project: Pick<Project, "id" | "host">, c
       directness: "DIRECT",
       fragment,
       summary: `${component.toLowerCase().replace(/_/g, " ")}: ${fragment}`,
-      mechanismState: spec.mechanismState ?? null,
+      // The CURRENT_STATE fixture fragment states "the buyback mechanism is
+      // active as of the latest epoch" — a stated LIVE, which is what a
+      // CURRENT_STATE row must carry to establish (FRESH DOCUMENT ≠ CURRENT
+      // CLAIM). Every other default stays stateless.
+      mechanismState: spec.mechanismState ?? (component === "CURRENT_STATE" ? "LIVE" : null),
       sourceClass: sourceClass as "OFFICIAL_DOCS",
       officiality: route.officiality,
       entityBinding: computeEntityBinding(url, sourceClass, identity),
