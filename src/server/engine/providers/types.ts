@@ -212,6 +212,10 @@ export interface ExtractedFact {
   // read a state off an excerpt; fixtures and other producers may still
   // write null or prose, which the same normalizer fails closed on.
   mechanismState: string | null;
+  // The exact words of supportFragment that explicitly state mechanismState
+  // (domain/mechanism-state-cue.ts). Optional: fixtures, chain synthesis and
+  // other producers carry none, which reads as uncued.
+  stateCue?: string | null;
   directness: "DIRECT" | "INDIRECT" | "INFERRED";
   // S4 review fix (BLOCKER-1, D-074, §7.2): sourceClass/officiality are
   // DELIBERATELY ABSENT from this interface. Source authority is a two-

@@ -97,6 +97,8 @@ export interface LifecycleSignalEvidence {
   onchainFactKind: string | null;
   sourceClass: string | null;
   mechanismState: string | null;
+  // 1 = the state is backed by a validated explicit cue; null = uncued.
+  mechanismStateRuleVersion?: number | null;
   publishedAt: Date | null;
   fetchedAt: Date;
   publishedAtRuleVersion?: number | null;
@@ -110,6 +112,8 @@ const LIFECYCLE_SIGNAL_EXCLUSIONS: ReadonlySet<string> = new Set([
 ]);
 const LIFECYCLE_SIGNAL_STATES: ReadonlySet<string> = new Set(["LIVE", "IMPLEMENTING", "PAUSED", "DEPRECATED", "REMOVED"]);
 const TRUSTED_RULE_VERSION = 1;
+// The documentary state-cue contract version (domain/mechanism-state-cue.ts).
+const CUED_STATE_RULE_VERSION = 1;
 // Durable until something newer states otherwise.
 const DURABLE_STOP_STATES: ReadonlySet<string> = new Set(["DEPRECATED", "REMOVED"]);
 // Any stated stop, durable or not, newer than the current state blocks CURRENT.
@@ -145,6 +149,11 @@ export function deriveLifecycleStateSignals(input: {
     if (row.sourceClass === null || !admits.includes(row.sourceClass)) continue;
     const state = (row.mechanismState ?? "").trim().toUpperCase();
     if (!LIFECYCLE_SIGNAL_STATES.has(state)) continue;
+    // PRESENT TENSE ≠ CURRENT STATE: a documentary state is a lifecycle
+    // signal only when an explicit, validated cue backs it. An uncued label
+    // neither makes a mechanism CURRENT or HISTORICAL nor is ever reported
+    // as the latest recorded state.
+    if (row.mechanismStateRuleVersion !== CUED_STATE_RULE_VERSION) continue;
     if (row.publishedAt === null || row.publishedAtRuleVersion !== TRUSTED_RULE_VERSION) continue;
     if (row.publishedAt.getTime() > row.fetchedAt.getTime()) continue;
     out.push({ evidenceId: row.id, component, state: state as LifecycleStateSignal["state"], at: row.publishedAt.toISOString() });

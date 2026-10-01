@@ -8,15 +8,19 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
-- **Present-tense documentation can be labelled LIVE at extraction (2026-10-01).**
-  Wave 1A (`fd1252ef`, evidence `41838267`): the excerpt "Raydium fees are
-  split between liquidity providers, RAY buybacks, and treasury" was
-  extracted with `mechanism_state = LIVE`, although the prompt says a
-  documentation page is not an operating mechanism because it documents one.
-  Held downstream today — CURRENT_STATE needs a trusted publication date
-  (MISSING_PUBLICATION_DATE) — so no verdict changed; it is a documented ≠
-  executing slip at the labelling step. Founder: record for a separate audit;
-  NOT fixed by the does_not_prove contract (D-162).
+- ~~**Present-tense documentation can be labelled LIVE at extraction**~~ **CLOSED
+  2026-10-01** by D-163 for CURRENT_STATE and its lifecycle: a model-written
+  state counts only with a validated explicit state cue.
+
+- **Historical execution cannot be represented without LIVE (2026-10-01).**
+  EXECUTION_EVIDENCE's only state gate is `requiresLiveMechanismState` (LIVE
+  or IMPLEMENTING); no canonical state says "this executed". A documentary
+  execution report ("bought back X on date Y") therefore passes only when the
+  model labels it LIVE, and that label is still not cue-validated there.
+  Applying the D-163 cue rule to this gate would block honest historical
+  reports; supporting them needs a semantic decision (a gate that reads an
+  execution cue, or a new state). Latent today: 0 OFFICIAL_REPORT rows in
+  atlas_dev. Founder: stop-and-report per D-163 §5.
 
 - **Traceability gaps left after entity decoding (2026-09-23).** Decoding
   covers the decoder's table (`amp lt gt quot apos nbsp hellip mldr middot

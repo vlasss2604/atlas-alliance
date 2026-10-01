@@ -20,6 +20,7 @@ import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
 import { setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { fixtureStateCue } from "./state-cue-fixture";
 
 // RESEARCH RELIABILITY V1 — C2, THE TWO BOUNDED COMPLETION/RECOVERY DEFECTS.
 //
@@ -57,7 +58,10 @@ afterAll(async () => {
 
 const HOST = "docs.c2-eligibility.test";
 const OTHER_HOST = "blog.unconfirmed.test";
-const SENTENCE = "Protocol fees are used to buy back the token and bought-back tokens are held at a public address.";
+// The world's documents state the mechanism's state explicitly ("is currently
+// active"): under D-163 present tense alone is never a current state, and
+// these suites test recovery mechanics, not that rule.
+const SENTENCE = "Protocol fees are used to buy back the token, the buyback is currently active, and bought-back tokens are held at a public address.";
 const COST: ModelCostProfile = {
   modelId: "fixture-test-model",
   inputPriceMicroUsdPerToken: 1,
@@ -83,7 +87,7 @@ function fixtureDoc(url: string): FetchedDocument {
   return { finalUrl: url, requestedUrl: url, httpStatus: 200, contentType: "text/markdown", normalizedText: text, contentHash: `sha256:${url}`, fetchedAt: new Date(), byteLength: text.length };
 }
 function fact(step: number, component: string, ageDays: number): ExtractedFact {
-  return { step, component, statement: SENTENCE, supportFragment: SENTENCE, mechanismState: "LIVE", directness: "DIRECT", publishedAt: new Date(Date.now() - ageDays * DAY_MS), doesNotProve: "does not establish that any buyback executed", relationship: "SUPPORTS", onchainLocator: null, onchainLocators: null };
+  return { step, component, statement: SENTENCE, supportFragment: SENTENCE, mechanismState: "LIVE", stateCue: fixtureStateCue(SENTENCE, "LIVE"), directness: "DIRECT", publishedAt: new Date(Date.now() - ageDays * DAY_MS), doesNotProve: "does not establish that any buyback executed", relationship: "SUPPORTS", onchainLocator: null, onchainLocators: null };
 }
 const fresh = (step: number, component: string) => fact(step, component, 1);
 // Far outside every freshness class — excluded at S5 as STALE_FOR_CURRENT_STATE.

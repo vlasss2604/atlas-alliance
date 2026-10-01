@@ -4,6 +4,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 
 import { loadProductConfig } from "../config/product";
 import { doesNotProveRuleVersionFor } from "../domain/does-not-prove-contract";
+import { mechanismStateRuleVersionFor } from "../domain/mechanism-state-cue";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
 import { readJobBudgetReserved, reserveJobBudget } from "./budget-reservation";
@@ -3542,6 +3543,16 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 fragment: fact.supportFragment,
                 summary: fact.statement,
                 mechanismState: fact.mechanismState,
+                // The model's state is kept verbatim; the marker records whether
+                // a validated explicit cue backs it (literal in the fragment by
+                // the same traceability check, one canonical state, the same
+                // state). Uncued, it never counts for CURRENT_STATE.
+                mechanismStateRuleVersion: mechanismStateRuleVersionFor({
+                  mechanismState: fact.mechanismState,
+                  stateCue: fact.stateCue ?? null,
+                  supportFragment: fact.supportFragment,
+                  isLiteral: isTraceable,
+                }),
                 // BLOCKER-1: never fact.sourceClass/fact.officiality — those
                 // fields don't exist on ExtractedFact. Computed above,
                 // deterministically, by source-authority.ts.

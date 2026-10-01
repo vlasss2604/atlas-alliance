@@ -78,6 +78,9 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     evidenceContractVersion: 2,
     // Models current extraction: dates produced under the strict rule.
     publishedAtRuleVersion: 1,
+    // The builder's rows are explicit statements of their state: a validated
+    // state cue backs it (documentary state-cue contract, D-163).
+    mechanismStateRuleVersion: 1,
     patternStep: STEP_OF[component],
     component,
     relationship: "SUPPORTS",

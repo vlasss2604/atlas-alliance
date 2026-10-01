@@ -165,6 +165,9 @@ export interface ResearchEvidenceView {
   // Optional: older payloads and fixtures do not carry it (read as legacy).
   doesNotProveRuleVersion?: number | null;
   mechanismState: string | null;
+  // 1 = the state is backed by a validated explicit state cue; null = uncued.
+  // Optional: older payloads and fixtures do not carry it (read as uncued).
+  mechanismStateRuleVersion?: number | null;
   valueSource: string | null;
   sourceClass: string | null;
   officiality: string | null;

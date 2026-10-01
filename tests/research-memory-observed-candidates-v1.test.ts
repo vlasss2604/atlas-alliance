@@ -146,6 +146,10 @@ async function insertRow(jobId: string, sourceId: string, item: { step: number; 
       // CURRENT_STATE is established only by a row stating a known state
       // (FRESH DOCUMENT ≠ CURRENT CLAIM); the fixture's row for it says so.
       mechanismState: item.component === "CURRENT_STATE" ? "LIVE" : null,
+      // The fixture's stated states are explicit, so a validated state cue
+      // backs them (documentary state-cue contract). FLOW_PATH carries the
+      // marker too, so the adoption test below can prove it is copied exactly.
+      mechanismStateRuleVersion: item.component === "CURRENT_STATE" || item.component === "FLOW_PATH" ? 1 : null,
       sourceClass: (o.sourceClass ?? "OFFICIAL_DOCS") as "OFFICIAL_DOCS",
       officiality: o.officiality ?? "CONFIRMED",
       entityBinding: o.entityBinding ?? null,
@@ -400,6 +404,9 @@ describe("VERIFIED Research -> OBSERVED Research Memory candidates", () => {
     expect(flowOrigin.doesNotProveRuleVersion).toBe(1);
     expect(adopted.doesNotProveRuleVersion).toBe(1);
     expect(adopted.doesNotProve).toBe(flowOrigin.doesNotProve);
+    // The state-cue marker travels exactly, never re-derived by adoption.
+    expect(flowOrigin.mechanismStateRuleVersion).toBe(1);
+    expect(adopted.mechanismStateRuleVersion).toBe(1);
     expect(adopted.publishedAt?.toISOString()).toBe(flowOrigin.publishedAt?.toISOString());
     expect(adopted.sourceClass).toBe("OFFICIAL_DOCS");
     expect(adopted.officiality).toBe("CONFIRMED");

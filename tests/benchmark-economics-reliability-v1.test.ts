@@ -114,6 +114,9 @@ const LAT = { proposer: 1.5, search: 0.4, fetch: 0.8, extract: 2.5 };
 interface FactSpec {
   fragment: string;
   mechanismState?: string | null;
+  // The exact words of `fragment` that state mechanismState (documentary
+  // state-cue contract) — null when the fragment only describes.
+  stateCue?: string | null;
   relationship?: ExtractedFact["relationship"];
   publishedAt?: Date | null;
 }
@@ -153,6 +156,9 @@ const CANON: Record<Component, string> = {
   DURABILITY_BASIS: "the allocation can only be changed by a further token holder vote",
 };
 const LIVE: Partial<Record<Component, string>> = { MECHANISM_SPEC: "LIVE", EXECUTION_EVIDENCE: "LIVE", CURRENT_STATE: "LIVE" };
+// The canonical CURRENT_STATE passage states its state explicitly ("is
+// active"); the others describe, so they carry no cue.
+const CUE: Partial<Record<Component, string>> = { CURRENT_STATE: "is active" };
 function canon(over: Partial<Record<Component, FactSpec | null>> = {}): Partial<Record<Component, FactSpec>> {
   const out: Partial<Record<Component, FactSpec>> = {};
   for (const c of COMPONENTS) {
@@ -160,7 +166,7 @@ function canon(over: Partial<Record<Component, FactSpec | null>> = {}): Partial<
       if (over[c]) out[c] = over[c]!;
       continue;
     }
-    out[c] = { fragment: CANON[c], mechanismState: LIVE[c] ?? null };
+    out[c] = { fragment: CANON[c], mechanismState: LIVE[c] ?? null, stateCue: CUE[c] ?? null };
   }
   return out;
 }
@@ -242,7 +248,7 @@ const SCENARIOS: Scenario[] = [
       MECHANISM_SPEC: { fragment: "the fee switch directs a share of protocol fees to the token treasury once activated", mechanismState: "APPROVED" },
       GOVERNANCE_BASIS: { fragment: "the fee switch proposal passed the token holder vote", mechanismState: "APPROVED" },
       EXECUTION_EVIDENCE: null,
-      CURRENT_STATE: { fragment: "the fee switch is approved but has not been activated; no fees are being directed yet", mechanismState: "APPROVED" },
+      CURRENT_STATE: { fragment: "the fee switch is approved but has not been activated; no fees are being directed yet", mechanismState: "APPROVED", stateCue: "is approved" },
       DESTINATION: { fragment: "once activated, the fee share would be sent to the token treasury" },
       NET_EFFECT: null,
     }),
@@ -512,6 +518,7 @@ function providers(project: Project, corpus: Corpus, c: Counters) {
             statement: `${comp.toLowerCase().replace(/_/g, " ")}: ${f.fragment}`,
             supportFragment: f.fragment,
             mechanismState: f.mechanismState ?? null,
+            stateCue: f.stateCue ?? null,
             directness: "DIRECT",
             publishedAt: f.publishedAt ?? daysAgo(1),
             doesNotProve: "does not prove the size of the effect",

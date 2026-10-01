@@ -676,6 +676,9 @@ async function materializeOne(
       // caveat stays legacy in the adopting job, a v1 one stays v1. Never
       // re-derived from the text here.
       doesNotProveRuleVersion: origin.doesNotProveRuleVersion,
+      // The state's cue marker travels with the state: legacy stays legacy,
+      // v1 stays v1. Never re-derived here.
+      mechanismStateRuleVersion: origin.mechanismStateRuleVersion,
       // ROUND 11 — A RESEARCH INPUT COMES FROM THE OBSERVATION, NEVER FROM
       // THE MUTABLE MEMORY ROW.
       //

@@ -328,6 +328,8 @@ export interface EvidenceLike extends EvidenceItemLike {
   // The row's stated lifecycle state, as persisted. Optional: fixtures and
   // older payloads may not carry it, and absence reads as "no known state".
   mechanismState?: string | null;
+  // 1 = the state is backed by a validated explicit cue; null / absent = uncued.
+  mechanismStateRuleVersion?: number | null;
   publishedAt?: string | null;
   // 1 = strict publication-date rule; null / absent = legacy provenance.
   publishedAtRuleVersion?: number | null;
@@ -546,6 +548,16 @@ const STATE_UNSTATED_LIMIT =
 const DATE_UNTRUSTED_LIMIT =
   "The sources checked carry no publication date that can show this is happening now.";
 const TRUSTED_RULE_VERSION = 1;
+// PRESENT TENSE ≠ CURRENT STATE: a documentary row STATES a state only when
+// an explicit, validated cue backs it (server: domain/mechanism-state-cue.ts).
+// An uncued documentary label reads as no stated state; a chain row keeps
+// its own ceilings.
+const CUED_STATE_RULE_VERSION = 1;
+function statesItsState(e: EvidenceLike | undefined): boolean {
+  if (!e || !KNOWN_STATED_STATES.has((e.mechanismState ?? "").trim().toUpperCase())) return false;
+  if (e.onchainFactKind || e.sourceClass === "ONCHAIN_VERIFIABLE") return true;
+  return e.mechanismStateRuleVersion === CUED_STATE_RULE_VERSION;
+}
 
 type CurrentClaimCeiling = "STATE_UNSTATED" | "DATE_UNTRUSTED" | null;
 
@@ -560,8 +572,7 @@ function currentClaimCeilingOf(
   let allStateless = true;
   for (const id of ids) {
     const e = evidenceById.get(id);
-    const stated = KNOWN_STATED_STATES.has((e?.mechanismState ?? "").trim().toUpperCase());
-    if (!stated) continue;
+    if (!statesItsState(e)) continue;
     allStateless = false;
     // A chain row is held to its own ceilings (a level reading, a burn); this
     // one is about DOCUMENTARY publication dates only.
@@ -585,7 +596,7 @@ export interface LatestStatedState {
 // or null (a live state, a mixture, or no known state).
 function statedStopOf(evidence: readonly EvidenceLike[]): StopState | null {
   const states = new Set(
-    evidence.map((e) => (e.mechanismState ?? "").trim().toUpperCase()).filter((s) => KNOWN_STATED_STATES.has(s)),
+    evidence.filter((e) => statesItsState(e)).map((e) => (e.mechanismState ?? "").trim().toUpperCase()),
   );
   if (states.size !== 1) return null;
   const only = [...states][0];

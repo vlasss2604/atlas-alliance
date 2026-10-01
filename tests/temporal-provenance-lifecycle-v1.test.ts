@@ -69,6 +69,9 @@ function row(component: string, o: Partial<EvidenceRow> = {}): EvidenceRow {
     publishedAt: older(1),
     // Strict-rule date by default: the rows the engine writes today.
     publishedAtRuleVersion: PUBLISHED_AT_RULE_VERSION,
+    // The builder's rows state their state explicitly: a validated state cue
+    // backs it (documentary state-cue contract, mechanism_state_rule_version).
+    mechanismStateRuleVersion: 1,
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...o,

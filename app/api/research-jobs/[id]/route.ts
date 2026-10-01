@@ -184,6 +184,8 @@ export async function GET(
         // may be shown as a boundary, never from the text.
         doesNotProveRuleVersion: evidence.doesNotProveRuleVersion,
         mechanismState: evidence.mechanismState,
+        // 1 = the state is backed by a validated explicit cue; null = uncued.
+        mechanismStateRuleVersion: evidence.mechanismStateRuleVersion,
         valueSource: evidence.valueSource,
         sourceClass: evidence.sourceClass,
         officiality: evidence.officiality,

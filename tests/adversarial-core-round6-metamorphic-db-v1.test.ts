@@ -39,6 +39,7 @@ import { markProofVerified } from "../src/server/memory/verification";
 import { claimResearchJob, createResearchJob, transitionJobState } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { fixtureStateCue } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 6: METAMORPHIC INVARIANTS,
 // THE PERSISTED RESEARCH.
@@ -307,6 +308,8 @@ function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; c
             statement: `${component.toLowerCase().replace(/_/g, " ")}: ${f.fragment}`,
             supportFragment: f.fragment,
             mechanismState: f.mechanismState ?? null,
+            // A compliant extractor cites the fragment's explicit state words (D-163).
+            stateCue: fixtureStateCue(f.fragment, f.mechanismState),
             directness: "DIRECT",
             publishedAt: f.publishedAt === undefined ? defaultPublishedAt(url) : f.publishedAt,
             doesNotProve: "does not prove the size of the effect",

@@ -37,6 +37,7 @@ import { markProofVerified } from "../src/server/memory/verification";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { fixtureStateCue } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 5: THE FINAL RESULT, BLACK BOX.
 //
@@ -345,6 +346,8 @@ function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; c
           statement: `${component.toLowerCase().replace(/_/g, " ")}: ${f.fragment}`,
           supportFragment: f.fragment,
           mechanismState: f.mechanismState ?? null,
+          // A compliant extractor cites the fragment's explicit state words (D-163).
+          stateCue: fixtureStateCue(f.fragment, f.mechanismState),
           directness: f.directness ?? "DIRECT",
           // A publication date later than the fetch is refused as a date
           // (Round 1, D3/G2), so the default is a day before.

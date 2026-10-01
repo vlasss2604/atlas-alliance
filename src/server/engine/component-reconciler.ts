@@ -231,6 +231,11 @@ export interface EvidenceRow {
   fragment: string;
   summary: string | null;
   mechanismState: string | null;
+  // 1 = the model-assigned mechanismState is backed by a validated explicit
+  // state cue (domain/mechanism-state-cue.ts); null / absent = legacy or
+  // uncued. Read only by `currentStateReadingOf`: an uncued documentary
+  // state is UNKNOWN for a current-state component.
+  mechanismStateRuleVersion?: number | null;
   sourceClass: EvidenceSourceClass | null;
   officiality: "CONFIRMED" | "CLAIMED" | null;
   // D-134 — Axis C, independent of sourceClass/officiality. null when the
@@ -895,6 +900,27 @@ export function acquisitionBoundaryFromAttempt(
   return null;
 }
 
+// PRESENT TENSE ≠ CURRENT STATE (Founder decision, documentary state cue).
+// A component that asks what is true NOW reads a model-written state only
+// when an explicit, validated state cue backs it
+// (mechanismStateRuleVersion === 1, domain/mechanism-state-cue.ts). An
+// uncued documentary state — legacy, or present-tense description the model
+// labelled LIVE — is UNKNOWN here: it never establishes the current state,
+// never contradicts one, and never moves one. Not a contradiction, a gap.
+//
+// Scope, exactly: components with requiresCurrentState (CURRENT_STATE), and
+// model-written states only (onchainFactKind null — a chain row's state is
+// written by code). Every other component, the EXECUTION_EVIDENCE live gate
+// (evaluateCoreEligibility) and the supersession rule itself are unchanged.
+export const CUED_MECHANISM_STATE_RULE_VERSION = 1;
+
+function currentStateReadingOf(row: EvidenceRow, requirements: ComponentRequirements): MechanismState {
+  const state = normalizeMechanismState(row.mechanismState);
+  if (!requirements.requiresCurrentState) return state;
+  if (row.onchainFactKind !== null && row.onchainFactKind !== undefined) return state;
+  return row.mechanismStateRuleVersion === CUED_MECHANISM_STATE_RULE_VERSION ? state : "UNKNOWN";
+}
+
 export function reconcileComponent(input: ComponentReconciliationInput): ComponentReconciliationResult {
   const { jobId, item, requirements, evidence, now, freshnessPolicyDays } = input;
 
@@ -976,7 +1002,7 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
   // --- Step 3/core eligibility (normalization happens inside) -------------
   const verdictByRowId = new Map<string, RowVerdict>();
   for (const row of survivingAfterDedup) {
-    const normalizedState = normalizeMechanismState(row.mechanismState);
+    const normalizedState = currentStateReadingOf(row, requirements);
     const temporalBasis = temporalBasisOf(row);
     const core = evaluateCoreEligibility(row, requirements, now, freshnessPolicyDays);
     verdictByRowId.set(row.id, {

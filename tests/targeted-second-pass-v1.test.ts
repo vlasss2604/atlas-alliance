@@ -22,6 +22,7 @@ import { runMemoryPlanningStage } from "../src/server/memory/plan-job";
 import { classifySourceRoute } from "../src/server/memory/source-route-classification";
 import { confirmSourceRoute } from "../src/server/memory/source-route-confirmation";
 import { setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { fixtureStateCue } from "./state-cue-fixture";
 
 // TARGETED SECOND PASS (Research Reliability V1, B2).
 //
@@ -49,7 +50,10 @@ afterAll(async () => {
 });
 
 const HOST = "docs.second-pass.test";
-const SENTENCE = "Protocol fees are used to buy back the token and bought-back tokens are held at a public address.";
+// The world's documents state the mechanism's state explicitly ("is currently
+// active"): under D-163 present tense alone is never a current state, and
+// these suites test recovery mechanics, not that rule.
+const SENTENCE = "Protocol fees are used to buy back the token, the buyback is currently active, and bought-back tokens are held at a public address.";
 const COST: ModelCostProfile = {
   modelId: "fixture-test-model",
   inputPriceMicroUsdPerToken: 1,
@@ -78,7 +82,7 @@ function fixtureDoc(url: string): FetchedDocument {
 function fact(step: number, component: string): ExtractedFact {
   // State-bearing and fresh, so a current-state component can be
   // established by a documentary fact in this fixture.
-  return { step, component, statement: SENTENCE, supportFragment: SENTENCE, mechanismState: "LIVE", directness: "DIRECT", publishedAt: new Date(Date.now() - 24 * 3600 * 1000), doesNotProve: "does not establish that any buyback executed", relationship: "SUPPORTS", onchainLocator: null, onchainLocators: null };
+  return { step, component, statement: SENTENCE, supportFragment: SENTENCE, mechanismState: "LIVE", stateCue: fixtureStateCue(SENTENCE, "LIVE"), directness: "DIRECT", publishedAt: new Date(Date.now() - 24 * 3600 * 1000), doesNotProve: "does not establish that any buyback executed", relationship: "SUPPORTS", onchainLocator: null, onchainLocators: null };
 }
 
 async function makeProject() {

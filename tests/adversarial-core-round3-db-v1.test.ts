@@ -296,6 +296,9 @@ async function insertRow(jobId: string, project: Pick<Project, "id" | "host">, c
       fetchedAt: now,
       publishedAt: spec.publishedAt === undefined ? now : spec.publishedAt,
       publishedAtRuleVersion: 1,
+      // The builder's rows are explicit statements of their state: a validated
+      // state cue backs it (documentary state-cue contract, D-163).
+      mechanismStateRuleVersion: 1,
       doesNotProve: "does not prove the size of the effect",
       retrievedUrl: url,
       contentHash: `sha256:${url}`,

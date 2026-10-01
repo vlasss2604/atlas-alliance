@@ -160,6 +160,7 @@ async function loadLifecycleStateSignals(
       onchainFactKind: evidence.onchainFactKind,
       sourceClass: evidence.sourceClass,
       mechanismState: evidence.mechanismState,
+      mechanismStateRuleVersion: evidence.mechanismStateRuleVersion,
       publishedAt: evidence.publishedAt,
       fetchedAt: evidence.fetchedAt,
       publishedAtRuleVersion: evidence.publishedAtRuleVersion,

@@ -282,6 +282,6 @@ describe("6. presentation only — no verdict, component, confidence, source-aut
     const statements = sql.split("\n").filter((l) => !l.trim().startsWith("--") && l.trim().length > 0);
     expect(statements).toEqual(['ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "does_not_prove_rule_version" smallint;']);
     const journal = JSON.parse(readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8")) as { entries: { idx: number; tag: string }[] };
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 60, tag: "0060_does_not_prove_rule_version" });
+    expect(journal.entries.find((e) => e.idx === 60)).toMatchObject({ idx: 60, tag: "0060_does_not_prove_rule_version" });
   });
 });

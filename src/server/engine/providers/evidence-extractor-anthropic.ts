@@ -77,6 +77,18 @@ const extractedFactSchema = z.object({
     .string()
     .describe(`lifecycle state the excerpt DIRECTLY establishes — exactly one of: ${MECHANISM_STATES.join(", ")}; null or UNKNOWN when it does not establish one`)
     .nullable(),
+  // THE STATE-CUE CONTRACT (domain/mechanism-state-cue.ts): the exact words
+  // of supportFragment that explicitly state mechanismState. Code verifies
+  // the cue is literal, maps it through a closed table and requires it to
+  // name the same state; an uncued state is persisted as written but never
+  // counts as a stated state for CURRENT_STATE. Optional and nullable: a
+  // missing cue reads exactly as no cue (fail closed), never as a malformed
+  // fact.
+  stateCue: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("the exact words of supportFragment that explicitly state mechanismState (e.g. \"is currently live\", \"has been paused since\"); null when the excerpt only describes how the mechanism works"),
   directness: z.enum(["DIRECT", "INDIRECT", "INFERRED"]),
   publishedAt: z.string().nullable(), // ISO string over the wire; parsed to Date below
   // The does_not_prove CONTRACT (domain/does-not-prove-contract.ts): the
@@ -231,6 +243,15 @@ project, the component being researched, what the research task is looking for, 
 project. A post on a governance forum is not an approved decision because it appears there; a documentation page is not
 an operating mechanism because it documents one; an official page is not a live state because it is official. When the
 excerpt does not settle the state, UNKNOWN is the correct answer, never the most likely state.
+
+STATE CUE. Whenever mechanismState is not null or UNKNOWN, set stateCue to the exact words copied from supportFragment
+that state that state explicitly — for example "is currently live", "is now active", "has been paused since March",
+"is deprecated", "was removed", "has been approved". The cue must be a literal part of supportFragment and must state the
+state itself. Present tense is not a state: "12% of fees are used to buy back the token", "rewards are sent to the vault",
+"the balance updates automatically", a table row, an address or an allocation split describe how a mechanism works and
+are never a cue — for such an excerpt set mechanismState to UNKNOWN and stateCue to null. A report that something was
+executed ("bought back 1,000 tokens on 3 May") is not a current state either. Never write a cue the excerpt does not
+contain, and never paraphrase one.
 
 WHAT IT DOES NOT PROVE. doesNotProve names the nearest claim this fact does NOT establish. It is read as "this fact does
 not establish <doesNotProve>", so write THE CLAIM ITSELF, in exactly one of these forms:

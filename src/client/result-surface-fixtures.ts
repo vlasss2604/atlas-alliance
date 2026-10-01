@@ -133,6 +133,9 @@ function build(opts: {
       doesNotProveRuleVersion: spec.doesNotProve && spec.kind !== "CHAIN" ? 1 : null,
       onchainFactKind: spec.kind === "CHAIN" ? (spec.quantity ? "TOKEN_SUPPLY" : "SIGNATURES_FOR_ADDRESS") : null,
       mechanismState: spec.state ?? null,
+      // A fixture's stated state is an explicit one (its excerpt says so), so
+      // it carries the state-cue marker the engine writes for such a row.
+      mechanismStateRuleVersion: spec.state ? 1 : null,
       // Fixtures model what the engine writes today: dates produced under
       // the strict publication-date rule.
       publishedAtRuleVersion: 1,

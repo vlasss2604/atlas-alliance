@@ -250,6 +250,12 @@ export const evidence = pgTable(
     // 0060). Presentation only: no verdict, reconciliation or Memory rule
     // reads it.
     doesNotProveRuleVersion: smallint("does_not_prove_rule_version"),
+    // Whether the model-assigned mechanism_state is backed by an explicit,
+    // validated state cue: 1 = v1 (domain/mechanism-state-cue.ts); NULL =
+    // legacy or uncued. A documentary row without it is state-UNKNOWN for
+    // CURRENT_STATE and its lifecycle. Copied exactly on Memory reuse, never
+    // backfilled (migration 0061).
+    mechanismStateRuleVersion: smallint("mechanism_state_rule_version"),
     // Мост к кандидату памяти без повторного разбора (§6.2); nullable —
     // не каждое Evidence метит claim заранее известного словаря.
     // D-158 PHASE 2 — machine-owned invocation provenance for a

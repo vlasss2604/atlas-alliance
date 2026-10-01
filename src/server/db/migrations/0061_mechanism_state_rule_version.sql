@@ -1,0 +1,13 @@
+-- DOCUMENTARY STATE-CUE MARKER (Founder-approved).
+--
+-- evidence.mechanism_state_rule_version records whether the model-assigned
+-- mechanism_state is backed by an explicit, validated state cue: 1 = the v1
+-- contract (src/server/domain/mechanism-state-cue.ts — a verbatim cue inside
+-- the support fragment that maps to exactly the assigned canonical state).
+-- NULL = legacy, uncued, or a cue that did not validate. The raw
+-- mechanism_state is kept as provenance either way.
+--
+-- Forward only. Nullable, no default, no backfill: every existing row stays
+-- NULL. A documentary row without the marker is state-UNKNOWN for
+-- CURRENT_STATE and its lifecycle — never a contradiction.
+ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "mechanism_state_rule_version" smallint;

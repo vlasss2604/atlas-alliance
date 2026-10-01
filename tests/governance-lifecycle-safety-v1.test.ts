@@ -69,6 +69,9 @@ function forumRow(component: string, overrides: Partial<EvidenceRow> = {}): Evid
     evidenceContractVersion: 2,
     // Models current extraction: dates produced under the strict rule.
     publishedAtRuleVersion: 1,
+    // The builder's rows state their state explicitly: a validated state cue
+    // backs it (documentary state-cue contract, mechanism_state_rule_version).
+    mechanismStateRuleVersion: 1,
     patternStep: STEP[component],
     component,
     relationship: "SUPPORTS",

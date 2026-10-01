@@ -7,8 +7,8 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-10-01 (D-162 does_not_prove contract, on
-  the final tree): **5463 passing, 4 skipped, 4 failing** (264 files) —
+- Full suite, last verified 2026-10-01 (D-163 documentary state cue, on the
+  final tree): **5485 passing, 4 skipped, 4 failing** (265 files) —
   exactly the four standing failures below.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
   timeout (29.0 s alone on `39e8132`) and can time out under load.
@@ -40,6 +40,30 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   REPORT test write its table (per-run verdict, critical nodes attempted,
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
+
+## PRESENT TENSE IS NOT A CURRENT STATE (D-163)
+
+A documentary row's `mechanism_state` is model-written, and the model labels
+description as state (Wave 1A: 73 of 77 documentary rows LIVE, including a
+fee-split table row). A trusted date proves the page is recent, not that the
+mechanism runs.
+
+- **Cue contract.** The extractor returns `stateCue`: the exact words of the
+  support fragment that state the state. `domain/mechanism-state-cue.ts`
+  accepts it only if it is literal in the fragment (`isTraceable`), maps
+  through a closed code-owned table to exactly one canonical state, and equals
+  the model's label. Negation, condition, modal or future refuse it.
+- **Marker.** `evidence.mechanism_state_rule_version smallint NULL` (migration
+  0061, no default, no backfill). 1 only for a validated cue; the raw label is
+  kept. Memory copies it exactly.
+- **Rule** (`component-reconciler.ts` `currentStateReadingOf`). For
+  CURRENT_STATE, a model-written state without the marker is UNKNOWN: it does
+  not establish, contradict or move the current state. CURRENT_STATE needs a
+  validated cue AND a trusted date. The same holds for lifecycle signals
+  (`deriveLifecycleStateSignals`) and the surface (`statesItsState`).
+- **Unchanged.** EXECUTION_EVIDENCE's live gate (historical execution needs a
+  separate decision — BACKLOG), every other component, supersession, source
+  authority, NET_EFFECT, BURN/supply, chain rows (their states are code-written).
 
 ## A CAVEAT IS SHOWN AS A BOUNDARY ONLY WHEN IT NAMES A CLAIM (D-162)
 
