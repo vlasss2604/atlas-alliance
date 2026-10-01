@@ -111,7 +111,11 @@ describe("View excerpt", () => {
     expect(html).toContain('aria-expanded="true"');
     expect(count(html, "evidence-excerpt")).toBe(1);
     expect(textOf(html)).toContain(card.excerpt);
-    if (card.doesNotProve) expect(textOf(html)).toContain(`Does not prove: ${card.doesNotProve}`);
+    // The card's limit arrives already framed ("Does not establish: <claim>"
+    // or a complete sentence) and is shown as is — never under a second
+    // "Does not prove:" label.
+    if (card.doesNotProve) expect(textOf(html)).toContain(card.doesNotProve);
+    expect(textOf(html)).not.toContain("Does not prove:");
     // Human text, never the record's shape.
     expect(html).not.toContain("amountRaw");
     expect(html).not.toMatch(/"fragment"\s*:/);

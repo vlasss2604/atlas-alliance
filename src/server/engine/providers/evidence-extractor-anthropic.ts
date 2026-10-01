@@ -79,7 +79,14 @@ const extractedFactSchema = z.object({
     .nullable(),
   directness: z.enum(["DIRECT", "INDIRECT", "INFERRED"]),
   publishedAt: z.string().nullable(), // ISO string over the wire; parsed to Date below
-  doesNotProve: z.string().min(1),
+  // The does_not_prove CONTRACT (domain/does-not-prove-contract.ts): the
+  // claim this fact does NOT establish, written as that claim. The text is
+  // never edited downstream; the executor only records whether it met the
+  // contract.
+  doesNotProve: z
+    .string()
+    .min(1)
+    .describe('the claim this fact does NOT establish, written as that claim in its own polarity: "that <claim>", "whether <claim>", or a short noun phrase — never a sentence about the excerpt or document'),
   relationship: z.enum(["SUPPORTS", "CONTRADICTS", "CONTEXT", "LIMITS"]),
   // Proposed only. documentary-locator.ts is the authority — see the
   // field's doc comment on ExtractedFact. Nullable because most facts
@@ -224,6 +231,18 @@ project, the component being researched, what the research task is looking for, 
 project. A post on a governance forum is not an approved decision because it appears there; a documentation page is not
 an operating mechanism because it documents one; an official page is not a live state because it is official. When the
 excerpt does not settle the state, UNKNOWN is the correct answer, never the most likely state.
+
+WHAT IT DOES NOT PROVE. doesNotProve names the nearest claim this fact does NOT establish. It is read as "this fact does
+not establish <doesNotProve>", so write THE CLAIM ITSELF, in exactly one of these forms:
+  that <claim>        — for example "that the mechanism is currently LIVE", "that value does not reach token holders"
+  whether <claim>     — for example "whether buybacks are actually executing"
+  a short noun phrase — for example "net supply reduction"; a noun phrase has no verb such as is, are, has, does or can,
+    and no negation
+State the claim with its own polarity. A claim that is itself negative is allowed, but only in the that-form or the
+whether-form ("that value does not reach token holders"). Never write a sentence about the excerpt, the document or the
+evidence ("This excerpt does not prove …", "The document does not state …", "X is not specified"), and never write the
+opposite of the claim you mean ("The mechanism is not yet LIVE" when the unproven claim is that it is LIVE). One claim
+or one list of claims joined by "or" — not several sentences.
 
 PUBLICATION DATE. publishedAt is DOCUMENT METADATA, not a fact the document reports. Set it ONLY from an explicit
 publication date or explicit last-updated date that the document states about ITSELF (for example "Published 3 March

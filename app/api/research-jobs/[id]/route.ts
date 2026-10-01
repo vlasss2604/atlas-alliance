@@ -179,6 +179,10 @@ export async function GET(
         fragment: evidence.fragment,
         summary: evidence.summary,
         doesNotProve: evidence.doesNotProve,
+        // Which contract the caveat was written under (1 = v1 claim form;
+        // null = legacy). The surface decides from this whether the caveat
+        // may be shown as a boundary, never from the text.
+        doesNotProveRuleVersion: evidence.doesNotProveRuleVersion,
         mechanismState: evidence.mechanismState,
         valueSource: evidence.valueSource,
         sourceClass: evidence.sourceClass,

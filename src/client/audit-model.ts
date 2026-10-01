@@ -1,6 +1,9 @@
 import {
   componentLabel,
   exclusionLabel,
+  legacyExtractorNote,
+  passageLimit,
+  passageLimitLine,
   reasonExplanation,
   safeClaimLabel,
   sourceClassCaveat,
@@ -333,7 +336,14 @@ export interface AuditEvidenceLink {
   evidenceIds: string[];
   canEstablish: string | null;
   cannotEstablish: string | null;
+  // This passage's own limit, where the does_not_prove contract lets it be
+  // read as one: a v1 claim (framed "Does not establish: …") or a chain
+  // row's code-written sentence. Null otherwise — the class limit stands.
   doesNotProve: string | null;
+  // The raw model-written caveat that is NOT a contract boundary (legacy or
+  // out-of-contract wording), kept visible here as provenance and only
+  // ever rendered under its own "Legacy extractor note" label.
+  legacyExtractorNote: string | null;
   exclusionReasons: string[];
   hasSnapshot: boolean;
   retrievedUrl: string;
@@ -356,6 +366,14 @@ export interface AuditEvidenceGroup {
 // One group per component that actually has evidence attached — supporting,
 // contradicting or excluded. A component with nothing attached is not an
 // evidence-map row; it is a coverage row, and it is already in section 2.
+// The passage-specific limit the audit may state as a boundary — never the
+// source-class fallback, which the link carries separately as
+// `cannotEstablish`.
+function auditPassageLimit(row: AuditEvidenceRow): string | null {
+  const limit = passageLimit(row);
+  return limit && limit.origin !== "SOURCE_CLASS" ? passageLimitLine(limit) : null;
+}
+
 export function auditEvidenceMap(
   scope: AuditScopeItem[],
   components: AuditComponentRow[],
@@ -394,7 +412,8 @@ export function auditEvidenceMap(
         // The per-passage limit is kept only while it is the SAME for
         // every row; one document speaking with two voices about its own
         // limits is not something to average.
-        if (existing.doesNotProve !== (row.doesNotProve ?? null)) existing.doesNotProve = null;
+        if (existing.doesNotProve !== auditPassageLimit(row)) existing.doesNotProve = null;
+        if (existing.legacyExtractorNote !== legacyExtractorNote(row)) existing.legacyExtractorNote = null;
         return;
       }
       const caveat = sourceClassCaveat(row.sourceClass ?? null);
@@ -408,7 +427,8 @@ export function auditEvidenceMap(
         evidenceIds: [row.id],
         canEstablish: caveat?.can ?? null,
         cannotEstablish: caveat?.cannot ?? null,
-        doesNotProve: row.doesNotProve ?? null,
+        doesNotProve: auditPassageLimit(row),
+        legacyExtractorNote: legacyExtractorNote(row),
         exclusionReasons: exclusionReason ? [exclusionLabel(exclusionReason)] : [],
         hasSnapshot: row.hasSnapshot === true,
         retrievedUrl: row.retrievedUrl ?? "",

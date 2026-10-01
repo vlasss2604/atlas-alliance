@@ -421,6 +421,13 @@
       "when": 1790035200000,
       "tag": "0059_published_at_rule_version",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "7",
+      "when": 1790121600000,
+      "tag": "0060_does_not_prove_rule_version",
+      "breakpoints": true
     }
   ]
 }

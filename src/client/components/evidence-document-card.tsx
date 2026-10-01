@@ -5,6 +5,7 @@ import { useState } from "react";
 import {
   componentClaimLabel,
   exclusionLabel,
+  passageLimit,
   sourceClassCaveat,
   sourceClassLabel,
   type DocumentGroup,
@@ -49,6 +50,13 @@ const ROLE_TONE: Record<EvidenceRole, string> = {
 // This is presentation only. Stored Evidence, its component links and its
 // admission are untouched; the role is passed in from the persisted
 // relationship and never inferred from text.
+// The passage-specific limit only — never the source-class fallback, which
+// this card already shows once for the whole document.
+function passageOwnLimit(item: EvidenceItemLike): string | null {
+  const limit = passageLimit(item);
+  return limit && limit.origin !== "SOURCE_CLASS" ? limit.text : null;
+}
+
 export function EvidenceDocumentCard({
   group,
   role,
@@ -166,10 +174,14 @@ export function EvidenceDocumentCard({
                     <p className="mt-1.5 text-[var(--atlas-text-dim)]">{item.summary}</p>
                   </>
                 )}
-                {item.doesNotProve && (
+                {/* Only a caveat about THIS passage that the contract lets a
+                    surface read (a v1 claim or a chain row's own sentence).
+                    A legacy model caveat is withheld; the card's source-class
+                    line above already states the generic limit. */}
+                {passageOwnLimit(item) && (
                   <>
                     <p className="eyebrow mt-3">What it does not establish</p>
-                    <p className="mt-1.5 text-[var(--atlas-text-dim)]">{item.doesNotProve}</p>
+                    <p className="mt-1.5 text-[var(--atlas-text-dim)]">{passageOwnLimit(item)}</p>
                   </>
                 )}
               </div>

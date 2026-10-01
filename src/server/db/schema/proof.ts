@@ -243,6 +243,13 @@ export const evidence = pgTable(
     // one stays provenance. Never inferred from created_at, never backfilled
     // (migration 0059).
     publishedAtRuleVersion: smallint("published_at_rule_version"),
+    // WHICH CONTRACT the model-written does_not_prove was written under: 1 =
+    // the v1 claim form (domain/does-not-prove-contract.ts); NULL = legacy
+    // free text, a caveat outside the contract, or a code-written chain
+    // caveat. Copied exactly on Memory reuse, never backfilled (migration
+    // 0060). Presentation only: no verdict, reconciliation or Memory rule
+    // reads it.
+    doesNotProveRuleVersion: smallint("does_not_prove_rule_version"),
     // Мост к кандидату памяти без повторного разбора (§6.2); nullable —
     // не каждое Evidence метит claim заранее известного словаря.
     // D-158 PHASE 2 — machine-owned invocation provenance for a

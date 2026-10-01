@@ -511,7 +511,7 @@ export function EvidenceCardView({
           </blockquote>
           {card.doesNotProve && (
             <p className="text-[0.9rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="evidence-does-not-prove">
-              Does not prove: {card.doesNotProve}
+              {card.doesNotProve}
             </p>
           )}
         </div>

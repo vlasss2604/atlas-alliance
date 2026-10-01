@@ -567,7 +567,7 @@ describe("evidence — from persisted links only, translated for a reader", () =
     const doc = surface.keyEvidence.find((c) => c.id === "ev-docs-active")!;
     expect(doc.excerpt).toBe("Active modules: Lending v3, Swap v2, Buyback (since epoch 118).");
     expect(doc.whyUsed).toBe("Shows what the project officially documents.");
-    expect(doc.doesNotProve).toBe("does not show a purchase transaction");
+    expect(doc.doesNotProve).toBe("Does not establish: a purchase transaction");
     expect(doc.openable).toBe(true);
   });
 

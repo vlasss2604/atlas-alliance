@@ -1,0 +1,12 @@
+-- does_not_prove CONTRACT MARKER (Founder-approved).
+--
+-- evidence.does_not_prove_rule_version records WHICH CONTRACT the
+-- model-written caveat in does_not_prove was written under: 1 = the v1
+-- claim form (src/server/domain/does-not-prove-contract.ts — "that …",
+-- "whether …" or a short noun phrase, in the claim's own polarity). NULL =
+-- legacy free text, or a caveat that did not meet the contract.
+--
+-- Forward only. Nullable, no default, no backfill: every existing row stays
+-- NULL and keeps its exact text as provenance. An unmarked caveat is never
+-- shown as an authoritative boundary on a primary Result surface.
+ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "does_not_prove_rule_version" smallint;

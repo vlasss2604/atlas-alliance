@@ -8,6 +8,16 @@ genuinely blocks the current task, say so and get it scoped explicitly.
 
 ### Engine / research
 
+- **Present-tense documentation can be labelled LIVE at extraction (2026-10-01).**
+  Wave 1A (`fd1252ef`, evidence `41838267`): the excerpt "Raydium fees are
+  split between liquidity providers, RAY buybacks, and treasury" was
+  extracted with `mechanism_state = LIVE`, although the prompt says a
+  documentation page is not an operating mechanism because it documents one.
+  Held downstream today — CURRENT_STATE needs a trusted publication date
+  (MISSING_PUBLICATION_DATE) — so no verdict changed; it is a documented ≠
+  executing slip at the labelling step. Founder: record for a separate audit;
+  NOT fixed by the does_not_prove contract (D-162).
+
 - **Traceability gaps left after entity decoding (2026-09-23).** Decoding
   covers the decoder's table (`amp lt gt quot apos nbsp hellip mldr middot
   ndash mdash`) and every numeric reference. Still literal and still able to

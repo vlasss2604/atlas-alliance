@@ -441,9 +441,12 @@ describe("V2 — the source's own words come before the model's", () => {
     // states, and nothing about whether it happens.
     expect(CARD_SRC).toContain("sourceClassCaveat(group.sourceClass)");
     expect(CARD_SRC).toContain('data-testid="source-class-caveat"');
-    // And the per-fact doesNotProve the extractor persisted still renders.
+    // And the per-fact limit still renders — through the does_not_prove
+    // contract (passageLimit), never the raw model caveat: a legacy caveat
+    // is withheld here and the class line above states the limit.
     expect(CARD_SRC).toContain("What it does not establish");
-    expect(CARD_SRC).toContain("{item.doesNotProve}");
+    expect(CARD_SRC).toContain("{passageOwnLimit(item)}");
+    expect(CARD_SRC).not.toContain("{item.doesNotProve}");
   });
 
   it("TEST 11d: every source class carries both what it can and cannot settle", () => {

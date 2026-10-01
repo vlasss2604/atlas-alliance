@@ -7,15 +7,14 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-09-27 (D-161 pre-activation and
-  multi-match fixes, on the final tree): **5444 passing, 4 skipped, 4
-  failing** (263 files) —
+- Full suite, last verified 2026-10-01 (D-162 does_not_prove contract, on
+  the final tree): **5463 passing, 4 skipped, 4 failing** (264 files) —
   exactly the four standing failures below.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
   timeout (29.0 s alone on `39e8132`) and can time out under load.
   Run the suite ALONE — two concurrent `vitest run` invocations share the
   one test database and produce mass spurious failures (observed earlier:
-  193 "failures" that vanished on a clean serial run). The three failures
+  193 "failures" that vanished on a clean serial run). The four failures
   are pre-existing and unrelated to research behaviour; they reproduce in
   isolation:
   - `phase1.test.ts` (DoD 1) and `phase2.test.ts` (DoD 6) pin a
@@ -25,6 +24,10 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   - `renderer-launch-diagnosis.test.ts` "a corrupt browser binary is
     diagnosed as a start failure": expects EXECUTABLE_NOT_FOUND, this
     machine reports PROCESS_START_FAILED. Environment-specific.
+  - `gates-owner-alpha.test.ts` "D. ADMIN + non-allowlisted project
+    (uniswap …) → DISABLED": fails identically on a clean checkout of
+    `7eb9d26` (verified 2026-10-01). An allowlist/gating expectation, not a
+    research one — do not change the allowlist to make it pass.
   Two older notes still apply: `first-real-run-stage2.test.ts` holds a
   source-regex assertion that is a line-ending artifact (matches `\n}\n`;
   `core.autocrlf=true` checks the file out with CRLF — check the file's
@@ -37,6 +40,34 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   REPORT test write its table (per-run verdict, critical nodes attempted,
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
+
+## A CAVEAT IS SHOWN AS A BOUNDARY ONLY WHEN IT NAMES A CLAIM (D-162)
+
+A documentary row's `does_not_prove` is model-written. It is read as "this
+fact does not establish <text>", so a free-standing sentence flipped its
+meaning ("The mechanism is not yet LIVE" → "does not establish that the
+mechanism is not yet LIVE"). Presentation and the extraction boundary only;
+no verdict, component, relationship, source-authority, CURRENT_STATE,
+mechanism_state, claim, confidence, Memory or BURN/supply rule reads it.
+
+- **Contract (v1).** The extractor prompt and schema ask for THE CLAIM, in
+  its own polarity: `that …`, `whether …`, or a short noun phrase. A negative
+  claim is allowed only in the that/whether form. Never a sentence about the
+  excerpt or document, never the opposite claim.
+- **Marker.** `evidence.does_not_prove_rule_version smallint NULL` (migration
+  0060, no default, no backfill). The executor stores the model's text
+  verbatim and writes 1 only when it is in a v1 form
+  (`domain/does-not-prove-contract.ts` checks FRAMING; it never edits text or
+  touches a negation); otherwise NULL. Memory adoption copies the marker
+  exactly. Chain rows (`onchain_fact_kind` set) carry code-written caveats and
+  no marker.
+- **Surface** (`research-model.ts` `passageLimit`, the one rule). v1 →
+  "Does not establish: <claim>"; chain row → its own sentence; anything else
+  (every pre-0060 row, and any out-of-contract model text) → the code-owned
+  source-class limit. The raw legacy text stays persisted and appears only in
+  the audit, labelled "Legacy extractor note".
+- **Not fixed here (BACKLOG):** present-tense documentation labelled LIVE at
+  extraction.
 
 ## RESEARCH RELIABILITY V1: THE SAME RESEARCH IN BOTH RUNTIMES, A RECORD OF WHY IT STOPPED, AND ONE BOUNDED SECOND LOOK
 

@@ -126,6 +126,12 @@ function build(opts: {
       fragment: spec.fragment,
       summary: spec.summary,
       doesNotProve: spec.doesNotProve ?? null,
+      // Fixtures model what the engine writes today: a documentary caveat in
+      // the v1 claim form carries its marker; a chain row's caveat is
+      // code-written and is identified by its fact kind (never BURN here, so
+      // no burn-only ceiling is implied).
+      doesNotProveRuleVersion: spec.doesNotProve && spec.kind !== "CHAIN" ? 1 : null,
+      onchainFactKind: spec.kind === "CHAIN" ? (spec.quantity ? "TOKEN_SUPPLY" : "SIGNATURES_FOR_ADDRESS") : null,
       mechanismState: spec.state ?? null,
       // Fixtures model what the engine writes today: dates produced under
       // the strict publication-date rule.
@@ -254,7 +260,7 @@ const DOC_REVENUE: EvidenceSpec = {
   kind: "DOCS",
   summary: "Protocol fees from lending and swaps accrue to the Fixture treasury contract before any allocation.",
   fragment: "All protocol fees collected by the lending and swap modules are transferred to the Treasury contract at the end of each epoch.",
-  doesNotProve: "does not establish how much revenue is allocated to buybacks",
+  doesNotProve: "the share of revenue allocated to buybacks",
   publishedAt: "2026-08-02T00:00:00.000Z",
   cited: true,
 };
@@ -263,7 +269,7 @@ const DOC_MECHANISM: EvidenceSpec = {
   kind: "DOCS",
   summary: "The buyback module spends up to 30% of epoch revenue purchasing FXT on approved venues.",
   fragment: "The Buyback module may spend up to 30% of the epoch's collected fees to purchase FXT through approved on-chain venues.",
-  doesNotProve: "does not establish that purchases have taken place",
+  doesNotProve: "that purchases have taken place",
   publishedAt: "2026-08-02T00:00:00.000Z",
   cited: true,
 };
@@ -272,7 +278,7 @@ const GOV_APPROVAL: EvidenceSpec = {
   kind: "GOV",
   summary: "Proposal FP-41 approving the buyback module passed with 82% of votes in favour.",
   fragment: "FP-41: Activate the Buyback module at 30% of epoch revenue. Result: Passed (82% for, 18% against).",
-  doesNotProve: "does not establish that the module was switched on after the vote",
+  doesNotProve: "that the module was switched on after the vote",
   publishedAt: "2026-07-21T00:00:00.000Z",
 };
 const DOC_ACTIVE: EvidenceSpec = {
@@ -280,7 +286,7 @@ const DOC_ACTIVE: EvidenceSpec = {
   kind: "DOCS",
   summary: "The buyback module is listed as active on the protocol's current modules page.",
   fragment: "Active modules: Lending v3, Swap v2, Buyback (since epoch 118).",
-  doesNotProve: "does not show a purchase transaction",
+  doesNotProve: "a purchase transaction",
   publishedAt: "2026-09-10T00:00:00.000Z",
   // "listed as active" — the excerpt states the mechanism is live.
   state: "LIVE",
@@ -325,7 +331,7 @@ const REPORT_RECIPIENT: EvidenceSpec = {
   kind: "REPORT",
   summary: "The Q2 treasury report lists the Ecosystem Reserve as holding 1.4M FXT acquired through buybacks.",
   fragment: "Ecosystem Reserve holdings: 1,400,000 FXT (acquired via Buyback module, epochs 118–130).",
-  doesNotProve: "self-reported; not independently confirmed here",
+  doesNotProve: "independent confirmation of the reported figures",
   publishedAt: "2026-07-30T00:00:00.000Z",
 };
 const MEDIA_EXECUTION: EvidenceSpec = {

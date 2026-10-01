@@ -38,6 +38,8 @@ import {
   deriveResultLadder,
   domainOf,
   jobOutcome,
+  passageLimit,
+  passageLimitLine,
   researchAnswer,
   resultBriefing,
   retrievedOn,
@@ -300,8 +302,8 @@ export interface EvidenceCard {
   claim: string;
   // What it proves: the engine's persisted reading, the passage otherwise.
   proves: string;
-  // What it does NOT prove — the extractor's own record for this passage,
-  // the class's generic limit otherwise.
+  // What it does NOT establish, framed for display (passageLimitLine): a v1
+  // claim or a chain row's own caveat, the class's generic limit otherwise.
   doesNotProve: string | null;
   excerpt: string;
   sourceName: string;
@@ -377,6 +379,11 @@ function dateOf(e: EvidenceLike): EvidenceCard["date"] {
   return checked ? { label: "Checked", value: checked, iso: e.fetchedAt! } : null;
 }
 
+function limitLineOf(e: EvidenceLike): string | null {
+  const limit = passageLimit(e);
+  return limit ? passageLimitLine(limit) : null;
+}
+
 export function evidenceCard(
   e: EvidenceLike,
   relation: EvidenceCard["relation"],
@@ -395,7 +402,10 @@ export function evidenceCard(
     // summary carries the raw integer, the mint and the slot, and those
     // belong to the full evidence, not to a card a reader scans.
     proves: onchain ? onchain.observation : e.summary && e.summary.trim().length > 0 ? e.summary : e.fragment,
-    doesNotProve: e.doesNotProve ?? caveat?.cannot ?? null,
+    // Only a caveat the contract lets a surface read (a v1 claim or a chain
+    // row's code-written sentence); a legacy model caveat yields to the
+    // code-owned source-class limit. Already framed for display.
+    doesNotProve: limitLineOf(e),
     excerpt: e.fragment,
     sourceName: onchain ? "On-chain record" : e.sourceTitle?.trim() || domain,
     sourceClass: sourceClassLabel(e.sourceClass),

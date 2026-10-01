@@ -157,7 +157,11 @@ async function insertRow(jobId: string, sourceId: string, item: { step: number; 
       // exactly — a legacy date stays legacy in the adopting job. FLOW_PATH
       // asks nothing about "now", so its reconciliation is unaffected.
       publishedAtRuleVersion: item.component === "FLOW_PATH" ? null : 1,
-      doesNotProve: "does not prove distribution to holders",
+      // FLOW_PATH carries a v1 (marked) caveat, every other row a legacy one,
+      // so the adoption test below can prove the caveat and its marker are
+      // copied exactly — the opposite direction to the date marker above.
+      doesNotProve: item.component === "FLOW_PATH" ? "that fees reach token holders" : "does not prove distribution to holders",
+      doesNotProveRuleVersion: item.component === "FLOW_PATH" ? 1 : null,
       retrievedUrl: DOC_URL,
       contentHash: `sha256:${uniq("content")}`,
       extractionUnitKey: extractionUnitKey(jobId, sourceId, item.step, item.component, fragment),
@@ -391,6 +395,11 @@ describe("VERIFIED Research -> OBSERVED Research Memory candidates", () => {
     const [flowOrigin] = await ctx.db.select().from(evidence).where(eq(evidence.id, flowProv.originEvidenceId!));
     expect(flowOrigin.publishedAtRuleVersion).toBeNull();
     expect(adopted.publishedAtRuleVersion).toBeNull();
+    // The caveat and its contract marker travel together, exactly: a v1
+    // origin stays v1, never re-derived from the text by adoption.
+    expect(flowOrigin.doesNotProveRuleVersion).toBe(1);
+    expect(adopted.doesNotProveRuleVersion).toBe(1);
+    expect(adopted.doesNotProve).toBe(flowOrigin.doesNotProve);
     expect(adopted.publishedAt?.toISOString()).toBe(flowOrigin.publishedAt?.toISOString());
     expect(adopted.sourceClass).toBe("OFFICIAL_DOCS");
     expect(adopted.officiality).toBe("CONFIRMED");

@@ -8,6 +8,8 @@ import {
   deriveResultLadder,
   findingExplanation,
   findingMicroAnswer,
+  passageLimit,
+  passageLimitLine,
   retrievedOn,
   retrievedResource,
   sourceClassCaveat,
@@ -382,10 +384,11 @@ function FindingEvidence({
 // compete with the first.
 function EvidenceItem({ item, jobId }: { item: EvidenceItemLike; jobId: string | null }) {
   const caveat = sourceClassCaveat(item.sourceClass);
-  // The source-class limit is generic to the KIND of source; doesNotProve
-  // is what the extractor recorded about THIS passage. The specific one
-  // wins where it exists.
-  const limit = item.doesNotProve ?? caveat?.cannot ?? null;
+  // The passage's own caveat where the contract lets a surface read it (a
+  // v1 claim, or a chain row's code-written sentence); the generic
+  // source-class limit otherwise — never a legacy model caveat.
+  const passage = passageLimit(item);
+  const limit = passage ? passageLimitLine(passage) : null;
   const domain = domainOf(item.retrievedUrl);
   // A real page title when one was captured; otherwise the publisher, which
   // is the strongest identity that actually exists. Never the filename.

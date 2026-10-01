@@ -672,6 +672,10 @@ async function materializeOne(
       fragment,
       summary: origin.summary ?? origin.fragment,
       doesNotProve: origin.doesNotProve,
+      // The caveat's contract travels with the caveat: a legacy (unmarked)
+      // caveat stays legacy in the adopting job, a v1 one stays v1. Never
+      // re-derived from the text here.
+      doesNotProveRuleVersion: origin.doesNotProveRuleVersion,
       // ROUND 11 — A RESEARCH INPUT COMES FROM THE OBSERVATION, NEVER FROM
       // THE MUTABLE MEMORY ROW.
       //

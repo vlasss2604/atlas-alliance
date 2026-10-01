@@ -668,6 +668,12 @@ export interface EvidenceItemLike {
   summary: string | null;
   fragment: string;
   doesNotProve: string | null;
+  // Which contract `doesNotProve` was written under: 1 = the v1 claim form,
+  // null / absent = legacy free text. Read only by `passageLimit`.
+  doesNotProveRuleVersion?: number | null;
+  // Typed chain fact kind; null / absent on documentary rows. A chain row's
+  // caveat is code-written, never model-written.
+  onchainFactKind?: string | null;
   sourceClass: string | null;
   officiality: string | null;
   retrievedUrl: string;
@@ -1249,6 +1255,65 @@ export function sourceClassCaveat(
 ): { from: string; can: string; cannot: string } | null {
   if (!sourceClass) return null;
   return SOURCE_CLASS_CAVEATS[sourceClass] ?? null;
+}
+
+// WHAT ONE PASSAGE DOES NOT ESTABLISH — THE ONLY CAVEAT A RESULT MAY SHOW.
+//
+// `doesNotProve` on a documentary row is model-written. Before the v1
+// contract (server: domain/does-not-prove-contract.ts) its form was free, and
+// a free-standing sentence read under a "does not prove" label flipped its
+// meaning: "The mechanism is not yet LIVE" became "does not prove that the
+// mechanism is not yet LIVE". So the TEXT never decides whether it is shown;
+// the persisted contract marker does:
+//
+//   * v1 caveat — a claim ("that …", "whether …", a noun phrase), shown as
+//     "Does not establish: <claim>", verbatim, its polarity untouched;
+//   * a chain row's caveat — code-written methodology, a complete sentence,
+//     shown as written;
+//   * anything else (legacy or out-of-contract model text) — NOT shown as a
+//     boundary. The code-owned source-class limit stands in for it, and the
+//     raw words stay persisted and visible in the audit as a labelled
+//     "Legacy extractor note".
+//
+// Nothing here edits a caveat or touches a negation.
+export const STRUCTURED_DOES_NOT_PROVE_RULE_VERSION = 1;
+
+export interface PassageLimit {
+  text: string;
+  // CLAIM reads after "Does not establish: "; STATEMENT is a complete sentence.
+  form: "CLAIM" | "STATEMENT";
+  origin: "EXTRACTOR_V1" | "CHAIN" | "SOURCE_CLASS";
+}
+
+type PassageLimitInput = Pick<EvidenceItemLike, "doesNotProve" | "doesNotProveRuleVersion" | "onchainFactKind" | "sourceClass">;
+
+function caveatText(e: PassageLimitInput): string | null {
+  const t = e.doesNotProve?.trim();
+  return t ? t : null;
+}
+
+export function passageLimit(e: PassageLimitInput): PassageLimit | null {
+  const text = caveatText(e);
+  if (text && e.doesNotProveRuleVersion === STRUCTURED_DOES_NOT_PROVE_RULE_VERSION) {
+    return { text, form: "CLAIM", origin: "EXTRACTOR_V1" };
+  }
+  if (text && e.onchainFactKind) return { text, form: "STATEMENT", origin: "CHAIN" };
+  const cannot = sourceClassCaveat(e.sourceClass)?.cannot;
+  return cannot ? { text: cannot, form: "STATEMENT", origin: "SOURCE_CLASS" } : null;
+}
+
+// One line, for a surface that has no heading of its own.
+export function passageLimitLine(limit: PassageLimit): string {
+  return limit.form === "CLAIM" ? `Does not establish: ${limit.text}` : limit.text;
+}
+
+// The raw model-written caveat that `passageLimit` withholds — for the audit
+// only, and only under its label. Null when the caveat is shown as a
+// boundary (v1 or chain) or when there is none.
+export function legacyExtractorNote(e: PassageLimitInput): string | null {
+  const text = caveatText(e);
+  if (!text || e.onchainFactKind || e.doesNotProveRuleVersion === STRUCTURED_DOES_NOT_PROVE_RULE_VERSION) return null;
+  return text;
 }
 
 // HOW COMPLETE THE CHECKING FOR ONE STEP ACTUALLY WAS.

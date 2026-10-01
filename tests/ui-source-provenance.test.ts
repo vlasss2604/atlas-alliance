@@ -201,10 +201,13 @@ describe("the excerpt is external material, and says so", () => {
     // have moved on).
     expect(card.indexOf("Source limit")).toBeLessThan(card.indexOf("View source snapshot"));
     expect(card.indexOf("View source snapshot")).toBeLessThan(card.indexOf("Open original"));
-    // Suitability comes from the class, the limit prefers the per-passage
-    // record where the extractor left one.
+    // Suitability comes from the class; the limit prefers the per-passage
+    // record where the does_not_prove contract lets a surface read it (a v1
+    // claim or a chain row's own sentence), the class limit otherwise —
+    // decided in ONE place, never by reading the raw caveat here.
     expect(card).toContain("caveat.can");
-    expect(card).toContain("item.doesNotProve ?? caveat?.cannot");
+    expect(card).toContain("const passage = passageLimit(item);");
+    expect(card).not.toContain("item.doesNotProve ??");
   });
 
   it("TEST 11: the conclusion itself is not restated by our own prose", () => {

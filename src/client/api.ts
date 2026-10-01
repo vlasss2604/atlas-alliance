@@ -161,6 +161,9 @@ export interface ResearchEvidenceView {
   fragment: string;
   summary: string | null;
   doesNotProve: string | null;
+  // 1 = the caveat was written in the v1 claim form; null = legacy free text.
+  // Optional: older payloads and fixtures do not carry it (read as legacy).
+  doesNotProveRuleVersion?: number | null;
   mechanismState: string | null;
   valueSource: string | null;
   sourceClass: string | null;

@@ -28,6 +28,7 @@
 // `entities`) the API does not project yet — see `inputFromResearchJobDetail`.
 import type { ResearchJobDetail } from "./api";
 import type { ProofState } from "./components/result-blocks/types";
+import { passageLimit } from "./research-model";
 
 /* ------------------------------------------------------------------ *
  * INPUT — what a completed Research hands the planner
@@ -1271,7 +1272,10 @@ export function inputFromResearchJobDetail(detail: ResearchJobDetail): Analytica
       officiality: e.officiality,
       fragment: e.fragment,
       summary: e.summary,
-      doesNotProve: e.doesNotProve,
+      // The limit a surface may show (passageLimit): a v1 claim or a chain
+      // row's own sentence, the source-class limit otherwise — never a
+      // legacy model caveat. Raw text stays in the audit.
+      doesNotProve: passageLimit(e)?.text ?? null,
       mechanismState: e.mechanismState,
       publishedAt: e.publishedAt,
       observedAt: e.observedAt,

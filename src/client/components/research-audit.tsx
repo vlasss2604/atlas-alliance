@@ -237,7 +237,7 @@ function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | nu
       </p>
       <p className="mt-1 text-[1rem] leading-[1.5]">{sourceSentence(card)}</p>
       {card.doesNotProve && (
-        <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">Does not prove: {card.doesNotProve}</p>
+        <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">{card.doesNotProve}</p>
       )}
       <p className="mt-2.5 flex flex-wrap items-center gap-x-3.5 gap-y-1.5">
         {card.excerpt && (
@@ -518,10 +518,26 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
                 <span className="text-[var(--atlas-text)]/75">What this establishes: </span>
                 {l.canEstablish ?? "Not classified."}
               </p>
-              <p className="mt-1 text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">
-                <span className="text-[var(--atlas-text)]/75">Outside its scope: </span>
-                {l.doesNotProve ?? l.cannotEstablish ?? "Not recorded."}
-              </p>
+              {l.doesNotProve ? (
+                // Already framed: "Does not establish: <claim>" for a v1
+                // caveat, or a chain row's own complete sentence.
+                <p className="mt-1 text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="audit-passage-limit">
+                  {l.doesNotProve}
+                </p>
+              ) : (
+                <p className="mt-1 text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">
+                  <span className="text-[var(--atlas-text)]/75">Outside its scope: </span>
+                  {l.cannotEstablish ?? "Not recorded."}
+                </p>
+              )}
+              {l.legacyExtractorNote && (
+                // Provenance, not a boundary: the extractor's raw wording from
+                // before the does_not_prove contract (or outside it).
+                <p className="mt-1 text-[0.8rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="audit-legacy-extractor-note">
+                  <span className="text-[var(--atlas-text)]/75">Legacy extractor note: </span>
+                  {l.legacyExtractorNote}
+                </p>
+              )}
               <SourceActions
                 jobId={jobId}
                 link={{

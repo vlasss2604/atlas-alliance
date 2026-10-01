@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { eq, inArray, sql } from "drizzle-orm";
 
 import { loadProductConfig } from "../config/product";
+import { doesNotProveRuleVersionFor } from "../domain/does-not-prove-contract";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
 import { readJobBudgetReserved, reserveJobBudget } from "./budget-reservation";
@@ -3560,6 +3561,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 // rule this executor's extraction path runs.
                 publishedAtRuleVersion: PUBLISHED_AT_RULE_VERSION,
                 doesNotProve: fact.doesNotProve,
+                // The model's caveat is kept verbatim; the marker records
+                // whether it was written in the v1 claim form, so a surface
+                // never reads a free-standing sentence as a claim.
+                doesNotProveRuleVersion: doesNotProveRuleVersionFor(fact.doesNotProve),
                 retrievedUrl: doc.finalUrl,
                 contentHash: doc.contentHash,
                 extractionUnitKey: unitKey,
