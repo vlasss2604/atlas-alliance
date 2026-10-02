@@ -76,6 +76,7 @@ export function ResearchAudit({
           scopeLabels: usable.content.scopeLabels,
         }
       : null,
+    detail.mechanism?.flows ?? null,
   );
   const available = availableAuditSections(content);
   // THE COMPLETENESS GUARANTEE, APPLIED. A section canonical research gave

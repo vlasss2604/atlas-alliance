@@ -30,6 +30,7 @@
 
 import type { ProofBoundaryView, ResearchJobDetail } from "./api";
 import { compactAmount } from "./components/result-blocks/selected-blocks";
+import { TYPED_VALUE_ABSENT_LIMIT, typedMechanismValueOf, typedValueAbsent } from "./mechanism-typed-value";
 import {
   canonicalDocumentKey,
   componentClaimLabel,
@@ -659,7 +660,13 @@ export function latestStatedStateOf(flows: readonly unknown[] | null | undefined
 // component), burn events only (EXECUTION_EVIDENCE), or rows stating no
 // known state (CURRENT_STATE). Used by the table and by the non-verdict
 // answer, which reads component statuses directly.
-type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | "STATE_UNSTATED" | "DATE_UNTRUSTED" | null;
+//
+// TYPED_VALUE_ABSENT is the same idea on a different axis (PAGE <= PERSISTED
+// VERIFIED RECORD): RECIPIENT / DESTINATION stored as (partly) established
+// while no stored mechanism flow carries a specific recipient / destination
+// kind (mechanism-typed-value.ts). The component status is not rewritten;
+// the surface simply does not present a specific answer the record lacks.
+type SurfaceCeiling = "LEVEL_ONLY" | "BURN_ONLY" | "STATE_UNSTATED" | "DATE_UNTRUSTED" | "TYPED_VALUE_ABSENT" | null;
 
 function surfaceCeilingOf(
   component: string,
@@ -668,10 +675,12 @@ function surfaceCeilingOf(
   quantityByEvidence: ReadonlyMap<string, QuantityLike>,
   kindByEvidence: ReadonlyMap<string, string | null>,
   evidenceById: ReadonlyMap<string, EvidenceLike> = new Map(),
+  flows: readonly unknown[] | null | undefined = null,
 ): SurfaceCeiling {
   if (persistedStatus !== "SUPPORTED" && persistedStatus !== "PARTIALLY_SUPPORTED") return null;
   if (restsOnlyOnLevelReadings(supportingEvidenceIds, quantityByEvidence)) return "LEVEL_ONLY";
   if (restsOnlyOnBurnEvents(component, supportingEvidenceIds, kindByEvidence)) return "BURN_ONLY";
+  if (typedValueAbsent(component, persistedStatus, flows)) return "TYPED_VALUE_ABSENT";
   return currentClaimCeilingOf(component, supportingEvidenceIds, evidenceById);
 }
 
@@ -803,6 +812,9 @@ export interface SurfaceInput {
   boundary: ProofBoundaryView | null | undefined;
   // The lifecycle's latest trusted stated state, when the assembly has one.
   latestStatedState?: LatestStatedState | null;
+  // The persisted mechanism flows, read only for the typed recipient /
+  // destination value. Absent (no mechanism record) reads as no typed value.
+  flows?: readonly unknown[] | null;
 }
 
 // THE ROWS THE QUESTION TURNS ON. Where the question projection resolved,
@@ -861,17 +873,29 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
     if (persistedStatus === null) continue;
     const persisted = input.components.find((c) => c.component === component);
     const ceiling = persistedStatus === "CONFIRMED" || persistedStatus === "PARTIAL"
-      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence, evidenceById)
+      ? surfaceCeilingOf(component, persisted?.status ?? "", persisted?.supportingEvidenceIds, quantityByEvidence, kindByEvidence, evidenceById, input.flows)
       : null;
     const levelOnly = ceiling === "LEVEL_ONLY";
     const burnOnly = ceiling === "BURN_ONLY";
     const stateUnstated = ceiling === "STATE_UNSTATED";
     const dateUntrusted = ceiling === "DATE_UNTRUSTED";
+    const typedAbsent = ceiling === "TYPED_VALUE_ABSENT";
     const status: ResultStatus = ceiling !== null ? "NOT_ESTABLISHED" : persistedStatus;
-    const evidence = (admittedByComponent[component] ?? []).map(({ e, relation }) =>
+    const cards = (admittedByComponent[component] ?? []).map(({ e, relation }) =>
       evidenceCard(e, relation, { jobId: input.jobId, quantity: quantityByEvidence.get(e.id) ?? null, ticker: input.ticker, component }),
     );
-    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly && !stateUnstated && !dateUntrusted
+    // A row that keeps its status on a typed recipient / destination speaks
+    // from the flow that carries that value: its rows first, so the sentence
+    // and the source shown are the ones the typed value rests on, never the
+    // first supporting row by accident. Every card stays; only order moves.
+    const typed = ceiling === null ? typedMechanismValueOf(input.flows, component) : null;
+    const typedIds = new Set(typed?.evidenceIds ?? []);
+    const evidence = typedIds.size > 0 ? [...cards.filter((c) => typedIds.has(c.id)), ...cards.filter((c) => !typedIds.has(c.id))] : cards;
+    // The sentence and the source come from the typed flow's own rows when
+    // the record holds them; from every admitted row otherwise.
+    const typedCards = evidence.filter((c) => typedIds.has(c.id));
+    const spoken = typedCards.length > 0 ? typedCards : evidence;
+    const boundary = status === "NOT_ESTABLISHED" && !levelOnly && !burnOnly && !stateUnstated && !dateUntrusted && !typedAbsent
       ? boundaryOf({ component, reasonCodes: persisted?.reasonCodes, coverage: row.coverage, boundary: input.boundary })
       : null;
     const claimNotShown =
@@ -880,8 +904,8 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       CURRENT_CLAIM_COMPONENTS.has(component) && (status === "CONFIRMED" || status === "PARTIAL")
         ? statedStopOf((persisted?.supportingEvidenceIds ?? []).map((id) => evidenceById.get(id)).filter((e): e is EvidenceLike => !!e))
         : null;
-    const strongestClass = SOURCE_PRECEDENCE.find((cls) => evidence.some((e) => e.sourceClass === sourceClassLabel(cls)));
-    const strongest = strongestClass ? evidence.find((e) => e.sourceClass === sourceClassLabel(strongestClass)) ?? null : evidence[0] ?? null;
+    const strongestClass = SOURCE_PRECEDENCE.find((cls) => spoken.some((e) => e.sourceClass === sourceClassLabel(cls)));
+    const strongest = strongestClass ? spoken.find((e) => e.sourceClass === sourceClassLabel(strongestClass)) ?? null : spoken[0] ?? null;
     // The question projection's own words for the rows it named; a
     // question in the reader's words for every other row. A projection
     // label the semantic-envelope guard refused has already degraded to
@@ -904,12 +928,14 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
             ? STATE_UNSTATED_LIMIT
             : dateUntrusted
               ? DATE_UNTRUSTED_LIMIT
-              : withCurrentStateNote(
+              : typedAbsent
+                ? TYPED_VALUE_ABSENT_LIMIT[component]
+                : withCurrentStateNote(
                   component,
                   status,
                   statedStop,
                   latestStated,
-                  withExecutionTimeNote(component, status, establishedText(row, evidence, boundary), evidence),
+                  withExecutionTimeNote(component, status, establishedText(row, spoken, boundary), evidence),
                 ),
       boundary,
       ...(claimNotShown ? { claimNotShown: true as const } : {}),
@@ -1227,7 +1253,7 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
   const kindByEvidence = new Map(detail.evidence.map((e) => [e.id, e.onchainFactKind ?? null]));
   const evidenceById = new Map<string, EvidenceLike>(detail.evidence.map((e) => [e.id, e]));
   const answerStatusOf = (c: ResearchJobDetail["components"][number]): string => {
-    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence, evidenceById) !== null) return "INSUFFICIENT_EVIDENCE";
+    if (surfaceCeilingOf(c.component, c.status, c.supportingEvidenceIds, quantityByEvidence, kindByEvidence, evidenceById, detail.mechanism?.flows) !== null) return "INSUFFICIENT_EVIDENCE";
     const claimNotShown =
       c.status === "PARTIALLY_SUPPORTED" && (c.reasonCodes ?? []).some((x) => typeof x === "string" && CLAIM_NOT_SHOWN_CODES.has(x));
     return claimNotShown ? "INSUFFICIENT_EVIDENCE" : c.status;
@@ -1242,6 +1268,7 @@ export function buildResultSurface(detail: ResearchJobDetail): ResultSurface {
     quantities: detail.quantities,
     boundary: detail.proof?.boundedBy ?? null,
     latestStatedState: latestStatedStateOf(detail.mechanism?.flows),
+    flows: detail.mechanism?.flows ?? null,
   });
   const cited = new Set((detail.proof?.citations ?? []).map((c) => c.evidenceId));
   const cards = keyEvidence(table, cited);

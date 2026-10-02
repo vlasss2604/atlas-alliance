@@ -11,6 +11,7 @@ import {
   type ComponentCoverage,
   type EvidenceItemLike,
 } from "./research-model";
+import { TYPED_VALUE_ABSENT_LIMIT, typedValueAbsent } from "./mechanism-typed-value";
 
 // THE FULL RESEARCH AUDIT — A SECOND PROJECTION OF THE SAME CANONICAL TRUTH.
 //
@@ -106,6 +107,7 @@ export interface AuditCounts {
 export function auditCounts(
   components: AuditComponentRow[],
   register: SourceRegister,
+  flows: readonly unknown[] | null = null,
 ): AuditCounts {
   let established = 0;
   let partial = 0;
@@ -114,7 +116,9 @@ export function auditCounts(
   let exclusions = 0;
   let technical = 0;
   for (const c of components) {
-    switch (c.status) {
+    // A recipient / destination stored as established with no typed value
+    // on any stored flow is not counted as confirmed (see auditScope).
+    switch (typedValueAbsent(c.component, c.status, flows) ? "INSUFFICIENT_EVIDENCE" : c.status) {
       case "SUPPORTED":
         established += 1;
         break;
@@ -252,9 +256,14 @@ export const COVERAGE_LABELS: Record<ComponentCoverage, string> = {
   NOT_ATTEMPTED: "Not checked",
 };
 
+// PAGE <= PERSISTED VERIFIED RECORD (mechanism-typed-value.ts). The record
+// view keeps the raw stored component status (`status`, and named in the
+// reason line), but never words it as "Recipient / Destination — Confirmed"
+// when no stored mechanism flow carries a typed recipient / destination.
 export function auditScope(
   components: AuditComponentRow[],
   projection: AuditProjectionRow | null,
+  flows: readonly unknown[] | null = null,
 ): AuditScopeItem[] {
   const labels = new Map<string, string>();
   for (const l of projection?.scopeLabels ?? []) {
@@ -266,6 +275,8 @@ export function auditScope(
     const reasonCodes = (c.reasonCodes ?? []).filter(
       (r): r is string => typeof r === "string",
     );
+    const untyped = typedValueAbsent(c.component, c.status, flows);
+    const shownStatus = untyped ? "INSUFFICIENT_EVIDENCE" : c.status;
     return {
       patternStep: c.patternStep,
       component: c.component,
@@ -284,12 +295,14 @@ export function auditScope(
         : componentLabel(c.component),
       labelSource: projected ? "PROJECTION" : "CANONICAL",
       status: c.status,
-      outcome: auditOutcome(c.status, c.coverage),
-      outcomeLabel: AUDIT_OUTCOME_LABELS[auditOutcome(c.status, c.coverage)],
+      outcome: auditOutcome(shownStatus, c.coverage),
+      outcomeLabel: AUDIT_OUTCOME_LABELS[auditOutcome(shownStatus, c.coverage)],
       coverage: c.coverage,
       coverageLabel: COVERAGE_LABELS[c.coverage] ?? c.coverage,
       reasonCodes,
-      reason: reasonExplanation(reasonCodes),
+      reason: untyped
+        ? `${TYPED_VALUE_ABSENT_LIMIT[c.component]} Stored component status: ${c.status}.`
+        : reasonExplanation(reasonCodes),
       limitation: limitationKind(c),
       supportingCount: c.supportingEvidenceIds.length,
       contradictingCount: c.contradictingEvidenceIds.length,
@@ -738,11 +751,14 @@ export function buildAuditContent(
   components: AuditComponentRow[],
   evidence: AuditEvidenceRow[],
   projection: AuditProjectionRow | null,
+  // The persisted mechanism flows, read only for the typed recipient /
+  // destination value. Absent reads as no typed value.
+  flows: readonly unknown[] | null = null,
 ): AuditContent {
-  const scope = auditScope(components, projection);
+  const scope = auditScope(components, projection, flows);
   const register = auditSourceRegister(components, evidence, scope);
   return {
-    counts: auditCounts(components, register),
+    counts: auditCounts(components, register, flows),
     scope,
     evidenceMap: auditEvidenceMap(scope, components, evidence),
     register,

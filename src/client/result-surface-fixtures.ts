@@ -240,7 +240,7 @@ function build(opts: {
       boundedBy,
     },
     claimSupport: { intent: "PROTOCOL_REVENUE_TO_TOKEN", status: claimStatus, reasonCodes: [], requirementResults: [], contextGaps: [] },
-    mechanism: null,
+    mechanism: typedFlowFor(opts.id, components),
     execution: { attemptedSteps: 8, attemptedComponents: components.length, succeededComponents: components.length, establishedComponents: components.filter((c) => c.status === "SUPPORTED").length },
     finding: {
       componentKeys: components.map((c) => ({ step: c.patternStep, component: c.component })),
@@ -253,6 +253,37 @@ function build(opts: {
     components,
     snapshotEvidenceIds: snapshotIds,
     evidence,
+  };
+}
+
+// THE FIXTURE WORLD'S MECHANISM RECORD. The fixture documents name one
+// place and one holder — "sent to the Ecosystem Reserve … and held there" —
+// so a fixture whose record holds RECIPIENT / DESTINATION as (partly)
+// established models an assembly that resolved them: one stored flow that
+// carries each such component on its lineage, with the typed kind. The page
+// may show a specific recipient / destination only off such a value
+// (mechanism-typed-value.ts); a record without one is modelled in tests by
+// removing or blanking this flow.
+function typedFlowFor(id: string, components: ResearchJobDetail["components"]): ResearchJobDetail["mechanism"] {
+  const carried = components.filter(
+    (c) => (c.component === "RECIPIENT" || c.component === "DESTINATION") && (c.status === "SUPPORTED" || c.status === "PARTIALLY_SUPPORTED"),
+  );
+  if (carried.length === 0) return null;
+  return {
+    flows: [
+      {
+        flowId: `flow-${id}`,
+        lineage: carried.map((c) => ({
+          step: c.patternStep,
+          component: c.component,
+          evidenceIds: [...c.supportingEvidenceIds],
+          componentResultKey: `${c.patternStep}:${c.component}`,
+        })),
+        attributes: { recipientKind: "TREASURY", destinationKind: "TREASURY" },
+        gaps: [],
+      },
+    ],
+    unassignedGaps: [],
   };
 }
 

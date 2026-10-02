@@ -240,6 +240,12 @@ willing to assert. Collapsing any two of these is the most common failure.
 - A component that asks a mechanism-level or economic question is not answered by
   a bare technical observation. Offer it as context and let the binding arrive as
   separate admitted evidence.
+- **Component established ≠ specific answer known (D-166).** A RECIPIENT or
+  DESTINATION component with admissible rows filed under it does not name a
+  recipient or a destination; only a typed kind on a stored mechanism flow
+  does. Presentation must not create new truth: the page shows either as
+  known only off that persisted typed value, and never classifies prose
+  itself. Page ≤ persisted verified record.
 
 ## Fail closed
 

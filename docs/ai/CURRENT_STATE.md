@@ -7,9 +7,9 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-10-02 (D-165 historical execution, on the
-  final tree): **5512 passing, 4 skipped, 4 failing** (265 files) — exactly
-  the four standing failures below. `bounded-search-finalization-v1` proves
+- Full suite, last verified 2026-10-02 (D-166 recipient / destination
+  display ceiling, on the final tree): **5535 passing, 4 skipped, 4 failing**
+  (266 files) — exactly the four standing failures below. `bounded-search-finalization-v1` proves
   the unreachable-component invariant under a TEST-ONLY narrowed Pattern in
   atlas_test (restored in `finally`); production Pattern unchanged.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
@@ -42,6 +42,28 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   REPORT test write its table (per-run verdict, critical nodes attempted,
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
+
+## THE PAGE SAYS NO MORE ABOUT RECIPIENT OR DESTINATION THAN THE RECORD HOLDS (D-166)
+
+A RECIPIENT / DESTINATION component status of SUPPORTED means admissible rows
+were filed under it; the specific answer is the typed `recipientKind` /
+`destinationKind` the mechanism assembly stored on a flow. The primary Result
+read only the status (Wave 1A: "Who ultimately receives it? — Confirmed" with
+every stored flow UNKNOWN).
+
+- **Ceiling** (`client/result-surface.ts`, `TYPED_VALUE_ABSENT`; reader in
+  `client/mechanism-typed-value.ts`). SUPPORTED or PARTIALLY_SUPPORTED with no
+  stored flow carrying the component with a specific kind (UNKNOWN, NONE, off
+  every lineage, no mechanism record) is shown NOT ESTABLISHED with a
+  code-owned sentence. Row, top answer, path strip and "rests on" follow.
+- **Typed value present.** Stored status kept; sentence and source come from
+  the rows of the flow that carries the value. Evidence cards always stay.
+- **Deep audit.** Raw stored status kept and named; never worded as
+  "Recipient / Destination — Confirmed" without a typed value.
+- **Unchanged.** Engine, Pattern, schema, stored Proofs and evidence, verdicts
+  (S7 already reads only the typed value). No text is classified in the page.
+- Corpus (atlas_dev, read-only): 22 RECIPIENT and 25 DESTINATION rows demote
+  across 32 jobs; none stronger.
 
 ## PRESENT TENSE IS NOT A CURRENT STATE (D-163)
 
