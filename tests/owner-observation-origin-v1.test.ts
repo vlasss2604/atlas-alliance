@@ -211,8 +211,10 @@ async function historicalFor(f: Fixture, currentJobId: string, beforeSlot = BURN
 // ---------------------------------------------------------------------
 
 describe("REAL_RESEARCH_ACQUISITION_ORIGINS — a positive allowlist", () => {
-  it("4. admits exactly PRODUCT and OWNER_MANUAL_ALPHA; OWNER_OBSERVATION and any unknown origin fail closed", () => {
-    expect([...REAL_RESEARCH_ACQUISITION_ORIGINS].sort()).toEqual(["OWNER_MANUAL_ALPHA", "PRODUCT"]);
+  it("4. admits exactly PRODUCT, OWNER_MANUAL_ALPHA and PRIVATE_BETA; OWNER_OBSERVATION and any unknown origin fail closed", () => {
+    // PRIVATE_BETA (D-167) is a real Research acquisition too; an operator
+    // observation still is not.
+    expect([...REAL_RESEARCH_ACQUISITION_ORIGINS].sort()).toEqual(["OWNER_MANUAL_ALPHA", "PRIVATE_BETA", "PRODUCT"]);
     expect(isResearchAcquisitionOrigin("PRODUCT")).toBe(true);
     expect(isResearchAcquisitionOrigin("OWNER_MANUAL_ALPHA")).toBe(true);
     expect(isResearchAcquisitionOrigin("OWNER_OBSERVATION")).toBe(false);

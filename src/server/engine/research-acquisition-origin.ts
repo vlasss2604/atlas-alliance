@@ -19,11 +19,15 @@
 //                       reconciled within its own job, never reused.
 
 // The same vocabulary research_jobs.origin carries (schema/enums.ts).
-export type ResearchJobOrigin = "PRODUCT" | "OWNER_MANUAL_ALPHA" | "OWNER_OBSERVATION";
+export type ResearchJobOrigin = "PRODUCT" | "OWNER_MANUAL_ALPHA" | "OWNER_OBSERVATION" | "PRIVATE_BETA";
 
 export const REAL_RESEARCH_ACQUISITION_ORIGINS: ReadonlySet<ResearchJobOrigin> = new Set<ResearchJobOrigin>([
   "PRODUCT",
   "OWNER_MANUAL_ALPHA",
+  // A private-beta Research is a real Research acquisition (D-167). What
+  // crosses jobs through this allowlist is unchanged: public chain
+  // observations of a project, never a user's question, Evidence or Proof.
+  "PRIVATE_BETA",
 ]);
 
 export function isResearchAcquisitionOrigin(origin: string): origin is ResearchJobOrigin {

@@ -61,6 +61,21 @@ export const productConfigSchema = z.object({
   // only ran migrations and was never re-seeded fails closed onto the
   // existing behaviour instead of throwing.
   phased_research_enabled: z.boolean().default(false),
+  // PRIVATE BETA (D-167) — three server-owned keys, every one FAILING
+  // CLOSED when its row is absent, by the same .default(...) defense as the
+  // flags above.
+  //
+  // private_beta_enabled: the private-beta switch, SEPARATE from
+  // internal_alpha_enabled (owner alpha) and from research_enabled (the
+  // public product path, which stays closed). Off: no beta Research is
+  // admitted and no admitted one continues past its next phase boundary.
+  private_beta_enabled: z.boolean().default(false),
+  // The only projects a private-beta Research may target. Empty by
+  // default: an unconfigured database admits nothing. A project must ALSO
+  // be on the code-owned live-spend allowlist (live-executor.ts).
+  private_beta_project_slugs: z.array(z.string().min(1)).default([]),
+  // How many Researches one beta user may be admitted for in total.
+  private_beta_research_limit: z.number().int().min(0).default(5),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -108,6 +123,9 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   audit_model: "claude-haiku-4-5",
   internal_alpha_enabled: false,
   phased_research_enabled: false,
+  private_beta_enabled: false,
+  private_beta_project_slugs: [],
+  private_beta_research_limit: 5,
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,

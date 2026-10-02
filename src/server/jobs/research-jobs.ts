@@ -43,7 +43,7 @@ export interface CreateResearchJobInput {
   // persisting owner scripts pass "OWNER_OBSERVATION": their job exists
   // because Evidence requires one, and it is not a Research acquisition
   // (engine/research-acquisition-origin.ts).
-  origin?: "PRODUCT" | "OWNER_MANUAL_ALPHA" | "OWNER_OBSERVATION";
+  origin?: "PRODUCT" | "OWNER_MANUAL_ALPHA" | "OWNER_OBSERVATION" | "PRIVATE_BETA";
 }
 
 export interface CreateResearchJobResult {

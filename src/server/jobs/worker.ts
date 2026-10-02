@@ -24,10 +24,14 @@ import {
   type PhaseWorkerContext,
 } from "./acquisition-phase-worker";
 import {
-  assertOwnerAlphaLive,
   resolveOwnerAlphaExtractionExecutor,
   resolveOwnerAlphaWorkExecutor,
 } from "./owner-alpha-routing";
+import {
+  assertJobLiveAdmitted,
+  resolvePrivateBetaExtractionExecutor,
+  resolvePrivateBetaWorkExecutor,
+} from "./private-beta-routing";
 import {
   createBoss,
   PHASE_QUEUE,
@@ -383,6 +387,12 @@ export async function handleResearchJobTask(
         project,
         internalAlphaEnabled: config.internal_alpha_enabled,
       });
+    } else if (job.origin === "PRIVATE_BETA") {
+      // D-167 — a private-beta Research runs the same real executor as an
+      // owner-alpha one, behind the private-beta gate (its own switch and
+      // project list). A refusal throws and the job fails closed below; it
+      // never falls through to the non-live executor.
+      executor = resolvePrivateBetaWorkExecutor({ db, job, project, config: await loadProductConfig(db) });
     } else {
       executor = createNonLiveS4WorkExecutor({ db, project });
     }
@@ -599,10 +609,13 @@ async function assertPhaseLiveAdmitted(
     return { ok: false, result: { ran: false, refusal: "JOB_NOT_RUNNABLE" } };
   }
   try {
-    await assertOwnerAlphaLive(
+    // One question for whichever admission class the job records (D-167):
+    // a PRIVATE_BETA job is asked the private-beta gate, every other origin
+    // the owner-alpha gate, unchanged.
+    await assertJobLiveAdmitted(
       ctx.db,
       { origin: job.origin, userId: job.userId, projectSlug: project.slug },
-      config.internal_alpha_enabled,
+      config,
     );
     return { ok: true };
   } catch (e) {
@@ -644,19 +657,25 @@ export async function dispatchExtractQueueMessage(
 
   let result: PhaseHandlerResult;
   try {
-    result = await handleExtractingPhase(ctx, jobId, async (replay) =>
-      resolveOwnerAlphaExtractionExecutor({
+    result = await handleExtractingPhase(ctx, jobId, async (replay) => {
+      const replayProviders = {
+        queryProposer: replay.queryProposer,
+        searchGateway: replay.searchGateway,
+        contentFetcher: replay.contentFetcher,
+      };
+      // D-167 — the same extraction executor, behind the gate of the
+      // admission class the job records.
+      if (job.origin === "PRIVATE_BETA") {
+        return resolvePrivateBetaExtractionExecutor({ db: ctx.db, job, project: replay.project, config, replay: replayProviders });
+      }
+      return resolveOwnerAlphaExtractionExecutor({
         db: ctx.db,
         job,
         project: replay.project,
         internalAlphaEnabled: config.internal_alpha_enabled,
-        replay: {
-          queryProposer: replay.queryProposer,
-          searchGateway: replay.searchGateway,
-          contentFetcher: replay.contentFetcher,
-        },
-      }),
-    );
+        replay: replayProviders,
+      });
+    });
   } catch (e) {
     console.error("[worker] phased extraction failed", e);
     const budget = e instanceof BudgetExhaustedError;

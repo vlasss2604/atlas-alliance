@@ -35,7 +35,11 @@ export type ProofBlockReason =
   | "CORE_REQUIRED"
   | "DEMO_QUOTA_EXHAUSTED"
   | "ACTIVE_JOB_EXISTS"
-  | "DISABLED";
+  | "DISABLED"
+  // Private beta (D-167): the server's own three admission refusals.
+  | "BETA_ACCESS_REQUIRED"
+  | "BETA_PROJECT_NOT_AVAILABLE"
+  | "BETA_RESEARCH_LIMIT_REACHED";
 
 export interface ProofGateSubject {
   interpretation: Pick<InterpretationView, "status" | "route"> | null;
@@ -77,6 +81,12 @@ export function proofBlockReason(subject: ProofGateSubject): ProofBlockReason | 
       return "ACTIVE_JOB_EXISTS";
     case "DISABLED":
       return "DISABLED";
+    case "BETA_ACCESS_REQUIRED":
+      return "BETA_ACCESS_REQUIRED";
+    case "BETA_PROJECT_NOT_AVAILABLE":
+      return "BETA_PROJECT_NOT_AVAILABLE";
+    case "BETA_RESEARCH_LIMIT_REACHED":
+      return "BETA_RESEARCH_LIMIT_REACHED";
     case "AVAILABLE":
     case "NOT_DEEP_RESEARCH":
       return null;

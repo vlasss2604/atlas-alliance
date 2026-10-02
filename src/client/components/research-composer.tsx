@@ -116,6 +116,9 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
       if (e.code === "DEMO_QUOTA_EXHAUSTED") return dict.ask.quotaExhausted;
       if (e.code === "ACTIVE_JOB_EXISTS") return dict.ask.activeJob;
       if (e.code === "OUT_OF_SCOPE") return dict.ask.outOfScope;
+      if (e.code === "BETA_ACCESS_REQUIRED") return dict.ask.betaAccessRequired;
+      if (e.code === "BETA_PROJECT_NOT_AVAILABLE") return dict.ask.betaProjectNotAvailable;
+      if (e.code === "BETA_RESEARCH_LIMIT_REACHED") return dict.ask.betaResearchLimitReached;
       if (e.code === "CLARIFICATION_ALREADY_ANSWERED") return dict.ask.clarifyAnswered;
       if (e.code === "CLARIFICATION_NOT_EXPECTED") return dict.ask.clarifyStale;
     }
@@ -134,6 +137,12 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
         return dict.ask.activeJob;
       case "DISABLED":
         return dict.ask.disabledNote;
+      case "BETA_ACCESS_REQUIRED":
+        return dict.ask.betaAccessRequired;
+      case "BETA_PROJECT_NOT_AVAILABLE":
+        return dict.ask.betaProjectNotAvailable;
+      case "BETA_RESEARCH_LIMIT_REACHED":
+        return dict.ask.betaResearchLimitReached;
       case null:
         return null;
     }

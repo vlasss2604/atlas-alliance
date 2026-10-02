@@ -587,7 +587,7 @@ describe("9. D-165: EXECUTION_EVIDENCE = the claimed mechanism executed at least
     const statements = sql.split("\n").filter((l) => !l.trim().startsWith("--") && l.trim().length > 0);
     expect(statements).toEqual(['ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "execution_rule_version" smallint;']);
     const journal = JSON.parse(readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8")) as { entries: { idx: number; tag: string }[] };
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 62, tag: "0062_execution_rule_version" });
+    expect(journal.entries.find((e) => e.idx === 62)).toMatchObject({ tag: "0062_execution_rule_version" });
   });
 });
 

@@ -47,6 +47,9 @@ export const ru: Dict = {
     quotaExhausted:
       "DEMO-исследования закончились. ARI • CORE снимает ограничение.",
     activeJob: "Одно исследование уже идёт. Оно скоро завершится.",
+    betaAccessRequired: "ATLAS PROOF работает в закрытой бете. Для исследования нужен доступ к закрытой бете.",
+    betaProjectNotAvailable: "Этот проект пока недоступен в закрытой бете.",
+    betaResearchLimitReached: "Вы использовали все исследования, включённые в закрытую бету.",
     error: "Не удалось обработать вопрос. Попробуйте ещё раз.",
     newQuestion: "Задать другой вопрос",
     provisionalPrefix: "Понял:",

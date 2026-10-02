@@ -7,9 +7,9 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-10-02 (D-166 recipient / destination
-  display ceiling, on the final tree): **5535 passing, 4 skipped, 4 failing**
-  (266 files) — exactly the four standing failures below. `bounded-search-finalization-v1` proves
+- Full suite, last verified 2026-10-02 (D-167 private-beta admission, on
+  the final tree): **5574 passing, 4 skipped, 4 failing** (267 files) —
+  exactly the four standing failures below. `bounded-search-finalization-v1` proves
   the unreachable-component invariant under a TEST-ONLY narrowed Pattern in
   atlas_test (restored in `finally`); production Pattern unchanged.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
@@ -42,6 +42,38 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   REPORT test write its table (per-run verdict, critical nodes attempted,
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
+
+## AN APPROVED BETA USER RUNS THE REAL RESEARCH WITHOUT ADMIN (D-167)
+
+The public path stays closed (`research_enabled=false`, PRODUCT jobs still
+run the non-live executor). A second, additive admission exists beside
+owner alpha.
+
+- **Grant.** One `subscriptions` row: ARI_CORE, explicit `valid_until`, no
+  auto-renew, `billing_provider='PRIVATE_BETA_GRANT'`
+  (`services/private-beta.ts`). The user stays role USER.
+- **Admission** (`services/start-private-beta-research.ts`, reached from
+  `POST /api/research-jobs` for a non-ADMIN while `private_beta_enabled`).
+  Before any job exists: valid grant now (`BETA_ACCESS_REQUIRED`); own READY
+  DEEP_RESEARCH interpretation; ACTIVE_CORE; project on
+  `private_beta_project_slugs` AND the live-spend allowlist
+  (`BETA_PROJECT_NOT_AVAILABLE`); total admitted beta jobs under
+  `private_beta_research_limit` (`BETA_RESEARCH_LIMIT_REACHED`); one active
+  job and idempotency by the existing constraints. Job origin `PRIVATE_BETA`,
+  budget `INTERNAL_ALPHA_V1`, phased per `phased_research_enabled`.
+- **Execution** (`jobs/private-beta-routing.ts`). Same real executor and
+  phases. Each phase asks: origin, `private_beta_enabled`, project lists.
+  The user's grant is NOT re-read: expiry or revocation refuses new jobs and
+  never ends an admitted one.
+- **Preview and Interpreter.** `gates.ts` and `/api/projects` call the same
+  admission function. While private beta is on, a model-backed Interpreter
+  call needs a grant (or the owner); with the switch off the Interpreter is
+  governed as before (`interpreter_enabled`).
+- **Config** (all fail closed when absent): `private_beta_enabled` false,
+  `private_beta_project_slugs` [], `private_beta_research_limit` 5.
+- **Owner tool.** `npm run admin:private-beta -- status|config|grant|revoke`
+  (dry run unless `--apply`).
+- **Not applied to atlas_dev:** migration 0063, the config rows, any grant.
 
 ## THE PAGE SAYS NO MORE ABOUT RECIPIENT OR DESTINATION THAN THE RECORD HOLDS (D-166)
 

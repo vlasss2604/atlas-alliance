@@ -16,6 +16,7 @@
     "worker:fetch": "tsx scripts/dev-launch.ts fetch",
     "admin:verify-proof": "tsx scripts/verify-proof.ts",
     "admin:promote-memory": "tsx scripts/promote-memory.ts",
+    "admin:private-beta": "tsx scripts/private-beta.ts",
     "alpha:run": "tsx scripts/alpha-run.ts",
     "alpha:inspect": "tsx scripts/alpha-inspect.ts",
     "eval:memory": "tsx scripts/eval-memory.ts",

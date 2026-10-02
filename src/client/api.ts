@@ -110,7 +110,10 @@ export interface GateView {
     | "OUT_OF_SCOPE"
     | "CORE_REQUIRED"
     | "ACTIVE_JOB_EXISTS"
-    | "DEMO_QUOTA_EXHAUSTED";
+    | "DEMO_QUOTA_EXHAUSTED"
+    | "BETA_ACCESS_REQUIRED"
+    | "BETA_PROJECT_NOT_AVAILABLE"
+    | "BETA_RESEARCH_LIMIT_REACHED";
   demo: { used: number; limit: number } | null;
 }
 

@@ -4,6 +4,7 @@ import type { ProductConfig } from "../config/product";
 import type { Database } from "../db/client";
 import { ACTIVE_JOB_STATES, projects, researchJobs, topics, users } from "../db/schema";
 import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../engine/live-executor";
+import { evaluatePrivateBetaAdmission, hasValidPrivateBetaGrant, privateBetaOpen } from "./private-beta";
 import { resolveEntitlement, type EntitlementView } from "./entitlement";
 
 // Scope ≠ Entitlement (канон atlas-intent). Две разные проверки,
@@ -22,7 +23,12 @@ export type ResearchGate =
   | "CORE_REQUIRED"
   | "DISABLED"
   | "ACTIVE_JOB_EXISTS"
-  | "DEMO_QUOTA_EXHAUSTED";
+  | "DEMO_QUOTA_EXHAUSTED"
+  // PRIVATE BETA (D-167) — the three admission refusals, verbatim the codes
+  // POST /api/research-jobs returns for the same facts.
+  | "BETA_ACCESS_REQUIRED"
+  | "BETA_PROJECT_NOT_AVAILABLE"
+  | "BETA_RESEARCH_LIMIT_REACHED";
 
 export interface GateSubject {
   userId: string;
@@ -104,11 +110,19 @@ export async function evaluateGates(
   // those two gates are the ones this eligibility is allowed to skip;
   // scope and "one active job" still apply exactly as for any other job.
   let ownerAlphaEligible = false;
+  // PRIVATE BETA preview parity (D-167). The route sends a non-ADMIN user to
+  // startPrivateBetaResearch exactly when the public path is closed and the
+  // beta switch is on; for that user the preview is decided by the SAME
+  // admission function the start service calls (evaluatePrivateBetaAdmission),
+  // in the same order, so the screen never offers a Research the server
+  // will refuse. An ADMIN keeps the owner-alpha preview above, unchanged.
+  let privateBetaApplies = false;
   if (!config.research_enabled) {
     const [actor] = await db
       .select({ role: users.role })
       .from(users)
       .where(eq(users.id, subject.userId));
+    privateBetaApplies = privateBetaOpen(config) && actor?.role !== "ADMIN";
     ownerAlphaEligible =
       actor?.role === "ADMIN" &&
       config.internal_alpha_enabled &&
@@ -121,8 +135,31 @@ export async function evaluateGates(
   // маршрут и scope не зависят от рубильника research_enabled, иначе при
   // выключенном движке «объяснение» неотличимо от «исследование выключено».
   let research: ResearchGate = "AVAILABLE";
+  const activeJobExists = async (): Promise<boolean> => {
+    const active = await db
+      .select({ id: researchJobs.id })
+      .from(researchJobs)
+      .where(and(eq(researchJobs.userId, subject.userId), inArray(researchJobs.state, [...ACTIVE_JOB_STATES])))
+      .limit(1);
+    return active.length > 0;
+  };
   if (subject.route !== "DEEP_RESEARCH") {
     research = "NOT_DEEP_RESEARCH";
+  } else if (privateBetaApplies) {
+    // The start service's own order: the grant, then scope, then the
+    // project list and the cap, then "one active job".
+    if (!(await hasValidPrivateBetaGrant(db, subject.userId))) {
+      research = "BETA_ACCESS_REQUIRED";
+    } else if (scope === "OUT_OF_SCOPE") {
+      research = "OUT_OF_SCOPE";
+    } else {
+      const refusal = await evaluatePrivateBetaAdmission(db, config, {
+        userId: subject.userId,
+        projectSlugs: subject.projectSlugs,
+      });
+      if (refusal !== null) research = refusal;
+      else if (await activeJobExists()) research = "ACTIVE_JOB_EXISTS";
+    }
   } else if (scope === "OUT_OF_SCOPE") {
     research = "OUT_OF_SCOPE";
   } else if (entitlement === "CORE_REQUIRED" && !ownerAlphaEligible) {
@@ -131,18 +168,8 @@ export async function evaluateGates(
     research = "DISABLED";
   } else if (demo && demo.used >= demo.limit && !ownerAlphaEligible) {
     research = "DEMO_QUOTA_EXHAUSTED";
-  } else {
-    const active = await db
-      .select({ id: researchJobs.id })
-      .from(researchJobs)
-      .where(
-        and(
-          eq(researchJobs.userId, subject.userId),
-          inArray(researchJobs.state, [...ACTIVE_JOB_STATES]),
-        ),
-      )
-      .limit(1);
-    if (active.length > 0) research = "ACTIVE_JOB_EXISTS";
+  } else if (await activeJobExists()) {
+    research = "ACTIVE_JOB_EXISTS";
   }
 
   const primary = rows.find((p) => p.slug === subject.projectSlugs[0]);

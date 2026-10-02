@@ -6,6 +6,7 @@ import type { ProductConfig } from "../config/product";
 import type { Database } from "../db/client";
 import { interpretations, users } from "../db/schema";
 import { evaluateGates, looseKey, type GateDecision } from "../services/gates";
+import { interpreterAccessRefusal } from "../services/private-beta";
 import {
   InterpreterUnavailableError,
   resolveInterpreterGateway,
@@ -107,6 +108,15 @@ export interface InterpretResult {
 
 function requireEnabled(config: ProductConfig): void {
   if (!config.interpreter_enabled) throw new HttpError(403, "INTERPRETER_DISABLED");
+}
+
+// PRIVATE BETA (D-167) — a model-backed Interpreter call is provider spend,
+// and during private beta only the owner and a user holding a valid beta
+// grant may cause one (services/private-beta.ts). Asked before the rate
+// limit and before the model, so a refusal costs nothing.
+async function requireInterpreterAccess(db: Database, config: ProductConfig, userId: string): Promise<void> {
+  const refusal = await interpreterAccessRefusal(db, config, userId);
+  if (refusal !== null) throw new HttpError(403, refusal);
 }
 
 function cleanText(value: unknown, max: number, code: string): string {
@@ -483,6 +493,7 @@ export async function createInterpretation(
   input: { userId: string; question: unknown },
 ): Promise<InterpretResult> {
   requireEnabled(config);
+  await requireInterpreterAccess(db, config, input.userId);
   const question = cleanText(input.question, MAX_QUESTION_CHARS, "QUESTION_TOO_LONG");
   await hitRateLimit(db, `interp:${input.userId}`, RATE_LIMIT, RATE_WINDOW_SEC);
 
@@ -521,6 +532,7 @@ export async function clarifyInterpretation(
   input: { userId: string; parentId: string; answer: unknown },
 ): Promise<InterpretResult> {
   requireEnabled(config);
+  await requireInterpreterAccess(db, config, input.userId);
   const answer = cleanText(input.answer, MAX_ANSWER_CHARS, "ANSWER_TOO_LONG");
 
   const [parent] = await db

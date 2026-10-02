@@ -117,10 +117,17 @@ export const userRole = pgEnum("user_role", ["USER", "ADMIN"]);
 // observations for another job. Which origins DO count as Research
 // acquisition is the positive allowlist in
 // engine/research-acquisition-origin.ts, never "anything but this one".
+//
+// PRIVATE_BETA (D-167) — a Research admitted for an approved private-beta
+// USER (services/start-private-beta-research.ts): the same real pipeline as
+// OWNER_MANUAL_ALPHA, admitted by a server-owned beta grant instead of the
+// ADMIN role. Like every origin it is written once, at creation, and never
+// inferred from the caller at execution time.
 export const researchJobOrigin = pgEnum("research_job_origin", [
   "PRODUCT",
   "OWNER_MANUAL_ALPHA",
   "OWNER_OBSERVATION",
+  "PRIVATE_BETA",
 ]);
 
 // D-136 — the acquisition phase a research job is currently in. A CLOSED

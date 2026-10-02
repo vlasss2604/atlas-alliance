@@ -2,34 +2,38 @@
 
 > Overwrite this file each round. Never append.
 
-## RECIPIENT / DESTINATION DISPLAY CEILING (D-166) — IMPLEMENTED OFFLINE
+## PRIVATE-BETA ADMISSION (D-167) — IMPLEMENTED OFFLINE
 
 Founder-approved 2026-10-02. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
 
-PRESENTATION MUST NOT CREATE NEW TRUTH. PAGE <= PERSISTED VERIFIED RECORD.
+An approved beta USER runs the same real, budget-bounded Research as owner
+alpha, without ADMIN; the public PRODUCT path stays closed.
 
-- **Cause** (Private Beta Readiness Audit): the primary Result showed
-  "Who ultimately receives it? — Confirmed" off the component status alone,
-  while every stored mechanism flow read recipientKind UNKNOWN.
-- **Fix, presentation only**: `client/mechanism-typed-value.ts` reads the
-  stored typed value; `client/result-surface.ts` shows RECIPIENT /
-  DESTINATION as NOT ESTABLISHED without one, and speaks from the typed
-  flow's rows with one; `client/audit-model.ts` keeps the raw status but
-  never words it "Confirmed" without a typed value.
-- **Corpus (atlas_dev, read-only)**: 22 RECIPIENT + 25 DESTINATION rows
-  demote across 32 jobs; 0 rows stronger.
-- Engine, Pattern, schema, stored Proofs and evidence untouched.
+- **Grant**: a `subscriptions` row (ARI_CORE, explicit expiry, no
+  auto-renew, `PRIVATE_BETA_GRANT`). No new role, table or auth system.
+- **Admission**: `services/start-private-beta-research.ts`; refusals
+  BETA_ACCESS_REQUIRED / BETA_PROJECT_NOT_AVAILABLE /
+  BETA_RESEARCH_LIMIT_REACHED create no job. Origin `PRIVATE_BETA`
+  (migration 0063), budget `INTERNAL_ALPHA_V1`.
+- **Execution**: `jobs/private-beta-routing.ts`, the real executor at every
+  phase; the grant is checked at admission only; `private_beta_enabled` is
+  the emergency switch.
+- **Preview / Interpreter / roster** use the same admission function.
 
-atlas_dev: migration 0062 applied, Pattern v5 ACTIVE. App and workers are not
-running.
+NOT done, each needs Founder approval (writes to atlas_dev):
+1. `npm run db:migrate` (0063 only; export DATABASE_URL from .env.local).
+2. `npm run admin:private-beta -- config --enabled=true
+   --projects=raydium,pump_fun,lido --limit=5 --apply`.
+3. The user signs in once; then `npm run admin:private-beta -- grant
+   --telegram-id=<id> --until=YYYY-MM-DD --apply`.
+4. A hosted environment (app + two workers + provider reach) — not designed.
 
-Still waiting on the Founder (Private Beta Readiness Audit): BLOCKER — no
-live Research path for a non-admin beta user, and no hosted environment
-verified; BEFORE BETA — limit beta to prepared projects, the Solana
-DESTINATION dead end (a context-only chain row closes the component and
-skips the documentary pass, `s4-executor.ts` closesComponent), first-answer
-wording, smoke-test projects in the catalog. Separate decision: whether the
-RECIPIENT component itself needs a code-validated recipient. D-165 positive
-live validation stays deferred. v1 execution gaps and older items: BACKLOG.
+Known and left as is: with the beta switch OFF the Interpreter is open to
+any signed-in user as before (stop it with `interpreter_enabled`); a failed
+or cancelled beta Research still counts toward the cap of 5.
+
+Still waiting on the Founder: hosted-environment task; BEFORE-BETA items
+from the readiness audit (Solana DESTINATION dead end, first-answer wording,
+smoke-test projects in the catalog); D-165 positive live validation.
 
 STOP here until the Founder reviews. No push, no live call.

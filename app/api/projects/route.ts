@@ -3,6 +3,7 @@ import { inArray } from "drizzle-orm";
 import { errorResponse, requireSession } from "@/src/server/auth/guards";
 import { projects } from "@/src/server/db/schema";
 import { resolveEntitlement } from "@/src/server/services/entitlement";
+import { hasValidPrivateBetaGrant, privateBetaOpen, privateBetaProjectAllowed } from "@/src/server/services/private-beta";
 import { getDb, getProductConfig } from "@/src/server/runtime";
 
 // Roster — из БД по статусу, DEMO-доступность — из product_config (Scope ≠
@@ -25,12 +26,21 @@ export async function GET(req: Request): Promise<Response> {
       .where(inArray(projects.status, ["ACTIVE_CORE"]));
 
     const isCore = entitlement.snapshot.level === "ARI_CORE";
+    // PRIVATE BETA (D-167) — while private beta is what admits this user
+    // (public path closed, beta switch on, not the owner), "researchable"
+    // means what startPrivateBetaResearch will actually admit: a valid
+    // grant AND a project on the beta list and the live-spend allowlist.
+    // The roster never offers a project the server would refuse.
+    const beta = privateBetaOpen(config) && session.role !== "ADMIN";
+    const granted = beta ? await hasValidPrivateBetaGrant(db, session.userId) : false;
     return Response.json({
       projects: rows.map((p) => ({
         slug: p.slug,
         name: p.name,
         ticker: p.ticker,
-        researchable: isCore || config.demo_project_slugs.includes(p.slug),
+        researchable: beta
+          ? granted && privateBetaProjectAllowed(config, p.slug)
+          : isCore || config.demo_project_slugs.includes(p.slug),
       })),
     });
   } catch (e) {

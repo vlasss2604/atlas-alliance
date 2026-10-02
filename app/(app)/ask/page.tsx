@@ -97,6 +97,9 @@ export default function AskPage() {
       if (e.code === "DEMO_QUOTA_EXHAUSTED") return dict.ask.quotaExhausted;
       if (e.code === "ACTIVE_JOB_EXISTS") return dict.ask.activeJob;
       if (e.code === "OUT_OF_SCOPE") return dict.ask.outOfScope;
+      if (e.code === "BETA_ACCESS_REQUIRED") return dict.ask.betaAccessRequired;
+      if (e.code === "BETA_PROJECT_NOT_AVAILABLE") return dict.ask.betaProjectNotAvailable;
+      if (e.code === "BETA_RESEARCH_LIMIT_REACHED") return dict.ask.betaResearchLimitReached;
       // Постоянные состояния не выдаём за временный сбой: «попробуйте ещё
       // раз» на них не сработает никогда (adversarial review, LOW-7).
       if (e.code === "CLARIFICATION_ALREADY_ANSWERED") return dict.ask.clarifyAnswered;
@@ -121,6 +124,12 @@ export default function AskPage() {
         return dict.ask.quotaExhausted;
       case "ACTIVE_JOB_EXISTS":
         return dict.ask.activeJob;
+      case "BETA_ACCESS_REQUIRED":
+        return dict.ask.betaAccessRequired;
+      case "BETA_PROJECT_NOT_AVAILABLE":
+        return dict.ask.betaProjectNotAvailable;
+      case "BETA_RESEARCH_LIMIT_REACHED":
+        return dict.ask.betaResearchLimitReached;
       case "DISABLED":
         return dict.ask.disabledNote;
       case null:
