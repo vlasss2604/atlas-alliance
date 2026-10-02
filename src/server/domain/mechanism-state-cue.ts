@@ -22,6 +22,12 @@
 // A cue carrying a negation, a condition, a modal or a future is refused
 // outright, whatever else it contains: "is not live", "will be live", "if
 // the module is active" state nothing about the present.
+//   4. sits, at EVERY place it occurs in the fragment, inside an ASSERTED
+//      sentence. The model chooses how many words to cite, so checking the
+//      cue alone let "is live" out of "…once the token is live…" and "is
+//      enabled" out of "…is enabled only after governance approves it". The
+//      sentence around the cue faces the same refusal words, plus a closed
+//      set of contingency markers, and a question asserts nothing.
 //
 // THIS MODULE NEVER EDITS ANYTHING. The model's raw mechanism_state is
 // persisted as written; the answer here is the rule-version marker stored
@@ -82,6 +88,47 @@ export function stateOfCue(cue: string | null | undefined): CuedState | null {
   return matched.length === 1 ? matched[0] : null;
 }
 
+// Words that make a sentence contingent on something else: "enabled only
+// after approval", "live upon deployment", "active provided that…". Checked
+// against the sentence, never the cue, together with DISQUALIFIER.
+// Deliberately broad on the refusing side: a genuine assertion that happens
+// to share a sentence with one of these is left uncued (fail closed), never
+// rewritten.
+const CONTINGENCY =
+  /\b(?:after|before|upon|provided|providing|subject\s+to|assuming|whether|in\s+case|as\s+soon\s+as|depend(?:s|ing|ent)?\s+on)\b/i;
+
+// Sentence ends: . ! ? followed by whitespace or the end ("v1.5" is not an
+// end), a semicolon, a line break, or a table cell bar.
+const SENTENCE_END = /[.!?](?=\s|$)|[;\n|]/g;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// True only when the cue occurs in the fragment on word boundaries and every
+// occurrence sits in a sentence that asserts: no negation, condition, modal,
+// future or contingency, and not a question. A cue that cannot be located
+// this way is not asserted — never a guess about where it was meant to be.
+export function cueIsAsserted(supportFragment: string, cue: string): boolean {
+  const words = cue.trim().split(/\s+/).filter((w) => w.length > 0);
+  if (words.length === 0) return false;
+  const locate = new RegExp(`(?<![A-Za-z0-9])${words.map(escapeRegExp).join("\\s+")}(?![A-Za-z0-9])`, "gi");
+  const ends: { at: number; char: string }[] = [];
+  for (const m of supportFragment.matchAll(SENTENCE_END)) ends.push({ at: m.index, char: m[0] });
+  let found = false;
+  for (const m of supportFragment.matchAll(locate)) {
+    found = true;
+    const start = m.index;
+    const finish = start + m[0].length;
+    const before = ends.filter((e) => e.at < start).at(-1);
+    const after = ends.find((e) => e.at >= finish);
+    const sentence = supportFragment.slice(before ? before.at + 1 : 0, after ? after.at : supportFragment.length);
+    if (after?.char === "?") return false;
+    if (DISQUALIFIER.test(sentence) || CONTINGENCY.test(sentence)) return false;
+  }
+  return found;
+}
+
 export interface StateCueInput {
   mechanismState: string | null | undefined;
   stateCue: string | null | undefined;
@@ -99,5 +146,6 @@ export function mechanismStateRuleVersionFor(input: StateCueInput): number | nul
   const cue = input.stateCue;
   if (typeof cue !== "string" || cue.trim().length === 0) return null;
   if (!input.isLiteral(input.supportFragment, cue)) return null;
-  return stateOfCue(cue) === labelled ? MECHANISM_STATE_RULE_VERSION : null;
+  if (stateOfCue(cue) !== labelled) return null;
+  return cueIsAsserted(input.supportFragment, cue) ? MECHANISM_STATE_RULE_VERSION : null;
 }

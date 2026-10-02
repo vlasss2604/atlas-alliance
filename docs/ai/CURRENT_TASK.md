@@ -2,33 +2,34 @@
 
 > Overwrite this file each round. Never append.
 
-## DOCUMENTARY STATE CUE (D-163) — IMPLEMENTED OFFLINE
+## CLAUSE-LEVEL GUARD FOR THE STATE CUE (D-164) — IMPLEMENTED OFFLINE
 
-Founder-approved 2026-10-01. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
+Founder-approved 2026-10-02. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
 
-PRESENT TENSE ≠ CURRENT STATE. DOCUMENTED ≠ EXECUTING. CURRENT_STATE requires
-an explicit, validated state cue AND trusted temporal provenance.
+The offline corpus audit of D-163 on `atlas_dev` (125 CURRENT_STATE /
+EXECUTION_EVIDENCE results, 1597 documentary rows, read-only) found that the
+refusal words were checked on the cue alone, so a narrow cue escaped its
+sentence ("is live" out of "…once the token is live…").
 
-- **Cue**: the extractor returns `stateCue` (verbatim words of the support
-  fragment). `domain/mechanism-state-cue.ts` accepts it only if literal
-  (`isTraceable`), mapped by the closed table to exactly one canonical state,
-  and equal to the model's label; negation/condition/modal/future refuse it.
-- **Marker**: `evidence.mechanism_state_rule_version smallint NULL` (migration
-  0061, no default, no backfill); Memory copies it exactly.
-- **Rule**: for CURRENT_STATE, an uncued model-written state is UNKNOWN; same
-  for lifecycle signals and the surface. Chain rows unchanged.
-- **Not changed (stop-and-report, D-163 §5)**: EXECUTION_EVIDENCE's live gate.
-  Historical execution cannot be represented without LIVE; see BACKLOG.
-- Offline corpus: no stored CURRENT_STATE / EXECUTION_EVIDENCE status changes;
-  the Wave 1A trusted-date probe no longer yields SUPPORTED/LIVE.
+- **Fix**: `cueIsAsserted` in `domain/mechanism-state-cue.ts`. Every
+  word-bounded occurrence of the cue must sit in an asserted sentence: no
+  D-163 refusal word, no contingency marker, not a question. Unlocatable cue
+  → refused. Marker version stays 1; cue table and taxonomy unchanged.
+- **Corpus after the fix**: 0 status changes; Wave 1A CURRENT_STATE stays
+  INSUFFICIENT even with trusted dates; no variant is stronger than legacy.
+- **Known fail-closed cost**: an assertion sharing a sentence with "when",
+  "after", "can", "no" … is left uncued.
+- **Not in the v1 table** (needs its own decision): "has been active since",
+  "active since", "went live", "was deprecated", bare "deprecated",
+  "no longer".
 
-Before the next live run on `atlas_dev`: migrations 0060 and 0061 are NOT
-applied there (`npm run db:migrate` needs Founder approval). App and workers
-are not running.
+atlas_dev has migrations through 0061 applied. App and workers are not
+running.
 
 Still waiting on the Founder: the EXECUTION_EVIDENCE historical-execution
-decision (BACKLOG); Raydium HTML route classification (`84774bb9…`, optional);
-global unmarked-date supersession (BACKLOG); EVM V1 live validation candidate;
-Blind Batch V1 inputs.
+decision (BACKLOG; also: its live gate still reads an uncued label); cue
+table extension (above); Raydium HTML route classification (optional);
+global unmarked-date supersession (BACKLOG); EVM V1 live validation
+candidate; Blind Batch V1 inputs.
 
 STOP here until the Founder reviews. No push, no live call.

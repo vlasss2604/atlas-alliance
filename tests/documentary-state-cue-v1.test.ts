@@ -305,3 +305,63 @@ describe("6. contract plumbing: extractor, executor, Memory, migration", () => {
     expect(journal.entries.at(-1)).toMatchObject({ idx: 61, tag: "0061_mechanism_state_rule_version" });
   });
 });
+
+describe("7. the cue must sit in an ASSERTED sentence, not only be a clean phrase", () => {
+  // The four false positives found by the offline corpus audit: each cue is
+  // clean on its own, so the cue-only check accepted it.
+  const CORPUS_FALSE_POSITIVES: [string, string, string][] = [
+    ["LIVE", "is live", "All participants have the same opportunity to buy and sell once the token is live, aiming to promote transparency."],
+    ["LIVE", "is active", "If the fee switch is active, 12% of fees are used to buy back RAY."],
+    ["LIVE", "is live", "The buyback module will not launch until the vault is live."],
+    ["LIVE", "is enabled", "The fee switch is enabled only after governance approval."],
+  ];
+
+  it("conditional, contingent, negated-future and dependent sentences get no marker", () => {
+    for (const [state, cue, fragment] of CORPUS_FALSE_POSITIVES) {
+      expect(stateOfCue(cue), cue).toBe(state);
+      expect(isTraceable(fragment, cue), fragment).toBe(true);
+      expect(markerFor(state, cue, fragment), fragment).toBeNull();
+    }
+  });
+
+  it("explicit asserted states still pass", () => {
+    for (const [state, cue, fragment] of [
+      ["LIVE", "is currently live", "The module is currently live."],
+      ["LIVE", "is now active", "The buyback module is now active on mainnet."],
+      ["PAUSED", "is paused", "The module is paused."],
+      ["PAUSED", "has been paused", "The module has been paused since March."],
+      ["PAUSED", "have been paused since March", "Buybacks have been paused since March pending review."],
+      ["DEPRECATED", "is deprecated", "The v1 module is deprecated."],
+      ["REMOVED", "was removed", "The fee switch was removed in the v3 upgrade."],
+    ] as const) {
+      expect(markerFor(state, cue, fragment), fragment).toBe(MECHANISM_STATE_RULE_VERSION);
+    }
+  });
+
+  it("the sentence is the scope: a qualifier in ANOTHER sentence does not refuse, one in the same sentence does", () => {
+    expect(markerFor("LIVE", "is currently live", "The module is currently live. Rewards will be distributed monthly.")).toBe(1);
+    expect(markerFor("LIVE", "is currently live", "The module is currently live and will be paused next month.")).toBeNull();
+    // A version number is not a sentence end.
+    expect(markerFor("LIVE", "is live", "Raydium v1.5 is live.")).toBe(1);
+  });
+
+  it("a question asserts nothing", () => {
+    expect(markerFor("LIVE", "is live", "So the vault is live?")).toBeNull();
+  });
+
+  it("every occurrence must be asserted; a cue that cannot be located on word boundaries is refused", () => {
+    expect(markerFor("LIVE", "is live", "The vault is live. If the pool is live, fees accrue.")).toBeNull();
+    // Literal by substring ("this live"), but no word-bounded occurrence.
+    expect(markerFor("LIVE", "is live", "Watch this live stream.")).toBeNull();
+  });
+
+  it("CURRENT_STATE: a conditional cue with a trusted date establishes nothing", () => {
+    const [, cue, fragment] = CORPUS_FALSE_POSITIVES[1];
+    const conditional = row("CURRENT_STATE", fragment, "LIVE", cue);
+    expect(conditional.mechanismStateRuleVersion).toBeNull();
+    const r = cs([conditional]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.currentState).toBeNull();
+    expect(reasonOf(r, conditional.id)).toBe("NOT_CURRENT_STATE_BEARING");
+  });
+});

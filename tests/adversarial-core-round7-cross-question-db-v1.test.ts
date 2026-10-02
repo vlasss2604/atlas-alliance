@@ -514,7 +514,7 @@ describe("P1. one document set, eight persisted Researches", () => {
       text: `${project.name} — epoch 12 report. ${CANON.EXECUTION_EVIDENCE}.`,
       facts: { EXECUTION_EVIDENCE: [{ fragment: CANON.EXECUTION_EVIDENCE, mechanismState: "LIVE", publishedAt: daysAgo(45) }] },
     };
-    const docs = [...canonDocs(project, { EXECUTION_EVIDENCE: null, CURRENT_STATE: [{ fragment: "the buyback mechanism has been deprecated and will not resume", mechanismState: "DEPRECATED" }] }), report];
+    const docs = [...canonDocs(project, { EXECUTION_EVIDENCE: null, CURRENT_STATE: [{ fragment: "the buyback mechanism has been deprecated. It will not resume", mechanismState: "DEPRECATED" }] }), report];
     const by = await askAll(project, docs);
     persistedLaws(by, "P1c");
     const mcs = by.MECHANISM_CURRENT_STATE;

@@ -7,9 +7,12 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-10-01 (D-163 documentary state cue, on the
-  final tree): **5485 passing, 4 skipped, 4 failing** (265 files) —
-  exactly the four standing failures below.
+- Full suite, last verified 2026-10-02 (D-164 clause-level cue guard):
+  5490 passing, 4 skipped, 5 failing (265 files) — the four standing
+  failures below plus round7 P1c, whose fixture sentence "has been
+  deprecated and will not resume" the guard refuses; the fixture now states
+  the follow-up as its own sentence and that file passes alone (32/32 with
+  the cue tests). Expected on the final tree: 5491 / 4 / 4.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
   timeout (29.0 s alone on `39e8132`) and can time out under load.
   Run the suite ALONE — two concurrent `vitest run` invocations share the
@@ -53,6 +56,12 @@ mechanism runs.
   accepts it only if it is literal in the fragment (`isTraceable`), maps
   through a closed code-owned table to exactly one canonical state, and equals
   the model's label. Negation, condition, modal or future refuse it.
+- **Asserted sentence (D-164).** Every word-bounded occurrence of the cue in
+  the fragment must sit in a sentence free of those refusal words and of a
+  closed set of contingency markers (after, before, upon, provided, subject
+  to, assuming, whether, in case, as soon as, depends on), and not a
+  question (`cueIsAsserted`). A cue that cannot be located is refused. Fails
+  closed: a real assertion sharing a sentence with "when" stays uncued.
 - **Marker.** `evidence.mechanism_state_rule_version smallint NULL` (migration
   0061, no default, no backfill). 1 only for a validated cue; the raw label is
   kept. Memory copies it exactly.
