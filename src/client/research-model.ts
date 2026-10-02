@@ -1389,8 +1389,11 @@ const MECHANISM_ROWS = [
   { component: "GOVERNANCE_BASIS", label: "A governing decision authorises it" },
   { component: "CURRENT_STATE", label: "It is currently active" },
   // Tense-neutral: execution evidence shows that execution happened at the
-  // time of the evidence, never that it continues now.
-  { component: "EXECUTION_EVIDENCE", label: "Execution has been observed" },
+  // time of the evidence, never that it continues now. Not "observed": since
+  // D-165 the basis may be a published report of the execution, not an
+  // observation ATLAS made of a transaction. And not "has executed": a label
+  // sits beside "not established" too, and must never read as the claim.
+  { component: "EXECUTION_EVIDENCE", label: "Execution is on record" },
 ] as const;
 
 const VALUE_ROWS = [
@@ -2012,8 +2015,8 @@ function shortAnswerFor(input: BriefingInput, rows: readonly ResultRow[]): strin
     const detail = boundary.coverage === "BLOCKED" ? boundary.limitation : boundary.reason;
     // THE SUBJECT IS THE PHRASE, NOT THE ROW LABEL.
     //
-    // A ladder label is a CLAIM — "Execution has been observed" — and
-    // reading "Main limitation — Execution has been observed: …" says
+    // A ladder label is a CLAIM — "Execution is on record" — and
+    // reading "Main limitation — Execution is on record: …" says
     // the opposite of what is meant. The component phrase is a noun phrase
     // written to sit inside a sentence, so it slots in and stays true.
     const subjectPhrase = COMPONENT_PHRASES[boundary.component] ?? null;

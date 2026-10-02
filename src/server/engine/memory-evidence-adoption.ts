@@ -679,6 +679,8 @@ async function materializeOne(
       // The state's cue marker travels with the state: legacy stays legacy,
       // v1 stays v1. Never re-derived here.
       mechanismStateRuleVersion: origin.mechanismStateRuleVersion,
+      // Same discipline for the execution marker: copied, never re-derived.
+      executionRuleVersion: origin.executionRuleVersion,
       // ROUND 11 — A RESEARCH INPUT COMES FROM THE OBSERVATION, NEVER FROM
       // THE MUTABLE MEMORY ROW.
       //

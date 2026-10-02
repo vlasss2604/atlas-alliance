@@ -14,6 +14,7 @@ import {
   type AssemblyEvidenceProjection,
 } from "../src/server/engine/mechanism-assembler";
 import { buildProof } from "../src/server/engine/proof-builder";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // ADVERSARIAL RESEARCH CORE V1 — DOCUMENTED BOUNDARIES.
 //
@@ -53,7 +54,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
   seq += 1;
   const id = overrides.id ?? `b${String(seq).padStart(4, "0")}-0000-4000-8000-000000000000`;
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -79,7 +80,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 
 function reconcile(component: string, evidence: EvidenceRow[]): ComponentReconciliationResult {
@@ -297,7 +298,7 @@ describe("N. attacks that held — kept as regressions", () => {
     // is not the mechanism executing (BURN EVENT != CLAIMED MECHANISM EXECUTION).
     // Executed EARLIER, deprecated later: the lifecycle orders trusted dates,
     // and rows dated the same day that disagree settle nothing.
-    const executed = row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the programme executed its distributions on schedule", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 400 * DAY) });
+    const executed = row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the programme has executed its distributions on schedule", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 400 * DAY) });
     const deprecated = row("CURRENT_STATE", { mechanismState: "DEPRECATED", fragment: "the programme was deprecated" });
     const historical = runChain("MECHANISM_CURRENT_STATE", [executed, deprecated]);
     expect(historical.claim.status).toBe("NOT_SUPPORTED");
@@ -307,7 +308,7 @@ describe("N. attacks that held — kept as regressions", () => {
   it("N3. a lifecycle that is HISTORICAL (executed, now deprecated) positively refutes 'current' — and rests on CURRENT_STATE", () => {
     const deprecated = row("CURRENT_STATE", { mechanismState: "DEPRECATED", fragment: "the buyback programme was deprecated" });
     const pool = [
-      row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback programme executed its purchases", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 400 * DAY) }),
+      row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback programme has executed its purchases", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 400 * DAY) }),
       deprecated,
     ];
     const { assembly, claim } = runChain("MECHANISM_CURRENT_STATE", pool);

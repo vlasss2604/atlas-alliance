@@ -101,6 +101,7 @@ export const ru: Dict = {
         DIRECTNESS_INSUFFICIENT: "связь с утверждением слишком косвенная",
         RELATIONSHIP_NOT_SUPPORTING: "не подтверждает утверждение",
         NOT_CURRENT_STATE_BEARING: "не отражает текущее состояние",
+        EXECUTION_NOT_STATED: "не сообщает о состоявшемся исполнении",
         MISSING_PUBLICATION_DATE: "нет даты публикации",
         STALE_FOR_CURRENT_STATE: "устарело для проверки текущего состояния",
         SUPERSEDED_BY_NEWER: "заменено более свежим источником",

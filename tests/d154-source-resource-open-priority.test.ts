@@ -279,8 +279,9 @@ describe("D-154 — an approved resource wins an equal-rank tie at the final ope
     // resource s class, otherwise admissibility routing legitimately hands
     // it the resource too and this test can no longer tell
     // component-scoped PRIORITY apart from class-driven ROUTING.
-    // EXECUTION_EVIDENCE admits only ONCHAIN_VERIFIABLE / OFFICIAL_REPORT.
-    const destination = items.find((i) => i.component === "EXECUTION_EVIDENCE");
+    // DURABILITY_BASIS admits only GOVERNANCE (EXECUTION_EVIDENCE admits
+    // OFFICIAL_DOCS since D-165).
+    const destination = items.find((i) => i.component === "DURABILITY_BASIS");
     expect(recipient && destination).toBeTruthy();
 
     const resource = `https://${project.host}/docs/for-recipient.md`;

@@ -53,7 +53,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
   seq += 1;
   const id = overrides.id ?? `r${String(seq).padStart(4, "0")}-0000-4000-8000-000000000000`;
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -79,7 +79,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 
 function reconcile(component: string, evidence: EvidenceRow[]): ComponentReconciliationResult {
@@ -335,8 +335,10 @@ describe("M. mixed pools — weak rows beside strong rows", () => {
 
   it("M6. an unbound chain read beside a bound one: only the bound row establishes, and the foreign one is not silently merged", () => {
     // Untyped chain-class rows: the binding rule is keyed on the class.
-    const bound = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE" });
-    const foreign = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", entityBinding: "UNVERIFIED" });
+    // D-165: both REPORT an execution, so binding alone separates them.
+    const reported = "the buyback contract has executed 12 purchases";
+    const bound = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", fragment: reported });
+    const foreign = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", entityBinding: "UNVERIFIED", fragment: reported });
     const r = reconcile("EXECUTION_EVIDENCE", [foreign, bound]);
     expect(r.supportingEvidenceIds).toEqual([bound.id]);
     expect(exclusionOf(r, foreign.id)).toBe("ENTITY_NOT_CONFIRMED");
@@ -404,7 +406,8 @@ describe("T. temporal boundaries", () => {
   });
 
   it("T6. a chain read fetched in the future relative to `now` is not a negative-age loophole for staleness — it is accepted as a basis but never dated before its fetch", () => {
-    const future = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", publishedAt: null, fetchedAt: new Date(NOW.getTime() + DAY) });
+    // D-165: the read reports an execution, so the time basis is what is tested.
+    const future = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", mechanismState: "LIVE", publishedAt: null, fetchedAt: new Date(NOW.getTime() + DAY), fragment: "the buyback contract has executed 12 purchases" });
     const r = reconcile("EXECUTION_EVIDENCE", [future]);
     expect(r.temporalBasis?.basisField).toBe("fetched_at");
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
@@ -538,6 +541,7 @@ describe("X. cross-stage contracts and idempotency of the pure chain", () => {
 import type { ClaimRequirement, PatternContent } from "../src/server/domain/pattern";
 import { observedCandidateRefusal } from "../src/server/memory/observed-candidates";
 import { validateProjection } from "../src/server/engine/question-projection";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 describe("Z. fresh pass — Pattern -> S7 contract, memory candidate admission, projection labels", () => {
   function patternWith(intent: string, requirements: ClaimRequirement[]): PatternContent {

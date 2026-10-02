@@ -11,6 +11,7 @@ import {
 import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
 import { computeProofConfidence } from "../src/server/engine/proof-confidence";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // ROUND 6.5 — FOUNDER SEMANTIC HARDENING, THE PURE CHAIN.
 //
@@ -71,7 +72,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
   const id = overrides.id ?? `r${String(seq).padStart(4, "0")}-0000-4000-8000-000000000065`;
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
   const confirmedByClass = sourceClass === "OFFICIAL_DOCS" || sourceClass === "OFFICIAL_REPORT";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -97,7 +98,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 const confirmed = (component: string, o: Partial<EvidenceRow>): EvidenceRow => row(component, { officiality: "CONFIRMED", ...o });
 
@@ -245,7 +246,7 @@ function world(): EvidenceRow[] {
     row("FLOW_PATH", { fragment: "fee revenue is routed from the fee collector to the distributor contract" }),
     row("MECHANISM_SPEC", { fragment: "50% of protocol fees are distributed to token holders weekly", mechanismState: "LIVE" }),
     confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", fragment: "the proposal to distribute fees passed", mechanismState: "APPROVED" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
     row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
@@ -264,7 +265,7 @@ function world(): EvidenceRow[] {
 function singleAtomWorld(): EvidenceRow[] {
   return [
     row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { mechanismState: "LIVE" }),
   ];
 }
@@ -505,7 +506,7 @@ describe("Decision 3 — MORE AGREEING ADMISSIBLE EVIDENCE != WEAKER PROOF (D-10
       { label: "second official SOURCE_OF_VALUE page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { fragment: "protocol fees paid by users generate the revenue", sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "second official FLOW_PATH page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("FLOW_PATH", { sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "weak CLAIMED governance row for SOURCE_OF_VALUE", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", publishedAt: older(2) })], downstream: "DESTINATION" },
-      { label: "four more distinct official execution reports at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" })), downstream: "NET_EFFECT" },
+      { label: "four more distinct official execution reports at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" })), downstream: "NET_EFFECT" },
     ];
     for (const k of cases) {
       const control = runChain(k.intent, base);
@@ -690,10 +691,11 @@ describe("No false semantics", () => {
           const counter = row(component, { sourceClass: original.sourceClass, officiality: original.officiality, entityBinding: original.entityBinding, onchainFactKind: original.onchainFactKind, mechanismState: "PAUSED", publishedAt: original.publishedAt, sourceId: `counter-${component}` });
           const t = runChain(intent, [...base, counter]);
           if (component === "EXECUTION_EVIDENCE") {
-            // The live-state gate refuses a PAUSED row outright, and D-094
-            // says the contradiction threshold IS the establishment
+            // The execution gate refuses a row that reports no completed
+            // execution (D-165: a PAUSED label is a lifecycle position), and
+            // D-094 says the contradiction threshold IS the establishment
             // threshold: a row that cannot establish cannot contradict.
-            expect(exclusionOf(t.byComponent.get(component)!, counter.id), `${intent} / ${component} counter`).toBe("NOT_CURRENT_STATE_BEARING");
+            expect(exclusionOf(t.byComponent.get(component)!, counter.id), `${intent} / ${component} counter`).toBe("EXECUTION_NOT_STATED");
             // The component is untouched; the LIFECYCLE reads the trusted
             // PAUSED row (Founder, Fix 3 — option a), and a PAUSED dated the
             // same day as the LIVE is a same-date conflict: NOT_ESTABLISHED.

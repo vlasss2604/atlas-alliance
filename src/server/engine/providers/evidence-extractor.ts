@@ -166,6 +166,7 @@ export const EXTRACTOR_SCHEMA_FIELDS = [
   "FACTS_ONCHAIN_LOCATOR",
   "FACTS_ONCHAIN_LOCATORS",
   "FACTS_STATE_CUE",
+  "FACTS_EXECUTION_CUE",
   "UNKNOWN_SCHEMA_FIELD",
 ] as const;
 
@@ -195,6 +196,7 @@ const FACT_FIELD_CODES: ReadonlyMap<string, ExtractorSchemaField> = new Map([
   ["onchainLocator", "FACTS_ONCHAIN_LOCATOR"],
   ["onchainLocators", "FACTS_ONCHAIN_LOCATORS"],
   ["stateCue", "FACTS_STATE_CUE"],
+  ["executionCue", "FACTS_EXECUTION_CUE"],
 ]);
 
 // The ONE reduction of a zod validation failure to the closed field

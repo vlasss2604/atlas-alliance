@@ -28,7 +28,7 @@ import { confirmSourceRoute } from "../src/server/memory/source-route-confirmati
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
-import { fixtureStateCue } from "./state-cue-fixture";
+import { fixtureStateCue, fixtureExecutionCue } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 7: CROSS-QUESTION / LOGICAL
 // CONSISTENCY, THE PERSISTED RESEARCH.
@@ -265,6 +265,7 @@ function executorFor(project: Project, s: Scenario): WorkExecutor {
             mechanismState: f.mechanismState ?? null,
             // A compliant extractor cites the fragment's explicit state words (D-163).
             stateCue: fixtureStateCue(f.fragment, f.mechanismState),
+            executionCue: fixtureExecutionCue(f.fragment),
             directness: "DIRECT",
             publishedAt: f.publishedAt === undefined ? defaultPublishedAt(input.document.finalUrl) : f.publishedAt,
             doesNotProve: "does not prove the size of the effect",
@@ -488,7 +489,11 @@ describe("P1. one document set, eight persisted Researches", () => {
     expect(s5.SOURCE_OF_VALUE?.reasonCodes).toEqual(["MECHANICAL_PROVENANCE_NOT_ESTABLISHED"]);
     expect(s5.NET_EFFECT?.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(s5.NET_EFFECT?.reasonCodes).toEqual(["ALL_EVIDENCE_EXCLUDED"]);
-    expect(s5.EXECUTION_EVIDENCE?.status).toBe("INSUFFICIENT_EVIDENCE"); // docs are not execution evidence
+    // D-165: an official page that REPORTS a completed execution ("has
+    // executed a purchase in every epoch") is execution evidence — that the
+    // mechanism executed at least once, nothing about now. Every verdict
+    // above is unchanged: execution strengthens no answer here.
+    expect(s5.EXECUTION_EVIDENCE?.status).toBe("SUPPORTED");
     expect(s5.CURRENT_STATE?.status).toBe("SUPPORTED");
     // 'is it current?' cites exactly the current-state row of ITS job.
     expect(by.MECHANISM_CURRENT_STATE.cited.map((c) => c.component)).toEqual(["CURRENT_STATE"]);

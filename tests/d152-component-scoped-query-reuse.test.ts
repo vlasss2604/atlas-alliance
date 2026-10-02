@@ -119,11 +119,11 @@ async function makeJob(projectId: string): Promise<string> {
 // D-156 — the canonical component that does NOT admit OFFICIAL_DOCS.
 // Routing is admissibility-driven, so "another component" is only a
 // meaningful isolation probe when that component structurally cannot be
-// established by this resource s class. EXECUTION_EVIDENCE admits only
-// ONCHAIN_VERIFIABLE and OFFICIAL_REPORT.
+// established by this resource s class. DURABILITY_BASIS admits only
+// GOVERNANCE (EXECUTION_EVIDENCE admits OFFICIAL_DOCS since D-165).
 function nonAdmitting(items: ComponentWorkItem[]): ComponentWorkItem {
-  const item = items.find((i) => i.component === "EXECUTION_EVIDENCE");
-  if (!item) throw new Error("fixture pattern has no EXECUTION_EVIDENCE work item");
+  const item = items.find((i) => i.component === "DURABILITY_BASIS");
+  if (!item) throw new Error("fixture pattern has no DURABILITY_BASIS work item");
   return item;
 }
 

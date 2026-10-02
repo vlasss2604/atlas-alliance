@@ -13,6 +13,7 @@ import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidencePr
 import { applicableFactKindsForComponent } from "../src/server/engine/onchain-facts";
 import { __setInstructionRegistryOverlay } from "../src/server/engine/onchain-instruction-registry";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 12: TECHNICAL DEGRADATION
 // AND TEMPORAL MONOTONICITY.
@@ -86,7 +87,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
   const id = overrides.id ?? `c${String(seq).padStart(4, "0")}-0000-4000-8000-000000000000`;
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
   const confirmedByClass = sourceClass === "OFFICIAL_DOCS" || sourceClass === "OFFICIAL_REPORT";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -112,7 +113,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 const chain = (component: string, o: Partial<EvidenceRow>): EvidenceRow =>
   row(component, {

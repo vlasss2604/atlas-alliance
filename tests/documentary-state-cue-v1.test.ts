@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { buildResultSurface } from "../src/client/result-surface";
 import { resultFixture } from "../src/client/result-surface-fixtures";
 import { componentRequirementsFor, PATTERN_V1_CONTENT } from "../src/server/domain/pattern";
+import { cueStatesExecution, EXECUTION_RULE_VERSION, executionRuleVersionFor } from "../src/server/domain/execution-cue";
 import {
   MECHANISM_STATE_RULE_VERSION,
   mechanismStateRuleVersionFor,
@@ -235,10 +236,13 @@ describe("3. the lifecycle reads only cued documentary states", () => {
 });
 
 describe("4. what this task deliberately did NOT change", () => {
-  it("EXECUTION_EVIDENCE gating is unchanged: its live gate still reads the label (Founder §5 — reported, not changed)", () => {
+  it("EXECUTION_EVIDENCE: an uncued LIVE label no longer establishes execution (CURRENT / LIVE ≠ EXECUTED)", () => {
     const report = row("EXECUTION_EVIDENCE", "The buyback executed its purchases on schedule.", "LIVE", null);
     expect(report.mechanismStateRuleVersion).toBeNull();
-    expect(reconcile("EXECUTION_EVIDENCE", [report]).status).toBe("SUPPORTED");
+    const r = reconcile("EXECUTION_EVIDENCE", [report]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.currentState).toBeNull();
+    expect(reasonOf(r, report.id)).toBe("EXECUTION_NOT_STATED");
   });
 
   it("components that do not ask about the present are unchanged", () => {
@@ -302,7 +306,7 @@ describe("6. contract plumbing: extractor, executor, Memory, migration", () => {
     const statements = sql.split("\n").filter((l) => !l.trim().startsWith("--") && l.trim().length > 0);
     expect(statements).toEqual(['ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "mechanism_state_rule_version" smallint;']);
     const journal = JSON.parse(readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8")) as { entries: { idx: number; tag: string }[] };
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 61, tag: "0061_mechanism_state_rule_version" });
+    expect(journal.entries.find((e) => e.idx === 61)).toMatchObject({ tag: "0061_mechanism_state_rule_version" });
   });
 });
 
@@ -363,5 +367,243 @@ describe("7. the cue must sit in an ASSERTED sentence, not only be a clean phras
     expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(r.currentState).toBeNull();
     expect(reasonOf(r, conditional.id)).toBe("NOT_CURRENT_STATE_BEARING");
+  });
+});
+
+describe("8. CURRENT / LIVE ≠ EXECUTED: a lifecycle label never establishes EXECUTION_EVIDENCE", () => {
+  const ee = (rows: EvidenceRow[]) => reconcile("EXECUTION_EVIDENCE", rows);
+
+  it("an uncued documentary LIVE or IMPLEMENTING row cannot establish or partially establish execution", () => {
+    for (const state of ["LIVE", "IMPLEMENTING"] as const) {
+      const r1 = row("EXECUTION_EVIDENCE", "The buyback mechanism operates on schedule.", state, null);
+      const r = ee([r1]);
+      expect(r.status, state).toBe("INSUFFICIENT_EVIDENCE");
+      expect(r.supportingEvidenceIds, state).toEqual([]);
+      expect(r.currentState, state).toBeNull();
+      expect(reasonOf(r, r1.id), state).toBe("EXECUTION_NOT_STATED");
+    }
+  });
+
+  it("a cue-validated 'is currently live' row is a valid lifecycle statement and still not execution", () => {
+    const live = row("EXECUTION_EVIDENCE", "The buyback module is currently live on mainnet.", "LIVE", "is currently live");
+    expect(live.mechanismStateRuleVersion).toBe(1);
+    const r = ee([live]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.currentState).toBeNull();
+    expect(reasonOf(r, live.id)).toBe("EXECUTION_NOT_STATED");
+    // The same row still establishes CURRENT_STATE (D-163 unchanged).
+    expect(cs([row("CURRENT_STATE", live.fragment, "LIVE", "is currently live")]).status).toBe("SUPPORTED");
+  });
+
+  it("historical execution without a validated execution cue is not established — never forced into LIVE", () => {
+    for (const fragment of [
+      "The treasury bought back tokens on Sep 12.",
+      "The mechanism executed its scheduled operations.",
+      "Total bought back and burnt $448M",
+    ]) {
+      for (const state of ["LIVE", "UNKNOWN", null] as const) {
+        const r = ee([row("EXECUTION_EVIDENCE", fragment, state, null)]);
+        expect(r.status, `${fragment} ${state}`).toBe("INSUFFICIENT_EVIDENCE");
+      }
+    }
+  });
+
+  it("a model-written row neither establishes nor contradicts execution", () => {
+    const paused = row("EXECUTION_EVIDENCE", "Buybacks are currently paused.", "PAUSED", "are currently paused", { relationship: "CONTRADICTS" });
+    const live = row("EXECUTION_EVIDENCE", "The buyback module is currently live.", "LIVE", "is currently live", { relationship: "CONTRADICTS" });
+    const r = ee([paused, live]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.contradictingEvidenceIds).toEqual([]);
+  });
+
+  it("chain rows keep their own path: the new reason is never given to a typed on-chain fact", () => {
+    const chain = row("EXECUTION_EVIDENCE", '{"signature":"sig","slot":1}', "LIVE", null, {
+      sourceClass: "ONCHAIN_VERIFIABLE",
+      entityBinding: "CONFIRMED",
+      onchainFactKind: "BURN",
+    });
+    const r = ee([chain]);
+    expect(reasonOf(r, chain.id)).toBe("FACT_KIND_CANNOT_ESTABLISH");
+  });
+
+  it("the lifecycle still reads a cued trusted EXECUTION_EVIDENCE statement exactly as before", () => {
+    const stop = row("EXECUTION_EVIDENCE", "The v1 buyback module is deprecated.", "DEPRECATED", "is deprecated");
+    const live = row("EXECUTION_EVIDENCE", "The buyback module is currently live.", "LIVE", "is currently live");
+    const result = ee([live]);
+    expect(reasonOf(result, live.id)).toBe("EXECUTION_NOT_STATED");
+    const signals = deriveLifecycleStateSignals({ pattern: PATTERN_V1_CONTENT, componentResults: [result, ee([stop])], rows: [live, stop] });
+    expect(signals.map((s) => s.evidenceId).sort()).toEqual([live.id, stop.id].sort());
+  });
+});
+
+describe("9. D-165: EXECUTION_EVIDENCE = the claimed mechanism executed at least once, from a validated execution cue", () => {
+  const ee = (rows: EvidenceRow[]) => reconcile("EXECUTION_EVIDENCE", rows);
+  const exMarker = (cue: string | null, fragment: string) =>
+    executionRuleVersionFor({ executionCue: cue, supportFragment: fragment, isLiteral: isTraceable });
+  // A row whose extractor returned `cue` as its executionCue.
+  const executed = (fragment: string, cue: string, o: Partial<EvidenceRow> = {}) =>
+    row("EXECUTION_EVIDENCE", fragment, null, null, { executionRuleVersion: exMarker(cue, fragment), ...o });
+
+  it("the Founder's qualifying examples get the marker", () => {
+    for (const [fragment, cue] of [
+      ["The protocol has bought back 1.2M RAY.", "has bought back"],
+      ["The buyback was executed.", "was executed"],
+      ["Three purchases were completed.", "were completed"],
+      ["The protocol has completed three buybacks.", "has completed"],
+      ["Aave has repurchased over 70,000 AAVE.", "has repurchased"],
+      ["The treasury bought back 1.2M RAY on Sep 12.", "bought back 1.2M"],
+      ["The operation has been executed on schedule.", "has been executed"],
+    ] as const) {
+      expect(cueStatesExecution(cue), cue).toBe(true);
+      expect(exMarker(cue, fragment), fragment).toBe(EXECUTION_RULE_VERSION);
+    }
+  });
+
+  it("description, lifecycle, capability, intention, bare past, labels and table rows never qualify", () => {
+    for (const [fragment, cue] of [
+      ["The protocol buys back RAY.", "buys back RAY"],
+      ["The mechanism is live.", "is live"],
+      ["The module can execute buybacks.", "can execute buybacks"],
+      ["Buybacks are intended to occur weekly.", "are intended to occur weekly"],
+      ["Executed proposals are listed below.", "Executed proposals"],
+      ["The mechanism executed its scheduled operations.", "executed its scheduled operations"],
+      ["The treasury bought back RAY on Sep 12.", "bought back RAY"],
+      ["Total bought back and burnt $448M", "bought back and burnt $448M"],
+      ["| Sep 4, 2026 | 119.1M | 4.9K | $524.2K |", "119.1M"],
+      ["Buybacks are executed weekly.", "are executed weekly"],
+    ] as const) {
+      expect(exMarker(cue, fragment), fragment).toBeNull();
+    }
+  });
+
+  it("the D-164 asserted-sentence guard applies: negated, conditional, modal, future, contingent or questioned execution is refused", () => {
+    for (const [fragment, cue] of [
+      ["The buyback has not been executed.", "been executed"],
+      ["If the vote passes, the buyback was executed retroactively.", "was executed"],
+      ["The buyback should have been executed by now.", "have been executed"],
+      ["The buyback will have been executed by Friday.", "have been executed"],
+      ["The buyback was executed only after governance approval.", "was executed"],
+      ["Has the buyback been executed?", "been executed"],
+      // Known fail-closed boundary: the D-164 guard reads "scheduled" as an
+      // expectation word anywhere in the sentence, so this genuine report is
+      // left unvalidated rather than the guard being weakened.
+      ["The scheduled operation was executed.", "was executed"],
+    ] as const) {
+      expect(exMarker(cue, fragment), fragment).toBeNull();
+    }
+    // A qualifier in ANOTHER sentence does not refuse.
+    expect(exMarker("was executed", "The buyback was executed. Future buybacks will follow.")).toBe(1);
+    // A cue that is not literal in the fragment is refused.
+    expect(exMarker("was executed", "The buyback was carried out.")).toBeNull();
+  });
+
+  it("a validated execution report establishes EXECUTION_EVIDENCE whatever its lifecycle label, and reports no current state", () => {
+    for (const state of [null, "UNKNOWN", "LIVE", "DEPRECATED"] as const) {
+      const r1 = executed("The protocol has bought back 1.2M RAY.", "has bought back", { mechanismState: state });
+      const r = ee([r1]);
+      expect(r.status, String(state)).toBe("SUPPORTED");
+      expect(r.supportingEvidenceIds, String(state)).toEqual([r1.id]);
+      // HISTORICAL EXECUTION ≠ CURRENT STATE.
+      expect(r.currentState, String(state)).toBeNull();
+      expect(r.reasonCodes, String(state)).not.toContain("STATE_NOT_FULLY_LIVE");
+    }
+  });
+
+  it("two execution reports with different lifecycle labels do not contradict each other", () => {
+    const a = executed("The buyback was executed in March.", "was executed", { mechanismState: "LIVE" });
+    const b = executed("Three purchases were completed.", "were completed", { mechanismState: "DEPRECATED" });
+    const r = ee([a, b]);
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.contradictingEvidenceIds).toEqual([]);
+  });
+
+  it("source classes: OFFICIAL_REPORT and OFFICIAL_DOCS admitted; GOVERNANCE and SOCIAL are not", () => {
+    for (const cls of ["OFFICIAL_REPORT", "OFFICIAL_DOCS"] as const) {
+      expect(ee([executed("The buyback was executed.", "was executed", { sourceClass: cls })]).status, cls).toBe("SUPPORTED");
+    }
+    for (const cls of ["GOVERNANCE", "SOCIAL"] as const) {
+      const r1 = executed("Proposal 12 was executed.", "was executed", { sourceClass: cls });
+      expect(reasonOf(ee([r1]), r1.id), cls).toBe("CLASS_NOT_ADMISSIBLE");
+    }
+  });
+
+  it("a model-read explorer page needs the execution cue AND its entity binding; a raw LIVE label alone is nothing", () => {
+    const page = (o: Partial<EvidenceRow>) =>
+      row("EXECUTION_EVIDENCE", "Transfer of 12,000 tokens confirmed in block 20000001.", "LIVE", null, { sourceClass: "ONCHAIN_VERIFIABLE", entityBinding: "CONFIRMED", ...o });
+    const uncued = page({});
+    expect(reasonOf(ee([uncued]), uncued.id)).toBe("EXECUTION_NOT_STATED");
+    const unbound = executed("The buyback has executed 12 purchases.", "has executed", { sourceClass: "ONCHAIN_VERIFIABLE", entityBinding: "UNVERIFIED" });
+    expect(reasonOf(ee([unbound]), unbound.id)).toBe("ENTITY_NOT_CONFIRMED");
+    const bound = executed("The buyback has executed 12 purchases.", "has executed", { sourceClass: "ONCHAIN_VERIFIABLE", entityBinding: "CONFIRMED" });
+    expect(ee([bound]).status).toBe("SUPPORTED");
+  });
+
+  it("typed chain facts keep their path: no kind establishes execution, the execution marker changes nothing for them", () => {
+    for (const kind of ["BURN", "TOKEN_TRANSFER", "ZERO_ADDRESS_TRANSFER", "DECODED_EXCHANGE"] as const) {
+      const chain = row("EXECUTION_EVIDENCE", '{"signature":"sig","slot":1}', "LIVE", null, {
+        sourceClass: "ONCHAIN_VERIFIABLE",
+        entityBinding: "CONFIRMED",
+        onchainFactKind: kind,
+        executionRuleVersion: 1,
+      });
+      const r = ee([chain]);
+      expect(r.status, kind).toBe("INSUFFICIENT_EVIDENCE");
+      expect(reasonOf(r, chain.id), kind).toBe("FACT_KIND_CANNOT_ESTABLISH");
+    }
+  });
+
+  it("lifecycle: validated execution + a later trusted, cued DEPRECATED is HISTORICAL; a PAUSED stays a pause; no LIVE needed", () => {
+    const exec = executed("The buyback was executed.", "was executed", { publishedAt: older(30) });
+    const execResult = ee([exec]);
+    expect(execResult.status).toBe("SUPPORTED");
+    const stop = row("CURRENT_STATE", "The v1 buyback module is deprecated.", "DEPRECATED", "is deprecated");
+    const csResult = cs([stop]);
+    const signals = deriveLifecycleStateSignals({ pattern: PATTERN_V1_CONTENT, componentResults: [execResult, csResult], rows: [exec, stop] });
+    // The execution row carries no lifecycle state; the stop is the signal.
+    expect(signals.map((x) => [x.evidenceId, x.state])).toEqual([[stop.id, "DEPRECATED"]]);
+  });
+
+  it("CURRENT_STATE never reads the execution marker", () => {
+    const r1 = row("CURRENT_STATE", "The buyback was executed.", null, null, { executionRuleVersion: exMarker("was executed", "The buyback was executed.") });
+    expect(r1.executionRuleVersion).toBe(1);
+    const r = cs([r1]);
+    expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(r.currentState).toBeNull();
+  });
+
+  it("the Pattern admits OFFICIAL_DOCS for EXECUTION_EVIDENCE and still not GOVERNANCE", () => {
+    const classes = componentRequirementsFor(PATTERN_V1_CONTENT, "EXECUTION_EVIDENCE").establishingClasses;
+    expect([...classes].sort()).toEqual(["OFFICIAL_DOCS", "OFFICIAL_REPORT", "ONCHAIN_VERIFIABLE"]);
+  });
+
+  it("plumbing: extractor field and prompt, executor marker, Memory copy, migration 0062", () => {
+    expect(EVIDENCE_EXTRACTOR_SYSTEM_PROMPT).toContain("EXECUTION CUE.");
+    const extractor = readFileSync("src/server/engine/providers/evidence-extractor-anthropic.ts", "utf-8");
+    expect(extractor).toMatch(/executionCue: z\s*\.string\(\)\s*\.nullable\(\)\s*\.optional\(\)/);
+    const executor = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
+    expect(executor).toMatch(/executionRuleVersion: executionRuleVersionFor\(\{[\s\S]*?isLiteral: isTraceable,/);
+    expect(readFileSync("src/server/engine/memory-evidence-adoption.ts", "utf-8")).toContain("executionRuleVersion: origin.executionRuleVersion,");
+    const sql = readFileSync("src/server/db/migrations/0062_execution_rule_version.sql", "utf-8");
+    const statements = sql.split("\n").filter((l) => !l.trim().startsWith("--") && l.trim().length > 0);
+    expect(statements).toEqual(['ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "execution_rule_version" smallint;']);
+    const journal = JSON.parse(readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8")) as { entries: { idx: number; tag: string }[] };
+    expect(journal.entries.at(-1)).toMatchObject({ idx: 62, tag: "0062_execution_rule_version" });
+  });
+});
+
+describe("10. D-165 presentation: documentary execution is never shown as an observed transaction", () => {
+  const NOTE = "It rests on a source that reports the execution, not on an on-chain transaction ATLAS observed.";
+  const executionRow = (key: string) =>
+    buildResultSurface(resultFixture(key).detail).table.find((x) => x.component === "EXECUTION_EVIDENCE")!;
+
+  it("an execution established only by documentary sources says so", () => {
+    const r = executionRow("2");
+    expect(r.status).toBe("PARTIAL");
+    expect(r.established).toContain(NOTE);
+    expect(r.established).toMatch(/not that it continues now/);
+  });
+
+  it("an execution resting on an on-chain record does not carry the documentary note", () => {
+    expect(executionRow("1").established ?? "").not.toContain(NOTE);
   });
 });

@@ -100,6 +100,7 @@ export const en = {
         DIRECTNESS_INSUFFICIENT: "too indirect to establish the claim",
         RELATIONSHIP_NOT_SUPPORTING: "does not support the claim",
         NOT_CURRENT_STATE_BEARING: "does not carry current state",
+        EXECUTION_NOT_STATED: "does not report a completed execution",
         MISSING_PUBLICATION_DATE: "no publication date",
         STALE_FOR_CURRENT_STATE: "too old to establish current state",
         SUPERSEDED_BY_NEWER: "superseded by a newer source",

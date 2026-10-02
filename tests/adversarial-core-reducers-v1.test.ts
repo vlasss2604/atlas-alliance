@@ -15,6 +15,7 @@ import {
 import { buildProof } from "../src/server/engine/proof-builder";
 import { computeProofConfidence } from "../src/server/engine/proof-confidence";
 import { parseModelPublishedAt } from "../src/server/engine/providers/evidence-extractor-anthropic";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // ADVERSARIAL RESEARCH CORE V1 — the pure reducer chain under attack.
 //
@@ -64,7 +65,7 @@ function nextId(): string {
 function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceRow {
   const id = overrides.id ?? nextId();
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -90,7 +91,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 
 function reconcile(
@@ -347,7 +348,8 @@ describe("C. lifecycle: documented != approved != activated != executing", () =>
     const r = reconcile("EXECUTION_EVIDENCE", [row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", mechanismState: "PROPOSED" })]);
     expect(r.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(r.reasonCodes).toEqual(["MISSING_EXECUTION_EVIDENCE"]);
-    expect(r.excludedEvidence[0].reason).toBe("NOT_CURRENT_STATE_BEARING");
+    // D-165: no completed execution is reported, whatever the lifecycle label.
+    expect(r.excludedEvidence[0].reason).toBe("EXECUTION_NOT_STATED");
   });
 
   it("C4. a mechanism spec described as PROPOSED, and nothing past it, is a proposal — PARTIAL with PROPOSED_STATE_ONLY", () => {
@@ -414,7 +416,8 @@ describe("D. freshness and the temporal basis", () => {
 
   it("D4. an on-chain observation's temporal basis is its fetch time — a fresh chain read establishes what it can (capped as CLAIMED)", () => {
     // An untyped chain-class row: the §6.2 basis rule is keyed on the class.
-    const read = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", officiality: "CLAIMED", publishedAt: null, mechanismState: "LIVE" });
+    // D-165: a model-read page establishes execution only by REPORTING one.
+    const read = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", officiality: "CLAIMED", publishedAt: null, mechanismState: "LIVE", fragment: "the buyback contract has executed 12 purchases" });
     const r = reconcile("EXECUTION_EVIDENCE", [read]);
     expect(r.status).toBe("PARTIALLY_SUPPORTED");
     expect(r.reasonCodes).toEqual(["INSUFFICIENT_AUTHORITY"]);
@@ -432,7 +435,7 @@ describe("D. freshness and the temporal basis", () => {
   });
 
   it("D7. a row whose kind cannot establish the component supersedes nothing: a newer burn never pushes aside an older official execution report", () => {
-    const report = row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback executed on schedule", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 10 * DAY) });
+    const report = row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback has executed on schedule", mechanismState: "LIVE", publishedAt: new Date(NOW.getTime() - 10 * DAY) });
     const burn = row("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null, mechanismState: "LIVE" });
     const r = reconcile("EXECUTION_EVIDENCE", [report, burn]);
     expect(r.supportingEvidenceIds).toEqual([report.id]);
@@ -563,7 +566,7 @@ describe("F. the full chain: nothing strengthens a Proof beyond its evidence", (
     // mechanism executing), so no bare-absence code masks the supply cap.
     const pool = [
       ...documentedMechanismPool(),
-      row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback-and-burn executed on schedule", mechanismState: "LIVE" }),
+      row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the buyback-and-burn has executed on schedule", mechanismState: "LIVE" }),
       row("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN" }),
     ];
     const { claim, proof } = runChain("BURN_OR_SUPPLY_EFFECT", pool);

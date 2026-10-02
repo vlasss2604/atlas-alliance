@@ -12,15 +12,15 @@ genuinely blocks the current task, say so and get it scoped explicitly.
   2026-10-01** by D-163 for CURRENT_STATE and its lifecycle: a model-written
   state counts only with a validated explicit state cue.
 
-- **Historical execution cannot be represented without LIVE (2026-10-01).**
-  EXECUTION_EVIDENCE's only state gate is `requiresLiveMechanismState` (LIVE
-  or IMPLEMENTING); no canonical state says "this executed". A documentary
-  execution report ("bought back X on date Y") therefore passes only when the
-  model labels it LIVE, and that label is still not cue-validated there.
-  Applying the D-163 cue rule to this gate would block honest historical
-  reports; supporting them needs a semantic decision (a gate that reads an
-  execution cue, or a new state). Latent today: 0 OFFICIAL_REPORT rows in
-  atlas_dev. Founder: stop-and-report per D-163 §5.
+- **Execution evidence v1 gaps (2026-10-02, D-165).** Not representable yet,
+  each needs its own Founder decision: statistic labels and dated table rows
+  as execution ("Total bought back and burnt $448M" — the real Pump.fun
+  evidence, 52 OFFICIAL_DOCS rows in atlas_dev, all EXECUTION_NOT_STATED);
+  on-chain mechanism attribution (an execution role in the instruction
+  registry, D-158-style); GOVERNANCE execution records; bare simple past
+  ("the mechanism executed …"); and the D-164 guard's false negatives on
+  real reports (a refusal word such as "scheduled", "after" or "when" in the
+  same sentence).
 
 - **Traceability gaps left after entity decoding (2026-09-23).** Decoding
   covers the decoder's table (`amp lt gt quot apos nbsp hellip mldr middot

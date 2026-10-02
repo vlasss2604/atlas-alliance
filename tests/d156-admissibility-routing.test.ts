@@ -54,10 +54,12 @@ afterAll(async () => {
 
 const MINT = "4k3Dyjzvzp8eMZWUXbBCjEvwSkkk59S5iCNLY3QrkX6R";
 
-// The component the whole defect is named after: it admits ONLY
-// ONCHAIN_VERIFIABLE and OFFICIAL_REPORT, so an OFFICIAL_DOCS page must
-// never be routed into it by admissibility.
-const NON_ADMITTING = "EXECUTION_EVIDENCE";
+// A component that does not admit OFFICIAL_DOCS, so an OFFICIAL_DOCS page
+// must never be routed into it by admissibility. The defect was named after
+// EXECUTION_EVIDENCE, which admits OFFICIAL_DOCS since D-165 (a project's
+// own page may REPORT a completed execution); DURABILITY_BASIS admits only
+// GOVERNANCE.
+const NON_ADMITTING = "DURABILITY_BASIS";
 
 async function makeProject(routeClass: "OFFICIAL_DOCS" | "GOVERNANCE" = "OFFICIAL_DOCS") {
   const host = `docs.${uniq("p").replace(/_/g, "-")}.test`;
@@ -221,7 +223,7 @@ describe("D-156 B — routing is not establishment", () => {
     expect(await routedComponents(jobId, url)).not.toContain(NON_ADMITTING);
   });
 
-  it("OFFICIAL_DOCS is still not admissible for EXECUTION_EVIDENCE", async () => {
+  it("OFFICIAL_DOCS is not admissible for a GOVERNANCE-only component, and is admissible for EXECUTION_EVIDENCE since D-165", async () => {
     const project = await makeProject();
     const jobId = await makeJob(project.id);
     const items = await workItems(jobId);
@@ -233,15 +235,10 @@ describe("D-156 B — routing is not establishment", () => {
       items.map((i) => i.component),
     );
     expect(admitting).not.toContain(NON_ADMITTING);
-    // And the classes that DO establish it are unchanged.
-    const onchain = await componentsAdmittingClass(ctx.db, jobId, "ONCHAIN_VERIFIABLE", [
-      NON_ADMITTING,
-    ]);
-    const report = await componentsAdmittingClass(ctx.db, jobId, "OFFICIAL_REPORT", [
-      NON_ADMITTING,
-    ]);
-    expect(onchain).toEqual([NON_ADMITTING]);
-    expect(report).toEqual([NON_ADMITTING]);
+    expect(admitting).toContain("EXECUTION_EVIDENCE");
+    // The class that DOES establish it is unchanged.
+    const governance = await componentsAdmittingClass(ctx.db, jobId, "GOVERNANCE", [NON_ADMITTING]);
+    expect(governance).toEqual([NON_ADMITTING]);
   });
 
   it("a seeded resource still reaches the component a human named, even when that component cannot admit its class", async () => {

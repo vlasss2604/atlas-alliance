@@ -122,12 +122,12 @@ async function workItems(jobId: string): Promise<ComponentWorkItem[]> {
 //
 // Routing is admissibility-driven, so "another component" is only a
 // meaningful isolation probe when that component structurally cannot be
-// established by this resource s class. EXECUTION_EVIDENCE admits only
-// ONCHAIN_VERIFIABLE and OFFICIAL_REPORT, which is exactly why a project s
+// established by this resource s class. DURABILITY_BASIS admits only
+// GOVERNANCE (EXECUTION_EVIDENCE admits OFFICIAL_DOCS since D-165), which is exactly why a project s
 // own docs page must never arrive there.
 function nonAdmitting(items: ComponentWorkItem[]): ComponentWorkItem {
-  const item = items.find((i) => i.component === "EXECUTION_EVIDENCE");
-  if (!item) throw new Error("fixture pattern has no EXECUTION_EVIDENCE work item");
+  const item = items.find((i) => i.component === "DURABILITY_BASIS");
+  if (!item) throw new Error("fixture pattern has no DURABILITY_BASIS work item");
   return item;
 }
 

@@ -256,6 +256,11 @@ export const evidence = pgTable(
     // CURRENT_STATE and its lifecycle. Copied exactly on Memory reuse, never
     // backfilled (migration 0061).
     mechanismStateRuleVersion: smallint("mechanism_state_rule_version"),
+    // Whether a validated execution cue backs the row: 1 = v1
+    // (domain/execution-cue.ts); NULL = legacy or no completed-execution
+    // statement. A model-written row establishes EXECUTION_EVIDENCE only
+    // with it. Never backfilled (migration 0062).
+    executionRuleVersion: smallint("execution_rule_version"),
     // Мост к кандидату памяти без повторного разбора (§6.2); nullable —
     // не каждое Evidence метит claim заранее известного словаря.
     // D-158 PHASE 2 — machine-owned invocation provenance for a

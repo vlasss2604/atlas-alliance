@@ -173,6 +173,12 @@ willing to assert. Collapsing any two of these is the most common failure.
   continues. An approval later paused, deprecated or removed by a newer
   governance record is named (`APPROVAL_LATER_WITHDRAWN`), never "no
   approval seen".
+- **Current / LIVE ≠ executed. Documented ≠ executing (D-165).**
+  EXECUTION_EVIDENCE means the claimed mechanism executed at least once. A
+  lifecycle label, even a validated "is currently live", never establishes
+  it; a model-written row does so only by reporting a completed execution in
+  a code-validated form. A reported execution is not attribution of any
+  transaction, not a burn and not a supply change.
 - **Proposal made ≠ proposal passed.** An official governance venue is not a
   decision; a post on it establishes what was proposed, never that governance
   approved it. `PROPOSED` ≠ `APPROVED` ≠ `ACTIVATED` ≠ `EXECUTING`.

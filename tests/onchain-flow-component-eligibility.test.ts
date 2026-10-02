@@ -174,7 +174,10 @@ function asRow(fact: ExtractedFact): EvidenceRow {
     sourceClass: "ONCHAIN_VERIFIABLE",
     officiality: "CONFIRMED",
     entityBinding: "CONFIRMED",
-    onchainFactKind: null,
+    // The kind the synthesis declared, exactly as the acquisition insert
+    // persists it (D-165: a null kind here modelled a row production never
+    // writes, and let a burn read as a documentary execution report).
+    onchainFactKind: (fact as ExtractedFact & { onchainFactKind?: EvidenceRow["onchainFactKind"] }).onchainFactKind ?? null,
     fetchedAt: NOW,
     publishedAt: null,
     extractionUnitKey: `unit-${id}`,
@@ -318,28 +321,28 @@ describe("2. a zero-burn reciprocal transaction cannot establish burn execution"
 // which is what this file is about; it is not a claim about the status a
 // real burn reaches in a real job. onchain-persisted-burn-evidence.test.ts
 // runs that shape against a real persisted artifact.
-describe("3. a genuine burn retains its execution support", () => {
+// BURN EVENT ≠ CLAIMED MECHANISM EXECUTION (onchain-facts.ts kind map;
+// D-165). This section used to read "a genuine burn retains its execution
+// support", on rows whose fact kind was dropped to null — a shape production
+// never writes. With the kind the synthesis declares, the burn keeps its own
+// state and establishes nothing at EXECUTION_EVIDENCE.
+describe("3. a genuine burn is a burn, not the claimed mechanism executing", () => {
   const { facts, outcome } = reconcileFor("EXECUTION_EVIDENCE", burnTx(), 4);
 
-  it("the burn fact still carries LIVE and still establishes", () => {
+  it("the burn fact still carries LIVE (its own state) and establishes no EXECUTION_EVIDENCE", () => {
     const burnFact = facts.find((f) => f.statement.includes("destroying"));
     expect(burnFact).toBeTruthy();
     expect(burnFact!.mechanismState).toBe("LIVE");
     expect(burnFact!.relationship).toBe("SUPPORTS");
-    expect(outcome.status).toBe("SUPPORTED");
-    expect(outcome.supportingEvidenceIds.length).toBeGreaterThan(0);
+    expect(outcome.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(outcome.supportingEvidenceIds).toEqual([]);
   });
 
-  it("the transfer facts beside it are still excluded, not promoted by proximity", () => {
-    const burnRowIds = new Set(
-      facts
-        .map((f, i) => ({ f, i }))
-        .filter(({ f }) => f.statement.includes("destroying"))
-        .map(({ i }) => i),
-    );
-    // Exactly one supporting row: the burn. The reciprocal facts do not
-    // ride along with it.
-    expect(outcome.supportingEvidenceIds).toHaveLength(burnRowIds.size);
+  it("the transfer facts beside it are excluded too, not promoted by proximity", () => {
+    expect(outcome.excludedEvidence).toHaveLength(facts.length);
+    const reasons = new Set(outcome.excludedEvidence.map((e) => e.reason));
+    expect(reasons.has("FACT_KIND_CANNOT_ESTABLISH")).toBe(true);
+    expect([...reasons].every((r) => r === "FACT_KIND_CANNOT_ESTABLISH" || r === "NOT_CURRENT_STATE_BEARING")).toBe(true);
   });
 });
 

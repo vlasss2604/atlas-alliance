@@ -49,6 +49,7 @@ import { markProofReviewed, markProofVerified, ProofVerificationRefusedError } f
 import { claimResearchJob, createResearchJob, transitionJobState } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
+import { fixtureExecutionRuleVersion } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 4: ATLAS AS A LONG-LIVED
 // STATEFUL SYSTEM.
@@ -292,6 +293,9 @@ async function insertRow(jobId: string, project: Pick<Project, "id" | "host">, c
       // The builder's rows are explicit statements of their state: a validated
       // state cue backs it (documentary state-cue contract, D-163).
       mechanismStateRuleVersion: 1,
+      // D-165: the execution marker exactly when the fragment reports a
+      // completed execution in a v1 form (compliant extractor).
+      executionRuleVersion: fixtureExecutionRuleVersion(fragment),
       doesNotProve: "does not prove the size of the effect",
       retrievedUrl: url,
       contentHash: `sha256:${url}`,

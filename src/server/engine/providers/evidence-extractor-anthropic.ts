@@ -89,6 +89,16 @@ const extractedFactSchema = z.object({
     .nullable()
     .optional()
     .describe("the exact words of supportFragment that explicitly state mechanismState (e.g. \"is currently live\", \"has been paused since\"); null when the excerpt only describes how the mechanism works"),
+  // THE EXECUTION-CUE CONTRACT (domain/execution-cue.ts): the exact words of
+  // supportFragment that report a COMPLETED execution. Code verifies it is
+  // literal, in a closed completed-execution form, inside an asserted
+  // sentence. Independent of mechanismState. Optional and nullable: absent
+  // reads as no execution statement (fail closed).
+  executionCue: z
+    .string()
+    .nullable()
+    .optional()
+    .describe("the exact words of supportFragment that report a completed execution of the mechanism (e.g. \"has bought back 1.2M RAY\", \"was executed\", \"were completed\"); null when the excerpt describes, plans or states capability"),
   directness: z.enum(["DIRECT", "INDIRECT", "INFERRED"]),
   publishedAt: z.string().nullable(), // ISO string over the wire; parsed to Date below
   // The does_not_prove CONTRACT (domain/does-not-prove-contract.ts): the
@@ -252,6 +262,15 @@ state itself. Present tense is not a state: "12% of fees are used to buy back th
 are never a cue — for such an excerpt set mechanismState to UNKNOWN and stateCue to null. A report that something was
 executed ("bought back 1,000 tokens on 3 May") is not a current state either. Never write a cue the excerpt does not
 contain, and never paraphrase one.
+
+EXECUTION CUE. executionCue is separate from mechanismState and records whether the excerpt reports that the
+mechanism has ALREADY EXECUTED at least once. Set it to the exact words copied from supportFragment that report a
+completed execution — for example "has bought back 1.2M RAY", "was executed", "were completed", "has completed three
+buybacks". A completed execution is not a current state: do not set mechanismState to LIVE because something executed.
+Set executionCue to null when the excerpt describes how the mechanism works ("the protocol buys back RAY"), states a
+lifecycle position ("the mechanism is live"), states a capability, plan, schedule or intention ("can execute",
+"intended to occur weekly"), negates or conditions the execution, or only shows a total, a dashboard figure or a table
+row. Never write a cue the excerpt does not contain, and never paraphrase one.
 
 WHAT IT DOES NOT PROVE. doesNotProve names the nearest claim this fact does NOT establish. It is read as "this fact does
 not establish <doesNotProve>", so write THE CLAIM ITSELF, in exactly one of these forms:

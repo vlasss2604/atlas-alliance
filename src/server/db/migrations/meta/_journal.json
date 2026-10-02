@@ -435,6 +435,13 @@
       "when": 1790208000000,
       "tag": "0061_mechanism_state_rule_version",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1790294400000,
+      "tag": "0062_execution_rule_version",
+      "breakpoints": true
     }
   ]
 }

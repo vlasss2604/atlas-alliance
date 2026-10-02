@@ -2,34 +2,34 @@
 
 > Overwrite this file each round. Never append.
 
-## CLAUSE-LEVEL GUARD FOR THE STATE CUE (D-164) — IMPLEMENTED OFFLINE
+## HISTORICAL EXECUTION_EVIDENCE (D-165) — IMPLEMENTED OFFLINE
 
 Founder-approved 2026-10-02. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
 
-The offline corpus audit of D-163 on `atlas_dev` (125 CURRENT_STATE /
-EXECUTION_EVIDENCE results, 1597 documentary rows, read-only) found that the
-refusal words were checked on the cue alone, so a narrow cue escaped its
-sentence ("is live" out of "…once the token is live…").
+EXECUTION_EVIDENCE = the claimed mechanism executed at least once.
+CURRENT / LIVE ≠ EXECUTED; HISTORICAL EXECUTION ≠ CURRENT STATE;
+TRANSACTION HAPPENED ≠ CLAIMED MECHANISM EXECUTED.
 
-- **Fix**: `cueIsAsserted` in `domain/mechanism-state-cue.ts`. Every
-  word-bounded occurrence of the cue must sit in an asserted sentence: no
-  D-163 refusal word, no contingency marker, not a question. Unlocatable cue
-  → refused. Marker version stays 1; cue table and taxonomy unchanged.
-- **Corpus after the fix**: 0 status changes; Wave 1A CURRENT_STATE stays
-  INSUFFICIENT even with trusted dates; no variant is stronger than legacy.
-- **Known fail-closed cost**: an assertion sharing a sentence with "when",
-  "after", "can", "no" … is left uncued.
-- **Not in the v1 table** (needs its own decision): "has been active since",
-  "active since", "went live", "was deprecated", bare "deprecated",
-  "no longer".
+- **Contract**: extractor `executionCue` → `domain/execution-cue.ts` →
+  `evidence.execution_rule_version` (migration 0062). A model-written row
+  establishes execution only with the marker; lifecycle labels never do
+  (`EXECUTION_NOT_STATED`).
+- **Classes**: OFFICIAL_REPORT, OFFICIAL_DOCS (new), model-read
+  ONCHAIN_VERIFIABLE with binding. Not GOVERNANCE. No chain kind.
+- **Corpus (atlas_dev, read-only replay)**: 0 changes in 125 results, none
+  stronger, Wave 1A unchanged; 0 rows qualify at EXECUTION_EVIDENCE.
 
-atlas_dev has migrations through 0061 applied. App and workers are not
-running.
+Before any live run on `atlas_dev` (each needs Founder approval):
+migration 0062 (`npm run db:migrate`), and Pattern v5 activation
+(`npx tsx scripts/activate-pattern-version.ts --apply`) — until then the
+DB Pattern does not admit OFFICIAL_DOCS for EXECUTION_EVIDENCE. Admitting
+it also makes EXECUTION_EVIDENCE documentarily reachable, so acquisition
+will search official pages for it. App and workers are not running.
 
-Still waiting on the Founder: the EXECUTION_EVIDENCE historical-execution
-decision (BACKLOG; also: its live gate still reads an uncued label); cue
-table extension (above); Raydium HTML route classification (optional);
-global unmarked-date supersession (BACKLOG); EVM V1 live validation
-candidate; Blind Batch V1 inputs.
+Still waiting on the Founder: v1 execution gaps (BACKLOG: statistic labels /
+tables, on-chain execution role, GOVERNANCE records, bare past, D-164 guard
+false negatives); Raydium HTML route classification (optional); global
+unmarked-date supersession (BACKLOG); EVM V1 live validation candidate;
+Blind Batch V1 inputs.
 
 STOP here until the Founder reviews. No push, no live call.

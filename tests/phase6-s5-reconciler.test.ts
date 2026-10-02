@@ -6,6 +6,7 @@ import {
   type EvidenceRow,
   type ComponentReconciliationInput,
 } from "../src/server/engine/component-reconciler";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // Phase 6, S5 — pure reconciler unit tests (phase-6-s5-plan.md §14 A-Y,
 // §15 mutations 1-29). No DB, no model, no network — reconcileComponent()
@@ -45,7 +46,7 @@ function row(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
   const id = overrides.id ?? nextId();
   const component = overrides.component ?? "MECHANISM_SPEC";
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `source-${id}`,
@@ -79,7 +80,7 @@ function row(overrides: Partial<EvidenceRow> = {}): EvidenceRow {
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 
 function requirements(overrides: Partial<ComponentRequirements> = {}): ComponentRequirements {
@@ -448,6 +449,8 @@ describe("Фаза 6, S5 — приёмочная матрица A-Y (phase-6-s5
       component: "EXECUTION_EVIDENCE",
       sourceClass: "ONCHAIN_VERIFIABLE",
       mechanismState: "LIVE",
+      // D-165: a model-read page establishes execution only by reporting one.
+      fragment: "the buyback contract has executed 12 purchases",
       publishedAt: new Date("2025-01-01T00:00:00Z"),
       fetchedAt: new Date("2025-01-01T00:00:00Z"),
     });
@@ -557,6 +560,8 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
       component: "EXECUTION_EVIDENCE",
       sourceClass: "ONCHAIN_VERIFIABLE",
       mechanismState: "LIVE",
+      // D-165: a model-read page establishes execution only by reporting one.
+      fragment: "the buyback contract has executed 12 purchases",
       publishedAt: new Date("2025-01-01T00:00:00Z"),
     });
     const newerButWeaker = row({
@@ -731,6 +736,8 @@ describe("Фаза 6, S5 — мутации §15 (обязаны ронять т
       component: "EXECUTION_EVIDENCE",
       sourceClass: "ONCHAIN_VERIFIABLE",
       mechanismState: "LIVE",
+      // D-165: a model-read page establishes execution only by reporting one.
+      fragment: "the buyback contract has executed 12 purchases",
       publishedAt: new Date("2025-01-01T00:00:00Z"),
     });
     const docs = row({

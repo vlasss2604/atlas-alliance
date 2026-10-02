@@ -37,7 +37,7 @@ import { markProofVerified } from "../src/server/memory/verification";
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
-import { fixtureStateCue } from "./state-cue-fixture";
+import { fixtureStateCue, fixtureExecutionCue } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 5: THE FINAL RESULT, BLACK BOX.
 //
@@ -348,6 +348,7 @@ function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; c
           mechanismState: f.mechanismState ?? null,
           // A compliant extractor cites the fragment's explicit state words (D-163).
           stateCue: fixtureStateCue(f.fragment, f.mechanismState),
+          executionCue: fixtureExecutionCue(f.fragment),
           directness: f.directness ?? "DIRECT",
           // A publication date later than the fetch is refused as a date
           // (Round 1, D3/G2), so the default is a day before.
@@ -624,7 +625,7 @@ describe("F2. documentary vs on-chain", () => {
     nonNegative(revenue);
   });
 
-  it("F2d. an explorer transaction page proves an execution happened; nothing establishes what the value is: TRANSACTION HAPPENED is not MECHANISM EXECUTED — the revenue claim stays INSUFFICIENT", async () => {
+  it("F2d. an explorer transaction page shows a transaction, not that the mechanism executed (D-165), and nothing establishes what the value is: TRANSACTION HAPPENED is not MECHANISM EXECUTED — execution and the revenue claim stay INSUFFICIENT", async () => {
     const project = await makeProject({ identity: EVM });
     const docs = canonDocs(project, ["DESTINATION", "RECIPIENT", "FLOW_PATH"]);
     const tx: Doc = {
@@ -633,11 +634,13 @@ describe("F2. documentary vs on-chain", () => {
       facts: { EXECUTION_EVIDENCE: [{ fragment: "Transfer of 12,000 tokens from the buyback module to 0x000...dEaD confirmed in block 20000001", mechanismState: "LIVE" }] },
     };
     const o = await research(project, { docs: [...docs, tx] });
-    // An explorer page opened over HTTP is CLAIMED (D-074: only a chain read
-    // is CONFIRMED authority), so the execution is at most partial.
-    expect(o.s5.EXECUTION_EVIDENCE!.status).toBe("PARTIALLY_SUPPORTED");
-    expect(o.s5.EXECUTION_EVIDENCE!.reasonCodes).toContain("INSUFFICIENT_AUTHORITY");
+    // D-165: a model-read explorer page is model-written evidence. "Transfer …
+    // confirmed in block …" shows a transaction, reports no completed
+    // execution of the mechanism and attributes nothing, and its LIVE label
+    // counts for nothing — so execution is not established at all.
+    expect(o.s5.EXECUTION_EVIDENCE!.status).toBe("INSUFFICIENT_EVIDENCE");
     const txRow = (await evidenceOf(o.jobId, "EXECUTION_EVIDENCE"))[0];
+    expect(o.s5.EXECUTION_EVIDENCE!.excluded.find((e) => e.evidenceId === txRow.id)?.reason).toBe("EXECUTION_NOT_STATED");
     expect(txRow.entityBinding).toBe("CONFIRMED");
     expect(txRow.officiality).toBe("CLAIMED");
     expect(o.s5.SOURCE_OF_VALUE).toSatisfy((v: Outcome["s5"][string]) => v === null || v.status !== "SUPPORTED");
@@ -888,10 +891,10 @@ describe("F6. project / token ambiguity", () => {
       text: `${project.name} (AMB) token tracker. ${what}`,
       facts: { EXECUTION_EVIDENCE: [{ fragment: what, mechanismState: "LIVE" }] },
     });
-    const canonical = page(`https://etherscan.io/token/${EVM}`, "the buyback module executed a purchase of 9,000 AMB in block 20000100");
-    const legacy = page(`https://etherscan.io/token/${EVM_LEGACY}`, "the legacy buyback module executed a purchase of 9,001 AMB in block 19000100");
-    const wrapper = page(`https://etherscan.io/token/${EVM_WRAPPER}`, "the wrapper contract executed a purchase of 9,002 AMB in block 20000200");
-    const bsc = page(`https://bscscan.com/token/${EVM.toLowerCase()}`, "the buyback module executed a purchase of 9,003 AMB in block 41000000");
+    const canonical = page(`https://etherscan.io/token/${EVM}`, "the buyback module has executed a purchase of 9,000 AMB in block 20000100");
+    const legacy = page(`https://etherscan.io/token/${EVM_LEGACY}`, "the legacy buyback module has executed a purchase of 9,001 AMB in block 19000100");
+    const wrapper = page(`https://etherscan.io/token/${EVM_WRAPPER}`, "the wrapper contract has executed a purchase of 9,002 AMB in block 20000200");
+    const bsc = page(`https://bscscan.com/token/${EVM.toLowerCase()}`, "the buyback module has executed a purchase of 9,003 AMB in block 41000000");
     const multi: Doc = {
       url: docsUrl(project, "contracts"),
       text: `${project.name} contracts. Canonical token: ${EVM}. Legacy token (deprecated): ${EVM_LEGACY}. Wrapped token: ${EVM_WRAPPER}. the buyback module executed a purchase in every epoch since launch.`,
@@ -911,10 +914,11 @@ describe("F6. project / token ambiguity", () => {
       expect(["ENTITY_NOT_CONFIRMED", "SUPERSEDED_BY_NEWER"]).toContain(o.s5.EXECUTION_EVIDENCE!.excluded.find((e) => e.evidenceId === r.id)?.reason);
       expect(o.cited.map((c) => c.url)).not.toContain(d.url);
     }
-    // The official page that names three contracts is documentary, not
-    // on-chain: it cannot establish EXECUTION_EVIDENCE at all.
+    // The official page that names three contracts is admissible since D-165
+    // (OFFICIAL_DOCS), but its bare simple past reports no v1 completed
+    // execution, so it establishes nothing.
     const multiRow = byUrl.get(multi.url)!;
-    expect(o.s5.EXECUTION_EVIDENCE!.excluded.find((e) => e.evidenceId === multiRow.id)?.reason).toBe("CLASS_NOT_ADMISSIBLE");
+    expect(o.s5.EXECUTION_EVIDENCE!.excluded.find((e) => e.evidenceId === multiRow.id)?.reason).toBe("EXECUTION_NOT_STATED");
     expect(o.s5.EXECUTION_EVIDENCE!.supporting).toEqual([byUrl.get(canonical.url)!.id]);
     citesOnlySupport(o);
   });

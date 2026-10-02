@@ -109,6 +109,9 @@ const LIFECYCLE_SIGNAL_EXCLUSIONS: ReadonlySet<string> = new Set([
   "NOT_CURRENT_STATE_BEARING",
   "STALE_FOR_CURRENT_STATE",
   "SUPERSEDED_BY_NEWER",
+  // D-165: a model-written row refused AS EXECUTION is still a lifecycle
+  // statement; the lifecycle reads its own cued state exactly as before.
+  "EXECUTION_NOT_STATED",
 ]);
 const LIFECYCLE_SIGNAL_STATES: ReadonlySet<string> = new Set(["LIVE", "IMPLEMENTING", "PAUSED", "DEPRECATED", "REMOVED"]);
 const TRUSTED_RULE_VERSION = 1;

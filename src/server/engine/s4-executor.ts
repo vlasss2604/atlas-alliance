@@ -4,6 +4,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 
 import { loadProductConfig } from "../config/product";
 import { doesNotProveRuleVersionFor } from "../domain/does-not-prove-contract";
+import { executionRuleVersionFor } from "../domain/execution-cue";
 import { mechanismStateRuleVersionFor } from "../domain/mechanism-state-cue";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
@@ -3550,6 +3551,14 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
                 mechanismStateRuleVersion: mechanismStateRuleVersionFor({
                   mechanismState: fact.mechanismState,
                   stateCue: fact.stateCue ?? null,
+                  supportFragment: fact.supportFragment,
+                  isLiteral: isTraceable,
+                }),
+                // CURRENT / LIVE ≠ EXECUTED: a separate marker for a validated
+                // report of a completed execution — the only way this row can
+                // establish EXECUTION_EVIDENCE. Same literal check.
+                executionRuleVersion: executionRuleVersionFor({
+                  executionCue: fact.executionCue ?? null,
                   supportFragment: fact.supportFragment,
                   isLiteral: isTraceable,
                 }),

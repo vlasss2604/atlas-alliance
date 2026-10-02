@@ -165,6 +165,7 @@ function toEvidenceRow(r: typeof evidence.$inferSelect): EvidenceRow {
     summary: r.summary,
     mechanismState: r.mechanismState,
     mechanismStateRuleVersion: r.mechanismStateRuleVersion,
+    executionRuleVersion: r.executionRuleVersion,
     sourceClass: r.sourceClass,
     officiality: r.officiality,
     entityBinding: r.entityBinding,

@@ -7,12 +7,11 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 - Branch: `claude/phase-5-research-memory`. Working tree should be clean.
 - Typecheck (`npx tsc --noEmit` — there is no `typecheck` npm script) and
   `npm run lint` are clean.
-- Full suite, last verified 2026-10-02 (D-164 clause-level cue guard):
-  5490 passing, 4 skipped, 5 failing (265 files) — the four standing
-  failures below plus round7 P1c, whose fixture sentence "has been
-  deprecated and will not resume" the guard refuses; the fixture now states
-  the follow-up as its own sentence and that file passes alone (32/32 with
-  the cue tests). Expected on the final tree: 5491 / 4 / 4.
+- Full suite, last verified 2026-10-02 (D-165 historical execution, on the
+  final tree): **5512 passing, 4 skipped, 4 failing** (265 files) — exactly
+  the four standing failures below. `bounded-search-finalization-v1` proves
+  the unreachable-component invariant under a TEST-ONLY narrowed Pattern in
+  atlas_test (restored in `finally`); production Pattern unchanged.
   `adversarial-core-round6-metamorphic-db-v1` F8a runs within ~1 s of its 30 s
   timeout (29.0 s alone on `39e8132`) and can time out under load.
   Run the suite ALONE — two concurrent `vitest run` invocations share the
@@ -70,9 +69,18 @@ mechanism runs.
   not establish, contradict or move the current state. CURRENT_STATE needs a
   validated cue AND a trusted date. The same holds for lifecycle signals
   (`deriveLifecycleStateSignals`) and the surface (`statesItsState`).
-- **Unchanged.** EXECUTION_EVIDENCE's live gate (historical execution needs a
-  separate decision — BACKLOG), every other component, supersession, source
-  authority, NET_EFFECT, BURN/supply, chain rows (their states are code-written).
+- **Execution (D-165).** EXECUTION_EVIDENCE = the claimed mechanism executed
+  at least once. A model-written row establishes it only with
+  `execution_rule_version = 1`: a verbatim `executionCue`, literal, in a
+  closed completed-execution form (`domain/execution-cue.ts`), inside an
+  asserted sentence (D-164 guard). No lifecycle label establishes or
+  contradicts it (`EXECUTION_NOT_STATED`), and at this component a
+  model-written label sets no current state. Classes: OFFICIAL_REPORT,
+  OFFICIAL_DOCS, model-read ONCHAIN_VERIFIABLE (bound); not GOVERNANCE. No
+  chain kind establishes it. HISTORICAL = validated execution + a later
+  trusted, cued DEPRECATED/REMOVED. v1 gaps: BACKLOG.
+- **Unchanged.** Every other component, supersession, source authority,
+  NET_EFFECT, BURN/supply, chain rows (their states are code-written).
 
 ## A CAVEAT IS SHOWN AS A BOUNDARY ONLY WHEN IT NAMES A CLAIM (D-162)
 

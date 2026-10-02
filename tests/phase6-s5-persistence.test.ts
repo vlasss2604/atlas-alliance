@@ -232,7 +232,7 @@ describe("Фаза 6, S5 — персистенция (research_component_result
     expect(result.excludedEvidence[0].reason).toBe("CLASS_NOT_ADMISSIBLE");
   });
 
-  it("реальная seeded матрица EXECUTION_EVIDENCE: OFFICIAL_DOCS не устанавливает исполнение (mutation 4 teeth, через реальный Pattern)", async () => {
+  it("реальная seeded матрица EXECUTION_EVIDENCE: OFFICIAL_DOCS с одной меткой LIVE не устанавливает исполнение (D-165: класс допущен, исполнение не заявлено; через реальный Pattern)", async () => {
     const { jobId } = await makeJob();
     const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
     await insertEvidence(jobId, sourceId, {
@@ -245,7 +245,7 @@ describe("Фаза 6, S5 — персистенция (research_component_result
     const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
     expect(result.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(result.reasonCodes).toContain("MISSING_EXECUTION_EVIDENCE");
-    expect(result.excludedEvidence[0].reason).toBe("CLASS_NOT_ADMISSIBLE");
+    expect(result.excludedEvidence[0].reason).toBe("EXECUTION_NOT_STATED");
   });
 
   it("реальная seeded матрица EXECUTION_EVIDENCE: ONCHAIN_VERIFIABLE с mechanism_state=PROPOSED не устанавливает исполнение (mutation 5 teeth, через реальный Pattern)", async () => {
@@ -263,18 +263,32 @@ describe("Фаза 6, S5 — персистенция (research_component_result
     expect(result.reasonCodes).toContain("MISSING_EXECUTION_EVIDENCE");
   });
 
-  it("реальная seeded матрица EXECUTION_EVIDENCE: ONCHAIN_VERIFIABLE с mechanism_state=LIVE УСТАНАВЛИВАЕТ исполнение (позитивный контроль для двух тестов выше)", async () => {
-    const { jobId } = await makeJob();
-    const sourceId = await makeSource(`https://example.com/${uniq("doc")}`);
-    await insertEvidence(jobId, sourceId, {
-      patternStep: 4,
-      component: "EXECUTION_EVIDENCE",
-      sourceClass: "ONCHAIN_VERIFIABLE",
-      mechanismState: "LIVE",
-    });
+  it("реальная seeded матрица EXECUTION_EVIDENCE: метка LIVE сама по себе не устанавливает исполнение; execution_rule_version = 1, прочитанный из БД, — устанавливает (позитивный контроль, D-165)", async () => {
+    const fragment = "the buyback contract has executed 12 purchases";
+    for (const sourceClass of ["ONCHAIN_VERIFIABLE", "OFFICIAL_DOCS"] as const) {
+      const { jobId: liveOnly } = await makeJob();
+      await insertEvidence(liveOnly, await makeSource(`https://example.com/${uniq("doc")}`), {
+        patternStep: 4,
+        component: "EXECUTION_EVIDENCE",
+        sourceClass,
+        mechanismState: "LIVE",
+      });
+      const r1 = await reconcileAndPersistComponent(ctx.db, liveOnly, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
+      expect(r1.status, sourceClass).toBe("INSUFFICIENT_EVIDENCE");
 
-    const result = await reconcileAndPersistComponent(ctx.db, jobId, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
-    expect(result.status).toBe("SUPPORTED");
+      const { jobId: reported } = await makeJob();
+      await insertEvidence(reported, await makeSource(`https://example.com/${uniq("doc")}`), {
+        patternStep: 4,
+        component: "EXECUTION_EVIDENCE",
+        sourceClass,
+        mechanismState: null,
+        fragment,
+        executionRuleVersion: 1,
+      });
+      const r2 = await reconcileAndPersistComponent(ctx.db, reported, { step: 4, component: "EXECUTION_EVIDENCE" }, NOW);
+      expect(r2.status, sourceClass).toBe("SUPPORTED");
+      expect(r2.currentState, sourceClass).toBeNull();
+    }
   });
 
   it("D-134: ONCHAIN_VERIFIABLE с entity_binding=UNVERIFIED не устанавливает компонент ЧЕРЕЗ ПЕРСИСТЕНЦИЮ (колонка реально читается из БД, а не только в in-memory reconciler)", async () => {

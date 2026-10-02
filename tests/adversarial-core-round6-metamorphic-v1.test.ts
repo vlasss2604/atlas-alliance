@@ -10,6 +10,7 @@ import {
 } from "../src/server/engine/component-reconciler";
 import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { buildProof, type ProofDraft } from "../src/server/engine/proof-builder";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 6: METAMORPHIC INVARIANTS,
 // THE PURE CHAIN.
@@ -71,7 +72,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
   const id = overrides.id ?? `r${String(seq).padStart(4, "0")}-0000-4000-8000-000000000000`;
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
   const confirmedByClass = sourceClass === "OFFICIAL_DOCS" || sourceClass === "OFFICIAL_REPORT";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -97,7 +98,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 // A CONFIRMED row of a non-docs class: a routed governance page or a
 // chain read (the classes whose authority is CONFIRMED through a route or
@@ -291,7 +292,7 @@ function world(): EvidenceRow[] {
     row("FLOW_PATH", { fragment: "fee revenue is routed from the fee collector to the distributor contract" }),
     row("MECHANISM_SPEC", { fragment: "50% of protocol fees are distributed to token holders weekly", mechanismState: "LIVE" }),
     confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", fragment: "the proposal to distribute fees passed", mechanismState: "APPROVED" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
     row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
@@ -388,7 +389,7 @@ describe("F1. adding weak, foreign, inadmissible or irrelevant evidence must not
       { label: "second official SOURCE_OF_VALUE page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { fragment: "protocol fees paid by users generate the revenue", sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "second official FLOW_PATH page", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("FLOW_PATH", { sourceId: "another-official-page" })], downstream: "DESTINATION" },
       { label: "weak CLAIMED governance row for SOURCE_OF_VALUE", intent: "PROTOCOL_REVENUE_TO_TOKEN", rows: [row("SOURCE_OF_VALUE", { sourceClass: "GOVERNANCE", officiality: "CLAIMED", publishedAt: older(2) })], downstream: "DESTINATION" },
-      { label: "four more distinct official execution reports at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" })), downstream: "NET_EFFECT" },
+      { label: "four more distinct official execution reports at EXECUTION_EVIDENCE", intent: "BURN_OR_SUPPLY_EFFECT", rows: Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" })), downstream: "NET_EFFECT" },
     ];
     for (const k of cases) {
       const control = runChain(k.intent, base);
@@ -457,10 +458,10 @@ describe("F2. duplication must not create confidence", () => {
   it("F2c. on-chain duplicates: five identical burn observations (same unit) reduce to one; five DISTINCT burns establish exactly what one does — no stronger execution, no stronger net effect", () => {
     const base = world();
     const control = runChain("BURN_OR_SUPPLY_EFFECT", base);
-    const sameUnit = Array.from({ length: 4 }, (_, i) => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE", extractionUnitKey: control.pool.find((r) => r.component === "EXECUTION_EVIDENCE")!.extractionUnitKey, contentHash: `b-${i}` }));
+    const sameUnit = Array.from({ length: 4 }, (_, i) => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE", extractionUnitKey: control.pool.find((r) => r.component === "EXECUTION_EVIDENCE")!.extractionUnitKey, contentHash: `b-${i}` }));
     const t1 = runChain("BURN_OR_SUPPLY_EFFECT", [...base, ...sameUnit]);
     expect(shape(t1)).toEqual(shape(control));
-    const distinct = Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }));
+    const distinct = Array.from({ length: 4 }, () => confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" }));
     const distinctNet = Array.from({ length: 4 }, () => confirmed("NET_EFFECT", { sourceClass: "ONCHAIN_VERIFIABLE", onchainFactKind: "BURN", publishedAt: null }));
     // Distinct NET_EFFECT burns (the terminal slot): the same conclusion.
     const t2 = runChain("BURN_OR_SUPPLY_EFFECT", [...base, ...distinctNet]);
@@ -917,7 +918,7 @@ describe("F12. confidence invariants", () => {
   it("F12b. DECIDED (Round 6.5, Founder decision 2) — adding ONLY inadmissible rows (social posts) to components that had nothing leaves the band exactly where bare absence leaves it: 20 -> 20 on a SUPPORTED verdict, the exclusion recorded, nothing new cited. The full pin is founder-semantics-round6-5-v1 (C, D, E)", () => {
     const supported = [
       row("RECIPIENT", { fragment: "token holders are entitled to a pro rata share of the distributed fees" }),
-      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
+      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" }),
       row("CURRENT_STATE", { mechanismState: "LIVE" }),
     ];
     const empty = runChain("PASSIVE_HOLDER_OUTCOME", supported);
@@ -953,7 +954,7 @@ describe("F12. confidence invariants", () => {
     const soc = (c: string) => row(c, { sourceClass: "SOCIAL", officiality: "CLAIMED" });
     const pool = [
       row("MECHANISM_SPEC", { mechanismState: "LIVE" }),
-      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE", publishedAt: older(400) }),
+      confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE", publishedAt: older(400) }),
       row("CURRENT_STATE", { mechanismState: "LIVE", publishedAt: older(2) }),
       confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", mechanismState: "APPROVED" }),
       ...["SOURCE_OF_VALUE", "FLOW_PATH", "DESTINATION", "RECIPIENT", "NET_EFFECT", "DURABILITY_BASIS"].map(soc),

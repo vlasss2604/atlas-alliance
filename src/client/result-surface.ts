@@ -767,7 +767,16 @@ function withExecutionTimeNote(
     dated && dated.label !== "Checked"
       ? `The supporting evidence is dated ${dated.value}: it shows that execution had happened by then, not that it continues now.`
       : "The supporting evidence carries no date of its own: it shows that execution happened, not that it continues now.";
-  return `${text} ${note}`;
+  // TRANSACTION HAPPENED ≠ CLAIMED MECHANISM EXECUTED, in the other
+  // direction too (D-165): when every supporting card is a document, the
+  // finding is the project's own report and is never presented as an
+  // observed transaction.
+  const supporting = evidence.filter((e) => e.relation === "SUPPORTS");
+  const documentaryOnly = supporting.length > 0 && supporting.every((e) => e.onchain === null);
+  const basis = documentaryOnly
+    ? " It rests on a source that reports the execution, not on an on-chain transaction ATLAS observed."
+    : "";
+  return `${text} ${note}${basis}`;
 }
 
 // The reading itself, then why it cannot answer the row.

@@ -216,6 +216,10 @@ export interface ExtractedFact {
   // (domain/mechanism-state-cue.ts). Optional: fixtures, chain synthesis and
   // other producers carry none, which reads as uncued.
   stateCue?: string | null;
+  // The exact words of supportFragment that report a COMPLETED execution of
+  // the mechanism (domain/execution-cue.ts). Independent of mechanismState.
+  // Optional: absent reads as no execution statement.
+  executionCue?: string | null;
   directness: "DIRECT" | "INDIRECT" | "INFERRED";
   // S4 review fix (BLOCKER-1, D-074, §7.2): sourceClass/officiality are
   // DELIBERATELY ABSENT from this interface. Source authority is a two-

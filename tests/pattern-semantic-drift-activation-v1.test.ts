@@ -137,6 +137,9 @@ describe("the rule — what forces activation and what does not", () => {
     expect(v.reason).toBe("SEMANTIC_DRIFT");
     expect(v.differences).toEqual([
       'DIFFERS       content.componentRequirements.DURABILITY_BASIS.establishingClasses: db=["GOVERNANCE","OFFICIAL_DOCS"] code=["GOVERNANCE"]',
+      // D-165: EXECUTION_EVIDENCE admits OFFICIAL_DOCS (a project's own page
+      // may report a completed execution) — a drift that requires activation.
+      'DIFFERS       content.componentRequirements.EXECUTION_EVIDENCE.establishingClasses: db=["ONCHAIN_VERIFIABLE","OFFICIAL_REPORT"] code=["ONCHAIN_VERIFIABLE","OFFICIAL_REPORT","OFFICIAL_DOCS"]',
       // RESEARCH RELIABILITY V1 (B3): the critical proof paths are Pattern
       // data the stored v2 row does not carry — a semantic drift that
       // forces activation of a new version before a live run can
@@ -153,6 +156,7 @@ describe("the rule — what forces activation and what does not", () => {
     // Same shape, same fingerprint: the fixture is the row, not a paraphrase.
     const rebuilt = clone();
     rebuilt.componentRequirements!.DURABILITY_BASIS.establishingClasses = ["GOVERNANCE", "OFFICIAL_DOCS"];
+    rebuilt.componentRequirements!.EXECUTION_EVIDENCE.establishingClasses = ["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT"];
     for (const entry of Object.values(rebuilt.intentRequirements ?? {})) delete entry.criticalComponents;
     expect(patternSemanticFingerprint(LIDO_V2)).toBe(patternSemanticFingerprint(rebuilt));
   });

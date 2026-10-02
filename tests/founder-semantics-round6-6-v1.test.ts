@@ -10,6 +10,7 @@ import {
 } from "../src/server/engine/component-reconciler";
 import { assembleMechanism, deriveLifecycleStateSignals, type AssemblyEvidenceProjection, type MechanismAssemblyResult } from "../src/server/engine/mechanism-assembler";
 import { buildProof, type ProofBuilderInput, type ProofDraft } from "../src/server/engine/proof-builder";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // ROUND 6.6 — FOUNDER SEMANTIC HARDENING: SPANNING SOURCE + BOUNDED
 // ENUMERATION, THE PURE CHAIN.
@@ -67,7 +68,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
   const id = overrides.id ?? `r${String(seq).padStart(4, "0")}-0000-4000-8000-000000000066`;
   const sourceClass = overrides.sourceClass ?? "OFFICIAL_DOCS";
   const confirmedByClass = sourceClass === "OFFICIAL_DOCS" || sourceClass === "OFFICIAL_REPORT";
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `src-${id}`,
@@ -93,7 +94,7 @@ function row(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceR
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 const confirmed = (component: string, o: Partial<EvidenceRow>): EvidenceRow => row(component, { officiality: "CONFIRMED", ...o });
 
@@ -220,7 +221,7 @@ function world(): EvidenceRow[] {
     row("FLOW_PATH", { fragment: "fee revenue is routed from the fee collector to the distributor contract" }),
     row("MECHANISM_SPEC", { fragment: "50% of protocol fees are distributed to token holders weekly", mechanismState: "LIVE" }),
     confirmed("GOVERNANCE_BASIS", { sourceClass: "GOVERNANCE", fragment: "the proposal to distribute fees passed", mechanismState: "APPROVED" }),
-    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism executed its scheduled operations", mechanismState: "LIVE" }),
+    confirmed("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", fragment: "the mechanism has executed its operations on schedule", mechanismState: "LIVE" }),
     row("CURRENT_STATE", { fragment: "the fee distribution is live", mechanismState: "LIVE" }),
     row("DESTINATION", { fragment: "fees are distributed to token holders via the distributor" }),
     row("RECIPIENT", { fragment: "token holders receive the distributed fees" }),

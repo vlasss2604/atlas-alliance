@@ -493,7 +493,17 @@ export const PATTERN_V1_CONTENT: PatternContent = {
         "find the governing decision, vote, proposal or charter that authorises the mechanism, and what it permits, requires or constrains",
     },
     EXECUTION_EVIDENCE: {
-      establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT"],
+      // D-165 — "the claimed mechanism executed at least once". A
+      // model-written row (OFFICIAL_REPORT, OFFICIAL_DOCS, or a model-read
+      // ONCHAIN_VERIFIABLE page under its entity binding) establishes it only
+      // with a validated execution cue (domain/execution-cue.ts); a
+      // lifecycle label never does. OFFICIAL_DOCS is admitted because a
+      // project's own pages are where completed executions are reported.
+      // GOVERNANCE is not: "the proposal was executed" is not the researched
+      // economic mechanism executing. No typed chain kind establishes it.
+      // requiresLiveMechanismState keeps its name as Pattern data; for
+      // model-written rows the reconciler reads it as "requires execution".
+      establishingClasses: ["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT", "OFFICIAL_DOCS"],
       requiresCurrentState: false,
       requiresLiveMechanismState: true,
       freshnessClass: "MEDIUM_CHANGE",

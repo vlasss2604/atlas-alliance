@@ -10,6 +10,7 @@ import { resultFixture } from "../src/client/result-surface-fixtures";
 import { MECHANISM_STATES } from "../src/server/domain/mechanism-state";
 import { reconcileComponent, type EvidenceRow } from "../src/server/engine/component-reconciler";
 import { EVIDENCE_EXTRACTOR_SYSTEM_PROMPT } from "../src/server/engine/providers/evidence-extractor-anthropic";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // TEMPORAL RELIABILITY (Founder-approved Fixes 1, 2, 4).
 //
@@ -23,7 +24,7 @@ const FRESHNESS = { LOW_CHANGE: 180, MEDIUM_CHANGE: 30, HIGH_CHANGE: 3 };
 let seq = 0;
 function row(over: Partial<EvidenceRow>): EvidenceRow {
   seq += 1;
-  return {
+  return withFixtureExecutionMarker({
     id: `row-${String(seq).padStart(4, "0")}`,
     researchJobId: "job",
     sourceId: `src-${seq}`,
@@ -49,7 +50,7 @@ function row(over: Partial<EvidenceRow>): EvidenceRow {
     extractionUnitKey: null,
     contentHash: `hash-${seq}`,
     ...over,
-  };
+  });
 }
 
 const CURRENT_STATE = {
@@ -220,7 +221,7 @@ describe("Fix 4: execution evidence is worded as historical", () => {
       expect(readFileSync(file, "utf-8"), file).not.toContain("observed executing");
     }
     expect(readFileSync("src/client/research-model.ts", "utf-8")).toContain(
-      '{ component: "EXECUTION_EVIDENCE", label: "Execution has been observed" }',
+      '{ component: "EXECUTION_EVIDENCE", label: "Execution is on record" }',
     );
   });
 
@@ -228,7 +229,7 @@ describe("Fix 4: execution evidence is worded as historical", () => {
     const surface = buildResultSurface(resultFixture("2").detail);
     const row = surface.table.find((r) => r.component === "EXECUTION_EVIDENCE")!;
     expect(["CONFIRMED", "PARTIAL"]).toContain(row.status);
-    expect(row.established).toMatch(/The supporting evidence is dated .+: it shows that execution had happened by then, not that it continues now\.$/);
+    expect(row.established).toMatch(/The supporting evidence is dated .+: it shows that execution had happened by then, not that it continues now\.( It rests on a source that reports the execution, not on an on-chain transaction ATLAS observed\.)?$/);
   });
 });
 

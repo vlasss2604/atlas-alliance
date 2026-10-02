@@ -18,6 +18,7 @@ import {
   type AssemblyEvidenceProjection,
 } from "../src/server/engine/mechanism-assembler";
 import { PUBLISHED_AT_RULE_VERSION } from "../src/server/engine/providers/types";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // UNTRUSTED DOCUMENTARY DATES MUST NOT CREATE CURRENT OR LIFECYCLE TEMPORAL
 // TRUTH (Founder-approved temporal provenance marker + Fix 3).
@@ -49,7 +50,7 @@ let seq = 0;
 function row(component: string, o: Partial<EvidenceRow> = {}): EvidenceRow {
   seq += 1;
   const id = `t${String(seq).padStart(4, "0")}-0000-4000-8000-000000000000`;
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: `src-${id}`,
@@ -75,12 +76,12 @@ function row(component: string, o: Partial<EvidenceRow> = {}): EvidenceRow {
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...o,
-  };
+  });
 }
 const cs = (state: string, days: number, o: Partial<EvidenceRow> = {}) =>
   row("CURRENT_STATE", { mechanismState: state, publishedAt: older(days), ...o });
 const executed = (days: number, o: Partial<EvidenceRow> = {}) =>
-  row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", mechanismState: "LIVE", publishedAt: older(days), fragment: "the buyback executed its purchases on schedule", ...o });
+  row("EXECUTION_EVIDENCE", { sourceClass: "OFFICIAL_REPORT", mechanismState: "LIVE", publishedAt: older(days), fragment: "the buyback has executed its purchases on schedule", ...o });
 const legacy: Partial<EvidenceRow> = { publishedAtRuleVersion: null };
 
 function projection(r: EvidenceRow): AssemblyEvidenceProjection {
@@ -219,7 +220,8 @@ describe("Fix 3 — durable stops, non-durable pauses, trusted ordering", () => 
   it("old LIVE → newer PAUSED at the execution component → NOT_ESTABLISHED", () => {
     const pausedReport = executed(10, { mechanismState: "PAUSED", fragment: "the buyback was paused" });
     const m = run([executed(400), cs("LIVE", 1), pausedReport]);
-    expect(m.by.get("EXECUTION_EVIDENCE")!.excludedEvidence.map((x) => x.reason)).toContain("NOT_CURRENT_STATE_BEARING");
+    // D-165: a pause report is not an execution report; it stays a lifecycle signal.
+    expect(m.by.get("EXECUTION_EVIDENCE")!.excludedEvidence.map((x) => x.reason)).toContain("EXECUTION_NOT_STATED");
     // The CURRENT_STATE LIVE is newer than the pause, so it stands: CURRENT.
     expect(m.flow.lifecycle).toBe("CURRENT");
     const n = run([executed(400), cs("LIVE", 2), executed(1, { mechanismState: "PAUSED", fragment: "the buyback was paused" })]);

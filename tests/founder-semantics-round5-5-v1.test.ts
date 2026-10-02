@@ -37,7 +37,7 @@ import { confirmSourceRoute } from "../src/server/memory/source-route-confirmati
 import { createResearchJob } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
-import { fixtureStateCue } from "./state-cue-fixture";
+import { fixtureStateCue, fixtureExecutionCue } from "./state-cue-fixture";
 import { expectRecoveryRanToCompletion } from "./recovery-continuation-assertions";
 
 // ROUND 5.5 — FOUNDER SEMANTIC HARDENING: CROSS-PROJECT BINDING AND
@@ -347,6 +347,7 @@ function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; c
           mechanismState: f.mechanismState ?? null,
           // A compliant extractor cites the fragment's explicit state words (D-163).
           stateCue: fixtureStateCue(f.fragment, f.mechanismState),
+          executionCue: fixtureExecutionCue(f.fragment),
           directness: "DIRECT",
           publishedAt: defaultPublishedAt(url),
           doesNotProve: "does not prove the size of the effect",

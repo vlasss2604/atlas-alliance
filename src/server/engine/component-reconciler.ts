@@ -64,7 +64,13 @@ export type ExclusionReason =
   // data, and still true) — an observation of what an account IS simply
   // cannot establish what it DOES. Null-kind rows never carry this reason,
   // so no documentary evidence is affected.
-  | "FACT_KIND_CANNOT_ESTABLISH";
+  | "FACT_KIND_CANNOT_ESTABLISH"
+  // CURRENT / LIVE ≠ EXECUTED (D-165). A model-written row at
+  // EXECUTION_EVIDENCE without a validated execution cue
+  // (execution_rule_version = 1, domain/execution-cue.ts). Its lifecycle
+  // label — LIVE or any other, cued or not — states where the mechanism
+  // stands, never that it executed. Chain rows never carry this reason.
+  | "EXECUTION_NOT_STATED";
 
 // §10 — closed.
 export type ResultReasonCode =
@@ -236,6 +242,10 @@ export interface EvidenceRow {
   // uncued. Read only by `currentStateReadingOf`: an uncued documentary
   // state is UNKNOWN for a current-state component.
   mechanismStateRuleVersion?: number | null;
+  // 1 = a validated report of a completed execution backs the row
+  // (domain/execution-cue.ts); null / absent = none. Read only by the
+  // EXECUTION_EVIDENCE gate and its state reading.
+  executionRuleVersion?: number | null;
   sourceClass: EvidenceSourceClass | null;
   officiality: "CONFIRMED" | "CLAIMED" | null;
   // D-134 — Axis C, independent of sourceClass/officiality. null when the
@@ -783,7 +793,27 @@ function evaluateCoreEligibility(
   }
   const normalizedState = normalizeMechanismState(row.mechanismState);
   if (requirements.requiresLiveMechanismState) {
-    if (normalizedState !== "LIVE" && normalizedState !== "IMPLEMENTING") {
+    // EXECUTION_EVIDENCE = the claimed mechanism executed AT LEAST ONCE
+    // (D-165). CURRENT / LIVE ≠ EXECUTED; DOCUMENTED ≠ EXECUTING.
+    //
+    // A MODEL-WRITTEN ROW (documentary, or a model-read explorer page —
+    // onchainFactKind null) speaks for execution only through a validated
+    // report of a completed execution: execution_rule_version = 1
+    // (domain/execution-cue.ts). Its lifecycle label is not read here at
+    // all — a raw or even cue-validated "LIVE" states a position, never
+    // that anything ran, and an honest execution report is typically
+    // UNKNOWN. Without the marker the row neither establishes nor
+    // contradicts execution.
+    //
+    // A CHAIN ROW keeps exactly its own path: the code-written state gate
+    // below, then the fact-kind map, under which no current kind
+    // establishes EXECUTION_EVIDENCE (TRANSACTION HAPPENED ≠ CLAIMED
+    // MECHANISM EXECUTED).
+    if (row.onchainFactKind === null || row.onchainFactKind === undefined) {
+      if (row.executionRuleVersion !== VALIDATED_EXECUTION_RULE_VERSION) {
+        return { ok: false, reason: "EXECUTION_NOT_STATED" };
+      }
+    } else if (normalizedState !== "LIVE" && normalizedState !== "IMPLEMENTING") {
       return { ok: false, reason: "NOT_CURRENT_STATE_BEARING" };
     }
   }
@@ -910,14 +940,24 @@ export function acquisitionBoundaryFromAttempt(
 //
 // Scope, exactly: components with requiresCurrentState (CURRENT_STATE), and
 // model-written states only (onchainFactKind null — a chain row's state is
-// written by code). Every other component, the EXECUTION_EVIDENCE live gate
-// (evaluateCoreEligibility) and the supersession rule itself are unchanged.
+// written by code). EXECUTION_EVIDENCE reads no model-written state at all
+// (D-165, below). Every other component and the supersession rule itself are
+// unchanged.
 export const CUED_MECHANISM_STATE_RULE_VERSION = 1;
+
+// The execution-cue contract version (domain/execution-cue.ts).
+export const VALIDATED_EXECUTION_RULE_VERSION = 1;
 
 function currentStateReadingOf(row: EvidenceRow, requirements: ComponentRequirements): MechanismState {
   const state = normalizeMechanismState(row.mechanismState);
-  if (!requirements.requiresCurrentState) return state;
   if (row.onchainFactKind !== null && row.onchainFactKind !== undefined) return state;
+  // HISTORICAL EXECUTION ≠ CURRENT STATE (D-165). At EXECUTION_EVIDENCE a
+  // model-written lifecycle label is not part of the execution finding: it
+  // never caps it (STATE_NOT_FULLY_LIVE), never sets its reported state and
+  // never makes two execution reports contradict each other. The lifecycle
+  // still reads the row's own cued state directly (mechanism-assembler.ts).
+  if (requirements.requiresLiveMechanismState) return "UNKNOWN";
+  if (!requirements.requiresCurrentState) return state;
   return row.mechanismStateRuleVersion === CUED_MECHANISM_STATE_RULE_VERSION ? state : "UNKNOWN";
 }
 
@@ -1469,6 +1509,13 @@ export function reconcileComponent(input: ComponentReconciliationInput): Compone
       temporalBasis = v.trustedTemporalBasis
         ? { basisField: v.trustedTemporalBasis.basisField, at: v.trustedTemporalBasis.at.toISOString() }
         : null;
+    } else if (requirements.requiresLiveMechanismState && stateRows.length === 0 && supportingRows.length > 0) {
+      // D-165: an execution established by validated reports carries no
+      // state (HISTORICAL EXECUTION ≠ CURRENT STATE), but still WHEN it is
+      // evidenced: the trusted basis of the best-ranked supporting row —
+      // "execution had happened by then", never a current state.
+      const basis = verdictByRowId.get(supportingRows[0].id)!.trustedTemporalBasis;
+      temporalBasis = basis ? { basisField: basis.basisField, at: basis.at.toISOString() } : null;
     }
   }
 

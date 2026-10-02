@@ -18,6 +18,7 @@ import {
 import { computeProofConfidence } from "../src/server/engine/proof-confidence";
 import { deriveSourceType, resolveSourceClass } from "../src/server/engine/source-authority";
 import { REASON_CODE_EXPLANATIONS } from "../src/client/research-model";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // GOVERNANCE LIFECYCLE SAFETY V1 — PROPOSED != APPROVED != EXECUTING.
 //
@@ -62,7 +63,7 @@ const STEP: Record<string, number> = {
 // mechanism that is only proposed. Nothing here names a project or a host.
 function forumRow(component: string, overrides: Partial<EvidenceRow> = {}): EvidenceRow {
   const id = overrides.id ?? nextId();
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: overrides.sourceId ?? `source-${id}`,
@@ -88,7 +89,7 @@ function forumRow(component: string, overrides: Partial<EvidenceRow> = {}): Evid
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...overrides,
-  };
+  });
 }
 
 function realRequirements(component: string): ComponentRequirements {
@@ -249,7 +250,8 @@ describe("E/F — the lifecycle ladder cannot be climbed by proposal-only eviden
     const approved = forumRow("GOVERNANCE_BASIS", { mechanismState: "APPROVED" });
     expect(reconcile("GOVERNANCE_BASIS", [approved]).status).toBe("SUPPORTED");
     // The same APPROVED row cannot establish EXECUTION_EVIDENCE (class) —
-    // and even an on-chain APPROVED row is not execution (state gate).
+    // and even a model-read on-chain APPROVED page is not execution: it
+    // reports no completed execution (D-165).
     const asExec = forumRow("EXECUTION_EVIDENCE", { mechanismState: "APPROVED" });
     const re = reconcile("EXECUTION_EVIDENCE", [asExec]);
     expect(re.status).toBe("INSUFFICIENT_EVIDENCE");
@@ -257,7 +259,7 @@ describe("E/F — the lifecycle ladder cannot be climbed by proposal-only eviden
     const onchainApproved = forumRow("EXECUTION_EVIDENCE", { mechanismState: "APPROVED", sourceClass: "ONCHAIN_VERIFIABLE", entityBinding: "CONFIRMED" });
     const ro = reconcile("EXECUTION_EVIDENCE", [onchainApproved]);
     expect(ro.status).toBe("INSUFFICIENT_EVIDENCE");
-    expect(ro.excludedEvidence).toEqual([{ evidenceId: onchainApproved.id, reason: "NOT_CURRENT_STATE_BEARING" }]);
+    expect(ro.excludedEvidence).toEqual([{ evidenceId: onchainApproved.id, reason: "EXECUTION_NOT_STATED" }]);
     // CURRENT_STATE excludes GOVERNANCE entirely.
     const asCurrent = forumRow("CURRENT_STATE", { mechanismState: "APPROVED" });
     expect(reconcile("CURRENT_STATE", [asCurrent]).excludedEvidence).toEqual([{ evidenceId: asCurrent.id, reason: "CLASS_NOT_ADMISSIBLE" }]);
@@ -265,17 +267,19 @@ describe("E/F — the lifecycle ladder cannot be climbed by proposal-only eviden
 });
 
 describe("G/H — existing gates intact; non-governance behaviour unchanged", () => {
-  it("G. EXECUTION_EVIDENCE still refuses PROPOSED and caps IMPLEMENTING; CURRENT_STATE still reports PROPOSED as a legitimate current state, uncapped", () => {
+  it("G. EXECUTION_EVIDENCE refuses PROPOSED and, since D-165, a descriptive IMPLEMENTING label too (a lifecycle label is not execution); CURRENT_STATE still reports PROPOSED as a legitimate current state, uncapped", () => {
     const proposed = forumRow("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", entityBinding: "CONFIRMED" });
     const rp = reconcile("EXECUTION_EVIDENCE", [proposed]);
     expect(rp.status).toBe("INSUFFICIENT_EVIDENCE");
     expect(rp.reasonCodes).toEqual(["MISSING_EXECUTION_EVIDENCE"]);
-    expect(rp.excludedEvidence).toEqual([{ evidenceId: proposed.id, reason: "NOT_CURRENT_STATE_BEARING" }]);
+    expect(rp.excludedEvidence).toEqual([{ evidenceId: proposed.id, reason: "EXECUTION_NOT_STATED" }]);
 
+    // CURRENT / LIVE ≠ EXECUTED (D-165): IMPLEMENTING no longer reaches a
+    // partial execution — the row reports no completed execution.
     const implementing = forumRow("EXECUTION_EVIDENCE", { sourceClass: "ONCHAIN_VERIFIABLE", entityBinding: "CONFIRMED", mechanismState: "IMPLEMENTING" });
     const ri = reconcile("EXECUTION_EVIDENCE", [implementing]);
-    expect(ri.status).toBe("PARTIALLY_SUPPORTED");
-    expect(ri.reasonCodes).toEqual(["STATE_NOT_FULLY_LIVE"]);
+    expect(ri.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(ri.excludedEvidence).toEqual([{ evidenceId: implementing.id, reason: "EXECUTION_NOT_STATED" }]);
 
     // "Not yet started" IS a current state — the proposal cap must not
     // touch the one component whose question is what the state is.

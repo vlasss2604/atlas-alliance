@@ -13,6 +13,7 @@ import {
   deriveLifecycleStateSignals,
 } from "../src/server/engine/mechanism-assembler";
 import { PUBLISHED_AT_RULE_VERSION } from "../src/server/engine/providers/types";
+import { withFixtureExecutionMarker } from "./state-cue-fixture";
 
 // Two narrow semantic fixes (Founder decision, closing the offline hardening
 // cycle):
@@ -46,7 +47,7 @@ let seq = 0;
 function row(component: string, o: Partial<EvidenceRow> = {}): EvidenceRow {
   seq += 1;
   const id = `p${String(seq).padStart(4, "0")}-0000-4000-8000-000000000000`;
-  return {
+  return withFixtureExecutionMarker({
     id,
     researchJobId: JOB,
     sourceId: `src-${id}`,
@@ -72,7 +73,7 @@ function row(component: string, o: Partial<EvidenceRow> = {}): EvidenceRow {
     extractionUnitKey: `unit-${id}`,
     contentHash: `hash-${id}`,
     ...o,
-  };
+  });
 }
 
 function reconcile(component: string, rows: EvidenceRow[]): ComponentReconciliationResult {

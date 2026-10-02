@@ -39,7 +39,7 @@ import { markProofVerified } from "../src/server/memory/verification";
 import { claimResearchJob, createResearchJob, transitionJobState } from "../src/server/jobs/research-jobs";
 import { handleResearchJobTask } from "../src/server/jobs/worker";
 import { coreEntitlement, setupTestDatabase, uniq, type TestContext } from "./phase1-setup";
-import { fixtureStateCue } from "./state-cue-fixture";
+import { fixtureStateCue, fixtureExecutionCue } from "./state-cue-fixture";
 
 // RESEARCH CORE ADVERSARIAL HARDENING — ROUND 6: METAMORPHIC INVARIANTS,
 // THE PERSISTED RESEARCH.
@@ -310,6 +310,7 @@ function executorFor(project: Project, s: Scenario): { executor: WorkExecutor; c
             mechanismState: f.mechanismState ?? null,
             // A compliant extractor cites the fragment's explicit state words (D-163).
             stateCue: fixtureStateCue(f.fragment, f.mechanismState),
+            executionCue: fixtureExecutionCue(f.fragment),
             directness: "DIRECT",
             publishedAt: f.publishedAt === undefined ? defaultPublishedAt(url) : f.publishedAt,
             doesNotProve: "does not prove the size of the effect",
@@ -854,7 +855,7 @@ describe("F10. project / chain substitution", () => {
     for (const v of variants) {
       const project = await makeProject({ ticker: "SUB", identity: v.identity });
       const docs = canonDocs(project, ["SOURCE_OF_VALUE", "FLOW_PATH", "MECHANISM_SPEC", "CURRENT_STATE", "DESTINATION", "RECIPIENT"]);
-      const explorer = page(project, v.url, "the buyback module executed a purchase of 9,000 SUB in block 20000100");
+      const explorer = page(project, v.url, "the buyback module has executed a purchase of 9,000 SUB in block 20000100");
       // Discovery is held identical across variants: the same page is found
       // for EXECUTION_EVIDENCE whatever the identity says.
       const o = await research(project, { docs: [...docs, explorer], search: { EXECUTION_EVIDENCE: [v.url] } });

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { INTERNAL_ALPHA_V1 } from "../src/server/config/product";
@@ -13,6 +13,7 @@ import {
   researchClaimSupport,
   researchComponentResults,
   researchJobs,
+  researchPatterns,
   researchTraceEvents,
   topics,
   users,
@@ -464,8 +465,51 @@ describe("the reachability rule, asked of the classifier that owns the classes",
 /* route-aware acquisition on the real executor                         */
 /* ------------------------------------------------------------------ */
 
+// TEST-ONLY PATTERN FIXTURE (Founder, D-165 option 1). NOT a product
+// decision and not production data.
+//
+// The invariant under test is generic: a component that is UNREACHABLE under
+// the ACTIVE Pattern costs nothing — no proposer, no search, no open, no
+// extraction. Since D-165 the production Pattern admits OFFICIAL_DOCS for
+// EXECUTION_EVIDENCE, so the shipped Pattern no longer contains such a
+// component. These tests therefore run under a narrowed clone of the active
+// Pattern in which EXECUTION_EVIDENCE admits only ONCHAIN_VERIFIABLE and
+// OFFICIAL_REPORT (the pre-D-165 classes), inside atlas_test only, for the
+// duration of one test. The original row is restored in `finally` — even
+// when the test fails — and the fixture row is deleted, so nothing outlives
+// the test. Production Pattern code and defaults are untouched.
+async function withReportOnlyExecutionPattern<T>(fn: () => Promise<T>): Promise<T> {
+  const [{ db: dbName }] = (await ctx.db.execute(sql`select current_database() as db`)).rows as { db: string }[];
+  if (dbName !== "atlas_test") throw new Error(`test-only Pattern fixture refuses to run on ${dbName}`);
+  const [topic] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
+  const [original] = await ctx.db
+    .select()
+    .from(researchPatterns)
+    .where(and(eq(researchPatterns.topicId, topic.id), eq(researchPatterns.status, "ACTIVE")));
+  if (!original) throw new Error("fixture: no ACTIVE Pattern to narrow");
+  const [{ maxVersion }] = (await ctx.db.execute(sql`select max(version)::int as "maxVersion" from research_patterns where topic_id = ${topic.id}`)).rows as { maxVersion: number }[];
+  const content = structuredClone(original.content) as { componentRequirements: Record<string, { establishingClasses: string[] }> };
+  content.componentRequirements.EXECUTION_EVIDENCE.establishingClasses = ["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT"];
+  const fixtureId = await ctx.db.transaction(async (tx) => {
+    await tx.update(researchPatterns).set({ status: "RETIRED" }).where(eq(researchPatterns.id, original.id));
+    const [row] = await tx
+      .insert(researchPatterns)
+      .values({ topicId: topic.id, version: maxVersion + 1, status: "ACTIVE", content })
+      .returning({ id: researchPatterns.id });
+    return row.id;
+  });
+  try {
+    return await fn();
+  } finally {
+    await ctx.db.transaction(async (tx) => {
+      await tx.delete(researchPatterns).where(eq(researchPatterns.id, fixtureId));
+      await tx.update(researchPatterns).set({ status: "ACTIVE" }).where(eq(researchPatterns.id, original.id));
+    });
+  }
+}
+
 describe("route-aware acquisition — the executor spends nothing on a provably unreachable obligation", () => {
-  it("A/E. EXECUTION_EVIDENCE (ONCHAIN owned + OFFICIAL_REPORT, no report route): zero proposer, zero search, zero fetch, zero search budget, SKIPPED / NO_ADMISSIBLE_ROUTE → S5 INSUFFICIENT_EVIDENCE [NO_ADMISSIBLE_ROUTE]", async () => {
+  it("A/E. EXECUTION_EVIDENCE (ONCHAIN owned + OFFICIAL_REPORT, no report route): zero proposer, zero search, zero fetch, zero search budget, SKIPPED / NO_ADMISSIBLE_ROUTE → S5 INSUFFICIENT_EVIDENCE [NO_ADMISSIBLE_ROUTE]", async () => withReportOnlyExecutionPattern(async () => {
     installEvm();
     const project = await makeProject({ routes: ["OFFICIAL_DOCS"] });
     const jobId = await makeJob(project);
@@ -496,6 +540,19 @@ describe("route-aware acquisition — the executor spends nothing on a provably 
     // D. Not a claim that the mechanism is absent: INSUFFICIENT on the
     // named boundary, no contradiction, no exclusion.
     expect(s5row).toMatchObject({ status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["NO_ADMISSIBLE_ROUTE"], contradictingEvidenceIds: [], excludedEvidence: [] });
+  }));
+
+  it("the fixture is test-only: after it, the active Pattern is the production one again (EXECUTION_EVIDENCE admits OFFICIAL_DOCS)", async () => {
+    await withReportOnlyExecutionPattern(async () => {
+      const project = await makeProject();
+      const jobId = await makeJob(project);
+      const plan = await loadAcquisitionPlan(ctx.db, jobId, "EXECUTION_EVIDENCE", project.id);
+      expect(plan.establishingClasses).toEqual(["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT"]);
+    });
+    const project = await makeProject();
+    const jobId = await makeJob(project);
+    const plan = await loadAcquisitionPlan(ctx.db, jobId, "EXECUTION_EVIDENCE", project.id);
+    expect(plan.establishingClasses).toEqual(["ONCHAIN_VERIFIABLE", "OFFICIAL_REPORT", "OFFICIAL_DOCS"]);
   });
 
   it("B. the same component with a confirmed OFFICIAL_REPORT route: ordinary acquisition runs", async () => {
@@ -542,7 +599,7 @@ describe("route-aware acquisition — the executor spends nothing on a provably 
     expect(p.fetchCalls.some((u) => new URL(u).hostname === "twitter.com")).toBe(true);
   });
 
-  it("G/H. no route is created or confirmed by acquisition, and the rule is the same on Solana and on EVM", async () => {
+  it("G/H. no route is created or confirmed by acquisition, and the rule is the same on Solana and on EVM", async () => withReportOnlyExecutionPattern(async () => {
     for (const chain of ["ethereum", "solana"] as const) {
       const project = await makeProject({ chain, routes: ["OFFICIAL_DOCS"] });
       if (chain === "ethereum") installEvm();
@@ -570,7 +627,7 @@ describe("route-aware acquisition — the executor spends nothing on a provably 
       expect(await ctx.db.select().from(evidence).where(eq(evidence.researchJobId, jobId)), chain).toEqual(before);
       __setOnchainRetriever(null);
     }
-  });
+  }));
 });
 
 /* ------------------------------------------------------------------ */
@@ -657,7 +714,7 @@ describe("bounded search finalization — the executor", () => {
 /* ------------------------------------------------------------------ */
 
 describe("A2-prime shape, whole Research through the worker handler", () => {
-  it("1-4. productive components search; the route-unreachable one spends nothing; the 12-search cap holds and the job finalizes WORK_QUEUE_EXHAUSTED with a Proof", async () => {
+  it("1-4. productive components search; the route-unreachable one spends nothing; the 12-search cap holds and the job finalizes WORK_QUEUE_EXHAUSTED with a Proof", async () => withReportOnlyExecutionPattern(async () => {
     const evm = installEvm();
     const project = await makeProject({ routes: ["OFFICIAL_DOCS"] });
     const jobId = await makeJob(project, { enqueue: true });
@@ -710,7 +767,7 @@ describe("A2-prime shape, whole Research through the worker handler", () => {
     const table = [...per.entries()].map(([c, v]) => `${c}=${v.search}`).join(" ");
     console.log(`[a2-prime fixture] searches=${b.searchQueries} opens=${b.sourceOpens} proposer=${p.counters.proposer} extract=${p.counters.extract} | ${table}`);
     console.log(`[a2-prime fixture] refused searches=${(await trace(jobId)).filter((r) => r.operationType === "SEARCH_EXECUTED" && r.status === "SKIPPED").length}`);
-  }, 60_000);
+  }), 60_000);
 
   it("5-6. with the search cap deliberately below the queue's need, the Research still finalizes: later components close SKIPPED / SEARCH_BUDGET_EXHAUSTED, earlier Evidence survives, no STARTED attempt, a Proof exists", async () => {
     installEvm();
