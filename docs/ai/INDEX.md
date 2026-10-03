@@ -28,6 +28,9 @@ Those three are the whole normal startup set.
 
 ## Not part of this set
 
+- `../../deploy/wave1/RUNBOOK.md` — the Wave 1 hosted deployment package
+  (one server, Caddy, web, one combined worker, Postgres 16). Read only for a
+  provisioning, deploy, backup or hosted-verification task.
 - `../DECISIONS.md` — the D-### register. Consult when a comment or plan cites a
   decision number you need to honour.
 - `../PROJECT_ASSESSMENT_PRODUCT_SPEC.md` — the recorded FUTURE

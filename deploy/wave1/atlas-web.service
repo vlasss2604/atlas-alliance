@@ -1,0 +1,24 @@
+# ATLAS PROOF — Wave 1 web app (Next.js production server).
+# Install: /etc/systemd/system/atlas-web.service
+[Unit]
+Description=ATLAS PROOF web (Next.js)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+WorkingDirectory=/opt/atlas/app
+EnvironmentFile=/etc/atlas/atlas.env
+ExecStartPre=/bin/sh /opt/atlas/app/deploy/wave1/preflight-env.sh web
+# Loopback only: Caddy is the single public entry point.
+ExecStart=/opt/atlas/app/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=5
+TimeoutStopSec=30
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

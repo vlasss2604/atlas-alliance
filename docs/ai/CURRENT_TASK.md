@@ -2,38 +2,31 @@
 
 > Overwrite this file each round. Never append.
 
-## PRIVATE-BETA ADMISSION (D-167) — IMPLEMENTED OFFLINE
+## WAVE 1 DEPLOYMENT PACKAGE — PREPARED OFFLINE, NOTHING PROVISIONED
 
-Founder-approved 2026-10-02. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
+Founder-approved 2026-10-03. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
+No product code, Research semantics, auth semantics or Pattern changed.
 
-An approved beta USER runs the same real, budget-bounded Research as owner
-alpha, without ADMIN; the public PRODUCT path stays closed.
+`deploy/wave1/` holds the smallest production-faithful environment: one
+Ubuntu 24.04 server, Caddy (TLS), `next start` on loopback, ONE worker with
+`ATLAS_WORKER_CAPABILITIES=SEARCH_EXTRACT,FETCH`, PostgreSQL 16 on loopback.
+`RUNBOOK.md` is the procedure; `preflight-env.sh` (ExecStartPre) refuses a
+process whose environment has a dev switch or proxy variable, a non-production
+NODE_ENV, a missing required variable, an http origin, or a split worker
+declaration. Pinned by `tests/deploy-wave1-preflight.test.ts`.
 
-- **Grant**: a `subscriptions` row (ARI_CORE, explicit expiry, no
-  auto-renew, `PRIVATE_BETA_GRANT`). No new role, table or auth system.
-- **Admission**: `services/start-private-beta-research.ts`; refusals
-  BETA_ACCESS_REQUIRED / BETA_PROJECT_NOT_AVAILABLE /
-  BETA_RESEARCH_LIMIT_REACHED create no job. Origin `PRIVATE_BETA`
-  (migration 0063), budget `INTERNAL_ALPHA_V1`.
-- **Execution**: `jobs/private-beta-routing.ts`, the real executor at every
-  phase; the grant is checked at admission only; `private_beta_enabled` is
-  the emergency switch.
-- **Preview / Interpreter / roster** use the same admission function.
+Established offline:
+- `next build` compiles and type-checks offline; the ONLY network need is
+  Google Fonts (`next/font/google`) at build time.
+- Install must be `npm ci --include=dev`: worker, migrator and owner CLIs run
+  through `tsx` (a devDependency).
+- Hosted DB = a pg_dump copy of atlas_dev (owner-confirmed identities, routes,
+  Pattern v5 and beta config are not reproducible from migrations + seed).
 
-NOT done, each needs Founder approval (writes to atlas_dev):
-1. `npm run db:migrate` (0063 only; export DATABASE_URL from .env.local).
-2. `npm run admin:private-beta -- config --enabled=true
-   --projects=raydium,pump_fun,lido --limit=5 --apply`.
-3. The user signs in once; then `npm run admin:private-beta -- grant
-   --telegram-id=<id> --until=YYYY-MM-DD --apply`.
-4. A hosted environment (app + two workers + provider reach) — not designed.
+Each next step needs Founder approval: code transport to the server (push +
+deploy key, or a git bundle — local HEAD is ahead of origin); provisioning;
+the database copy; BotFather bot; the user-visible `rc1_*` smoke projects
+(REQUIRED before inviting users, already on the BEFORE-BETA list); provider
+connectivity checks; the beta grant; the first live beta Research.
 
-Known and left as is: with the beta switch OFF the Interpreter is open to
-any signed-in user as before (stop it with `interpreter_enabled`); a failed
-or cancelled beta Research still counts toward the cap of 5.
-
-Still waiting on the Founder: hosted-environment task; BEFORE-BETA items
-from the readiness audit (Solana DESTINATION dead end, first-answer wording,
-smoke-test projects in the catalog); D-165 positive live validation.
-
-STOP here until the Founder reviews. No push, no live call.
+STOP here until the Founder reviews.

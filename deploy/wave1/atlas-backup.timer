@@ -1,0 +1,11 @@
+# ATLAS PROOF — Wave 1 nightly backup schedule.
+# Install: /etc/systemd/system/atlas-backup.timer
+[Unit]
+Description=Nightly ATLAS PROOF Postgres backup
+
+[Timer]
+OnCalendar=*-*-* 03:30:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

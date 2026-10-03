@@ -1,0 +1,21 @@
+# ATLAS PROOF — Wave 1 Caddy config.
+# Install: /etc/caddy/Caddyfile, replacing atlas.example.com with the real
+# domain (its DNS A/AAAA records must already point at this server).
+#
+# Caddy obtains and renews the TLS certificate automatically (ports 80 and
+# 443 must be open). It sets X-Forwarded-For to the real client address and
+# ignores a client-supplied one, which the per-IP sign-in limit relies on.
+
+atlas.example.com {
+	reverse_proxy 127.0.0.1:3000 {
+		# Research progress is a long-lived event stream: flush immediately.
+		flush_interval -1
+	}
+
+	log {
+		output file /var/log/caddy/atlas-access.log {
+			roll_size 50MiB
+			roll_keep 5
+		}
+	}
+}
