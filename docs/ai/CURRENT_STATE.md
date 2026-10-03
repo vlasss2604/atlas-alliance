@@ -53,7 +53,9 @@ owner alpha.
   auto-renew, `billing_provider='PRIVATE_BETA_GRANT'`
   (`services/private-beta.ts`). The user stays role USER.
 - **Admission** (`services/start-private-beta-research.ts`, reached from
-  `POST /api/research-jobs` for a non-ADMIN while `private_beta_enabled`).
+  `POST /api/research-jobs` for a non-ADMIN while `private_beta_enabled`,
+  whatever `research_enabled` says — a non-ADMIN never reaches the PRODUCT
+  path while the beta switch is on).
   Before any job exists: valid grant now (`BETA_ACCESS_REQUIRED`); own READY
   DEEP_RESEARCH interpretation; ACTIVE_CORE; project on
   `private_beta_project_slugs` AND the live-spend allowlist

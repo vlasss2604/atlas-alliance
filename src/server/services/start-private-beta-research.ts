@@ -40,7 +40,7 @@ export interface StartPrivateBetaResearchInput {
 //
 // EVERY CHECK RUNS BEFORE A JOB EXISTS. A refusal therefore creates no job,
 // spends nothing and can never surface as an empty Result:
-//   1. private beta is open (public path closed, private_beta_enabled);
+//   1. private beta is open (private_beta_enabled, whatever research_enabled says);
 //   2. the user holds a valid beta grant NOW            → BETA_ACCESS_REQUIRED
 //      (an exact replay of an already-admitted request returns its job
 //      first — nothing new is admitted by a replay);

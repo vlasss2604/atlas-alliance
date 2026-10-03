@@ -31,11 +31,12 @@ export type PrivateBetaRefusal =
   | "BETA_PROJECT_NOT_AVAILABLE"
   | "BETA_RESEARCH_LIMIT_REACHED";
 
-// Private beta is in effect only while the PUBLIC product path is closed
-// and the beta switch is on. With research_enabled=true the public path
-// decides and nothing here applies.
+// Private beta is in effect exactly while the beta switch is on — whatever
+// research_enabled says. While it is on, a non-ADMIN user's Research is
+// decided by private-beta admission and by nothing else, so a beta user can
+// never fall through to the PRODUCT path (whose executor is non-live).
 export function privateBetaOpen(config: ProductConfig): boolean {
-  return !config.research_enabled && config.private_beta_enabled;
+  return config.private_beta_enabled;
 }
 
 // A valid grant NOW: entitling status, not expired, ARI_CORE, never
@@ -102,8 +103,8 @@ export async function evaluatePrivateBetaAdmission(
 // (ADMIN, the existing owner-alpha path) and a user holding a valid grant.
 // Nobody else — sign-in stays open, a model call does not.
 //
-// "During private beta" is exactly privateBetaOpen: the public path closed
-// AND the beta switch on. With the switch off the product is in its
+// "During private beta" is exactly privateBetaOpen: the beta switch on,
+// whatever research_enabled says. With the switch off the product is in its
 // pre-beta state and the Interpreter is governed as it always was
 // (interpreter_enabled, owner decision №3) — its honest answer to an
 // ordinary user there is "research is disabled", not "beta access

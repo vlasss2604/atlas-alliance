@@ -254,8 +254,10 @@ describe("1. the grant is the existing subscription entitlement, and nothing mor
     expect(DEFAULT_PRODUCT_CONFIG.private_beta_project_slugs).toEqual([]);
     expect(DEFAULT_PRODUCT_CONFIG.research_enabled).toBe(false);
     expect(privateBetaOpen({ ...DEFAULT_PRODUCT_CONFIG, private_beta_enabled: true })).toBe(true);
-    // The public path open means the public rules decide, never the beta.
-    expect(privateBetaOpen({ ...DEFAULT_PRODUCT_CONFIG, private_beta_enabled: true, research_enabled: true })).toBe(false);
+    // The beta switch alone decides: research_enabled can never hand a beta
+    // user to the PRODUCT path.
+    expect(privateBetaOpen({ ...DEFAULT_PRODUCT_CONFIG, private_beta_enabled: true, research_enabled: true })).toBe(true);
+    expect(privateBetaOpen({ ...DEFAULT_PRODUCT_CONFIG, private_beta_enabled: false, research_enabled: true })).toBe(false);
   });
 
   it("a grant is one ARI_CORE subscription row with an explicit expiry, no auto-renew, a server-owned marker — and the user stays USER", async () => {
@@ -686,6 +688,49 @@ describe("6. the Interpreter spends provider budget only for an admitted user du
     expect(res.status).toBe(201);
     const body = (await res.json()) as { gates: { research: string } };
     expect(body.gates.research).toBe("DISABLED");
+  });
+
+  it("beta on governs the Interpreter even with research_enabled on: an ordinary user without a grant never reaches the model", async () => {
+    const plain = await makeAuthedClient("USER");
+    await setConfig({ research_enabled: true });
+    expect(await interpreterAccessRefusal(ctx.db, await loadProductConfig(ctx.db), plain.userId)).toBeNull();
+    const config = await openBeta();
+    expect(config.research_enabled).toBe(true);
+    expect(await interpreterAccessRefusal(ctx.db, config, plain.userId)).toBe("BETA_ACCESS_REQUIRED");
+  });
+});
+
+describe("6b. research_enabled can never route a beta user to the PRODUCT path", () => {
+  it("public switch on + beta on: a grant holder is admitted PRIVATE_BETA (never PRODUCT); a user without one is refused and no job exists", async () => {
+    await setConfig({ research_enabled: true });
+    const config = await openBeta();
+    expect(privateBetaOpen(config)).toBe(true);
+
+    const granted = await betaUser();
+    const res = await jobsPOST(post("/api/research-jobs", granted, { interpretationId: await interpretationFor(granted.userId), idempotencyKey: uniq("idem") }));
+    expect(res.status).toBe(201);
+    const { job } = (await res.json()) as { job: { id: string } };
+    const row = await jobRow(job.id);
+    expect(row.origin).toBe("PRIVATE_BETA");
+    expect(row.budgetAtStart).toEqual(INTERNAL_ALPHA_V1);
+
+    const plain = await makeAuthedClient("USER");
+    const refused = await jobsPOST(post("/api/research-jobs", plain, { interpretationId: await interpretationFor(plain.userId), idempotencyKey: uniq("idem") }));
+    expect(refused.status).toBe(403);
+    expect(await errorOf(refused)).toBe("BETA_ACCESS_REQUIRED");
+    expect(await jobsOf(plain.userId)).toHaveLength(0);
+
+    // The preview agrees with the route in this state too.
+    const preview = async (userId: string) =>
+      (await evaluateGates(ctx.db, config, { userId, status: "READY", route: "DEEP_RESEARCH", projectSlugs: [BETA_PROJECT] })).research;
+    expect(await preview(plain.userId)).toBe("BETA_ACCESS_REQUIRED");
+    expect(await preview(granted.userId)).toBe("ACTIVE_JOB_EXISTS");
+    const fresh = await betaUser();
+    expect(await preview(fresh.userId)).toBe("AVAILABLE");
+    // And no PRODUCT job was created for any beta-era user.
+    for (const u of [granted, plain, fresh]) {
+      expect((await jobsOf(u.userId)).filter((j) => j.origin === "PRODUCT")).toHaveLength(0);
+    }
   });
 });
 

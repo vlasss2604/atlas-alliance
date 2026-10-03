@@ -111,19 +111,20 @@ export async function evaluateGates(
   // scope and "one active job" still apply exactly as for any other job.
   let ownerAlphaEligible = false;
   // PRIVATE BETA preview parity (D-167). The route sends a non-ADMIN user to
-  // startPrivateBetaResearch exactly when the public path is closed and the
-  // beta switch is on; for that user the preview is decided by the SAME
+  // startPrivateBetaResearch exactly when the beta switch is on, whatever
+  // research_enabled says; for that user the preview is decided by the SAME
   // admission function the start service calls (evaluatePrivateBetaAdmission),
   // in the same order, so the screen never offers a Research the server
   // will refuse. An ADMIN keeps the owner-alpha preview above, unchanged.
   let privateBetaApplies = false;
-  if (!config.research_enabled) {
+  if (!config.research_enabled || privateBetaOpen(config)) {
     const [actor] = await db
       .select({ role: users.role })
       .from(users)
       .where(eq(users.id, subject.userId));
     privateBetaApplies = privateBetaOpen(config) && actor?.role !== "ADMIN";
     ownerAlphaEligible =
+      !config.research_enabled &&
       actor?.role === "ADMIN" &&
       config.internal_alpha_enabled &&
       scope === "SUPPORTED" &&

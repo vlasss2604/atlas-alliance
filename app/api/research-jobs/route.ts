@@ -92,14 +92,13 @@ export async function POST(req: Request): Promise<Response> {
     // Normal (non-ADMIN) users always fall through to startResearch below,
     // which still throws RESEARCH_DISABLED exactly as before this change.
     //
-    // PRIVATE BETA (D-167) — a second additive admission path, reachable
-    // ONLY while the public path is closed AND private_beta_enabled is on,
-    // and only for a non-ADMIN user (an ADMIN keeps the owner path above).
-    // It admits a user who holds a valid beta grant; everyone else is
-    // refused there with a distinct reason and NO job is created. With the
-    // beta switch off this branch is not taken and a non-ADMIN user falls
-    // through to startResearch → RESEARCH_DISABLED, exactly as before. The
-    // moment research_enabled becomes true this branch is dead code too.
+    // PRIVATE BETA (D-167) — a second additive admission path, taken for
+    // EVERY non-ADMIN user while private_beta_enabled is on, whatever
+    // research_enabled says: a beta user must never fall through to the
+    // PRODUCT path and its non-live executor. It admits a user who holds a
+    // valid beta grant; everyone else is refused there with a distinct
+    // reason and NO job is created. With the beta switch off this branch is
+    // not taken and a non-ADMIN user reaches startResearch exactly as before.
     const input = {
       userId: session.userId,
       interpretationId: body.interpretationId,
@@ -108,7 +107,7 @@ export async function POST(req: Request): Promise<Response> {
     const { job, created } =
       !config.research_enabled && session.role === "ADMIN"
         ? await startOwnerManualAlphaResearch(db, await getBoss(), config, input)
-        : privateBetaOpen(config)
+        : privateBetaOpen(config) && session.role !== "ADMIN"
           ? await startPrivateBetaResearch(db, await getBoss(), config, input)
           : await startResearch(db, await getBoss(), config, input);
     return Response.json(

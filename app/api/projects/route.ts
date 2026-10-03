@@ -27,7 +27,7 @@ export async function GET(req: Request): Promise<Response> {
 
     const isCore = entitlement.snapshot.level === "ARI_CORE";
     // PRIVATE BETA (D-167) — while private beta is what admits this user
-    // (public path closed, beta switch on, not the owner), "researchable"
+    // (beta switch on, not the owner), "researchable"
     // means what startPrivateBetaResearch will actually admit: a valid
     // grant AND a project on the beta list and the live-spend allowlist.
     // The roster never offers a project the server would refuse.
