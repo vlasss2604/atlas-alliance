@@ -29,7 +29,7 @@ export async function POST(req: Request): Promise<Response> {
       const { devAuthenticate } = await import("@/src/server/auth/dev-bypass");
       const result = await devAuthenticate(db);
       return Response.json(
-        { csrfToken: result.csrfToken, onboardingCompleted: result.onboardingCompleted },
+        { csrfToken: result.csrfToken, onboardingCompleted: result.onboardingCompleted, startParam: null },
         { status: 200, headers: { "Set-Cookie": result.setCookie } },
       );
     }
@@ -58,7 +58,7 @@ export async function POST(req: Request): Promise<Response> {
       req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "unknown";
     const result = await authenticateTelegram(db, body.initData ?? "", ip);
     return Response.json(
-      { csrfToken: result.csrfToken, onboardingCompleted: result.onboardingCompleted },
+      { csrfToken: result.csrfToken, onboardingCompleted: result.onboardingCompleted, startParam: result.startParam },
       { status: 200, headers: { "Set-Cookie": result.setCookie } },
     );
   } catch (e) {

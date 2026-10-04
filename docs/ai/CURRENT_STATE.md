@@ -43,6 +43,48 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
+## A FORWARDED TELEGRAM MESSAGE BECOMES ONE INTAKE, NEVER A RESEARCH (D-168)
+
+The bot is an entry surface. A message forwarded (or typed) to it in a
+private chat becomes one bounded `research_intakes` row owned by the
+canonical user; nothing else is created or spent. Research starts only from
+the Ask screen through the unchanged canonical path.
+
+- **Webhook** `app/api/telegram/webhook/route.ts` → `src/server/telegram/`
+  (`update.ts` parses the little V1 reads, `webhook.ts` is the adapter,
+  `bot-api.ts` is the one outbound `sendMessage` to the fixed host,
+  `replies.ts` the copy). Secret in `X-Telegram-Bot-Api-Secret-Token`
+  compared in constant time against `TELEGRAM_WEBHOOK_SECRET`; unset → 503
+  for everyone; mismatch → 401. Authenticated deliveries always get 200.
+  Sender → `users.id` through `user_identities` (TELEGRAM); no row created
+  for a stranger. Per-sender bucket `tgintake:<id>` on `auth_rate_limits`.
+- **Intake** (`services/research-intake.ts`, Telegram-blind). Text trimmed
+  and clipped to `MAX_QUESTION_CHARS`; source label / public t.me link only
+  for a public channel; `detected_project_slug` from
+  `services/project-detection.ts` (catalog only, exactly one project or
+  null); `external_ref = tg:<update_id>` makes re-delivery idempotent.
+  24-hour `expires_at`. No raw update, sender profile or chat id stored.
+- **Beta scope at the bot.** Beta on + recognised project outside
+  `private_beta_project_slugs` → plain refusal, no intake, no button. Beta
+  off → no scope applied. Nothing hard-coded.
+- **Owner read** `GET /api/intakes/[id]`: owner + unexpired in one
+  predicate; foreign, unknown, expired → 404. CONSUMED returns no text.
+- **Launch.** Bot button → `/ask?intake=<id>`; signed Mini App
+  `start_param` surfaces as `startParam` in the auth response and is routed
+  to the same path (`client/intake-launch.ts`), kept in memory across
+  onboarding. The text prefills the ordinary editable composer. Opening
+  reads only.
+- **Consumption.** `POST /api/research-jobs` takes an optional `intakeId`
+  that decides nothing about admission; after a job exists the intake is
+  marked CONSUMED by owner, only from OPEN, only before expiry. A refusal
+  leaves it OPEN.
+- **Not in V1:** aggregation, monitoring, X API, Discord, a second engine.
+  A bare X URL is carried as text and never fetched.
+- **Not applied anywhere but the test DB:** migration 0064. Webhook not
+  registered; Bot API field shapes (`forward_origin`, `secret_token`,
+  `web_app` URL with query, `start_param` in initData) are pinned by tests
+  and the runbook says to verify them before `setWebhook`.
+
 ## AN APPROVED BETA USER RUNS THE REAL RESEARCH WITHOUT ADMIN (D-167)
 
 The public path stays closed (`research_enabled=false`, PRODUCT jobs still

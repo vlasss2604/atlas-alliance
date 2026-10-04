@@ -1,10 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { api, ApiError, type GateView, type InterpretResult } from "@/src/client/api";
+import { api, ApiError, type GateView, type InterpretResult, type ResearchIntakeView } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
+import { intakeIdFromSearch } from "@/src/client/intake-launch";
+import { getPlatform } from "@/src/client/platform";
 import { canStartProof, proofBlockReason } from "@/src/client/proof-gate";
 
 // Question-first input (канон atlas-product-ui) + Question Interpreter
@@ -13,10 +15,45 @@ import { canStartProof, proofBlockReason } from "@/src/client/proof-gate";
 // когда сервер действительно разрешает старт.
 type Phase = "input" | "thinking" | "result" | "starting";
 
+// A FORWARDED CLAIM, IF THIS SCREEN WAS OPENED FOR ONE. `?intake=<id>` is
+// the bot's launch (and what a signed Telegram start parameter is routed
+// to). The id is only a pointer: the server returns the text solely to its
+// owner while it is OPEN, and the text lands in the SAME editable composer
+// as a typed question. Nothing starts and nothing is spent by opening it.
+type IntakeLaunch =
+  | { kind: "none" }
+  | { kind: "open"; view: ResearchIntakeView }
+  | { kind: "consumed" }
+  | { kind: "unavailable" };
+
 export default function AskPage() {
   const { dict, refresh } = useApp();
   const router = useRouter();
   const [question, setQuestion] = useState("");
+  const [intake, setIntake] = useState<IntakeLaunch>({ kind: "none" });
+
+  useEffect(() => {
+    const id = intakeIdFromSearch(window.location.search);
+    if (!id) return;
+    let cancelled = false;
+    api
+      .getIntake(id)
+      .then(({ intake: view }) => {
+        if (cancelled) return;
+        if (view.status === "OPEN" && view.rawText) {
+          setQuestion(view.rawText);
+          setIntake({ kind: "open", view });
+        } else {
+          setIntake({ kind: "consumed" });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setIntake({ kind: "unavailable" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [showExamples, setShowExamples] = useState(false);
   const [phase, setPhase] = useState<Phase>("input");
   const [result, setResult] = useState<InterpretResult | null>(null);
@@ -32,6 +69,7 @@ export default function AskPage() {
     setPhase("input");
     setResult(null);
     setQuestion("");
+    setIntake({ kind: "none" });
     setAnswer("");
     setError(null);
     setLimitReached(false);
@@ -82,7 +120,9 @@ export default function AskPage() {
     setPhase("starting");
     try {
       // Ключ идемпотентности на клик: двойное нажатие не создаёт два job.
-      await api.startResearch(interp.id, crypto.randomUUID());
+      // The intake id rides along only so the server can mark the forwarded
+      // claim consumed once a job exists; it decides nothing about admission.
+      await api.startResearch(interp.id, crypto.randomUUID(), intake.kind === "open" ? intake.view.intakeId : undefined);
       await refresh();
       router.push("/research");
     } catch (e) {
@@ -174,6 +214,45 @@ export default function AskPage() {
               </li>
             ))}
           </ul>
+        </div>
+      )}
+
+      {phase === "input" && intake.kind !== "none" && (
+        <div className="glass sheet-enter flex flex-col gap-2 px-4 py-3" data-testid="intake-notice" data-kind={intake.kind}>
+          {intake.kind === "open" && (
+            <>
+              <p className="flex flex-wrap items-center gap-x-2 text-xs uppercase tracking-wide text-[var(--atlas-cyan)]">
+                <span>{dict.ask.intakeFrom}</span>
+                {intake.view.sourceLabel && (
+                  <span className="normal-case tracking-normal text-[var(--atlas-text-dim)]" data-testid="intake-source">
+                    · {intake.view.sourceLabel}
+                  </span>
+                )}
+                {intake.view.sourceUrl && (
+                  <a
+                    href={intake.view.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="normal-case tracking-normal underline-offset-2 hover:underline"
+                    data-testid="intake-view-original"
+                    onClick={(e) => {
+                      if (getPlatform().openExternal(intake.view.sourceUrl!)) e.preventDefault();
+                    }}
+                  >
+                    {dict.ask.intakeViewOriginal}
+                  </a>
+                )}
+              </p>
+              <p className="text-sm text-[var(--atlas-text-dim)]">{dict.ask.intakeEditable}</p>
+              {intake.view.detectedProject?.availableInPrivateBeta === false && (
+                <p className="text-sm text-[var(--atlas-amber)]" data-testid="intake-project-unavailable">
+                  {dict.ask.intakeProjectNotAvailable.replace("{project}", intake.view.detectedProject.name)}
+                </p>
+              )}
+            </>
+          )}
+          {intake.kind === "consumed" && <p className="text-sm text-[var(--atlas-text-dim)]">{dict.ask.intakeConsumed}</p>}
+          {intake.kind === "unavailable" && <p className="text-sm text-[var(--atlas-text-dim)]">{dict.ask.intakeUnavailable}</p>}
         </div>
       )}
 

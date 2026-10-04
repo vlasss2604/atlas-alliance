@@ -57,6 +57,13 @@ export const ru: Dict = {
     clarifyStale: "Этот вопрос уже разобран. Задайте новый, чтобы продолжить.",
     checkOnProject: "Проверить это на конкретном проекте",
     checkOnProjectDraft: "Проверь это на ",
+    // Утверждение, пришедшее через Telegram-бота (research intake).
+    intakeFrom: "Из сообщения Telegram",
+    intakeViewOriginal: "Открыть оригинал",
+    intakeEditable: "Проверьте или отредактируйте вопрос перед запуском.",
+    intakeUnavailable: "Это пересланное сообщение больше недоступно. Задайте вопрос здесь.",
+    intakeConsumed: "Исследование по этому сообщению уже запущено. Задайте новый вопрос здесь.",
+    intakeProjectNotAvailable: "{project} пока недоступен в закрытой бете.",
   },
   research: {
     title: "Исследования",

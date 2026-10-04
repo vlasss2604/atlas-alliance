@@ -13,6 +13,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { authenticate, getMe, type MeResponse } from "./api";
 import { en, type Dict } from "./i18n/en";
 import { ru } from "./i18n/ru";
+import { askPathForIntake, intakeIdFromStartParam, rememberLaunchIntake } from "./intake-launch";
 import { getPlatform } from "./platform";
 
 interface AppState {
@@ -50,8 +51,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getPlatform().ready();
       const auth = await authenticate();
       if (cancelled) return;
+      // A Telegram deep link carrying an intake id (signed start parameter)
+      // lands on the Ask screen with that id in the query — the same entry
+      // the bot's button uses. Onboarding still runs first for a new user;
+      // the launch is remembered for the moment it completes.
+      const launchIntake = intakeIdFromStartParam(auth?.startParam);
       if (auth && !auth.onboardingCompleted && pathname !== "/onboarding") {
+        if (launchIntake) rememberLaunchIntake(launchIntake);
         router.replace("/onboarding");
+      } else if (launchIntake && pathname !== "/ask") {
+        router.replace(askPathForIntake(launchIntake));
       }
       await refresh();
     })();

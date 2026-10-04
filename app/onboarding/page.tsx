@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { api, authenticate } from "@/src/client/api";
+import { askPathForIntake, intakeIdFromStartParam, rememberLaunchIntake, takeLaunchIntake } from "@/src/client/intake-launch";
 import { en } from "@/src/client/i18n/en";
 import { ru } from "@/src/client/i18n/ru";
 
@@ -24,12 +25,16 @@ export default function OnboardingPage() {
     if (busy) return; // защита от двойного тапа (endpoint и так идемпотентен)
     setBusy(true);
     try {
-      await authenticate();
+      const auth = await authenticate();
+      const launch = intakeIdFromStartParam(auth?.startParam);
+      if (launch) rememberLaunchIntake(launch);
       await api.completeOnboarding();
     } catch {
       /* даже при сбое не запираем пользователя в onboarding */
     }
-    router.replace("/home");
+    // A launch that brought a forwarded claim continues to it; otherwise home.
+    const intake = takeLaunchIntake();
+    router.replace(intake ? askPathForIntake(intake) : "/home");
   };
 
   return (

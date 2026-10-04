@@ -108,6 +108,22 @@ travels past the identity-attachment table. The rate limiter's `tg:` bucket
 (`auth_rate_limits`) applies only to signature-verified ids and is an auth-edge
 concern.
 
+### 4.2a Telegram forward intake is an edge adapter (ADDED 2026-10-04, D-168)
+
+`app/api/telegram/webhook/route.ts` → `src/server/telegram/` (`update.ts`,
+`webhook.ts`, `bot-api.ts`, `replies.ts`) is the second Telegram edge. It
+resolves the sender through the same `user_identities` row the auth chain
+created, and hands bounded text plus optional source context to
+`src/server/services/research-intake.ts`, which knows nothing about Telegram
+and writes one `research_intakes` row keyed on `users.id`. The row carries
+`origin = 'TELEGRAM_FORWARD'` as a fact about the input, never on
+`research_jobs.origin`; a Web or iOS share sheet could write the same row.
+Nothing under `src/server/engine`, `domain`, `memory` or `jobs` reads it.
+The only outbound call is `sendMessage` to the fixed host `api.telegram.org`
+in `bot-api.ts`, separate from the research fetcher. Removal test: delete
+`src/server/telegram/` and `app/api/telegram/` and the intake service, the
+Ask prefill and the canonical start path still work for any client.
+
 ### 4.3 Client platform isolation (ALREADY SATISFIED)
 
 `src/client/platform.ts` is the **ClientPlatformAdapter**: all
@@ -271,6 +287,9 @@ telegram / WebApp / initData / Stars / chatId / bot concepts:
 `src/server/auth/rate-limit.ts` (`tg:` bucket for verified ids),
 `src/client/platform.ts` (the adapter itself), `src/client/api.ts` (calls the
 auth route), `app/layout.tsx` (SDK script tag, used only inside the adapter).
+Added 2026-10-04 (D-168): `app/api/telegram/webhook/route.ts`,
+`src/server/telegram/*` (intake adapter, `tgintake:` bucket on the same
+rate-limit table), `src/client/intake-launch.ts` (opaque launch id).
 
 **Class B — application layer behind an adapter:** none beyond the auth
 chain above, which *is* the adapter.

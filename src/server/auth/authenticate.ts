@@ -13,6 +13,19 @@ export interface AuthResult {
   csrfToken: string;
   setCookie: string;
   onboardingCompleted: boolean;
+  // The Mini App launch parameter Telegram placed in the SIGNED initData
+  // (`start_param`), if any — covered by the HMAC above, so it cannot be
+  // forged by the client. It is an opaque token for the client to act on
+  // (today: a research intake id); it authorizes nothing by itself.
+  startParam: string | null;
+}
+
+// Telegram's own alphabet for a start parameter; anything else is dropped.
+const START_PARAM = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function startParamOf(raw: Record<string, string>): string | null {
+  const v = raw["start_param"];
+  return v && START_PARAM.test(v) ? v : null;
 }
 
 const AUTH_RATE_LIMIT = 20;
@@ -102,6 +115,7 @@ export async function authenticateTelegram(
     csrfToken: deriveCsrfToken(hashToken(rawToken), getEnv("CSRF_SECRET")),
     setCookie: sessionCookie(rawToken),
     onboardingCompleted: u.onboardingCompleted,
+    startParam: startParamOf(validation.raw),
   };
 }
 

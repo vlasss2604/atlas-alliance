@@ -143,6 +143,19 @@ export const researchJobOrigin = pgEnum("research_job_origin", [
 // not run the phased path at all" — every historical row, and every job
 // the single-process worker path handles. A phase handler that receives
 // a message for a NULL-phase job refuses closed rather than guessing.
+// RESEARCH INTAKE — a claim a user handed to ATLAS through an entry surface
+// (today: a Telegram message forwarded to the bot), stored BEFORE any
+// interpretation or Research exists. It is an INPUT, never a source, never
+// Evidence: the Research it may lead to starts only through the canonical
+// Ask → Interpreter → admission path, and nothing in the engine reads it.
+// Which surface delivered it is a fact about the input, not a Research
+// origin, so it lives here and never on research_jobs.origin.
+export const researchIntakeOrigin = pgEnum("research_intake_origin", ["TELEGRAM_FORWARD"]);
+
+// OPEN until a Research was actually started from it; CONSUMED after. Expiry
+// is a timestamp on the row, not a third state, so nothing has to sweep.
+export const researchIntakeStatus = pgEnum("research_intake_status", ["OPEN", "CONSUMED"]);
+
 export const researchAcquisitionPhase = pgEnum("research_acquisition_phase", [
   "SEARCHING",
   "FETCHING",

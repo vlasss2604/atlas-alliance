@@ -2,31 +2,26 @@
 
 > Overwrite this file each round. Never append.
 
-## WAVE 1 DEPLOYMENT PACKAGE — PREPARED OFFLINE, NOTHING PROVISIONED
+## TELEGRAM FORWARD → RESEARCH INTAKE V1 — IMPLEMENTED OFFLINE, NOT COMMITTED
 
-Founder-approved 2026-10-03. LIVE CALLS MADE BY THIS TASK: 0. Not pushed.
-No product code, Research semantics, auth semantics or Pattern changed.
+Founder-approved 2026-10-04 (D-168). LIVE CALLS MADE BY THIS TASK: 0.
+Migration 0064 applied ONLY to the isolated test database by the suite.
+Webhook not registered. Nothing pushed.
 
-`deploy/wave1/` holds the smallest production-faithful environment: one
-Ubuntu 24.04 server, Caddy (TLS), `next start` on loopback, ONE worker with
-`ATLAS_WORKER_CAPABILITIES=SEARCH_EXTRACT,FETCH`, PostgreSQL 16 on loopback.
-`RUNBOOK.md` is the procedure; `preflight-env.sh` (ExecStartPre) refuses a
-process whose environment has a dev switch or proxy variable, a non-production
-NODE_ENV, a missing required variable, an http origin, or a split worker
-declaration. Pinned by `tests/deploy-wave1-preflight.test.ts`.
+Done on this tree: webhook route + Telegram adapter, intake service, catalog
+project detection, `research_intakes` schema/migration, owner read route,
+launch handoff (button URL and signed `start_param`), Ask prefill, consume
+after job creation (owner + OPEN + unexpired), env example and runbook §8/4a,
+`tests/telegram-forward-intake-v1.test.ts`.
 
-Established offline:
-- `next build` compiles and type-checks offline; the ONLY network need is
-  Google Fonts (`next/font/google`) at build time.
-- Install must be `npm ci --include=dev`: worker, migrator and owner CLIs run
-  through `tsx` (a devDependency).
-- Hosted DB = a pg_dump copy of atlas_dev (owner-confirmed identities, routes,
-  Pattern v5 and beta config are not reproducible from migrations + seed).
-
-Each next step needs Founder approval: code transport to the server (push +
-deploy key, or a git bundle — local HEAD is ahead of origin); provisioning;
-the database copy; BotFather bot; the user-visible `rc1_*` smoke projects
-(REQUIRED before inviting users, already on the BEFORE-BETA list); provider
-connectivity checks; the beta grant; the first live beta Research.
+Next steps, each needing Founder approval:
+- commit on `claude/phase-5-research-memory`;
+- before `setWebhook`: verify against the current Bot API the shapes the
+  tests pin (`forward_origin` types, `secret_token` header, `web_app`
+  inline button with a query string, `start_param` inside signed initData);
+- apply 0064 to atlas_dev / the hosted DB (D-167 items still pending too);
+- set `TELEGRAM_WEBHOOK_SECRET`, restart web, register the webhook once
+  from the Founder's machine (runbook §8 4a), then one forward from the
+  second account as the first live check.
 
 STOP here until the Founder reviews.

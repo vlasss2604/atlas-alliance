@@ -980,7 +980,8 @@ describe("11. the migration and the scope of the change", () => {
     const statements = sqlText.split("\n").filter((l) => !l.trim().startsWith("--") && l.trim().length > 0);
     expect(statements).toEqual([`ALTER TYPE "public"."research_job_origin" ADD VALUE IF NOT EXISTS 'PRIVATE_BETA';`]);
     const journal = JSON.parse(readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8")) as { entries: { idx: number; tag: string }[] };
-    expect(journal.entries.at(-1)).toMatchObject({ idx: 63, tag: "0063_private_beta_job_origin" });
+    // Entry 63 is this migration; later migrations may follow it.
+    expect(journal.entries.find((e: { idx: number }) => e.idx === 63)).toMatchObject({ idx: 63, tag: "0063_private_beta_job_origin" });
   });
 
   it("no new role, no new table: the role enum is unchanged and admission never reads or writes a role", () => {

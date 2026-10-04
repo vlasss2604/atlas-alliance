@@ -8,3 +8,4 @@ export * from "./config";
 export * from "./engine";
 export * from "./acquired";
 export * from "./projection";
+export * from "./intake";

@@ -166,7 +166,8 @@ Both services refuse to start if `preflight-env.sh` rejects the environment;
 |---|---|---|
 | `NODE_ENV` | all | `production` |
 | `DATABASE_URL` | all | `postgres://atlas:<pw>@127.0.0.1:5432/atlas_beta` |
-| `BOT_TOKEN` | web | from @BotFather (§7) |
+| `BOT_TOKEN` | web | from @BotFather (§8) |
+| `TELEGRAM_WEBHOOK_SECRET` | web | optional; random, e.g. `openssl rand -hex 32` — only if the forward-to-bot webhook is registered (§8) |
 | `CSRF_SECRET` | web | **new** random value, e.g. `openssl rand -hex 32` |
 | `ALLOWED_ORIGINS` | web | `https://<domain>` exactly |
 | `ANTHROPIC_API_KEY` | web + worker | secret |
@@ -297,6 +298,27 @@ Then the owner tool's own view:
    *Configure Mini App* → enable, URL `https://<domain>/` (or `/newapp`).
 4. *Optional* menu button: *Bot Settings* → *Menu Button* → same URL.
    (`/setdomain` is for the Login Widget and is not needed.)
+4a. *Optional* **forward-to-bot intake** (`POST /api/telegram/webhook`). A
+   user forwards a message to the bot; the bot stores a bounded intake and
+   replies with one button that opens `https://<domain>/ask?intake=<id>`
+   (a `web_app` inline button; the id is opaque and useless without the
+   owner's session). Research still starts only from the Ask screen through
+   the normal path. To enable: set `TELEGRAM_WEBHOOK_SECRET` in
+   `/etc/atlas/atlas.env`, restart `atlas-web`, then register the webhook
+   ONCE from the Founder's machine:
+   `curl -s "https://api.telegram.org/bot<BOT_TOKEN>/setWebhook" -d "url=https://<domain>/api/telegram/webhook" -d "secret_token=<TELEGRAM_WEBHOOK_SECRET>" -d "allowed_updates=[\"message\"]"`.
+   Nothing registers it automatically, and nothing in the repository has
+   made this call. **Verify against the current Bot API documentation
+   before registering** (not verifiable offline from the repository):
+   the `secret_token` parameter and the `X-Telegram-Bot-Api-Secret-Token`
+   header; the `forward_origin` field with `type` channel / user /
+   hidden_user / chat on forwarded messages; that a `web_app` inline button
+   may carry a URL with a query string; and that a `start_param` in a
+   direct-link launch (`https://t.me/<bot>/<app>?startapp=<intake id>`)
+   arrives inside the signed `initData` — the app accepts both launch
+   forms. To disable: `setWebhook` with an empty `url`, or unset the secret
+   (the route then answers 503 and Telegram stops retrying after its own
+   limit).
 5. From the **second, non-Founder** Telegram account, open the bot and launch
    the Mini App once. Use the **mobile or desktop Telegram app**: Telegram Web
    embeds the Mini App in a third-party iframe where browsers may block the

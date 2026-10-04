@@ -5,9 +5,11 @@ import {
   HttpError,
   requireMutation,
   requireSession,
+  requireUuid,
 } from "@/src/server/auth/guards";
 import { projects, proofs, researchJobs } from "@/src/server/db/schema";
 import { privateBetaOpen } from "@/src/server/services/private-beta";
+import { consumeResearchIntake } from "@/src/server/services/research-intake";
 import { startOwnerManualAlphaResearch } from "@/src/server/services/start-owner-alpha-research";
 import { startPrivateBetaResearch } from "@/src/server/services/start-private-beta-research";
 import { startResearch } from "@/src/server/services/start-research";
@@ -77,10 +79,18 @@ export async function POST(req: Request): Promise<Response> {
     const body = (await req.json().catch(() => ({}))) as {
       interpretationId?: string;
       idempotencyKey?: string;
+      intakeId?: string;
     };
     if (!body.interpretationId || !body.idempotencyKey) {
       throw new HttpError(400, "BAD_REQUEST");
     }
+    // RESEARCH INTAKE (Telegram forward → ATLAS). Optional and advisory on
+    // the way in: it changes nothing about admission below. Only after a
+    // job exists for this caller is the intake marked CONSUMED, by owner
+    // and only while OPEN — so a refusal above leaves it usable for a
+    // retry, and a replay or a foreign id can never consume anything.
+    const intakeId = typeof body.intakeId === "string" ? body.intakeId : null;
+    if (intakeId !== null) requireUuid(intakeId);
     const config = await getProductConfig();
     // Owner Manual Alpha App Test (D-123) — ADMIN-only additive admission
     // path, reachable ONLY while the public path is closed
@@ -110,6 +120,9 @@ export async function POST(req: Request): Promise<Response> {
         : privateBetaOpen(config) && session.role !== "ADMIN"
           ? await startPrivateBetaResearch(db, await getBoss(), config, input)
           : await startResearch(db, await getBoss(), config, input);
+    if (intakeId !== null) {
+      await consumeResearchIntake(db, { id: intakeId, userId: session.userId, researchJobId: job.id });
+    }
     return Response.json(
       {
         job: {

@@ -25,9 +25,15 @@ export interface MeResponse {
 // из request) делят ОДНУ аутентификацию. Иначе ротация сессий на сервере
 // обесценивает cookie/CSRF первого запроса вторым — гонка, ловившаяся
 // e2e как «Skip зацикливает onboarding».
-let authInFlight: Promise<{ onboardingCompleted: boolean } | null> | null = null;
+let authInFlight: Promise<AuthView | null> | null = null;
 
-export function authenticate(): Promise<{ onboardingCompleted: boolean } | null> {
+export interface AuthView {
+  onboardingCompleted: boolean;
+  // Opaque Mini App launch parameter from the signed initData, or null.
+  startParam: string | null;
+}
+
+export function authenticate(): Promise<AuthView | null> {
   if (authInFlight) return authInFlight;
   authInFlight = (async () => {
     try {
@@ -44,9 +50,10 @@ export function authenticate(): Promise<{ onboardingCompleted: boolean } | null>
       const data = (await res.json()) as {
         csrfToken: string;
         onboardingCompleted: boolean;
+        startParam?: string | null;
       };
       csrfToken = data.csrfToken;
-      return { onboardingCompleted: data.onboardingCompleted };
+      return { onboardingCompleted: data.onboardingCompleted, startParam: data.startParam ?? null };
     } finally {
       authInFlight = null;
     }
@@ -120,6 +127,19 @@ export interface GateView {
 export interface InterpretResult {
   interpretation: InterpretationView;
   gates: GateView;
+}
+
+// A claim handed in through an entry surface (today: a message forwarded
+// to the Telegram bot), as the server lets its owner see it. Text is
+// present only while the intake is OPEN.
+export interface ResearchIntakeView {
+  intakeId: string;
+  status: "OPEN" | "CONSUMED";
+  rawText: string | null;
+  detectedProject: { slug: string; name: string; availableInPrivateBeta: boolean | null } | null;
+  sourceLabel: string | null;
+  sourceUrl: string | null;
+  researchJobId: string | null;
 }
 
 // Код ошибки сервера — отдельно от сетевого сбоя: UI обязан различать
@@ -456,11 +476,15 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ answer }),
     }),
-  startResearch: (interpretationId: string, idempotencyKey: string) =>
+  // `intakeId` names the research intake (a forwarded claim) this question
+  // came from, so the server can mark it consumed once a job exists. It
+  // grants nothing: admission is decided exactly as without it.
+  startResearch: (interpretationId: string, idempotencyKey: string, intakeId?: string) =>
     requestChecked<{ job: { id: string; state: string } }>("/api/research-jobs", {
       method: "POST",
-      body: JSON.stringify({ interpretationId, idempotencyKey }),
+      body: JSON.stringify(intakeId ? { interpretationId, idempotencyKey, intakeId } : { interpretationId, idempotencyKey }),
     }),
+  getIntake: (id: string) => requestChecked<{ intake: ResearchIntakeView }>(`/api/intakes/${id}`, { method: "GET" }),
   setLanguage: (language: "RU" | "EN") =>
     request<{ language: string }>("/api/me/language", {
       method: "PATCH",

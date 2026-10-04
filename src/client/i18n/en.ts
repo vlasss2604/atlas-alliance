@@ -57,6 +57,13 @@ export const en = {
     clarifyStale: "This question is already resolved. Ask a new one to continue.",
     checkOnProject: "Check this on a specific project",
     checkOnProjectDraft: "Check this on ",
+    // A claim that arrived through the Telegram bot (research intake).
+    intakeFrom: "From a Telegram message",
+    intakeViewOriginal: "View original",
+    intakeEditable: "Review or edit the question before starting.",
+    intakeUnavailable: "That forwarded message is no longer available. Ask your question here.",
+    intakeConsumed: "Research from that message has already been started. Ask a new question here.",
+    intakeProjectNotAvailable: "{project} is not currently available in the private beta.",
   },
   research: {
     title: "Research",

@@ -611,7 +611,13 @@ describe("D-138 §6 — boundaries (items 21, 26, 27, 28)", () => {
       }
     }
     // And Start Proof specifically still sends exactly what it always sent.
-    expect(api).toContain("JSON.stringify({ interpretationId, idempotencyKey })");
+    // D-168 added the one approved optional field: `intakeId`, a pointer to
+    // a forwarded claim that the server marks consumed after a job exists.
+    // It is not a phase field, decides nothing about admission, and is
+    // absent from the body when there is no intake.
+    expect(api).toContain(
+      "JSON.stringify(intakeId ? { interpretationId, idempotencyKey, intakeId } : { interpretationId, idempotencyKey })",
+    );
     // The service decides from configuration, which the client never sees.
     const service = await readFile("src/server/services/start-owner-alpha-research.ts", "utf-8");
     expect(service).toContain("config.phased_research_enabled");
