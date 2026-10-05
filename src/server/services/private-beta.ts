@@ -1,9 +1,10 @@
 import { and, eq, gt, inArray, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { productConfig, researchJobs, subscriptions, users } from "../db/schema";
+import { productConfig, proofs, researchJobs, subscriptions, users } from "../db/schema";
 import type { ProductConfig } from "../config/product";
 import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../engine/live-executor";
+import { PROOF_BEARING_TERMINAL_STATES } from "../jobs/research-jobs";
 
 // PRIVATE BETA ACCESS (Founder-approved, D-167).
 //
@@ -66,14 +67,35 @@ export function privateBetaProjectAllowed(config: Pick<ProductConfig, "private_b
   return config.private_beta_project_slugs.includes(slug) && INTERNAL_ALPHA_LIVE_PROJECT_SLUGS.has(slug);
 }
 
-// Every Research this user was ever admitted for under private beta —
-// whatever became of it. The cap bounds spend, and a failed or cancelled
-// run was still admitted and still spent.
+// WHAT COUNTS AGAINST THE BETA ALLOWANCE (D-169). A beta job occupies a
+// slot while it is still active (QUEUED, RUNNING, AWAITING_CLARIFICATION —
+// exactly the states the one-active-job index guards). Once finished, it
+// keeps the slot permanently when:
+//   - it ended in a proof-bearing terminal state WITH a proofs row (the
+//     same rule and the same states as the DEMO ledger), or
+//   - the user cancelled it after execution had started. Paid work may
+//     already have run, so cancelling must never hand the slot back:
+//     otherwise start → cancel → start again would consume unbounded beta
+//     spend. "Started" is `started_at`, stamped on the first entry into
+//     RUNNING and never cleared; the state machine allows CANCELLED without
+//     RUNNING only straight from QUEUED, where `started_at` is still NULL.
+// A FAILED job, a job cancelled while still QUEUED, and a terminal with no
+// Proof hand the slot back: a system failure never punishes the user. No
+// ledger row is added: the job, its start stamp and its Proof are the record.
 export async function countPrivateBetaJobs(db: Database | Transaction, userId: string): Promise<number> {
+  const proofBearing = sql.join([...PROOF_BEARING_TERMINAL_STATES].map((s) => sql`${s}`), sql`, `);
   const [{ n }] = (
     await db.execute(sql`
-      SELECT count(*)::int AS n FROM ${researchJobs}
-      WHERE user_id = ${userId} AND origin = 'PRIVATE_BETA'
+      SELECT count(*)::int AS n FROM ${researchJobs} j
+      WHERE j.user_id = ${userId} AND j.origin = 'PRIVATE_BETA'
+        AND (
+          j.state IN ('QUEUED', 'RUNNING', 'AWAITING_CLARIFICATION')
+          OR (
+            j.state IN (${proofBearing})
+            AND EXISTS (SELECT 1 FROM ${proofs} p WHERE p.research_job_id = j.id)
+          )
+          OR (j.state = 'CANCELLED' AND j.started_at IS NOT NULL)
+        )
     `)
   ).rows as [{ n: number }];
   return n;

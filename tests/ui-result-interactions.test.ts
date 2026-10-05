@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import type { ResearchJobListItem } from "../src/client/api";
 import { projectHue, projectInitials, ProjectAvatar } from "../src/client/components/project-avatar";
 import { RecentProofCard } from "../src/client/components/recent-proof-card";
+import { en } from "../src/client/i18n/en";
 import { EvidenceCardView, FindingRow, ResearchResult } from "../src/client/components/research-result";
 import { buildResultSurface, tableRows } from "../src/client/result-surface";
 import { resultFixture } from "../src/client/result-surface-fixtures";
@@ -256,8 +257,12 @@ describe("Home — previously researched projects", () => {
     const page = readFileSync("app/(app)/home/page.tsx", "utf-8");
     expect(page).not.toContain("ATLAS checks what a token actually earns");
     expect(page).toContain('data-testid="recent-loading"');
-    expect(page).toContain("Nothing researched yet");
-    expect(page).toContain("Previously researched");
+    // D-169: the history surface reads the dictionaries; the English copy
+    // is pinned on the dictionary, the page on the keys it renders.
+    expect(page).toContain("dict.home.recentEmpty");
+    expect(page).toContain("dict.home.previouslyResearched");
+    expect(en.home.recentEmpty).toContain("Nothing researched yet");
+    expect(en.home.previouslyResearched).toBe("Previously researched");
     expect(page).not.toContain("Recent research");
   });
 });

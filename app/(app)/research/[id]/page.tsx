@@ -28,7 +28,7 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
-  const { refresh } = useApp();
+  const { refresh, me } = useApp();
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   // Re-read the whole detail. Used when the job reaches a terminal state,
@@ -159,7 +159,7 @@ export default function ResearchDetailPage() {
             </p>
           </section>
           <div data-testid="progress-slot-live">
-            <ResearchProgress job={job} />
+            <ResearchProgress job={job} memoryEnabled={me?.memoryEnabled ?? false} />
           </div>
         </>
       )}

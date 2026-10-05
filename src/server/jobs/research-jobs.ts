@@ -316,7 +316,9 @@ export async function resolveDemoReservation(
 // and the projection store already treats both as states that carry a
 // result. FAILED, CANCELLED and every other technical terminal never
 // consume, and neither does a completion that produced no Proof at all.
-const PROOF_BEARING_TERMINAL_STATES: ReadonlySet<string> = new Set(["SUCCEEDED", "BUDGET_LIMIT_REACHED"]);
+// Exported so every allowance that is spent "only by a durable Proof" reads
+// the same two states (DEMO here, private beta in services/private-beta.ts).
+export const PROOF_BEARING_TERMINAL_STATES: ReadonlySet<string> = new Set(["SUCCEEDED", "BUDGET_LIMIT_REACHED"]);
 
 export async function demoTerminalOutcome(
   dbOrTx: Database | Transaction,

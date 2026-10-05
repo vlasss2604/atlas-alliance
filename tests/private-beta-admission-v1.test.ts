@@ -24,6 +24,7 @@ import {
   interpretations,
   productConfig,
   projects,
+  proofs,
   researchAttempts,
   researchJobs,
   subscriptions,
@@ -200,9 +201,18 @@ async function queued(queue: string, jobId: string): Promise<number> {
   const rows = await ctx.db.execute(sql`SELECT count(*)::int AS n FROM pgboss.job WHERE name = ${queue} AND data->>'jobId' = ${jobId}`);
   return (rows.rows[0] as { n: number }).n;
 }
-// Ends an admitted job so the user may be admitted again; the job stays an
-// admitted PRIVATE_BETA job for the cap.
+// Ends an admitted job while it is still QUEUED (execution never started),
+// so the user may be admitted again. Under D-169 such a cancellation hands
+// the slot back; a cancellation after execution started does not.
 const finish = (jobId: string) => transitionJobState(ctx.db, jobId, "CANCELLED", "test: release the active slot");
+// A Research that ended with a durable Proof: the one outcome that keeps a
+// beta slot (D-169), exactly as a DEMO reservation is CONSUMED.
+async function finishWithProof(jobId: string, userId: string): Promise<void> {
+  const [job] = await ctx.db.select({ projectId: researchJobs.projectId, topicId: researchJobs.topicId }).from(researchJobs).where(eq(researchJobs.id, jobId));
+  await transitionJobState(ctx.db, jobId, "RUNNING", "test: pick up");
+  await transitionJobState(ctx.db, jobId, "SUCCEEDED", "test: finished with a Proof");
+  await ctx.db.insert(proofs).values({ researchJobId: jobId, ownerUserId: userId, projectId: job.projectId!, topicId: job.topicId, verdict: "SUPPORTED", confidence: 70, layers: {} });
+}
 
 // Provider seams the REAL executor resolves. They record every call.
 function recordingProviders() {
@@ -379,13 +389,13 @@ describe("2. admission: every refusal happens before a job exists", () => {
     expect(await jobsOf(c.userId)).toHaveLength(0);
   });
 
-  it("the 5-Research total cap is enforced, counts every admitted job, and is a server-owned number", async () => {
+  it("the 5-Research total cap is enforced, counts only Research that ended with a durable Proof, and is a server-owned number (D-169)", async () => {
     const config = await openBeta();
     const c = await betaUser();
     for (let i = 0; i < 5; i += 1) {
       const { job, created } = await start(config, c.userId, await interpretationFor(c.userId));
       expect(created).toBe(true);
-      await finish(job.id);
+      await finishWithProof(job.id, c.userId);
     }
     expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(5);
     expect(await codeOf(start(config, c.userId, await interpretationFor(c.userId)))).toBe("BETA_RESEARCH_LIMIT_REACHED");
@@ -396,6 +406,80 @@ describe("2. admission: every refusal happens before a job exists", () => {
     expect(await codeOf(start(raised, c.userId, await interpretationFor(c.userId)))).toBe("ADMITTED");
     const other = await betaUser();
     expect(await countPrivateBetaJobs(ctx.db, other.userId)).toBe(0);
+  });
+
+  it("a cancelled or failed beta Research, or a terminal with no Proof, hands its slot back; an active one occupies it (D-169)", async () => {
+    const config = await openBeta({ researchLimit: 2 });
+    const c = await betaUser();
+    // Cancelled before any Proof: the slot is not spent.
+    const first = await start(config, c.userId, await interpretationFor(c.userId));
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(1); // active: occupies
+    await finish(first.job.id);
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(0);
+    // Failed: the slot is not spent.
+    const second = await start(config, c.userId, await interpretationFor(c.userId));
+    await transitionJobState(ctx.db, second.job.id, "RUNNING", "test: pick up");
+    await transitionJobState(ctx.db, second.job.id, "FAILED", "test: provider failure");
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(0);
+    // SUCCEEDED without a proofs row (nothing durable was produced): not spent.
+    const third = await start(config, c.userId, await interpretationFor(c.userId));
+    await transitionJobState(ctx.db, third.job.id, "RUNNING", "test: pick up");
+    await transitionJobState(ctx.db, third.job.id, "SUCCEEDED", "test: no proof persisted");
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(0);
+    // Two durable Proofs spend the whole allowance of 2; the three earlier
+    // runs never counted. The user still has five job rows.
+    for (let i = 0; i < 2; i += 1) {
+      const { job } = await start(config, c.userId, await interpretationFor(c.userId));
+      await finishWithProof(job.id, c.userId);
+    }
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(2);
+    expect(await jobsOf(c.userId)).toHaveLength(5);
+    expect(await codeOf(start(config, c.userId, await interpretationFor(c.userId)))).toBe("BETA_RESEARCH_LIMIT_REACHED");
+  });
+
+  it("a Research cancelled after execution started keeps its slot permanently, through the user's own cancel route; cancelled while still QUEUED it does not (D-169)", async () => {
+    const config = await openBeta({ researchLimit: 2 });
+    const c = await betaUser();
+    const cancelVia = async (jobId: string) =>
+      cancelPOST(post(`/api/research-jobs/${jobId}/cancel`, c, {}), { params: Promise.resolve({ id: jobId }) });
+
+    // Cancelled by the user while still QUEUED: nothing ran, the slot returns.
+    const queuedOnly = await start(config, c.userId, await interpretationFor(c.userId));
+    expect((await cancelVia(queuedOnly.job.id)).status).toBe(200);
+    expect((await ctx.db.select({ startedAt: researchJobs.startedAt }).from(researchJobs).where(eq(researchJobs.id, queuedOnly.job.id)))[0].startedAt).toBeNull();
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(0);
+
+    // Cancelled by the user after execution started: paid work may have run,
+    // so the slot stays spent even though no Proof exists.
+    const running = await start(config, c.userId, await interpretationFor(c.userId));
+    await transitionJobState(ctx.db, running.job.id, "RUNNING", "test: pick up");
+    expect((await cancelVia(running.job.id)).status).toBe(200);
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(1);
+
+    // Cancelled while AWAITING_CLARIFICATION: that state is reachable only
+    // through RUNNING, so execution started and the slot stays spent too.
+    const clarifying = await start(config, c.userId, await interpretationFor(c.userId));
+    await transitionJobState(ctx.db, clarifying.job.id, "RUNNING", "test: pick up");
+    await transitionJobState(ctx.db, clarifying.job.id, "AWAITING_CLARIFICATION", "test: needs the user");
+    expect((await cancelVia(clarifying.job.id)).status).toBe(200);
+    expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(2);
+
+    // Start → cancel cannot be repeated to consume unbounded beta spend:
+    // the allowance of 2 is now exhausted without a single Proof.
+    expect(await codeOf(start(config, c.userId, await interpretationFor(c.userId)))).toBe("BETA_RESEARCH_LIMIT_REACHED");
+    expect(await jobsOf(c.userId)).toHaveLength(3);
+  });
+
+  it("a FAILED Research returns its slot even after execution started: a system failure never punishes the user (D-169)", async () => {
+    const config = await openBeta({ researchLimit: 1 });
+    const c = await betaUser();
+    for (let i = 0; i < 3; i += 1) {
+      const { job } = await start(config, c.userId, await interpretationFor(c.userId));
+      await transitionJobState(ctx.db, job.id, "RUNNING", "test: pick up");
+      await transitionJobState(ctx.db, job.id, "FAILED", "test: provider failure");
+      expect(await countPrivateBetaJobs(ctx.db, c.userId)).toBe(0);
+    }
+    expect(await codeOf(start(config, c.userId, await interpretationFor(c.userId)))).toBe("ADMITTED");
   });
 
   it("one active job per user: a second concurrent Research is refused and nothing more is enqueued", async () => {
@@ -746,7 +830,7 @@ describe("7. the Ask preview is the admission decision, not a second opinion", (
     cases.push({ name: "no grant", user: await makeAuthedClient("USER"), slug: BETA_PROJECT, expected: "BETA_ACCESS_REQUIRED" });
     cases.push({ name: "project outside the list", user: await betaUser(), slug: "aave", expected: "BETA_PROJECT_NOT_AVAILABLE" });
     const capped = await betaUser();
-    for (let i = 0; i < 5; i += 1) await finish((await start(config, capped.userId, await interpretationFor(capped.userId))).job.id);
+    for (let i = 0; i < 5; i += 1) await finishWithProof((await start(config, capped.userId, await interpretationFor(capped.userId))).job.id, capped.userId);
     cases.push({ name: "cap reached", user: capped, slug: BETA_PROJECT, expected: "BETA_RESEARCH_LIMIT_REACHED" });
     const busy = await betaUser();
     await start(config, busy.userId, await interpretationFor(busy.userId));

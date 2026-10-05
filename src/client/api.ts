@@ -18,6 +18,8 @@ export interface MeResponse {
     priceStars: number;
   };
   unreadCount: number;
+  // Research Memory is consulted during a run only when this is true.
+  memoryEnabled: boolean;
   csrfToken: string;
 }
 

@@ -11,11 +11,11 @@ import { ProjectAvatar } from "./project-avatar";
 // because a list must be scannable. Everything shown is a value the
 // server sent. A job with no Proof is labelled by its live stage or
 // lifecycle state, never given a verdict to look done.
-export function RecentProofCard({ job }: { job: ResearchJobListItem }) {
+export function RecentProofCard({ job, memoryEnabled = false }: { job: ResearchJobListItem; memoryEnabled?: boolean }) {
   const terminal = isTerminal(job.state);
   const title = job.projectName ?? job.projectTicker ?? "Unresolved project";
   const outcome = jobOutcome(job);
-  const progress = deriveProgress({ state: job.state, progressStage: job.progressStage, acquisitionPhase: job.acquisitionPhase });
+  const progress = deriveProgress({ state: job.state, progressStage: job.progressStage, acquisitionPhase: job.acquisitionPhase }, { memoryEnabled });
   const checked = job.finishedAt ? retrievedOn(job.finishedAt) : null;
   return (
     <li className="list-none">

@@ -9,8 +9,8 @@ import { deriveProgress, type ProgressInput } from "../research-model";
 // stage counter before acquisition begins. That is the whole reason this
 // component cannot show "checking previous research" for a job that is
 // already fetching or extracting.
-export function ResearchProgress({ job }: { job: ProgressInput }) {
-  const progress = deriveProgress(job);
+export function ResearchProgress({ job, memoryEnabled = false }: { job: ProgressInput; memoryEnabled?: boolean }) {
+  const progress = deriveProgress(job, { memoryEnabled });
 
   return (
     <section className="panel p-5 sm:p-6" data-testid="research-progress">

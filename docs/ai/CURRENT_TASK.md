@@ -2,26 +2,24 @@
 
 > Overwrite this file each round. Never append.
 
-## TELEGRAM FORWARD → RESEARCH INTAKE V1 — IMPLEMENTED OFFLINE, NOT COMMITTED
+## RESEARCH LIBRARY PRE-BETA HARDENING — ACCEPTED, COMMITTED, NOT PUSHED
 
-Founder-approved 2026-10-04 (D-168). LIVE CALLS MADE BY THIS TASK: 0.
-Migration 0064 applied ONLY to the isolated test database by the suite.
-Webhook not registered. Nothing pushed.
+Founder-approved 2026-10-04 (D-169). LIVE CALLS MADE BY THIS TASK: 0.
+No migration. atlas_dev untouched (0064 applied earlier the same day).
 
-Done on this tree: webhook route + Telegram adapter, intake service, catalog
-project detection, `research_intakes` schema/migration, owner read route,
-launch handoff (button URL and signed `start_param`), Ask prefill, consume
-after job creation (owner + OPEN + unexpired), env example and runbook §8/4a,
-`tests/telegram-forward-intake-v1.test.ts`.
+Done on this tree: beta allowance spent by a durable Proof or by a
+cancel after execution started (`countPrivateBetaJobs`, Founder rule
+2026-10-05); FAILED and a cancel while QUEUED return the slot; Research
+Library naming and the keep-note in both dictionaries, hard-coded English removed from Home and the library;
+HTTP-level read-access tests after grant expiry or revocation; the
+progress rail's Memory label gated on `memoryEnabled` from `/api/me`;
+deletion copy describing the real cascade; D-169 recorded.
 
 Next steps, each needing Founder approval:
-- commit on `claude/phase-5-research-memory`;
-- before `setWebhook`: verify against the current Bot API the shapes the
-  tests pin (`forward_origin` types, `secret_token` header, `web_app`
-  inline button with a query string, `start_param` inside signed initData);
-- apply 0064 to atlas_dev / the hosted DB (D-167 items still pending too);
-- set `TELEGRAM_WEBHOOK_SECRET`, restart web, register the webhook once
-  from the Founder's machine (runbook §8 4a), then one forward from the
-  second account as the first live check.
+- push `claude/phase-5-research-memory`;
+- the Telegram webhook steps recorded under D-168 (Bot API verification,
+  `TELEGRAM_WEBHOOK_SECRET`, one manual `setWebhook`);
+- deployment topology decision (one server abroad is the zero-change
+  option; a RU data plane needs the Interpreter-as-job change).
 
 STOP here until the Founder reviews.

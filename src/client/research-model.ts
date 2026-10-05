@@ -73,6 +73,21 @@ export const RESEARCH_STAGES = [
 
 export type ResearchStageKey = (typeof RESEARCH_STAGES)[number]["key"];
 
+// WHEN MEMORY IS OFF, THE STAGE IS PLANNING, NOT RECALL. The engine's
+// stage-2 step still runs (it plans the job) but consults no Research
+// Memory while `memory_enabled` is false, so the rail must not say it
+// does. The default is the honest direction: unless the app has been told
+// Memory is on, the label never claims it (D-169).
+export const MEMORY_NOT_CONSULTED_LABEL = "Planning the research";
+
+export interface ProgressOptions {
+  memoryEnabled?: boolean;
+}
+
+function stageLabel(stage: (typeof RESEARCH_STAGES)[number], opts: ProgressOptions | undefined): string {
+  return stage.key === "MEMORY" && opts?.memoryEnabled !== true ? MEMORY_NOT_CONSULTED_LABEL : stage.label;
+}
+
 export interface ProgressInput {
   state: JobState;
   // The stage counter. It only ever reaches the memory step for an acquiring
@@ -112,10 +127,10 @@ const PROGRESS_STAGE_INDEX = [0, 0, 1, 2, 4, 5];
 // So whenever the engine has recorded an acquisition phase, that phase is the
 // answer. The counter is consulted only before acquisition begins, and a
 // terminal job ignores both: it is finished, and its last phase is history.
-export function deriveProgress(job: ProgressInput): ProgressView {
+export function deriveProgress(job: ProgressInput, opts?: ProgressOptions): ProgressView {
   if (isTerminal(job.state)) {
     return {
-      stages: RESEARCH_STAGES.map((s) => ({ ...s, state: "DONE" as const })),
+      stages: RESEARCH_STAGES.map((s) => ({ ...s, label: stageLabel(s, opts), state: "DONE" as const })),
       activeIndex: RESEARCH_STAGES.length - 1,
       source: "TERMINAL",
       running: false,
@@ -136,6 +151,7 @@ export function deriveProgress(job: ProgressInput): ProgressView {
   return {
     stages: RESEARCH_STAGES.map((s, i) => ({
       ...s,
+      label: stageLabel(s, opts),
       state: i < activeIndex ? "DONE" : i === activeIndex ? "ACTIVE" : "PENDING",
     })),
     activeIndex,

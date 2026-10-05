@@ -13,6 +13,9 @@ export const en = {
       `DEMO research used: ${used} of ${limit}`,
     coreActive: "ARI • CORE active",
     cta: "What do you want to understand?",
+    previouslyResearched: "Previously researched",
+    viewAll: "View all",
+    recentEmpty: "Nothing researched yet — ask a question above and the project will appear here.",
   },
   ask: {
     title: "What do you want to understand?",
@@ -66,7 +69,14 @@ export const en = {
     intakeProjectNotAvailable: "{project} is not currently available in the private beta.",
   },
   research: {
-    title: "Research",
+    // THE RESEARCH LIBRARY (D-169): finished Research belongs to the user
+    // and reopening it is a pure read — never another Research.
+    title: "Research Library",
+    subtitle: "Everything ATLAS has verified for you, grouped by project.",
+    keepNote: "Your completed Research stays here. Reopening it never uses another Research.",
+    loading: "Loading…",
+    inProgress: "In progress",
+    projectsResearched: "Projects researched",
     empty: "No research yet. Ask ARI your first question.",
     // Human-readable состояния: предложены планом Фазы 3 §6; финальное
     // утверждение copy — за владельцем до public release.
@@ -149,7 +159,10 @@ export const en = {
     privacyNote: "Your Proofs are private by default.",
     help: "Help",
     deleteAccount: "Delete account",
-    deleteConfirm1: "Delete your account? Your research history will be removed.",
+    // Describes what the deletion does today: the account and everything
+    // owned by it go; shared sources and project-level Research Memory are
+    // not personal records and stay.
+    deleteConfirm1: "Delete your account? Your Research and history will be removed. Shared sources and project-level Research Memory are not personal and remain.",
     deleteConfirm2: "This cannot be undone. Confirm deletion?",
     deleted: "Account deleted.",
   },

@@ -43,6 +43,34 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
+## THE RESEARCH LIBRARY: REOPENING IS A READ, AN ALLOWANCE IS SPENT ONLY BY A PROOF (D-169)
+
+- **Beta allowance.** `countPrivateBetaJobs` counts a PRIVATE_BETA job only
+  while it is active (QUEUED, RUNNING, AWAITING_CLARIFICATION) or when it
+  ended SUCCEEDED / BUDGET_LIMIT_REACHED with a `proofs` row
+  (`PROOF_BEARING_TERMINAL_STATES`, exported from `jobs/research-jobs.ts`
+  and read by both the DEMO ledger and this query), or when it was
+  CANCELLED after execution started (`started_at` set — stamped on first
+  entry to RUNNING, never cleared). FAILED, a cancel while still QUEUED and
+  a terminal without a Proof hand the slot back. No new table or schema.
+- **Library surface.** `dict.research.title` is "Research Library" /
+  "Библиотека исследований"; the nav item stays "Research". The list and
+  Home history headings, empty states and loading text come from the
+  dictionaries; `dict.research.keepNote` states that finished Research
+  stays and reopening never uses another Research.
+- **Reads after expiry.** Every history read (list, detail, snapshot,
+  audit GET) uses only the session and the owner predicate; none consults
+  entitlement. Pinned through HTTP in
+  `tests/research-library-read-access-v1.test.ts` with a fetch guard and a
+  before/after ledger (jobs, reservations, beta count, queue, audits).
+- **Memory label.** `/api/me` carries `memoryEnabled`; `deriveProgress`
+  labels the second stage "Planning the research" unless told Memory is
+  on. Memory itself: unchanged, `memory_enabled=false`.
+- **No "research again" or refresh action exists.** Opening history is a
+  pure read.
+- **Deletion copy** describes today's cascade: the account's own Research
+  goes; shared sources and project-level Memory remain.
+
 ## A FORWARDED TELEGRAM MESSAGE BECOMES ONE INTAKE, NEVER A RESEARCH (D-168)
 
 The bot is an entry surface. A message forwarded (or typed) to it in a

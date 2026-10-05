@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 
 import { api, type ResearchJobListItem } from "@/src/client/api";
+import { useApp } from "@/src/client/app-context";
 import { AtlasMark } from "@/src/client/components/atlas-header";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
@@ -19,6 +20,7 @@ import { groupResearchRuns } from "@/src/client/research-model";
 // server; no verdict is invented for a job that has none.
 
 export default function HomePage() {
+  const { dict, me } = useApp();
   const [jobs, setJobs] = useState<ResearchJobListItem[] | null>(null);
 
   useEffect(() => {
@@ -51,9 +53,9 @@ export default function HomePage() {
 
       <section data-testid="recent-research">
         <div className="flex items-baseline justify-between px-1">
-          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Previously researched</h2>
+          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.home.previouslyResearched}</h2>
           <Link href="/research" className="text-[0.92rem] font-medium text-[var(--atlas-cyan-strong)] hover:underline">
-            View all
+            {dict.home.viewAll}
           </Link>
         </div>
         {jobs === null ? (
@@ -69,13 +71,13 @@ export default function HomePage() {
             ))}
           </ul>
         ) : recent.length === 0 ? (
-          <p className="mt-3 px-1 text-[0.98rem] text-[var(--atlas-text-dim)]">
-            Nothing researched yet — ask a question above and the project will appear here.
+          <p className="mt-3 px-1 text-[0.98rem] text-[var(--atlas-text-dim)]" data-testid="recent-empty">
+            {dict.home.recentEmpty}
           </p>
         ) : (
           <ul className="mt-2 flex flex-col">
             {recent.map((job) => (
-              <RecentProofCard key={job.id} job={job} />
+              <RecentProofCard key={job.id} job={job} memoryEnabled={me?.memoryEnabled ?? false} />
             ))}
           </ul>
         )}

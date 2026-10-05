@@ -45,6 +45,9 @@ export async function GET(req: Request): Promise<Response> {
         priceStars: config.ari_core_price_stars,
       },
       unreadCount: unread,
+      // Whether Research Memory is consulted at all in this deployment, so
+      // the progress rail never claims a step that does not happen (D-169).
+      memoryEnabled: config.memory_enabled,
       csrfToken: deriveCsrfToken(session.tokenHash, getEnv("CSRF_SECRET")),
     });
   } catch (e) {
