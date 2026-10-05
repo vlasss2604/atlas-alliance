@@ -337,7 +337,16 @@ describe("Phase 2 DoD", () => {
     const body = (await (await projectsGET(apiRequest("/api/projects", "GET", client))).json()) as {
       projects: { slug: string; researchable: boolean }[];
     };
-    expect(body.projects.length).toBe(4);
+    // The roster is exactly the ACTIVE_CORE catalog in the DB — compared as
+    // sorted slug lists, so a legitimate catalog addition never breaks this
+    // test, while a hard-coded or incomplete roster still does.
+    const activeInDb = (
+      await ctx.db.select({ slug: projects.slug }).from(projects).where(eq(projects.status, "ACTIVE_CORE"))
+    )
+      .map((p) => p.slug)
+      .sort();
+    expect(activeInDb.length).toBeGreaterThan(0);
+    expect(body.projects.map((p) => p.slug).sort()).toEqual(activeInDb);
     // Scope != Entitlement: каталог шире demo config. raydium в scope, но
     // не в demo_project_slugs — значит researchable=false, и researchable
     // определяется именно конфигом, а не фактом присутствия в каталоге.
