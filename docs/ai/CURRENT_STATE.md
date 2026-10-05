@@ -73,6 +73,11 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
 
 ## A FORWARDED TELEGRAM MESSAGE BECOMES ONE INTAKE, NEVER A RESEARCH (D-168)
 
+**Status: ACCEPTED — OFFLINE VERIFIED (2026-10-05), live NOT verified.**
+Code `8e42aa4`; intake suite 38/38 on the tree after D-169; typecheck and
+lint clean. Live webhook and Mini App handoff await public HTTPS
+deployment (steps in the last bullet below).
+
 The bot is an entry surface. A message forwarded (or typed) to it in a
 private chat becomes one bounded `research_intakes` row owned by the
 canonical user; nothing else is created or spent. Research starts only from
@@ -108,10 +113,13 @@ the Ask screen through the unchanged canonical path.
   leaves it OPEN.
 - **Not in V1:** aggregation, monitoring, X API, Discord, a second engine.
   A bare X URL is carried as text and never fetched.
-- **Not applied anywhere but the test DB:** migration 0064. Webhook not
-  registered; Bot API field shapes (`forward_origin`, `secret_token`,
+- **Migration 0064:** applied to the test DB and to atlas_dev; NOT applied
+  to production. Webhook not registered; Bot API field shapes (`forward_origin`, `secret_token`,
   `web_app` URL with query, `start_param` in initData) are pinned by tests
-  and the runbook says to verify them before `setWebhook`.
+  and the runbook says to verify them before `setWebhook`. Pending live
+  steps: verify those shapes, set `TELEGRAM_WEBHOOK_SECRET`, register the
+  webhook manually, apply 0064 to production, then one real forward →
+  Verify with ATLAS → Mini App smoke test.
 
 ## AN APPROVED BETA USER RUNS THE REAL RESEARCH WITHOUT ADMIN (D-167)
 

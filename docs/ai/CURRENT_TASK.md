@@ -2,23 +2,24 @@
 
 > Overwrite this file each round. Never append.
 
-## RESEARCH LIBRARY PRE-BETA HARDENING — ACCEPTED, COMMITTED, NOT PUSHED
+## D-168 CLOSURE — ACCEPTED, OFFLINE VERIFIED; LIVE PENDING
 
-Founder-approved 2026-10-04 (D-169). LIVE CALLS MADE BY THIS TASK: 0.
-No migration. atlas_dev untouched (0064 applied earlier the same day).
+Documentation-only round, 2026-10-05. LIVE CALLS MADE BY THIS TASK: 0.
 
-Done on this tree: beta allowance spent by a durable Proof or by a
-cancel after execution started (`countPrivateBetaJobs`, Founder rule
-2026-10-05); FAILED and a cancel while QUEUED return the slot; Research
-Library naming and the keep-note in both dictionaries, hard-coded English removed from Home and the library;
-HTTP-level read-access tests after grant expiry or revocation; the
-progress rail's Memory label gated on `memoryEnabled` from `/api/me`;
-deletion copy describing the real cascade; D-169 recorded.
+D-168 (Telegram/X Research Intake V1, `8e42aa4`) is accepted at the
+code/offline level: intake suite 38/38 on the tree after D-169
+(`4a96b78`), no regression, migration 0064 verified in the test DB,
+typecheck and lint clean. Live webhook and Mini App handoff are NOT
+verified.
 
 Next steps, each needing Founder approval:
 - push `claude/phase-5-research-memory`;
-- the Telegram webhook steps recorded under D-168 (Bot API verification,
-  `TELEGRAM_WEBHOOK_SECRET`, one manual `setWebhook`);
+- after public HTTPS deployment, the D-168 live steps: verify the Bot API
+  field shapes, set `TELEGRAM_WEBHOOK_SECRET`, register the webhook
+  manually, apply 0064 to production, real forward → Verify with ATLAS →
+  Mini App smoke test;
+- maintenance debt: `tests/phase2.test.ts` case 6 still expects 4 catalog
+  projects; the catalog has 12 (fails since before D-168);
 - deployment topology decision (one server abroad is the zero-change
   option; a RU data plane needs the Interpreter-as-job change).
 
