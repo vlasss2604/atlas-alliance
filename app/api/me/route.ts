@@ -9,7 +9,9 @@ import {
 } from "@/src/server/auth/guards";
 import { clearedSessionCookie } from "@/src/server/auth/session";
 import { researchJobs, users } from "@/src/server/db/schema";
+import { feedbackDue } from "@/src/server/services/beta-feedback";
 import { resolveEntitlement } from "@/src/server/services/entitlement";
+import { privateBetaAllowanceFor } from "@/src/server/services/private-beta";
 import { getDb, getProductConfig } from "@/src/server/runtime";
 
 export async function GET(req: Request): Promise<Response> {
@@ -48,6 +50,11 @@ export async function GET(req: Request): Promise<Response> {
       // Whether Research Memory is consulted at all in this deployment, so
       // the progress rail never claims a step that does not happen (D-169).
       memoryEnabled: config.memory_enabled,
+      // D-170: the beta user's own allowance, by the same count admission
+      // uses (D-169 rule), or null when private beta does not admit them.
+      privateBeta: await privateBetaAllowanceFor(db, config, { userId: session.userId, role: user.role }),
+      // D-170: the one-time feedback prompt (second Proof, never answered).
+      feedbackDue: await feedbackDue(db, session.userId),
       csrfToken: deriveCsrfToken(session.tokenHash, getEnv("CSRF_SECRET")),
     });
   } catch (e) {

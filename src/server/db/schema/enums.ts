@@ -156,6 +156,11 @@ export const researchIntakeOrigin = pgEnum("research_intake_origin", ["TELEGRAM_
 // is a timestamp on the row, not a third state, so nothing has to sweep.
 export const researchIntakeStatus = pgEnum("research_intake_status", ["OPEN", "CONSUMED"]);
 
+// D-170 — the one-time private-beta feedback prompt: answered or skipped.
+// Either way it is never asked again.
+export const betaFeedbackStatus = pgEnum("beta_feedback_status", ["SUBMITTED", "DISMISSED"]);
+export const betaFeedbackKeepUsing = pgEnum("beta_feedback_keep_using", ["YES", "NO", "UNSURE"]);
+
 export const researchAcquisitionPhase = pgEnum("research_acquisition_phase", [
   "SEARCHING",
   "FETCHING",

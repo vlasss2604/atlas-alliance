@@ -65,13 +65,17 @@ export default function ProfilePage() {
       <section className="glass px-4 py-3">
         <p className="text-xs text-[var(--atlas-text-dim)]">{dict.profile.level}</p>
         <p className="mt-1 text-sm">
+          {/* A private-beta grant is stored as an ARI_CORE subscription, but
+              the user holds a beta allowance, not CORE (D-170). */}
           {me
-            ? me.entitlement.level === "ARI_CORE"
-              ? "ARI • CORE"
-              : `DEMO · ${dict.home.demoCounter(me.entitlement.demoUsed, me.entitlement.demoLimit)}`
+            ? me.privateBeta
+              ? `${dict.home.betaLabel} · ${dict.home.betaRemaining(me.privateBeta.remaining)}`
+              : me.entitlement.level === "ARI_CORE"
+                ? "ARI • CORE"
+                : `DEMO · ${dict.home.demoCounter(me.entitlement.demoUsed, me.entitlement.demoLimit)}`
             : dict.common.loading}
         </p>
-        {me && me.entitlement.level === "DEMO" && (
+        {me && !me.privateBeta && me.entitlement.level === "DEMO" && (
           <p className="mt-1 text-xs text-[var(--atlas-text-dim)]">
             {dict.profile.priceNote(me.entitlement.priceStars)}
           </p>

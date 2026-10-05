@@ -20,7 +20,7 @@ import { groupResearchRuns } from "@/src/client/research-model";
 // server; no verdict is invented for a job that has none.
 
 export default function HomePage() {
-  const { dict, me } = useApp();
+  const { dict, me, betaAccessFull } = useApp();
   const [jobs, setJobs] = useState<ResearchJobListItem[] | null>(null);
 
   useEffect(() => {
@@ -50,6 +50,21 @@ export default function HomePage() {
       <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-6" data-testid="home-composer">
         <ResearchComposer hero />
       </section>
+
+      {/* PRIVATE BETA ALLOWANCE (D-170) — the server's own count, shown only
+          while private beta is what admits this user. */}
+      {me?.privateBeta && (
+        <p className="-mt-3 px-1 text-center text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="beta-allowance">
+          <span className="font-medium text-[var(--atlas-cyan-strong)]">{dict.home.betaLabel}</span>
+          {" · "}
+          {dict.home.betaRemaining(me.privateBeta.remaining)}
+        </p>
+      )}
+      {!me?.privateBeta && betaAccessFull && (
+        <p className="-mt-3 px-1 text-center text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="beta-access-full">
+          {dict.home.betaAccessFull}
+        </p>
+      )}
 
       <section data-testid="recent-research">
         <div className="flex items-baseline justify-between px-1">

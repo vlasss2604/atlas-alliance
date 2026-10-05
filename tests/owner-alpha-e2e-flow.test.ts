@@ -9,6 +9,7 @@ import { POST as interpretPOST } from "../app/api/interpretations/route";
 import { deriveCsrfToken } from "../src/server/auth/csrf";
 import { createSession } from "../src/server/auth/session";
 import {
+  interpretations,
   productConfig,
   projects,
   researchClaimSupport,
@@ -239,15 +240,23 @@ describe("owner alpha — real product path end to end (no live providers)", () 
     // accidental product-wide opening.
     const user = await makeAuthedClient("USER");
     const interpretRes = await interpretPOST(req("/api/interpretations", user, { question: QUESTION }));
-    const body = (await interpretRes.json()) as {
-      interpretation: { id: string };
-      gates: { research: string };
-    };
-    expect(body.gates.research).toBe("DISABLED");
+    // D-170: refused before the model — no paid call for a question that
+    // cannot lead to Research.
+    expect(interpretRes.status).toBe(403);
+    expect(((await interpretRes.json()) as { error: string }).error).toBe("RESEARCH_DISABLED");
+    const [held] = await ctx.db
+      .insert(interpretations)
+      .values({
+        userId: user.userId,
+        originalQuestion: QUESTION,
+        status: "READY",
+        result: { project_slug: "pump_fun", project_slugs: ["pump_fun"], research_task: "trace revenue to token holders", route: "DEEP_RESEARCH" },
+      })
+      .returning();
 
     const startRes = await jobsPOST(
       req("/api/research-jobs", user, {
-        interpretationId: body.interpretation.id,
+        interpretationId: held.id,
         idempotencyKey: uniq("idem"),
       }),
     );

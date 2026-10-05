@@ -548,7 +548,10 @@ describe("First Real Run Stage 2 acceptance closure — real Interpreter path (M
       const topicId = await activeTopicId();
       const projectSlug = uniq("tao_test");
       const [project] = await ctx.db.insert(projects).values({ slug: projectSlug, name: "TAO", status: "ACTIVE_CORE" }).returning();
-      const userId = await makeUser();
+      // The owner interprets (D-170: an ordinary user cannot cause an
+      // Interpreter call while public research and private beta are off).
+      const [owner] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();
+      const userId = owner.id;
 
       const interpretResult = await createInterpretation(ctx.db, DEFAULT_PRODUCT_CONFIG, {
         userId,

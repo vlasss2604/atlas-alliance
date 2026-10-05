@@ -76,6 +76,12 @@ export interface CreateResearchJobOptions {
   // network the worker happens to sit in — exactly what D-136 exists to
   // prevent. Passing both is a programming error and is refused.
   phased?: boolean;
+  // D-170 — an admission check that must hold at the instant the job row
+  // is written, run INSIDE this transaction after the idempotency replay
+  // and before the INSERT. Throwing refuses: nothing is written. Used by
+  // private beta to take its admission lock and re-count the global
+  // capacity, so concurrent starts cannot pass the cap together.
+  admitInTx?: (tx: Transaction) => Promise<void>;
 }
 
 function pgConstraint(e: unknown): string | undefined {
@@ -133,6 +139,8 @@ export async function createResearchJob(
           throw new DemoQuotaExceededError();
         }
       }
+
+      if (options?.admitInTx) await options.admitInTx(tx);
 
       const [job] = await tx
         .insert(researchJobs)

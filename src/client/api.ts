@@ -20,8 +20,18 @@ export interface MeResponse {
   unreadCount: number;
   // Research Memory is consulted during a run only when this is true.
   memoryEnabled: boolean;
+  // D-170: present only while private beta is what admits this user. The
+  // server's own count (D-169 rule); the client never recomputes it.
+  privateBeta: { used: number; limit: number; remaining: number } | null;
+  // D-170: the one-time feedback prompt is due (second Proof, never asked).
+  feedbackDue: boolean;
   csrfToken: string;
 }
+
+export type FeedbackKeepUsing = "YES" | "NO" | "UNSURE";
+export type BetaFeedbackInput =
+  | { action: "DISMISS" }
+  | { action: "SUBMIT"; useful: string; missing: string; keepUsing: FeedbackKeepUsing; changeNeeded: string };
 
 // Single-flight: конкурентные вызовы (AppProvider + onboarding + retry
 // из request) делят ОДНУ аутентификацию. Иначе ротация сессий на сервере
@@ -122,7 +132,8 @@ export interface GateView {
     | "DEMO_QUOTA_EXHAUSTED"
     | "BETA_ACCESS_REQUIRED"
     | "BETA_PROJECT_NOT_AVAILABLE"
-    | "BETA_RESEARCH_LIMIT_REACHED";
+    | "BETA_RESEARCH_LIMIT_REACHED"
+    | "GLOBAL_BETA_CAPACITY_REACHED";
   demo: { used: number; limit: number } | null;
 }
 
@@ -487,6 +498,18 @@ export const api = {
       body: JSON.stringify(intakeId ? { interpretationId, idempotencyKey, intakeId } : { interpretationId, idempotencyKey }),
     }),
   getIntake: (id: string) => requestChecked<{ intake: ResearchIntakeView }>(`/api/intakes/${id}`, { method: "GET" }),
+  // D-170: the invite comes from the SIGNED Telegram start parameter; the
+  // server grants only the session's own user, never one named here.
+  redeemBetaInvite: (invite: string) =>
+    requestChecked<{ result: "GRANTED" | "ALREADY_GRANTED" }>("/api/private-beta/invite", {
+      method: "POST",
+      body: JSON.stringify({ invite }),
+    }),
+  sendBetaFeedback: (input: BetaFeedbackInput) =>
+    requestChecked<{ recorded: "SUBMITTED" | "DISMISSED" }>("/api/beta-feedback", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
   setLanguage: (language: "RU" | "EN") =>
     request<{ language: string }>("/api/me/language", {
       method: "PATCH",

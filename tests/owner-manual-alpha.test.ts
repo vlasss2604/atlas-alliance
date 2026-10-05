@@ -11,6 +11,7 @@ import { createSession } from "../src/server/auth/session";
 import { en } from "../src/client/i18n/en";
 import { ru } from "../src/client/i18n/ru";
 import {
+  interpretations,
   productConfig,
   projects,
   researchJobs,
@@ -107,7 +108,22 @@ async function readyInterpretation(c: Authed, question: string): Promise<string>
 describe("Owner Manual PUMP App Test (D-123)", () => {
   it("A. normal user + research_enabled=false → still rejected", async () => {
     const c = await makeAuthedClient("USER");
-    const interpretationId = await readyInterpretation(c, "Does Pump.fun revenue reach token holders?");
+    // D-170: the Interpreter itself refuses first — no model call is paid
+    // for a question that cannot lead to Research.
+    const interp = await interpretPOST(req("/api/interpretations", c, { question: "Does Pump.fun revenue reach token holders?" }));
+    expect(interp.status).toBe(403);
+    expect(((await interp.json()) as { error: string }).error).toBe("RESEARCH_DISABLED");
+    // And a READY interpretation the user somehow holds is still refused at start.
+    const [row] = await ctx.db
+      .insert(interpretations)
+      .values({
+        userId: c.userId,
+        originalQuestion: "Does Pump.fun revenue reach token holders?",
+        status: "READY",
+        result: { project_slug: "pump_fun", project_slugs: ["pump_fun"], research_task: "trace revenue to token holders", route: "DEEP_RESEARCH" },
+      })
+      .returning();
+    const interpretationId = row.id;
     const res = await jobsPOST(
       req("/api/research-jobs", c, { interpretationId, idempotencyKey: uniq("idem") }),
     );
@@ -149,8 +165,9 @@ describe("Owner Manual PUMP App Test (D-123)", () => {
       const userRes = await interpretPOST(
         req("/api/interpretations", user, { question: "Does Pump.fun revenue reach token holders?" }),
       );
-      const userBody = (await userRes.json()) as { gates: { research: string } };
-      expect(userBody.gates.research).toBe("DISABLED");
+      // D-170: refused before the model, not merely previewed as DISABLED.
+      expect(userRes.status).toBe(403);
+      expect(((await userRes.json()) as { error: string }).error).toBe("RESEARCH_DISABLED");
     } finally {
       await setConfig("internal_alpha_enabled", false);
     }

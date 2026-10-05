@@ -189,7 +189,11 @@ Leave unset: `MODEL_GATEWAY` (default `anthropic`), `SEARCH_GATEWAY_PROVIDER`
 Product configuration (`product_config`) arrives with the database copy and
 is not an environment variable: `private_beta_enabled=true`,
 `private_beta_project_slugs=["raydium","pump_fun","lido"]`,
-`private_beta_research_limit=5`, `research_enabled=false`.
+`private_beta_research_limit=5`, `research_enabled=false`. **D-170:** the
+copied rows are NOT changed by the new code defaults — the database keeps
+`private_beta_research_limit=5` and has no `private_beta_global_research_limit`
+row, which reads as **0 (closed: no new beta Research, no beta Interpreter
+call)** until the owner sets the creator-beta values (§13).
 
 ## 6. Database: atlas_dev → hosted beta database
 
@@ -257,7 +261,7 @@ SELECT 'ledger_max',  max(created_at) FROM drizzle.__drizzle_migrations;
 SELECT 'origin_enum', enum_range(NULL::research_job_origin)::text;
 SELECT 'pattern', version, status FROM research_patterns WHERE status='ACTIVE';
 SELECT 'config', key, value::text FROM product_config
-  WHERE key IN ('private_beta_enabled','private_beta_project_slugs','private_beta_research_limit','research_enabled','internal_alpha_enabled')
+  WHERE key IN ('private_beta_enabled','private_beta_project_slugs','private_beta_research_limit','private_beta_global_research_limit','research_enabled','internal_alpha_enabled')
   ORDER BY key;
 SELECT 'prepared', p.slug, m.kind, count(*) FROM project_memory_items m JOIN projects p ON p.id=m.project_id
   WHERE p.slug IN ('raydium','pump_fun','lido') AND m.lifecycle_state='ACTIVE' GROUP BY 2,3 ORDER BY 2,3;
@@ -352,7 +356,7 @@ approval, once, bounded, zero retries. None creates a Research job.
 | 14 | Ethereum RPC | `… curl -s "$ETHEREUM_MAINNET_RPC_URL" -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'` | a `result` hex |
 | 15 | Page fetch | `curl -sSI https://docs.raydium.io/` from the server, no proxy | `200`/`3xx` |
 | 16 | Rendered fetch | `sudo -u atlas deploy/wave1/with-env.sh --worker npm run probe:renderer -- <confirmed route url> <slug>` | probe reports success (one navigation, writes nothing) |
-| 17 | Beta config | `with-env.sh npm run admin:private-beta -- status` | enabled, 3 slugs all `ACTIVE_CORE, live-spend allowlisted`, limit 5 |
+| 17 | Beta config | `with-env.sh npm run admin:private-beta -- status` | enabled, 3 slugs all `ACTIVE_CORE, live-spend allowlisted`, limit 3 per user, global limit 60 (after §13 step 2) |
 | 18 | PRODUCT closed | `status` output | `research_enabled (public path): false` |
 
 Never print a variable's value while checking; pipe RPC responses through
@@ -417,3 +421,45 @@ sudo systemctl restart atlas-worker atlas-web
   `journalctl -u atlas-backup`, `journalctl -u caddy`; HTTP access log
   `/var/log/caddy/atlas-access.log`; Postgres `/var/log/postgresql/`.
   Ubuntu keeps the journal on disk (`/var/log/journal`).
+
+## 13. Creator beta (D-170) — invite, limits, emergency stop
+
+Nothing here is automatic; every write is the owner tool, dry run unless
+`--apply`. Live creator-link behaviour inside Telegram (the `startapp`
+parameter reaching signed initData) is **not verified offline** and needs
+the HTTPS deployment smoke test.
+
+1. **Migration 0065** (`research_beta_feedback`, additive) is applied by the
+   normal `npm run db:migrate` of §6.
+2. **Limits:** `with-env.sh npm run admin:private-beta -- config --limit=3 --global-limit=60 --creator-user-limit=20 --apply`.
+   Personal: 3 Research per user by the D-169 count. Global: 60 admitted
+   `PRIVATE_BETA` jobs in total, every admitted job counting permanently
+   (failed and cancelled included). Raising the global limit later is the
+   same command with a new number.
+3. **Invite:** `admin:private-beta -- invite --until=YYYY-MM-DD --max-redemptions=20 --apply`
+   prints the start parameter `beta_<token>` ONCE (only its SHA-256 is
+   stored). The creator link is
+   `https://t.me/<bot_username>/<mini_app_short_name>?startapp=beta_<token>`.
+   A user who opens it signs in normally and receives the ordinary beta
+   grant until that date. Wave 1 admits at most 20 distinct users through
+   creator invites IN TOTAL, across every token ever issued
+   (`--creator-user-limit`; 20 × 3 = the 60 global); a revoked or expired
+   creator user still counts, a manual owner grant never does. The 21st new
+   user is told "Private beta access is currently full."; `status` shows
+   the creator-wide count and each invite's own count. A forwarded link
+   works too; the global Research limit stays the authoritative spend
+   boundary. Rotating the invite does NOT reset the 20. **Rotate:** run `invite` again (the old one stops
+   within the 60-second config cache). **Disable:** `invite --disable --apply`.
+   A revoked user cannot re-grant themselves through the link.
+4. **Emergency stop:** `admin:private-beta -- stop --apply` sets
+   `private_beta_enabled=false` (it refuses if `research_enabled` is on).
+   Within the 60-second config cache: no normal user can start a Research
+   and no normal user can cause an Interpreter call (`RESEARCH_DISABLED`);
+   the owner keeps the Interpreter. Nothing is deleted — the Research
+   Library and every Proof stay readable, and forwarding to the bot still
+   only stores an intake. Already-admitted Research is not killed: a phased
+   job is refused at its next phase boundary and ends FAILED (the phase in
+   progress completes); a non-phased job already executing finishes. To
+   resume: `config --enabled=true --apply`. Alternative soft stop that keeps
+   the beta switch on: `config --global-limit=0 --apply` (same refusals,
+   worded "at capacity").

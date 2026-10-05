@@ -487,13 +487,18 @@ async function gatesFor(
   };
 }
 
+// `ownerTool` (D-170): ONLY for an owner-run, in-process script that has
+// already forced a non-live gateway (scripts/alpha-run.ts). It skips the
+// per-user access gate, which exists to stop paid calls a normal user
+// could cause; no HTTP route passes it, so no request can reach it.
 export async function createInterpretation(
   db: Database,
   config: ProductConfig,
   input: { userId: string; question: unknown },
+  options?: { ownerTool?: true },
 ): Promise<InterpretResult> {
   requireEnabled(config);
-  await requireInterpreterAccess(db, config, input.userId);
+  if (!options?.ownerTool) await requireInterpreterAccess(db, config, input.userId);
   const question = cleanText(input.question, MAX_QUESTION_CHARS, "QUESTION_TOO_LONG");
   await hitRateLimit(db, `interp:${input.userId}`, RATE_LIMIT, RATE_WINDOW_SEC);
 

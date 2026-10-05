@@ -74,8 +74,38 @@ export const productConfigSchema = z.object({
   // default: an unconfigured database admits nothing. A project must ALSO
   // be on the code-owned live-spend allowlist (live-executor.ts).
   private_beta_project_slugs: z.array(z.string().min(1)).default([]),
-  // How many Researches one beta user may be admitted for in total.
-  private_beta_research_limit: z.number().int().min(0).default(5),
+  // How many Researches one beta user may use (D-169 counting rule:
+  // countPrivateBetaJobs). Creator beta: 3 (D-170).
+  private_beta_research_limit: z.number().int().min(0).default(3),
+  // CREATOR BETA GLOBAL CAPACITY (D-170) — a spend bound, not a fairness
+  // rule: EVERY admitted PRIVATE_BETA job counts against it permanently,
+  // whatever became of it (countPrivateBetaAdmissions). An absent row
+  // reads as 0, so a database that was never configured admits no new
+  // beta Research and makes no beta Interpreter call: the safety boundary
+  // fails closed, never open. An invalid value fails the whole config
+  // parse, which is closed too.
+  private_beta_global_research_limit: z.number().int().min(0).default(0),
+  // CREATOR BETA USER CEILING (D-170) — how many distinct users may EVER
+  // receive beta access through ANY creator invite, all tokens together
+  // (Wave 1: 20 users × 3 personal = the 60 global). Revoked or expired
+  // invite grants keep counting; manual owner grants never count. Absent →
+  // 0 (no invite grants anyone); invalid → the config parse fails, closed.
+  private_beta_creator_user_limit: z.number().int().min(0).default(0),
+  // CREATOR BETA INVITE (D-170). One opaque invite at a time; only its
+  // SHA-256 is stored, never the invite itself. A signed-in user who
+  // presents the invite receives the ordinary private-beta grant until
+  // grantUntil — at most maxRedemptions distinct users per invite (Wave 1:
+  // 20 × 3 personal = the 60 global). Disabled unless enabled is true, the
+  // hash is well formed and grantUntil is a future instant; a missing
+  // maxRedemptions reads 0 (full). Anything else refuses.
+  private_beta_invite: z
+    .object({
+      enabled: z.boolean(),
+      sha256: z.string(),
+      grantUntil: z.string(),
+      maxRedemptions: z.number().int().min(0).default(0),
+    })
+    .default({ enabled: false, sha256: "", grantUntil: "", maxRedemptions: 0 }),
   ari_core_price_stars: z.number().int().positive(),
   subscription_period_days: z.number().int().positive(),
   demo_lifetime_proof_limit: z.number().int().positive(),
@@ -125,7 +155,12 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   phased_research_enabled: false,
   private_beta_enabled: false,
   private_beta_project_slugs: [],
-  private_beta_research_limit: 5,
+  private_beta_research_limit: 3,
+  // The seeded creator-beta capacity (D-170). A database without the row
+  // reads 0 (closed) through the schema default above.
+  private_beta_global_research_limit: 60,
+  private_beta_creator_user_limit: 20,
+  private_beta_invite: { enabled: false, sha256: "", grantUntil: "", maxRedemptions: 0 },
   ari_core_price_stars: 2999,
   subscription_period_days: 30,
   demo_lifetime_proof_limit: 3,

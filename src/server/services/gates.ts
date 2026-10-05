@@ -28,7 +28,9 @@ export type ResearchGate =
   // POST /api/research-jobs returns for the same facts.
   | "BETA_ACCESS_REQUIRED"
   | "BETA_PROJECT_NOT_AVAILABLE"
-  | "BETA_RESEARCH_LIMIT_REACHED";
+  | "BETA_RESEARCH_LIMIT_REACHED"
+  // D-170: the creator beta is full for everyone — not this user's allowance.
+  | "GLOBAL_BETA_CAPACITY_REACHED";
 
 export interface GateSubject {
   userId: string;

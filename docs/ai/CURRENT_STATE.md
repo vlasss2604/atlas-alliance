@@ -30,6 +30,10 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
     (uniswap …) → DISABLED": fails identically on a clean checkout of
     `7eb9d26` (verified 2026-10-01). An allowlist/gating expectation, not a
     research one — do not change the allowlist to make it pass.
+  Intermittent test debt (observed 2026-10-05 during D-170, not caused by
+  it): `first-real-run-stage2.test.ts` "#17 one failed fetch remains
+  visible even when another source succeeds" failed once and passed three
+  consecutive reruns; outside the D-170 change area. Not fixed.
   Two older notes still apply: `first-real-run-stage2.test.ts` holds a
   source-regex assertion that is a line-ending artifact (matches `\n}\n`;
   `core.autocrlf=true` checks the file out with CRLF — check the file's
@@ -42,6 +46,56 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   REPORT test write its table (per-run verdict, critical nodes attempted,
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
+
+## CREATOR BETA GUARDRAILS (D-170)
+
+Offline only; the creator link inside Telegram is not live-verified.
+
+- **Personal allowance** `private_beta_research_limit` = 3, counted by the
+  D-169 rule (`countPrivateBetaJobs`). `/api/me.privateBeta`
+  `{used, limit, remaining}` only while private beta admits the user (switch
+  on, non-ADMIN, valid grant); Home and Profile show "Private Beta · N
+  Research remaining" instead of "ARI • CORE".
+- **Global capacity** `private_beta_global_research_limit` (seeded 60; absent
+  → 0, closed). `countPrivateBetaAdmissions` counts EVERY admitted
+  `PRIVATE_BETA` job permanently, whatever its state — a spend bound, a
+  different meaning from the personal count. Checked in
+  `evaluatePrivateBetaAdmission` (preview parity, refusal
+  `GLOBAL_BETA_CAPACITY_REACHED`, before project and personal checks) and
+  again, authoritatively, inside the job-creating transaction under
+  `pg_advisory_xact_lock(170001)` via `createResearchJob`'s `admitInTx` hook.
+  Idempotent replays return before the hook.
+- **Interpreter** (`interpreterAccessRefusal`, before rate limit and model):
+  ADMIN always; beta on → grant required, then global capacity, then the
+  personal allowance (D-169 count; 0 left → `BETA_RESEARCH_LIMIT_REACHED`);
+  beta off → allowed only if `research_enabled`, else `RESEARCH_DISABLED`.
+  Owner scripts that force a non-live gateway pass `{ ownerTool: true }`
+  (alpha-run only; no HTTP route can).
+- **Creator invite.** Config `private_beta_invite {enabled, sha256,
+  grantUntil}`; launch `startapp=beta_<token>` (24 random bytes, base64url),
+  separate from the D-168 bare-uuid intake launch. The client posts the
+  signed start parameter to `POST /api/private-beta/invite` (session + CSRF,
+  body = invite only); `redeemBetaInvite` writes the ordinary
+  `grantPrivateBetaAccess` grant for the session's user. Valid grant →
+  `ALREADY_GRANTED` untouched; a prior revoked/expired beta grant or a
+  non-beta entitlement → `INVITE_NOT_APPLICABLE`; anything wrong →
+  `INVITE_INVALID`. No account is created. Invite grants carry
+  `plan_version = creator-invite:<sha256[0:16]>`. Two bounds, both checked
+  and the grant written under one `pg_advisory_xact_lock(170002)` for every
+  token: `private_beta_creator_user_limit` (seeded 20; absent → 0) counts
+  DISTINCT users with the `creator-invite:` prefix across ALL tokens, any
+  status — the Wave 1 total; and the invite's own `maxRedemptions`. Over
+  either → `BETA_ACCESS_FULL` (Home: "Private beta access is currently
+  full."). A repeat, or a granted user redeeming another token, uses no
+  slot; revocation and expiry free none; manual grants are outside it.
+- **Feedback.** Table `research_beta_feedback` (migration 0065, one row per
+  user, cascade). Due (`/api/me.feedbackDue`) when the user has ≥2
+  PRIVATE_BETA jobs with a Proof and no row. `POST /api/beta-feedback`
+  SUBMIT (answers ≤1000 chars, keep-using YES/NO/UNSURE) or DISMISS; either
+  ends the prompt. Shown on a finished Result with a Proof. No credits.
+- **Emergency stop** `admin:private-beta -- stop --apply` (runbook §13).
+- **atlas_dev / hosted copy:** still `private_beta_research_limit=5` and no
+  global row (reads 0 → closed) until `config --limit=3 --global-limit=60`.
 
 ## THE RESEARCH LIBRARY: REOPENING IS A READ, AN ALLOWANCE IS SPENT ONLY BY A PROOF (D-169)
 
@@ -146,12 +200,11 @@ owner alpha.
   The user's grant is NOT re-read: expiry or revocation refuses new jobs and
   never ends an admitted one.
 - **Preview and Interpreter.** `gates.ts` and `/api/projects` call the same
-  admission function. While private beta is on, a model-backed Interpreter
-  call needs a grant (or the owner); with the switch off the Interpreter is
-  governed as before (`interpreter_enabled`).
+  admission function. Interpreter access is D-170's rule (below).
 - **Config** (all fail closed when absent): `private_beta_enabled` false,
-  `private_beta_project_slugs` [], `private_beta_research_limit` 5.
-- **Owner tool.** `npm run admin:private-beta -- status|config|grant|revoke`
+  `private_beta_project_slugs` [], `private_beta_research_limit` 3 (D-170),
+  `private_beta_global_research_limit` 0 when absent (60 seeded).
+- **Owner tool.** `npm run admin:private-beta -- status|config|grant|revoke|invite|stop`
   (dry run unless `--apply`).
 - **Not applied to atlas_dev:** migration 0063, the config rows, any grant.
 

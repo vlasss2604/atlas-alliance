@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { api, type ResearchJobDetail } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
+import { BetaFeedbackPrompt } from "@/src/client/components/beta-feedback-prompt";
 import { DeveloperDetails } from "@/src/client/components/developer-details";
 import { ResearchProgress } from "@/src/client/components/research-progress";
 import { ResearchResult } from "@/src/client/components/research-result";
@@ -166,6 +167,10 @@ export default function ResearchDetailPage() {
 
       {/* ---- FINISHED: the one result surface. ------------------------ */}
       {finished && <ResearchResult detail={detail} jobId={jobId} />}
+
+      {/* D-170: the one-time feedback prompt, right after a finished Result
+          with a Proof, only when the server says it is due. */}
+      {finished && detail.proof && me?.feedbackDue && <BetaFeedbackPrompt />}
 
       {/* ---- engine internals, behind an explicit opt-in ------------- */}
       <DeveloperDetails detail={detail} />

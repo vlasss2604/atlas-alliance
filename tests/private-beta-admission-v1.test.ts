@@ -259,7 +259,7 @@ describe("1. the grant is the existing subscription entitlement, and nothing mor
     });
     expect(bare.private_beta_enabled).toBe(false);
     expect(bare.private_beta_project_slugs).toEqual([]);
-    expect(bare.private_beta_research_limit).toBe(5);
+    expect(bare.private_beta_research_limit).toBe(3); // creator beta, D-170
     expect(DEFAULT_PRODUCT_CONFIG.private_beta_enabled).toBe(false);
     expect(DEFAULT_PRODUCT_CONFIG.private_beta_project_slugs).toEqual([]);
     expect(DEFAULT_PRODUCT_CONFIG.research_enabled).toBe(false);
@@ -765,13 +765,15 @@ describe("6. the Interpreter spends provider budget only for an admitted user du
     expect(await interpreterAccessRefusal(ctx.db, config, c.userId)).toBe("BETA_ACCESS_REQUIRED");
   });
 
-  it("beta off: the Interpreter is governed exactly as before — an ordinary user is served and told honestly that research is disabled", async () => {
+  it("beta off AND public research off (the emergency state, D-170): an ordinary user is refused before the model — switching the beta off never reopens the Interpreter", async () => {
     const plain = await makeAuthedClient("USER");
-    expect(await interpreterAccessRefusal(ctx.db, await loadProductConfig(ctx.db), plain.userId)).toBeNull();
+    expect(await interpreterAccessRefusal(ctx.db, await loadProductConfig(ctx.db), plain.userId)).toBe("RESEARCH_DISABLED");
     const res = await interpretPOST(post("/api/interpretations", plain, { question: QUESTION }));
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as { gates: { research: string } };
-    expect(body.gates.research).toBe("DISABLED");
+    expect(res.status).toBe(403);
+    expect(await errorOf(res)).toBe("RESEARCH_DISABLED");
+    // The owner keeps the Interpreter, as before.
+    const admin = await makeAuthedClient("ADMIN");
+    expect(await interpreterAccessRefusal(ctx.db, await loadProductConfig(ctx.db), admin.userId)).toBeNull();
   });
 
   it("beta on governs the Interpreter even with research_enabled on: an ordinary user without a grant never reaches the model", async () => {

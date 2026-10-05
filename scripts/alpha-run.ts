@@ -514,10 +514,9 @@ async function main() {
     // server-side entity resolution against the projects catalog,
     // schema-validated model output, status/route derivation — not a
     // hand-built stand-in for it.
-    const interpretResult = await createInterpretation(db, DEFAULT_PRODUCT_CONFIG, {
-      userId: user.id,
-      question,
-    });
+    // Owner tool, non-live gateway forced above: the per-user access gate
+    // (D-170) guards paid calls a normal user could cause, not this run.
+    const interpretResult = await createInterpretation(db, DEFAULT_PRODUCT_CONFIG, { userId: user.id, question }, { ownerTool: true });
     const interp = interpretResult.interpretation;
     if (interp.status !== "READY" || interp.route !== "DEEP_RESEARCH" || !interp.understood) {
       console.error("[alpha-run] interpretation did not classify as DEEP_RESEARCH — refusing to fabricate a job for it");

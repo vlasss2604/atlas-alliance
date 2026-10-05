@@ -39,7 +39,9 @@ export type ProofBlockReason =
   // Private beta (D-167): the server's own three admission refusals.
   | "BETA_ACCESS_REQUIRED"
   | "BETA_PROJECT_NOT_AVAILABLE"
-  | "BETA_RESEARCH_LIMIT_REACHED";
+  | "BETA_RESEARCH_LIMIT_REACHED"
+  // D-170: the creator beta is full for everyone, not this user's allowance.
+  | "GLOBAL_BETA_CAPACITY_REACHED";
 
 export interface ProofGateSubject {
   interpretation: Pick<InterpretationView, "status" | "route"> | null;
@@ -87,6 +89,8 @@ export function proofBlockReason(subject: ProofGateSubject): ProofBlockReason | 
       return "BETA_PROJECT_NOT_AVAILABLE";
     case "BETA_RESEARCH_LIMIT_REACHED":
       return "BETA_RESEARCH_LIMIT_REACHED";
+    case "GLOBAL_BETA_CAPACITY_REACHED":
+      return "GLOBAL_BETA_CAPACITY_REACHED";
     case "AVAILABLE":
     case "NOT_DEEP_RESEARCH":
       return null;

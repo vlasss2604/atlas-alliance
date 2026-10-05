@@ -15,7 +15,13 @@ import {
   transitionJobState,
   type ResearchJobRow,
 } from "../jobs/research-jobs";
-import { evaluatePrivateBetaAdmission, hasValidPrivateBetaGrant, privateBetaOpen } from "./private-beta";
+import {
+  evaluatePrivateBetaAdmission,
+  hasValidPrivateBetaGrant,
+  lockPrivateBetaAdmission,
+  privateBetaCapacityReached,
+  privateBetaOpen,
+} from "./private-beta";
 
 interface InterpretationResult {
   project_slug?: string;
@@ -46,19 +52,25 @@ export interface StartPrivateBetaResearchInput {
 //      first — nothing new is admitted by a replay);
 //   3. the interpretation is this user's, READY, a research request, unused;
 //   4. every named project is in research scope (ACTIVE_CORE);
-//   5. every named project is on the beta list AND the
+//   5. the creator-beta global capacity is not reached → GLOBAL_BETA_CAPACITY_REACHED
+//   6. every named project is on the beta list AND the
 //      live-spend allowlist                             → BETA_PROJECT_NOT_AVAILABLE
-//   6. the user's total admitted beta Researches are
-//      under private_beta_research_limit                → BETA_RESEARCH_LIMIT_REACHED
-//   7. one active job per user, and idempotency — the existing database
+//   7. the user's personal allowance (D-169 rule)
+//      is under private_beta_research_limit             → BETA_RESEARCH_LIMIT_REACHED
+//   8. one active job per user, and idempotency — the existing database
 //      constraints inside createResearchJob.
-// (2), (5) and (6) are evaluatePrivateBetaAdmission, the function the Ask-screen
-// preview also calls, so what the screen offers is what this admits.
+// (2), (5), (6) and (7) are evaluatePrivateBetaAdmission, the function the
+// Ask-screen preview also calls, so what the screen offers is what this admits.
 //
-// THE CAP CANNOT BE RACED PAST. Two concurrent submissions that both read
-// "4 used" cannot both be created: the second violates the one-active-job
-// unique index and is refused, so the count only ever grows one finished
-// Research at a time.
+// THE PERSONAL CAP CANNOT BE RACED PAST. Two concurrent submissions of one
+// user that both read "2 used" cannot both be created: the second violates
+// the one-active-job unique index and is refused.
+//
+// THE GLOBAL CAP CANNOT BE RACED PAST EITHER (D-170). Different users do
+// not share that index, so the authoritative capacity check runs again
+// INSIDE the job-creating transaction under one advisory lock
+// (lockPrivateBetaAdmission): count → admit → INSERT is serial across all
+// starts. The check in (5) is the early, cheap refusal; this one decides.
 //
 // THE BUDGET IS THE SERVER'S. The request carries an interpretation id and
 // an idempotency key and nothing else; the envelope is a code constant.
@@ -163,7 +175,15 @@ export async function startPrivateBetaResearch(
         demoLifetimeProofLimit: 0,
         origin: "PRIVATE_BETA",
       },
-      phased ? { phased: true } : undefined,
+      {
+        ...(phased ? { phased: true } : {}),
+        admitInTx: async (tx) => {
+          await lockPrivateBetaAdmission(tx);
+          if (await privateBetaCapacityReached(tx, config)) {
+            throw new HttpError(403, "GLOBAL_BETA_CAPACITY_REACHED");
+          }
+        },
+      },
     );
 
     if (!created.created) {

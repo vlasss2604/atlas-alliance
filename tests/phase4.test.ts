@@ -73,8 +73,8 @@ interface Authed {
   userId: string;
 }
 
-async function makeAuthedClient(): Promise<Authed> {
-  const [u] = await ctx.db.insert(users).values({}).returning();
+async function makeAuthedClient(role: "USER" | "ADMIN" = "USER"): Promise<Authed> {
+  const [u] = await ctx.db.insert(users).values({ role }).returning();
   const { rawToken } = await createSession(ctx.db, u.id);
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   return {
@@ -529,9 +529,17 @@ describe("Фаза 4 — Question Interpreter + Scope/Entitlement Gate", () => {
   });
 
   it("12b. отгруженная конфигурация Фазы 4 (research_enabled=false): причина названа честно", async () => {
-    const c = await makeAuthedClient();
+    // D-170: with public research AND private beta off, an ordinary user is
+    // refused before the model (no paid call that cannot lead to Research);
+    // the owner still interprets, and the preview names reasons honestly.
+    const plain = await makeAuthedClient();
+    const c = await makeAuthedClient("ADMIN");
     await setConfig("research_enabled", false);
     try {
+      const refused = await interpretPOST(req("/api/interpretations", plain, { question: "Uniswap: holder что получает?" }));
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { error: string }).error).toBe("RESEARCH_DISABLED");
+
       // Объяснение остаётся объяснением: причина — маршрут, а не рубильник,
       // иначе экран показывает «Proof отключён» там, где Proof и не нужен.
       const staking = await ask(c, "Если у Uniswap есть staking, значит проект безопасный?");

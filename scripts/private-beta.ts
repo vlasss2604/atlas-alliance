@@ -1,13 +1,17 @@
 // PRIVATE BETA — OWNER TOOL (D-167).
 //
-// The only writer of a private-beta grant and of the three private-beta
-// config keys. No HTTP route reaches any of this.
+// The owner's writer of private-beta grants and of the private-beta config
+// keys. No HTTP route reaches any of this (the creator invite route writes
+// the same grant, for the signed-in user only — D-170).
 //
 // DRY RUN BY DEFAULT. Without --apply every command reads, reports what it
 // WOULD do, and writes nothing.
 //
 //   npx tsx scripts/private-beta.ts status
-//   npx tsx scripts/private-beta.ts config --enabled=true --projects=raydium,pump_fun,lido --limit=5 [--apply]
+//   npx tsx scripts/private-beta.ts config --enabled=true --projects=raydium,pump_fun,lido --limit=3 --global-limit=60 --creator-user-limit=20 [--apply]
+//   npx tsx scripts/private-beta.ts invite --until=YYYY-MM-DD --max-redemptions=20 [--apply]   (new creator invite; replaces the old one)
+//   npx tsx scripts/private-beta.ts invite --disable [--apply]
+//   npx tsx scripts/private-beta.ts stop [--apply]                          (EMERGENCY STOP, see below)
 //   npx tsx scripts/private-beta.ts grant  --telegram-id=<id> | --user-id=<uuid>  --until=YYYY-MM-DD [--apply]
 //   npx tsx scripts/private-beta.ts revoke --telegram-id=<id> | --user-id=<uuid> [--apply]
 //
@@ -26,8 +30,14 @@ import { createDatabase, type Database } from "../src/server/db/client";
 import { projects, subscriptions, userIdentities, users } from "../src/server/db/schema";
 import { INTERNAL_ALPHA_LIVE_PROJECT_SLUGS } from "../src/server/engine/live-executor";
 import {
+  BETA_INVITE_PREFIX,
   PRIVATE_BETA_GRANT_PROVIDER,
+  activeBetaInvite,
+  countCreatorBetaUsers,
+  countInviteRedemptions,
+  countPrivateBetaAdmissions,
   countPrivateBetaJobs,
+  newBetaInviteToken,
   grantPrivateBetaAccess,
   hasValidPrivateBetaGrant,
   revokePrivateBetaAccess,
@@ -66,7 +76,20 @@ async function status(db: Database): Promise<void> {
   const config = await loadProductConfig(db);
   console.log(`research_enabled (public path): ${config.research_enabled}`);
   console.log(`private_beta_enabled:           ${config.private_beta_enabled}`);
-  console.log(`private_beta_research_limit:    ${config.private_beta_research_limit}`);
+  console.log(`interpreter_enabled:            ${config.interpreter_enabled}`);
+  console.log(`private_beta_research_limit:    ${config.private_beta_research_limit} per user (D-169 count)`);
+  console.log(`private_beta_global_research_limit: ${config.private_beta_global_research_limit}; admitted so far: ${await countPrivateBetaAdmissions(db)} (every admitted PRIVATE_BETA job)`);
+  console.log(`private_beta_creator_user_limit: ${config.private_beta_creator_user_limit}; creator-invite users so far: ${await countCreatorBetaUsers(db)} (all invites, revoked/expired included)`);
+  const invite = activeBetaInvite(config);
+  console.log(
+    `creator invite:                 ${
+      invite
+        ? `ACTIVE, grants until ${invite.grantUntil.toISOString()}, redeemed by ${await countInviteRedemptions(db, invite.sha256)} of ${invite.maxRedemptions} users`
+        : "none active"
+    }`,
+  );
+  const stopped = !config.private_beta_enabled && !config.research_enabled;
+  console.log(`emergency state (beta off AND public research off): ${stopped ? "YES — no new normal-user Research, no normal-user Interpreter call" : "no"}`);
   console.log(`private_beta_project_slugs:     ${JSON.stringify(config.private_beta_project_slugs)}`);
   for (const slug of config.private_beta_project_slugs) {
     const [p] = await db.select({ status: projects.status }).from(projects).where(eq(projects.slug, slug));
@@ -93,7 +116,11 @@ async function configure(db: Database): Promise<void> {
   const enabledArg = arg("enabled");
   const projectsArg = arg("projects");
   const limitArg = arg("limit");
-  if (enabledArg === undefined && projectsArg === undefined && limitArg === undefined) fail("nothing to set: pass --enabled, --projects and/or --limit");
+  const globalArg = arg("global-limit");
+  const creatorArg = arg("creator-user-limit");
+  if (enabledArg === undefined && projectsArg === undefined && limitArg === undefined && globalArg === undefined && creatorArg === undefined) {
+    fail("nothing to set: pass --enabled, --projects, --limit, --global-limit and/or --creator-user-limit");
+  }
   if (enabledArg !== undefined && enabledArg !== "true" && enabledArg !== "false") fail("--enabled must be true or false");
   const slugs = projectsArg === undefined ? undefined : projectsArg.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
   if (slugs !== undefined) {
@@ -106,7 +133,17 @@ async function configure(db: Database): Promise<void> {
   }
   const limit = limitArg === undefined ? undefined : Number(limitArg);
   if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) fail("--limit must be a non-negative integer");
-  const patch = { enabled: enabledArg === undefined ? undefined : enabledArg === "true", projectSlugs: slugs, researchLimit: limit };
+  const globalLimit = globalArg === undefined ? undefined : Number(globalArg);
+  if (globalLimit !== undefined && (!Number.isInteger(globalLimit) || globalLimit < 0)) fail("--global-limit must be a non-negative integer");
+  const creatorLimit = creatorArg === undefined ? undefined : Number(creatorArg);
+  if (creatorLimit !== undefined && (!Number.isInteger(creatorLimit) || creatorLimit < 0)) fail("--creator-user-limit must be a non-negative integer");
+  const patch = {
+    enabled: enabledArg === undefined ? undefined : enabledArg === "true",
+    projectSlugs: slugs,
+    researchLimit: limit,
+    globalResearchLimit: globalLimit,
+    creatorUserLimit: creatorLimit,
+  };
   console.log(`would set: ${JSON.stringify(patch)}`);
   if (!apply) return console.log("DRY RUN — nothing written. Re-run with --apply.");
   await setPrivateBetaConfig(db, patch);
@@ -135,6 +172,58 @@ async function revoke(db: Database): Promise<void> {
   console.log(`APPLIED: ${out.revoked} grant(s) revoked.`);
 }
 
+// THE CREATOR INVITE (D-170). A new invite replaces the previous one, which
+// stops working at once (within the 60-second config cache). Only the
+// SHA-256 is stored; the invite itself is printed once, here, and nowhere
+// else. It carries no user and no PII.
+async function invite(db: Database): Promise<void> {
+  if (process.argv.includes("--disable")) {
+    console.log("would disable the creator invite (users already granted keep their grant)");
+    if (!apply) return console.log("DRY RUN — nothing written. Re-run with --apply.");
+    await setPrivateBetaConfig(db, { invite: { enabled: false, sha256: "", grantUntil: "", maxRedemptions: 0 } });
+    return console.log("APPLIED: creator invite disabled.");
+  }
+  const until = arg("until");
+  if (until === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(until)) fail("--until=YYYY-MM-DD is required (the grant each redeemer receives expires then)");
+  const grantUntil = new Date(`${until}T23:59:59.000Z`);
+  if (Number.isNaN(grantUntil.getTime()) || grantUntil.getTime() <= Date.now()) fail("--until must be a real date in the future");
+  const maxArg = arg("max-redemptions");
+  const maxRedemptions = maxArg === undefined ? NaN : Number(maxArg);
+  if (!Number.isInteger(maxRedemptions) || maxRedemptions < 1) fail("--max-redemptions=<N> is required: how many distinct users this invite may grant (Wave 1: 20)");
+  console.log(
+    `would create a new creator invite granting private beta until ${grantUntil.toISOString()} to at most ${maxRedemptions} users (replaces any current invite; every invite also counts against the creator-wide user limit)`,
+  );
+  if (!apply) return console.log("DRY RUN — nothing written. Re-run with --apply.");
+  const { token, sha256 } = newBetaInviteToken();
+  await setPrivateBetaConfig(db, { invite: { enabled: true, sha256, grantUntil: grantUntil.toISOString(), maxRedemptions } });
+  console.log("APPLIED. Start parameter (shown once — store it yourself):");
+  console.log(`  ${BETA_INVITE_PREFIX}${token}`);
+  console.log("Creator link: https://t.me/<bot_username>/<mini_app_short_name>?startapp=" + `${BETA_INVITE_PREFIX}${token}`);
+}
+
+// EMERGENCY STOP (D-170). Turns private beta off and confirms the public
+// path is off too. In that state no normal user can start a Research or
+// cause an Interpreter call (interpreterAccessRefusal → RESEARCH_DISABLED).
+// Nothing is deleted: the Research Library and every Proof stay readable.
+// Already-admitted beta Research is not killed: a phased one is refused at
+// its next phase boundary (the execution-time gate re-reads the switch)
+// and ends FAILED — the phase in progress completes; a non-phased one that
+// is already executing finishes, and one still queued is refused when a
+// worker picks it up. Every one of them stays counted against the global
+// capacity; FAILED hands the user's personal slot back (D-169).
+// To resume: config --enabled=true --apply.
+async function stop(db: Database): Promise<void> {
+  const config = await loadProductConfig(db);
+  if (config.research_enabled) {
+    fail("research_enabled (the public path) is ON: this tool does not touch it. Turn it off deliberately first, or the public path stays open.");
+  }
+  console.log("would set private_beta_enabled=false (public research already off) — no data is changed or deleted");
+  if (!apply) return console.log("DRY RUN — nothing written. Re-run with --apply.");
+  await setPrivateBetaConfig(db, { enabled: false });
+  console.log("APPLIED: emergency stop in effect within the 60-second config cache.");
+  await status(db);
+}
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   const { db, pool } = createDatabase();
@@ -143,7 +232,9 @@ async function main(): Promise<void> {
     else if (command === "config") await configure(db);
     else if (command === "grant") await grant(db);
     else if (command === "revoke") await revoke(db);
-    else fail("usage: private-beta.ts status | config | grant | revoke   (add --apply to write)");
+    else if (command === "invite") await invite(db);
+    else if (command === "stop") await stop(db);
+    else fail("usage: private-beta.ts status | config | grant | revoke | invite | stop   (add --apply to write)");
   } finally {
     await pool.end();
   }

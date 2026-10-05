@@ -119,6 +119,9 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
       if (e.code === "BETA_ACCESS_REQUIRED") return dict.ask.betaAccessRequired;
       if (e.code === "BETA_PROJECT_NOT_AVAILABLE") return dict.ask.betaProjectNotAvailable;
       if (e.code === "BETA_RESEARCH_LIMIT_REACHED") return dict.ask.betaResearchLimitReached;
+      // D-170: the Interpreter itself refuses when no Research could follow.
+      if (e.code === "GLOBAL_BETA_CAPACITY_REACHED") return dict.ask.globalBetaCapacity;
+      if (e.code === "RESEARCH_DISABLED") return dict.ask.disabledNote;
       if (e.code === "CLARIFICATION_ALREADY_ANSWERED") return dict.ask.clarifyAnswered;
       if (e.code === "CLARIFICATION_NOT_EXPECTED") return dict.ask.clarifyStale;
     }
@@ -143,6 +146,8 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
         return dict.ask.betaProjectNotAvailable;
       case "BETA_RESEARCH_LIMIT_REACHED":
         return dict.ask.betaResearchLimitReached;
+      case "GLOBAL_BETA_CAPACITY_REACHED":
+        return dict.ask.globalBetaCapacity;
       case null:
         return null;
     }

@@ -71,7 +71,9 @@ async function interpretedQuestion(question: string) {
   const [topic] = await ctx.db.select().from(topics).where(eq(topics.isActive, true));
   const slug = uniq("tao_override");
   const [project] = await ctx.db.insert(projects).values({ slug, name: "TAO", status: "ACTIVE_CORE" }).returning();
-  const [user] = await ctx.db.insert(users).values({}).returning();
+  // The owner (D-170: an ordinary user cannot cause an Interpreter call
+  // while public research and private beta are both off).
+  const [user] = await ctx.db.insert(users).values({ role: "ADMIN" }).returning();
   const { interpretation } = await createInterpretation(ctx.db, DEFAULT_PRODUCT_CONFIG, { userId: user.id, question });
   expect(interpretation.status).toBe("READY");
   expect(interpretation.route).toBe("DEEP_RESEARCH");

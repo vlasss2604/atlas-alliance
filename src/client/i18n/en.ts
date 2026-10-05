@@ -12,6 +12,10 @@ export const en = {
     demoCounter: (used: number, limit: number) =>
       `DEMO research used: ${used} of ${limit}`,
     coreActive: "ARI • CORE active",
+    // D-170: a private-beta user's own allowance, from the server's count.
+    betaLabel: "Private Beta",
+    betaRemaining: (n: number) => `${n} Research remaining`,
+    betaAccessFull: "Private beta access is currently full.",
     cta: "What do you want to understand?",
     previouslyResearched: "Previously researched",
     viewAll: "View all",
@@ -53,6 +57,9 @@ export const en = {
     betaAccessRequired: "ATLAS PROOF is in private beta. Research needs private beta access.",
     betaProjectNotAvailable: "This project is not available in the private beta yet.",
     betaResearchLimitReached: "You have used all the research runs included in the private beta.",
+    // D-170: the creator beta is full for everyone — never phrased as this
+    // user's own allowance, never an upsell.
+    globalBetaCapacity: "Private beta is at capacity for now. Your previous Research is still available in your Research Library.",
     error: "Couldn't process the question. Please try again.",
     newQuestion: "Ask another question",
     provisionalPrefix: "Understood so far:",
@@ -165,6 +172,23 @@ export const en = {
     deleteConfirm1: "Delete your account? Your Research and history will be removed. Shared sources and project-level Research Memory are not personal and remain.",
     deleteConfirm2: "This cannot be undone. Confirm deletion?",
     deleted: "Account deleted.",
+  },
+  // D-170: the one-time private-beta feedback prompt. Optional; skipping
+  // is permanent and costs nothing.
+  feedback: {
+    title: "Help shape ATLAS",
+    intro: "Two minutes, optional. It never affects your Research.",
+    useful: "What was useful?",
+    missing: "What was missing or what would you add?",
+    keepUsing: "Would you keep using ATLAS?",
+    yes: "Yes",
+    no: "No",
+    unsure: "Not sure",
+    changeNeeded: "If not, what would need to change?",
+    send: "Send feedback",
+    skip: "Skip",
+    thanks: "Thank you — your feedback was sent.",
+    error: "Couldn't send. Please try again.",
   },
   onboarding: {
     skip: "Skip",

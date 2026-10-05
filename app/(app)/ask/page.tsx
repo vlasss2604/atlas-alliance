@@ -140,6 +140,9 @@ export default function AskPage() {
       if (e.code === "BETA_ACCESS_REQUIRED") return dict.ask.betaAccessRequired;
       if (e.code === "BETA_PROJECT_NOT_AVAILABLE") return dict.ask.betaProjectNotAvailable;
       if (e.code === "BETA_RESEARCH_LIMIT_REACHED") return dict.ask.betaResearchLimitReached;
+      // D-170: the Interpreter itself refuses when no Research could follow.
+      if (e.code === "GLOBAL_BETA_CAPACITY_REACHED") return dict.ask.globalBetaCapacity;
+      if (e.code === "RESEARCH_DISABLED") return dict.ask.disabledNote;
       // Постоянные состояния не выдаём за временный сбой: «попробуйте ещё
       // раз» на них не сработает никогда (adversarial review, LOW-7).
       if (e.code === "CLARIFICATION_ALREADY_ANSWERED") return dict.ask.clarifyAnswered;
@@ -170,6 +173,8 @@ export default function AskPage() {
         return dict.ask.betaProjectNotAvailable;
       case "BETA_RESEARCH_LIMIT_REACHED":
         return dict.ask.betaResearchLimitReached;
+      case "GLOBAL_BETA_CAPACITY_REACHED":
+        return dict.ask.globalBetaCapacity;
       case "DISABLED":
         return dict.ask.disabledNote;
       case null:

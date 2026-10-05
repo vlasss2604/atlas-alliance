@@ -10,7 +10,8 @@ import {
 } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
-import { authenticate, getMe, type MeResponse } from "./api";
+import { api, ApiError, authenticate, getMe, type MeResponse } from "./api";
+import { betaInviteFromStartParam } from "./beta-invite-launch";
 import { en, type Dict } from "./i18n/en";
 import { ru } from "./i18n/ru";
 import { askPathForIntake, intakeIdFromStartParam, rememberLaunchIntake } from "./intake-launch";
@@ -18,6 +19,9 @@ import { getPlatform } from "./platform";
 
 interface AppState {
   me: MeResponse | null;
+  // D-170: a creator invite this user opened could not grant access
+  // because the invite's user limit is reached. Generic, in memory only.
+  betaAccessFull: boolean;
   dict: Dict;
   refresh: () => Promise<void>;
 }
@@ -34,6 +38,7 @@ export function useApp(): AppState {
 // в фоне; UI наблюдает состояние, а не блокируется запросом.
 export function AppProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<MeResponse | null>(null);
+  const [betaAccessFull, setBetaAccessFull] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -51,6 +56,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       getPlatform().ready();
       const auth = await authenticate();
       if (cancelled) return;
+      // A creator beta invite (D-170) is redeemed for the user who just
+      // signed in, before anything else reads /api/me. A refused or failed
+      // redemption changes nothing: the app opens exactly as without it.
+      const invite = betaInviteFromStartParam(auth?.startParam);
+      if (invite) {
+        await api.redeemBetaInvite(invite).catch((e: unknown) => {
+          if (e instanceof ApiError && e.code === "BETA_ACCESS_FULL") setBetaAccessFull(true);
+        });
+      }
       // A Telegram deep link carrying an intake id (signed start parameter)
       // lands on the Ask screen with that id in the query — the same entry
       // the bot's button uses. Onboarding still runs first for a new user;
@@ -79,7 +93,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const dict = me?.language === "RU" ? ru : en;
   return (
-    <AppContext.Provider value={{ me, dict, refresh }}>
+    <AppContext.Provider value={{ me, betaAccessFull, dict, refresh }}>
       {children}
     </AppContext.Provider>
   );
