@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { en } from "../src/client/i18n/en";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -76,7 +77,9 @@ describe("research detail route — a valid owned job resolves", () => {
     // not exist AND for one this caller does not own, so the client cannot
     // tell them apart and must not try.
     expect(src).toContain('setStatus("error")');
-    expect(src).toContain("This research could not be loaded.");
+    // D-171: the message reads from the dictionary, unchanged in English.
+    expect(src).toContain("{dict.detailPage.loadError}");
+    expect(en.detailPage.loadError).toBe("This research could not be loaded.");
 
     // Ownership itself is enforced server-side, as a query predicate.
     const route = readFileSync("app/api/research-jobs/[id]/route.ts", "utf-8");

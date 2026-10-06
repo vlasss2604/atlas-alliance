@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { ResearchResult } from "../src/client/components/research-result";
+import { en } from "../src/client/i18n/en";
 import { SnapshotDocumentView } from "../src/client/components/snapshot-document-view";
 import { resultFixture } from "../src/client/result-surface-fixtures";
 import { buildResultSurface } from "../src/client/result-surface";
@@ -78,22 +79,29 @@ describe("source snapshot — the capture is described honestly", () => {
     expect(representationOf("text/markdown")).toBe("MARKDOWN_SOURCE");
     expect(representationOf("application/json")).toBe("TEXT");
 
+    // The notes live in the dictionaries (D-171), keyed by representation;
+    // the page renders the one for what was stored. English pinned here.
     const page = readFileSync(PAGE, "utf-8");
-    expect(page).toContain("Captured representation of the source ATLAS retrieved");
-    // The three notes must each exist, and the HTML one must say what was
-    // lost rather than implying a faithful copy.
-    expect(page).toContain("Layout, images and navigation were not kept");
-    expect(page).toMatch(/not the (live )?page/i);
+    expect(page).toContain("dict.snapshot.representation[snapshot.representation]");
+    const notes = en.snapshot.representation;
+    for (const r of ["MARKDOWN_SOURCE", "EXTRACTED_TEXT", "TEXT"]) {
+      expect(notes[r], r).toContain("Captured representation of the source ATLAS retrieved");
+      expect(notes[r], r).toMatch(/not the (live )?page/i);
+    }
+    // The HTML one must say what was lost rather than implying a faithful copy.
+    expect(notes.EXTRACTED_TEXT).toContain("Layout, images and navigation were not kept");
   });
 
   it("the view never claims to be the original, and always offers it", () => {
     const page = readFileSync(PAGE, "utf-8");
-    expect(page).toContain("ATLAS source snapshot");
+    expect(page).toContain("dict.snapshot.eyebrow");
+    expect(en.snapshot.eyebrow).toBe("ATLAS source snapshot");
     expect(page).toContain("snapshot-open-original");
     // "Open original" is the escape hatch to the live document. A snapshot
     // that could not be compared against its source would be worth less
     // than the excerpt it explains.
-    expect(page).toContain("Open original");
+    expect(page).toContain("dict.result.openOriginal");
+    expect(en.result.openOriginal).toBe("Open original");
   });
 
   it("the body is bounded, and truncation is declared rather than silent", () => {
@@ -106,7 +114,8 @@ describe("source snapshot — the capture is described honestly", () => {
     // The hash keeps describing the WHOLE capture, so a truncated view
     // must say so rather than letting the hash look like it covers the
     // visible text.
-    expect(page).toMatch(/hashes above cover/i);
+    expect(page).toContain("dict.snapshot.truncated(");
+    expect(en.snapshot.truncated("10", "20")).toMatch(/hashes above cover/i);
   });
 });
 
@@ -120,7 +129,8 @@ describe("source snapshot — the provenance card reads as an identity", () => {
     const at = (needle: string) => page.indexOf(needle);
     // Eyebrow, then the domain as the headline, then the badge and the
     // capture date, then the note, then the way out to the live page.
-    expect(at("ATLAS source snapshot")).toBeLessThan(at("{domain}"));
+    expect(at("dict.snapshot.eyebrow")).toBeGreaterThan(-1);
+    expect(at("dict.snapshot.eyebrow")).toBeLessThan(at("{domain}"));
     expect(at("{domain}")).toBeLessThan(at("snapshot-source-class"));
     expect(at("snapshot-source-class")).toBeLessThan(at("snapshot-captured"));
     expect(at("snapshot-captured")).toBeLessThan(at("snapshot-representation-note"));
@@ -131,18 +141,21 @@ describe("source snapshot — the provenance card reads as an identity", () => {
 
   it("no provenance field was dropped on the way behind the disclosure", () => {
     const page = readFileSync(PAGE, "utf-8");
-    // Every field the card carried before the polish is still rendered.
-    for (const label of [
-      "Captured",
-      "Type",
-      "Response",
-      "Size",
-      "Retrieved from",
-      "Landed on",
-      "Content hash",
-      "Text hash",
-    ]) {
-      expect(page, label).toContain(`label="${label}"`);
+    // Every field the card carried before the polish is still rendered —
+    // labelled from the dictionaries (D-171), English pinned.
+    const rows = en.snapshot.rows;
+    for (const [key, label] of [
+      ["captured", "Captured"],
+      ["type", "Type"],
+      ["response", "Response"],
+      ["size", "Size"],
+      ["retrievedFrom", "Retrieved from"],
+      ["landedOn", "Landed on"],
+      ["contentHash", "Content hash"],
+      ["textHash", "Text hash"],
+    ] as const) {
+      expect(page, label).toContain(`label={dict.snapshot.rows.${key}}`);
+      expect(rows[key], label).toBe(label);
     }
     // The values are the persisted ones, not prettier versions of them.
     expect(page).toContain("snapshot.contentHash");
@@ -425,7 +438,8 @@ describe("source snapshot — the capture reads as a document", () => {
     const page = readFileSync(PAGE, "utf-8");
     // Raw is opt-in — the readable form answers "what does this source
     // say?", and the exact text answers "is this really what you stored?".
-    expect(page).toContain("Show exact captured text");
+    expect(page).toContain("dict.snapshot.showExact");
+    expect(en.snapshot.showExact).toBe("Show exact captured text");
     expect(page).toContain("useState(false)");
     expect(page).toContain("snapshot-raw");
   });
@@ -515,20 +529,19 @@ describe("source snapshot — a flattened capture is not a document", () => {
     const at = (needle: string) => page.indexOf(needle);
     // It says what it is, shows the excerpt, and only then offers the
     // whole capture.
-    expect(page).toContain("Extracted text snapshot");
-    // JSX wraps prose across lines, so the sentence is matched against a
-    // whitespace-normalised copy rather than the raw source layout.
-    const prose = page.replace(/\s+/g, " ");
-    expect(prose).toContain("This is the text representation ATLAS captured from the page.");
-    expect(prose).toContain(
-      "The original page structure was not preserved in this snapshot.",
-    );
+    // The words live in the dictionaries (D-171); English pinned.
+    expect(page).toContain("dict.snapshot.extractedText");
+    expect(en.snapshot.extractedText).toBe("Extracted text snapshot");
+    expect(page).toContain("dict.snapshot.flatNote");
+    expect(en.snapshot.flatNote).toContain("This is the text representation ATLAS captured from the page.");
+    expect(en.snapshot.flatNote).toContain("The original page structure was not preserved in this snapshot.");
     expect(at("snapshot-flat-note")).toBeLessThan(at("snapshot-excerpt"));
-    expect(at("snapshot-excerpt")).toBeLessThan(at("Show full captured text"));
+    expect(at("snapshot-excerpt")).toBeLessThan(at("dict.snapshot.showFull"));
     // The excerpt is this Evidence row's own fragment — the words the
     // finding quoted, never a passage chosen here.
     expect(page).toContain("{snapshot.fragment}");
-    expect(page).toContain("Relevant excerpt");
+    expect(page).toContain("dict.snapshot.relevantExcerpt");
+    expect(en.snapshot.relevantExcerpt).toBe("Relevant excerpt");
   });
 
   it("the whole capture is kept, reachable and unmodified — just not default", () => {
@@ -536,8 +549,10 @@ describe("source snapshot — a flattened capture is not a document", () => {
     const flat = page.slice(page.indexOf('data-testid="snapshot-flat-note"'));
     // Behind a control, rendered verbatim, and never truncated or
     // rewritten on its way to the screen.
-    expect(flat).toContain("Show full captured text");
-    expect(flat).toContain("Hide full captured text");
+    expect(flat).toContain("dict.snapshot.showFull");
+    expect(flat).toContain("dict.snapshot.hideFull");
+    expect(en.snapshot.showFull).toBe("Show full captured text");
+    expect(en.snapshot.hideFull).toBe("Hide full captured text");
     expect(flat).toContain("{snapshot.content}");
     expect(flat).toContain('data-testid="snapshot-raw"');
     // The reader is told how much there is before choosing to open it.
@@ -554,8 +569,9 @@ describe("source snapshot — a flattened capture is not a document", () => {
     expect(structured).toContain("<SnapshotDocumentView");
     // Its opt-in exact text is unchanged, and offered only on this branch
     // — the flat branch has its own "full captured text" control instead.
-    expect(page).toContain("Show exact captured text");
-    expect(page).toContain("Show as document");
+    expect(page).toContain("dict.snapshot.showExact");
+    expect(page).toContain("dict.snapshot.showDocument");
+    expect(en.snapshot.showDocument).toBe("Show as document");
     expect(page).toContain("{structured && (");
     // And the branch is chosen by the stored representation, not by size,
     // not by sniffing the text.

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { en } from "../src/client/i18n/en";
 import { describe, expect, it } from "vitest";
 
 import { deriveQuestionFindings, findingExplanation } from "../src/client/research-model";
@@ -189,8 +190,11 @@ describe("the normal result shows what the answer rests on, and nothing else", (
     expect(code).not.toContain("usedDocs");
     expect(code).not.toContain("used as evidence");
     const meta = code.slice(code.indexOf('data-testid="answer-meta"'));
-    expect(meta.slice(0, 500)).toContain("Checked {surface.checkedOn}");
-    expect(meta.slice(0, 500)).toContain("Newest source");
+    // D-171: the same two dates, worded by the dictionary.
+    expect(meta.slice(0, 600)).toContain("dict.result.checkedOn(surface.checkedOn)");
+    expect(meta.slice(0, 600)).toContain("dict.result.newest(");
+    expect(en.result.checkedOn("4 Oct 2026")).toBe("Checked 4 Oct 2026");
+    expect(en.result.newest("Published", "3 Oct 2026")).toBe("Newest source published 3 Oct 2026");
   });
 
   it("TEST 6b: the footnote is a footnote, never styled as a score", () => {
@@ -210,9 +214,13 @@ describe("the normal result shows what the answer rests on, and nothing else", (
     // role-bucketed document lists inside the result.
     expect(code).toContain('data-testid="audit-entry"');
     const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
-    expect(audit).toContain("Sources used");
-    expect(audit).toContain("Checked but not used");
-    expect(audit).toContain("Read during research; no research point relied on it.");
+    // The headings read from the dictionaries (D-171); English pinned.
+    expect(audit).toContain("dict.audit.sourcesUsed");
+    expect(audit).toContain("dict.audit.checkedNotUsed");
+    expect(audit).toContain("dict.audit.notUsedDefault");
+    expect(en.audit.sourcesUsed).toBe("Sources used");
+    expect(en.audit.checkedNotUsed).toBe("Checked but not used");
+    expect(en.audit.notUsedDefault).toBe("Read during research; no research point relied on it.");
   });
 });
 

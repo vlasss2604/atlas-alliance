@@ -5,27 +5,33 @@ import { usePathname } from "next/navigation";
 
 import { useApp } from "../app-context";
 import { AtlasMark } from "./atlas-header";
-import { AnalyticsIcon, AskIcon, ProfileIcon, ResearchIcon } from "./icons";
+import { AskIcon, ProfileIcon, ResearchIcon } from "./icons";
 
-// THE APP SHELL V4 — FIVE PLACES, HOME IN THE MIDDLE.
+// THE APP SHELL V4 — HOME IN THE MIDDLE.
 //
-//   Ask · Research · [ Home ] · Analytics · Profile
+//   Ask · Research · [ Home ] · · Profile
 //
-// One product structure, two treatments. On a handset the five sit in a
+// One product structure, two treatments. On a handset the places sit in a
 // bottom bar, Home as a raised disc rising from its centre — the way back
-// from anywhere. On a wide screen the same five sit in the header: the
-// brand lockup on the left, Ask · Research · Home · Analytics in the
-// centre, Profile on the right. Ask is the focused question screen;
-// Home is the overview with the composer and recent research.
+// from anywhere. On a wide screen they sit in the header: the brand lockup
+// on the left, Ask · Research · Home in the centre, Profile on the right.
+// Ask is the focused question screen; Home is the overview with the
+// composer and recent research.
 //
-// No dead controls. Analytics is a real page with an honest empty state.
+// No dead controls. Analytics (Compare / Monitoring) is not built, so it
+// is not in the navigation (D-171); its page stays reachable by URL only.
 
+// Labels come from the dictionary at render (D-171): EN by default, RU on
+// the user's explicit choice.
 const ITEMS = {
-  ask: { href: "/ask", label: "Ask" },
-  research: { href: "/research", label: "Research" },
-  analytics: { href: "/analytics", label: "Analytics" },
-  profile: { href: "/profile", label: "Profile" },
+  ask: { href: "/ask" },
+  research: { href: "/research" },
+  profile: { href: "/profile" },
 } as const;
+
+type NavDict = { askShort: string; research: string; profile: string };
+const navLabel = (key: keyof typeof ITEMS, nav: NavDict): string =>
+  key === "ask" ? nav.askShort : key === "research" ? nav.research : nav.profile;
 
 function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
@@ -33,7 +39,7 @@ function isActive(pathname: string, href: string): boolean {
 
 export function AppHeader() {
   const pathname = usePathname();
-  const { me } = useApp();
+  const { me, dict } = useApp();
   const unread = (me?.unreadCount ?? 0) > 0;
   const item = (key: keyof typeof ITEMS, icon: React.ReactNode, extra = "") => (
     <Link
@@ -42,7 +48,7 @@ export function AppHeader() {
       data-testid={`nav-${key}`}
     >
       {icon}
-      {ITEMS[key].label}
+      {navLabel(key, dict.nav)}
     </Link>
   );
   // Home carries the brand itself, as its centred hero, so the header
@@ -57,7 +63,7 @@ export function AppHeader() {
         href="/home"
         className={`brand-lockup mx-auto sm:mx-0 ${onHome ? "brand-lockup-home" : ""}`}
         data-testid="brand-lockup"
-        aria-label="ATLAS PROOF — Crypto Verification"
+        aria-label={`ATLAS PROOF — ${dict.home.tagline}`}
       >
         <AtlasMark size={32} />
         <span className="min-w-0">
@@ -65,33 +71,32 @@ export function AppHeader() {
             ATLAS <span className="text-[var(--atlas-cyan)]">PROOF</span>
           </span>
           <span className="mt-1 block text-[0.72rem] leading-none tracking-[0.02em] text-[var(--atlas-text-dim)]">
-            Crypto Verification
+            {dict.home.tagline}
           </span>
         </span>
       </Link>
 
-      <nav className="app-nav hidden sm:flex" aria-label="Primary" data-testid="app-nav">
+      <nav className="app-nav hidden sm:flex" aria-label={dict.nav.primary} data-testid="app-nav">
         {item("ask", <AskIcon size={16} />)}
         {item("research", <ResearchIcon size={16} />, unread ? "unread-dot" : "")}
         <Link
           href="/home"
           className={`home-orb mx-2 ${pathname === "/home" ? "home-orb-active" : ""}`}
-          aria-label="Home"
+          aria-label={dict.nav.home}
           data-testid="nav-home"
         >
           <AtlasMark size={42} />
         </Link>
-        {item("analytics", <AnalyticsIcon size={16} />)}
       </nav>
 
       <Link
         href={ITEMS.profile.href}
         className={`profile-link hidden sm:inline-flex ${isActive(pathname, "/profile") ? "profile-link-active" : ""}`}
-        aria-label="Profile"
+        aria-label={dict.nav.profile}
         data-testid="nav-profile"
       >
         <ProfileIcon size={16} />
-        <span>Profile</span>
+        <span>{dict.nav.profile}</span>
       </Link>
     </header>
   );
@@ -99,7 +104,7 @@ export function AppHeader() {
 
 export function AtlasDock() {
   const pathname = usePathname();
-  const { me } = useApp();
+  const { me, dict } = useApp();
   const unread = (me?.unreadCount ?? 0) > 0;
   const item = (key: keyof typeof ITEMS, icon: React.ReactNode, extra = "") => (
     <Link
@@ -108,22 +113,25 @@ export function AtlasDock() {
       data-testid={`dock-${key}`}
     >
       {icon}
-      {ITEMS[key].label}
+      {navLabel(key, dict.nav)}
     </Link>
   );
   return (
-    <nav className="dock sm:hidden" aria-label="Primary" data-testid="app-dock">
+    <nav className="dock sm:hidden" aria-label={dict.nav.primary} data-testid="app-dock">
       {item("ask", <AskIcon size={22} />)}
       {item("research", <ResearchIcon size={22} />, unread ? "unread-dot" : "")}
       <Link
         href="/home"
         className={`dock-home ${pathname === "/home" ? "home-orb-active" : ""}`}
-        aria-label="Home"
+        aria-label={dict.nav.home}
         data-testid="dock-home"
       >
         <AtlasMark size={56} />
       </Link>
-      {item("analytics", <AnalyticsIcon size={22} />)}
+      {/* D-171: Analytics (Compare / Monitoring) is not built, so it is not
+          in the creator-beta navigation. The cell stays so the Home orb
+          remains centred in the five-column dock. */}
+      <span aria-hidden data-testid="dock-spacer" />
       {item("profile", <ProfileIcon size={22} />)}
     </nav>
   );

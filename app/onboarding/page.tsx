@@ -10,14 +10,19 @@ import { ru } from "@/src/client/i18n/ru";
 
 // 3 экрана (LOCKED §10): вторичный «Пропустить», точки-пагинация, каждый
 // экран в один viewport. Состояние — на сервере, endpoint идемпотентен.
-// Язык до первого /api/me неизвестен — берём из navigator (только для
-// отображения onboarding; сохранённый выбор всегда с backend).
+// D-171: English by default — never a browser, device or Telegram locale
+// guess. An explicit EN | RU switch here saves the choice through the same
+// endpoint Profile uses (users.language), so the app opens in it.
 export default function OnboardingPage() {
   const router = useRouter();
   const [screen, setScreen] = useState(0);
   const [busy, setBusy] = useState(false);
-  const dict =
-    typeof navigator !== "undefined" && navigator.language.startsWith("ru") ? ru : en;
+  const [language, setLanguage] = useState<"EN" | "RU">("EN");
+  const dict = language === "RU" ? ru : en;
+  const choose = (next: "EN" | "RU") => {
+    setLanguage(next);
+    void api.setLanguage(next).catch(() => {});
+  };
   const screens = dict.onboarding.screens;
   const isLast = screen === screens.length - 1;
 
@@ -39,6 +44,19 @@ export default function OnboardingPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-[430px] flex-col px-6 py-10">
+      <div className="flex justify-end gap-1 text-sm" data-testid="onboarding-language">
+        {(["EN", "RU"] as const).map((l) => (
+          <button
+            key={l}
+            type="button"
+            onClick={() => choose(l)}
+            aria-pressed={language === l}
+            className={`pill px-3 py-1 ${language === l ? "text-[var(--atlas-cyan)]" : "text-[var(--atlas-text-dim)]"}`}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
       <div className="enter flex flex-1 flex-col justify-center gap-4" key={screen}>
         <h1 className="text-2xl font-semibold text-[var(--atlas-cyan)]">
           {screens[screen].title}

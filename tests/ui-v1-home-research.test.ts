@@ -12,6 +12,7 @@ import { ResearchGroupCard } from "../src/client/components/research-group-card"
 import { ResearchProgress } from "../src/client/components/research-progress";
 import { ResultLadder } from "../src/client/components/result-ladder";
 import { OutcomeBadge, VerdictBadge } from "../src/client/components/verdict-badge";
+import { en } from "../src/client/i18n/en";
 import {
   deriveProgress,
   deriveResultLadder,
@@ -653,7 +654,9 @@ describe("UI — evidence is grouped by document", () => {
     // and the separation is stronger — excluded material is on a
     // different surface entirely.
     const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
-    expect(audit).toContain("Checked but not used");
+    // The heading reads from the dictionaries (D-171); English pinned.
+    expect(audit).toContain("dict.audit.checkedNotUsed");
+    expect(en.audit.checkedNotUsed).toBe("Checked but not used");
     expect(audit).toContain('data-testid="audit-sources-not-used"');
     expect(audit).toContain('data-testid="audit-not-used-reason"');
     // And the exclusion role is still derived from PERSISTED links, in the
@@ -847,6 +850,14 @@ describe("UI — no project-specific conclusion", () => {
       let src = readFileSync(file, "utf-8");
       if (file.endsWith("research-composer.tsx")) {
         src = src.replace(/const EXAMPLES = \[[\s\S]*?\] as const;/, "");
+      }
+      // D-171: the dictionaries hold the approved availability COPY — the
+      // example questions and the one sentence naming what the private beta
+      // covers. Copy, not a code path that knows a project.
+      if (/i18n\/(en|ru)\.ts$/.test(file)) {
+        src = src
+          .replace(/examples: \[[\s\S]*?\],/, "")
+          .replace(/Raydium, Pump\.fun (and|и) Lido/g, "");
       }
       if (projectNames.test(codeOf(src))) offenders.push(file);
     }

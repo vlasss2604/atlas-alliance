@@ -5,7 +5,6 @@ import { useState } from "react";
 
 import type { AuditProjectionView, ResearchJobDetail } from "../api";
 import {
-  AUDIT_SECTION_TITLES,
   buildAuditContent,
   availableAuditSections,
   orderAuditSections,
@@ -18,12 +17,11 @@ import {
   type SourceRegister,
   auditOutcome,
 } from "../audit-model";
+import { useDict } from "../app-context";
 import { getPlatform } from "../platform";
 import { retrievedOn } from "../research-model";
 import { ChevronDownIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
 import {
-  BOUNDARY_COPY,
-  BOUNDARY_NEVER,
   buildResultSurface,
   RESULT_STATE_WORDS,
   sourceSentence,
@@ -54,6 +52,12 @@ import {
 // short component LABELS and two sentences of connective copy inside the
 // technical record — and where it supplied none, canonical labels are
 // used and every section still renders.
+//
+// TWO LANGUAGES (D-171). The interface words come from the dictionary; the
+// sentences built from statuses and reason codes follow the display
+// language (i18n/result-ru.ts). The record's own words — projection labels
+// and summary, evidence text, URLs, the engine codes under Developer
+// details — are shown as written.
 export function ResearchAudit({
   jobId,
   detail,
@@ -63,8 +67,9 @@ export function ResearchAudit({
   detail: ResearchJobDetail;
   projection: AuditProjectionView | null;
 }) {
+  const dict = useDict();
   const surface = buildResultSurface(detail);
-  const projectName = detail.job.projectName ?? detail.job.projectTicker ?? "Research record";
+  const projectName = detail.job.projectName ?? detail.job.projectTicker ?? dict.audit.recordFallback;
   const usable = projection?.status === "VALID" ? projection : null;
   const content = buildAuditContent(
     detail.components,
@@ -88,19 +93,19 @@ export function ResearchAudit({
       {/* COMPACT CONTEXT ONLY. Enough to know which record this is —
           never a second copy of the Result the reader just left. */}
       <header data-testid="audit-context">
-        <p className="text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">Full audit · {projectName}</p>
+        <p className="text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">{dict.audit.title(projectName)}</p>
         <h1 className="display mt-2 text-[1.4rem] font-semibold leading-[1.2] text-[var(--atlas-text-strong)] sm:text-[1.8rem]">
           {detail.job.originalQuestion}
         </h1>
         <p className="mt-3 text-[0.88rem] text-[var(--atlas-text-dim)]">
-          Research completed {retrievedOn(detail.job.finishedAt) ?? "—"}
-          {projection ? ` · audit prepared ${retrievedOn(projection.createdAt) ?? "—"}` : ""}
+          {dict.audit.completed(retrievedOn(detail.job.finishedAt) ?? "—")}
+          {projection ? dict.audit.prepared(retrievedOn(projection.createdAt) ?? "—") : ""}
         </p>
       </header>
 
       {surface.table.length > 0 && (
         <section data-testid="audit-points">
-          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Research points</h2>
+          <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.audit.points}</h2>
           <ol className="mt-1 flex flex-col">
             {surface.table.map((row) => (
               <AuditPoint key={row.component} row={row} jobId={jobId} />
@@ -114,11 +119,9 @@ export function ResearchAudit({
           <span className="grid h-7 w-7 place-items-center rounded-full border border-[var(--hairline-strong)] text-[var(--atlas-cyan-strong)]">
             <ChevronDownIcon size={14} className="transition-transform duration-200 group-open:rotate-180" />
           </span>
-          Technical record
+          {dict.audit.technicalRecord}
         </summary>
-        <p className="mt-2 text-[0.9rem] text-[var(--atlas-text-dim)]">
-          Coverage, every source read, raw on-chain observations, exclusion reasons and the engine trace.
-        </p>
+        <p className="mt-2 text-[0.9rem] text-[var(--atlas-text-dim)]">{dict.audit.technicalNote}</p>
         <div className="mt-5 flex flex-col gap-4">
           {sections.map((id) => (
             <AuditSection key={id} id={id}>
@@ -143,8 +146,7 @@ export function ResearchAudit({
               className="px-1 py-2 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]"
               data-testid="audit-projection-failed"
             >
-              Audit labels could not be prepared, so research points are shown under their
-              canonical names. The record itself is complete.
+              {dict.audit.projectionFailed}
             </p>
           )}
         </div>
@@ -162,6 +164,7 @@ export function ResearchAudit({
 // row, each with what it tells and what it does not prove; the limit is
 // the row's boundary, only where there is one.
 function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | null }) {
+  const dict = useDict();
   return (
     <li
       className="relative border-b border-[var(--hairline)] py-6 pl-4 last:border-b-0"
@@ -178,18 +181,18 @@ function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
       </p>
       <p className="mt-2 flex items-center gap-1.5 text-[0.88rem] text-[var(--atlas-text-dim)]">
         <span className={`dot dot-${row.tone}`} aria-hidden />
-        {RESULT_STATE_WORDS[row.status]}
+        {dict.result.stateWords[row.status] ?? RESULT_STATE_WORDS[row.status]}
       </p>
 
       {row.restsOn.length > 0 && (
         <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="audit-point-rests-on">
-          Also confirmed: {row.restsOn.map((r) => r.phrase).join(", ")}.
+          {dict.result.alsoConfirmed} {row.restsOn.map((r) => r.phrase).join(", ")}.
         </p>
       )}
 
       {row.evidence.length > 0 && (
         <div className="mt-4" data-testid="audit-point-evidence">
-          <p className="section-label">Evidence</p>
+          <p className="section-label">{dict.audit.evidence}</p>
           <ul className="mt-2 flex flex-col gap-4">
             {row.evidence.map((card) => (
               <AuditEvidence key={card.id} card={card} jobId={jobId} />
@@ -205,13 +208,13 @@ function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
           same words the Result uses, with what it must never be read as. */}
       {row.boundary && row.boundary.kind !== "SUBSTANTIVE" && (
         <div className="mt-4" data-testid="audit-point-limit" data-kind={row.boundary.kind}>
-          <p className="section-label">Limit</p>
+          <p className="section-label">{dict.audit.limit}</p>
           <p className="mt-1.5 text-[0.95rem] leading-[1.5] text-[var(--atlas-text)]/85">
             {row.boundary.kind === "TECHNICAL" && row.boundary.remainingPaths !== null
-              ? `The research limit was reached before ${row.boundary.remainingPaths} known relevant ${row.boundary.remainingPaths === 1 ? "source" : "sources"} could be checked.`
-              : BOUNDARY_COPY[row.boundary.kind]}
+              ? dict.audit.limitRemaining(row.boundary.remainingPaths)
+              : dict.audit.boundaryCopy[row.boundary.kind]}
           </p>
-          <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">{BOUNDARY_NEVER[row.boundary.kind]}</p>
+          <p className="mt-1 text-[0.9rem] text-[var(--atlas-text-dim)]">{dict.audit.boundaryNever[row.boundary.kind]}</p>
         </div>
       )}
     </li>
@@ -219,22 +222,23 @@ function AuditPoint({ row, jobId }: { row: ResearchTableRow; jobId: string | nul
 }
 
 function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | null }) {
+  const dict = useDict();
   const [open, setOpen] = useState(false);
   return (
     <li data-testid="audit-evidence" data-evidence-id={card.id} data-relation={card.relation}>
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.88rem] text-[var(--atlas-text-dim)]">
         <span className={`kind kind-${sourceKindFamily(card.sourceClass)}`}>
           <SourceKindIcon label={card.sourceClass} size={13} />
-          {card.sourceClass}
+          {dict.result.sourceKindChips[card.sourceClass] ?? card.sourceClass}
         </span>
         <span className="font-semibold text-[var(--atlas-text)]">{card.sourceName}</span>
         {card.onchain?.network && <span>{card.onchain.network}</span>}
         {card.date && (
           <span>
-            {card.date.label} {card.date.value}
+            {dict.result.dateLabels[card.date.label] ?? card.date.label} {card.date.value}
           </span>
         )}
-        {card.relation === "CONTRADICTS" && <span className="font-semibold text-[var(--atlas-red)]">Contradicts</span>}
+        {card.relation === "CONTRADICTS" && <span className="font-semibold text-[var(--atlas-red)]">{dict.result.contradicts}</span>}
       </p>
       <p className="mt-1 text-[1rem] leading-[1.5]">{sourceSentence(card)}</p>
       {card.doesNotProve && (
@@ -244,7 +248,7 @@ function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | nu
         {card.excerpt && (
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="btn-action">
             <QuoteIcon size={13} />
-            {open ? "Hide excerpt" : "View excerpt"}
+            {open ? dict.result.hideExcerpt : dict.result.viewExcerpt}
           </button>
         )}
         {card.openable && (
@@ -258,13 +262,13 @@ function AuditEvidence({ card, jobId }: { card: EvidenceCard; jobId: string | nu
             }}
           >
             <ExternalIcon size={14} />
-            Open original
+            {dict.result.openOriginal}
           </a>
         )}
         {card.snapshotHref && jobId && (
           <Link href={card.snapshotHref} className="link-action">
             <SnapshotIcon size={14} />
-            Snapshot
+            {dict.result.snapshot}
           </Link>
         )}
       </p>
@@ -292,10 +296,11 @@ const OPEN_BY_DEFAULT: AuditSectionId[] = [
 ];
 
 function AuditSection({ id, children }: { id: AuditSectionId; children: React.ReactNode }) {
+  const dict = useDict();
   if (OPEN_BY_DEFAULT.includes(id)) {
     return (
       <section className="rounded-[0.9rem] border border-[var(--hairline)] px-5 py-5 sm:px-6" data-testid={`audit-section-${id}`}>
-        <p className="section-label">{AUDIT_SECTION_TITLES[id]}</p>
+        <p className="section-label">{dict.audit.sections[id]}</p>
         <div className="mt-4">{children}</div>
       </section>
     );
@@ -304,7 +309,7 @@ function AuditSection({ id, children }: { id: AuditSectionId; children: React.Re
     <details className="group rounded-[0.9rem] border border-[var(--hairline)] px-5 py-4 sm:px-6" data-testid={`audit-section-${id}`}>
       <summary className="flex cursor-pointer list-none items-center gap-2.5 text-[0.9rem] text-[var(--atlas-text-dim)] select-none [&::-webkit-details-marker]:hidden">
         <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
-        {AUDIT_SECTION_TITLES[id]}
+        {dict.audit.sections[id]}
       </summary>
       <div className="mt-4">{children}</div>
     </details>
@@ -316,14 +321,11 @@ function AuditSection({ id, children }: { id: AuditSectionId; children: React.Re
  * ---------------------------------------------------------------- */
 
 function Summary({ content, summary }: { content: AuditContent; summary: string | null }) {
+  const dict = useDict();
   const c = content.counts;
   // RELATED NUMBERS READ TOGETHER. "12 exclusions" beside "1 unused
   // source" invites a reader to compare two figures that are one piece of
   // accounting; said as one sentence it becomes information instead.
-  const exclusionLine =
-    c.exclusions > 0
-      ? `${c.exclusions} evidence ${c.exclusions === 1 ? "item" : "items"} excluded on admission`
-      : null;
   return (
     <div>
       {/* CATEGORIES THAT DO NOT OVERLAP. "blocked" used to sit in the same
@@ -332,26 +334,18 @@ function Summary({ content, summary }: { content: AuditContent; summary: string 
           work. These three partition the record; anything that qualifies
           one of them is a sentence underneath. */}
       <div className="flex flex-wrap gap-x-7 gap-y-3" data-testid="audit-counts">
-        <Stat n={c.componentsTotal} label="research points" />
-        <Stat n={c.established} label="confirmed" tone="supported" />
-        {c.partial > 0 && <Stat n={c.partial} label="partially confirmed" tone="partial" />}
-        {c.contradicted > 0 && <Stat n={c.contradicted} label="contradicted" tone="negative" />}
-        <Stat n={c.unresolved} label="unresolved" tone="insufficient" />
+        <Stat n={c.componentsTotal} label={dict.audit.stats.points} />
+        <Stat n={c.established} label={dict.audit.stats.confirmed} tone="supported" />
+        {c.partial > 0 && <Stat n={c.partial} label={dict.audit.stats.partial} tone="partial" />}
+        {c.contradicted > 0 && <Stat n={c.contradicted} label={dict.audit.stats.contradicted} tone="negative" />}
+        <Stat n={c.unresolved} label={dict.audit.stats.unresolved} tone="insufficient" />
       </div>
       <div className="mt-4 border-t border-[var(--hairline)] pt-3.5 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
         {c.technicalLimitations > 0 && (
-          <p data-testid="audit-blocked-note">
-            {c.technicalLimitations} of the unresolved{" "}
-            {c.technicalLimitations === 1 ? "check was" : "checks were"} blocked by
-            source-access limitations rather than by missing evidence.
-          </p>
+          <p data-testid="audit-blocked-note">{dict.audit.blockedNote(c.technicalLimitations)}</p>
         )}
         <p className={c.technicalLimitations > 0 ? "mt-1.5" : ""}>
-          {c.sourcesUsed} {c.sourcesUsed === 1 ? "source" : "sources"} used
-          {c.sourcesCheckedNotUsed > 0
-            ? `, ${c.sourcesCheckedNotUsed} checked and not used`
-            : ""}
-          {exclusionLine ? ` · ${exclusionLine}` : ""}.
+          {dict.audit.sourcesLine(c.sourcesUsed, c.sourcesCheckedNotUsed, c.exclusions)}
         </p>
       </div>
       {summary && (
@@ -401,6 +395,7 @@ function Coverage({ scope }: { scope: AuditScopeItem[] }) {
 }
 
 function CoverageRow({ item }: { item: AuditScopeItem }) {
+  const dict = useDict();
   const [open, setOpen] = useState(false);
   return (
     <div className="border-b border-[var(--hairline)] py-2.5 last:border-b-0">
@@ -418,9 +413,7 @@ function CoverageRow({ item }: { item: AuditScopeItem }) {
           {/* The one line that keeps "we could not reach it" from being
               read as "it is not there". */}
           {item.outcome === "RESEARCH_BLOCKED" && (
-            <span className="mt-0.5 block text-[0.82rem] text-[#fcd34d]">
-              ATLAS could not access the source this check required.
-            </span>
+            <span className="mt-0.5 block text-[0.82rem] text-[#fcd34d]">{dict.audit.coverageBlocked}</span>
           )}
         </span>
         <span
@@ -439,13 +432,12 @@ function CoverageRow({ item }: { item: AuditScopeItem }) {
         >
           {item.reason && <p>{item.reason}</p>}
           <p className={item.reason ? "mt-1" : ""}>
-            <span className="text-[var(--atlas-text)]/75">How far the check got: </span>
+            <span className="text-[var(--atlas-text)]/75">{dict.audit.howFar}</span>
             {item.coverageLabel.toLowerCase()}
           </p>
           <p className="mt-1">
-            <span className="text-[var(--atlas-text)]/75">Evidence: </span>
-            {item.supportingCount} supporting · {item.contradictingCount} conflicting ·{" "}
-            {item.excludedCount} excluded
+            <span className="text-[var(--atlas-text)]/75">{dict.audit.evidenceLabel}</span>
+            {dict.audit.evidenceCounts(item.supportingCount, item.contradictingCount, item.excludedCount)}
           </p>
         </div>
       )}
@@ -474,6 +466,7 @@ function EvidenceMap({ groups, jobId }: { groups: AuditEvidenceGroup[]; jobId: s
 }
 
 function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: string | null }) {
+  const dict = useDict();
   const [open, setOpen] = useState(false);
   const excludedCount = group.excluded.reduce((n, l) => n + l.evidenceCount, 0);
   return (
@@ -494,14 +487,14 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
               ? group.admitted
                   .map(
                     (l) =>
-                      `${l.domain} · ${l.sourceClassLabel} · ${l.evidenceCount} ${l.evidenceCount === 1 ? "item" : "items"}`,
+                      `${l.domain} · ${dict.result.sourceKindChips[l.sourceClassLabel] ?? l.sourceClassLabel} · ${dict.audit.items(l.evidenceCount)}`,
                   )
                   .join("   ")
-              : "No admitted evidence"}
+              : dict.audit.noAdmitted}
             {excludedCount > 0 && (
               <span className="text-[#fcd34d]">
                 {group.admitted.length > 0 ? "   " : ""}
-                {excludedCount} excluded
+                {dict.audit.excludedCount(excludedCount)}
               </span>
             )}
           </span>
@@ -516,8 +509,8 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
           {group.admitted.map((l) => (
             <div key={`a:${l.sourceKey}`}>
               <p className="text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">
-                <span className="text-[var(--atlas-text)]/75">What this establishes: </span>
-                {l.canEstablish ?? "Not classified."}
+                <span className="text-[var(--atlas-text)]/75">{dict.audit.whatEstablishes}</span>
+                {l.canEstablish ?? dict.audit.notClassified}
               </p>
               {l.doesNotProve ? (
                 // Already framed: "Does not establish: <claim>" for a v1
@@ -527,15 +520,15 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
                 </p>
               ) : (
                 <p className="mt-1 text-[0.85rem] leading-snug text-[var(--atlas-text-dim)]">
-                  <span className="text-[var(--atlas-text)]/75">Outside its scope: </span>
-                  {l.cannotEstablish ?? "Not recorded."}
+                  <span className="text-[var(--atlas-text)]/75">{dict.audit.outsideScope}</span>
+                  {l.cannotEstablish ?? dict.audit.notRecorded}
                 </p>
               )}
               {l.legacyExtractorNote && (
                 // Provenance, not a boundary: the extractor's raw wording from
                 // before the does_not_prove contract (or outside it).
                 <p className="mt-1 text-[0.8rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="audit-legacy-extractor-note">
-                  <span className="text-[var(--atlas-text)]/75">Legacy extractor note: </span>
+                  <span className="text-[var(--atlas-text)]/75">{dict.audit.legacyNote}</span>
                   {l.legacyExtractorNote}
                 </p>
               )}
@@ -560,8 +553,7 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
               className="rounded-md border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.04)] px-3 py-2 text-[0.85rem] leading-snug text-[#fcd34d]"
               data-testid="audit-excluded-summary"
             >
-              {l.evidenceCount} {l.evidenceCount === 1 ? "item" : "items"} from {l.domain} not
-              admitted here
+              {dict.audit.excludedSummary(l.evidenceCount, l.domain)}
               {l.exclusionReasons.length > 0 ? ` — ${l.exclusionReasons.join("; ")}` : ""}
             </p>
           ))}
@@ -580,12 +572,11 @@ function EvidenceRow({ group, jobId }: { group: AuditEvidenceGroup; jobId: strin
 // to, its role and its limit, and the two ways to read it. Every other
 // section references a source compactly.
 function Register({ register, jobId }: { register: SourceRegister; jobId: string | null }) {
+  const dict = useDict();
   return (
     <div className="flex flex-col gap-5" data-testid="audit-source-register">
       <div>
-        <p className="text-[0.82rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
-          Sources used
-        </p>
+        <p className="text-[0.82rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">{dict.audit.sourcesUsed}</p>
         <div className="mt-1" data-testid="audit-sources-used">
           {register.used.map((s) => (
             <SourceRow key={s.sourceKey} entry={s} jobId={jobId} />
@@ -598,9 +589,7 @@ function Register({ register, jobId }: { register: SourceRegister; jobId: string
           {/* THE HALF A NORMAL RESULT NEVER SHOWS. Material the run read
               and did not rely on is where over-claiming would have
               happened and did not. */}
-          <p className="text-[0.82rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
-            Checked but not used
-          </p>
+          <p className="text-[0.82rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">{dict.audit.checkedNotUsed}</p>
           <div className="mt-1" data-testid="audit-sources-not-used">
             {register.checkedNotUsed.map((s) => (
               <SourceRow key={s.sourceKey} entry={s} jobId={jobId} notUsed />
@@ -621,6 +610,7 @@ function SourceRow({
   jobId: string | null;
   notUsed?: boolean;
 }) {
+  const dict = useDict();
   const [open, setOpen] = useState(false);
   return (
     <div
@@ -638,9 +628,9 @@ function SourceRow({
         <span className="min-w-0 flex-1">
           <span className="block text-[0.83rem] font-medium">{entry.domain}</span>
           <span className="mt-0.5 block text-[0.82rem] text-[var(--atlas-text-dim)]">
-            {entry.sourceClassLabel}
-            {entry.fetchedAt ? ` · retrieved ${retrievedOn(entry.fetchedAt)}` : ""}
-            {entry.evidenceIds.length > 1 ? ` · ${entry.evidenceIds.length} items` : ""}
+            {dict.result.sourceKindChips[entry.sourceClassLabel] ?? entry.sourceClassLabel}
+            {entry.fetchedAt ? dict.audit.retrieved(retrievedOn(entry.fetchedAt) ?? "") : ""}
+            {entry.evidenceIds.length > 1 ? ` · ${dict.audit.items(entry.evidenceIds.length)}` : ""}
           </span>
         </span>
       </button>
@@ -649,18 +639,18 @@ function SourceRow({
         <div className="mt-2 ml-[1.45rem] text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
           {entry.contributedTo.length > 0 && (
             <p>
-              <span className="text-[var(--atlas-text)]/75">Contributed to: </span>
+              <span className="text-[var(--atlas-text)]/75">{dict.audit.contributedTo}</span>
               {entry.contributedTo.map((x) => x.label).join(" · ")}
             </p>
           )}
           {entry.suitability && (
             <>
               <p className="mt-1">
-                <span className="text-[var(--atlas-text)]/75">Source role: </span>
+                <span className="text-[var(--atlas-text)]/75">{dict.audit.sourceRole}</span>
                 {entry.suitability.can}
               </p>
               <p className="mt-1">
-                <span className="text-[var(--atlas-text)]/75">Source limit: </span>
+                <span className="text-[var(--atlas-text)]/75">{dict.audit.sourceLimit}</span>
                 {entry.suitability.cannot}
               </p>
             </>
@@ -669,7 +659,7 @@ function SourceRow({
             <p className="mt-1 text-[#fcd34d]" data-testid="audit-not-used-reason">
               {entry.notUsedReasons.length > 0
                 ? entry.notUsedReasons.join(" · ")
-                : "Read during research; no research point relied on it."}
+                : dict.audit.notUsedDefault}
             </p>
           )}
           <SourceActions
@@ -700,6 +690,7 @@ function SourceActions({
   jobId: string | null;
   link: { evidenceIds: string[]; hasSnapshot: boolean; retrievedUrl: string };
 }) {
+  const dict = useDict();
   const evidenceId = link.evidenceIds[0];
   if (!link.retrievedUrl) return null;
   return (
@@ -710,7 +701,7 @@ function SourceActions({
           className="text-[0.82rem] font-medium text-[var(--atlas-cyan)] hover:underline"
           data-testid="audit-view-snapshot"
         >
-          View source snapshot
+          {dict.audit.viewSnapshot}
         </Link>
       )}
       <a
@@ -720,7 +711,7 @@ function SourceActions({
         className="text-[0.82rem] text-[var(--atlas-text-dim)] hover:text-[var(--atlas-cyan)] hover:underline"
         data-testid="audit-open-original"
       >
-        Open original
+        {dict.result.openOriginal}
       </a>
     </div>
   );
@@ -730,17 +721,12 @@ function SourceActions({
  * 5. OPEN QUESTIONS / CONFLICTS / LIMITATIONS
  * ---------------------------------------------------------------- */
 
-const OPEN_ITEM_TITLES: Record<AuditOpenItem["kind"], string> = {
-  CONFLICT: "Conflict",
-  TECHNICAL_LIMITATION: "Research limitation",
-  OPEN_EVIDENCE_QUESTION: "Evidence gap",
-};
-
 // EACH ITEM ADDS SOMETHING COVERAGE DID NOT SAY. Coverage states that a
 // point is open; this states WHY it is open, which KIND of open it is,
 // and what would close it. Repeating the coverage row word for word would
-// make this section furniture.
+// make this section furniture. Titles: dict.audit.openItemTitles, by kind.
 function OpenQuestions({ items }: { items: AuditOpenItem[] }) {
+  const dict = useDict();
   return (
     <div className="flex flex-col" data-testid="audit-open-questions">
       {items.map((i) => (
@@ -755,14 +741,14 @@ function OpenQuestions({ items }: { items: AuditOpenItem[] }) {
               className="text-[0.82rem] font-medium tracking-wider uppercase"
               style={{ color: openItemColor(i.kind) }}
             >
-              {OPEN_ITEM_TITLES[i.kind]}
+              {dict.audit.openItemTitles[i.kind]}
             </span>
           </div>
           <p className="mt-1.5 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
             {i.detail}
           </p>
           <p className="mt-1.5 text-[0.85rem] leading-relaxed text-[var(--atlas-text-dim)]">
-            <span className="text-[var(--atlas-text)]/75">Needed to resolve: </span>
+            <span className="text-[var(--atlas-text)]/75">{dict.audit.neededToResolve}</span>
             {i.needed}
           </p>
         </div>
@@ -805,6 +791,7 @@ function Onchain({ entries }: { entries: { evidenceId: string; locator: string }
 // removed: the component key and its reason codes are exactly where an
 // engineer would look for them, and nowhere a reader would trip over them.
 function Trace({ scope }: { scope: AuditScopeItem[] }) {
+  const dict = useDict();
   return (
     <div className="flex flex-col" data-testid="audit-trace">
       {scope.map((s) => (
@@ -827,11 +814,11 @@ function Trace({ scope }: { scope: AuditScopeItem[] }) {
             </p>
           )}
           <p className="mt-1 text-[0.85rem] text-[var(--atlas-text-dim)]">
-            How far the check got: {s.coverageLabel.toLowerCase()}
+            {dict.audit.howFar}
+            {s.coverageLabel.toLowerCase()}
           </p>
           <p className="mt-0.5 text-[0.85rem] text-[var(--atlas-text-dim)]">
-            Supporting: {s.supportingCount} · Conflicting: {s.contradictingCount} · Excluded:{" "}
-            {s.excludedCount}
+            {dict.audit.traceCounts(s.supportingCount, s.contradictingCount, s.excludedCount)}
           </p>
 
           {/* THE ENGINE'S OWN VOCABULARY, ONE LEVEL DEEPER. This is the
@@ -840,7 +827,7 @@ function Trace({ scope }: { scope: AuditScopeItem[] }) {
           <details className="group mt-1.5">
             <summary className="flex cursor-pointer list-none items-center gap-1.5 text-[0.82rem] text-[var(--atlas-text-dim)]/80 select-none [&::-webkit-details-marker]:hidden">
               <Chevron className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
-              Developer details
+              {dict.audit.developerDetails}
             </summary>
             <dl className="mt-1.5 ml-4 font-mono text-[0.82rem] text-[var(--atlas-text-dim)]">
               <div>component: {s.component}</div>

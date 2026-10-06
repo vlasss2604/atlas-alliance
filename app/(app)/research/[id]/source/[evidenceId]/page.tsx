@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { api, type SourceSnapshotView } from "@/src/client/api";
+import { useDict } from "@/src/client/app-context";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
 import { SnapshotDocumentView } from "@/src/client/components/snapshot-document-view";
 import { domainOf, retrievedOn, sourceClassLabel } from "@/src/client/research-model";
@@ -35,8 +36,13 @@ import { preservesStructure } from "@/src/client/snapshot-document";
 // which are escaped — no dangerouslySetInnerHTML, no iframe, no embed. The
 // deeper reason it is safe is upstream: the acquisition transport strips
 // markup before persisting, so no stored capture contains a tag at all.
+//
+// TWO LANGUAGES (D-171). The interface words come from the dictionary. The
+// capture itself — the domain, the excerpt, the stored text, URLs, hashes,
+// the content type — is shown exactly as stored.
 export default function SourceSnapshotPage() {
   const params = useParams<{ id: string; evidenceId: string }>();
+  const dict = useDict();
   const jobId = typeof params?.id === "string" ? params.id : null;
   const evidenceId = typeof params?.evidenceId === "string" ? params.evidenceId : null;
 
@@ -62,13 +68,13 @@ export default function SourceSnapshotPage() {
     };
   }, [jobId, evidenceId]);
 
-  const back = { href: `/research/${jobId ?? ""}`, label: "Back to result" };
+  const back = { href: `/research/${jobId ?? ""}`, label: dict.audit.back };
 
   if (status === "loading") {
     return (
       <main className="enter flex flex-col gap-5 pb-6">
         <AtlasHeader compact back={back} />
-        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">Loading…</div>
+        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">{dict.common.loading}</div>
       </main>
     );
   }
@@ -77,9 +83,7 @@ export default function SourceSnapshotPage() {
     return (
       <main className="enter flex flex-col gap-5 pb-6">
         <AtlasHeader compact back={back} />
-        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">
-          No captured copy of this source is available.
-        </div>
+        <div className="panel px-5 py-6 text-sm text-[var(--atlas-text-dim)]">{dict.snapshot.unavailable}</div>
       </main>
     );
   }
@@ -118,7 +122,7 @@ export default function SourceSnapshotPage() {
         data-testid="snapshot-header"
       >
         <div className="flex flex-col items-center text-center">
-          <p className="eyebrow eyebrow-cyan">ATLAS source snapshot</p>
+          <p className="eyebrow eyebrow-cyan">{dict.snapshot.eyebrow}</p>
 
           {/* The domain is the headline because it is the strongest
               identity the data actually carries: `sources.title` and
@@ -139,7 +143,7 @@ export default function SourceSnapshotPage() {
                 className="rounded-full border border-[var(--hairline-strong)] bg-[rgba(255,255,255,0.035)] px-2.5 py-[0.28rem] text-[0.68rem] font-medium tracking-[0.09em] text-[var(--atlas-text)]/80 uppercase"
                 data-testid="snapshot-source-class"
               >
-                {sourceClassLabel(snapshot.sourceClass)}
+                {dict.result.sourceKindChips[sourceClassLabel(snapshot.sourceClass)] ?? sourceClassLabel(snapshot.sourceClass)}
               </span>
             )}
             {captured && (
@@ -148,7 +152,7 @@ export default function SourceSnapshotPage() {
                 data-testid="snapshot-captured"
               >
                 <ClockIcon />
-                Captured {captured}
+                {dict.snapshot.captured(captured)}
               </span>
             )}
           </div>
@@ -157,7 +161,7 @@ export default function SourceSnapshotPage() {
             className="mt-4 max-w-[34rem] text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]"
             data-testid="snapshot-representation-note"
           >
-            {REPRESENTATION_NOTE[snapshot.representation]}
+            {dict.snapshot.representation[snapshot.representation]}
           </p>
 
           <a
@@ -167,7 +171,7 @@ export default function SourceSnapshotPage() {
             className="mt-5 inline-flex items-center gap-1.5 text-[0.78rem] font-medium text-[var(--atlas-cyan)] hover:underline"
             data-testid="snapshot-open-original"
           >
-            Open original
+            {dict.result.openOriginal}
             <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
               <path
                 d="M4 2h6v6M10 2 3 9"
@@ -193,24 +197,24 @@ export default function SourceSnapshotPage() {
         >
           <summary className="mx-auto flex w-fit cursor-pointer list-none items-center gap-2 text-[0.74rem] text-[var(--atlas-text-dim)] transition-colors select-none hover:text-[var(--atlas-text)]/85 [&::-webkit-details-marker]:hidden">
             <ChevronIcon className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
-            Technical details
+            {dict.snapshot.technical}
           </summary>
 
           <dl className="mt-5 grid gap-x-8 gap-y-3 text-left text-[0.75rem] sm:grid-cols-2">
-            <Row label="Type" value={snapshot.contentType} />
-            <Row label="Response" value={`HTTP ${snapshot.httpStatus}`} />
-            <Row label="Size" value={`${snapshot.byteLength.toLocaleString()} bytes`} />
-            <Row label="Captured" value={captured ?? "—"} />
-            <Row label="Retrieved from" value={snapshot.retrievedUrl} mono />
+            <Row label={dict.snapshot.rows.type} value={snapshot.contentType} />
+            <Row label={dict.snapshot.rows.response} value={`HTTP ${snapshot.httpStatus}`} />
+            <Row label={dict.snapshot.rows.size} value={dict.snapshot.bytes(snapshot.byteLength.toLocaleString())} />
+            <Row label={dict.snapshot.rows.captured} value={captured ?? "—"} />
+            <Row label={dict.snapshot.rows.retrievedFrom} value={snapshot.retrievedUrl} mono />
             {snapshot.finalUrl !== snapshot.retrievedUrl && (
-              <Row label="Landed on" value={snapshot.finalUrl} mono />
+              <Row label={dict.snapshot.rows.landedOn} value={snapshot.finalUrl} mono />
             )}
             {/* The hashes cover the WHOLE capture, including anything the
                 body below truncates. They say "this is the text that was
                 captured" and deliberately nothing more — not a
                 notarisation, and published nowhere. */}
-            <Row label="Content hash" value={snapshot.contentHash} mono />
-            <Row label="Text hash" value={snapshot.textSha256} mono />
+            <Row label={dict.snapshot.rows.contentHash} value={snapshot.contentHash} mono />
+            <Row label={dict.snapshot.rows.textHash} value={snapshot.textSha256} mono />
           </dl>
         </details>
       </section>
@@ -227,7 +231,7 @@ export default function SourceSnapshotPage() {
       <section className="panel p-5 sm:p-6" data-testid="snapshot-content">
         <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
           <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-            {structured ? "Captured content" : "Extracted text snapshot"}
+            {structured ? dict.snapshot.capturedContent : dict.snapshot.extractedText}
           </p>
           {/* THE EXACT TEXT STAYS REACHABLE. Typesetting is a reading aid,
               so a reader checking a quotation character by character — or
@@ -241,7 +245,7 @@ export default function SourceSnapshotPage() {
               className="text-[0.72rem] text-[var(--atlas-text-dim)] underline-offset-2 hover:text-[var(--atlas-cyan)] hover:underline"
               data-testid="toggle-raw-capture"
             >
-              {showRaw ? "Show as document" : "Show exact captured text"}
+              {showRaw ? dict.snapshot.showDocument : dict.snapshot.showExact}
             </button>
           )}
         </div>
@@ -273,8 +277,7 @@ export default function SourceSnapshotPage() {
               className="text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]"
               data-testid="snapshot-flat-note"
             >
-              This is the text representation ATLAS captured from the page. The original
-              page structure was not preserved in this snapshot.
+              {dict.snapshot.flatNote}
             </p>
 
             {/* THE PASSAGE THE RESEARCH ACTUALLY CITED, FIRST. It is this
@@ -284,7 +287,7 @@ export default function SourceSnapshotPage() {
                 for. */}
             <div className="mt-5" data-testid="snapshot-excerpt">
               <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-                Relevant excerpt
+                {dict.snapshot.relevantExcerpt}
               </p>
               <blockquote className="mt-2 border-l-2 border-[rgba(45,212,191,0.4)] pl-3.5 text-[0.86rem] leading-relaxed text-[var(--atlas-text)]/92">
                 {snapshot.fragment}
@@ -304,9 +307,9 @@ export default function SourceSnapshotPage() {
               <ChevronIcon
                 className={`shrink-0 transition-transform duration-200 ${showRaw ? "rotate-90" : ""}`}
               />
-              {showRaw ? "Hide full captured text" : "Show full captured text"}
+              {showRaw ? dict.snapshot.hideFull : dict.snapshot.showFull}
               <span className="text-[var(--atlas-text-dim)]/70">
-                ({snapshot.fullLength.toLocaleString()} characters)
+                {dict.snapshot.characters(snapshot.fullLength.toLocaleString())}
               </span>
             </button>
 
@@ -326,9 +329,7 @@ export default function SourceSnapshotPage() {
             className="mt-5 rounded-lg border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.05)] px-3 py-2 text-[0.76rem] leading-snug text-[#fcd34d]"
             data-testid="snapshot-truncated"
           >
-            Shown up to {snapshot.content.length.toLocaleString()} of{" "}
-            {snapshot.fullLength.toLocaleString()} characters. The hashes above cover the
-            whole capture.
+            {dict.snapshot.truncated(snapshot.content.length.toLocaleString(), snapshot.fullLength.toLocaleString())}
           </p>
         )}
       </section>
@@ -336,15 +337,8 @@ export default function SourceSnapshotPage() {
   );
 }
 
-// What was actually preserved, per representation. An HTML page did not
-// survive as a page and is never described as one.
-const REPRESENTATION_NOTE: Record<SourceSnapshotView["representation"], string> = {
-  MARKDOWN_SOURCE:
-    "Captured representation of the source ATLAS retrieved, and the one this research read. It is a preserved copy of the document, not the live page.",
-  EXTRACTED_TEXT:
-    "Captured representation of the source ATLAS retrieved, and the one this research read — the text extracted from the page. Layout, images and navigation were not kept, so this is not the page as it appears in a browser.",
-  TEXT: "Captured representation of the source ATLAS retrieved, and the one this research read. It is a preserved copy, not the live page.",
-};
+// What was actually preserved, per representation (dict.snapshot.representation).
+// An HTML page did not survive as a page and is never described as one.
 
 // The same two glyphs the rest of the product uses: one "this is an age"
 // signal, and one disclosure marker, so this screen does not introduce a

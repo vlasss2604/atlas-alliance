@@ -639,7 +639,7 @@ describe("D. Private Beta · N Research remaining, by the D-169 count", () => {
   it("3 → 2 → 1 → 0; FAILED and no-Proof runs do not decrement; a cancel after start does", async () => {
     await setGlobalHeadroom(20);
     const c = await betaUser();
-    expect(await remaining(c)).toEqual({ used: 0, limit: 3, remaining: 3 });
+    expect(await remaining(c)).toEqual({ used: 0, limit: 3, remaining: 3, capacityReached: false });
     await withProof(await startedJobId(c), c.userId);
     expect((await remaining(c))!.remaining).toBe(2);
     await failAfterStart(await startedJobId(c));
@@ -653,7 +653,7 @@ describe("D. Private Beta · N Research remaining, by the D-169 count", () => {
     const cancelled = await startedJobId(c);
     await transitionJobState(ctx.db, cancelled, "RUNNING", "test: pick up");
     await transitionJobState(ctx.db, cancelled, "CANCELLED", "test: user cancel after start");
-    expect(await remaining(c)).toEqual({ used: 3, limit: 3, remaining: 0 });
+    expect(await remaining(c)).toEqual({ used: 3, limit: 3, remaining: 0, capacityReached: false });
     expect(await errorOf(await startHttp(c))).toBe("BETA_RESEARCH_LIMIT_REACHED");
   });
 
@@ -686,7 +686,9 @@ describe("D. Private Beta · N Research remaining, by the D-169 count", () => {
     expect(profile.indexOf("me.privateBeta")).toBeLessThan(profile.indexOf('"ARI • CORE"'));
     expect(readFileSync("app/(app)/home/page.tsx", "utf8")).toContain("dict.home.betaRemaining(me.privateBeta.remaining)");
     expect(en.ask.globalBetaCapacity).toBe("Private beta is at capacity for now. Your previous Research is still available in your Research Library.");
-    expect(ru.ask.globalBetaCapacity).toBe("Сейчас лимит private beta исчерпан. Ваши предыдущие Research по-прежнему доступны в Research Library.");
+    // D-171 language decision: one consistent Russian vocabulary (закрытая
+    // бета, исследования, Библиотека исследований) — no mixed strings.
+    expect(ru.ask.globalBetaCapacity).toBe("Закрытая бета сейчас заполнена. Ваши прошлые исследования по-прежнему доступны в Библиотеке исследований.");
     for (const copy of [en.ask.globalBetaCapacity, ru.ask.globalBetaCapacity]) expect(copy).not.toMatch(/CORE|Pro\b|buy|купи/i);
   });
 });

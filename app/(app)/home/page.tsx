@@ -6,8 +6,10 @@ import { useEffect, useState } from "react";
 import { api, type ResearchJobListItem } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
 import { AtlasMark } from "@/src/client/components/atlas-header";
+import { BetaStatusNotice } from "@/src/client/components/beta-status-notice";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
+import { betaBlockOf } from "@/src/client/beta-status";
 import { groupResearchRuns } from "@/src/client/research-model";
 
 // HOME — FINAL COMPOSITION.
@@ -20,7 +22,10 @@ import { groupResearchRuns } from "@/src/client/research-model";
 // server; no verdict is invented for a job that has none.
 
 export default function HomePage() {
-  const { dict, me, betaAccessFull } = useApp();
+  const { dict, me, inviteNotice } = useApp();
+  // D-171: when the beta cannot take a new Research for this user, Home
+  // stops promoting one and points to the Research Library instead.
+  const block = betaBlockOf(me);
   const [jobs, setJobs] = useState<ResearchJobListItem[] | null>(null);
 
   useEffect(() => {
@@ -44,25 +49,30 @@ export default function HomePage() {
         <p className="wordmark mt-4 text-[1.25rem] leading-none sm:text-[1.45rem]">
           ATLAS <span className="text-[var(--atlas-cyan)]">PROOF</span>
         </p>
-        <p className="tagline mt-2.5">Crypto Verification</p>
+        <p className="tagline mt-2.5">{dict.home.tagline}</p>
       </section>
 
-      <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-6" data-testid="home-composer">
-        <ResearchComposer hero />
-      </section>
+      {block ? (
+        <BetaStatusNotice />
+      ) : (
+        <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-6" data-testid="home-composer">
+          <ResearchComposer hero />
+        </section>
+      )}
 
       {/* PRIVATE BETA ALLOWANCE (D-170) — the server's own count, shown only
-          while private beta is what admits this user. */}
-      {me?.privateBeta && (
+          while private beta is what admits this user and a start is
+          possible (D-171: never "N remaining" when the beta is full). */}
+      {me?.privateBeta && !block && (
         <p className="-mt-3 px-1 text-center text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="beta-allowance">
           <span className="font-medium text-[var(--atlas-cyan-strong)]">{dict.home.betaLabel}</span>
           {" · "}
           {dict.home.betaRemaining(me.privateBeta.remaining)}
         </p>
       )}
-      {!me?.privateBeta && betaAccessFull && (
-        <p className="-mt-3 px-1 text-center text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="beta-access-full">
-          {dict.home.betaAccessFull}
+      {!me?.privateBeta && !me?.betaPaused && inviteNotice && (
+        <p className="-mt-3 px-1 text-center text-[0.95rem] text-[var(--atlas-text-dim)]" data-testid="beta-invite-notice" data-notice={inviteNotice}>
+          {inviteNotice === "FULL" ? dict.home.betaAccessFull : dict.home.betaInviteUnavailable}
         </p>
       )}
 

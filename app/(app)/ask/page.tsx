@@ -5,6 +5,8 @@ import { useEffect, useState } from "react";
 
 import { api, ApiError, type GateView, type InterpretResult, type ResearchIntakeView } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
+import { betaBlockOf } from "@/src/client/beta-status";
+import { BetaStatusNotice } from "@/src/client/components/beta-status-notice";
 import { intakeIdFromSearch } from "@/src/client/intake-launch";
 import { getPlatform } from "@/src/client/platform";
 import { canStartProof, proofBlockReason } from "@/src/client/proof-gate";
@@ -27,7 +29,10 @@ type IntakeLaunch =
   | { kind: "unavailable" };
 
 export default function AskPage() {
-  const { dict, refresh } = useApp();
+  const { dict, refresh, me } = useApp();
+  // D-171: a beta user who cannot start a new Research is not offered one;
+  // the notice points to the Research Library.
+  const block = betaBlockOf(me);
   const router = useRouter();
   const [question, setQuestion] = useState("");
   const [intake, setIntake] = useState<IntakeLaunch>({ kind: "none" });
@@ -198,7 +203,9 @@ export default function AskPage() {
         </button>
       </div>
 
-      {showExamples && phase === "input" && (
+      {block && phase === "input" && <BetaStatusNotice />}
+
+      {showExamples && phase === "input" && !block && (
         <div className="glass sheet-enter px-4 py-3">
           <p className="mb-2 text-xs text-[var(--atlas-text-dim)]">
             {dict.ask.examplesTitle}
@@ -261,7 +268,7 @@ export default function AskPage() {
         </div>
       )}
 
-      {phase === "input" && (
+      {phase === "input" && !block && (
         <>
           <textarea
             value={question}
@@ -277,8 +284,11 @@ export default function AskPage() {
             onClick={submit}
             disabled={!question.trim()}
             className="pill cta w-full py-3 text-base"
+            data-testid="ask-continue"
           >
-            {dict.ask.submit}
+            {/* D-171: this step only reads the question — "Start Proof" is
+                the separate, explicit start shown after it. */}
+            {dict.ask.continue}
           </button>
         </>
       )}

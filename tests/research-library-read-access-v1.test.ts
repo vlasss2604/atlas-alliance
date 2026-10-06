@@ -304,7 +304,8 @@ describe("3. the Library says what it is, in both languages; the progress rail n
     const { readFileSync } = await import("node:fs");
     expect(en.research.title).toBe("Research Library");
     expect(en.research.keepNote).toBe("Your completed Research stays here. Reopening it never uses another Research.");
-    expect(ru.research.keepNote).toBe("Все завершённые исследования сохраняются здесь. Повторное открытие не расходует Research.");
+    // D-171 language decision: one Russian vocabulary, no English product terms.
+    expect(ru.research.keepNote).toBe("Все завершённые исследования сохраняются здесь. Повторное открытие не тратит новое исследование.");
     for (const dict of [en, ru]) {
       for (const key of ["title", "subtitle", "keepNote", "loading", "inProgress", "projectsResearched", "empty"] as const) {
         expect(typeof dict.research[key]).toBe("string");
@@ -314,7 +315,8 @@ describe("3. the Library says what it is, in both languages; the progress rail n
       }
       // Deletion copy describes what deletion does: the account's own
       // Research goes; shared sources and project-level Memory remain.
-      expect(dict.profile.deleteConfirm1).toMatch(/Research Memory/);
+      // (D-171: Russian names it in Russian, not as "Research Memory".)
+      expect(dict.profile.deleteConfirm1).toMatch(dict === ru ? /накопленные знания о проектах/ : /Research Memory/);
     }
     const list = readFileSync("app/(app)/research/page.tsx", "utf8");
     for (const key of ["dict.research.title", "dict.research.subtitle", "dict.research.keepNote", "dict.research.empty", "dict.research.inProgress", "dict.research.projectsResearched"]) {

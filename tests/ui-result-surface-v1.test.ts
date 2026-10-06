@@ -323,7 +323,10 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     const first = textOf(firstScreenOf(html));
     // The group's one sentence carries the count; the reading it must
     // never be given stands beside it.
-    expect(first).toContain("The research limit was reached before 4 known relevant sources could be checked.");
+    // D-171: plain words — "this Research stopped", never "research limit".
+    expect(first).toContain("This Research stopped before 4 known relevant sources could be checked.");
+    expect(first).toContain("Not every source could be checked");
+    expect(first).not.toContain("Research limit reached");
     expect(first).toContain(BOUNDARY_NEVER.TECHNICAL);
     // The row itself says the same thing, not "no evidence".
     const cs = surface.table.find((r) => r.component === "CURRENT_STATE")!;

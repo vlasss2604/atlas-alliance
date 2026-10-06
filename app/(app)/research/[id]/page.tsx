@@ -29,7 +29,7 @@ import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 export default function ResearchDetailPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
-  const { refresh, me } = useApp();
+  const { refresh, me, dict } = useApp();
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   // Re-read the whole detail. Used when the job reaches a terminal state,
@@ -107,8 +107,8 @@ export default function ResearchDetailPage() {
   if (status === "loading") {
     return (
       <main className="enter flex flex-col gap-6">
-        <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
-        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">Loading…</div>
+        <AtlasHeader compact back={{ href: "/research", label: dict.detailPage.back }} />
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.detailPage.loading}</div>
       </main>
     );
   }
@@ -116,21 +116,21 @@ export default function ResearchDetailPage() {
   if (status === "error" || !detail) {
     return (
       <main className="enter flex flex-col gap-6">
-        <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
+        <AtlasHeader compact back={{ href: "/research", label: dict.detailPage.back }} />
         <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">
-          This research could not be loaded.
+          {dict.detailPage.loadError}
         </div>
       </main>
     );
   }
 
   const { job } = detail;
-  const projectName = job.projectName ?? job.projectTicker ?? "Unresolved project";
+  const projectName = job.projectName ?? job.projectTicker ?? dict.detailPage.unresolvedProject;
   const finished = isTerminal(job.state as JobState);
 
   return (
     <main className="enter flex flex-col gap-5 pb-6">
-      <AtlasHeader compact back={{ href: "/research", label: "Back" }} />
+      <AtlasHeader compact back={{ href: "/research", label: dict.detailPage.back }} />
 
       {/* ---- LIVE: the subject and the question are the header — there is
            no result yet for them to belong to — and progress leads. ---- */}
@@ -144,7 +144,7 @@ export default function ResearchDetailPage() {
               {projectName.slice(0, 2).toUpperCase()}
             </span>
             <div className="min-w-0 flex-1">
-              <p className="section-label">Researching</p>
+              <p className="section-label">{dict.detailPage.researching}</p>
               <p className="mt-1 text-[1.2rem] font-semibold leading-tight tracking-tight">{projectName}</p>
               <p className="mt-1.5 text-[1rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</p>
             </div>
@@ -152,17 +152,24 @@ export default function ResearchDetailPage() {
           <section className="panel p-5 sm:p-6" data-testid="live-banner">
             <div className="flex items-center gap-3">
               <span className="pulse-dot" aria-hidden />
-              <p className="text-[1.05rem] font-medium">Research in progress</p>
+              <p className="text-[1.05rem] font-medium">{dict.detailPage.inProgress}</p>
             </div>
             <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]">
-              You can leave this screen. ATLAS keeps working and the result will be here when you come
-              back.
+              {dict.detailPage.leaveNote}
             </p>
           </section>
           <div data-testid="progress-slot-live">
             <ResearchProgress job={job} memoryEnabled={me?.memoryEnabled ?? false} />
           </div>
         </>
+      )}
+
+      {/* D-171: a due feedback prompt is announced at the top of the
+          finished Result, so it is seen without scrolling past the answer. */}
+      {finished && detail.proof && me?.feedbackDue && (
+        <a href="#beta-feedback" className="glass block px-4 py-3 text-[0.95rem] text-[var(--atlas-cyan-strong)]" data-testid="beta-feedback-banner">
+          {dict.feedback.banner}
+        </a>
       )}
 
       {/* ---- FINISHED: the one result surface. ------------------------ */}

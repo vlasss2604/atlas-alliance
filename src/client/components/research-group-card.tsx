@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useState } from "react";
 
 import type { ResearchJobListItem } from "../api";
+import { useDict } from "../app-context";
+import { outcomeText } from "../localize";
 import { jobOutcome, relativeAge, type ProjectGroup } from "../research-model";
 
 // RESEARCH HISTORY, NOT A JOB LOG. A project researched eight times is ONE
@@ -13,6 +15,7 @@ import { jobOutcome, relativeAge, type ProjectGroup } from "../research-model";
 export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobListItem> }) {
   const [open, setOpen] = useState(false);
   const latest = jobOutcome(group.latest);
+  const dict = useDict();
   return (
     <li className="list-none border-b border-[var(--hairline)] last:border-b-0" data-testid={`group-${group.key}`}>
       <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="history-row w-full text-left">
@@ -20,16 +23,16 @@ export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobLi
           <span className="block text-[1.08rem] font-semibold text-[var(--atlas-text-strong)]">{group.projectName}</span>
           <span className="mt-1 block text-[0.92rem] text-[var(--atlas-text-dim)]">
             <span data-testid="group-run-count">
-              {group.runCount} {group.runCount === 1 ? "run" : "runs"}
+              {dict.history.runs(group.runCount)}
             </span>
-            {group.questions.length > 1 && <span data-testid="group-question-count"> · {group.questions.length} questions</span>}
-            <span> · last researched {relativeAge(group.lastAt)}</span>
+            {group.questions.length > 1 && <span data-testid="group-question-count"> · {dict.history.questions(group.questions.length)}</span>}
+            <span> · {dict.history.lastResearched(relativeAge(group.lastAt))}</span>
           </span>
         </span>
         <span className="flex shrink-0 items-center gap-3 text-[0.88rem] text-[var(--atlas-text-dim)]">
           <span className="flex items-center gap-1.5" data-testid="group-latest" data-verdict={latest.verdict ?? "NONE"}>
             <span className={`dot dot-${latest.tone}`} aria-hidden />
-            {latest.label}
+            {outcomeText(latest, dict)}
           </span>
           <Chevron open={open} />
         </span>
@@ -48,7 +51,7 @@ export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobLi
                         <span className="flex-1">{relativeAge(run.finishedAt ?? run.createdAt)}</span>
                         <span className="flex items-center gap-1.5" data-verdict={o.verdict ?? "NONE"}>
                           <span className={`dot dot-${o.tone}`} aria-hidden />
-                          {o.label}
+                          {outcomeText(o, dict)}
                         </span>
                         <Chevron open={false} />
                       </Link>

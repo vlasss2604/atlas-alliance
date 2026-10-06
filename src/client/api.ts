@@ -22,7 +22,11 @@ export interface MeResponse {
   memoryEnabled: boolean;
   // D-170: present only while private beta is what admits this user. The
   // server's own count (D-169 rule); the client never recomputes it.
-  privateBeta: { used: number; limit: number; remaining: number } | null;
+  privateBeta: { used: number; limit: number; remaining: number; capacityReached: boolean } | null;
+  // D-171: a DEMO Research could actually start (public path open, beta not in force).
+  demoAvailable: boolean;
+  // D-171: this user's private beta is operationally paused.
+  betaPaused: boolean;
   // D-170: the one-time feedback prompt is due (second Proof, never asked).
   feedbackDue: boolean;
   csrfToken: string;

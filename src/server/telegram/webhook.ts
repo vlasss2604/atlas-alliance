@@ -5,7 +5,7 @@ import { hitRateLimit, RateLimitedError } from "../auth/rate-limit";
 import type { ProductConfig } from "../config/product";
 import type { Database } from "../db/client";
 import { projects, userIdentities, users } from "../db/schema";
-import { privateBetaOpen, privateBetaProjectAllowed } from "../services/private-beta";
+import { interpreterAccessRefusal, privateBetaOpen, privateBetaProjectAllowed } from "../services/private-beta";
 import { detectProjectSlug } from "../services/project-detection";
 import { createResearchIntake } from "../services/research-intake";
 import { sendTelegramMessage, type OutboundMessage, type SendResult } from "./bot-api";
@@ -43,7 +43,12 @@ const INTAKE_RATE_WINDOW_SEC = 600;
 
 export type WebhookOutcome =
   | { handled: false; reason: "MALFORMED" | "IGNORED" | "RATE_LIMITED" }
-  | { handled: true; action: "SIGN_IN_FIRST" | "NEED_TEXT" | "HINT" | "NOT_IN_BETA"; intakeId: null; send: SendResult }
+  | {
+      handled: true;
+      action: "SIGN_IN_FIRST" | "NEED_TEXT" | "HINT" | "NOT_IN_BETA" | "NO_RESEARCH_ACCESS";
+      intakeId: null;
+      send: SendResult;
+    }
   | { handled: true; action: "VERIFY" | "OPEN"; intakeId: string; send: SendResult };
 
 // The Mini App origin is the first allowed frontend origin — the same value
@@ -57,6 +62,12 @@ export function miniAppOrigin(): string {
 
 export function intakeLaunchUrl(intakeId: string): string {
   return `${miniAppOrigin()}/ask?intake=${intakeId}`;
+}
+
+// D-171: where "Open ATLAS" lands — the Mini App's own Home, signed in by
+// Telegram the normal way. No grant, no account, nothing else.
+export function homeLaunchUrl(): string {
+  return `${miniAppOrigin()}/home`;
 }
 
 async function canonicalUser(db: Database, telegramUserId: string): Promise<{ userId: string; language: ReplyLanguage } | null> {
@@ -89,13 +100,37 @@ export async function handleTelegramUpdate(
   const user = await canonicalUser(db, update.senderId);
   const t = repliesFor(user?.language ?? "EN");
   if (!user) {
-    return { handled: true, action: "SIGN_IN_FIRST", intakeId: null, send: await send({ chatId: update.chatId, text: t.signInFirst }) };
+    // D-171: give the way in, not just the instruction.
+    return {
+      handled: true,
+      action: "SIGN_IN_FIRST",
+      intakeId: null,
+      send: await send({ chatId: update.chatId, text: t.signInFirst, buttons: [{ text: t.openAtlas, webAppUrl: homeLaunchUrl() }] }),
+    };
   }
   if (update.kind === "NO_TEXT") {
     return { handled: true, action: "NEED_TEXT", intakeId: null, send: await send({ chatId: update.chatId, text: t.needText }) };
   }
   if (update.isCommand) {
     return { handled: true, action: "HINT", intakeId: null, send: await send({ chatId: update.chatId, text: t.hint }) };
+  }
+
+  // D-171 — NO DEAD-END VERIFY FLOW. The same rule the Interpreter applies
+  // before any model call: when this user's question could not lead to a
+  // Research right now (no beta access, the beta paused or full, or their
+  // own allowance used up), say so and store nothing. It grants nothing and
+  // changes nothing; the canonical start path still decides every start.
+  const refusal = await interpreterAccessRefusal(db, config, user.userId);
+  if (refusal !== null) {
+    const text =
+      refusal === "BETA_ACCESS_REQUIRED"
+        ? `${t.noBetaAccess}\n\n${t.betaCovers}`
+        : refusal === "GLOBAL_BETA_CAPACITY_REACHED"
+          ? t.betaAtCapacity
+          : refusal === "BETA_RESEARCH_LIMIT_REACHED"
+            ? t.betaExhausted
+            : t.betaPaused;
+    return { handled: true, action: "NO_RESEARCH_ACCESS", intakeId: null, send: await send({ chatId: update.chatId, text }) };
   }
 
   const slug = await detectProjectSlug(db, update.text);
@@ -105,7 +140,7 @@ export async function handleTelegramUpdate(
   // nothing — there is no Research for the Mini App to prepare. (With the
   // beta switch off this check does not apply; the Mini App gates decide.)
   if (project && privateBetaOpen(config) && !privateBetaProjectAllowed(config, project.slug)) {
-    const text = `${t.project}: ${project.name}\n\n${t.notInBeta(project.name)}`;
+    const text = `${t.project}: ${project.name}\n\n${t.notInBeta(project.name)} ${t.betaCovers}`;
     return { handled: true, action: "NOT_IN_BETA", intakeId: null, send: await send({ chatId: update.chatId, text }) };
   }
 

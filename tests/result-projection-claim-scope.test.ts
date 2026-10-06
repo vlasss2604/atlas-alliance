@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { en } from "../src/client/i18n/en";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { GET as jobDetailGET } from "../app/api/research-jobs/[id]/route";
@@ -436,7 +437,8 @@ describe("result view — proof section reads only claim-scoped evidence", () =>
     // whatever else the job happens to hold: a check with no admitted
     // link says so on its own row (in a reader's words — "admitted" is the
     // engine's).
-    expect(code).toContain("No qualifying source");
+    expect(code).toContain("dict.result.noQualifyingSource");
+    expect(en.result.noQualifyingSource).toBe("No qualifying source");
     // And no step count may come from mechanism branch structure.
     expect(code).not.toContain("mechanism.flows.length");
   });

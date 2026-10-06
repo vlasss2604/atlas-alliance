@@ -22,16 +22,9 @@ import { ArrowIcon, AskIcon } from "./icons";
 
 type Phase = "input" | "thinking" | "result" | "starting";
 
-// Four research examples in the product's own domain — Token Value
-// Capture. A tap fills the input; the reader edits or sends. The fourth
-// names no project on purpose: the interpreter asks which, exactly as it
-// would for any reader's question.
-const EXAMPLES = [
-  { text: "Does PUMP buyback actually reduce supply?" },
-  { text: "Where do Raydium trading fees go?" },
-  { text: "Does HYPE revenue actually reach token holders?" },
-  { text: "Are bought-back tokens burned or held?" },
-] as const;
+// The example questions come from the dictionary (dict.ask.examples): each
+// names a project the private beta covers (D-171), so a tap never leads to
+// a refusal or a clarification question.
 
 export function ResearchComposer({ hero = false }: { hero?: boolean }) {
   const { dict, refresh } = useApp();
@@ -159,9 +152,9 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
   return (
     <section data-testid="composer" className={centred}>
       <h1 className="display text-[1.55rem] font-semibold leading-[1.15] text-[var(--atlas-text-strong)] sm:text-[1.9rem]">
-        What do you want to verify?
+        {dict.composer.title}
       </h1>
-      <p className="mt-1.5 text-[1rem] text-[var(--atlas-text-dim)]">Ask about a project, a token, a claim or a link.</p>
+      <p className="mt-1.5 text-[1rem] text-[var(--atlas-text-dim)]">{dict.composer.subtitle}</p>
 
       {phase === "input" || phase === "thinking" ? (
         <>
@@ -177,9 +170,9 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
                     void submit();
                   }
                 }}
-                placeholder="Ask or paste a link…"
+                placeholder={dict.composer.placeholder}
                 maxLength={2000}
-                aria-label="Research question"
+                aria-label={dict.composer.title}
                 data-testid="composer-input"
                 disabled={phase === "thinking"}
                 className="w-full bg-transparent text-[1.05rem] outline-none"
@@ -189,7 +182,7 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
               type="button"
               onClick={() => void submit()}
               disabled={!question.trim() || phase === "thinking"}
-              aria-label={dict.ask.submit}
+              aria-label={dict.ask.continue}
               data-testid="composer-submit"
               className="send-orb h-[50px] w-[50px] shrink-0"
             >
@@ -198,12 +191,12 @@ export function ResearchComposer({ hero = false }: { hero?: boolean }) {
           </div>
 
           <div className={`mt-4 ${hero ? "mx-auto max-w-[640px]" : ""}`}>
-            <p className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-[var(--atlas-text-faint)]">Try asking</p>
+            <p className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-[var(--atlas-text-faint)]">{dict.composer.tryAsking}</p>
             <ul className={`mt-2 flex flex-wrap gap-2 ${hero ? "justify-center" : ""}`} data-testid="composer-examples">
-              {EXAMPLES.map((ex) => (
-                <li key={ex.text}>
-                  <button type="button" onClick={() => setQuestion(ex.text)} className="chip" data-testid="composer-example">
-                    {ex.text}
+              {dict.ask.examples.map((ex) => (
+                <li key={ex}>
+                  <button type="button" onClick={() => setQuestion(ex)} className="chip" data-testid="composer-example">
+                    {ex}
                   </button>
                 </li>
               ))}

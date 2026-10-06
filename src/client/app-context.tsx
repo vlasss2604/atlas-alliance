@@ -12,6 +12,7 @@ import { usePathname, useRouter } from "next/navigation";
 
 import { api, ApiError, authenticate, getMe, type MeResponse } from "./api";
 import { betaInviteFromStartParam } from "./beta-invite-launch";
+import { setDisplayLanguage } from "./display-language";
 import { en, type Dict } from "./i18n/en";
 import { ru } from "./i18n/ru";
 import { askPathForIntake, intakeIdFromStartParam, rememberLaunchIntake } from "./intake-launch";
@@ -19,14 +20,33 @@ import { getPlatform } from "./platform";
 
 interface AppState {
   me: MeResponse | null;
-  // D-170: a creator invite this user opened could not grant access
-  // because the invite's user limit is reached. Generic, in memory only.
-  betaAccessFull: boolean;
+  // A creator invite this user opened could not grant access (in memory
+  // only): FULL — the creator beta has no place left (D-170); UNAVAILABLE —
+  // any other refusal, one generic answer that never says whether the
+  // invite was wrong, expired, disabled or revoked (D-171).
+  inviteNotice: "FULL" | "UNAVAILABLE" | null;
   dict: Dict;
   refresh: () => Promise<void>;
 }
 
 const AppContext = createContext<AppState | null>(null);
+
+// The dictionary for presentational components (D-171): the user's
+// language inside the app, English wherever a component renders without the
+// app provider (static rendering, tests). Never a locale guess. DictScope
+// pins a dictionary for a subtree rendered outside the app (static
+// rendering of one component in one language).
+const DictContext = createContext<Dict | null>(null);
+
+export function DictScope({ dict, children }: { dict: Dict; children?: ReactNode }) {
+  return <DictContext.Provider value={dict}>{children}</DictContext.Provider>;
+}
+
+export function useDict(): Dict {
+  const scoped = useContext(DictContext);
+  const app = useContext(AppContext);
+  return scoped ?? app?.dict ?? en;
+}
 
 export function useApp(): AppState {
   const ctx = useContext(AppContext);
@@ -38,7 +58,7 @@ export function useApp(): AppState {
 // в фоне; UI наблюдает состояние, а не блокируется запросом.
 export function AppProvider({ children }: { children: ReactNode }) {
   const [me, setMe] = useState<MeResponse | null>(null);
-  const [betaAccessFull, setBetaAccessFull] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState<"FULL" | "UNAVAILABLE" | null>(null);
   const router = useRouter();
   const pathname = usePathname();
 
@@ -62,7 +82,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const invite = betaInviteFromStartParam(auth?.startParam);
       if (invite) {
         await api.redeemBetaInvite(invite).catch((e: unknown) => {
-          if (e instanceof ApiError && e.code === "BETA_ACCESS_FULL") setBetaAccessFull(true);
+          if (e instanceof ApiError && e.code === "BETA_ACCESS_FULL") setInviteNotice("FULL");
+          else if (e instanceof ApiError && (e.code === "INVITE_INVALID" || e.code === "INVITE_NOT_APPLICABLE")) setInviteNotice("UNAVAILABLE");
         });
       }
       // A Telegram deep link carrying an intake id (signed start parameter)
@@ -91,9 +112,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);
 
-  const dict = me?.language === "RU" ? ru : en;
+  // The user's explicit, saved choice — English until they change it in
+  // Profile (D-171). Never inferred from a browser, device or Telegram
+  // locale. Set before the children render so dates follow it too.
+  const language = me?.language === "RU" ? "RU" : "EN";
+  setDisplayLanguage(language);
+  const dict = language === "RU" ? ru : en;
   return (
-    <AppContext.Provider value={{ me, betaAccessFull, dict, refresh }}>
+    <AppContext.Provider value={{ me, inviteNotice, dict, refresh }}>
       {children}
     </AppContext.Provider>
   );

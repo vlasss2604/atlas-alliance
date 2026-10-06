@@ -3,6 +3,8 @@
 import Link from "next/link";
 
 import type { ResearchJobListItem } from "../api";
+import { useDict } from "../app-context";
+import { outcomeText, stageText } from "../localize";
 import { deriveProgress, isTerminal, jobOutcome, relativeAge, retrievedOn } from "../research-model";
 import { ProjectAvatar } from "./project-avatar";
 
@@ -13,7 +15,8 @@ import { ProjectAvatar } from "./project-avatar";
 // lifecycle state, never given a verdict to look done.
 export function RecentProofCard({ job, memoryEnabled = false }: { job: ResearchJobListItem; memoryEnabled?: boolean }) {
   const terminal = isTerminal(job.state);
-  const title = job.projectName ?? job.projectTicker ?? "Unresolved project";
+  const dict = useDict();
+  const title = job.projectName ?? job.projectTicker ?? dict.detailPage.unresolvedProject;
   const outcome = jobOutcome(job);
   const progress = deriveProgress({ state: job.state, progressStage: job.progressStage, acquisitionPhase: job.acquisitionPhase }, { memoryEnabled });
   const checked = job.finishedAt ? retrievedOn(job.finishedAt) : null;
@@ -28,18 +31,18 @@ export function RecentProofCard({ job, memoryEnabled = false }: { job: ResearchJ
           </span>
           <span className="mt-0.5 block text-[0.95rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</span>
           <span className="mt-1.5 block text-[0.85rem] text-[var(--atlas-text-faint)]" data-testid="history-checked">
-            {terminal && checked ? `Checked ${checked}` : relativeAge(job.finishedAt ?? job.createdAt)}
+            {terminal && checked ? dict.detailPage.checked(checked) : relativeAge(job.finishedAt ?? job.createdAt)}
           </span>
         </span>
         <span className="flex shrink-0 flex-col items-end gap-1.5 text-right text-[0.88rem] text-[var(--atlas-text-dim)]">
           {terminal ? (
             <span className={`tone tone-${outcome.tone} text-[0.8rem] px-2.5 py-1`} data-testid="history-outcome" data-verdict={outcome.verdict ?? "NONE"} data-outcome={outcome.kind}>
-              {outcome.label}
+              {outcomeText(outcome, dict)}
             </span>
           ) : (
             <span className="flex items-center gap-1.5" data-testid={`job-status-${job.id}`}>
               <span className="pulse-dot h-2 w-2" aria-hidden />
-              {progress.stages[progress.activeIndex]?.label}
+              {progress.stages[progress.activeIndex] ? stageText(progress.stages[progress.activeIndex], dict) : null}
             </span>
           )}
         </span>

@@ -47,6 +47,62 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
+## CREATOR BETA UX AND TWO LANGUAGES (D-171)
+
+Offline only; bot and Mini App behaviour not live-verified.
+
+- **Language.** EN default for every new user; no browser, device or
+  Telegram locale is read. Explicit EN / RU via the existing
+  `users.language` (`PATCH /api/me/language`): Profile and the onboarding
+  switch. `AppProvider` sets `display-language.ts` (dates, "… ago") and the
+  dictionary from it. `useDict()` gives presentational components the
+  user's dictionary (English outside the app; `DictScope` for static
+  rendering). Model labels stay English in `research-model`; screens
+  translate by key (`localize.ts`).
+- **Result / Proof sentences.** The deterministic phrasebook
+  (`research-model.ts`, `result-surface.ts`, `audit-model.ts`,
+  `mechanism-typed-value.ts`: answer, row questions and clauses, reason
+  codes, row limits and ceilings, current-state and execution notes, chain
+  observations, source-class limits, "Does not establish:" frame,
+  non-verdict answer, audit outcome / coverage / open-item copy) has a
+  Russian twin, `i18n/result-ru.ts`, chosen only when `displayLanguage()`
+  is RU; English is byte-identical. The full audit and the source snapshot
+  read their interface words from `dict.audit` / `dict.snapshot`.
+  `mechanismNounOf` also reads Russian stems (выкуп, сжига…, распредел…,
+  стейкинг/награ…), still returning the English key.
+- **Never translated (the record's words):** evidence summaries and
+  excerpts, source titles, URLs and domains, projection question labels and
+  the audit projection summary, the v1 claim after "Не устанавливает:",
+  persisted chain-row summaries / caveats. Engine codes stay codes under the
+  audit's Developer details and in "Stored component status: X".
+- **Dev-only, still English in RU:** `findingMicroAnswer`,
+  `findingExplanation`, `unresolvedFrom`, `resultBriefing` lead lines and
+  the `/dev/*` showcases (no product surface renders them).
+- **Pinned:** `tests/creator-beta-ux-v1.test.ts` renders every Result
+  fixture and its full audit in RU, removes the record's own words, and
+  requires no Latin word left but ATLAS / Proof / ARI (with an EN control
+  proving the scan is not vacuous); RU/EN key parity of every phrasebook
+  table.
+- **Russian vocabulary:** закрытая бета, исследование, Библиотека
+  исследований; Proof / ATLAS PROOF / ARI untranslated.
+- **/api/me** adds `demoAvailable`, `betaPaused`, `privateBeta.capacityReached`
+  (existing canonical state only). `client/beta-status.ts` `betaBlockOf` →
+  PAUSED / CAPACITY / EXHAUSTED; Home and Ask then show `BetaStatusNotice`
+  (→ Research Library) instead of a new-Research input.
+- **Profile:** no price, no DEMO counter unless `demoAvailable`, never
+  "ARI • CORE" for a beta grant; otherwise "Research is currently available
+  by private beta invite."
+- **Bot:** sign-in reply has an "Open ATLAS" `web_app` button (`/home`); a
+  forward whose question could not lead to a Research
+  (`interpreterAccessRefusal` ≠ null) gets an honest reply, no intake,
+  `action: NO_RESEARCH_ACCESS`.
+- **Navigation:** Analytics removed (page kept, URL only; dock spacer keeps
+  Home centred). Ask's first button is "Continue".
+- **Result gaps:** "Not every source could be checked" / "No supported
+  source for this yet"; boundary kinds and reasons unchanged.
+- **Feedback:** banner at the top of a finished Result links to the form;
+  hint while question 3 is unanswered.
+
 ## CREATOR BETA GUARDRAILS (D-170)
 
 Offline only; the creator link inside Telegram is not live-verified.

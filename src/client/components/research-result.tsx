@@ -18,6 +18,8 @@ import {
   type ResultStatus,
   type ResultSurface,
 } from "../result-surface";
+import { useDict } from "../app-context";
+import type { Dict } from "../i18n/en";
 import { getPlatform } from "../platform";
 import { canonicalDocumentKey, type JobState, type VerdictTone } from "../research-model";
 import { CalendarIcon, ChevronDownIcon, ChevronIcon, EvidenceIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
@@ -64,17 +66,12 @@ const STATE_GLYPHS: Record<ResultStatus, string> = {
   NOT_ESTABLISHED: "?",
   CONTRADICTED: "✕",
 };
-const COUNT_WORDS: Record<ResultStatus, string> = {
-  CONFIRMED: "verified",
-  PARTIAL: "partly",
-  NOT_ESTABLISHED: "unresolved",
-  CONTRADICTED: "contradicted",
-};
 const COUNT_ORDER: ResultStatus[] = ["CONFIRMED", "PARTIAL", "CONTRADICTED", "NOT_ESTABLISHED"];
 
 export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; jobId: string | null }) {
+  const dict = useDict();
   const surface = buildResultSurface(detail);
-  const projectName = detail.job.projectName ?? detail.job.projectTicker ?? "Unresolved project";
+  const projectName = detail.job.projectName ?? detail.job.projectTicker ?? dict.detailPage.unresolvedProject;
   const noun = mechanismNounOf([detail.job.originalQuestion, ...surface.table.filter((r) => r.primary).map((r) => r.label)]);
   return (
     <article className="flex flex-col gap-8 sm:gap-10" data-testid="research-result">
@@ -86,7 +83,7 @@ export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; j
       {jobId && (
         <p className="pb-2">
           <Link href={`/research/${jobId}/audit`} className="btn-secondary px-5 py-3 text-[0.98rem]" data-testid="audit-entry">
-            Open full audit
+            {dict.result.openAudit}
             <ChevronIcon size={14} />
           </Link>
         </p>
@@ -106,14 +103,15 @@ export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; j
 // behind it; the dates are one quiet footnote.
 function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface; detail: ResearchJobDetail; projectName: string }) {
   const { job, proof } = detail;
+  const dict = useDict();
   const lead = surface.answer.sentences[0];
-  const stats = workFigures(surface);
+  const stats = workFigures(surface, dict);
   return (
     <section className="panel panel-hero px-5 py-6 sm:px-9 sm:py-9" data-testid="answer-panel">
       <p className="flex flex-wrap items-center gap-x-2 text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">
         <span className="text-[var(--atlas-text)]">{projectName}</span>
         <span aria-hidden>·</span>
-        <span>Research result</span>
+        <span>{dict.result.label}</span>
       </p>
       <h1 className="display mt-2 text-[1.4rem] font-semibold leading-[1.2] text-[var(--atlas-text-strong)] sm:text-[1.9rem]" data-testid="result-question">
         {job.originalQuestion}
@@ -122,7 +120,7 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
         <OutcomeBadge job={{ state: job.state as JobState, verdict: proof?.verdict ?? null }} />
         {surface.answer.confidenceLabel && (
           <span className="text-[0.92rem] text-[var(--atlas-text-dim)]" data-testid="answer-confidence">
-            {surface.answer.confidenceLabel} confidence
+            {dict.result.confidence(dict.result.confidenceWords[surface.answer.confidenceLabel] ?? surface.answer.confidenceLabel)}
           </span>
         )}
       </div>
@@ -136,7 +134,7 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
       {stats.length > 0 && (
         <div className="stats mt-7" data-testid="answer-stats">
           {stats.map((s) => (
-            <div key={s.label} className={`stat ${s.label === "verified" ? "stat-verified" : ""}`}>
+            <div key={s.key} className={`stat ${s.key === "verified" ? "stat-verified" : ""}`}>
               <span className="stat-n">{s.n}</span>
               <span className="stat-l">{s.label}</span>
             </div>
@@ -147,10 +145,10 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
         className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-[var(--hairline)] pt-4 text-[0.88rem] text-[var(--atlas-text-dim)]"
         data-testid="answer-meta"
       >
-        {surface.checkedOn && <span data-testid="answer-checked">Checked {surface.checkedOn}</span>}
+        {surface.checkedOn && <span data-testid="answer-checked">{dict.result.checkedOn(surface.checkedOn)}</span>}
         {surface.latestEvidence && (
           <span>
-            Newest source {surface.latestEvidence.label.toLowerCase()} {surface.latestEvidence.value}
+            {dict.result.newest(dict.result.dateLabels[surface.latestEvidence.label] ?? surface.latestEvidence.label, surface.latestEvidence.value)}
           </span>
         )}
       </p>
@@ -161,7 +159,7 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
 // THE WORK, IN FIGURES — counted from the rows, never estimated: the
 // checks the research turned on, the distinct documents admitted behind
 // them, the admitted evidence items, and the checks that were verified.
-function workFigures(surface: ResultSurface): { n: number; label: string }[] {
+function workFigures(surface: ResultSurface, dict: Dict): { key: string; n: number; label: string }[] {
   const rows = surface.table;
   if (rows.length === 0) return [];
   const cards = rows.flatMap((r) => r.evidence);
@@ -169,10 +167,10 @@ function workFigures(surface: ResultSurface): { n: number; label: string }[] {
   const docs = new Set(cards.map((c) => canonicalDocumentKey(c.url))).size;
   const verified = rows.filter((r) => r.status === "CONFIRMED").length;
   return [
-    { n: rows.length, label: rows.length === 1 ? "check" : "checks" },
-    { n: docs, label: docs === 1 ? "source" : "sources" },
-    { n: items, label: items === 1 ? "evidence item" : "evidence items" },
-    { n: verified, label: "verified" },
+    { key: "checks", n: rows.length, label: dict.result.figures.checks(rows.length) },
+    { key: "sources", n: docs, label: dict.result.figures.sources(docs) },
+    { key: "items", n: items, label: dict.result.figures.items(items) },
+    { key: "verified", n: verified, label: dict.result.figures.verified },
   ];
 }
 
@@ -185,7 +183,11 @@ function workFigures(surface: ResultSurface): { n: number; label: string }[] {
 // supply — each in one or two human words and its state colour. It
 // exists so a reader sees WHAT was checked and in what order; it never
 // repeats a row's text.
-function pathWord(component: string, noun: string): string {
+function pathWord(component: string, noun: string, dict: Dict): string {
+  // The English design word follows the question's own mechanism noun
+  // ("Buyback", "Burn"); every other word, and every Russian word, is the
+  // dictionary's (D-171).
+  if (!dict.result.pathNounFromQuestion && dict.result.pathWords[component]) return dict.result.pathWords[component];
   switch (component) {
     case "SOURCE_OF_VALUE":
       return "Revenue";
@@ -217,17 +219,18 @@ function capitalize(s: string): string {
 }
 
 function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: string }) {
+  const dict = useDict();
   if (chain.length < 2) return null;
   return (
-    <section data-testid="research-path" aria-label="Research path">
-      <p className="mb-3 px-1 text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">What the research followed</p>
+    <section data-testid="research-path" aria-label={dict.result.pathAria}>
+      <p className="mb-3 px-1 text-[0.95rem] font-medium text-[var(--atlas-text-dim)]">{dict.result.pathTitle}</p>
       <ol className="path">
         {chain.map((n) => (
           <li
             key={n.component}
             className="path-node"
             style={{ "--node": TONE_COLORS[n.tone] } as React.CSSProperties}
-            title={`${n.label} — ${STATE_WORDS[n.status]}`}
+            title={`${n.label} — ${dict.result.stateWords[n.status] ?? STATE_WORDS[n.status]}`}
             data-testid="path-node"
             data-component={n.component}
             data-status={n.status}
@@ -235,8 +238,8 @@ function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: stri
             <span className={`path-mark ${n.status === "NOT_ESTABLISHED" ? "" : "path-mark-filled"}`} aria-hidden>
               {STATE_GLYPHS[n.status]}
             </span>
-            <span>{pathWord(n.component, noun)}</span>
-            <span className="sr-only">{STATE_WORDS[n.status]}</span>
+            <span>{pathWord(n.component, noun, dict)}</span>
+            <span className="sr-only">{dict.result.stateWords[n.status] ?? STATE_WORDS[n.status]}</span>
           </li>
         ))}
       </ol>
@@ -256,18 +259,19 @@ function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: stri
 // glance how much of the story is settled — counted over every check,
 // folded supporting checks included, the same set the figures above use.
 function FindingsTable({ rows: all, jobId }: { rows: readonly ResearchTableRow[]; jobId: string | null }) {
+  const dict = useDict();
   const rows = tableRows(all);
   if (rows.length === 0) return null;
   const counts = COUNT_ORDER.map((status) => ({ status, n: all.filter((r) => r.status === status).length })).filter((c) => c.n > 0);
   return (
     <section className="panel-section" data-testid="research-table">
       <div className="flex flex-col gap-2 border-b border-[var(--hairline)] px-5 py-4 sm:flex-row sm:items-baseline sm:justify-between sm:gap-6 sm:px-6">
-        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">What ATLAS checked</h2>
+        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.result.checkedTitle}</h2>
         <p className="counts" data-testid="research-counts">
           {counts.map((c) => (
             <span key={c.status}>
               <span className="dot" style={{ background: TONE_COLORS[statusTone(c.status)] }} aria-hidden />
-              {c.n} {COUNT_WORDS[c.status]}
+              {c.n} {dict.result.counts[c.status]}
             </span>
           ))}
         </p>
@@ -286,26 +290,27 @@ function FindingsTable({ rows: all, jobId }: { rows: readonly ResearchTableRow[]
 // it came from, in one breath. The source kind is the row's own strongest
 // admitted class, lowercased; nothing here names a source that was not
 // admitted to the row.
-function stateSentence(row: ResearchTableRow): string {
-  const word = STATE_WORDS[row.status];
-  const kind = row.source?.kind.toLowerCase() ?? null;
+function stateSentence(row: ResearchTableRow, dict: Dict): string {
+  const word = dict.result.stateWords[row.status] ?? STATE_WORDS[row.status];
+  const kind = row.source ? (dict.result.sourceKinds[row.source.kind] ?? row.source.kind.toLowerCase()) : null;
   if (!kind) return word;
-  if (row.status === "CONTRADICTED") return `${word} by ${kind}`;
-  if (row.status === "NOT_ESTABLISHED") return `${word} · ${kind}`;
-  return `${word} from ${kind}`;
+  if (row.status === "CONTRADICTED") return dict.result.stateBy(word, kind);
+  if (row.status === "NOT_ESTABLISHED") return dict.result.stateWith(word, kind);
+  return dict.result.stateFrom(word, kind);
 }
 
 // `defaultOpen` is presentation state for tests and fixtures — the row
 // opens exactly as a tap on "Evidence · N" opens it.
 export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchTableRow; jobId: string | null; defaultOpen?: boolean }) {
+  const dict = useDict();
   const [open, setOpen] = useState(defaultOpen);
   const color = TONE_COLORS[row.tone];
-  const toggleLabel = open ? "Hide evidence" : `Evidence · ${row.evidence.length}`;
+  const toggleLabel = open ? dict.result.hideEvidence : dict.result.evidenceCount(row.evidence.length);
   return (
     <li
       className={`finding ${open ? "finding-open" : ""}`}
       style={{ "--row-accent": color } as React.CSSProperties}
-      title={stateSentence(row)}
+      title={stateSentence(row, dict)}
       data-testid="research-row"
       data-component={row.component}
       data-status={row.status}
@@ -321,7 +326,7 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
         </p>
         {row.restsOn.length > 0 && (
           <p className="mt-1.5 text-[0.92rem] leading-snug text-[var(--atlas-text-dim)]" data-testid="row-rests-on">
-            Also confirmed: {joinPhrases(row.restsOn.map((d) => d.phrase))}.
+            {dict.result.alsoConfirmed} {joinPhrases(row.restsOn.map((d) => d.phrase), dict.result.and)}.
           </p>
         )}
         <p className="state-line mt-2.5">
@@ -329,7 +334,7 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
             {STATE_GLYPHS[row.status]}
           </span>
           <span className="state-word" data-testid="row-cue">
-            {stateSentence(row)}
+            {stateSentence(row, dict)}
           </span>
           <span data-testid="row-source" className="byline min-w-0">
             {row.source ? (
@@ -338,7 +343,7 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
                 <span>{row.source.name}</span>
               </>
             ) : (
-              <span>No qualifying source</span>
+              <span>{dict.result.noQualifyingSource}</span>
             )}
           </span>
           {row.date && (
@@ -364,10 +369,8 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
           <div className="row-evidence expand-enter" data-testid="row-evidence">
             <p className="row-evidence-title">
               <EvidenceIcon size={14} />
-              Evidence behind this answer
-              <span className="font-normal text-[var(--atlas-text-dim)]">
-                · {row.evidence.length} {row.evidence.length === 1 ? "source" : "sources"}
-              </span>
+              {dict.result.evidenceBehind}
+              <span className="font-normal text-[var(--atlas-text-dim)]">· {dict.result.sourcesCount(row.evidence.length)}</span>
             </p>
             <div className="mt-3 flex flex-col gap-4">
               {row.evidence.map((c) => (
@@ -381,9 +384,9 @@ export function FindingRow({ row, jobId, defaultOpen = false }: { row: ResearchT
   );
 }
 
-function joinPhrases(items: readonly string[]): string {
+function joinPhrases(items: readonly string[], and: string): string {
   if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+  return `${items.slice(0, -1).join(", ")} ${and} ${items[items.length - 1]}`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -396,14 +399,13 @@ function joinPhrases(items: readonly string[]): string {
 // tap away. Two-up on a desk, stacked on a handset. A contradicting card
 // carries a red edge — the one thing a reader must not miss.
 function SourcesSection({ cards, jobId }: { cards: readonly EvidenceCard[]; jobId: string | null }) {
+  const dict = useDict();
   if (cards.length === 0) return null;
   return (
     <section data-testid="sources">
       <div className="flex items-baseline justify-between gap-4 px-1">
-        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">Evidence</h2>
-        <p className="text-[0.92rem] text-[var(--atlas-text-dim)]">
-          {cards.length} {cards.length === 1 ? "source" : "sources"} behind the answer
-        </p>
+        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.result.evidenceTitle}</h2>
+        <p className="text-[0.92rem] text-[var(--atlas-text-dim)]">{dict.result.sourcesBehind(cards.length)}</p>
       </div>
       <ul className="evidence-grid mt-3">
         {cards.map((c, i) => (
@@ -443,25 +445,27 @@ export function EvidenceCardView({
   open?: boolean;
   compact?: boolean;
 }) {
+  const dict = useDict();
   const [open, setOpen] = useState(openByDefault);
   const contradicts = card.relation === "CONTRADICTS";
+  const kindLabel = dict.result.sourceKindChips[card.sourceClass] ?? card.sourceClass;
   return (
     <div data-testid="evidence-card" data-evidence-id={card.id} data-relation={card.relation} data-open={open ? "true" : "false"}>
       <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 text-[0.88rem] text-[var(--atlas-text-dim)]">
         <span className={`kind kind-${sourceKindFamily(card.sourceClass)}`}>
           <SourceKindIcon label={card.sourceClass} size={13} />
-          {card.sourceClass}
+          {kindLabel}
         </span>
         {card.onchain?.network && <span>{card.onchain.network}</span>}
         {card.date && (
           <span className="byline">
             <CalendarIcon size={13} className="opacity-70" />
-            {card.date.label} {card.date.value}
+            {dict.result.dateLabels[card.date.label] ?? card.date.label} {card.date.value}
           </span>
         )}
         {contradicts && (
           <span className="font-semibold" style={{ color: TONE_COLORS.negative }}>
-            Contradicts
+            {dict.result.contradicts}
           </span>
         )}
       </p>
@@ -475,7 +479,7 @@ export function EvidenceCardView({
         {!card.onchain && (
           <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="btn-action" data-testid="evidence-details-toggle">
             <QuoteIcon size={13} />
-            {open ? "Hide excerpt" : "View excerpt"}
+            {open ? dict.result.hideExcerpt : dict.result.viewExcerpt}
           </button>
         )}
         {/* Only a real http(s) original is offered — a chain locator has no
@@ -494,13 +498,13 @@ export function EvidenceCardView({
             }}
           >
             <ExternalIcon size={14} />
-            Open original
+            {dict.result.openOriginal}
           </a>
         )}
         {card.snapshotHref && jobId && (
           <Link href={card.snapshotHref} className="link-action" data-testid="evidence-snapshot">
             <SnapshotIcon size={14} />
-            Snapshot
+            {dict.result.snapshot}
           </Link>
         )}
       </p>
@@ -530,27 +534,26 @@ export function EvidenceCardView({
 // unread, or that ATLAS has no supported route for this project: that is
 // stated here, once per kind, as one intentional surface, with the checks
 // it applies to listed one per line.
-const UNCLEAR_HEADINGS: Record<BoundaryGroup["kind"], string> = {
-  TECHNICAL: "Research limit reached",
-  CONFIGURATION: "No supported source route yet",
-  SUBSTANTIVE: "Checked, not found",
-};
-
+// D-171: the headings, the explanation and the "never read as" line come
+// from the dictionary by boundary KIND — plain words, never "research
+// limit" (which reads like the user's allowance) or "source route". The
+// kind and every canonical reason behind it are unchanged.
 function UnclearSection({ groups }: { groups: readonly BoundaryGroup[] }) {
+  const dict = useDict();
   if (groups.length === 0) return null;
   return (
     <section className="panel-section tone-edge" style={{ "--edge": "var(--atlas-amber)" } as React.CSSProperties} data-testid="unclear-section">
       <div className="border-b border-[var(--hairline)] px-5 py-4 sm:px-6">
-        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">What remains unclear</h2>
+        <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.result.unclearTitle}</h2>
       </div>
       <div className="flex flex-col">
         {groups.map((g) => (
           <div key={g.kind} className="border-b border-[var(--hairline)] px-5 py-5 last:border-b-0 sm:px-6" data-testid="unclear-group" data-kind={g.kind}>
-            <p className="text-[1.05rem] font-semibold leading-snug text-[var(--atlas-text-strong)]">{UNCLEAR_HEADINGS[g.kind]}</p>
+            <p className="text-[1.05rem] font-semibold leading-snug text-[var(--atlas-text-strong)]">{dict.result.unclearHeadings[g.kind]}</p>
             <p className="mt-1.5 text-[1rem] leading-[1.5] text-[var(--atlas-text)]/90" data-testid="unclear-copy">
               {g.kind === "TECHNICAL" && g.remainingPaths !== null
-                ? `The research limit was reached before ${g.remainingPaths} known relevant ${g.remainingPaths === 1 ? "source" : "sources"} could be checked.`
-                : g.copy}
+                ? dict.result.technicalRemaining(g.remainingPaths)
+                : (dict.result.unclearCopy[g.kind] ?? g.copy)}
             </p>
             <ul className="mt-3 flex flex-col gap-1.5" data-testid="unclear-items">
               {g.items.map((it) => (
@@ -566,7 +569,7 @@ function UnclearSection({ groups }: { groups: readonly BoundaryGroup[] }) {
               ))}
             </ul>
             <p className="mt-3 text-[0.9rem] text-[var(--atlas-text-dim)]" data-testid="unclear-never">
-              {g.never}
+              {dict.result.unclearNever[g.kind] ?? g.never}
             </p>
           </div>
         ))}

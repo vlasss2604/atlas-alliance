@@ -5,10 +5,14 @@ export const en = {
     ask: "Ask ARI",
     projects: "Projects",
     profile: "Profile",
+    // D-171: the short labels of the primary navigation.
+    askShort: "Ask",
+    primary: "Primary",
   },
   home: {
     title: "ATLAS PROOF",
     subtitle: "Research Intelligence for Digital Assets",
+    tagline: "Crypto Verification",
     demoCounter: (used: number, limit: number) =>
       `DEMO research used: ${used} of ${limit}`,
     coreActive: "ARI • CORE active",
@@ -16,6 +20,14 @@ export const en = {
     betaLabel: "Private Beta",
     betaRemaining: (n: number) => `${n} Research remaining`,
     betaAccessFull: "Private beta access is currently full.",
+    // D-171: the states in which a beta user cannot start a new Research.
+    // Each points to the Research Library, which always stays open.
+    betaAtCapacity: "Private beta is at capacity for now.",
+    betaPaused: "Private beta is temporarily paused. Your previous Research is still available in your Research Library.",
+    betaExhausted: (n: number) =>
+      `You've used your ${n} private-beta Research. Your completed Research remains available in Research Library.`,
+    betaInviteUnavailable: "This private beta invite is no longer available.",
+    openLibrary: "Open Research Library",
     cta: "What do you want to understand?",
     previouslyResearched: "Previously researched",
     viewAll: "View all",
@@ -26,15 +38,18 @@ export const en = {
     placeholder: "Ask about a project, token, or market mechanism…",
     helper: "Plain language is fine.",
     examplesTitle: "Example questions",
+    // D-171: the private beta covers Raydium, Pump.fun and Lido; every
+    // example names one of them, so none leads to a refusal or a question.
     examples: [
-      "What could make this token more valuable?",
-      "The project earns a lot. Do token holders benefit from it?",
-      "What looks strong in this project, and what could be a weak point?",
-      "What important things might I be missing?",
+      "Does Raydium buy back RAY with its trading fees?",
+      "Does the Pump.fun buyback reduce PUMP supply?",
+      "Where do Lido staking rewards and fees go?",
     ],
+    // The first step only reads the question; nothing starts yet.
+    continue: "Continue",
     submit: "Start Proof",
     disabledNote:
-      "ARI is being connected — research will be available in an upcoming update.",
+      "Private beta is temporarily paused. Your previous Research is still available in your Research Library.",
     // Фаза 4. Copy предложен реализацией; финальное утверждение — за
     // владельцем после просмотра реальных состояний UI.
     thinking: "ARI is reading your question…",
@@ -54,9 +69,10 @@ export const en = {
     coreRequired: "This research requires ARI • CORE.",
     quotaExhausted: "Your DEMO research is used up. ARI • CORE removes the limit.",
     activeJob: "One research is already running. It will finish shortly.",
-    betaAccessRequired: "ATLAS PROOF is in private beta. Research needs private beta access.",
-    betaProjectNotAvailable: "This project is not available in the private beta yet.",
-    betaResearchLimitReached: "You have used all the research runs included in the private beta.",
+    betaAccessRequired: "ATLAS PROOF is in private beta. Research needs a private beta invite.",
+    betaProjectNotAvailable: "This project isn't in the private beta. The private beta covers Raydium, Pump.fun and Lido.",
+    betaResearchLimitReached:
+      "You've used all your private-beta Research. Your completed Research remains available in Research Library.",
     // D-170: the creator beta is full for everyone — never phrased as this
     // user's own allowance, never an upsell.
     globalBetaCapacity: "Private beta is at capacity for now. Your previous Research is still available in your Research Library.",
@@ -73,7 +89,7 @@ export const en = {
     intakeEditable: "Review or edit the question before starting.",
     intakeUnavailable: "That forwarded message is no longer available. Ask your question here.",
     intakeConsumed: "Research from that message has already been started. Ask a new question here.",
-    intakeProjectNotAvailable: "{project} is not currently available in the private beta.",
+    intakeProjectNotAvailable: "{project} isn't in the private beta. The private beta covers Raydium, Pump.fun and Lido.",
   },
   research: {
     // THE RESEARCH LIBRARY (D-169): finished Research belongs to the user
@@ -161,6 +177,9 @@ export const en = {
     title: "Profile",
     language: "Language",
     level: "Access level",
+    // D-171: an account without any Research access today. No offer of a
+    // plan or a DEMO allowance that cannot be used.
+    noAccess: "Research is currently available by private beta invite.",
     priceNote: (stars: number) => `ARI • CORE — ${stars} Stars / month`,
     privacy: "Privacy",
     privacyNote: "Your Proofs are private by default.",
@@ -186,6 +205,8 @@ export const en = {
     unsure: "Not sure",
     changeNeeded: "If not, what would need to change?",
     send: "Send feedback",
+    requiredHint: "Answer “Would you keep using ATLAS?” to send.",
+    banner: "Two quick questions about ATLAS — below your result.",
     skip: "Skip",
     thanks: "Thank you — your feedback was sent.",
     error: "Couldn't send. Please try again.",
@@ -208,6 +229,282 @@ export const en = {
         body: "ATLAS develops through verified research experience: projects, topics, connections, scenarios.",
       },
     ],
+  },
+  // D-171: every remaining creator-beta surface reads its copy from here.
+  // English is the canonical default; Russian mirrors it key for key.
+  composer: {
+    title: "What do you want to verify?",
+    subtitle: "Ask about a project, a token, a claim or a link.",
+    placeholder: "Ask or paste a link…",
+    tryAsking: "Try asking",
+  },
+  progress: {
+    title: "Research process",
+    // Keyed by the presentation stage (research-model RESEARCH_STAGES);
+    // PLANNING is the second stage while Research Memory is off.
+    stages: {
+      UNDERSTANDING: "Understanding the question",
+      MEMORY: "Checking previous research",
+      PLANNING: "Planning the research",
+      SEARCH: "Searching sources",
+      FETCH: "Reading evidence",
+      EXTRACT: "Verifying the mechanism",
+      VERDICT: "Building the answer",
+    } as Record<string, string>,
+  },
+  detailPage: {
+    back: "Back",
+    loading: "Loading…",
+    loadError: "This research could not be loaded.",
+    researching: "Researching",
+    inProgress: "Research in progress",
+    leaveNote: "You can leave this screen. ATLAS keeps working and the result will be here when you come back.",
+    unresolvedProject: "Unresolved project",
+    checked: (date: string) => `Checked ${date}`,
+  },
+  history: {
+    runs: (n: number): string => `${n} ${n === 1 ? "run" : "runs"}`,
+    questions: (n: number): string => `${n} questions`,
+    lastResearched: (age: string): string => `last researched ${age}`,
+  },
+  // Keyed by research-model's OutcomeView.kind and by the verdict code.
+  outcome: {
+    IN_PROGRESS: "In progress",
+    FAILED: "Research failed",
+    CANCELLED: "Cancelled",
+    STOPPED_AT_LIMIT: "Stopped early",
+    NO_CONCLUSION: "No conclusion",
+  } as Record<string, string>,
+  verdict: {
+    SUPPORTED: "Supported",
+    PARTIALLY_SUPPORTED: "Partially supported",
+    NOT_SUPPORTED: "Not supported",
+    INSUFFICIENT_EVIDENCE: "Insufficient evidence",
+    NOT_APPLICABLE: "Not applicable",
+  } as Record<string, string>,
+  // The Result screen's own words. Sentences built from the evidence and
+  // the research record (answer, row facts, question labels, evidence
+  // excerpts) are not here: they come from the record, not the interface.
+  result: {
+    label: "Research result",
+    confidence: (word: string) => `${word} confidence`,
+    // Keyed by the English confidence word result-surface returns.
+    confidenceWords: { Low: "Low", Limited: "Limited", Strong: "Strong", "Very strong": "Very strong" } as Record<string, string>,
+    figures: {
+      checks: (n: number): string => (n === 1 ? "check" : "checks"),
+      sources: (n: number): string => (n === 1 ? "source" : "sources"),
+      items: (n: number): string => (n === 1 ? "evidence item" : "evidence items"),
+      verified: "verified",
+    },
+    checkedOn: (date: string) => `Checked ${date}`,
+    // Keyed by the evidence card's date label.
+    dateLabels: { Published: "Published", Observed: "Observed", Checked: "Checked" } as Record<string, string>,
+    newest: (label: string, date: string) => `Newest source ${label.toLowerCase()} ${date}`,
+    pathTitle: "What the research followed",
+    // English names the design step by the question's own mechanism noun
+    // ("Buyback", "Burn"); a language without that noun table uses pathWords.
+    pathNounFromQuestion: true as boolean,
+    pathAria: "Research path",
+    pathWords: {
+      SOURCE_OF_VALUE: "Revenue",
+      FLOW_PATH: "Flow",
+      MECHANISM_SPEC: "Design",
+      GOVERNANCE_BASIS: "Approval",
+      CURRENT_STATE: "Active now",
+      EXECUTION_EVIDENCE: "Execution",
+      DESTINATION: "Where it goes",
+      RECIPIENT: "Recipient",
+      NET_EFFECT: "Supply impact",
+      DURABILITY_BASIS: "Durability",
+    } as Record<string, string>,
+    checkedTitle: "What ATLAS checked",
+    counts: { CONFIRMED: "verified", PARTIAL: "partly", NOT_ESTABLISHED: "unresolved", CONTRADICTED: "contradicted" } as Record<string, string>,
+    stateWords: { CONFIRMED: "Verified", PARTIAL: "Partly verified", NOT_ESTABLISHED: "Unresolved", CONTRADICTED: "Contradicted" } as Record<string, string>,
+    stateFrom: (word: string, kind: string) => `${word} from ${kind}`,
+    stateBy: (word: string, kind: string) => `${word} by ${kind}`,
+    stateWith: (word: string, kind: string) => `${word} · ${kind}`,
+    // Keyed by the English source-class label (research-model SOURCE_CLASS_LABELS).
+    sourceKinds: {
+      "Official docs": "official docs",
+      Governance: "governance",
+      "On-chain": "on-chain",
+      "Official report": "official report",
+      "Data provider": "data provider",
+      "Research media": "research media",
+      Social: "social",
+      Unclassified: "unclassified",
+    } as Record<string, string>,
+    // The source-kind chip on an evidence card, keyed like sourceKinds.
+    sourceKindChips: {
+      "Official docs": "Official docs",
+      Governance: "Governance",
+      "On-chain": "On-chain",
+      "Official report": "Official report",
+      "Data provider": "Data provider",
+      "Research media": "Research media",
+      Social: "Social",
+      Unclassified: "Unclassified",
+    } as Record<string, string>,
+    alsoConfirmed: "Also confirmed:",
+    and: "and",
+    hideEvidence: "Hide evidence",
+    evidenceCount: (n: number) => `Evidence · ${n}`,
+    noQualifyingSource: "No qualifying source",
+    evidenceBehind: "Evidence behind this answer",
+    sourcesCount: (n: number) => `${n} ${n === 1 ? "source" : "sources"}`,
+    evidenceTitle: "Evidence",
+    sourcesBehind: (n: number): string => `${n} ${n === 1 ? "source" : "sources"} behind the answer`,
+    contradicts: "Contradicts",
+    hideExcerpt: "Hide excerpt",
+    viewExcerpt: "View excerpt",
+    openOriginal: "Open original",
+    snapshot: "Snapshot",
+    unclearTitle: "What remains unclear",
+    // D-171: plain words for the research boundary. The kind (and every
+    // canonical reason behind it) is unchanged; only the wording is.
+    unclearHeadings: {
+      TECHNICAL: "Not every source could be checked",
+      CONFIGURATION: "No supported source for this yet",
+      SUBSTANTIVE: "Checked, not found",
+    } as Record<string, string>,
+    unclearCopy: {
+      TECHNICAL: "This Research stopped before all relevant sources could be checked.",
+      CONFIGURATION: "ATLAS doesn't yet have a supported source that can independently verify this point.",
+      SUBSTANTIVE: "The available evidence does not settle this.",
+    } as Record<string, string>,
+    technicalRemaining: (n: number) =>
+      `This Research stopped before ${n} known relevant ${n === 1 ? "source" : "sources"} could be checked.`,
+    unclearNever: {
+      TECHNICAL: "This is a limit of the research run, not a finding about the project.",
+      CONFIGURATION: "This is a limit of what ATLAS can currently verify, not a finding that the mechanism is not executing.",
+      SUBSTANTIVE: "This describes the evidence checked, not proof that the thing is absent.",
+    } as Record<string, string>,
+    openAudit: "Open full audit",
+  },
+  // D-171: the full audit and the source snapshot — the rest of the Proof
+  // journey. The record's own words (projection labels and summary,
+  // excerpts, URLs, hashes, the engine codes under Developer details) are
+  // shown as written; the sentences built from statuses and reason codes
+  // follow the display language through i18n/result-ru.ts.
+  audit: {
+    back: "Back to result",
+    preparing: "Preparing research audit…",
+    prepareError: "Full audit could not be prepared.",
+    title: (project: string) => `Full audit · ${project}`,
+    recordFallback: "Research record",
+    completed: (date: string) => `Research completed ${date}`,
+    prepared: (date: string) => ` · audit prepared ${date}`,
+    points: "Research points",
+    technicalRecord: "Technical record",
+    technicalNote: "Coverage, every source read, raw on-chain observations, exclusion reasons and the engine trace.",
+    projectionFailed:
+      "Audit labels could not be prepared, so research points are shown under their canonical names. The record itself is complete.",
+    evidence: "Evidence",
+    limit: "Limit",
+    limitRemaining: (n: number) =>
+      `The research limit was reached before ${n} known relevant ${n === 1 ? "source" : "sources"} could be checked.`,
+    // Keyed by boundary kind; the same sentences as result-surface BOUNDARY_COPY / BOUNDARY_NEVER.
+    boundaryCopy: {
+      SUBSTANTIVE: "The available evidence does not settle this.",
+      TECHNICAL: "The research limit was reached before all relevant sources could be checked.",
+      CONFIGURATION: "ATLAS currently lacks a source route that can independently verify this point.",
+    } as Record<string, string>,
+    boundaryNever: {
+      SUBSTANTIVE: "This describes the evidence checked, not proof that the thing is absent.",
+      TECHNICAL: "This is a limit of the research run, not a finding about the project.",
+      CONFIGURATION: "This is a limit of what ATLAS can currently verify, not a finding that the mechanism is not executing.",
+    } as Record<string, string>,
+    // Keyed by audit-model AuditSectionId.
+    sections: {
+      SUMMARY: "Audit summary",
+      COVERAGE: "Research coverage",
+      EVIDENCE_MAP: "Evidence map",
+      SOURCE_REGISTER: "Source register",
+      OPEN_QUESTIONS: "Open questions, conflicts and limitations",
+      ONCHAIN: "On-chain verification",
+      TRACE: "Research trace",
+    } as Record<string, string>,
+    // Captions under a count.
+    stats: {
+      points: "research points",
+      confirmed: "confirmed",
+      partial: "partially confirmed",
+      contradicted: "contradicted",
+      unresolved: "unresolved",
+    },
+    blockedNote: (n: number) =>
+      `${n} of the unresolved ${n === 1 ? "check was" : "checks were"} blocked by source-access limitations rather than by missing evidence.`,
+    sourcesLine: (used: number, notUsed: number, exclusions: number) =>
+      `${used} ${used === 1 ? "source" : "sources"} used${notUsed > 0 ? `, ${notUsed} checked and not used` : ""}${
+        exclusions > 0 ? ` · ${exclusions} evidence ${exclusions === 1 ? "item" : "items"} excluded on admission` : ""
+      }.`,
+    coverageBlocked: "ATLAS could not access the source this check required.",
+    howFar: "How far the check got: ",
+    evidenceLabel: "Evidence: ",
+    evidenceCounts: (s: number, c: number, x: number) => `${s} supporting · ${c} conflicting · ${x} excluded`,
+    items: (n: number) => `${n} ${n === 1 ? "item" : "items"}`,
+    noAdmitted: "No admitted evidence",
+    excludedCount: (n: number) => `${n} excluded`,
+    whatEstablishes: "What this establishes: ",
+    notClassified: "Not classified.",
+    outsideScope: "Outside its scope: ",
+    notRecorded: "Not recorded.",
+    legacyNote: "Legacy extractor note: ",
+    excludedSummary: (n: number, domain: string) => `${n} ${n === 1 ? "item" : "items"} from ${domain} not admitted here`,
+    sourcesUsed: "Sources used",
+    checkedNotUsed: "Checked but not used",
+    retrieved: (date: string) => ` · retrieved ${date}`,
+    contributedTo: "Contributed to: ",
+    sourceRole: "Source role: ",
+    sourceLimit: "Source limit: ",
+    notUsedDefault: "Read during research; no research point relied on it.",
+    viewSnapshot: "View source snapshot",
+    // Keyed by audit-model AuditOpenItemKind.
+    openItemTitles: {
+      CONFLICT: "Conflict",
+      TECHNICAL_LIMITATION: "Research limitation",
+      OPEN_EVIDENCE_QUESTION: "Evidence gap",
+    } as Record<string, string>,
+    neededToResolve: "Needed to resolve: ",
+    traceCounts: (s: number, c: number, x: number) => `Supporting: ${s} · Conflicting: ${c} · Excluded: ${x}`,
+    developerDetails: "Developer details",
+  },
+  snapshot: {
+    unavailable: "No captured copy of this source is available.",
+    eyebrow: "ATLAS source snapshot",
+    captured: (date: string) => `Captured ${date}`,
+    technical: "Technical details",
+    rows: {
+      type: "Type",
+      response: "Response",
+      size: "Size",
+      captured: "Captured",
+      retrievedFrom: "Retrieved from",
+      landedOn: "Landed on",
+      contentHash: "Content hash",
+      textHash: "Text hash",
+    },
+    bytes: (n: string) => `${n} bytes`,
+    capturedContent: "Captured content",
+    extractedText: "Extracted text snapshot",
+    showDocument: "Show as document",
+    showExact: "Show exact captured text",
+    flatNote:
+      "This is the text representation ATLAS captured from the page. The original page structure was not preserved in this snapshot.",
+    relevantExcerpt: "Relevant excerpt",
+    hideFull: "Hide full captured text",
+    showFull: "Show full captured text",
+    characters: (n: string) => `(${n} characters)`,
+    truncated: (shown: string, full: string) =>
+      `Shown up to ${shown} of ${full} characters. The hashes above cover the whole capture.`,
+    // What was actually preserved, keyed by the snapshot's representation.
+    representation: {
+      MARKDOWN_SOURCE:
+        "Captured representation of the source ATLAS retrieved, and the one this research read. It is a preserved copy of the document, not the live page.",
+      EXTRACTED_TEXT:
+        "Captured representation of the source ATLAS retrieved, and the one this research read — the text extracted from the page. Layout, images and navigation were not kept, so this is not the page as it appears in a browser.",
+      TEXT: "Captured representation of the source ATLAS retrieved, and the one this research read. It is a preserved copy, not the live page.",
+    } as Record<string, string>,
   },
   common: { loading: "Loading…" },
 };

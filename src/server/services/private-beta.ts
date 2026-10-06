@@ -157,6 +157,9 @@ export interface PrivateBetaAllowance {
   used: number;
   limit: number;
   remaining: number;
+  // D-171: the creator beta is full for everyone right now — the screens
+  // must not offer "N remaining" as though a start were possible.
+  capacityReached: boolean;
 }
 
 export async function privateBetaAllowanceFor(
@@ -168,7 +171,19 @@ export async function privateBetaAllowanceFor(
   if (!(await hasValidPrivateBetaGrant(db, user.userId))) return null;
   const used = await countPrivateBetaJobs(db, user.userId);
   const limit = config.private_beta_research_limit;
-  return { used, limit, remaining: Math.max(0, limit - used) };
+  return { used, limit, remaining: Math.max(0, limit - used), capacityReached: await privateBetaCapacityReached(db, config) };
+}
+
+// D-171: a beta grant holder while the beta switch is off — the operational
+// pause (emergency stop). Read-only: it decides nothing, it lets the screens
+// say "paused" instead of showing the grant's storage level (ARI_CORE).
+export async function privateBetaPausedFor(
+  db: Database | Transaction,
+  config: ProductConfig,
+  user: { userId: string; role: string },
+): Promise<boolean> {
+  if (privateBetaOpen(config) || user.role === "ADMIN") return false;
+  return hasValidPrivateBetaGrant(db, user.userId);
 }
 
 // THE ONE ADMISSION RULE, shared by enforcement (start-private-beta-

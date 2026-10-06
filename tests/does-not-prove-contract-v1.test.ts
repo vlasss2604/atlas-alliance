@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { ResearchJobDetail } from "../src/client/api";
 import { buildAuditContent } from "../src/client/audit-model";
 import { EvidenceCardView } from "../src/client/components/research-result";
+import { en } from "../src/client/i18n/en";
 import { inputFromResearchJobDetail } from "../src/client/output-plan";
 import {
   legacyExtractorNote,
@@ -213,8 +214,10 @@ describe("4. the raw legacy text is preserved and auditable, under its own label
       expect(l.legacyExtractorNote).toBe(WAVE_1A);
       expect(l.doesNotProve).toBeNull();
     }
+    // The label reads from the dictionaries (D-171); English pinned.
     const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
-    expect(audit).toContain("Legacy extractor note: </span>");
+    expect(audit).toContain("{dict.audit.legacyNote}</span>");
+    expect(en.audit.legacyNote).toBe("Legacy extractor note: ");
   });
 
   it("a v1 caveat reaches the audit as a framed boundary, with no legacy note", () => {

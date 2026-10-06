@@ -43,7 +43,7 @@ export function BetaFeedbackPrompt() {
   const field =
     "glass w-full resize-none px-3 py-2 text-sm outline-none placeholder:text-[var(--atlas-text-dim)] focus:border-[var(--atlas-cyan)]";
   return (
-    <section className="glass flex flex-col gap-3 px-4 py-4" data-testid="beta-feedback-prompt">
+    <section id="beta-feedback" className="panel flex scroll-mt-4 flex-col gap-3 px-5 py-5" data-testid="beta-feedback-prompt">
       <div>
         <p className="text-[1.02rem] font-semibold">{t.title}</p>
         <p className="mt-1 text-sm text-[var(--atlas-text-dim)]">{t.intro}</p>
@@ -72,6 +72,12 @@ export function BetaFeedbackPrompt() {
         <textarea className={field} rows={2} maxLength={1000} value={changeNeeded} onChange={(e) => setChangeNeeded(e.target.value)} />
       </label>
       {state === "error" && <p className="text-sm text-[var(--atlas-amber)]">{t.error}</p>}
+      {/* D-171: say why "Send feedback" is not yet available. */}
+      {keepUsing === null && (
+        <p className="text-sm text-[var(--atlas-text-dim)]" data-testid="beta-feedback-required">
+          {t.requiredHint}
+        </p>
+      )}
       <div className="flex gap-3">
         <button
           type="button"

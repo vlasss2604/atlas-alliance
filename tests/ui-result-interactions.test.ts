@@ -7,6 +7,7 @@ import type { ResearchJobListItem } from "../src/client/api";
 import { projectHue, projectInitials, ProjectAvatar } from "../src/client/components/project-avatar";
 import { RecentProofCard } from "../src/client/components/recent-proof-card";
 import { en } from "../src/client/i18n/en";
+import { ru } from "../src/client/i18n/ru";
 import { EvidenceCardView, FindingRow, ResearchResult } from "../src/client/components/research-result";
 import { buildResultSurface, tableRows } from "../src/client/result-surface";
 import { resultFixture } from "../src/client/result-surface-fixtures";
@@ -268,17 +269,22 @@ describe("Home — previously researched projects", () => {
 });
 
 describe("Home — suggested questions", () => {
-  it("four research examples in the product's domain, each a chip that fills the input through the existing flow", () => {
+  it("three research examples, each naming a private-beta project, each a chip that fills the input through the existing flow (D-171)", () => {
     const code = readFileSync("src/client/components/research-composer.tsx", "utf-8");
-    const examples = code.slice(code.indexOf("const EXAMPLES"), code.indexOf("] as const;"));
-    expect((examples.match(/text: "/g) ?? []).length).toBe(4);
-    expect(examples).toContain("Does PUMP buyback actually reduce supply?");
-    expect(examples).toContain("Where do Raydium trading fees go?");
-    expect(examples).toContain("Does HYPE revenue actually reach token holders?");
-    expect(examples).toContain("Are bought-back tokens burned or held?");
+    // The examples are the dictionary's — one list for Home and Ask, in the
+    // user's language — and every one names Raydium, Pump.fun or Lido, so a
+    // tap never leads to a refusal or a clarification question.
+    expect(code).toContain("dict.ask.examples.map((ex) =>");
+    expect(en.ask.examples).toEqual([
+      "Does Raydium buy back RAY with its trading fees?",
+      "Does the Pump.fun buyback reduce PUMP supply?",
+      "Where do Lido staking rewards and fees go?",
+    ]);
+    for (const ex of [...en.ask.examples, ...ru.ask.examples]) expect(ex).toMatch(/Raydium|Pump\.fun|Lido/);
+    for (const ex of [...en.ask.examples, ...ru.ask.examples]) expect(ex).not.toMatch(/HYPE|Hyperliquid|Uniswap|Aave|Jupiter/);
     // A tap fills the input; sending goes through interpret → gate → start
     // exactly as a typed question does. No new backend path.
-    expect(code).toContain('onClick={() => setQuestion(ex.text)} className="chip" data-testid="composer-example"');
+    expect(code).toContain('onClick={() => setQuestion(ex)} className="chip" data-testid="composer-example"');
     expect(code).toContain("api.interpret(");
     expect(code).not.toMatch(/api\.startResearch\(ex\./);
   });

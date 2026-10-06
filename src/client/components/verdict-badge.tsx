@@ -7,6 +7,8 @@ import {
   type JobState,
   type VerdictTone,
 } from "../research-model";
+import { useDict } from "../app-context";
+import { outcomeText } from "../localize";
 
 // A verdict is never styled ad hoc. Tone comes from research-model's closed
 // mapping, so red can only ever appear for NOT_SUPPORTED — the one verdict
@@ -20,6 +22,7 @@ export function VerdictBadge({
   size?: "sm" | "md";
 }) {
   const tone = verdictTone(verdict);
+  const dict = useDict();
   return (
     <span
       className={`tone tone-${tone} ${size === "sm" ? "text-[0.8rem] px-2.5 py-1" : ""}`}
@@ -27,7 +30,7 @@ export function VerdictBadge({
       data-verdict={verdict ?? "NONE"}
       data-tone={tone}
     >
-      {verdictLabel(verdict)}
+      {(verdict && dict.verdict[verdict]) || verdictLabel(verdict)}
     </span>
   );
 }
@@ -44,6 +47,7 @@ export function OutcomeBadge({
   size?: "sm" | "md";
 }) {
   const outcome = jobOutcome(job);
+  const dict = useDict();
   return (
     <span
       className={`tone tone-${outcome.tone} ${size === "sm" ? "text-[0.8rem] px-2.5 py-1" : ""}`}
@@ -52,7 +56,7 @@ export function OutcomeBadge({
       data-verdict={outcome.verdict ?? "NONE"}
       data-tone={outcome.tone}
     >
-      {outcome.label}
+      {outcomeText(outcome, dict)}
     </span>
   );
 }

@@ -11,7 +11,7 @@ import { clearedSessionCookie } from "@/src/server/auth/session";
 import { researchJobs, users } from "@/src/server/db/schema";
 import { feedbackDue } from "@/src/server/services/beta-feedback";
 import { resolveEntitlement } from "@/src/server/services/entitlement";
-import { privateBetaAllowanceFor } from "@/src/server/services/private-beta";
+import { privateBetaAllowanceFor, privateBetaOpen, privateBetaPausedFor } from "@/src/server/services/private-beta";
 import { getDb, getProductConfig } from "@/src/server/runtime";
 
 export async function GET(req: Request): Promise<Response> {
@@ -46,6 +46,13 @@ export async function GET(req: Request): Promise<Response> {
         demoLimit: entitlement.demoLimit,
         priceStars: config.ari_core_price_stars,
       },
+      // D-171: whether a DEMO Research could actually start for an ordinary
+      // user here — only on the public path, and only while private beta is
+      // not what admits users. Lets Profile stop showing a DEMO allowance
+      // that cannot be used.
+      demoAvailable: config.research_enabled && !privateBetaOpen(config),
+      // D-171: this beta user's beta is paused (switch off, grant valid).
+      betaPaused: await privateBetaPausedFor(db, config, { userId: session.userId, role: user.role }),
       unreadCount: unread,
       // Whether Research Memory is consulted at all in this deployment, so
       // the progress rail never claims a step that does not happen (D-169).

@@ -173,6 +173,18 @@ together they stopped project #2 before it could start. Kept for context.
 
 ### Product surface
 
+- **Opening a Result's full audit can start provider work (2026-10-06, for
+  architecture review).** `/research/[id]/audit` POSTs
+  `/api/research-jobs/[id]/audit` on mount; when no `research_audit_projections`
+  row exists for (job, audit version), `generateAuditProjectionSafely` runs the
+  Anthropic audit projector, whose count-then-gate step calls `count_tokens`
+  before any generation. Observed locally during a UI review on 2026-10-06:
+  one visit to job `fd1252ef` wrote a `FAILED_MODEL` / `MODEL_INPUT_OVERSIZED`
+  row (no tokens, no generation); whether the request reached Anthropic is not
+  verified. Later visits skip (row exists). A page view should probably not be
+  what authorises a provider call; behaviour deliberately left unchanged in
+  D-171.
+
 - ~~**BLOCKING (S8): the confidence contract is undecided.**~~ **Ratified and
   implemented 2026-08-29 as D-135** — a closed ordinal band (LOW 20 / LIMITED
   40 / STRONG 60 / VERY_STRONG 80), never a probability, computed by

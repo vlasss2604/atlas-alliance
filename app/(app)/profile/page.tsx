@@ -15,6 +15,19 @@ export default function ProfilePage() {
     await refresh();
   };
 
+  const accessLine = (): string => {
+    if (!me) return dict.common.loading;
+    if (me.betaPaused) return `${dict.home.betaLabel} · ${dict.home.betaPaused}`;
+    if (me.privateBeta) {
+      return me.privateBeta.capacityReached
+        ? `${dict.home.betaLabel} · ${dict.home.betaAtCapacity}`
+        : `${dict.home.betaLabel} · ${dict.home.betaRemaining(me.privateBeta.remaining)}`;
+    }
+    if (me.entitlement.level === "ARI_CORE") return "ARI • CORE";
+    if (me.demoAvailable) return `DEMO · ${dict.home.demoCounter(me.entitlement.demoUsed, me.entitlement.demoLimit)}`;
+    return dict.profile.noAccess;
+  };
+
   // Двойное подтверждение (phase-2-plan §3): два независимых confirm.
   const deleteAccount = async () => {
     if (!window.confirm(dict.profile.deleteConfirm1)) return;
@@ -64,22 +77,13 @@ export default function ProfilePage() {
 
       <section className="glass px-4 py-3">
         <p className="text-xs text-[var(--atlas-text-dim)]">{dict.profile.level}</p>
-        <p className="mt-1 text-sm">
-          {/* A private-beta grant is stored as an ARI_CORE subscription, but
-              the user holds a beta allowance, not CORE (D-170). */}
-          {me
-            ? me.privateBeta
-              ? `${dict.home.betaLabel} · ${dict.home.betaRemaining(me.privateBeta.remaining)}`
-              : me.entitlement.level === "ARI_CORE"
-                ? "ARI • CORE"
-                : `DEMO · ${dict.home.demoCounter(me.entitlement.demoUsed, me.entitlement.demoLimit)}`
-            : dict.common.loading}
+        {/* D-171: only states the server says are real. A private-beta grant
+            is stored as an ARI_CORE subscription, but the user holds a beta
+            allowance, not CORE. No plan price is shown: payments are not
+            live, so nothing here may be offered for sale. */}
+        <p className="mt-1 text-sm" data-testid="profile-level">
+          {me ? accessLine() : dict.common.loading}
         </p>
-        {me && !me.privateBeta && me.entitlement.level === "DEMO" && (
-          <p className="mt-1 text-xs text-[var(--atlas-text-dim)]">
-            {dict.profile.priceNote(me.entitlement.priceStars)}
-          </p>
-        )}
       </section>
 
       <section className="glass px-4 py-3">

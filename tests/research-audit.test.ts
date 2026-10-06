@@ -13,6 +13,7 @@ import {
   type AuditEvidenceRow,
   type AuditProjectionRow,
 } from "../src/client/audit-model";
+import { en } from "../src/client/i18n/en";
 import {
   buildAuditInput,
   validateAuditProjection,
@@ -632,16 +633,17 @@ describe("audit is a different surface, not the result repeated", () => {
     const surface = codeOf(SURFACE);
     const trace = surface.slice(surface.indexOf("function Trace("));
     // The trace itself reads in ordinary words — spelled-out counts, the
-    // same outcome vocabulary, no compact codes.
-    expect(trace).toContain("Supporting:");
-    expect(trace).toContain("Conflicting:");
-    expect(trace).toContain("Excluded:");
+    // same outcome vocabulary, no compact codes. The words live in the
+    // dictionaries (D-171); the English ones are pinned here.
+    expect(trace).toContain("dict.audit.traceCounts(");
+    expect(en.audit.traceCounts(2, 0, 1)).toBe("Supporting: 2 · Conflicting: 0 · Excluded: 1");
     expect(trace).toContain("outcomeLabel");
     expect(trace).not.toMatch(/}s · {/);
     // Raw identifiers exist, but only behind an explicit developer
     // disclosure inside the trace.
-    expect(trace).toContain("Developer details");
-    const devBlock = trace.slice(trace.indexOf("Developer details"));
+    expect(trace).toContain("dict.audit.developerDetails");
+    expect(en.audit.developerDetails).toBe("Developer details");
+    const devBlock = trace.slice(trace.indexOf("dict.audit.developerDetails"));
     expect(devBlock).toContain("component:");
     expect(devBlock).toContain("reason_codes:");
     // Nothing above the trace exposes engine vocabulary at all.

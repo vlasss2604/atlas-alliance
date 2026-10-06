@@ -5,6 +5,7 @@ import { createElement } from "react";
 import { describe, expect, it } from "vitest";
 
 import { ResultLadder } from "../src/client/components/result-ladder";
+import { en } from "../src/client/i18n/en";
 import {
   deriveQuestionFindings,
   findingExplanation,
@@ -285,8 +286,11 @@ describe("the normal result carries no document list", () => {
     // document, with the engine's own exclusion reason attached, instead
     // of four role-bucketed document lists inside the result page.
     const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
-    expect(audit).toContain("Sources used");
-    expect(audit).toContain("Checked but not used");
+    // The headings read from the dictionaries (D-171); English pinned.
+    expect(audit).toContain("dict.audit.sourcesUsed");
+    expect(audit).toContain("dict.audit.checkedNotUsed");
+    expect(en.audit.sourcesUsed).toBe("Sources used");
+    expect(en.audit.checkedNotUsed).toBe("Checked but not used");
     expect(audit).toContain('data-testid="audit-sources-used"');
     expect(audit).toContain('data-testid="audit-sources-not-used"');
     // Every canonical component is still accounted for, in coverage.

@@ -12,6 +12,25 @@
 // — which is a research outcome, not an application error.
 
 import { isLabelSafe } from "../shared/projection-label-safety";
+import { displayLanguage } from "./display-language";
+import {
+  RU_ANSWER,
+  RU_CLAIM_LABEL_NO_COMPONENT,
+  RU_CLAIM_LABELS,
+  RU_COMPONENT_LABELS,
+  RU_COMPONENT_PHRASES,
+  RU_DOES_NOT_ESTABLISH,
+  RU_EXCLUSION_FALLBACK,
+  RU_EXCLUSION_LABELS,
+  RU_REASON_CODE_EXPLANATIONS,
+  RU_ROW,
+  RU_SOURCE_CLASS_CAVEATS,
+} from "./i18n/result-ru";
+
+// D-171: the code-owned sentences below have a Russian twin
+// (i18n/result-ru.ts), chosen only when the user's saved display language
+// is RU. The English text is the canonical phrasebook and is unchanged.
+const ru = (): boolean => displayLanguage() === "RU";
 
 export type JobState =
   | "QUEUED"
@@ -491,6 +510,7 @@ export const COMPONENT_LABELS: Record<string, string> = {
 };
 
 export function componentLabel(component: string): string {
+  if (ru() && RU_COMPONENT_LABELS[component]) return RU_COMPONENT_LABELS[component];
   return COMPONENT_LABELS[component] ?? component.replace(/_/g, " ").toLowerCase();
 }
 
@@ -640,6 +660,7 @@ export const EXCLUSION_LABELS: Record<string, string> = {
 // An unrecognised reason means this map has fallen behind the engine, which
 // is a copy bug — it must not become a leak.
 export function exclusionLabel(reason: string): string {
+  if (ru()) return RU_EXCLUSION_LABELS[reason] ?? RU_EXCLUSION_FALLBACK;
   return EXCLUSION_LABELS[reason] ?? "Did not meet the evidence standard for this step";
 }
 
@@ -749,7 +770,8 @@ export function retrievedOn(iso: string | null | undefined): string | null {
   if (!iso) return null;
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return null;
-  return at.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  // D-171: the user's chosen display language; English by default.
+  return at.toLocaleDateString(displayLanguage() === "RU" ? "ru-RU" : "en-GB", { day: "numeric", month: "short", year: "numeric" });
 }
 
 export interface DocumentGroup<T extends EvidenceItemLike> {
@@ -828,7 +850,7 @@ const COMPONENT_PHRASES: Record<string, string> = {
 // The phrase, for a surface that needs the SUBJECT of a check without the
 // sentence around it. Null where the component has none.
 export function componentPhrase(component: string): string | null {
-  return COMPONENT_PHRASES[component] ?? null;
+  return (ru() ? RU_COMPONENT_PHRASES : COMPONENT_PHRASES)[component] ?? null;
 }
 
 // Which findings a reader actually needs first. Documentation and governance
@@ -898,8 +920,32 @@ function pick(
   return priority
     .filter((c) => have.has(c) && COMPONENT_PHRASES[c])
     .slice(0, limit)
-    .map((c) => COMPONENT_PHRASES[c]);
+    .map((c) => componentPhrase(c) ?? COMPONENT_PHRASES[c]);
 }
+
+// The answer's sentences, per language (D-171). English is the canonical
+// wording; RU_ANSWER restates each entry and nothing more.
+const EN_ANSWER = {
+  subjectFallback: "this project",
+  and: "and",
+  or: "or",
+  inProgress: (s: string) => `Still researching this question about ${s}.`,
+  failedNothing: (s: string) => `This research run did not complete, so it confirmed nothing about ${s}.`,
+  failedIsRun: `The failure is a problem with the run itself — it is not a finding about the project.`,
+  failedPartly: (s: string) => `This research run did not complete, so it did not answer the whole question about ${s}.`,
+  contradicted: (list: string) => `On ${list}, the evidence indicates otherwise.`,
+  failedBoth: (v: string, p: string) => `Before it failed the sources confirmed ${v}, and partly confirmed ${p}.`,
+  failedVerified: (v: string) => `Before it failed the sources confirmed ${v}.`,
+  failedPartial: (p: string) => `Before it failed the sources partly confirmed ${p}.`,
+  failedSome: `Some findings were confirmed before it failed; they are listed below.`,
+  cancelled: `This research was cancelled before it reached a conclusion.`,
+  confirmed: (list: string) => `Confirmed: ${list}.`,
+  unresolved: (list: string) => `The available evidence does not show ${list}.`,
+  stoppedAtLimit: (s: string) =>
+    `This research stopped at its limit before covering everything it set out to check about ${s}.`,
+  noConclusion: (s: string) => `This research finished without producing a Proof for ${s}.`,
+};
+const answerPhrases = (): typeof EN_ANSWER => (ru() ? RU_ANSWER : EN_ANSWER);
 
 // THE ANSWER, BUILT FROM PERSISTED RESULTS ONLY.
 //
@@ -912,7 +958,8 @@ function pick(
 // A component with NO persisted row contributes nothing at all — it was not
 // assessed, and saying "could not verify" about it would misreport the run.
 export function researchAnswer(input: AnswerInput): string[] {
-  const subject = input.projectName ?? "this project";
+  const t = answerPhrases();
+  const subject = input.projectName ?? t.subjectFallback;
   const sentences: string[] = [];
 
   // THE LEAD SENTENCE IS GONE FOR EVERY NORMAL OUTCOME.
@@ -927,7 +974,7 @@ export function researchAnswer(input: AnswerInput): string[] {
   // no finding to lead with and the state of the RUN is the whole answer.
   switch (input.outcomeKind ?? "VERDICT") {
     case "IN_PROGRESS":
-      return [`Still researching this question about ${subject}.`];
+      return [t.inProgress(subject)];
     // A FAILED RUN IS NOT AUTOMATICALLY AN EMPTY ONE.
     //
     // This branch used to return "established nothing" unconditionally,
@@ -965,37 +1012,24 @@ export function researchAnswer(input: AnswerInput): string[] {
       // A — nothing substantive survived the failure. The state of the run
       // is the whole answer, worded exactly as before.
       if (!input.components.some((c) => SUBSTANTIVE_STATUSES.has(c.status))) {
-        return [
-          `This research run did not complete, so it confirmed nothing about ${subject}.`,
-          `The failure is a problem with the run itself — it is not a finding about the project.`,
-        ];
+        return [t.failedNothing(subject), t.failedIsRun];
       }
 
       // B — something did survive it.
-      const failed: string[] = [
-        `This research run did not complete, so it did not answer the whole question about ${subject}.`,
-      ];
+      const failed: string[] = [t.failedPartly(subject)];
       if (failedContradicted.length > 0) {
-        failed.push(
-          `On ${joinPhrases(failedContradicted, "and")}, the evidence indicates otherwise.`,
-        );
+        failed.push(t.contradicted(joinPhrases(failedContradicted, t.and)));
       }
       if (failedVerified.length > 0 && failedPartial.length > 0) {
-        failed.push(
-          `Before it failed the sources confirmed ${joinPhrases(failedVerified)}, and partly confirmed ${joinPhrases(failedPartial)}.`,
-        );
+        failed.push(t.failedBoth(joinPhrases(failedVerified, t.and), joinPhrases(failedPartial, t.and)));
       } else if (failedVerified.length > 0) {
-        failed.push(`Before it failed the sources confirmed ${joinPhrases(failedVerified)}.`);
+        failed.push(t.failedVerified(joinPhrases(failedVerified, t.and)));
       } else if (failedPartial.length > 0) {
-        failed.push(
-          `Before it failed the sources partly confirmed ${joinPhrases(failedPartial)}.`,
-        );
+        failed.push(t.failedPartial(joinPhrases(failedPartial, t.and)));
       } else if (failedContradicted.length === 0) {
         // Substantive rows exist, but none of them has a reader-facing
         // phrase. Point at the rows rather than inventing wording for them.
-        failed.push(
-          `Some findings were confirmed before it failed; they are listed below.`,
-        );
+        failed.push(t.failedSome);
       }
       // NO "Not established: …" LIST ON THIS PATH, DELIBERATELY.
       //
@@ -1008,13 +1042,11 @@ export function researchAnswer(input: AnswerInput): string[] {
       // persisted component status is rendered verbatim in the rows below,
       // and the lead sentence already says the question was not fully
       // answered.
-      failed.push(
-        `The failure is a problem with the run itself — it is not a finding about the project.`,
-      );
+      failed.push(t.failedIsRun);
       return failed;
     }
     case "CANCELLED":
-      return [`This research was cancelled before it reached a conclusion.`];
+      return [t.cancelled];
     // These two leads are shared with the result briefing below, so the top
     // of a result and this answer can never drift into two different
     // sentences for one run state. The wording is unchanged.
@@ -1033,7 +1065,7 @@ export function researchAnswer(input: AnswerInput): string[] {
   // thing a run can say, and it comes only from a CONTRADICTED row.
   const contradicted = pick(input.components, "CONTRADICTED", UNVERIFIED_PRIORITY, 2);
   if (contradicted.length > 0) {
-    sentences.push(`On ${joinPhrases(contradicted, "and")}, the evidence indicates otherwise.`);
+    sentences.push(t.contradicted(joinPhrases(contradicted, t.and)));
   }
 
   // 3 — WHAT WAS SETTLED, LED BY THE WORD THAT SAYS SO.
@@ -1045,7 +1077,7 @@ export function researchAnswer(input: AnswerInput): string[] {
   // accurate when the only source was documentation.
   const verified = pick(input.components, "SUPPORTED", VERIFIED_PRIORITY, 3);
   if (verified.length > 0) {
-    sentences.push(`Confirmed: ${joinPhrases(verified)}.`);
+    sentences.push(t.confirmed(joinPhrases(verified, t.and)));
   }
 
   // 4 — what it did not settle. Only components that were actually
@@ -1058,7 +1090,7 @@ export function researchAnswer(input: AnswerInput): string[] {
     verified.length > 0 ? 2 : 3,
   );
   if (unresolved.length > 0 && sentences.length < 3) {
-    sentences.push(`The available evidence does not show ${joinPhrases(unresolved, "or")}.`);
+    sentences.push(t.unresolved(joinPhrases(unresolved, t.or)));
   }
 
   // THREE SENTENCES, NOT FOUR. The default screen is read in about half a
@@ -1066,7 +1098,22 @@ export function researchAnswer(input: AnswerInput): string[] {
   return sentences.slice(0, 3);
 }
 
+const RU_UNITS: Record<string, [string, string, string]> = {
+  minute: ["минуту", "минуты", "минут"],
+  hour: ["час", "часа", "часов"],
+  day: ["день", "дня", "дней"],
+  month: ["месяц", "месяца", "месяцев"],
+  year: ["год", "года", "лет"],
+};
+
 function plural(n: number, unit: string): string {
+  if (displayLanguage() === "RU") {
+    const [one, few, many] = RU_UNITS[unit];
+    const m10 = n % 10;
+    const m100 = n % 100;
+    const word = m10 === 1 && m100 !== 11 ? one : m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14) ? few : many;
+    return `${n} ${word} назад`;
+  }
   return `${n} ${unit}${n === 1 ? "" : "s"} ago`;
 }
 
@@ -1086,7 +1133,7 @@ export function relativeAge(iso: string | null | undefined, now = Date.now()): s
   const then = Date.parse(iso);
   if (Number.isNaN(then)) return "";
   const mins = Math.max(0, Math.round((now - then) / 60000));
-  if (mins < 1) return "just now";
+  if (mins < 1) return displayLanguage() === "RU" ? "только что" : "just now";
   if (mins < 60) return plural(mins, "minute");
   const hours = Math.round(mins / 60);
   if (hours < 24) return plural(hours, "hour");
@@ -1198,9 +1245,10 @@ export const REASON_CODE_EXPLANATIONS: Record<string, string> = {
 export function reasonExplanation(
   codes: readonly unknown[] | null | undefined,
 ): string | null {
+  const table = ru() ? RU_REASON_CODE_EXPLANATIONS : REASON_CODE_EXPLANATIONS;
   for (const code of codes ?? []) {
     if (typeof code !== "string") continue;
-    const explanation = REASON_CODE_EXPLANATIONS[code];
+    const explanation = table[code];
     if (explanation) return explanation;
   }
   return null;
@@ -1270,7 +1318,7 @@ export function sourceClassCaveat(
   sourceClass: string | null | undefined,
 ): { from: string; can: string; cannot: string } | null {
   if (!sourceClass) return null;
-  return SOURCE_CLASS_CAVEATS[sourceClass] ?? null;
+  return (ru() ? RU_SOURCE_CLASS_CAVEATS : SOURCE_CLASS_CAVEATS)[sourceClass] ?? null;
 }
 
 // WHAT ONE PASSAGE DOES NOT ESTABLISH — THE ONLY CAVEAT A RESULT MAY SHOW.
@@ -1319,8 +1367,11 @@ export function passageLimit(e: PassageLimitInput): PassageLimit | null {
 }
 
 // One line, for a surface that has no heading of its own.
+// The frame is translated; the claim itself is the extractor's own words and
+// stays verbatim in any language.
 export function passageLimitLine(limit: PassageLimit): string {
-  return limit.form === "CLAIM" ? `Does not establish: ${limit.text}` : limit.text;
+  if (limit.form !== "CLAIM") return limit.text;
+  return ru() ? RU_DOES_NOT_ESTABLISH(limit.text) : `Does not establish: ${limit.text}`;
 }
 
 // The raw model-written caveat that `passageLimit` withholds — for the audit
@@ -1453,6 +1504,10 @@ const CLAIM_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export function componentClaimLabel(component: string | null | undefined): string {
+  if (ru()) {
+    if (!component) return RU_CLAIM_LABEL_NO_COMPONENT;
+    return RU_CLAIM_LABELS[component] ?? componentLabel(component);
+  }
   if (!component) return "This research";
   return CLAIM_LABELS[component] ?? componentLabel(component);
 }
@@ -1504,12 +1559,24 @@ function buildRow(
   // attempt data says the checking was blocked, the limitation speaks and
   // the reason-code sentence is withheld rather than restated wrongly.
   const blocked = coverage === "BLOCKED";
+  const inRu = ru();
   const reason = blocked
-    ? "ATLAS could not complete the checks for this step, so the evidence here is incomplete."
+    ? inRu
+      ? RU_ROW.blockedReason
+      : "ATLAS could not complete the checks for this step, so the evidence here is incomplete."
     : reasonExplanation(row?.reasonCodes);
 
-  const shows =
-    phrase === null
+  const shows = inRu
+    ? phrase === null
+      ? null
+      : state === "VERIFIED"
+        ? RU_ROW.shows(RU_COMPONENT_PHRASES[def.component] ?? phrase)
+        : state === "PARTIAL"
+          ? RU_ROW.showsPartly(RU_COMPONENT_PHRASES[def.component] ?? phrase)
+          : state === "NOT_HAPPENING"
+            ? RU_ROW.showsOtherWay(RU_COMPONENT_PHRASES[def.component] ?? phrase)
+            : null
+    : phrase === null
       ? null
       : state === "VERIFIED"
         ? `The checked evidence establishes ${phrase}.`
@@ -1519,15 +1586,25 @@ function buildRow(
             ? `On ${phrase}, the checked evidence indicates otherwise.`
             : null;
 
-  const checkedSummary = blocked
-    ? "Sources for this step could not be opened."
-    : admittedCount === 0 && refusedCount === 0
-      ? "No source ATLAS read carried evidence for this step."
-      : refusedCount === 0
-        ? `${countLabel(admittedCount, "source", "sources")} used as evidence.`
-        : admittedCount === 0
-          ? `${countLabel(refusedCount, "source", "sources")} read and not used.`
-          : `${countLabel(admittedCount, "source", "sources")} used as evidence, ${refusedCount} read and not used.`;
+  const checkedSummary = inRu
+    ? blocked
+      ? RU_ROW.checkedBlocked
+      : admittedCount === 0 && refusedCount === 0
+        ? RU_ROW.checkedNone
+        : refusedCount === 0
+          ? RU_ROW.checkedUsed(admittedCount)
+          : admittedCount === 0
+            ? RU_ROW.checkedRead(refusedCount)
+            : RU_ROW.checkedBoth(admittedCount, refusedCount)
+    : blocked
+      ? "Sources for this step could not be opened."
+      : admittedCount === 0 && refusedCount === 0
+        ? "No source ATLAS read carried evidence for this step."
+        : refusedCount === 0
+          ? `${countLabel(admittedCount, "source", "sources")} used as evidence.`
+          : admittedCount === 0
+            ? `${countLabel(refusedCount, "source", "sources")} read and not used.`
+            : `${countLabel(admittedCount, "source", "sources")} used as evidence, ${refusedCount} read and not used.`;
 
   return {
     component: def.component,
@@ -1539,7 +1616,9 @@ function buildRow(
     shows,
     coverage,
     limitation: blocked
-      ? "Required source access failed during this step. This is a limit of the research run, not evidence for or against the project."
+      ? inRu
+        ? RU_ROW.limitation
+        : "Required source access failed during this step. This is a limit of the research run, not evidence for or against the project."
       : null,
     admittedCount,
     refusedCount,
@@ -1946,9 +2025,8 @@ export function unresolvedFrom(
 // fault. Shared with `researchAnswer` so the briefing and the older answer
 // cannot drift into two different sentences for one state.
 const OUTCOME_LEADS: Partial<Record<OutcomeKind, (subject: string) => string>> = {
-  STOPPED_AT_LIMIT: (s) =>
-    `This research stopped at its limit before covering everything it set out to check about ${s}.`,
-  NO_CONCLUSION: (s) => `This research finished without producing a Proof for ${s}.`,
+  STOPPED_AT_LIMIT: (s) => answerPhrases().stoppedAtLimit(s),
+  NO_CONCLUSION: (s) => answerPhrases().noConclusion(s),
 };
 
 // THE SHORT ANSWER — THREE TO SIX SENTENCES, EACH ONE A PERSISTED STATUS.

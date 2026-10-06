@@ -190,7 +190,9 @@ describe("the boundary language", () => {
     for (const r of blocked) expect(r.established).toBe(ROW_LIMIT_COPY.TECHNICAL);
     const html = render(createElement(ResearchResult, { detail, jobId: detail.job.id }));
     const unclear = visibleText(html.slice(html.indexOf('data-testid="unclear-section"')));
-    expect(unclear).toContain("The research limit was reached before");
+    expect(unclear).toContain("This Research stopped before");
+    expect(unclear).not.toContain("Research limit reached");
+    expect(unclear).not.toContain("source route");
     expect(unclear).toContain(BOUNDARY_NEVER.TECHNICAL);
   });
 });

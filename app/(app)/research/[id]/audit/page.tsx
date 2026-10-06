@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 
 import { api, type AuditProjectionView, type ResearchJobDetail } from "@/src/client/api";
+import { useDict } from "@/src/client/app-context";
 import { AtlasHeader } from "@/src/client/components/atlas-header";
 import { ResearchAudit } from "@/src/client/components/research-audit";
 
@@ -28,6 +29,7 @@ import { ResearchAudit } from "@/src/client/components/research-audit";
 export default function ResearchAuditPage() {
   const params = useParams<{ id: string }>();
   const jobId = typeof params?.id === "string" ? params.id : null;
+  const dict = useDict();
 
   const [detail, setDetail] = useState<ResearchJobDetail | null>(null);
   const [projection, setProjection] = useState<AuditProjectionView | null>(null);
@@ -68,15 +70,13 @@ export default function ResearchAuditPage() {
     };
   }, [jobId]);
 
-  const back = { href: `/research/${jobId ?? ""}`, label: "Back to result" };
+  const back = { href: `/research/${jobId ?? ""}`, label: dict.audit.back };
 
   if (status === "loading") {
     return (
       <main className="enter flex flex-col gap-5 pb-6">
         <AtlasHeader compact back={back} />
-        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">
-          Preparing research audit…
-        </div>
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.audit.preparing}</div>
       </main>
     );
   }
@@ -85,9 +85,7 @@ export default function ResearchAuditPage() {
     return (
       <main className="enter flex flex-col gap-5 pb-6">
         <AtlasHeader compact back={back} />
-        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">
-          Full audit could not be prepared.
-        </div>
+        <div className="px-1 py-6 text-[0.95rem] text-[var(--atlas-text-dim)]">{dict.audit.prepareError}</div>
       </main>
     );
   }

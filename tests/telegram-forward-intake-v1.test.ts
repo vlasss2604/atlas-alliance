@@ -25,6 +25,7 @@ import { loadProductConfig } from "../src/server/config/product";
 import {
   demoQuotaReservations,
   interpretations,
+  productConfig,
   researchIntakes,
   researchJobs,
   sessions,
@@ -36,6 +37,7 @@ import { transitionJobState } from "../src/server/jobs/research-jobs";
 import { __resetRuntime } from "../src/server/runtime";
 import { countPrivateBetaJobs, grantPrivateBetaAccess, setPrivateBetaConfig } from "../src/server/services/private-beta";
 import { detectProjectSlug } from "../src/server/services/project-detection";
+import { createResearchIntake } from "../src/server/services/research-intake";
 import {
   INTAKE_TTL_MS,
   MAX_INTAKE_TEXT_CHARS,
@@ -106,11 +108,21 @@ afterEach(async () => {
 /* ------------------------------------------------------------------ */
 
 let tgSeq = 7_000_000;
-async function telegramUser(language: "EN" | "RU" = "EN"): Promise<{ userId: string; tgId: string }> {
+// A signed-in forwarder who can actually research: since D-171 the bot
+// stores an intake only when a Research could follow it, so the default
+// forwarder holds the ordinary private-beta grant. `{ grant: false }` is a
+// signed-in user without beta access.
+async function telegramUser(
+  language: "EN" | "RU" = "EN",
+  opts: { grant?: boolean } = {},
+): Promise<{ userId: string; tgId: string }> {
   const [u] = await ctx.db.insert(users).values({ role: "USER", language }).returning();
   tgSeq += 1;
   const tgId = String(tgSeq);
   await ctx.db.insert(userIdentities).values({ userId: u.id, provider: "TELEGRAM", providerUserId: tgId });
+  if (opts.grant !== false) {
+    await grantPrivateBetaAccess(ctx.db, { userId: u.id, validUntil: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000) });
+  }
   return { userId: u.id, tgId };
 }
 
@@ -267,7 +279,9 @@ describe("1. webhook authentication and update handling", () => {
     expect(await countUsers()).toBe(before);
     expect(sent).toHaveLength(1);
     expect(sent[0].body.text).toBe("Open ATLAS PROOF and sign in once, then forward the message again.");
-    expect(sent[0].body.reply_markup).toBeUndefined();
+    // D-171: the way in, not only the instruction — one button to the Mini
+    // App's Home. It grants nothing and creates nothing.
+    expect(sent[0].body.reply_markup).toEqual({ inline_keyboard: [[{ text: "Open ATLAS", web_app: { url: `${ORIGIN}/home` } }]] });
     const all = await ctx.db.select().from(researchIntakes);
     expect(all.some((r) => r.rawText === "Raydium buys back RAY")).toBe(false);
   });
@@ -460,7 +474,9 @@ describe("3. detection is the catalog and nothing else; beta scope is the existi
     const res = await webhookPOST(webhook(update(tgId, { text: "Uniswap will turn on the fee switch for UNI holders" })));
     expect(await outcomeOf(res)).toMatchObject({ handled: true, action: "NOT_IN_BETA", delivered: true });
     expect(await intakesOf(userId)).toHaveLength(0);
-    expect(sent[0].body.text).toBe("Project: Uniswap\n\nUniswap is not currently available in the private beta.");
+    expect(sent[0].body.text).toBe(
+      "Project: Uniswap\n\nUniswap isn't in the private beta. The private beta covers Raydium, Pump.fun and Lido.",
+    );
     expect(sent[0].body.reply_markup).toBeUndefined();
     await expectNothingSpent(userId);
   });
@@ -475,13 +491,30 @@ describe("3. detection is the catalog and nothing else; beta scope is the existi
     expect(readFileSync("src/server/telegram/webhook.ts", "utf8")).not.toMatch(/\[\s*"raydium"/);
   });
 
-  it("with the beta switch off the bot does not apply beta scope; the Mini App gates decide", async () => {
+  it("with the beta switch off the bot does not apply beta scope; with the public path also off it is paused (D-171)", async () => {
+    const setResearch = async (value: boolean) => {
+      await ctx.db.insert(productConfig).values({ key: "research_enabled", value }).onConflictDoUpdate({ target: productConfig.key, set: { value } });
+      await __resetRuntime();
+    };
     const { tgId, userId } = await telegramUser();
     await setPrivateBetaConfig(ctx.db, { enabled: false, projectSlugs: [], researchLimit: 5 });
-    await __resetRuntime();
-    const { outcome } = await forward(tgId, { text: "Uniswap fee switch" });
-    expect(outcome).toMatchObject({ action: "VERIFY" });
-    expect(await intakesOf(userId)).toHaveLength(1);
+    try {
+      // Public path open: beta scope does not apply; the Mini App gates decide.
+      await setResearch(true);
+      const open = await forward(tgId, { text: "Uniswap fee switch" });
+      expect(open.outcome).toMatchObject({ action: "VERIFY" });
+      expect(await intakesOf(userId)).toHaveLength(1);
+      // Both off (the emergency stop): a paused reply, no intake, no button.
+      await setResearch(false);
+      sent = [];
+      const paused = await forward(tgId, { text: "Raydium fee switch" });
+      expect(paused.outcome).toMatchObject({ action: "NO_RESEARCH_ACCESS" });
+      expect(await intakesOf(userId)).toHaveLength(1);
+      expect(sent[0].body.text).toBe("Private beta is temporarily paused. Your previous Research is still available in your Research Library.");
+      expect(sent[0].body.reply_markup).toBeUndefined();
+    } finally {
+      await setResearch(false);
+    }
   });
 });
 
@@ -642,9 +675,21 @@ describe("5. Research starts only through the canonical path, and consumption fo
     expect(await jobsOf(userId)).toHaveLength(1);
   });
 
-  it("a user without a grant is refused by the existing admission; nothing is consumed", async () => {
-    const { tgId, userId } = await telegramUser();
-    const { intakeId } = await forward(tgId, { text: "Raydium fees" });
+  it("a user without a grant gets no dead-end Verify (D-171); an intake they still hold is refused by the existing admission and not consumed", async () => {
+    const { tgId, userId } = await telegramUser("EN", { grant: false });
+    const refused = await forward(tgId, { text: "Raydium fees" });
+    expect(refused.outcome).toMatchObject({ action: "NO_RESEARCH_ACCESS" });
+    expect(await intakesOf(userId)).toHaveLength(0);
+    expect(sent.at(-1)!.body.text).toBe(
+      "ATLAS PROOF is in private beta. Research needs a private beta invite.\n\nThe private beta covers Raydium, Pump.fun and Lido.",
+    );
+    expect(sent.at(-1)!.body.reply_markup).toBeUndefined();
+    // An intake that exists anyway (e.g. stored before access lapsed) still
+    // starts nothing: the canonical admission refuses and nothing is consumed.
+    const { intake } = await createResearchIntake(ctx.db, {
+      userId, origin: "TELEGRAM_FORWARD", rawText: "Raydium fees", sourceLabel: null, sourceUrl: null, detectedProjectSlug: "raydium", externalRef: null,
+    });
+    const intakeId = intake.id;
     const c = await authedFor(userId);
     const res = await startFrom(c, await interpretationFor(userId, "raydium"), intakeId!);
     expect(await errorOf(res)).toBe("BETA_ACCESS_REQUIRED");

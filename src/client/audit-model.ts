@@ -12,6 +12,15 @@ import {
   type EvidenceItemLike,
 } from "./research-model";
 import { TYPED_VALUE_ABSENT_LIMIT, typedValueAbsent } from "./mechanism-typed-value";
+import { displayLanguage } from "./display-language";
+import { RU_AUDIT, RU_TYPED_VALUE_ABSENT_LIMIT } from "./i18n/result-ru";
+
+// D-171: every label and sentence written here has a Russian twin
+// (i18n/result-ru.ts), used only when the saved display language is RU.
+// Model-written projection labels and summaries are never translated.
+const ru = (): boolean => displayLanguage() === "RU";
+const outcomeLabelOf = (kind: AuditOutcomeKind): string =>
+  ru() ? RU_AUDIT.outcomeLabels[kind] : AUDIT_OUTCOME_LABELS[kind];
 
 // THE FULL RESEARCH AUDIT — A SECOND PROJECTION OF THE SAME CANONICAL TRUTH.
 //
@@ -296,12 +305,14 @@ export function auditScope(
       labelSource: projected ? "PROJECTION" : "CANONICAL",
       status: c.status,
       outcome: auditOutcome(shownStatus, c.coverage),
-      outcomeLabel: AUDIT_OUTCOME_LABELS[auditOutcome(shownStatus, c.coverage)],
+      outcomeLabel: outcomeLabelOf(auditOutcome(shownStatus, c.coverage)),
       coverage: c.coverage,
-      coverageLabel: COVERAGE_LABELS[c.coverage] ?? c.coverage,
+      coverageLabel: (ru() ? RU_AUDIT.coverageLabels[c.coverage] : COVERAGE_LABELS[c.coverage]) ?? c.coverage,
       reasonCodes,
       reason: untyped
-        ? `${TYPED_VALUE_ABSENT_LIMIT[c.component]} Stored component status: ${c.status}.`
+        ? ru()
+          ? RU_AUDIT.untypedReason(RU_TYPED_VALUE_ABSENT_LIMIT[c.component], c.status)
+          : `${TYPED_VALUE_ABSENT_LIMIT[c.component]} Stored component status: ${c.status}.`
         : reasonExplanation(reasonCodes),
       limitation: limitationKind(c),
       supportingCount: c.supportingEvidenceIds.length,
@@ -460,7 +471,7 @@ export function auditEvidenceMap(
       label: item?.label ?? componentLabel(c.component),
       status: c.status,
       outcomeLabel:
-        item?.outcomeLabel ?? AUDIT_OUTCOME_LABELS[auditOutcome(c.status, c.coverage)],
+        item?.outcomeLabel ?? outcomeLabelOf(auditOutcome(c.status, c.coverage)),
       admitted: links.filter((l) => l.role !== "EXCLUDED"),
       excluded: links.filter((l) => l.role === "EXCLUDED"),
     });
@@ -644,6 +655,7 @@ export function auditOpenItems(
 ): AuditOpenItem[] {
   const byKey = new Map(components.map((c) => [`${c.patternStep}:${c.component}`, c]));
   const items: AuditOpenItem[] = [];
+  const inRu = ru();
 
   for (const s of scope) {
     const c = byKey.get(`${s.patternStep}:${s.component}`);
@@ -656,10 +668,12 @@ export function auditOpenItems(
         component: s.component,
         label: s.label,
         outcomeLabel: s.outcomeLabel,
-        detail:
-          "Canonical research recorded evidence on both sides of this point. The reconciliation state shown is the engine's own, not a preference between sources.",
-        needed:
-          "A source of higher authority than both, or a direct on-chain observation, to settle which account of this point holds.",
+        detail: inRu
+          ? RU_AUDIT.conflictDetail
+          : "Canonical research recorded evidence on both sides of this point. The reconciliation state shown is the engine's own, not a preference between sources.",
+        needed: inRu
+          ? RU_AUDIT.conflictNeeded
+          : "A source of higher authority than both, or a direct on-chain observation, to settle which account of this point holds.",
         reasonCodes: s.reasonCodes,
       });
       continue;
@@ -672,9 +686,10 @@ export function auditOpenItems(
         component: s.component,
         label: s.label,
         outcomeLabel: s.outcomeLabel,
-        detail:
-          "A source this point needed could not be reached during the research run. This is a limitation of the run, not evidence that the mechanism is absent.",
-        needed: "A repeat run with access to the source this point requires.",
+        detail: inRu
+          ? RU_AUDIT.technicalDetail
+          : "A source this point needed could not be reached during the research run. This is a limitation of the run, not evidence that the mechanism is absent.",
+        needed: inRu ? RU_AUDIT.technicalNeeded : "A repeat run with access to the source this point requires.",
         reasonCodes: s.reasonCodes,
       });
       continue;
@@ -689,14 +704,22 @@ export function auditOpenItems(
         outcomeLabel: s.outcomeLabel,
         detail:
           s.reason ??
-          "The run completed for this point and the evidence needed to settle it was not established.",
+          (inRu
+            ? RU_AUDIT.evidenceDetail
+            : "The run completed for this point and the evidence needed to settle it was not established."),
         // An exclusion-driven gap and an empty-handed one need different
         // things, and the reason code already distinguishes them.
         needed: s.reasonCodes.includes("ALL_EVIDENCE_EXCLUDED")
-          ? "A source whose class carries enough authority for this kind of claim."
+          ? inRu
+            ? RU_AUDIT.neededExcluded
+            : "A source whose class carries enough authority for this kind of claim."
           : s.reasonCodes.includes("INSUFFICIENT_AUTHORITY")
-            ? "A source of sufficient authority for this claim, or a direct on-chain observation."
-            : "Any admissible evidence bearing on this point; none was found in this run.",
+            ? inRu
+              ? RU_AUDIT.neededAuthority
+              : "A source of sufficient authority for this claim, or a direct on-chain observation."
+            : inRu
+              ? RU_AUDIT.neededAny
+              : "Any admissible evidence bearing on this point; none was found in this run.",
         reasonCodes: s.reasonCodes,
       });
     }

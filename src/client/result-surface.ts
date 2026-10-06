@@ -27,9 +27,23 @@
 // stage names, attempt and recovery language are read here and rendered
 // as plain sentences; the closed lists at the bottom are what the tests
 // scan a rendered surface for.
+//
+// TWO LANGUAGES (D-171). Every sentence this file writes has a Russian twin
+// in i18n/result-ru.ts, used only when the user's saved display language is
+// RU; the English phrasebook below is unchanged. What a source or the model
+// wrote — evidence summaries, excerpts, source titles, projection labels —
+// is never translated and reaches the page in its own words.
 
 import type { ProofBoundaryView, ResearchJobDetail } from "./api";
 import { compactAmount } from "./components/result-blocks/selected-blocks";
+import { displayLanguage } from "./display-language";
+import {
+  RU_SURFACE,
+  RU_TYPED_VALUE_ABSENT_LIMIT,
+  ruQuestionLabel,
+  ruStatementPhrase,
+  ruStopStatePhrase,
+} from "./i18n/result-ru";
 import { TYPED_VALUE_ABSENT_LIMIT, typedMechanismValueOf, typedValueAbsent } from "./mechanism-typed-value";
 import {
   canonicalDocumentKey,
@@ -82,6 +96,8 @@ export const RESULT_STATE_WORDS: Record<ResultStatus, string> = {
   NOT_ESTABLISHED: "Unresolved",
   CONTRADICTED: "Contradicted",
 };
+
+const ru = (): boolean => displayLanguage() === "RU";
 
 export function resultStatus(state: RealityState): ResultStatus | null {
   switch (state) {
@@ -214,14 +230,16 @@ export const PROOF_PATH_ORDER = [
 // THE MECHANISM, IN THE READER'S OWN WORD. The question and the
 // projection's labels name what was asked about — a buyback, a burn, a
 // revenue share, a reward. The noun is read from those words, never
-// guessed from the intent: "the mechanism" is the honest fallback.
+// guessed from the intent: "the mechanism" is the honest fallback. The
+// result is a key (the English noun); a question asked in Russian is read
+// by the same rule through its Russian word stems (D-171).
 export function mechanismNounOf(texts: readonly (string | null | undefined)[]): string {
   const text = texts.filter((t): t is string => typeof t === "string").join(" ").toLowerCase();
-  if (/buy[- ]?back|repurchas/.test(text)) return "the buyback";
-  if (/\bburn/.test(text)) return "the burn";
-  if (/revenue[- ]shar|fee[- ]shar|dividend|distribut/.test(text)) return "the revenue share";
-  if (/staking|reward/.test(text)) return "the reward";
-  if (/fee switch/.test(text)) return "the fee switch";
+  if (/buy[- ]?back|repurchas|выкуп/.test(text)) return "the buyback";
+  if (/\bburn|сжига|сжечь|сожж/.test(text)) return "the burn";
+  if (/revenue[- ]shar|fee[- ]shar|dividend|distribut|распредел|дивиденд/.test(text)) return "the revenue share";
+  if (/staking|reward|стейкинг|награ|вознагражд/.test(text)) return "the reward";
+  if (/fee switch|переключател/.test(text)) return "the fee switch";
   return "the mechanism";
 }
 
@@ -229,6 +247,7 @@ export function mechanismNounOf(texts: readonly (string | null | undefined)[]): 
 // question projection's own labels lead where they exist; these serve the
 // checks it leans on and the reality checks it did not name.
 export function questionLabelFor(component: string, noun: string): string {
+  if (ru()) return ruQuestionLabel(component, noun) ?? componentClaimLabel(component);
   const buyback = noun === "the buyback";
   switch (component) {
     case "SOURCE_OF_VALUE":
@@ -259,6 +278,7 @@ export function questionLabelFor(component: string, noun: string): string {
 // The same checks as clauses of a sentence — "ATLAS established WHAT PAYS
 // FOR THE BUYBACK and WHO APPROVED IT". Object forms for the answer.
 export function statementPhraseFor(component: string, noun: string): string {
+  if (ru()) return ruStatementPhrase(component, noun) ?? componentPhrase(component) ?? componentClaimLabel(component).toLowerCase();
   const buyback = noun === "the buyback";
   switch (component) {
     case "SOURCE_OF_VALUE":
@@ -357,10 +377,13 @@ function onchainObservation(
   if (e.sourceClass !== "ONCHAIN_VERIFIABLE") return null;
   const network = networkOf(e.retrievedUrl);
   if (quantity && quantity.factKind === "TOKEN_SUPPLY") {
+    const amount = compactAmount(quantity.amountRaw, quantity.decimals);
+    if (ru()) return { observation: RU_SURFACE.supplyObserved(ticker, amount), network };
     const subject = ticker ? `${ticker} total supply` : "Token total supply";
-    return { observation: `${subject} observed: ${compactAmount(quantity.amountRaw, quantity.decimals)}`, network };
+    return { observation: `${subject} observed: ${amount}`, network };
   }
-  return { observation: e.summary?.trim() || "On-chain state observed", network };
+  // The persisted summary is the record's own text and is shown as written.
+  return { observation: e.summary?.trim() || (ru() ? RU_SURFACE.onchainStateObserved : "On-chain state observed"), network };
 }
 
 // `atlas-onchain://<chain>/<network>/…` names the chain in its first
@@ -395,7 +418,7 @@ export function evidenceCard(
   const component = input.component ?? e.component;
   const caveat = sourceClassCaveat(e.sourceClass);
   const onchain = onchainObservation(e, input.quantity, input.ticker);
-  const domain = onchain ? (onchain.network ?? "on-chain") : domainOf(e.retrievedUrl);
+  const domain = onchain ? (onchain.network ?? (ru() ? RU_SURFACE.onchainDomain : "on-chain")) : domainOf(e.retrievedUrl);
   return {
     id: e.id,
     component,
@@ -410,7 +433,7 @@ export function evidenceCard(
     // code-owned source-class limit. Already framed for display.
     doesNotProve: limitLineOf(e),
     excerpt: e.fragment,
-    sourceName: onchain ? "On-chain record" : e.sourceTitle?.trim() || domain,
+    sourceName: onchain ? (ru() ? RU_SURFACE.onchainRecord : "On-chain record") : e.sourceTitle?.trim() || domain,
     sourceClass: sourceClassLabel(e.sourceClass),
     sourceDomain: domain,
     date: dateOf(e),
@@ -605,6 +628,7 @@ function statedStopOf(evidence: readonly EvidenceLike[]): StopState | null {
 }
 
 export function stopStatePhrase(state: StopState, noun: string): string {
+  if (ru()) return ruStopStatePhrase(state, noun);
   if (state === "PAUSED") return `that ${noun} is currently paused`;
   if (state === "DEPRECATED") return `that ${noun} has been deprecated`;
   return `that ${noun} has been removed`;
@@ -615,6 +639,10 @@ export function stopStatePhrase(state: StopState, noun: string): string {
 function establishedStopNote(state: StopState, latest: LatestStatedState | null): string {
   const isLatest = latest !== null && latest.state === state;
   const when = isLatest ? retrievedOn(latest.at) : null;
+  if (ru()) {
+    if (state === "PAUSED") return isLatest ? RU_SURFACE.pausedLatest(when) : RU_SURFACE.pausedStated;
+    return isLatest ? RU_SURFACE.stoppedLatest(state, when) : RU_SURFACE.stoppedStated(state);
+  }
   if (state === "PAUSED") {
     return isLatest
       ? `The latest official state is paused${when ? ` (dated ${when})` : ""}; this does not show it happening now.`
@@ -633,6 +661,12 @@ function latestStateNote(latest: LatestStatedState): string | null {
   const when = retrievedOn(latest.at);
   if (!when) return null;
   const state = latest.state.toUpperCase();
+  if (ru()) {
+    if (state === "PAUSED") return RU_SURFACE.lastPaused(when);
+    if (state === "DEPRECATED" || state === "REMOVED") return RU_SURFACE.lastStopped(state, when);
+    if (state === "LIVE" || state === "IMPLEMENTING") return RU_SURFACE.lastActive(when);
+    return null;
+  }
   if (state === "PAUSED") return `It was last recorded as paused on ${when}; its current state is unknown.`;
   if (state === "DEPRECATED" || state === "REMOVED") {
     return `An official record dated ${when} states it was ${state === "DEPRECATED" ? "deprecated" : "removed"}; nothing newer shows it active again.`;
@@ -716,28 +750,31 @@ export const ROW_LIMIT_COPY: Record<Exclude<BoundaryKind, "SUBSTANTIVE">, string
 };
 
 function establishedText(row: ResultRow, evidence: EvidenceCard[], boundary: BoundaryReading | null): string {
+  const inRu = ru();
   const phrase = statementPhraseFor(row.component, "the mechanism");
   if (row.state === "VERIFIED" || row.state === "PARTIAL") {
     const summary = evidence.find((e) => e.relation === "SUPPORTS" && !e.onchain)?.proves
       ?? evidence.find((e) => e.relation === "SUPPORTS")?.proves;
     const fact = summary && firstSentence(summary).length <= MAX_ESTABLISHED ? firstSentence(summary) : null;
-    if (row.state === "VERIFIED") return fact ?? row.shows ?? `The sources confirm ${phrase}.`;
+    if (row.state === "VERIFIED") return fact ?? row.shows ?? (inRu ? RU_SURFACE.sourcesConfirm(phrase) : `The sources confirm ${phrase}.`);
     // Partial: the fact, then the gap — one persisted sentence, never the
     // word "partial" on its own.
-    const gap = row.reason ?? "The whole claim is not confirmed by the sources that could be relied on.";
+    const gap = row.reason ?? (inRu ? RU_SURFACE.partialGapFallback : "The whole claim is not confirmed by the sources that could be relied on.");
+    if (inRu) return fact ? `${fact} ${gap}` : RU_SURFACE.coversPart(gap);
     return fact ? `${fact} ${gap}` : `The sources cover part of this. ${gap}`;
   }
   if (row.state === "NOT_HAPPENING") {
+    const otherWay = inRu ? RU_SURFACE.otherWay : "The evidence points the other way.";
     const contra = evidence.find((e) => e.relation === "CONTRADICTS")?.proves;
     if (contra) {
       const one = firstSentence(contra);
-      if (one.length <= MAX_ESTABLISHED) return `${one} The evidence points the other way.`;
+      if (one.length <= MAX_ESTABLISHED) return `${one} ${otherWay}`;
     }
-    return "The evidence points the other way.";
+    return otherWay;
   }
   const kind = boundary?.kind ?? "SUBSTANTIVE";
-  if (kind !== "SUBSTANTIVE") return ROW_LIMIT_COPY[kind];
-  return row.reason ?? "The available evidence does not settle this.";
+  if (kind !== "SUBSTANTIVE") return inRu ? RU_SURFACE.rowLimit[kind] : ROW_LIMIT_COPY[kind];
+  return row.reason ?? (inRu ? RU_SURFACE.doesNotSettle : "The available evidence does not settle this.");
 }
 
 // A CURRENT_STATE row either established as a stop (its note says what was
@@ -771,11 +808,16 @@ function withExecutionTimeNote(
   evidence: EvidenceCard[],
 ): string {
   if (component !== "EXECUTION_EVIDENCE" || (status !== "CONFIRMED" && status !== "PARTIAL")) return text;
+  const inRu = ru();
   const dated = latestDate(evidence.filter((e) => e.relation === "SUPPORTS"));
   const note =
     dated && dated.label !== "Checked"
-      ? `The supporting evidence is dated ${dated.value}: it shows that execution had happened by then, not that it continues now.`
-      : "The supporting evidence carries no date of its own: it shows that execution happened, not that it continues now.";
+      ? inRu
+        ? RU_SURFACE.executionDated(dated.value)
+        : `The supporting evidence is dated ${dated.value}: it shows that execution had happened by then, not that it continues now.`
+      : inRu
+        ? RU_SURFACE.executionUndated
+        : "The supporting evidence carries no date of its own: it shows that execution happened, not that it continues now.";
   // TRANSACTION HAPPENED ≠ CLAIMED MECHANISM EXECUTED, in the other
   // direction too (D-165): when every supporting card is a document, the
   // finding is the project's own report and is never presented as an
@@ -783,7 +825,9 @@ function withExecutionTimeNote(
   const supporting = evidence.filter((e) => e.relation === "SUPPORTS");
   const documentaryOnly = supporting.length > 0 && supporting.every((e) => e.onchain === null);
   const basis = documentaryOnly
-    ? " It rests on a source that reports the execution, not on an on-chain transaction ATLAS observed."
+    ? inRu
+      ? RU_SURFACE.executionDocumentary
+      : " It rests on a source that reports the execution, not on an on-chain transaction ATLAS observed."
     : "";
   return `${text} ${note}${basis}`;
 }
@@ -792,7 +836,23 @@ function withExecutionTimeNote(
 function levelOnlyText(evidence: EvidenceCard[]): string {
   const reading = evidence.find((e) => e.relation === "SUPPORTS")?.proves;
   const fact = reading && firstSentence(reading).length <= MAX_ESTABLISHED ? firstSentence(reading) : null;
-  return fact ? `${fact} ${LEVEL_READING_LIMIT}` : LEVEL_READING_LIMIT;
+  const limit = ru() ? RU_SURFACE.levelReadingLimit : LEVEL_READING_LIMIT;
+  return fact ? `${fact} ${limit}` : limit;
+}
+
+// The ceilings' own sentences, in the user's language.
+function ceilingText(ceiling: "BURN_ONLY" | "STATE_UNSTATED" | "DATE_UNTRUSTED" | "TYPED_VALUE_ABSENT", component: string): string {
+  const inRu = ru();
+  switch (ceiling) {
+    case "BURN_ONLY":
+      return inRu ? RU_SURFACE.burnEventOnlyLimit : BURN_EVENT_ONLY_LIMIT;
+    case "STATE_UNSTATED":
+      return inRu ? RU_SURFACE.stateUnstatedLimit : STATE_UNSTATED_LIMIT;
+    case "DATE_UNTRUSTED":
+      return inRu ? RU_SURFACE.dateUntrustedLimit : DATE_UNTRUSTED_LIMIT;
+    case "TYPED_VALUE_ABSENT":
+      return (inRu ? RU_TYPED_VALUE_ABSENT_LIMIT : TYPED_VALUE_ABSENT_LIMIT)[component];
+  }
 }
 
 export interface SurfaceInput {
@@ -923,13 +983,13 @@ export function buildResearchTable(input: SurfaceInput): ResearchTableRow[] {
       established: levelOnly
         ? levelOnlyText(evidence)
         : burnOnly
-          ? BURN_EVENT_ONLY_LIMIT
+          ? ceilingText("BURN_ONLY", component)
           : stateUnstated
-            ? STATE_UNSTATED_LIMIT
+            ? ceilingText("STATE_UNSTATED", component)
             : dateUntrusted
-              ? DATE_UNTRUSTED_LIMIT
+              ? ceilingText("DATE_UNTRUSTED", component)
               : typedAbsent
-                ? TYPED_VALUE_ABSENT_LIMIT[component]
+                ? ceilingText("TYPED_VALUE_ABSENT", component)
                 : withCurrentStateNote(
                   component,
                   status,
@@ -1098,8 +1158,8 @@ export function boundaryGroups(rows: readonly ResearchTableRow[]): BoundaryGroup
     const shared = members.length > 1 && details[0] !== null && details.every((d) => d === details[0]) ? details[0] : null;
     groups.push({
       kind,
-      copy: BOUNDARY_COPY[kind],
-      never: BOUNDARY_NEVER[kind],
+      copy: ru() ? RU_SURFACE.boundaryCopy[kind] : BOUNDARY_COPY[kind],
+      never: ru() ? RU_SURFACE.boundaryNever[kind] : BOUNDARY_NEVER[kind],
       sharedDetail: shared,
       items: members.map((r, i) => ({
         component: r.component,
@@ -1129,9 +1189,10 @@ const CONFIDENCE_WORDS: Record<string, string> = {
   VERY_STRONG: "Very strong",
 };
 
-function joinPhrases(items: readonly string[], last = "and"): string {
+function joinPhrases(items: readonly string[], last: "and" | "or" = "and"): string {
   if (items.length <= 1) return items.join("");
-  return `${items.slice(0, -1).join(", ")} ${last} ${items[items.length - 1]}`;
+  const word = ru() ? RU_SURFACE[last] : last;
+  return `${items.slice(0, -1).join(", ")} ${word} ${items[items.length - 1]}`;
 }
 
 
@@ -1179,14 +1240,18 @@ export function surfaceAnswer(input: {
     r.statedStop ? stopStatePhrase(r.statedStop, noun) : statementPhraseFor(r.component, noun);
   const by = (status: ResultStatus) => rows.filter((r) => r.status === status);
   const sentences: string[] = [];
+  const inRu = ru();
+  const project = input.projectName ?? (inRu ? RU_SURFACE.projectFallback : "this project");
 
   const contradicted = by("CONTRADICTED");
   if (contradicted.length > 0) {
-    sentences.push(`On ${joinPhrases(contradicted.map(phrase).slice(0, 2))}, the evidence points the other way.`);
+    const list = joinPhrases(contradicted.map(phrase).slice(0, 2));
+    sentences.push(inRu ? RU_SURFACE.contradicted(list) : `On ${list}, the evidence points the other way.`);
   }
   const confirmed = by("CONFIRMED");
   if (confirmed.length > 0) {
-    sentences.push(`The sources confirm ${joinPhrases(confirmed.map(phrase).slice(0, 4))}.`);
+    const list = joinPhrases(confirmed.map(phrase).slice(0, 4));
+    sentences.push(inRu ? RU_SURFACE.confirmed(list) : `The sources confirm ${list}.`);
   }
   // "There is evidence that <claim>" only for a partial row whose claim the
   // evidence actually bears on; one whose reason says the claim itself is
@@ -1195,22 +1260,28 @@ export function surfaceAnswer(input: {
   if (partial.length > 0) {
     const lead = partial[0];
     const gap = lead.row.reason ? ` ${lead.row.reason}` : "";
-    sentences.push(`There is evidence ${joinPhrases(partial.map(phrase).slice(0, 2))}, but it is not fully confirmed.${gap}`);
+    const list = joinPhrases(partial.map(phrase).slice(0, 2));
+    sentences.push(inRu ? RU_SURFACE.partial(list, gap) : `There is evidence ${list}, but it is not fully confirmed.${gap}`);
   }
   const open = rows.filter((r) => r.status === "NOT_ESTABLISHED" || (r.status === "PARTIAL" && r.claimNotShown));
   if (open.length > 0) {
     const kinds = new Set(open.map((r) => r.boundary?.kind ?? "SUBSTANTIVE"));
-    const what = `The available evidence does not show ${joinPhrases(open.map(phrase).slice(0, 3), "or")}.`;
+    const list = joinPhrases(open.map(phrase).slice(0, 3), "or");
+    const what = inRu ? RU_SURFACE.open(list) : `The available evidence does not show ${list}.`;
     if (kinds.has("TECHNICAL")) {
-      sentences.push(`${what} The research limit was reached before all relevant sources could be checked.`);
+      sentences.push(inRu ? `${what}${RU_SURFACE.openTechnical}` : `${what} The research limit was reached before all relevant sources could be checked.`);
     } else if (kinds.has("CONFIGURATION")) {
-      sentences.push(`${what} ATLAS currently lacks a source route that can independently verify this for ${input.projectName ?? "this project"}.`);
+      sentences.push(
+        inRu
+          ? `${what}${RU_SURFACE.openConfiguration(project)}`
+          : `${what} ATLAS currently lacks a source route that can independently verify this for ${project}.`,
+      );
     } else {
       sentences.push(what);
     }
   }
   if (sentences.length === 0) {
-    sentences.push(`This research finished without a finding it could state about ${input.projectName ?? "this project"}.`);
+    sentences.push(inRu ? RU_SURFACE.noFinding(project) : `This research finished without a finding it could state about ${project}.`);
   }
   return { sentences: sentences.slice(0, 4), confidenceLabel };
 }

@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 
+import { en } from "../src/client/i18n/en";
 import { renderToStaticMarkup } from "react-dom/server";
 import { createElement } from "react";
 import { describe, expect, it } from "vitest";
@@ -348,7 +349,10 @@ describe("one action vocabulary, and nothing strengthened by the rewrite", () =>
     // The result surface no longer counts sources at all — a count invited
     // source arithmetic; the strongest source now sits beside each row.
     expect(result).not.toContain("usedDocs");
-    expect(result).toContain('open ? "Hide evidence" : `Evidence · ${row.evidence.length}`');
+    // D-171: the same words, read from the dictionary.
+    expect(result).toContain("open ? dict.result.hideEvidence : dict.result.evidenceCount(row.evidence.length)");
+    expect(en.result.hideEvidence).toBe("Hide evidence");
+    expect(en.result.evidenceCount(3)).toBe("Evidence · 3");
     // The old three-names-for-one-idea vocabulary is gone from the normal
     // result: proof, evidence and support were all the same journey.
     const code = ladder

@@ -1,5 +1,7 @@
 "use client";
 
+import { useDict } from "../app-context";
+import { stageText } from "../localize";
 import { deriveProgress, type ProgressInput } from "../research-model";
 
 // LIVE RESEARCH STATE.
@@ -11,10 +13,11 @@ import { deriveProgress, type ProgressInput } from "../research-model";
 // already fetching or extracting.
 export function ResearchProgress({ job, memoryEnabled = false }: { job: ProgressInput; memoryEnabled?: boolean }) {
   const progress = deriveProgress(job, { memoryEnabled });
+  const dict = useDict();
 
   return (
     <section className="panel p-5 sm:p-6" data-testid="research-progress">
-      <p className="section-label">Research process</p>
+      <p className="section-label">{dict.progress.title}</p>
       <div className="rail mt-4" data-progress-source={progress.source}>
         {progress.stages.map((stage, i) => (
           <div key={stage.key} className="rail-item" data-stage={stage.key} data-state={stage.state}>
@@ -40,7 +43,7 @@ export function ResearchProgress({ job, memoryEnabled = false }: { job: Progress
                     : "text-[var(--atlas-text)]")
               }
             >
-              {stage.label}
+              {stageText(stage, dict)}
               {stage.state === "ACTIVE" && progress.running && (
                 <span className="pulse-dot ml-2 h-1.5 w-1.5 align-middle" aria-hidden />
               )}
