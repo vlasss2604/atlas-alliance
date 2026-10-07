@@ -8,6 +8,10 @@ export const en = {
     // D-171: the short labels of the primary navigation.
     askShort: "Ask",
     primary: "Primary",
+    // D-172: the three places of the product loop.
+    pulse: "Pulse",
+    verify: "Verify",
+    proofs: "Proofs",
   },
   home: {
     title: "ATLAS PROOF",
@@ -232,6 +236,27 @@ export const en = {
   },
   // D-171: every remaining creator-beta surface reads its copy from here.
   // English is the canonical default; Russian mirrors it key for key.
+  // D-172: Pulse — fresh claims worth verifying. Discovery only; the
+  // source text itself is never translated.
+  pulse: {
+    title: "Pulse",
+    subtitle: "Fresh crypto claims worth verifying, selected from X.",
+    note: "Pulse is for discovery only. Nothing here is verified until you run a Research.",
+    fresh: "Last 48 hours",
+    earlier: "Earlier",
+    empty: "No new claims in the last 48 hours.",
+    sourceTypes: { OFFICIAL_PROJECT: "Official", RESEARCH_DATA: "Research & data" } as Record<string, string>,
+    sourceX: "X",
+    verify: "Verify",
+    openOnX: "Open on X",
+    // On the Verify screen, when it was opened from a Pulse card.
+    fromPulse: (handle: string) => `From Pulse · ${handle}`,
+    fromPulseEditable: "Review or edit the claim before you continue.",
+    unavailable: "That Pulse item is no longer available. Ask your question here.",
+    // Phase A: the offline cards are invented examples, said so on screen.
+    sampleTitle: "Sample data · prototype",
+    sampleBody: "These cards are invented examples of the claims Pulse is meant to carry. They are not real posts.",
+  },
   composer: {
     title: "What do you want to verify?",
     subtitle: "Ask about a project, a token, a claim or a link.",

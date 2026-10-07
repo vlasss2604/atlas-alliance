@@ -2,29 +2,23 @@
 
 > Overwrite this file each round. Never append.
 
-## D-171 CREATOR BETA UX CLEANUP + TWO LANGUAGES — COMPLETE OFFLINE, NOT COMMITTED
+## D-172 PHASE A — PULSE OFFLINE PROTOTYPE + NAVIGATION — IMPLEMENTED, NOT COMMITTED
 
-Founder-approved 2026-10-05. LIVE CALLS MADE BY THIS TASK: 0. No migration.
+Founder-approved 2026-10-06 (Phase A only). LIVE CALLS MADE BY THIS TASK:
+0. No migration, no worker, no X client, no model call.
 
-Done on this tree: truthful Profile (no price, no unusable DEMO, never
-ARI • CORE for beta), beta-only Home examples, Ask "Continue", blocked
-states (paused / capacity / exhausted) pointing to the Research Library,
-generic invite failure, bot "Open ATLAS" + no dead-end Verify, Analytics out
-of navigation, plain Result gap wording, visible feedback prompt; EN default
-with explicit EN / RU on every creator-beta surface; D-171 recorded;
-`tests/creator-beta-ux-v1.test.ts`.
+Done on this tree: navigation Pulse — [AP shield = Verify → `/home`] —
+Proofs (`/research`), Profile icon top-right, dock three cells; `/pulse`
+with seven fixture cards (X only, verbatim sample text, no fabricated
+provenance, production guard); Verify handoff `/home?pulse=<id>` prefilling
+the existing composer; EN / RU; D-172 recorded; `tests/pulse-phase-a-v1.test.ts`.
 
-Closed in the resume round: the Russian Result / Proof journey. ATLAS's
-deterministic sentences (answer, rows, reasons, limits, notes, evidence
-frame) and the full audit and source snapshot render in Russian
-(`i18n/result-ru.ts`, `dict.audit`, `dict.snapshot`); the record's own words
-stay in their original language (see CURRENT_STATE D-171).
+Deliberately not done: any live X ingestion (Phase C), Pro entitlement or
+payments, consolidation of Ask / ResearchComposer, removal of Home.
 
 Next steps, each needing Founder approval:
-- review and commit; push;
-- hosted database: runbook section 13 commands;
-- HTTPS smoke test: creator link, bot, both languages.
-
-Not started, deliberately: Monitoring.
+- Founder local visual review (Phase B), then commit; no push, no deploy;
+- Phase C only after explicit approval and current X API pricing / terms
+  verification.
 
 STOP here until the Founder reviews.

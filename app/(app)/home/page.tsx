@@ -10,9 +10,11 @@ import { BetaStatusNotice } from "@/src/client/components/beta-status-notice";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
 import { betaBlockOf } from "@/src/client/beta-status";
+import { pulseItemById, type PulseItem } from "@/src/client/pulse-fixtures";
+import { pulseIdFromSearch } from "@/src/client/pulse-launch";
 import { groupResearchRuns } from "@/src/client/research-model";
 
-// HOME — FINAL COMPOSITION.
+// HOME — THE VERIFY SCREEN (D-172 names it Verify; the route stays /home).
 //
 // Top to bottom: the brand, centred and alone (the brand says what the
 // product is — no paragraph); the composer as one compact raised surface
@@ -20,6 +22,12 @@ import { groupResearchRuns } from "@/src/client/research-model";
 // one row each with an avatar, the question and when it was checked. No
 // marketing cards, no statistics. Every row is a real record from the
 // server; no verdict is invented for a job that has none.
+//
+// OPENED FROM A PULSE CARD (`?pulse=<id>`): the card's text lands in the
+// same editable input, verbatim, with a line saying where it came from.
+// Nothing starts and nothing is spent by opening it; the start flow after
+// that is the composer's own, unchanged.
+type PulseLaunch = { kind: "none" } | { kind: "open"; item: PulseItem } | { kind: "unavailable" };
 
 export default function HomePage() {
   const { dict, me, inviteNotice } = useApp();
@@ -27,12 +35,25 @@ export default function HomePage() {
   // stops promoting one and points to the Research Library instead.
   const block = betaBlockOf(me);
   const [jobs, setJobs] = useState<ResearchJobListItem[] | null>(null);
+  const [pulse, setPulse] = useState<PulseLaunch>({ kind: "none" });
 
   useEffect(() => {
     void api
       .getResearchJobs()
       .then((r) => setJobs(r.jobs))
       .catch(() => setJobs([]));
+  }, []);
+
+  useEffect(() => {
+    const id = pulseIdFromSearch(window.location.search);
+    if (!id) return;
+    // Resolved after mount: the id is read from the URL in the browser, so
+    // the server-rendered markup and the first client render agree.
+    const t = window.setTimeout(() => {
+      const item = pulseItemById(id);
+      setPulse(item ? { kind: "open", item } : { kind: "unavailable" });
+    }, 0);
+    return () => window.clearTimeout(t);
   }, []);
 
   const recent = groupResearchRuns(jobs ?? [])
@@ -56,7 +77,26 @@ export default function HomePage() {
         <BetaStatusNotice />
       ) : (
         <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-6" data-testid="home-composer">
-          <ResearchComposer hero />
+          {pulse.kind !== "none" && (
+            <p className="mb-4 text-center text-[0.92rem] text-[var(--atlas-text-dim)]" data-testid="pulse-notice" data-kind={pulse.kind}>
+              {pulse.kind === "open" ? (
+                <>
+                  <span className="font-medium text-[var(--atlas-cyan-strong)]">{dict.pulse.fromPulse(pulse.item.source.handle)}</span>
+                  {" · "}
+                  {dict.pulse.fromPulseEditable}
+                </>
+              ) : (
+                dict.pulse.unavailable
+              )}
+            </p>
+          )}
+          {/* A remount per Pulse item puts its text into the composer's own
+              state; the composer itself is unchanged. */}
+          <ResearchComposer
+            hero
+            key={pulse.kind === "open" ? pulse.item.id : "plain"}
+            initialQuestion={pulse.kind === "open" ? pulse.item.text : ""}
+          />
         </section>
       )}
 

@@ -847,6 +847,9 @@ describe("UI — no project-specific conclusion", () => {
     const projectNames = /pump|raydium|hyperliquid|\bhype\b|jito|solana/i;
     const offenders: string[] = [];
     for (const file of uiSourceFiles()) {
+      // D-172: Pulse's offline cards are invented sample DATA (marked as
+      // such on screen), not a code path that knows a project.
+      if (file.endsWith("pulse-fixtures.ts")) continue;
       let src = readFileSync(file, "utf-8");
       if (file.endsWith("research-composer.tsx")) {
         src = src.replace(/const EXAMPLES = \[[\s\S]*?\] as const;/, "");

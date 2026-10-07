@@ -46,14 +46,15 @@ test("12. navigation walks all anchors; ARI opens ask; example fills input; subm
   await page.goto("/home");
   await expect(page).toHaveURL(/\/home$/);
 
-  // RESEARCH ← HOME → ANALYTICS, Profile aside. On a handset the anchors
-  // are the bottom dock with the AP orb in its centre; on a wide screen
-  // the same anchors sit in the header. Projects is reached by URL.
-  await page.getByTestId("dock-research").click();
+  // PULSE ← VERIFY → PROOFS (D-172), Profile at the top-right. On a
+  // handset the anchors are the bottom dock with the AP shield in its
+  // centre; on a wide screen the same anchors sit in the header. Projects
+  // and Analytics are reached by URL.
+  await page.getByTestId("dock-proofs").click();
   await expect(page).toHaveURL(/\/research$/);
-  await page.getByTestId("dock-analytics").click();
-  await expect(page).toHaveURL(/\/analytics$/);
-  await page.getByTestId("dock-home").click();
+  await page.getByTestId("dock-pulse").click();
+  await expect(page).toHaveURL(/\/pulse$/);
+  await page.getByTestId("dock-verify").click();
   await expect(page).toHaveURL(/\/home$/);
 
   await page.goto("/projects");

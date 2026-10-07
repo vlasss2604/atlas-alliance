@@ -316,6 +316,9 @@ describe("Russian is complete on the creator-beta surfaces", () => {
       "src/client/components/beta-status-notice.tsx",
       "src/client/components/beta-feedback-prompt.tsx",
       "src/client/components/app-chrome.tsx",
+      // D-172: Pulse.
+      "app/(app)/pulse/page.tsx",
+      "src/client/components/pulse-card.tsx",
       // The rest of the Proof journey: the full audit and the source snapshot.
       "src/client/components/research-audit.tsx",
       "app/(app)/research/[id]/audit/page.tsx",
@@ -619,10 +622,11 @@ describe("the screens tell the canonical beta state truthfully", () => {
     for (const d of [en, ru]) expect(d.home.betaInviteUnavailable).not.toMatch(/expired|revoked|disabled|invalid|истек|отозван|отключ|недействит/i);
   });
 
-  it("Analytics is not in the navigation; its page still exists; the dock stays five cells", () => {
+  it("Analytics is not in the navigation; its page still exists", () => {
+    // D-172 replaced the five-cell dock with Pulse · Verify · Proofs
+    // (tests/pulse-phase-a-v1.test.ts); Analytics stays out either way.
     const chrome = readFileSync("src/client/components/app-chrome.tsx", "utf8");
     expect(chrome).not.toMatch(/item\("analytics"|href: "\/analytics"|AnalyticsIcon/);
-    expect(chrome).toContain('data-testid="dock-spacer"');
     expect(existsSync("app/(app)/analytics/page.tsx")).toBe(true);
   });
 

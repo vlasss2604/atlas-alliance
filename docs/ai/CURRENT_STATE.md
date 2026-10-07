@@ -47,6 +47,54 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
+## PULSE — VERIFY — PROOFS, AND THE OFFLINE PULSE PROTOTYPE (D-172)
+
+Phase A only; local review, not deployed, not pushed.
+
+- **Navigation** (`app-chrome.tsx`, `globals.css` `.dock` three columns):
+  Pulse `/pulse` · Verify = the raised AP shield → `/home` (the existing
+  Home screen and its unchanged composer / start flow) · Proofs =
+  `/research` (the Research Library relabelled). Profile is an icon at the
+  header's top-right on every width (`.profile-link`), not in the dock. A
+  Result (`/research/[id]`) keeps Proofs active. Analytics stays URL-only.
+  `/home` is not a redirect; Ask and `ResearchComposer` are untouched
+  beyond one additive `initialQuestion` prop.
+- **Pulse** (`app/(app)/pulse/page.tsx`, `pulse-card.tsx`,
+  `pulse-fixtures.ts`): seven fixture cards, X only — project, account
+  (display name, handle, OFFICIAL_PROJECT / RESEARCH_DATA), source text
+  verbatim, age via `relativeAge`, Verify. Fresh (≤ 48 h, newest first,
+  cap 12) and "Earlier" (cap 8) never mix; a thin day shows a thin feed.
+  Sample notice on screen; `sourceUrl` null everywhere, no post ids, no
+  x.com/status links, no "Open on X". `pulseItems()` returns `[]` in a
+  production build (the `/dev/*` guard). Discovery input only: nothing in
+  `src/server` knows Pulse exists; no table, worker, scheduler, X client,
+  classifier, dedup or cost ledger.
+- **Handoff** (`pulse-launch.ts`, Home): Verify → `/home?pulse=<id>`; Home
+  looks the id up locally, remounts the composer with `initialQuestion` =
+  the exact text, shows "From Pulse · @handle" or an honest "no longer
+  available". No ResearchJob, allowance, provider or model call until the
+  user's own Continue / Start Proof, which are unchanged.
+- **EN / RU:** `dict.nav.pulse / verify / proofs`, `dict.pulse.*`; source
+  text, handles, names never translated.
+- **Future source model (documented, not built):** ~28–36 official
+  project X accounts + ~8–9 research/data accounts ≈ 36–45 curated
+  sources; expected yield after filtering and dedup ≈ 3–6 strong new claims
+  on a normal day, 1–2 on quiet days, more in active clusters. Never a
+  promise of 5–10 a day; three excellent claims beat twenty mediocre
+  posts. X is the only planned V1 ingestion source.
+- **Future access model (recorded in D-172):** open to admitted beta users
+  during private beta; Pro-only after Free/Pro launch (tab visible, locked
+  state for Free, credits do not unlock it). Proposed locked copy — EN
+  "Pulse is available with Pro. Discover fresh crypto claims selected by
+  ATLAS and verify the ones that matter." RU "Pulse доступен в Pro. Свежие
+  отобранные крипто-клеймы, которые стоит проверить." Not implemented.
+- **Phase C principles preserved for live X ingestion (not built):**
+  incremental `since_id` per source, never re-reading old posts,
+  idempotent ingestion, conservative dedup (exact post ids first, uncertain
+  duplicates kept separate), hard X API spend cap with fail-closed pause,
+  usage / cost accounting, current X API pricing verified first.
+- **Pinned:** `tests/pulse-phase-a-v1.test.ts`.
+
 ## CREATOR BETA UX AND TWO LANGUAGES (D-171)
 
 Offline only; bot and Mini App behaviour not live-verified.

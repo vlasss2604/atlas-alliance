@@ -186,6 +186,14 @@ export function ResearchIcon(p: IconProps) {
     </Svg>
   );
 }
+// Pulse: one beat on a flat line — fresh claims arriving.
+export function PulseIcon(p: IconProps) {
+  return (
+    <Svg {...p}>
+      <path d="M3 10.5h3.2l2-5 3.6 9 2-4h3.2" />
+    </Svg>
+  );
+}
 export function AnalyticsIcon(p: IconProps) {
   return (
     <Svg {...p}>

@@ -26,10 +26,13 @@ type Phase = "input" | "thinking" | "result" | "starting";
 // names a project the private beta covers (D-171), so a tap never leads to
 // a refusal or a clarification question.
 
-export function ResearchComposer({ hero = false }: { hero?: boolean }) {
+// `initialQuestion` (D-172): text a Pulse card handed over, dropped into
+// the same editable field a typed question uses. It changes nothing after
+// that — the flow below is untouched.
+export function ResearchComposer({ hero = false, initialQuestion = "" }: { hero?: boolean; initialQuestion?: string }) {
   const { dict, refresh } = useApp();
   const router = useRouter();
-  const [question, setQuestion] = useState("");
+  const [question, setQuestion] = useState(initialQuestion);
   const [phase, setPhase] = useState<Phase>("input");
   const [result, setResult] = useState<InterpretResult | null>(null);
   const [answer, setAnswer] = useState("");
