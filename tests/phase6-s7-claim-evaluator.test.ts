@@ -55,11 +55,19 @@ function durability(status: "SUPPORTED" | "PARTIALLY_SUPPORTED", evidenceIds: st
   return { componentStatus: status, basisClasses: ["GOVERNANCE"], qualifications: [], provenance: { componentResults: [{ step: 8, component: "DURABILITY_BASIS" }], evidenceIds } };
 }
 
-// A flow that fully establishes SOURCE_OF_VALUE -> DESTINATION with NET_EFFECT.
+// A flow that fully establishes SOURCE_OF_VALUE -> MECHANISM -> DESTINATION
+// with NET_EFFECT. The MECHANISM node is the scenario premise every suite
+// here shares ("a buyback exists"); since Research Quality V1 (D-176) a
+// claim is anchored to it — a flow carrying only the economics around a
+// mechanism cannot support a claim about the mechanism.
 function completeFlow(overrides: Partial<MechanismFlow> = {}): MechanismFlow {
   return flow({
-    lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"]), lineageStep(6, "DESTINATION", ["e2"])],
-    nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"]), node("DESTINATION", "DESTINATION", "SUPPORTED", ["e2"])],
+    lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"]), lineageStep(3, "MECHANISM_SPEC", ["e5"]), lineageStep(6, "DESTINATION", ["e2"])],
+    nodes: [
+      node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"]),
+      node("MECHANISM", "MECHANISM_SPEC", "SUPPORTED", ["e5"]),
+      node("DESTINATION", "DESTINATION", "SUPPORTED", ["e2"]),
+    ],
     netEffect: netEffect("SUPPORTED", ["e3"]),
     attributes: attrs({ valueSource: "USER_PAYMENT", destinationKind: "TREASURY", recipientKind: "PASSIVE_HOLDER" }),
     shape: "COMPLETE_PATH",
@@ -206,9 +214,15 @@ describe("S7 acceptance scenarios (phase-6-s7-plan.md §29)", () => {
   });
 
   it("V. two partial atoms in a compound requirement -> PARTIALLY_SUPPORTED deterministically", () => {
+    // The mechanism node is the anchor (D-176): without it the two partial
+    // economics atoms would be INSUFFICIENT_EVIDENCE, not partial support.
     const f = flow({
-      nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "PARTIALLY_SUPPORTED", ["e1"], ["INSUFFICIENT_AUTHORITY"]), node("DESTINATION", "DESTINATION", "PARTIALLY_SUPPORTED", ["e2"], ["INDIRECT_ONLY"])],
-      lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"]), lineageStep(6, "DESTINATION", ["e2"])],
+      nodes: [
+        node("VALUE_SOURCE", "SOURCE_OF_VALUE", "PARTIALLY_SUPPORTED", ["e1"], ["INSUFFICIENT_AUTHORITY"]),
+        node("MECHANISM", "MECHANISM_SPEC", "SUPPORTED", ["e5"]),
+        node("DESTINATION", "DESTINATION", "PARTIALLY_SUPPORTED", ["e2"], ["INDIRECT_ONLY"]),
+      ],
+      lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"]), lineageStep(3, "MECHANISM_SPEC", ["e5"]), lineageStep(6, "DESTINATION", ["e2"])],
       netEffect: netEffect("PARTIALLY_SUPPORTED", ["e3"]),
     });
     const r = evaluateClaimSupport(evalInput({ intent: "VALUE_CAPTURE", assembly: assemble([f]) }));
@@ -392,8 +406,21 @@ describe("S7 acceptance scenarios (phase-6-s7-plan.md §29)", () => {
   });
 
   it("F. BTC: user-paid fees vs protocol-issued subsidy stay distinct flows -> 'all miner rewards are fees' not supported", () => {
-    const feeFlow = flow({ flowId: "fFee", lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"])], nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"])], attributes: attrs({ valueSource: "FEES" }) });
-    const subsidyFlow = flow({ flowId: "fSubsidy", lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e2"])], nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e2"])], attributes: attrs({ valueSource: "PROTOCOL_ISSUANCE" }) });
+    // Both flows carry the (documented) reward mechanism — the anchor
+    // (D-176) — so that the only thing deciding between them is the
+    // valueSource atom under test.
+    const feeFlow = flow({
+      flowId: "fFee",
+      lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e1"]), lineageStep(3, "MECHANISM_SPEC", ["e5"])],
+      nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"]), node("MECHANISM", "MECHANISM_SPEC", "SUPPORTED", ["e5"])],
+      attributes: attrs({ valueSource: "FEES" }),
+    });
+    const subsidyFlow = flow({
+      flowId: "fSubsidy",
+      lineage: [lineageStep(1, "SOURCE_OF_VALUE", ["e2"]), lineageStep(3, "MECHANISM_SPEC", ["e6"])],
+      nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e2"]), node("MECHANISM", "MECHANISM_SPEC", "SUPPORTED", ["e6"])],
+      attributes: attrs({ valueSource: "PROTOCOL_ISSUANCE" }),
+    });
     const pattern: PatternContent = {
       ...PATTERN_V1_CONTENT,
       intentRequirements: {
@@ -560,9 +587,12 @@ describe("S7 acceptance scenarios (phase-6-s7-plan.md §29)", () => {
         },
       },
     };
+    // The buyback mechanism itself is documented (the anchor, D-176); what
+    // the test pins is that its BURN destination label alone never implies
+    // the supply effect.
     const f = flow({
-      lineage: [lineageStep(6, "DESTINATION", ["e1"])],
-      nodes: [node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])],
+      lineage: [lineageStep(3, "MECHANISM_SPEC", ["e5"]), lineageStep(6, "DESTINATION", ["e1"])],
+      nodes: [node("MECHANISM", "MECHANISM_SPEC", "SUPPORTED", ["e5"]), node("DESTINATION", "DESTINATION", "SUPPORTED", ["e1"])],
       attributes: attrs({ destinationKind: "BURN" }),
       gaps: [gap("NET_EFFECT_UNRESOLVED", "NET_EFFECT", 7)],
     });

@@ -18,9 +18,11 @@ import type { MechanismAssemblyResult, MechanismFlow, MechanismGapKind } from ".
 export type ClaimSupportStatus = "SUPPORTED" | "PARTIALLY_SUPPORTED" | "NOT_SUPPORTED" | "INSUFFICIENT_EVIDENCE";
 export type ClaimRequirementStatus = "SATISFIED" | "PARTIAL" | "CONTRADICTED" | "UNSATISFIED";
 
-// §20 — the closed, 20-member reason code vocabulary. No free text, no
-// dynamically constructed codes.
+// §20 — the closed reason code vocabulary (20 members from the S7 plan,
+// plus ASSERTED_MECHANISM_NOT_ESTABLISHED from Research Quality V1, D-176).
+// No free text, no dynamically constructed codes.
 export type ClaimReasonCode =
+  | "ASSERTED_MECHANISM_NOT_ESTABLISHED"
   | "REQUIRED_COMPONENT_MISSING"
   | "REQUIRED_ATOM_UNSATISFIED"
   | "REQUIRED_PATH_PARTIAL"
@@ -585,6 +587,53 @@ function evaluateDurabilityEstablished(_req: ClaimRequirement, flow: MechanismFl
 
 const VERDICT_RANK: Record<ClaimRequirementStatus, number> = { SATISFIED: 0, PARTIAL: 1, CONTRADICTED: 2, UNSATISFIED: 3 };
 
+// THE MECHANISM ANCHOR (Research Quality V1, D-176).
+//
+// AN UPSTREAM ECONOMIC FACT MAY BE ESTABLISHED WITHOUT SUPPORTING THE
+// USER'S ASSERTED MECHANISM. Every in-scope intent is a claim about a
+// Token Value Capture MECHANISM — a buyback, a burn, a fee share, a
+// reward programme. The atoms a requirement set names are the economics
+// around that mechanism: where value comes from (SOURCE_OF_VALUE), where
+// it ends up (DESTINATION), whether supply changed (NET_EFFECT). Those
+// atoms can hold on a flow that carries NO mechanism at all: "priority
+// fees exist and 90 % of them reach the DAO treasury" is a true, DIRECT,
+// confirmed-source finding about a project's revenue, and it says nothing
+// about whether the project buys back or burns its token. Measured on the
+// second Jito benchmark (job d3b7cd2c): PRT-1 and PRT-2 were both PARTIAL
+// off exactly such rows while MECHANISM_SPEC, GOVERNANCE_BASIS and
+// EXECUTION_EVIDENCE were all INSUFFICIENT, and the question "does Jito
+// use revenue to buy back or burn JTO?" came back PARTIALLY_SUPPORTED.
+//
+// So the compound verdict is anchored to the mechanism itself: a claim can
+// be SUPPORTED or PARTIALLY_SUPPORTED only if, on a flow that carries one
+// of the winning atoms, the asserted mechanism is ESTABLISHED in at least
+// one of the three forms the Pattern distinguishes — DOCUMENTED
+// (MECHANISM_SPEC), APPROVED (GOVERNANCE_BASIS) or EXECUTED
+// (EXECUTION_EVIDENCE); PARTIALLY_SUPPORTED counts, since partial
+// authority is a confidence matter. Without any of them the upstream
+// atoms stay exactly as evaluated and cited, and the verdict is
+// INSUFFICIENT_EVIDENCE with ASSERTED_MECHANISM_NOT_ESTABLISHED: the
+// evidence stops before the mechanism, so the claim does too.
+//
+// What this is NOT: not a new verdict state, not a re-adjudication of any
+// component (S5 statuses are read verbatim through lineageComponentStatus),
+// not a change to any atom's own verdict or provenance, and never a
+// strengthening — NOT_SUPPORTED (a positive incompatibility on a required
+// atom) is untouched, and the gate only ever lowers. A requirement set that
+// already names an anchor component as a REQUIRED atom cannot be affected
+// at all, because that atom is then SATISFIED or PARTIAL on the same flow.
+//
+// Code-owned on purpose: the Pattern's critical proof-path declaration
+// describes what a Research must TRY and is deliberately not read by S7;
+// which components constitute "the mechanism" is the S6 role model
+// (NODE_COMPONENTS: MECHANISM) plus the two lifecycle facts about it, and
+// is the same for every intent.
+export const MECHANISM_ANCHOR_COMPONENTS: readonly string[] = ["MECHANISM_SPEC", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"];
+
+function flowCarriesMechanismAnchor(flow: MechanismFlow): boolean {
+  return MECHANISM_ANCHOR_COMPONENTS.some((c) => lineageComponentStatus(flow, c) !== null);
+}
+
 function evaluateRequirement(req: ClaimRequirement, assembly: MechanismAssemblyResult): ClaimRequirementResult {
   const perFlow: { flow: MechanismFlow; verdict: FlowVerdict }[] = [];
   for (const flow of assembly.flows) {
@@ -813,6 +862,21 @@ export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportR
   } else {
     status = "INSUFFICIENT_EVIDENCE";
     for (const r of required) r.reasonCodes.forEach((c) => reasonCodes.add(c));
+  }
+
+  // THE MECHANISM ANCHOR (see MECHANISM_ANCHOR_COMPONENTS). Applied to a
+  // positive verdict only: the flows the winning required atoms matched
+  // must include one that carries the asserted mechanism in some
+  // established form. NOT_SUPPORTED and INSUFFICIENT_EVIDENCE pass through
+  // untouched — a refutation is a finding about the mechanism, and absence
+  // is already absence.
+  if (status === "SUPPORTED" || status === "PARTIALLY_SUPPORTED") {
+    const matched = new Set(required.flatMap((r) => r.matchedFlowIds));
+    const anchored = assembly.flows.some((f) => matched.has(f.flowId) && flowCarriesMechanismAnchor(f));
+    if (!anchored) {
+      status = "INSUFFICIENT_EVIDENCE";
+      reasonCodes.add("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    }
   }
 
   // §3.2/D-106 — structural ceiling for CLAIM_VERIFICATION task_type

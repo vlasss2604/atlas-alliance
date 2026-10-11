@@ -63,7 +63,10 @@ import type { QueryProposer } from "./providers/query-proposer";
 import type { SearchGateway } from "./providers/search-gateway";
 import { isReplayProvider } from "./providers/types";
 import type { ComponentTarget, FetchedDocument, ModelUsage } from "./providers/types";
-import { confirmedRouteRank, resolveSourceRoute } from "./source-authority";
+import { confirmedRouteRank, deriveSourceType, resolveSourceClass, resolveSourceRoute } from "./source-authority";
+import { rankCandidateForComponent } from "./acquisition-targeting";
+import { loadJobContractView } from "./job-contract-view";
+import type { EvidenceSourceClass } from "./providers/types";
 import { planSiteLocalExpansion, type HarvestedDocument } from "./site-local-expansion";
 import { canonicalTargetRef, isLossyTargetRef, recordTraceEvent } from "./trace-store";
 
@@ -688,6 +691,35 @@ export async function loadFetchTargets(
   // overridden. Seeds stay first, as before. Dedup is canonical and shared
   // with the seeds; a url leaves the list when ACQUIRED (D-146), never when
   // one strategy failed on it.
+  //
+  // CRITICAL-SOURCE FAIRNESS AND A STABLE TAIL (Research Quality V1,
+  // D-176). Two things the route rank alone could not say, measured on the
+  // second Jito benchmark: the candidates GOVERNANCE_BASIS's own search
+  // returned (a JIP approval write-up, a governance-forum thread) all sat
+  // at rank 2 behind a dozen project-site and news pages discovered
+  // earlier, and the three that reached the cut were third-party news
+  // hosts whose fetches failed; no component was guaranteed a single open
+  // of what IT found. So, between the confirmed-route bands and the rest:
+  //
+  //   PROTECTED PICKS — every work-queue component, intent-critical ones
+  //   first and then queue order, contributes ONE candidate: the first url
+  //   its own searches returned (component-scoped ledger, D-152) whose
+  //   predicted class could establish it or whose host nothing recognizes
+  //   (rankCandidateForComponent ≤ 1 — "conservative on the unknown", so a
+  //   project-owned host no human has confirmed yet is never ranked below a
+  //   recognised news site). One pick per component, so the protection is
+  //   bounded by the queue length, spends the ordinary opens budget, and
+  //   never adds a url the job did not discover.
+  //
+  //   THE TAIL — the remaining rank-2 candidates are split by the same
+  //   prediction: hosts nothing recognizes (2a) before hosts positively
+  //   recognised as a class no component here admits (2b: social, media,
+  //   data providers for a documentary question). Stable by discovery
+  //   index inside every band, so two runs that discover the same urls
+  //   open them in the same order.
+  //
+  // Ordering only: no class, authority or admissibility changes hands, and
+  // S5 still classifies every fetched document on its own.
   const ranked: { url: string; rank: number; index: number }[] = [];
   let index = 0;
   for (const urls of ledger.candidatesByQuery.values()) {
@@ -700,9 +732,90 @@ export async function loadFetchTargets(
       ranked.push({ url, rank, index: index++ });
     }
   }
-  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
-  for (const r of ranked) out.push(r.url);
+  const byCanonical = new Map(ranked.map((r) => [canonicalTargetRef(r.url), r]));
+  const picked = new Set<string>();
+  const protectedPicks: string[] = [];
+  const admittedClassesAnywhere = new Set<EvidenceSourceClass>();
+  if (projectId) {
+    const components = await workQueueComponentsForFairness(db, jobId, projectId);
+    for (const c of components) {
+      for (const cls of c.establishingClasses) admittedClassesAnywhere.add(cls);
+      // This component's own discoveries: the eligible one with the best
+      // route rank first (a confirmed-but-unclassified page of the project
+      // before a host nobody has confirmed), then the earliest discovered.
+      const prefix = `${c.step}:${c.component}:`;
+      let pick: { canonical: string; rank: number; index: number } | null = null;
+      for (const [key, urls] of ledger.candidatesByQueryComponent) {
+        if (!key.startsWith(prefix)) continue;
+        for (const url of urls) {
+          const canonical = canonicalTargetRef(url);
+          const entry = byCanonical.get(canonical);
+          if (!entry || picked.has(canonical) || entry.rank === 0) continue;
+          if (pick && (entry.rank > pick.rank || (entry.rank === pick.rank && entry.index >= pick.index))) continue;
+          const routeClass = (await resolveSourceRoute(db, projectId, url)).routeClass;
+          if (rankCandidateForComponent(url, c.establishingClasses, routeClass) <= 1) {
+            pick = { canonical, rank: entry.rank, index: entry.index };
+          }
+        }
+      }
+      if (pick) {
+        picked.add(pick.canonical);
+        protectedPicks.push(byCanonical.get(pick.canonical)!.url);
+      }
+    }
+  }
+  // 2a / 2b for the tail: a host nothing recognises keeps rank 2; a host
+  // positively recognised as a class no component admits drops to 3.
+  const tailRank = (url: string, rank: number): number => {
+    if (rank !== 2) return rank;
+    const predicted = resolveSourceClass(url, deriveSourceType(url), null);
+    const recognised = resolveSourceClass(url, "OTHER", "OFFICIAL_DOCS") !== "OFFICIAL_DOCS";
+    return recognised && !admittedClassesAnywhere.has(predicted) ? 3 : 2;
+  };
+  const rest = ranked
+    .filter((r) => !picked.has(canonicalTargetRef(r.url)))
+    .map((r) => ({ ...r, rank: tailRank(r.url, r.rank) }))
+    .sort((a, b) => a.rank - b.rank || a.index - b.index);
+  for (const r of rest) {
+    if (r.rank > 0 && protectedPicks.length > 0) {
+      out.push(...protectedPicks);
+      protectedPicks.length = 0;
+    }
+    out.push(r.url);
+  }
+  out.push(...protectedPicks);
   return out;
+}
+
+// The components whose own discoveries get a protected open, with the
+// classes each admits — intent-critical components first, then queue
+// order. Read through the same contract view and acquisition plan the
+// phases already use; never a second notion of the queue.
+async function workQueueComponentsForFairness(
+  db: Database | Transaction,
+  jobId: string,
+  projectId: string,
+): Promise<{ step: number; component: string; establishingClasses: readonly EvidenceSourceClass[] }[]> {
+  let queue: ComponentWorkItem[];
+  try {
+    queue = [...(await loadJobContractView(db, jobId)).view.workQueue];
+  } catch {
+    // No plan yet (an operator read before planning): no protection, the
+    // route-ranked order stands exactly as before.
+    return [];
+  }
+  const planned = await Promise.all(
+    queue.map(async (item) => {
+      const plan = await loadAcquisitionPlan(db, jobId, item.component, projectId);
+      return {
+        step: item.step,
+        component: item.component,
+        establishingClasses: plan.establishingClasses,
+        critical: plan.criticalComponents.has(item.component),
+      };
+    }),
+  );
+  return planned.sort((a, b) => Number(b.critical) - Number(a.critical) || a.step - b.step);
 }
 
 // D-146 — THE BOUNDED ACQUISITION CHAIN.

@@ -47,7 +47,57 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
-## ENGINE SPEED + BUDGET ACCOUNTING (D-173 / D-174 / D-175) — IMPLEMENTED, OFFLINE-VERIFIED, UNCOMMITTED; BENCHMARK #2 NOT RUN
+## RESEARCH QUALITY V1 (D-176) — IMPLEMENTED, OFFLINE-VERIFIED, UNCOMMITTED; LIVE QUALITY BENCHMARK NOT RUN
+
+Global, project-general rules from the two live Jito runs (`b817eb99`,
+`d3b7cd2c`): the same question was classified as two intents and moved
+INSUFFICIENT_EVIDENCE → PARTIALLY_SUPPORTED with no mechanism established.
+No semantics weakened; every change only lowers, orders or describes.
+
+- **Verdict anchor** (`claim-evaluator.ts`, `MECHANISM_ANCHOR_COMPONENTS`).
+  A compound claim is SUPPORTED / PARTIALLY_SUPPORTED only if a flow the
+  winning required atoms matched carries the asserted mechanism established
+  as DOCUMENTED (MECHANISM_SPEC), APPROVED (GOVERNANCE_BASIS) or EXECUTED
+  (EXECUTION_EVIDENCE), partial included. Otherwise INSUFFICIENT_EVIDENCE +
+  `ASSERTED_MECHANISM_NOT_ESTABLISHED` (new closed reason code); atoms,
+  provenance and NOT_SUPPORTED untouched. Both Jito runs re-evaluate to
+  INSUFFICIENT_EVIDENCE under it.
+- **Research coverage** (`research-coverage.ts`, pure derivation, nothing
+  persisted). Per component: COMPLETE_WITH_RESULT · CHECKED_AND_NOT_ESTABLISHED
+  · INCOMPLETE_COVERAGE · BLOCKED · NOT_REACHED · NOT_APPLICABLE, from the S5
+  row, the attempts, what the trace shows was actually read (class of every
+  EXTRACT_ATTEMPTED url, chain FETCH_OK), the recovery audit's remaining
+  paths and the job state. Job-level `overall` COMPLETE / COVERAGE_LIMITED
+  with closed quality-gate findings (critical component not reached /
+  blocked / incomplete, required class never checked, known paths unread,
+  infrastructure stop, execution / governance not covered, job terminated
+  early). Never a verdict; `isAdequatelyResearched` separates
+  NOT_ESTABLISHED from NOT_ADEQUATELY_RESEARCHED. Shown in
+  `scripts/alpha-inspect.ts` ("RESEARCH COVERAGE"); the Result surface does
+  not read it yet. Jito B2: COVERAGE_LIMITED — MECHANISM_SPEC and
+  CURRENT_STATE RECOVERY_BOUND_REACHED, GOVERNANCE_BASIS BLOCKED,
+  DURABILITY_BASIS ADMISSIBLE_CLASS_NEVER_INSPECTED.
+- **Authority candidates** (`source-route-candidates.ts`). A page on a
+  CONFIRMED domain outside every human-confirmed prefix that produced
+  Evidence is observed as a PATH candidate (`proposedPrefix`, first path
+  segment — not the route's `pathPrefix`, which only a human writes); a
+  host candidate that is a subdomain of a confirmed domain carries
+  `observed.parentConfirmedDomain`. OBSERVED only, no authority; shown in
+  alpha-inspect ("ROUTE CANDIDATES"). Automatic authority for such pages
+  would contradict D-074 / D-089 / CORE_RULES and is NOT implemented
+  (STRATEGY REVIEW REQUIRED).
+- **Critical-source fairness** (`acquisition-phases.ts loadFetchTargets`).
+  Fetch order: seeds → confirmed classified (0) → one PROTECTED PICK per
+  work-queue component (intent-critical first) from its own discoveries
+  with predicted rank ≤ 1 (admissible or unrecognised host; best route
+  rank, then earliest) → confirmed unclassified (1) → unrecognised hosts (2)
+  → hosts recognised as a class no component admits (3); stable by
+  discovery index inside each band. No budget change, no authority change.
+- **Not done, by rule:** interpreter intent stability (model side), web
+  search recall, automatic authority grants, Result redesign.
+- **Pinned:** `tests/research-quality-v1.test.ts` (23).
+
+## ENGINE SPEED + BUDGET ACCOUNTING (D-173 / D-174 / D-175) — IMPLEMENTED, OFFLINE-VERIFIED, COMMITTED `77368b8`; BENCHMARK #2 RUN (267.9 s, SUCCEEDED, 10/10 components)
 
 Offline only; no live call, no new Research, no push, no commit. Measured baseline
 (Jito, job `b817eb99`, 2026-10-11, phased pipeline, claude-haiku-4-5):

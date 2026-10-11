@@ -6,14 +6,16 @@
 // nothing computed from wall-clock time or randomness.
 //
 // Usage: tsx scripts/alpha-inspect.ts <jobId>
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, sql } from "drizzle-orm";
 
 import { createDatabase } from "../src/server/db/client";
+import { loadResearchCoverage } from "../src/server/engine/research-coverage";
 import { readAcquisitionPhase } from "../src/server/jobs/acquisition-phase-worker";
 import {
   evidence,
   interpretations,
   memoryRetrievals,
+  projectMemoryItems,
   researchAttempts,
   researchClaimSupport,
   researchComponentResults,
@@ -266,6 +268,45 @@ async function main() {
         `${t.at.toISOString()} ${t.fromState} -> ${t.toState}`,
         t.note ?? "(no note)",
       );
+    }
+
+    // RESEARCH QUALITY V1 (D-176) — was this Research adequately researched?
+    // Derived read-only from persisted rows; a statement about the research,
+    // never about the project, and never a second verdict.
+    section("RESEARCH COVERAGE");
+    try {
+      const coverage = await loadResearchCoverage(db, jobId);
+      line("overall", coverage.overall);
+      for (const c of coverage.components) {
+        line(`s${c.step} ${c.component}${c.critical ? " (critical)" : ""}`, `${c.coverage} [${c.reasons.join(", ")}] inspected=${c.inspectedClasses.join("|") || "-"} admits=${c.establishingClasses.join("|") || "-"}`);
+      }
+      if (coverage.findings.length === 0) console.log("  findings: (none)");
+      for (const f of coverage.findings) console.log(`  finding: ${f.code}${f.components.length > 0 ? ` -> ${f.components.join(", ")}` : ""}`);
+    } catch (e) {
+      line("coverage", `not derivable: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // RESEARCH QUALITY V1 (D-176) — what the engine OBSERVED for the owner
+    // to decide on: unseen hosts, project-owned subdomains of a confirmed
+    // domain, and paths on a confirmed domain outside every classified
+    // prefix. OBSERVED rows confer nothing; the owner tools act on them.
+    section("ROUTE CANDIDATES (OBSERVED, for the owner)");
+    if (job.projectId) {
+      const candidates = await db
+        .select({ content: projectMemoryItems.content, createdAt: projectMemoryItems.createdAt })
+        .from(projectMemoryItems)
+        .where(and(eq(projectMemoryItems.projectId, job.projectId), eq(projectMemoryItems.kind, "SOURCE_ROUTE"), eq(projectMemoryItems.lifecycleState, "OBSERVED")));
+      if (candidates.length === 0) console.log("  (none)");
+      for (const c of candidates) {
+        const content = c.content as { domain?: string; proposedPrefix?: string; observed?: { evidenceCount?: number; components?: string[]; parentConfirmedDomain?: string; urls?: string[] } };
+        const o = content.observed ?? {};
+        line(
+          `${content.domain ?? "?"}${content.proposedPrefix ? ` proposed path ${content.proposedPrefix}` : ""}`,
+          `${o.evidenceCount ?? 0} evidence row(s), components ${(o.components ?? []).join("|") || "-"}${o.parentConfirmedDomain ? `, subdomain of confirmed ${o.parentConfirmedDomain}` : ""}; e.g. ${(o.urls ?? [])[0] ?? "-"}`,
+        );
+      }
+    } else {
+      console.log("  (job has no project)");
     }
 
     section("WARNINGS");

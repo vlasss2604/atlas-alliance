@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { projectMemoryItems } from "../db/schema";
-import { hostnameOf, isUnrecognizedDomain, type ResolvedSourceRoute } from "./source-authority";
+import { hostnameOf, isUnrecognizedDomain, normalizePathPrefix, resolveSourceRoute, type ResolvedSourceRoute } from "./source-authority";
 
 // UNSEEN PROJECT AUTHORITY BOOTSTRAP V1 — the engine OBSERVES a route
 // candidate; only a human can ever make it a route.
@@ -67,10 +67,34 @@ export interface RouteCandidateProvenance {
   urls: string[];
   evidenceCount: number;
   components: string[];
+  // RESEARCH QUALITY V1 (D-176) — the project's CONFIRMED domain this host
+  // is a subdomain of, when there is one (forum.<confirmed>). Provenance
+  // for the human who reads the candidate: a project-owned governance or
+  // community surface usually lives exactly there. It confers nothing —
+  // authority does not flow from a parent host (CORE_RULES), so
+  // resolveSourceRoute never reads it; it only makes the owner's decision
+  // better informed and faster.
+  parentConfirmedDomain?: string;
 }
 
 export interface RouteCandidateContent {
   domain: string;
+  // RESEARCH QUALITY V1 (D-176) — PRESENT ONLY ON A PATH CANDIDATE: a page
+  // on a domain a human already CONFIRMED, outside every confirmed path
+  // prefix, that produced admitted Evidence. Measured on the second Jito
+  // benchmark: jito.network/jto/ sat outside the confirmed /docs prefix,
+  // classified SOCIAL by construction, and 21 Evidence rows from it
+  // counted for nothing while the owner tooling never learned the path
+  // existed. The candidate names the first path segment so the existing
+  // workflow (confirm-source-route.ts --prefix, then classify) can add a
+  // second classified row for it after reading the page.
+  //
+  // DELIBERATELY NOT the route's own `pathPrefix` property: that field is
+  // what resolveSourceRoute reads, and only a human may write it (the
+  // structural guard in tests/unseen-route-candidates pins exactly that).
+  // This is provenance — a proposal for the human to read — and has no
+  // reader in the authority layer.
+  proposedPrefix?: string;
   observed: RouteCandidateProvenance;
 }
 
@@ -95,11 +119,25 @@ export type RouteCandidateSkipReason =
   | "RECOGNIZED_DOMAIN"
   | "EXISTING_ROUTE_ROW"
   | "CAP_REACHED"
-  | "MALFORMED_URL";
+  | "MALFORMED_URL"
+  // A confirmed-domain page at the site root has no path to propose.
+  | "NO_PATH_PREFIX";
 
 function candidateDomainOf(content: unknown): string | null {
   const c = content as { domain?: unknown } | null;
   return typeof c?.domain === "string" ? c.domain.toLowerCase().replace(/^www\./, "") : null;
+}
+
+// The prefix a HUMAN row carries (read only — never written here).
+function routePrefixOf(content: unknown): string | null {
+  const c = content as { pathPrefix?: unknown } | null;
+  return typeof c?.pathPrefix === "string" ? c.pathPrefix : null;
+}
+
+// The prefix an OBSERVED path candidate proposes.
+function proposedPrefixOf(content: unknown): string | null {
+  const c = content as { proposedPrefix?: unknown } | null;
+  return typeof c?.proposedPrefix === "string" ? c.proposedPrefix : null;
 }
 
 function candidateProvenanceOf(content: unknown): RouteCandidateProvenance | null {
@@ -111,7 +149,42 @@ function candidateProvenanceOf(content: unknown): RouteCandidateProvenance | nul
     urls: Array.isArray(o.urls) ? o.urls.filter((u): u is string => typeof u === "string") : [],
     evidenceCount: typeof o.evidenceCount === "number" ? o.evidenceCount : 0,
     components: Array.isArray(o.components) ? o.components.filter((k): k is string => typeof k === "string") : [],
+    ...(typeof o.parentConfirmedDomain === "string" ? { parentConfirmedDomain: o.parentConfirmedDomain } : {}),
   };
+}
+
+// The first path segment of a url, as a prefix the owner tooling accepts
+// ("/jto" for https://host/jto/anything); null at the site root.
+export function firstPathSegment(url: string): string | null {
+  try {
+    const segment = new URL(url).pathname.split("/").filter((s) => s.length > 0)[0];
+    return segment ? `/${segment}` : null;
+  } catch {
+    return null;
+  }
+}
+
+// The project's CONFIRMED domain that `host` is a strict subdomain of, when
+// there is one; null otherwise. Dot-boundary match only, never a
+// substring — and "confirmed" is asked of the one authority resolver, so
+// this module holds no opinion of its own about lifecycle states.
+async function parentConfirmedDomainOf(
+  tx: Database | Transaction,
+  projectId: string,
+  host: string,
+  rows: readonly { content: unknown; lifecycleState: string }[],
+): Promise<string | null> {
+  const parents = new Set<string>();
+  for (const r of rows) {
+    if (r.lifecycleState === "OBSERVED") continue;
+    const d = candidateDomainOf(r.content);
+    if (d && host !== d && host.endsWith(`.${d}`)) parents.add(d);
+  }
+  for (const d of [...parents].sort()) {
+    const route = await resolveSourceRoute(tx, projectId, `https://${d}/`);
+    if (route.officiality === "CONFIRMED") return d;
+  }
+  return null;
 }
 
 export async function observeSourceRouteCandidate(
@@ -121,8 +194,20 @@ export async function observeSourceRouteCandidate(
   const domain = hostnameOf(input.finalUrl);
   if (!domain) return { outcome: "SKIPPED", reason: "MALFORMED_URL", domain: null };
   if (input.evidenceCount <= 0) return { outcome: "SKIPPED", reason: "NO_EVIDENCE", domain };
-  if (input.route.officiality !== "CLAIMED") return { outcome: "SKIPPED", reason: "ROUTE_CONFIRMED", domain };
-  if (!isUnrecognizedDomain(input.finalUrl)) return { outcome: "SKIPPED", reason: "RECOGNIZED_DOMAIN", domain };
+  // RESEARCH QUALITY V1 — TWO SHAPES OF CANDIDATE. A host nobody has an
+  // opinion about (the original, unchanged), and a PATH on a domain a
+  // human already confirmed that sits outside every classified prefix. A
+  // confirmed, CLASSIFIED page is the owner's finished decision: nothing
+  // to observe.
+  // `matchedPathPrefix === null`: the url sits under NO human-confirmed
+  // prefix. A page under a confirmed-but-unclassified prefix is already in
+  // the owner's hands (officiality AND the path are theirs); only its
+  // classification is pending, and that is not ours to propose.
+  const pathCandidate = input.route.officiality === "CONFIRMED" && input.route.routeClass === null && input.route.matchedPathPrefix === null;
+  if (input.route.officiality === "CONFIRMED" && !pathCandidate) return { outcome: "SKIPPED", reason: "ROUTE_CONFIRMED", domain };
+  if (!pathCandidate && !isUnrecognizedDomain(input.finalUrl)) return { outcome: "SKIPPED", reason: "RECOGNIZED_DOMAIN", domain };
+  const pathPrefix = pathCandidate ? firstPathSegment(input.finalUrl) : null;
+  if (pathCandidate && pathPrefix === null) return { outcome: "SKIPPED", reason: "NO_PATH_PREFIX", domain };
 
   return db.transaction(async (tx) => {
     // Every SOURCE_ROUTE row this project has, in every lifecycle state:
@@ -140,12 +225,27 @@ export async function observeSourceRouteCandidate(
       .where(and(eq(projectMemoryItems.projectId, input.projectId), eq(projectMemoryItems.kind, "SOURCE_ROUTE")));
 
     const sameHost = rows.filter((r) => candidateDomainOf(r.content) === domain);
-    if (sameHost.some((r) => r.lifecycleState !== "OBSERVED")) {
+    if (pathCandidate) {
+      // A human row for this domain WITHOUT a prefix, or confirmed at "/",
+      // covers the whole domain: classifying it is already theirs to do,
+      // and a path proposal would only repeat the question.
+      const domainWide = (r: { content: unknown }) => {
+        const p = routePrefixOf(r.content);
+        return p === null || normalizePathPrefix(p) === "/";
+      };
+      if (sameHost.some((r) => r.lifecycleState !== "OBSERVED" && domainWide(r))) {
+        return { outcome: "SKIPPED", reason: "EXISTING_ROUTE_ROW", domain };
+      }
+    } else if (sameHost.some((r) => r.lifecycleState !== "OBSERVED")) {
       return { outcome: "SKIPPED", reason: "EXISTING_ROUTE_ROW", domain };
     }
+    const parentConfirmedDomain = pathCandidate ? null : await parentConfirmedDomainOf(tx, input.projectId, domain, rows);
 
+    // The row this observation merges into: for a host candidate the one
+    // OBSERVED row of the host; for a path candidate the OBSERVED row of
+    // the same host AND the same proposed prefix.
     const existing = sameHost
-      .slice()
+      .filter((r) => r.lifecycleState === "OBSERVED" && proposedPrefixOf(r.content) === pathPrefix)
       .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())[0];
     if (existing) {
       const prior = candidateProvenanceOf(existing.content) ?? {
@@ -160,7 +260,14 @@ export async function observeSourceRouteCandidate(
       const components = [...new Set([...prior.components, input.component])].sort();
       const content: RouteCandidateContent = {
         domain,
-        observed: { jobId: prior.jobId, urls, evidenceCount: prior.evidenceCount + input.evidenceCount, components },
+        ...(pathPrefix ? { proposedPrefix: pathPrefix } : {}),
+        observed: {
+          jobId: prior.jobId,
+          urls,
+          evidenceCount: prior.evidenceCount + input.evidenceCount,
+          components,
+          ...(prior.parentConfirmedDomain ?? parentConfirmedDomain ? { parentConfirmedDomain: prior.parentConfirmedDomain ?? parentConfirmedDomain! } : {}),
+        },
       };
       // Guarded on lifecycle_state so a row a human moved on in the
       // meantime is never touched: an OBSERVED candidate is operational
@@ -183,7 +290,14 @@ export async function observeSourceRouteCandidate(
 
     const content: RouteCandidateContent = {
       domain,
-      observed: { jobId: input.jobId, urls: [input.finalUrl], evidenceCount: input.evidenceCount, components: [input.component] },
+      ...(pathPrefix ? { proposedPrefix: pathPrefix } : {}),
+      observed: {
+        jobId: input.jobId,
+        urls: [input.finalUrl],
+        evidenceCount: input.evidenceCount,
+        components: [input.component],
+        ...(parentConfirmedDomain ? { parentConfirmedDomain } : {}),
+      },
     };
     // OBSERVED is the only state the database guard admits on insert, and
     // the only state this module ever writes.
