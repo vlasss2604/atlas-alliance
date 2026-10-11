@@ -47,9 +47,73 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
+## UI V7 — THE APPROVED FIGMA DIRECTION, APPLIED (uncommitted, awaiting visual review)
+
+A visual pass over the real product, approved 2026-10-11 from the Figma
+references on the Founder's desktop (visual direction and screen
+architecture, not pixel-perfect, not semantic truth). Presentation only:
+no route, API field, migration, dependency or live call; PAGE <= PERSISTED
+VERIFIED RECORD throughout.
+
+- **Visual system** (`globals.css`): every raised surface carries a faint
+  cyan edge (`--edge-soft` / `--edge`) and a soft glow; radii 1.5–1.75rem;
+  state pills are outlined in their own colour (`.tone` reads `--tone`;
+  meanings unchanged — green supported, amber partial, slate insufficient,
+  red contradicted / not supported, grey fault); project avatars are
+  rounded-square tiles; list rows are cards (`.history-list` /
+  `.history-row` grid); findings are cards with their state rail
+  (`.finding-list`); `.answer-block` / `.answer-glyph`; `.field-grow` and
+  `.field-pill`; `.composer-orb`; `.accent`. No new `backdrop-filter`.
+- **Header everywhere.** The compact lockup is shown on Verify too
+  (`.brand-lockup-home { display: flex }`); the large centred brand Home
+  used to carry is removed (`home-brand` is gone).
+- **Verify composer** (`research-composer.tsx`): emblem + title with the
+  last word lit (`AccentTitle`, from the dictionary's own title in EN and
+  RU) + a textarea that grows with its text (capped at 11rem; Enter still
+  submits; `data-testid="composer-input"` unchanged) + the cyan send disc
+  + a column of example chips (`className="chip"` pinned by
+  `ui-result-interactions`). The interpret → gate → startResearch chain
+  and the Pulse `initialQuestion` handoff are untouched.
+- **List rows** (`recent-proof-card.tsx`, `research-group-card.tsx`):
+  avatar tile · name with the outcome pill beside it · the question on
+  its own full-width line · the date. A long pill wraps inside the card.
+  This fixes the 390 px Russian defect where "Недостаточно доказательств"
+  squeezed the question into one word per line.
+- **Result answer blocks** (`result-surface.ts`, `research-result.tsx`):
+  `SurfaceAnswer.parts: { kind: AnswerKind; text }[]` beside the unchanged
+  `sentences`; the kind is recorded by the branch that writes the sentence
+  (`say("CONFIRMED" | "PARTIAL" | "OPEN" | "CONTRADICTED", …)`), never
+  inferred from text; the non-verdict path yields `NONE` (plain
+  paragraphs). The screen renders each part under
+  `dict.result.answerHeadings[kind]` with the glyph and colour of the
+  row state it maps to (`OPEN → NOT_ESTABLISHED`). Sentence text is
+  byte-identical in EN and RU; `RESULT_STATE_WORDS` and the four work
+  figures are unchanged.
+- **Brand and project assets** (polish pass): `AtlasMark` renders the one
+  approved shield file (`public/brand/atlas-shield.png`) in the header
+  lockup and the dock's Verify action; `ProjectAvatar` shows an approved
+  logo where `src/client/project-assets.json` lists one
+  (`public/projects/*.png`, from the design export) and initials otherwise.
+  Static files from this origin only — no fetch, no icon service, nothing
+  generated. The assets are small rasters; a vector export would sharpen
+  them.
+- **Dock room:** `.app-column` reserves 8.5rem + the safe area under the
+  reading column on a handset (4rem on a desk), so the last card on every
+  screen scrolls clear of the fixed dock. Handset-only readability bumps
+  on the Result's finding rows, state lines and evidence metadata
+  (`@media (max-width: 639px)`), structure unchanged.
+- **Pinned:** `tests/ui-redesign-v7.test.ts`; `ui-result-interactions`'s
+  avatar test now states the asset-or-initials rule.
+- **Captures** (390×844@2x EN + RU, 1280×900 desktop, the Raydium job
+  `fd1252ef`): `/tmp/atlas-ui-screenshots/figma-before`,
+  `/tmp/atlas-ui-screenshots/figma-after`.
+- **Local dev note:** this WSL environment has no outbound network, so a
+  headless capture must abort the Telegram SDK script request (otherwise
+  the page's load event never fires).
+
 ## PULSE — VERIFY — PROOFS, AND THE OFFLINE PULSE PROTOTYPE (D-172)
 
-Phase A only; local review, not deployed, not pushed.
+Phase A committed as `77fc923` (2026-10-07); not deployed, not pushed.
 
 - **Navigation** (`app-chrome.tsx`, `globals.css` `.dock` three columns):
   Pulse `/pulse` · Verify = the raised AP shield → `/home` (the existing

@@ -11,6 +11,7 @@ import {
   sourceSentence,
   statusTone,
   tableRows,
+  type AnswerKind,
   type BoundaryGroup,
   type EvidenceCard,
   type ProofNode,
@@ -67,6 +68,14 @@ const STATE_GLYPHS: Record<ResultStatus, string> = {
   CONTRADICTED: "✕",
 };
 const COUNT_ORDER: ResultStatus[] = ["CONFIRMED", "PARTIAL", "CONTRADICTED", "NOT_ESTABLISHED"];
+// The answer block of each kind borrows the glyph and colour of the row
+// state it was written from — the same closed mapping, nothing new.
+const ANSWER_KIND_STATUS: Record<Exclude<AnswerKind, "NONE">, ResultStatus> = {
+  CONTRADICTED: "CONTRADICTED",
+  CONFIRMED: "CONFIRMED",
+  PARTIAL: "PARTIAL",
+  OPEN: "NOT_ESTABLISHED",
+};
 
 export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; jobId: string | null }) {
   const dict = useDict();
@@ -124,11 +133,14 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
           </span>
         )}
       </div>
-      <div className="mt-5 flex flex-col gap-3 text-[1.15rem] leading-[1.5] sm:text-[1.25rem] sm:leading-[1.5]" data-testid="answer-text">
+      {/* THE ANSWER, IN HEADED BLOCKS (the approved design). Each block is
+          one sentence of the answer, byte for byte, under the heading of
+          the branch that wrote it — confirmed / partly confirmed / still
+          unclear / contradicted — with that state's glyph. A sentence the
+          non-verdict path wrote has no kind and is shown as plain text. */}
+      <div className="mt-5 flex flex-col" data-testid="answer-text">
         {surface.answer.sentences.map((s) => (
-          <p key={s} className={s === lead ? "font-medium text-[var(--atlas-text-strong)]" : "text-[var(--atlas-text)]/90"}>
-            {s}
-          </p>
+          <AnswerSentence key={s} text={s} kind={kindOf(surface, s)} lead={s === lead} />
         ))}
       </div>
       {stats.length > 0 && (
@@ -153,6 +165,35 @@ function AnswerPanel({ surface, detail, projectName }: { surface: ResultSurface;
         )}
       </p>
     </section>
+  );
+}
+
+// The kind the surface recorded for this sentence — the branch that wrote
+// it, never a reading of its text. Unmatched means the non-verdict path.
+function kindOf(surface: ResultSurface, sentence: string): AnswerKind {
+  return surface.answer.parts.find((p) => p.text === sentence)?.kind ?? "NONE";
+}
+
+// ONE SENTENCE OF THE ANSWER. With a kind, it sits under that kind's
+// heading with the glyph and colour of the row state it maps to; without
+// one (the non-verdict path) it is plain text.
+function AnswerSentence({ text, kind, lead }: { text: string; kind: AnswerKind; lead: boolean }) {
+  const dict = useDict();
+  const weight = lead ? "font-medium text-[var(--atlas-text-strong)]" : "text-[var(--atlas-text)]/90";
+  if (kind === "NONE") {
+    return <p className={`py-1.5 text-[1.15rem] leading-[1.5] sm:text-[1.25rem] ${weight}`}>{text}</p>;
+  }
+  const status = ANSWER_KIND_STATUS[kind];
+  return (
+    <div className="answer-block" data-testid="answer-block" data-kind={kind}>
+      <span className="answer-glyph" style={{ "--tone": TONE_COLORS[statusTone(status)] } as React.CSSProperties} aria-hidden>
+        {STATE_GLYPHS[status]}
+      </span>
+      <div className="min-w-0">
+        <p className="answer-heading">{dict.result.answerHeadings[kind]}</p>
+        <p className={`mt-1 text-[1.1rem] leading-[1.5] sm:text-[1.2rem] ${weight}`}>{text}</p>
+      </div>
+    </div>
   );
 }
 
@@ -276,7 +317,7 @@ function FindingsTable({ rows: all, jobId }: { rows: readonly ResearchTableRow[]
           ))}
         </p>
       </div>
-      <ol className="flex flex-col">
+      <ol className="finding-list">
         {rows.map((r) => (
           <FindingRow key={r.component} row={r} jobId={jobId} />
         ))}

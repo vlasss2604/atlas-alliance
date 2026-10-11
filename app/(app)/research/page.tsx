@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 
 import { api, type ResearchJobListItem } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
+import { AccentTitle } from "@/src/client/components/accent-title";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchGroupCard } from "@/src/client/components/research-group-card";
 import { groupResearchRuns, isActive } from "@/src/client/research-model";
@@ -38,7 +39,9 @@ export default function ResearchListPage() {
   return (
     <main className="enter flex flex-col gap-8 pt-4">
       <div>
-        <h1 className="display text-[1.7rem] font-semibold text-[var(--atlas-text-strong)] sm:text-[2rem]">{dict.research.title}</h1>
+        <h1 className="display text-[1.7rem] font-semibold text-[var(--atlas-text-strong)] sm:text-[2rem]">
+          <AccentTitle text={dict.research.title} />
+        </h1>
         <p className="mt-1.5 text-[1.02rem] text-[var(--atlas-text-dim)]">{dict.research.subtitle}</p>
         <p className="mt-1.5 text-[0.95rem] text-[var(--atlas-text-faint)]" data-testid="library-keep-note">
           {dict.research.keepNote}
@@ -55,7 +58,7 @@ export default function ResearchListPage() {
       {running.length > 0 && (
         <section>
           <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.research.inProgress}</h2>
-          <ul className="mt-2 flex flex-col">
+          <ul className="history-list mt-3">
             {running.map((job) => (
               <RecentProofCard key={job.id} job={job} memoryEnabled={me?.memoryEnabled ?? false} />
             ))}
@@ -66,7 +69,7 @@ export default function ResearchListPage() {
       {groups.length > 0 && (
         <section>
           <h2 className="text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.research.projectsResearched}</h2>
-          <ul className="mt-2 flex flex-col">
+          <ul className="history-list mt-3">
             {groups.map((group) => (
               <ResearchGroupCard key={group.key} group={group} />
             ))}

@@ -343,6 +343,15 @@ export const en = {
       DURABILITY_BASIS: "Durability",
     } as Record<string, string>,
     checkedTitle: "What ATLAS checked",
+    // The heading over each sentence of the answer, keyed by the branch
+    // that wrote it (result-surface AnswerKind). The sentence itself is
+    // unchanged; the heading only names which kind of statement it is.
+    answerHeadings: {
+      CONTRADICTED: "What the evidence contradicts",
+      CONFIRMED: "What is confirmed",
+      PARTIAL: "What is not fully confirmed",
+      OPEN: "What is still unclear",
+    } as Record<string, string>,
     counts: { CONFIRMED: "verified", PARTIAL: "partly", NOT_ESTABLISHED: "unresolved", CONTRADICTED: "contradicted" } as Record<string, string>,
     stateWords: { CONFIRMED: "Verified", PARTIAL: "Partly verified", NOT_ESTABLISHED: "Unresolved", CONTRADICTED: "Contradicted" } as Record<string, string>,
     stateFrom: (word: string, kind: string) => `${word} from ${kind}`,

@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 import { api, type ResearchJobListItem } from "@/src/client/api";
 import { useApp } from "@/src/client/app-context";
-import { AtlasMark } from "@/src/client/components/atlas-header";
 import { BetaStatusNotice } from "@/src/client/components/beta-status-notice";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
@@ -16,12 +15,14 @@ import { groupResearchRuns } from "@/src/client/research-model";
 
 // HOME — THE VERIFY SCREEN (D-172 names it Verify; the route stays /home).
 //
-// Top to bottom: the brand, centred and alone (the brand says what the
-// product is — no paragraph); the composer as one compact raised surface
-// with four research examples; the projects ATLAS has already researched,
-// one row each with an avatar, the question and when it was checked. No
-// marketing cards, no statistics. Every row is a real record from the
-// server; no verdict is invented for a job that has none.
+// Top to bottom: the composer as one raised surface, led by the search
+// emblem (the brand is the compact lockup in the app header, the same on
+// every screen — the large centred brand this screen used to carry is
+// gone, per the approved design); the projects ATLAS has already
+// researched, one card each with an avatar, the outcome, the question and
+// when it was checked. No marketing cards, no statistics. Every row is a
+// real record from the server; no verdict is invented for a job that has
+// none.
 //
 // OPENED FROM A PULSE CARD (`?pulse=<id>`): the card's text lands in the
 // same editable input, verbatim, with a line saying where it came from.
@@ -62,23 +63,13 @@ export default function HomePage() {
     .slice(0, 6);
 
   return (
-    <main className="enter flex flex-col gap-7 pt-2 sm:gap-9 sm:pt-4">
-      {/* THE BRAND, ONCE, IN THE MIDDLE. The mark, the wordmark, the line
-          beneath — the brand says what the product is. */}
-      <section className="flex flex-col items-center text-center" data-testid="home-brand">
-        <AtlasMark size={64} hero />
-        <p className="wordmark mt-4 text-[1.25rem] leading-none sm:text-[1.45rem]">
-          ATLAS <span className="text-[var(--atlas-cyan)]">PROOF</span>
-        </p>
-        <p className="tagline mt-2.5">{dict.home.tagline}</p>
-      </section>
-
+    <main className="enter flex flex-col gap-7 pt-1 sm:gap-9 sm:pt-2">
       {block ? (
         <BetaStatusNotice />
       ) : (
-        <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-6" data-testid="home-composer">
+        <section className="panel panel-hero px-5 py-5 sm:px-8 sm:py-7" data-testid="home-composer">
           {pulse.kind !== "none" && (
-            <p className="mb-4 text-center text-[0.92rem] text-[var(--atlas-text-dim)]" data-testid="pulse-notice" data-kind={pulse.kind}>
+            <p className="mb-4 text-[0.92rem] text-[var(--atlas-text-dim)]" data-testid="pulse-notice" data-kind={pulse.kind}>
               {pulse.kind === "open" ? (
                 <>
                   <span className="font-medium text-[var(--atlas-cyan-strong)]">{dict.pulse.fromPulse(pulse.item.source.handle)}</span>
@@ -124,14 +115,13 @@ export default function HomePage() {
           </Link>
         </div>
         {jobs === null ? (
-          <ul className="mt-2 flex flex-col" aria-busy data-testid="recent-loading">
+          <ul className="history-list mt-3" aria-busy data-testid="recent-loading">
             {[0, 1, 2].map((i) => (
               <li key={i} className="history-row">
-                <span className="skeleton h-10 w-10 rounded-full" />
-                <span className="flex-1">
-                  <span className="skeleton block h-4 w-32" />
-                  <span className="skeleton mt-2 block h-3.5 w-3/4" />
-                </span>
+                <span className="skeleton h-11 w-11 rounded-[28%]" />
+                <span className="skeleton block h-4 w-32" />
+                <span className="skeleton block h-3.5 w-3/4" />
+                <span className="skeleton block h-3 w-20" />
               </li>
             ))}
           </ul>
@@ -140,7 +130,7 @@ export default function HomePage() {
             {dict.home.recentEmpty}
           </p>
         ) : (
-          <ul className="mt-2 flex flex-col">
+          <ul className="history-list mt-3">
             {recent.map((job) => (
               <RecentProofCard key={job.id} job={job} memoryEnabled={me?.memoryEnabled ?? false} />
             ))}

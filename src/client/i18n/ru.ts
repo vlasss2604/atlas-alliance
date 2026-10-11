@@ -318,6 +318,12 @@ export const ru: Dict = {
       DURABILITY_BASIS: "Устойчивость",
     },
     checkedTitle: "Что проверил ATLAS",
+    answerHeadings: {
+      CONTRADICTED: "Чему противоречат доказательства",
+      CONFIRMED: "Что подтверждено",
+      PARTIAL: "Что подтверждено не полностью",
+      OPEN: "Что остаётся неясным",
+    },
     counts: { CONFIRMED: "подтверждено", PARTIAL: "частично", NOT_ESTABLISHED: "не установлено", CONTRADICTED: "опровергнуто" },
     stateWords: { CONFIRMED: "Подтверждено", PARTIAL: "Частично подтверждено", NOT_ESTABLISHED: "Не установлено", CONTRADICTED: "Опровергнуто" },
     stateFrom: (word, kind) => `${word}: ${kind}`,

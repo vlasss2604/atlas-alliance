@@ -1,0 +1,7 @@
+{
+  "raydium": { "src": "/projects/raydium.png", "kind": "glyph" },
+  "hyperliquid": { "src": "/projects/hyperliquid.png", "kind": "glyph" },
+  "lido": { "src": "/projects/lido.png", "kind": "glyph" },
+  "aave": { "src": "/projects/aave.png", "kind": "tile" },
+  "morpho": { "src": "/projects/morpho.png", "kind": "tile" }
+}

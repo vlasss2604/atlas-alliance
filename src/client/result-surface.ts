@@ -1176,8 +1176,19 @@ export function boundaryGroups(rows: readonly ResearchTableRow[]): BoundaryGroup
  * 9. THE ANSWER — TWO TO FOUR SENTENCES
  * ------------------------------------------------------------------ */
 
+// WHICH BRANCH WROTE A SENTENCE. The answer's sentences are grouped under
+// headings on the screen (the approved design's "What is confirmed" /
+// "What is not fully confirmed" / "What is still unclear"); the kind is
+// recorded by the SAME branch that writes the sentence, never inferred
+// from its text. A sentence from the non-verdict path carries NONE and is
+// shown without a heading.
+export type AnswerKind = "CONTRADICTED" | "CONFIRMED" | "PARTIAL" | "OPEN" | "NONE";
+
 export interface SurfaceAnswer {
   sentences: string[];
+  // One entry per sentence, in the same order: the sentence and the kind
+  // of the branch that produced it.
+  parts: { kind: AnswerKind; text: string }[];
   // The verdict's own confidence, shown only where a verdict exists.
   confidenceLabel: string | null;
 }
@@ -1222,13 +1233,15 @@ export function surfaceAnswer(input: {
   // A run that did not end in a verdict keeps the settled wording for that
   // state — the state of the run is the whole answer there.
   if (input.outcomeKind !== "VERDICT") {
+    const sentences = researchAnswer({
+      verdict: input.verdict,
+      outcomeKind: input.outcomeKind,
+      projectName: input.projectName,
+      components: [...input.components],
+    }).slice(0, 4);
     return {
-      sentences: researchAnswer({
-        verdict: input.verdict,
-        outcomeKind: input.outcomeKind,
-        projectName: input.projectName,
-        components: [...input.components],
-      }).slice(0, 4),
+      sentences,
+      parts: sentences.map((text) => ({ kind: "NONE" as const, text })),
       confidenceLabel,
     };
   }
@@ -1239,19 +1252,22 @@ export function surfaceAnswer(input: {
   const phrase = (r: ResearchTableRow) =>
     r.statedStop ? stopStatePhrase(r.statedStop, noun) : statementPhraseFor(r.component, noun);
   const by = (status: ResultStatus) => rows.filter((r) => r.status === status);
-  const sentences: string[] = [];
+  // Each branch below records its own kind beside the sentence it writes;
+  // `sentences` stays the plain list every consumer already reads.
+  const parts: { kind: AnswerKind; text: string }[] = [];
+  const say = (kind: AnswerKind, text: string) => parts.push({ kind, text });
   const inRu = ru();
   const project = input.projectName ?? (inRu ? RU_SURFACE.projectFallback : "this project");
 
   const contradicted = by("CONTRADICTED");
   if (contradicted.length > 0) {
     const list = joinPhrases(contradicted.map(phrase).slice(0, 2));
-    sentences.push(inRu ? RU_SURFACE.contradicted(list) : `On ${list}, the evidence points the other way.`);
+    say("CONTRADICTED", inRu ? RU_SURFACE.contradicted(list) : `On ${list}, the evidence points the other way.`);
   }
   const confirmed = by("CONFIRMED");
   if (confirmed.length > 0) {
     const list = joinPhrases(confirmed.map(phrase).slice(0, 4));
-    sentences.push(inRu ? RU_SURFACE.confirmed(list) : `The sources confirm ${list}.`);
+    say("CONFIRMED", inRu ? RU_SURFACE.confirmed(list) : `The sources confirm ${list}.`);
   }
   // "There is evidence that <claim>" only for a partial row whose claim the
   // evidence actually bears on; one whose reason says the claim itself is
@@ -1261,7 +1277,7 @@ export function surfaceAnswer(input: {
     const lead = partial[0];
     const gap = lead.row.reason ? ` ${lead.row.reason}` : "";
     const list = joinPhrases(partial.map(phrase).slice(0, 2));
-    sentences.push(inRu ? RU_SURFACE.partial(list, gap) : `There is evidence ${list}, but it is not fully confirmed.${gap}`);
+    say("PARTIAL", inRu ? RU_SURFACE.partial(list, gap) : `There is evidence ${list}, but it is not fully confirmed.${gap}`);
   }
   const open = rows.filter((r) => r.status === "NOT_ESTABLISHED" || (r.status === "PARTIAL" && r.claimNotShown));
   if (open.length > 0) {
@@ -1269,21 +1285,23 @@ export function surfaceAnswer(input: {
     const list = joinPhrases(open.map(phrase).slice(0, 3), "or");
     const what = inRu ? RU_SURFACE.open(list) : `The available evidence does not show ${list}.`;
     if (kinds.has("TECHNICAL")) {
-      sentences.push(inRu ? `${what}${RU_SURFACE.openTechnical}` : `${what} The research limit was reached before all relevant sources could be checked.`);
+      say("OPEN", inRu ? `${what}${RU_SURFACE.openTechnical}` : `${what} The research limit was reached before all relevant sources could be checked.`);
     } else if (kinds.has("CONFIGURATION")) {
-      sentences.push(
+      say(
+        "OPEN",
         inRu
           ? `${what}${RU_SURFACE.openConfiguration(project)}`
           : `${what} ATLAS currently lacks a source route that can independently verify this for ${project}.`,
       );
     } else {
-      sentences.push(what);
+      say("OPEN", what);
     }
   }
-  if (sentences.length === 0) {
-    sentences.push(inRu ? RU_SURFACE.noFinding(project) : `This research finished without a finding it could state about ${project}.`);
+  if (parts.length === 0) {
+    say("NONE", inRu ? RU_SURFACE.noFinding(project) : `This research finished without a finding it could state about ${project}.`);
   }
-  return { sentences: sentences.slice(0, 4), confidenceLabel };
+  const kept = parts.slice(0, 4);
+  return { sentences: kept.map((p) => p.text), parts: kept, confidenceLabel };
 }
 
 /* ------------------------------------------------------------------ *

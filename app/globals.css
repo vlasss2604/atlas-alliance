@@ -40,6 +40,9 @@
   --cyan-dim: rgba(30, 197, 245, 0.12);
   --cyan-glow: rgba(30, 197, 245, 0.32);
   --cyan-edge: rgba(30, 197, 245, 0.34);
+  /* V7 edges: the faint cyan outline of every card, and its lit form */
+  --edge-soft: rgba(30, 197, 245, 0.16);
+  --edge: rgba(30, 197, 245, 0.3);
   /* Structural accent — a cold indigo for governance and structure only */
   --atlas-indigo: #7b8ff2;
   --indigo-dim: rgba(123, 143, 242, 0.14);
@@ -135,14 +138,55 @@ body {
   border: 1px solid var(--hairline);
   border-radius: 1.25rem;
 }
+/* V7 (the approved Figma direction): every raised surface carries a faint
+   cyan edge and a soft outer glow — restrained, so the hero still reads as
+   the one lit surface. Radii are generous; no backdrop-filter on lists. */
 .panel {
   position: relative;
-  border-radius: 1.25rem;
-  background: var(--surface-1);
-  border: 1px solid var(--hairline);
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(180deg, rgba(142, 230, 255, 0.035) 0%, rgba(142, 230, 255, 0) 38%),
+    var(--surface-1);
+  border: 1px solid var(--edge-soft);
   box-shadow:
     0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 0 0 1px rgba(30, 197, 245, 0.03),
+    0 0 30px -16px rgba(30, 197, 245, 0.28),
     0 16px 40px -24px rgba(0, 0, 0, 0.9);
+}
+/* A card in a list — a history row, a Pulse card, a finding: the same
+   edge, lighter, and a hover that lifts by one pixel. */
+.card {
+  position: relative;
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(180deg, rgba(142, 230, 255, 0.03) 0%, rgba(142, 230, 255, 0) 45%),
+    var(--surface-1);
+  border: 1px solid var(--edge-soft);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 0 24px -16px rgba(30, 197, 245, 0.22),
+    0 12px 30px -22px rgba(0, 0, 0, 0.9);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out);
+}
+a.card:hover,
+button.card:hover,
+.card-interactive:hover {
+  border-color: var(--edge);
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 0 30px -14px rgba(30, 197, 245, 0.4),
+    0 16px 34px -22px rgba(0, 0, 0, 0.95);
+}
+a.card:active,
+button.card:active,
+.card-interactive:active {
+  transform: scale(0.995);
 }
 .panel-raised {
   background: var(--surface-2);
@@ -152,14 +196,15 @@ body {
    logo's ring, echoed once, at the top-right corner. */
 .panel-hero {
   overflow: hidden;
+  border-radius: 1.75rem;
   background:
-    linear-gradient(180deg, rgba(30, 197, 245, 0.07) 0%, rgba(30, 197, 245, 0) 40%),
-    linear-gradient(135deg, rgba(20, 31, 51, 0.92) 0%, rgba(14, 27, 45, 0.92) 100%);
-  border-color: var(--cyan-edge);
+    linear-gradient(180deg, rgba(30, 197, 245, 0.08) 0%, rgba(30, 197, 245, 0) 42%),
+    linear-gradient(135deg, rgba(20, 31, 51, 0.94) 0%, rgba(13, 25, 43, 0.94) 100%);
+  border-color: rgba(30, 197, 245, 0.42);
   box-shadow:
-    0 1px 0 0 rgba(142, 230, 255, 0.12) inset,
-    0 0 0 1px rgba(30, 197, 245, 0.06),
-    0 0 48px -14px rgba(30, 197, 245, 0.28),
+    0 1px 0 0 rgba(142, 230, 255, 0.14) inset,
+    0 0 0 1px rgba(30, 197, 245, 0.08),
+    0 0 56px -12px rgba(30, 197, 245, 0.36),
     0 28px 64px -30px rgba(0, 0, 0, 0.95);
   backdrop-filter: blur(14px);
   -webkit-backdrop-filter: blur(14px);
@@ -182,10 +227,12 @@ body {
    boxing each of them — findings, uncertainty. */
 .panel-section {
   position: relative;
-  border-radius: 1.25rem;
+  border-radius: 1.5rem;
   background: var(--atlas-glass);
-  border: 1px solid var(--hairline);
-  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset;
+  border: 1px solid var(--edge-soft);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 0 30px -18px rgba(30, 197, 245, 0.22);
 }
 .tone-edge {
   overflow: hidden;
@@ -246,6 +293,12 @@ body {
 .display {
   letter-spacing: -0.022em;
 }
+/* The one accented word of a screen title — "verify?", "Library": the
+   mark's electric cyan with a faint halo. */
+.accent {
+  color: var(--atlas-cyan-strong);
+  text-shadow: 0 0 18px rgba(30, 197, 245, 0.35);
+}
 
 /* ---------------------------------------------------------------- *
  * THE ATLAS MARK — the one luminous object. The ring is drawn in the
@@ -276,61 +329,74 @@ body {
 .orb > svg {
   display: block;
 }
+/* The shield asset inside the orb: a little inset so the ring of light
+   reads around it, never stretched. */
+.orb > .orb-mark {
+  display: block;
+  width: 82%;
+  height: 82%;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
 
 /* ---------------------------------------------------------------- *
  * TONES — verdict / status pills. Sentence case, a leading dot.
  * ---------------------------------------------------------------- */
+/* V7 pills: an outlined pill in the state's own colour with a faint glow
+   of that colour — the Figma treatment. Meanings are unchanged: green is
+   supported, amber partial, slate insufficient, red contradicted/not
+   supported, grey a product fault. `--tone` carries the colour so the
+   outline, the dot and the glow are one declaration. */
 .tone {
+  --tone: var(--atlas-slate);
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
   border-radius: 9999px;
-  border: 1px solid transparent;
+  border: 1px solid color-mix(in srgb, var(--tone) 55%, transparent);
+  background: color-mix(in srgb, var(--tone) 9%, transparent);
   padding: 0.4rem 0.9rem;
   font-size: 0.875rem;
   font-weight: 600;
   letter-spacing: 0.005em;
   white-space: nowrap;
   line-height: 1.1;
+  box-shadow: 0 0 14px -6px color-mix(in srgb, var(--tone) 70%, transparent);
 }
 .tone::before {
   content: "";
   width: 0.5rem;
   height: 0.5rem;
   border-radius: 9999px;
-  background: currentColor;
-  box-shadow: 0 0 8px currentColor;
+  background: var(--tone);
+  box-shadow: 0 0 8px var(--tone);
   flex: none;
 }
 .tone-supported {
-  color: #7be6c3;
-  background: var(--green-dim);
-  border-color: rgba(53, 209, 162, 0.35);
+  --tone: var(--atlas-green);
+  color: #8fecd0;
 }
 .tone-partial {
-  color: #f0cd7c;
-  background: var(--amber-dim);
-  border-color: rgba(230, 181, 77, 0.35);
+  --tone: var(--atlas-amber);
+  color: #f3d58c;
 }
 .tone-insufficient {
-  color: #bac4d3;
-  background: var(--slate-dim);
-  border-color: rgba(148, 160, 179, 0.32);
+  --tone: var(--atlas-slate);
+  color: #c4cedb;
 }
 .tone-negative {
-  color: #f5a3a3;
-  background: var(--red-dim);
-  border-color: rgba(236, 111, 111, 0.35);
+  --tone: var(--atlas-red);
+  color: #f7adad;
 }
 .tone-fault {
+  --tone: #7f8ea3;
   color: #c9d2de;
-  background: rgba(100, 116, 139, 0.16);
-  border-color: rgba(148, 163, 184, 0.35);
 }
 .tone-neutral {
+  --tone: #7f8ea3;
   color: var(--atlas-text-dim);
-  background: rgba(148, 163, 184, 0.09);
-  border-color: rgba(148, 163, 184, 0.2);
+  box-shadow: none;
 }
 .dot {
   width: 0.55rem;
@@ -522,6 +588,45 @@ body {
 .field:focus-within .field-icon {
   color: var(--atlas-cyan);
 }
+/* The composer's field is a pill that grows with its text (a Pulse claim
+   is three sentences): a textarea with no resize handle, sized by script
+   to its content, capped so it never swallows the screen. */
+.field-pill {
+  border-radius: 1.75rem;
+}
+.field-grow {
+  display: block;
+  width: 100%;
+  min-height: 1.6rem;
+  max-height: 11rem;
+  resize: none;
+  overflow-y: auto;
+  background: transparent;
+  outline: none;
+  line-height: 1.5;
+  font: inherit;
+  color: inherit;
+}
+.field-grow::placeholder {
+  color: var(--atlas-text-faint);
+}
+/* The composer's emblem: the search glass in a lit ring, top-left of the
+   hero card (the Figma composer). Decorative — aria-hidden where used. */
+.composer-orb {
+  display: grid;
+  place-items: center;
+  width: 3.25rem;
+  height: 3.25rem;
+  border-radius: 9999px;
+  color: var(--atlas-cyan-strong);
+  background:
+    radial-gradient(circle at 50% 30%, rgba(30, 197, 245, 0.22) 0%, transparent 65%),
+    #070c15;
+  border: 1px solid rgba(30, 197, 245, 0.55);
+  box-shadow:
+    0 0 0 3px rgba(30, 197, 245, 0.08),
+    0 0 22px rgba(30, 197, 245, 0.3);
+}
 
 /* Suggested questions — quiet chips that light on hover. */
 .chip {
@@ -529,13 +634,13 @@ body {
   align-items: center;
   gap: 0.5rem;
   border-radius: 9999px;
-  padding: 0.55rem 0.95rem;
+  padding: 0.6rem 1rem;
   text-align: left;
   font-size: 0.9rem;
   line-height: 1.3;
-  border: 1px solid var(--hairline);
-  background: rgba(255, 255, 255, 0.025);
-  color: var(--atlas-text-dim);
+  border: 1px solid var(--edge-soft);
+  background: rgba(6, 10, 18, 0.35);
+  color: var(--atlas-text);
   transition:
     border-color var(--motion-transition) var(--ease-out),
     background-color var(--motion-transition) var(--ease-out),
@@ -554,6 +659,11 @@ body {
 .chip-cyan,
 .chip-teal {
   color: var(--atlas-text);
+}
+/* The composer's examples: a column of full-width chips (the Figma
+   composer), each a complete question a tap drops into the field. */
+.composer-chips .chip {
+  width: 100%;
 }
 
 /* ---------------------------------------------------------------- *
@@ -680,10 +790,12 @@ body {
 }
 .stat {
   position: relative;
-  border-radius: 0.9rem;
-  border: 1px solid var(--hairline);
-  background: rgba(6, 10, 18, 0.35);
-  padding: 0.75rem 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid var(--edge-soft);
+  background:
+    linear-gradient(180deg, rgba(30, 197, 245, 0.05) 0%, rgba(30, 197, 245, 0) 60%),
+    rgba(6, 10, 18, 0.4);
+  padding: 0.8rem 0.95rem;
   box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset;
 }
 .stat-n {
@@ -702,6 +814,47 @@ body {
 }
 .stat-verified .stat-n {
   color: #7be6c3;
+}
+
+/* ---------------------------------------------------------------- *
+ * ANSWER BLOCKS — the answer's sentences grouped under the heading of
+ * the branch that wrote each one (confirmed / partly / open /
+ * contradicted). The glyph is the state's glyph in the state's colour;
+ * the text is the sentence, byte for byte.
+ * ---------------------------------------------------------------- */
+.answer-block {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.85rem;
+  align-items: start;
+  padding: 0.9rem 0;
+  border-top: 1px solid var(--hairline);
+}
+.answer-block:first-child {
+  border-top: 0;
+  padding-top: 0.2rem;
+}
+.answer-glyph {
+  --tone: var(--atlas-slate);
+  display: grid;
+  place-items: center;
+  width: 1.9rem;
+  height: 1.9rem;
+  margin-top: 0.1rem;
+  border-radius: 9999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
+  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--tone) 70%, transparent);
+}
+.answer-heading {
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--atlas-text-dim);
 }
 
 /* ---------------------------------------------------------------- *
@@ -796,41 +949,58 @@ body {
 /* ---------------------------------------------------------------- *
  * FINDING ROWS — the analytical table on the result.
  * ---------------------------------------------------------------- */
+/* V7: each finding is its own card inside the section (the Figma "What
+   ATLAS checked" cards), with the state rail along its left edge. */
+.finding-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.8rem;
+}
+@media (min-width: 640px) {
+  .finding-list {
+    padding: 1rem;
+  }
+}
 .finding {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   gap: 0.5rem 1.5rem;
-  padding: 1.2rem 1.25rem 1.2rem 1.6rem;
-  border-bottom: 1px solid var(--hairline);
-  transition: background-color var(--motion-transition) var(--ease-out);
+  padding: 1.1rem 1.15rem 1.15rem 1.5rem;
+  border-radius: 1.15rem;
+  border: 1px solid var(--edge-soft);
+  background:
+    linear-gradient(180deg, rgba(142, 230, 255, 0.025) 0%, rgba(142, 230, 255, 0) 40%),
+    var(--surface-1);
+  overflow: hidden;
+  transition:
+    background-color var(--motion-transition) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out);
 }
 @media (min-width: 640px) {
   .finding {
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
-    padding: 1.4rem 1.6rem 1.4rem 1.9rem;
+    padding: 1.3rem 1.5rem 1.3rem 1.8rem;
   }
 }
-.finding:last-child {
-  border-bottom: 0;
-}
 .finding:hover {
-  background: rgba(30, 197, 245, 0.035);
+  border-color: var(--edge);
 }
 /* the state rail — a luminous bar in the row's state colour */
 .finding::before {
   content: "";
   position: absolute;
   left: 0;
-  top: 1.4rem;
-  bottom: 1.4rem;
-  width: 3px;
-  border-radius: 0 9999px 9999px 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
   background: var(--row-accent, var(--hairline-strong));
-  box-shadow: 0 0 10px color-mix(in srgb, var(--row-accent, transparent) 45%, transparent);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--row-accent, transparent) 55%, transparent);
 }
 .finding-open {
   background: rgba(30, 197, 245, 0.045);
+  border-color: var(--edge);
 }
 /* The evidence block a tap on "Evidence · N" opens beneath a finding —
    its own tinted surface, so the change of state is unmistakable. */
@@ -984,19 +1154,39 @@ body {
 /* ---------------------------------------------------------------- *
  * PROJECT AVATAR — initials on a navy disc, one deterministic hue.
  * ---------------------------------------------------------------- */
+/* V7: a rounded square tile (the Figma avatar), the initials on a navy
+   ground lit from the top, a faint ring in the project's own hue. */
 .avatar {
   display: inline-grid;
   place-items: center;
   flex: none;
-  border-radius: 9999px;
+  border-radius: 28%;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: hsl(var(--hue, 190) 70% 78%);
+  color: hsl(var(--hue, 190) 70% 80%);
   background:
-    radial-gradient(circle at 50% 30%, hsl(var(--hue, 190) 55% 22% / 0.9) 0%, transparent 70%),
+    radial-gradient(circle at 50% 22%, hsl(var(--hue, 190) 55% 26% / 0.95) 0%, transparent 72%),
     var(--surface-2);
-  border: 1px solid hsl(var(--hue, 190) 60% 60% / 0.35);
-  box-shadow: 0 0 0 1px hsl(var(--hue, 190) 60% 60% / 0.06);
+  border: 1px solid hsl(var(--hue, 190) 60% 62% / 0.38);
+  box-shadow:
+    0 0 0 1px hsl(var(--hue, 190) 60% 60% / 0.06),
+    0 0 16px -6px hsl(var(--hue, 190) 70% 60% / 0.45);
+  overflow: hidden;
+}
+/* An approved logo on the tile: a glyph sits inside the tile's ground; a
+   complete tile asset fills it edge to edge. */
+.avatar-glyph > img {
+  width: 62%;
+  height: 62%;
+  object-fit: contain;
+}
+.avatar-tile {
+  border-color: rgba(160, 190, 224, 0.22);
+}
+.avatar-tile > img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 /* The tagline under the wordmark: small, tracked, a hairline either side. */
 .tagline {
@@ -1043,20 +1233,77 @@ body {
 /* ---------------------------------------------------------------- *
  * HISTORY ROWS
  * ---------------------------------------------------------------- */
-.history-row {
+/* V7: one card per row (the Figma list), stacked with a small gap. The
+   grid puts the avatar in the first column and lets the question run the
+   full width beneath the name, so a long status pill never squeezes it. */
+.history-list {
   display: flex;
-  align-items: flex-start;
-  gap: 1rem;
-  padding: 1rem 0.5rem;
-  border-bottom: 1px solid var(--hairline);
-  border-radius: 0.85rem;
-  transition: background-color var(--motion-micro) var(--ease-out);
+  flex-direction: column;
+  gap: 0.65rem;
 }
-li:last-child > .history-row {
-  border-bottom: 0;
+.history-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  column-gap: 0.9rem;
+  row-gap: 0.3rem;
+  align-items: start;
+  width: 100%;
+  padding: 0.95rem 1rem 1rem;
+  text-align: left;
+  border-radius: 1.35rem;
+  background:
+    linear-gradient(180deg, rgba(142, 230, 255, 0.03) 0%, rgba(142, 230, 255, 0) 45%),
+    var(--surface-1);
+  border: 1px solid var(--edge-soft);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.03) inset,
+    0 0 24px -16px rgba(30, 197, 245, 0.22),
+    0 12px 30px -22px rgba(0, 0, 0, 0.9);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
 }
 .history-row:hover {
-  background: rgba(30, 197, 245, 0.04);
+  border-color: var(--edge);
+  transform: translateY(-1px);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 0 30px -14px rgba(30, 197, 245, 0.4),
+    0 16px 34px -22px rgba(0, 0, 0, 0.95);
+}
+.history-row:active {
+  transform: scale(0.995);
+}
+.history-row > .avatar {
+  grid-row: 1 / span 3;
+}
+.history-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  min-width: 0;
+}
+.history-head > .tone,
+.history-head .tone {
+  padding: 0.3rem 0.7rem;
+  font-size: 0.78rem;
+  /* a long pill may break onto two lines; it never leaves the card */
+  white-space: normal;
+  line-height: 1.2;
+  min-width: 0;
+  max-width: 100%;
+}
+.history-head > span:last-child {
+  min-width: 0;
+}
+/* On a narrow screen a long pill ("Недостаточно доказательств") goes
+   beneath the name rather than crushing it. */
+@media (max-width: 420px) {
+  .history-head {
+    flex-wrap: wrap;
+  }
 }
 
 /* ---------------------------------------------------------------- *
@@ -1084,14 +1331,10 @@ li:last-child > .history-row {
   gap: 0.7rem;
   min-width: 0;
 }
+/* V7: the compact lockup is shown on every screen, Verify included —
+   the large centred brand that Verify used to carry is gone. */
 .brand-lockup-home {
-  display: none;
-}
-@media (min-width: 640px) {
-  .brand-lockup-home {
-    display: flex;
-    visibility: hidden;
-  }
+  display: flex;
 }
 .app-nav {
   align-items: center;
@@ -1187,10 +1430,14 @@ li:last-child > .history-row {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   align-items: end;
-  padding: 0.4rem 0.5rem calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  padding: 0.45rem 0.5rem calc(env(safe-area-inset-bottom, 0px) + 0.55rem);
   background: rgba(8, 13, 22, 0.94);
-  border-top: 1px solid rgba(30, 197, 245, 0.16);
-  box-shadow: 0 -12px 30px -18px rgba(0, 0, 0, 0.9);
+  border-top: 1px solid rgba(30, 197, 245, 0.22);
+  border-radius: 1.4rem 1.4rem 0 0;
+  box-shadow:
+    0 -1px 0 0 rgba(142, 230, 255, 0.06) inset,
+    0 -14px 34px -18px rgba(30, 197, 245, 0.22),
+    0 -12px 30px -18px rgba(0, 0, 0, 0.9);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
 }
@@ -1249,8 +1496,9 @@ li:last-child > .history-row {
 }
 .dock-home > .orb {
   box-shadow:
-    0 0 0 1px rgba(30, 197, 245, 0.12),
-    0 0 22px rgba(30, 197, 245, 0.34),
+    0 0 0 1px rgba(30, 197, 245, 0.14),
+    0 0 0 5px rgba(8, 13, 22, 0.94),
+    0 0 26px rgba(30, 197, 245, 0.4),
     0 10px 24px -12px rgba(0, 0, 0, 0.8);
 }
 
@@ -1342,6 +1590,8 @@ li:last-child > .history-row {
   .pill:active,
   .chip,
   .row-card,
+  .card,
+  .history-row,
   .send-orb,
   .btn-secondary,
   .btn-action,
@@ -1354,6 +1604,78 @@ li:last-child > .history-row {
 
 .safe-bottom {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+/* THE READING COLUMN'S BOTTOM ROOM. On a handset the dock is fixed over
+   the page, so the column reserves the dock's height, the shield that
+   rises above it and a breath of space, plus the device's safe area —
+   the last card on every screen scrolls fully clear of it. On a wide
+   screen there is no dock. */
+.app-column {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8.5rem);
+}
+@media (min-width: 640px) {
+  .app-column {
+    padding-bottom: 4rem;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * HANDSET READABILITY — the Result's dense rows read one step larger
+ * on a phone: finding cards, their state lines, evidence metadata.
+ * Structure unchanged; only size and line-height.
+ * ---------------------------------------------------------------- */
+@media (max-width: 639px) {
+  .finding {
+    gap: 0.6rem 1.5rem;
+    padding: 1.2rem 1.1rem 1.25rem 1.45rem;
+  }
+  .finding [data-testid="row-label"] {
+    font-size: 1.08rem;
+    line-height: 1.35;
+  }
+  .finding [data-testid="row-answer"] {
+    font-size: 1.05rem;
+    line-height: 1.6;
+  }
+  .finding [data-testid="row-rests-on"] {
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  .state-line {
+    font-size: 0.94rem;
+    line-height: 1.5;
+    gap: 0.5rem 0.75rem;
+  }
+  .state-line .btn-action {
+    font-size: 0.9rem;
+    padding: 0.36rem 0.8rem;
+  }
+  .counts {
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  .stat-l {
+    font-size: 0.9rem;
+  }
+  .evidence-card [data-testid="evidence-tells"] {
+    line-height: 1.6;
+  }
+  .evidence-card > div > p:first-child,
+  .row-evidence [data-testid="evidence-card"] > p:first-child {
+    font-size: 0.92rem;
+    line-height: 1.5;
+  }
+  [data-testid="answer-meta"] {
+    font-size: 0.92rem;
+    line-height: 1.6;
+  }
+  [data-testid="evidence-excerpt"],
+  [data-testid="evidence-does-not-prove"] {
+    line-height: 1.6;
+  }
+  [data-testid="evidence-does-not-prove"] {
+    font-size: 0.94rem;
+  }
 }
 
 * {

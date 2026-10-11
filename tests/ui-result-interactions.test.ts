@@ -233,18 +233,24 @@ describe("Home — previously researched projects", () => {
     expect(html).toContain('href="/research/11111111-1111-1111-1111-111111111111"');
   });
 
-  it("the avatar invents nothing: initials from the ticker or the name, one deterministic hue from the stable key", () => {
+  it("the avatar invents nothing: an approved static asset where one exists, otherwise initials from the ticker or the name and one deterministic hue", () => {
     expect(projectInitials("Aave", "AAVE")).toBe("AAV");
     expect(projectInitials("Lido", null)).toBe("LI");
     expect(projectInitials("Pump Fun", null)).toBe("PF");
     expect(projectInitials(null, null)).toBe("?");
     expect(projectHue("aave")).toBe(projectHue("aave"));
     expect(projectHue("aave")).not.toBe(projectHue("lido"));
-    const html = render(createElement(ProjectAvatar, { name: "Lido", ticker: "LDO", slug: "lido" }));
-    expect(html).toContain("LDO");
-    expect(html).toContain("--hue:");
-    // No image, no fetch, no icon service.
-    expect(html).not.toContain("<img");
+    // A project with an approved asset (a file under /public/projects, from
+    // the approved design export) shows it — from this origin, never fetched.
+    const lido = render(createElement(ProjectAvatar, { name: "Lido", ticker: "LDO", slug: "lido" }));
+    expect(lido).toContain('src="/projects/lido.png"');
+    expect(lido).toContain('data-asset="lido"');
+    expect(lido).toContain("--hue:");
+    // A project without one falls back to initials: no image, no guess.
+    const unknown = render(createElement(ProjectAvatar, { name: "Pump Fun", ticker: "PUMP", slug: "pump_fun" }));
+    expect(unknown).toContain("PUM");
+    expect(unknown).not.toContain("<img");
+    // No icon service, no remote URL, no fetch — ever.
     expect(readFileSync("src/client/components/project-avatar.tsx", "utf-8")).not.toMatch(/fetch\(|https?:\/\//);
   });
 

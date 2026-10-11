@@ -7,38 +7,38 @@ import type { ResearchJobListItem } from "../api";
 import { useDict } from "../app-context";
 import { outcomeText } from "../localize";
 import { jobOutcome, relativeAge, type ProjectGroup } from "../research-model";
+import { ProjectAvatar } from "./project-avatar";
 
 // RESEARCH HISTORY, NOT A JOB LOG. A project researched eight times is ONE
-// row with eight runs behind it. The row leads with the project, the
-// latest outcome in a quiet word and when it was last researched; it
-// opens to the questions asked and their runs.
+// card with eight runs behind it (the Figma library row): the avatar
+// tile, the project with its latest outcome as a pill beside it, then one
+// line — runs · questions · when it was last researched. It opens to the
+// questions asked and their runs.
 export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobListItem> }) {
   const [open, setOpen] = useState(false);
   const latest = jobOutcome(group.latest);
   const dict = useDict();
   return (
-    <li className="list-none border-b border-[var(--hairline)] last:border-b-0" data-testid={`group-${group.key}`}>
-      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="history-row w-full text-left">
-        <span className="min-w-0 flex-1">
-          <span className="block text-[1.08rem] font-semibold text-[var(--atlas-text-strong)]">{group.projectName}</span>
-          <span className="mt-1 block text-[0.92rem] text-[var(--atlas-text-dim)]">
-            <span data-testid="group-run-count">
-              {dict.history.runs(group.runCount)}
+    <li className="list-none" data-testid={`group-${group.key}`}>
+      <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} className="history-row">
+        <ProjectAvatar name={group.projectName} ticker={group.latest.projectTicker} slug={group.latest.projectSlug ?? group.key} size={44} />
+        <span className="history-head">
+          <span className="truncate text-[1.08rem] font-semibold text-[var(--atlas-text-strong)]">{group.projectName}</span>
+          <span className="flex shrink-0 items-center gap-2">
+            <span className={`tone tone-${latest.tone}`} data-testid="group-latest" data-verdict={latest.verdict ?? "NONE"}>
+              {outcomeText(latest, dict)}
             </span>
-            {group.questions.length > 1 && <span data-testid="group-question-count"> · {dict.history.questions(group.questions.length)}</span>}
-            <span> · {dict.history.lastResearched(relativeAge(group.lastAt))}</span>
+            <Chevron open={open} />
           </span>
         </span>
-        <span className="flex shrink-0 items-center gap-3 text-[0.88rem] text-[var(--atlas-text-dim)]">
-          <span className="flex items-center gap-1.5" data-testid="group-latest" data-verdict={latest.verdict ?? "NONE"}>
-            <span className={`dot dot-${latest.tone}`} aria-hidden />
-            {outcomeText(latest, dict)}
-          </span>
-          <Chevron open={open} />
+        <span className="block text-[0.92rem] leading-snug text-[var(--atlas-text-dim)]">
+          <span data-testid="group-run-count">{dict.history.runs(group.runCount)}</span>
+          {group.questions.length > 1 && <span data-testid="group-question-count"> · {dict.history.questions(group.questions.length)}</span>}
+          <span> · {dict.history.lastResearched(relativeAge(group.lastAt))}</span>
         </span>
       </button>
       {open && (
-        <div className="flex flex-col gap-5 pb-5 pl-1">
+        <div className="expand-enter flex flex-col gap-5 px-3 pt-4 pb-2 sm:px-5">
           {group.questions.map((q) => (
             <div key={q.key} data-testid="question-group">
               <p className="text-[1rem] leading-snug text-[var(--atlas-text)]">{q.question}</p>
