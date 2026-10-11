@@ -1,5 +1,5 @@
 import { asc, eq } from "drizzle-orm";
-import { acquisitionConcurrency, mapWithConcurrency, serializeByKey } from "./concurrency";
+import { acquisitionConcurrency, mapWithConcurrency, searchPipelining, serializeByKey } from "./concurrency";
 
 import type { Database, Transaction } from "../db/client";
 import { researchTraceEvents } from "../db/schema";
@@ -55,7 +55,7 @@ import {
 import type { ContentFetchFailureReason } from "./providers/content-fetcher";
 import type { RenderNavigationDiagnosticCode } from "./trace-store";
 import type { ComponentWorkItem } from "./contract-view";
-import { reserveJobBudget } from "./budget-reservation";
+import { reserveJobBudget, settleJobBudgetReservation } from "./budget-reservation";
 import { resolveOnchainSourceOpenReserve } from "./onchain-source-open-reserve";
 import { ContentFetchError } from "./providers/content-fetcher";
 import type { ContentFetcher } from "./providers/content-fetcher";
@@ -216,7 +216,49 @@ export async function runSearchPhase(input: {
     loadModelCostProfile("QUERY_PROPOSER", (await loadProductConfig(input.db)).query_proposer_model);
   const proposerCostMicro = calculateMaxAuthorizedCostMicro(proposerProfile);
 
-  for (const [index, item] of input.items.entries()) {
+  // SEARCH PIPELINING (engine speed pass, 2026-10-11). The per-component
+  // body is split in two so that the ONE network wait that is not already
+  // overlapped — the proposer call — can run while the previous
+  // component's searches are in flight:
+  //
+  //   prepare(i)   plan, reachability, allowance, proposer reservation, and
+  //                START the proposer call. No trace row is written here;
+  //                a skip decision is carried to the component's own turn.
+  //   complete(i)  at the component's turn, in queue order: write the skip
+  //                row or await the proposer, settle, write the audit row,
+  //                blend, write QUERY_PROPOSED, read the ledger, plan and
+  //                RESERVE the searches in plan order; then run them and
+  //                merge their results in plan order exactly as before.
+  //
+  // prepare(i+1) is started the moment complete(i) has reserved its search
+  // units, i.e. while component i's searches run. That is the only point
+  // at which it is exact: the allowance of i+1 reads the live reserved
+  // counter, and between i's reservation pass and i+1's turn the sequential
+  // loop reserved nothing either (searches and trace writes reserve
+  // nothing). i+1's dedup ledger is read in complete(i+1), after i's
+  // SEARCH_EXECUTED and CANDIDATE_RETURNED rows exist, so dedup,
+  // provenance and the candidate order — which becomes the fetch order —
+  // are byte-identical to the loop's; so is the trace sequence, because
+  // every row is still written at the component's own turn. The number of
+  // searches and the per-component share cannot change: the same
+  // reservations are made against the same counter in the same order.
+  // ATLAS_SEARCH_PIPELINING=0 runs prepare(i+1) only after complete(i),
+  // which IS the former loop.
+  type Prepared =
+    | { kind: "skip"; index: number; item: ComponentWorkItem; reason: "ROUTE" | "SEARCH_BUDGET" | "MODEL_BUDGET" }
+    | {
+        kind: "call";
+        index: number;
+        item: ComponentWorkItem;
+        target: ComponentTarget;
+        plan: Awaited<ReturnType<typeof loadAcquisitionPlan>>;
+        allowance: number;
+        metered: boolean;
+        proposed: Promise<string[]>;
+      };
+
+  const prepare = async (index: number): Promise<Prepared> => {
+    const item = input.items[index];
     const target = input.target(item);
 
     // D-140 — FAIR SHARE BEFORE GENERATION.
@@ -259,21 +301,7 @@ export async function runSearchPhase(input: {
       confirmedRouteDomainsByClass: plan.confirmedRouteDomainsByClass,
       explorerOpenIsTheMechanism: true,
     });
-    if (!reach.reachable) {
-      out.routeRefusedComponents.push(item.component);
-      await recordTraceEvent(input.db, {
-        researchJobId: input.jobId,
-        operationType: "MODEL_CALL_SKIPPED",
-        providerKind: "QUERY_PROPOSE",
-        patternStep: item.step,
-        component: item.component,
-        status: "SKIPPED",
-        reasonCode: "NONE",
-        budgetAxis: "modelCostMicro",
-        budgetAmount: 0,
-      });
-      continue;
-    }
+    if (!reach.reachable) return { kind: "skip", index, item, reason: "ROUTE" };
 
     const othersPending = input.items.slice(index + 1);
     const reservedNow = await currentSearchQueriesReserved(input.db, input.jobId);
@@ -289,26 +317,12 @@ export async function runSearchPhase(input: {
       intentRequiredPending: othersPending.filter((c) => plan.intentRequired.has(c.component)).length,
     });
 
-    if (allowance <= 0) {
-      // The axis is genuinely spent. Do NOT call the proposer: a live
-      // model call producing queries that can never be searched is money
-      // spent on nothing, and the QUERY_PROPOSED rows it would write
-      // would claim a generation the job could not use. Bounded coverage
-      // is the honest outcome (D-130), not universal coverage.
-      out.budgetRefusedComponents.push(item.component);
-      await recordTraceEvent(input.db, {
-        researchJobId: input.jobId,
-        operationType: "MODEL_CALL_SKIPPED",
-        providerKind: "QUERY_PROPOSE",
-        patternStep: item.step,
-        component: item.component,
-        status: "SKIPPED",
-        reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
-        budgetAxis: "searchQueries",
-        budgetAmount: 0,
-      });
-      continue;
-    }
+    // The axis is genuinely spent. Do NOT call the proposer: a live
+    // model call producing queries that can never be searched is money
+    // spent on nothing, and the QUERY_PROPOSED rows it would write
+    // would claim a generation the job could not use. Bounded coverage
+    // is the honest outcome (D-130), not universal coverage.
+    if (allowance <= 0) return { kind: "skip", index, item, reason: "SEARCH_BUDGET" };
 
     // D-140 — a real proposer call is real external model consumption and
     // is charged to the job's ONE model envelope, before the call, the
@@ -325,7 +339,58 @@ export async function runSearchPhase(input: {
         proposerCostMicro,
         input.maxModelCostMicro,
       );
-      if (!reserved) {
+      if (!reserved) return { kind: "skip", index, item, reason: "MODEL_BUDGET" };
+      out.proposerCalls += 1;
+      out.proposerReservedMicro += proposerCostMicro;
+    }
+
+    const proposed = input.queryProposer.proposeQueries({
+      target,
+      hint: item.component,
+      // Never generate more than this component may actually search.
+      maxQueries: allowance,
+    });
+    // Awaited at the component's own turn, where a rejection surfaces
+    // exactly as the sequential loop's would have — after the previous
+    // component has fully completed; never as an unhandled rejection
+    // meanwhile.
+    proposed.catch(() => undefined);
+    return { kind: "call", index, item, target, plan, allowance, metered, proposed };
+  };
+
+  // Everything from the component's turn up to and including its search
+  // reservations. Returns null for a skipped component, otherwise the
+  // in-flight searches and what is needed to merge them.
+  const complete = async (p: Prepared) => {
+    const item = p.item;
+    if (p.kind === "skip") {
+      if (p.reason === "ROUTE") {
+        out.routeRefusedComponents.push(item.component);
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "MODEL_CALL_SKIPPED",
+          providerKind: "QUERY_PROPOSE",
+          patternStep: item.step,
+          component: item.component,
+          status: "SKIPPED",
+          reasonCode: "NONE",
+          budgetAxis: "modelCostMicro",
+          budgetAmount: 0,
+        });
+      } else if (p.reason === "SEARCH_BUDGET") {
+        out.budgetRefusedComponents.push(item.component);
+        await recordTraceEvent(input.db, {
+          researchJobId: input.jobId,
+          operationType: "MODEL_CALL_SKIPPED",
+          providerKind: "QUERY_PROPOSE",
+          patternStep: item.step,
+          component: item.component,
+          status: "SKIPPED",
+          reasonCode: "SEARCH_QUERY_BUDGET_EXHAUSTED",
+          budgetAxis: "searchQueries",
+          budgetAmount: 0,
+        });
+      } else {
         out.modelRefusedComponents.push(item.component);
         await recordTraceEvent(input.db, {
           researchJobId: input.jobId,
@@ -338,22 +403,24 @@ export async function runSearchPhase(input: {
           budgetAxis: "modelCostMicro",
           budgetAmount: proposerCostMicro,
         });
-        continue;
       }
-      out.proposerCalls += 1;
-      out.proposerReservedMicro += proposerCostMicro;
+      return null;
     }
 
-    const proposed = await input.queryProposer.proposeQueries({
-      target,
-      hint: item.component,
-      // Never generate more than this component may actually search.
-      maxQueries: allowance,
-    });
+    const { target, plan, allowance, metered } = p;
+    const proposed = await p.proposed;
 
     // The audit row for the real call: what it was authorized to cost and,
     // when the caller wired a usage callback, what it actually used.
     const usage = input.readProposerUsage?.() ?? null;
+    const proposerActualCostMicro =
+      usage && !usage.unsupportedBillingUsage ? calculateActualCostMicro(proposerProfile, usage) : null;
+    // BUDGET SETTLEMENT (D-173): the same rule s4-executor applies to its
+    // own proposer call — a metered call that has answered with priceable
+    // usage releases the unused part of its reserved maximum.
+    if (metered && proposerActualCostMicro !== null) {
+      await settleJobBudgetReservation(input.db, input.jobId, "modelCostMicro", proposerCostMicro, proposerActualCostMicro);
+    }
     await recordTraceEvent(input.db, {
       researchJobId: input.jobId,
       operationType: "MODEL_CALL_ATTEMPTED",
@@ -367,8 +434,7 @@ export async function runSearchPhase(input: {
       budgetAmount: metered ? proposerCostMicro : 0,
       actualInputTokens: usage?.inputTokens ?? null,
       actualOutputTokens: usage?.outputTokens ?? null,
-      actualCostMicro:
-        usage && !usage.unsupportedBillingUsage ? calculateActualCostMicro(proposerProfile, usage) : null,
+      actualCostMicro: proposerActualCostMicro,
     });
 
     // A1 PARITY — ROUTE-SCOPED TARGETING (D-129/D-133), as the executor
@@ -448,7 +514,7 @@ export async function runSearchPhase(input: {
         });
       }
     }
-    const searched = await mapWithConcurrency(queryPlan, acquisitionConcurrency(), async (entry, i) => {
+    const searched = mapWithConcurrency(queryPlan, acquisitionConcurrency(), async (entry, i) => {
       if (!reservedIdx[i]) return null;
       try {
         const candidates = await input.searchGateway.search(entry.query, target, { maxResults: input.maxResultsPerQuery });
@@ -457,6 +523,14 @@ export async function runSearchPhase(input: {
         return { candidates: [] as { url: string }[], failed: true as const };
       }
     });
+    return { item, queryPlan, reservedIdx, searched };
+  };
+
+  // Pass 3 of the component: trace each search and merge its candidates,
+  // in plan order.
+  const merge = async (stage: NonNullable<Awaited<ReturnType<typeof complete>>>) => {
+    const { item, queryPlan, reservedIdx } = stage;
+    const searched = await stage.searched;
     for (const [i, entry] of queryPlan.entries()) {
       if (!entry.needsSearch) {
         out.dedupedQueries.push(entry.query);
@@ -514,6 +588,22 @@ export async function runSearchPhase(input: {
         }
       }
     }
+  };
+
+  const pipelined = searchPipelining();
+  let next: Promise<Prepared> | null = input.items.length > 0 ? prepare(0) : null;
+  for (let index = 0; index < input.items.length; index++) {
+    const prepared = await next!;
+    const stage = await complete(prepared);
+    const hasNext = index + 1 < input.items.length;
+    // Pipelined: the next component's preparation starts now, while this
+    // component's searches are in flight (its reservations are done).
+    next = hasNext && pipelined ? prepare(index + 1) : null;
+    if (next) next.catch(() => undefined);
+    if (stage) await merge(stage);
+    // Sequential: the next component is prepared only after this one has
+    // merged — the former loop, order for order.
+    if (hasNext && !pipelined) next = prepare(index + 1);
   }
   return out;
 }

@@ -8,7 +8,7 @@ import { executionRuleVersionFor } from "../domain/execution-cue";
 import { mechanismStateRuleVersionFor } from "../domain/mechanism-state-cue";
 import type { Database, Transaction } from "../db/client";
 import { evidence, researchJobs, sources } from "../db/schema";
-import { readJobBudgetReserved, reserveJobBudget } from "./budget-reservation";
+import { readJobBudgetReserved, reserveJobBudget, settleJobBudgetReservation } from "./budget-reservation";
 import { isReplayProvider, PUBLISHED_AT_RULE_VERSION } from "./providers/types";
 import type { ComponentWorkItem } from "./contract-view";
 import type { WorkExecutionResult, WorkExecutor } from "./controller";
@@ -70,7 +70,7 @@ import {
   loadAcquisitionLedger,
   planQueries,
 } from "./acquisition-ledger";
-import { componentAdmitsOnchainAcquisition, runStructuredOnchainAcquisition } from "./onchain-acquisition";
+import { componentAdmitsOnchainAcquisition, componentHasOnchainIntent, runStructuredOnchainAcquisition } from "./onchain-acquisition";
 import { onchainFactMayEstablish } from "./component-reconciler";
 import { normalizeMechanismState } from "../domain/mechanism-state";
 import {
@@ -120,7 +120,7 @@ import type { ConfirmedProjectIdentity } from "../domain/project-identity";
 import { canonicalTargetRef, findAttemptId, recordTraceEvent } from "./trace-store";
 import { CapabilityFatalError } from "./capability-fatal-error";
 import { BudgetExhaustedError } from "./budget-exhausted-error";
-import { extractionConcurrency, startWithConcurrency } from "./concurrency";
+import { createSemaphore, extractionCallsPerJob, extractionConcurrency, serializeByKey, startWithConcurrency } from "./concurrency";
 import { TARGETED_RECOVERY_BOUNDS } from "./targeted-recovery";
 import { planSiteLocalExpansion } from "./site-local-expansion";
 
@@ -1133,10 +1133,50 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
   // non-transient, budget-denied), none of which says anything about
   // whether the capability is reachable.
   let consecutiveTransientlyFailedDocuments = 0;
+  // JOB-LEVEL PROBE (engine speed pass, 2026-10-11). The per-round rule
+  // "one document at a time until the round's first success, then overlap"
+  // exists so that a provider that refuses or cannot be reached is found
+  // out after ONE paid call, never four: it is an operational reachability
+  // check, not a research step — the first document is extracted exactly
+  // as any other, no admission or evidence rule reads whether it was the
+  // first, and whether the extractor answers is a property of the
+  // credential, the model id and the network, not of the component. Once
+  // ANY extraction call of this job run has answered, repeating the probe
+  // for every later component establishes nothing it did not already
+  // establish and serializes the slowest call of each round (measured:
+  // 10–19 s for the 20k-token official page, six times in one Research).
+  // So the probe is kept — for the FIRST round of the job run — and its
+  // result is reused: every later round overlaps from its first document.
+  // What this changes is cost under a mid-run permanent rejection or
+  // outage, never truth: the fatal classes, the "two consecutive transient
+  // documents" rule, the in-order consumption of results, the evidence
+  // and the budget accounting are byte-identical; a 401 arriving after the
+  // probe is still fatal at once, with the calls already in flight
+  // completed and paid (the same boundary the extraction overlap already
+  // accepted). Scoped to this executor instance — one job run; a resumed or
+  // redelivered run probes again (the conservative side).
+  let extractorProvenReachable = false;
+  // THE JOB-WIDE EXTRACTION CALL GATE: however many components overlap and
+  // however wide each round fans out, at most `extractionCallsPerJob()`
+  // generation calls of this job run are at the provider at once. It
+  // changes only WHEN a call starts: each call still reserves as it
+  // starts, in its round's start order, and is consumed in document order.
+  const extractionCallGate = createSemaphore(extractionCallsPerJob());
   return {
     // B2 — a replay fetcher cannot open anything new; run-job.ts defers the
     // targeted second pass to a second phase cycle in that case.
     liveAcquisition: !isReplayProvider(deps.contentFetcher),
+    // COMPONENT OVERLAP — which items the controller may run beside each
+    // other under a replay. The dependency audit of 2026-10-11: an attempt
+    // reads job-wide state in exactly one place, step 0b — the admitted
+    // locators of the whole job and the on-chain source-open reserve — and
+    // only a component with an on-chain intent acts on either. Every other
+    // read is scoped to the component (its candidates, its sealed
+    // documents, its own evidence, its reconciliation row) or race-safe by
+    // construction (sources, locators, trace). With chain acquisition
+    // disabled for the run no component reads that state at all.
+    independentOfJobState: (item: ComponentWorkItem): boolean =>
+      deps.chainAcquisition === "DOCUMENTARY_ONLY" || !componentHasOnchainIntent(item.component),
     async execute(item: ComponentWorkItem, ctx): Promise<WorkExecutionResult> {
       const target: ComponentTarget = {
         step: item.step,
@@ -1387,6 +1427,17 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           );
         }
       }
+
+      // COMPONENT OVERLAP — THE JOB-WIDE READS OF THIS ATTEMPT ARE DONE.
+      // Step 0b above is the one place an attempt reads what OTHER
+      // components persisted (the job's admitted locators) and the shared
+      // on-chain reserve; everything from here on is scoped to this
+      // component — its own candidates, its own sealed documents, its own
+      // evidence — or race-safe by construction. The controller may now let
+      // the items after this one start (controller.ts, exact barrier
+      // semantics). An early return inside 0b is covered by the attempt
+      // completing; a no-op for the sequential walk.
+      ctx.onJobStateRead?.();
 
       // AN EXPLORER PAGE IS NOT THE MECHANISM THAT ESTABLISHES A CHAIN FACT.
       //
@@ -1770,6 +1821,13 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
         queryProposerUsage && !queryProposerUsage.unsupportedBillingUsage
           ? calculateActualCostMicro(queryProposerProfile, queryProposerUsage)
           : null;
+      // BUDGET SETTLEMENT (D-173): the call has answered and its cost is
+      // known — the unused part of its reserved maximum is released. Only
+      // for a metered call (a replay reserved nothing) and only when the
+      // usage is priceable; otherwise the maximum stays, as before.
+      if (queryProposerMetered && queryProposerActualCostMicro !== null) {
+        await settleJobBudgetReservation(deps.db, ctx.jobId, "modelCostMicro", queryProposerCostMicro, queryProposerActualCostMicro);
+      }
       // D: no call was made, so there is no attempt to record here — the
       // MODEL_CALL_SKIPPED row above is this decision's only trace.
       if (canUseModelQueries) await recordTraceEvent(deps.db, {
@@ -3067,6 +3125,27 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             },
           };
           let authorizedMicro = 0;
+          // BUDGET SETTLEMENT (D-173): once THIS call has answered with
+          // priceable usage, its reserved maximum is settled down to the
+          // actual cost — immediately, so the released room is visible to
+          // the calls still waiting to reserve. A call that failed before
+          // answering (transport, a truncated output — usage is captured
+          // only after the stop_reason check), an unsupported billing
+          // category or a refused reservation settles nothing: the
+          // maximum stays spent, exactly as before. The retry wrapper's
+          // attempt-1 failure (no usage) therefore keeps its unit, and only
+          // the attempt that produced `capture.evidenceExtractor` settles.
+          const settleCompletedCall = async (): Promise<void> => {
+            const u = capture.evidenceExtractor;
+            if (!u || u.unsupportedBillingUsage) return;
+            await settleJobBudgetReservation(
+              deps.db,
+              ctx.jobId,
+              "modelCostMicro",
+              evidenceExtractorCostMicro,
+              calculateActualCostMicro(evidenceExtractorProfile, u),
+            );
+          };
           let extractOutcome = await reserveAndCallWithRetry({
             db: deps.db,
             jobId: ctx.jobId,
@@ -3075,7 +3154,7 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             maxBudget: ctx.budget.maxModelCostMicro,
             label: "EVIDENCE_EXTRACTOR",
             capability: "EVIDENCE_EXTRACTOR",
-            fn: () => evidenceExtractor.extract({ target, document: doc, ...perCallSinks }),
+            fn: () => extractionCallGate.run(() => evidenceExtractor.extract({ target, document: doc, ...perCallSinks })),
             onAttempt: recordExtractAttempted,
             onTransientRetry: async (firstAttemptError) => {
               await recordTraceEvent(deps.db, {
@@ -3097,6 +3176,9 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             abortRetry: () => extractionStopped,
           });
           authorizedMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+          await settleCompletedCall();
+          // The job-level probe's result: the extractor answered.
+          if (extractOutcome.kind === "ok") extractorProvenReachable = true;
           if (extractOutcome.kind === "fatal" && extractOutcome.fatalCause !== "TRANSIENT_RETRY_EXHAUSTED" && extractOutcome.fatalCause !== "TOKEN_COUNT_TRANSIENT_RETRY_EXHAUSTED") {
             // Known fatal: no new call, no new retry, from this instant.
             extractionStopped = true;
@@ -3119,6 +3201,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
             });
             observations.add("EXTRACT_COMPACT_RETRY");
             capture.rejectedFacts = null;
+            // A truncated call captured no usage (the throw precedes the
+            // capture), so its full maximum stays spent; the compact call
+            // below reports into a cleared capture and settles on its own.
+            capture.evidenceExtractor = null;
             // The compact retry is a NEW call: not after a known fatal
             // outcome. The truncated outcome stands as the document's.
             if (extractionStopped) return { doc, extractOutcome, capture, authorizedMicro };
@@ -3130,11 +3216,12 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
               maxBudget: ctx.budget.maxModelCostMicro,
               label: "EVIDENCE_EXTRACTOR",
               capability: "EVIDENCE_EXTRACTOR",
-              fn: () => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT", ...perCallSinks }),
+              fn: () => extractionCallGate.run(() => evidenceExtractor.extract({ target, document: doc, mode: "COMPACT", ...perCallSinks })),
               onAttempt: recordExtractAttempted,
               maxAttempts: 1,
             });
             authorizedMicro += extractOutcome.attempts * evidenceExtractorCostMicro;
+            await settleCompletedCall();
             if (extractOutcome.kind === "ok") {
               observations.add("EXTRACT_COMPACT_RETRY_OK");
             } else {
@@ -3156,7 +3243,10 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // as it STARTS (the wrapper's ordinary attempt-1 reservation), in
           // start order, so nothing is reserved for a document that never
           // starts.
-          if (!overlapping && lastOutcomeOk && extractionConcurrency() > 1 && !extractionStopped) {
+          // JOB-LEVEL PROBE: a round after the job run's first successful
+          // extraction overlaps from its first document; the first round of
+          // the run still probes one document at a time until it succeeds.
+          if (!overlapping && (lastOutcomeOk || extractorProvenReachable) && extractionConcurrency() > 1 && !extractionStopped) {
             overlapping = true;
             const rest = roundDocs.slice(docIndex);
             const started = startWithConcurrency(rest, extractionConcurrency(), (d) => callOne(d), {
@@ -3639,15 +3729,21 @@ export function createS4WorkExecutor(deps: S4ExecutorDeps): WorkExecutor {
           // is an observation, not a research outcome.
           if (insertedForDocument > 0) {
             try {
-              const candidate = await observeSourceRouteCandidate(deps.db, {
-                projectId: deps.project.id,
-                jobId: ctx.jobId,
-                sourceId: sourceInfo.id,
-                finalUrl: doc.finalUrl,
-                component: item.component,
-                evidenceCount: insertedForDocument,
-                route,
-              });
+              // Serialized per project: the candidate store dedups by host
+              // inside one transaction but has no unique key, so two
+              // overlapped components observing the same new host would
+              // otherwise each conclude "no row yet".
+              const candidate = await serializeByKey(`route-candidate:${deps.project.id}`, () =>
+                observeSourceRouteCandidate(deps.db, {
+                  projectId: deps.project.id,
+                  jobId: ctx.jobId,
+                  sourceId: sourceInfo.id,
+                  finalUrl: doc.finalUrl,
+                  component: item.component,
+                  evidenceCount: insertedForDocument,
+                  route,
+                }),
+              );
               if (candidate.outcome === "OBSERVED" || candidate.outcome === "UPDATED") {
                 observations.add(`SOURCE_ROUTE_CANDIDATE_OBSERVED:${candidate.domain}`);
               } else if (candidate.reason === "CAP_REACHED") {

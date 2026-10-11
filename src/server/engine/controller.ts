@@ -2,6 +2,7 @@ import { and, eq, sql } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
 import { researchAttempts, researchJobs } from "../db/schema";
+import { componentConcurrency } from "./concurrency";
 import type { ComponentWorkItem, ContractView } from "./contract-view";
 import { afterAttemptOf, planItemFor, type TargetedRecoveryItem, type TargetedRecoveryPlan } from "./targeted-recovery";
 import type { ComponentReconciliationResult } from "./component-reconciler";
@@ -92,6 +93,16 @@ export interface WorkExecutor {
       targetedRecovery?: TargetedRecoveryItem | null;
       // B2 — set on a first-pass attempt: what to hold back for recovery.
       recoveryReserve?: { searchQueries: number; sourceOpens: number } | null;
+      // COMPONENT OVERLAP (exact barrier semantics) — an executor whose
+      // attempt reads job-wide state does so at ONE point, before any
+      // documentary work (s4-executor step 0b: the job's admitted locators
+      // and the on-chain source-open reserve). Calling this right after
+      // that read tells the controller that nothing this attempt does from
+      // here on depends on what other components have persisted, so the
+      // items after this barrier may start while its own documentary pass
+      // runs. Optional: an executor that never calls it keeps every later
+      // item waiting for the barrier to complete — exact, only slower.
+      onJobStateRead?: () => void;
     },
   ): Promise<WorkExecutionResult>;
   // B2 — whether this executor can reach the network for search and opens
@@ -99,6 +110,16 @@ export interface WorkExecutor {
   // whether a targeted second pass runs in-process or is deferred to a
   // second phase cycle.
   liveAcquisition?: boolean;
+  // COMPONENT OVERLAP (exact barrier semantics) — whether an attempt for
+  // this item reads nothing another component's attempt writes: no
+  // job-wide locators, no shared on-chain reserve, no cross-component
+  // candidate adoption. The controller may run such items concurrently
+  // with each other; an item for which this is false (or which has no
+  // answer) is a barrier and runs alone, exactly where the sequential
+  // walk would have run it. Only consulted under a replay executor
+  // (`liveAcquisition === false`): a live executor's fair share and
+  // site-local expansion depend on order and stay sequential.
+  independentOfJobState?(item: ComponentWorkItem): boolean;
 }
 
 export type ControllerStopReason =
@@ -563,9 +584,11 @@ export async function runResearchController(
   // executor, so the per-component fair share is computed against what
   // genuinely still needs budget rather than the original queue length.
   let processedFromPending = 0;
-  const succeeded: ComponentWorkItem[] = [];
-  const failed: ComponentWorkItem[] = [];
-  const skipped: ComponentWorkItem[] = [];
+  // Per pending index, the terminal outcome of the attempt this run made
+  // for it (null: never claimed here). The result arrays are built from
+  // this in QUEUE ORDER, so they read the same whether attempts overlapped
+  // or not.
+  const outcomes: Array<{ item: ComponentWorkItem; status: WorkExecutionResult["status"] } | null> = pending.map(() => null);
   const budgetSpent = { searchQueries: 0, sourceOpens: 0, authorizedModelCostMicro: 0 };
 
   // Reported lifetime recovery count — refreshed after every claim
@@ -574,56 +597,80 @@ export async function runResearchController(
   // keep advancing it after this run returns.
   let recoveryAttemptsUsed = (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime;
 
-  for (const item of pending) {
-    if (attemptsThisRun >= maxAttemptsThisRun) {
-      return {
-        stopReason: "INTERRUPTED",
-        attemptsThisRun,
-        succeeded,
-        failed,
-        skipped,
-        budgetSpent,
-        recoveryAttemptsUsed,
-      };
+  const finish = (stopReason: ControllerStopReason): ControllerRunResult => {
+    const succeeded: ComponentWorkItem[] = [];
+    const failed: ComponentWorkItem[] = [];
+    const skipped: ComponentWorkItem[] = [];
+    for (const o of outcomes) {
+      if (!o) continue;
+      if (o.status === "SUCCEEDED") succeeded.push(o.item);
+      else if (o.status === "SKIPPED") skipped.push(o.item);
+      else failed.push(o.item);
     }
+    return { stopReason, attemptsThisRun, succeeded, failed, skipped, budgetSpent, recoveryAttemptsUsed };
+  };
 
-    const outcome = await claimAttempt(
-      db,
-      jobId,
-      item,
-      view.researchBudget,
-      view.workQueue.length,
-      now,
-      debugClaimDelayMs,
-      recoveryCeilingOverride,
-      targetedPass,
-      afterAttemptFor(item),
-    );
+  // COMPONENT OVERLAP — EXACT BARRIER SEMANTICS.
+  //
+  // The walk below used to be one loop: claim, execute, persist, reconcile,
+  // next. Under the phased EXTRACTING replay every provider is a replay
+  // (the proposer returns the queries this job paid for, the gateway the
+  // candidates it paid for, the fetcher the documents it sealed), so an
+  // attempt's only real wait is its own extraction calls — and the
+  // measured Jito Research spent 163 of 209 seconds walking ten such
+  // attempts one after another.
+  //
+  // Items the executor declares INDEPENDENT of job-wide state (today:
+  // documentary components, which read only their own candidates, their
+  // own sealed documents and their own evidence) may now be in flight
+  // together, at most `componentConcurrency()` at once. Every other item
+  // is a BARRIER: before it is claimed, every attempt in flight has
+  // completed — executed, persisted, reconciled — and nothing after it
+  // starts until it has. What a barrier reads (the job's admitted
+  // locators, the on-chain source-open reserve) is therefore exactly what
+  // the sequential walk would have shown it, and what an independent item
+  // reads is, by its own declaration, not written by anyone running
+  // beside it.
+  //
+  // A barrier reads that state once, at the start of its attempt, and the
+  // executor says so (`onJobStateRead`): from that moment its own
+  // documentary pass depends on nothing another component writes, so the
+  // items after it may start — the barrier still sees exactly the
+  // sequential state, and the items after it still start after the read
+  // that needed it. The next barrier waits for everything, this one
+  // included. An executor that never signals keeps later items waiting for
+  // the barrier's completion: exact, only slower.
+  //
+  // What is unchanged: the claim is still one serialized transaction per
+  // item in queue order (R-1), and the fair-share inputs each attempt
+  // receives (`remainingComponents`, `pendingComponents`) are fixed at
+  // claim time to the values the sequential loop would have computed. A
+  // failure (CapabilityFatalError, BudgetExhaustedError) stops the walk
+  // exactly as before — no new item is claimed — while attempts already
+  // in flight complete and persist (their calls are paid, their evidence
+  // is theirs); the first failure in queue order is then rethrown. Under
+  // a live executor, or at concurrency 1, this IS the sequential loop.
+  const overlapLimit = componentConcurrency();
+  const overlapEnabled =
+    overlapLimit > 1 && executor.liveAcquisition === false && !targetedPass && typeof executor.independentOfJobState === "function";
+  const inFlight = new Map<number, Promise<void>>();
+  let firstFailure: { index: number; error: unknown } | null = null;
+  const quiet = (p: Promise<void>): Promise<void> => p.then(() => undefined, () => undefined);
+  const drainAll = async (): Promise<void> => {
+    while (inFlight.size > 0) await Promise.all([...inFlight.values()].map(quiet));
+  };
+  const waitForOne = async (): Promise<void> => {
+    if (inFlight.size > 0) await Promise.race([...inFlight.values()].map(quiet));
+  };
 
-    if (!outcome.claimed) {
-      if (outcome.reason === "ALREADY_CLAIMED") {
-        // Nothing reserved, nothing spent — another invocation already
-        // owns (or already finished) this component; move on to the
-        // next pending item in this run.
-        continue;
-      }
-      // BUDGET_EXHAUSTED: re-read the authoritative lifetime count for
-      // reporting, then stop — same behavior as before R-1, just driven
-      // by a live (not locally-tracked) budget decision.
-      recoveryAttemptsUsed = (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime;
-      return {
-        stopReason: "BUDGET_EXHAUSTED",
-        attemptsThisRun,
-        succeeded,
-        failed,
-        skipped,
-        budgetSpent,
-        recoveryAttemptsUsed,
-      };
-    }
-
-    const { attemptNumber, isRecoveryAttempt } = outcome;
-
+  const runClaimedAttempt = async (
+    index: number,
+    item: ComponentWorkItem,
+    attemptNumber: number,
+    isRecoveryAttempt: boolean,
+    processedAtClaim: number,
+    onJobStateRead: () => void,
+  ): Promise<void> => {
     // Residual at-least-once semantics, stated plainly: this call to
     // executor.execute() is NOT exactly-once. If this process crashes (or
     // is killed) after the executor completes real external work but
@@ -652,18 +699,18 @@ export async function runResearchController(
       // D-130 — queue shape, so the executor can divide the frozen
       // ceilings fairly across components instead of letting the ones the
       // queue visits first spend everything. `pending` is this run's own
-      // not-yet-succeeded set; `processedFromPending` counts how many of
-      // them this run has already attempted, so the remainder (including
-      // the current item) is what still needs a share.
+      // not-yet-succeeded set; `processedAtClaim` counts how many of
+      // them this run had already claimed when this one was, so the
+      // remainder (including the current item) is what still needs a
+      // share — the same figure the sequential loop computed.
       workQueueSize: view.workQueue.length,
-      remainingComponents: Math.max(1, pending.length - processedFromPending),
+      remainingComponents: Math.max(1, pending.length - processedAtClaim),
       // Everything after the current item in this run's pending set.
-      pendingComponents: pending.slice(processedFromPending + 1).map((p) => p.component),
+      pendingComponents: pending.slice(processedAtClaim + 1).map((p) => p.component),
       targetedRecovery: planItemFor(input.targetedRecovery, item.step, item.component),
       recoveryReserve: input.targetedRecovery ? null : (input.recoveryReserve ?? null),
+      onJobStateRead,
     });
-    processedFromPending += 1;
-    attemptsThisRun += 1;
 
     // Informational/audit only — see WorkExecutionResult doc comment.
     // Floored at zero for sanity; not clamped to any ceiling here because
@@ -683,7 +730,14 @@ export async function runResearchController(
       .set({
         status: result.status,
         reason: result.reason ?? null,
-        completedAt: now,
+        // The wall-clock moment this attempt finished. `now` is the run's
+        // logical clock (the lease check and S5 freshness read it, and it is
+        // fixed once per run), so writing it here stamped every attempt of a
+        // run with the run's START — on the first measured Jito Research all
+        // nine finished attempts carried 04:30:02.594, a moment BEFORE eight
+        // of them had even been created. A completion time is an observation,
+        // not a policy input: nothing reads it back into a decision.
+        completedAt: new Date(),
         searchQueriesSpent: auditedSpent.searchQueries,
         sourceOpensSpent: auditedSpent.sourceOpens,
         // D-090: research_attempts.model_cost_micro_spent is the legacy
@@ -710,18 +764,85 @@ export async function runResearchController(
       await reconcile(db, jobId, item, now);
     }
 
-    if (result.status === "SUCCEEDED") succeeded.push(item);
-    else if (result.status === "SKIPPED") skipped.push(item);
-    else failed.push(item);
+    outcomes[index] = { item, status: result.status };
+  };
+
+  for (let index = 0; index < pending.length; index++) {
+    const item = pending[index];
+    const independent = overlapEnabled && executor.independentOfJobState!(item);
+    // A barrier waits for everything before it; an independent item waits
+    // only for a free slot.
+    if (!independent) await drainAll();
+    else while (inFlight.size >= overlapLimit) await waitForOne();
+    // A failure already known stops the walk here: nothing further is
+    // claimed, and the error is rethrown below once every attempt in
+    // flight has completed.
+    if (firstFailure) break;
+
+    if (attemptsThisRun >= maxAttemptsThisRun) {
+      await drainAll();
+      if (firstFailure) throw (firstFailure as { error: unknown }).error;
+      return finish("INTERRUPTED");
+    }
+
+    const outcome = await claimAttempt(
+      db,
+      jobId,
+      item,
+      view.researchBudget,
+      view.workQueue.length,
+      now,
+      debugClaimDelayMs,
+      recoveryCeilingOverride,
+      targetedPass,
+      afterAttemptFor(item),
+    );
+
+    if (!outcome.claimed) {
+      if (outcome.reason === "ALREADY_CLAIMED") {
+        // Nothing reserved, nothing spent — another invocation already
+        // owns (or already finished) this component; move on to the
+        // next pending item in this run.
+        continue;
+      }
+      // BUDGET_EXHAUSTED: let the attempts in flight finish, re-read the
+      // authoritative lifetime count for reporting, then stop — same
+      // behavior as before R-1, just driven by a live (not
+      // locally-tracked) budget decision.
+      await drainAll();
+      if (firstFailure) throw (firstFailure as { error: unknown }).error;
+      recoveryAttemptsUsed = (await loadAttemptState(db, jobId)).recoveryAttemptsUsedLifetime;
+      return finish("BUDGET_EXHAUSTED");
+    }
+
+    const { attemptNumber, isRecoveryAttempt } = outcome;
+    const processedAtClaim = processedFromPending;
+    processedFromPending += 1;
+    attemptsThisRun += 1;
+
+    let signalRead: () => void = () => undefined;
+    const readDone = new Promise<void>((resolve) => {
+      signalRead = resolve;
+    });
+    const task = runClaimedAttempt(index, item, attemptNumber, isRecoveryAttempt, processedAtClaim, () => signalRead())
+      .catch((error: unknown) => {
+        if (!firstFailure || index < firstFailure.index) firstFailure = { index, error };
+      })
+      .finally(() => {
+        inFlight.delete(index);
+      });
+    inFlight.set(index, task);
+    if (!independent) {
+      // Sequential walk: the attempt completes before the next item.
+      // Overlap: a barrier holds the walk only until its job-wide read is
+      // done (or, if the executor never signals, until it completes).
+      if (overlapEnabled) await Promise.race([readDone, quiet(task)]);
+      else await task;
+      if (firstFailure) break;
+    }
   }
 
-  return {
-    stopReason: "WORK_QUEUE_EXHAUSTED",
-    attemptsThisRun,
-    succeeded,
-    failed,
-    skipped,
-    budgetSpent,
-    recoveryAttemptsUsed,
-  };
+  await drainAll();
+  if (firstFailure) throw (firstFailure as { error: unknown }).error;
+  return finish("WORK_QUEUE_EXHAUSTED");
 }

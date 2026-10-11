@@ -35,7 +35,10 @@ describe("Фаза 6/S10, D-090/D-118 — production cost profile catalogue: rol
     const profile = loadModelCostProfile("EVIDENCE_EXTRACTOR", "claude-haiku-4-5");
     expect(profile.modelId).toBe("claude-haiku-4-5");
     expect(profile.maxInputTokens).toBe(48000);
-    expect(profile.maxOutputTokens).toBe(1536);
+    // 4,096 since the 2026-10-11 engine speed pass (was 1,536): the FULL
+    // extraction's 20-fact answer did not fit, see the catalogue comment.
+    // The value awaits Founder approval.
+    expect(profile.maxOutputTokens).toBe(4096);
     expect(profile.priceVersion).toBe("anthropic-2026-08");
   });
 

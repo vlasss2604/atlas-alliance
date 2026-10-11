@@ -299,7 +299,7 @@ describe("PIPELINE TIMING MODEL — one normal Research through the real phased 
     console.log(
       [
         "",
-        `PIPELINE TIMING MODEL  (PERF_SCALE=${SCALE}; acquisition concurrency ${process.env.ATLAS_ACQUISITION_CONCURRENCY ?? "default 4"}, extraction concurrency ${process.env.ATLAS_EXTRACTION_CONCURRENCY ?? "default 4"}; modelled latencies proposer ${LAT.proposer}ms, search ${LAT.search}ms, fetch ${LAT.fetch}ms, extract ${LAT.extract}ms)`,
+        `PIPELINE TIMING MODEL  (PERF_SCALE=${SCALE}; acquisition concurrency ${process.env.ATLAS_ACQUISITION_CONCURRENCY ?? "default 4"}, extraction concurrency ${process.env.ATLAS_EXTRACTION_CONCURRENCY ?? "default 4"}, component concurrency ${process.env.ATLAS_COMPONENT_CONCURRENCY ?? "default 3"}, search pipelining ${process.env.ATLAS_SEARCH_PIPELINING ?? "default on"}; modelled latencies proposer ${LAT.proposer}ms, search ${LAT.search}ms, fetch ${LAT.fetch}ms, extract ${LAT.extract}ms)`,
         `  components in work queue : ${t.components}`,
         `  memory planning          : ${fmt(t.memoryPlanningMs)}`,
         `  SEARCH phase             : ${fmt(t.searchMs)}   proposer calls ${c.proposer}, search calls ${c.search}`,
@@ -346,16 +346,25 @@ describe("SEQUENTIAL == CONCURRENT — the optimisation changes the waiting, nev
     // Both knobs: the default acquisition overlap AND the opt-in extraction
     // overlap, so the equivalence pin covers the whole machinery even while
     // extraction ships sequential.
-    const prevA = process.env.ATLAS_ACQUISITION_CONCURRENCY;
-    const prevE = process.env.ATLAS_EXTRACTION_CONCURRENCY;
+    // ENGINE SPEED PASS (2026-10-11): the component overlap (exact barrier
+    // semantics) and the SEARCH-phase pipelining join the same pin — the
+    // sequential run turns every knob off, the concurrent run turns every
+    // knob to its default.
+    const KNOBS = ["ATLAS_ACQUISITION_CONCURRENCY", "ATLAS_EXTRACTION_CONCURRENCY", "ATLAS_COMPONENT_CONCURRENCY", "ATLAS_SEARCH_PIPELINING"] as const;
+    const prev = Object.fromEntries(KNOBS.map((k) => [k, process.env[k]])) as Record<(typeof KNOBS)[number], string | undefined>;
     process.env.ATLAS_ACQUISITION_CONCURRENCY = "1";
     process.env.ATLAS_EXTRACTION_CONCURRENCY = "1";
+    process.env.ATLAS_COMPONENT_CONCURRENCY = "1";
+    process.env.ATLAS_SEARCH_PIPELINING = "0";
     const serial = await runModelledResearch();
     process.env.ATLAS_ACQUISITION_CONCURRENCY = "4";
     process.env.ATLAS_EXTRACTION_CONCURRENCY = "4";
+    process.env.ATLAS_COMPONENT_CONCURRENCY = "3";
+    process.env.ATLAS_SEARCH_PIPELINING = "1";
     const concurrent = await runModelledResearch();
-    if (prevA === undefined) delete process.env.ATLAS_ACQUISITION_CONCURRENCY; else process.env.ATLAS_ACQUISITION_CONCURRENCY = prevA;
-    if (prevE === undefined) delete process.env.ATLAS_EXTRACTION_CONCURRENCY; else process.env.ATLAS_EXTRACTION_CONCURRENCY = prevE;
+    for (const k of KNOBS) {
+      if (prev[k] === undefined) delete process.env[k]; else process.env[k] = prev[k];
+    }
 
     const picture = async (jobId: string) => {
       const { researchComponentResults, researchMechanismAssembly, researchClaimSupport, researchTraceEvents } = await import("../src/server/db/schema");

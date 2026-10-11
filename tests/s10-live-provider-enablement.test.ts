@@ -187,7 +187,7 @@ describe("S10 §3/§4 — role-qualified cost profiles resolve independently for
     expect(qp.maxInputTokens).toBe(4000);
     expect(qp.maxOutputTokens).toBe(512);
     expect(ee.maxInputTokens).toBe(48000);
-    expect(ee.maxOutputTokens).toBe(1536);
+    expect(ee.maxOutputTokens).toBe(4096);
   });
 });
 

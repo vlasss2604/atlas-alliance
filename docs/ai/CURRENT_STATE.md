@@ -47,7 +47,83 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
-## UI V7 — THE APPROVED FIGMA DIRECTION, APPLIED (uncommitted, awaiting visual review)
+## ENGINE SPEED + BUDGET ACCOUNTING (D-173 / D-174 / D-175) — IMPLEMENTED, OFFLINE-VERIFIED, UNCOMMITTED; BENCHMARK #2 NOT RUN
+
+Offline only; no live call, no new Research, no push, no commit. Measured baseline
+(Jito, job `b817eb99`, 2026-10-11, phased pipeline, claude-haiku-4-5):
+job started → finished 208.6 s (trace span 204.9 s); SEARCH ≈ 40 s
+(10 proposer calls, 12 Brave searches), FETCH ≈ 4.5 s (14 opens),
+EXTRACTING ≈ 163 s (34 extraction calls + 1 compact retry, 5 Solana reads).
+Terminal `BUDGET_LIMIT_REACHED` with 370,296 of 2,000,000 micro-USD spent.
+
+- **Budget settlement (D-173).** `settleJobBudgetReservation`
+  (`budget-reservation.ts`) releases `reserved − actual` for ONE completed
+  model call once the provider has reported priceable usage — downward
+  only, never below zero; one atomic conditional UPDATE, the same shape as
+  the reservation. Applied after the proposer call and after every
+  extraction call (compact retry included) in `s4-executor.ts`, and after
+  the SEARCH-phase proposer in `acquisition-phases.ts`. Admission is
+  unchanged: every real attempt still reserves the profile maximum first,
+  so in-flight exposure under concurrent calls never exceeds the cap. Not
+  settled (the maximum stays spent, as before): a failure before the
+  answer, `MAX_TOKENS_TRUNCATED` (no usage captured), an unsupported
+  billing category, a refused reservation, a replay provider. Root cause
+  of the false `BUDGET_EXHAUSTED`: 34 completed calls held 1,893,120 of
+  reservation; DURABILITY_BASIS's first call (+55,680) would have exceeded
+  the cap and was refused. `research_attempts.model_cost_micro_spent`
+  still records the authorized maximum (audit, frozen column).
+- **Output ceiling (D-174, OPEN).** `EVIDENCE_EXTRACTOR` profile
+  `maxOutputTokens` 1,536 → 4,096 (reservation per call 55,680 → 68,480;
+  revert is one number). The baseline's one truncation cost an 18.7 s
+  wasted call plus a 12.9 s compact retry.
+- **`research_attempts.completed_at`** is now the wall-clock completion
+  (`new Date()`), not the run's logical `now` (controller.ts,
+  run-job.ts). Nothing reads the column back into a decision.
+- **Component overlap, exact barrier semantics (D-175).** Under the phased
+  EXTRACTING replay the controller runs up to `ATLAS_COMPONENT_CONCURRENCY`
+  (default 3, ceiling 4; `1` = the sequential walk) components the
+  executor declares independent (`WorkExecutor.independentOfJobState`).
+  Barriers — the components with an on-chain intent, which read the job's
+  admitted locators and the on-chain reserve at step 0b: FLOW_PATH,
+  EXECUTION_EVIDENCE, CURRENT_STATE, DESTINATION, RECIPIENT, NET_EFFECT.
+  Independent: SOURCE_OF_VALUE, MECHANISM_SPEC, GOVERNANCE_BASIS,
+  DURABILITY_BASIS. A barrier starts only after every attempt in flight has
+  executed, persisted and reconciled; the items after it start once it
+  signals its step-0b read (`ctx.onJobStateRead`); the next barrier waits
+  for all. Claims stay one serialized transaction per item in queue order;
+  fair-share inputs are fixed at claim time to the sequential values;
+  results are reported in queue order; a failure stops new claims, lets
+  in-flight attempts complete and rethrows the first failure in queue
+  order. A live executor and a targeted pass stay sequential.
+  `observeSourceRouteCandidate` is serialized per project.
+- **Job-level extraction probe (D-175).** "One document at a time until
+  the round's first success" now runs once per job run (per executor
+  instance); after the first successful extraction every later round
+  overlaps from its first document. Fatal classes, the two-consecutive-
+  transient rule, in-order consumption, evidence and accounting unchanged.
+- **Job-wide extraction call gate (D-175).** `ATLAS_EXTRACTION_CALLS_PER_JOB`
+  (default 8, ceiling 16) bounds generation calls in flight across all
+  overlapped components; it changes only when a call starts.
+- **SEARCH-phase pipelining (D-175).** In `runSearchPhase` the next
+  component's plan, allowance, proposer reservation and proposer call start
+  while the previous component's searches run; every trace row, the dedup
+  ledger read, the reservations and the candidate order stay the
+  sequential loop's (pinned identical). `ATLAS_SEARCH_PIPELINING=0` restores
+  the loop.
+- **Not implemented, by rule:** relaxed component concurrency (locators
+  read as of attempt start), document-first prompt or any context
+  redesign, provider prompt caching, a weaker model, fewer components, any
+  evidence / verdict / admission change.
+- **Verified offline (2026-10-11):** 32 focused suites, 568 tests passed;
+  benchmark 161/161; `tsc` clean; lint 0 errors (45 pre-existing
+  warnings); `git diff --check` clean. **Benchmark #2 (live Jito) has not
+  been run.**
+- **Pinned:** `tests/budget-settlement-v1.test.ts` (13),
+  `tests/engine-speed-pass-v1.test.ts` (15), and the
+  SEQUENTIAL == CONCURRENT pin in `tests/perf-pipeline-timing-v1.test.ts`
+  now toggles all four knobs.
+
+## UI V7 — THE APPROVED FIGMA DIRECTION, APPLIED (committed `d0dafcc`, 2026-10-11; on-phone check pending)
 
 A visual pass over the real product, approved 2026-10-11 from the Figma
 references on the Founder's desktop (visual direction and screen

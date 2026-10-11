@@ -243,6 +243,19 @@ const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
 // than by restatement: `selectOnchainIntents` consults this first, so the
 // Pattern gate, the identity gate, the supported-chain gate and the
 // component -> intent map can never drift between the two answers.
+// WHETHER THIS COMPONENT'S ATTEMPT READS JOB-WIDE ON-CHAIN STATE AT ALL —
+// the STRUCTURAL half of componentAdmitsOnchainAcquisition, without the
+// identity and environment gates. The controller's component overlap asks
+// this to decide which components are barriers: a component with an
+// intent reads the job's admitted locators and the on-chain source-open
+// reserve at the start of its attempt, so it must see every earlier
+// component's evidence and nothing later — it runs alone. Deliberately
+// conservative: a component with an intent but no confirmed identity is
+// still treated as a barrier (it over-serializes, never under).
+export function componentHasOnchainIntent(component: string): boolean {
+  return (INTENTS_BY_COMPONENT[component] ?? []).length > 0;
+}
+
 export function componentAdmitsOnchainAcquisition(input: {
   component: string;
   establishingClasses: readonly EvidenceSourceClass[];

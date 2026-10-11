@@ -45,6 +45,89 @@ export function acquisitionConcurrency(): number {
   return 4;
 }
 
+// COMPONENT OVERLAP — EXACT BARRIER SEMANTICS (engine speed pass,
+// 2026-10-11). How many INDEPENDENT components the controller may have in
+// flight at once under the phased EXTRACTING replay (controller.ts). A
+// component whose attempt reads job-wide evidence state — every component
+// with an on-chain intent — is a barrier and still runs alone, after
+// everything before it and before everything after it, so what it reads
+// is byte-identical to the sequential walk. Default 3 (Founder preference),
+// ceiling 4; `1` is the sequential controller exactly.
+export function componentConcurrency(): number {
+  const raw = process.env.ATLAS_COMPONENT_CONCURRENCY;
+  const n = raw === undefined ? NaN : Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= 4) return n;
+  return 3;
+}
+
+// The JOB-WIDE ceiling on extraction model calls in flight, across every
+// overlapped component. Component overlap (3) × per-component extraction
+// overlap (4) would otherwise put up to 12 generation calls on the provider
+// at once; this gate bounds the aggregate so a rate limit is not
+// manufactured by our own fan-out. Default 8, ceiling 16; `4` reproduces
+// the aggregate load of the sequential controller. Changes only WHEN a
+// call starts, never which calls are made or how they are reserved.
+export function extractionCallsPerJob(): number {
+  const raw = process.env.ATLAS_EXTRACTION_CALLS_PER_JOB;
+  const n = raw === undefined ? NaN : Number(raw);
+  if (Number.isInteger(n) && n >= 1 && n <= 16) return n;
+  return 8;
+}
+
+// SEARCH PIPELINING (acquisition-phases.ts runSearchPhase): while one
+// component's searches are in flight, the next component's plan, allowance,
+// proposer reservation and proposer call may begin. Every observable order
+// — allowance inputs, reservations, trace rows, candidate order — is the
+// sequential loop's; only the proposer's network wait overlaps. On by
+// default; ATLAS_SEARCH_PIPELINING=0 restores the strictly sequential loop.
+export function searchPipelining(): boolean {
+  const raw = process.env.ATLAS_SEARCH_PIPELINING;
+  return !(raw === "0" || raw === "false" || raw === "off");
+}
+
+// A FIFO counting semaphore: at most `limit` callers inside `run` at once,
+// admitted in arrival order. Used for the job-wide extraction call gate.
+export interface Semaphore {
+  run<T>(fn: () => Promise<T>): Promise<T>;
+  readonly active: number;
+}
+
+export function createSemaphore(limit: number): Semaphore {
+  const max = Math.max(1, Math.floor(limit));
+  let active = 0;
+  const waiters: Array<() => void> = [];
+  const acquire = (): Promise<void> =>
+    new Promise((resolve) => {
+      if (active < max) {
+        active += 1;
+        resolve();
+      } else {
+        waiters.push(() => {
+          active += 1;
+          resolve();
+        });
+      }
+    });
+  const release = (): void => {
+    active -= 1;
+    const next = waiters.shift();
+    if (next) next();
+  };
+  return {
+    get active() {
+      return active;
+    },
+    async run<T>(fn: () => Promise<T>): Promise<T> {
+      await acquire();
+      try {
+        return await fn();
+      } finally {
+        release();
+      }
+    },
+  };
+}
+
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
   limit: number,

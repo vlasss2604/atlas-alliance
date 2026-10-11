@@ -88,10 +88,12 @@ export interface RunJobOptions {
 // that spent what was left, not a job-level stop: the attempt is closed
 // deterministically and the job finalizes on what it established. The
 // remaining known paths stay on the record as RECOVERY_BOUND_REACHED.
-async function closeRecoveryStoppedByBudget(db: Database | Transaction, jobId: string, axis: string, now: Date): Promise<void> {
+// `completed_at` is the wall-clock moment of the close, never the run's
+// logical clock (see controller.ts for why).
+async function closeRecoveryStoppedByBudget(db: Database | Transaction, jobId: string, axis: string): Promise<void> {
   await db
     .update(researchAttempts)
-    .set({ status: "SKIPPED", reason: `RECOVERY_BUDGET_EXHAUSTED:${axis}`, completedAt: now })
+    .set({ status: "SKIPPED", reason: `RECOVERY_BUDGET_EXHAUSTED:${axis}`, completedAt: new Date() })
     .where(and(eq(researchAttempts.researchJobId, jobId), eq(researchAttempts.status, "STARTED"), gt(researchAttempts.attemptNumber, 1)));
 }
 
@@ -154,7 +156,7 @@ export async function runS4ResearchJob(
     // A scoped (phased) recovery cycle that hit the hard envelope is a
     // recovery round stopped by the budget, exactly as in the loop below.
     if (scope && e instanceof BudgetExhaustedError) {
-      await closeRecoveryStoppedByBudget(db, jobId, e.axis, now);
+      await closeRecoveryStoppedByBudget(db, jobId, e.axis);
       recoveryStoppedByBudget = true;
       result = {
         stopReason: "WORK_QUEUE_EXHAUSTED",
@@ -421,7 +423,7 @@ export async function runS4ResearchJob(
         });
       } catch (e) {
         if (!(e instanceof BudgetExhaustedError)) throw e;
-        await closeRecoveryStoppedByBudget(db, jobId, e.axis, now);
+        await closeRecoveryStoppedByBudget(db, jobId, e.axis);
         recoveryStoppedByBudget = true;
         result = { ...result, targetedRecovery: plan };
         break;

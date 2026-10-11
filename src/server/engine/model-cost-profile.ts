@@ -99,12 +99,25 @@ const PRODUCTION_MODEL_COST_PROFILES: Record<string, ModelCostProfile> = {
     maxOutputTokens: 512,
     priceVersion: "anthropic-2026-08",
   },
+  // OUTPUT CEILING 4,096 (was 1,536) — PROPOSED WITH THE 2026-10-11 ENGINE
+  // SPEED PASS, AWAITING FOUNDER APPROVAL. The FULL extraction may return
+  // up to FULL_EXTRACTION_MAX_FACTS (20) facts, each carrying a statement,
+  // a literal excerpt, a caveat and cues; a rich official page therefore
+  // legitimately needs more than 1,536 output tokens, and the measured
+  // Jito baseline hit `stop_reason: max_tokens` on exactly such a page
+  // (one wasted 18.7 s call, then a 12.9 s COMPACT retry asking for LESS).
+  // Raising the ceiling changes no prompt, no schema, no admission rule
+  // and no evidence requirement; it only lets the model finish the answer
+  // it was asked for. Reservation per call: 48,000 + 4,096 × 5 = 68,480
+  // micro-USD (was 55,680) — transient exposure only, since a completed
+  // call now settles to its actual cost (budget-reservation.ts, D-173).
+  // Revert: this one number.
   [catalogueKey("EVIDENCE_EXTRACTOR", "claude-haiku-4-5")]: {
     modelId: "claude-haiku-4-5",
     inputPriceMicroUsdPerToken: 1,
     outputPriceMicroUsdPerToken: 5,
     maxInputTokens: 48_000,
-    maxOutputTokens: 1_536,
+    maxOutputTokens: 4_096,
     priceVersion: "anthropic-2026-08",
   },
   // The projection sees a compact status summary — never a document, a
@@ -167,11 +180,14 @@ export function calculateMaxAuthorizedCostMicro(profile: ModelCostProfile): numb
 
 // S10 (live-provider-enablement.md §7) — actual cost from REAL provider
 // usage, priced with the SAME approved profile used to reserve the call
-// (never a dynamic pricing lookup). AUDIT ONLY: never subtracted from or
-// compared against research_jobs.*Reserved — the reservation computed by
-// calculateMaxAuthorizedCostMicro above remains the sole execution
-// authority (owner decision, explicit: "do not refund reservations, do
-// not decrement reserved counters using actual usage").
+// (never a dynamic pricing lookup). The reservation computed by
+// calculateMaxAuthorizedCostMicro above remains the sole ADMISSION
+// authority: no call is admitted on an estimate, and nothing is ever
+// adjusted upward. Since D-173 (the separately approved downward rule
+// D-090 anticipated) this figure is also what a COMPLETED call's
+// reservation is settled down to — see budget-reservation.ts
+// settleJobBudgetReservation: known cost replaces the theoretical maximum,
+// never the other way round, and only once the provider has reported it.
 export function calculateActualCostMicro(profile: ModelCostProfile, usage: { inputTokens: number; outputTokens: number }): number {
   return usage.inputTokens * profile.inputPriceMicroUsdPerToken + usage.outputTokens * profile.outputPriceMicroUsdPerToken;
 }
