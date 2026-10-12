@@ -850,6 +850,9 @@ describe("UI — no project-specific conclusion", () => {
       // D-172: Pulse's offline cards are invented sample DATA (marked as
       // such on screen), not a code path that knows a project.
       if (file.endsWith("pulse-fixtures.ts")) continue;
+      // V7: the Explore strip's development fixture is the designer's
+      // sample DATA, never served in a production build (showcase-proofs.ts).
+      if (file.endsWith("showcase-fixtures.ts")) continue;
       let src = readFileSync(file, "utf-8");
       if (file.endsWith("research-composer.tsx")) {
         src = src.replace(/const EXAMPLES = \[[\s\S]*?\] as const;/, "");

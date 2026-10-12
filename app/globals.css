@@ -378,8 +378,8 @@ button.card:active,
 /* The one accented word of a screen title — "verify?", "Library": the
    mark's electric cyan with a faint halo. */
 .accent {
-  color: var(--atlas-cyan-strong);
-  text-shadow: 0 0 18px rgba(30, 197, 245, 0.35);
+  color: var(--atlas-cyan);
+  text-shadow: 0 0 24px rgba(30, 197, 245, 0.55);
 }
 
 /* ---------------------------------------------------------------- *
@@ -1590,6 +1590,393 @@ button.card:active,
 }
 
 /* ---------------------------------------------------------------- *
+ * V7 VERIFY (HANDOFF §4.1, §4.1a) — title, the input box, examples,
+ * Explore ATLAS Proofs and the Previously researched strip.
+ * ---------------------------------------------------------------- */
+.verify-title {
+  margin: 0;
+  max-width: 330px;
+  font-size: 36px;
+  line-height: 1.02;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--atlas-text-strong);
+}
+.verify-sub {
+  max-width: 310px;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--atlas-text-dim);
+}
+/* A section heading on a V7 screen: 20/24, 800. */
+.section-title {
+  margin: 0;
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--atlas-text-strong);
+}
+/* Uppercase label: 12/16, 700, 0.08em. */
+.label-caps {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--atlas-text-faint);
+}
+/* The one input box: 64px, radius 20, a 1.5px cyan edge and a static
+   soft glow (it never pulses). The field grows with its text; the glass
+   stays on the first line and the send square at the bottom. */
+.composer-box {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  min-height: 64px;
+  box-sizing: border-box;
+  padding: 7px 7px 7px 18px;
+  border-radius: var(--radius-card);
+  background: linear-gradient(180deg, #04182c 0%, #03111f 100%);
+  border: 1.5px solid rgba(30, 197, 245, 0.7);
+  box-shadow:
+    0 0 0 5px rgba(30, 197, 245, 0.06),
+    0 0 22px rgba(30, 197, 245, 0.18);
+}
+.composer-glass {
+  flex: none;
+  align-self: flex-start;
+  margin-top: 14px;
+  color: var(--atlas-cyan);
+}
+.composer-field {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 13px 0;
+  font-size: 15px;
+  line-height: 22px;
+  color: var(--atlas-text);
+}
+.composer-field::placeholder {
+  color: #7f93a8;
+  /* One line, like the mockup's input: a long RU placeholder ends in an
+     ellipsis instead of wrapping into a clipped second line. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.send-square {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 15px;
+  color: var(--on-cyan);
+  background: linear-gradient(180deg, var(--atlas-cyan-light) 0%, var(--atlas-cyan-press) 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 6px 18px rgba(30, 197, 245, 0.5);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    opacity var(--motion-micro) var(--ease-out);
+}
+.send-square:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.send-square:disabled {
+  opacity: 0.85;
+}
+.send-square .pulse-dot {
+  background: var(--on-cyan);
+  box-shadow: none;
+}
+/* The example chips: full-width rows with a small cyan glass. */
+.composer-chips .chip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 11px 14px 11px 12px;
+  border-radius: var(--radius-chip);
+  background: rgba(30, 197, 245, 0.07);
+  border: 1px solid rgba(30, 197, 245, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #dce4ec;
+  font-size: 13.5px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.composer-chips .chip:active {
+  transform: scale(0.97);
+}
+.chip-glass {
+  flex: none;
+  margin-top: 2px;
+  color: var(--atlas-cyan);
+}
+/* The "From Pulse" pill above the title. */
+.from-pulse {
+  align-self: flex-start;
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 8px 12px 8px 10px;
+  border-radius: var(--radius-chip);
+  background: rgba(30, 197, 245, 0.08);
+  border: 1px solid rgba(30, 197, 245, 0.32);
+  box-shadow: 0 0 18px -8px rgba(30, 197, 245, 0.7);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--atlas-text-dim);
+}
+.from-pulse-icon {
+  flex: none;
+  margin-top: 1px;
+  color: var(--atlas-cyan);
+}
+/* The static decorative ring behind the top-right corner. */
+.verify-ring {
+  position: absolute;
+  top: -40px;
+  right: -120px;
+  width: 260px;
+  height: 260px;
+  pointer-events: none;
+}
+/* A horizontal snap strip that bleeds to the screen edges. */
+.snap-strip {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0 16px;
+  margin: -6px -16px 0;
+  padding: 6px 16px 14px;
+  scrollbar-width: none;
+  list-style: none;
+}
+.snap-strip::-webkit-scrollbar {
+  display: none;
+}
+.snap-strip > li {
+  flex: none;
+  scroll-snap-align: start;
+}
+@media (min-width: 640px) {
+  .snap-strip {
+    margin: -6px -32px 0;
+    padding: 6px 32px 14px;
+    scroll-padding: 0 32px;
+  }
+}
+/* "Free to read" chip — green-tinted, used only for what is free to read. */
+.free-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 20px;
+  box-sizing: border-box;
+  padding: 0 8px;
+  border-radius: 10px;
+  background: rgba(53, 209, 162, 0.1);
+  border: 1px solid rgba(53, 209, 162, 0.4);
+  color: #8fecd0;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.free-chip-sm {
+  flex: none;
+  height: 24px;
+  padding: 0 8px 0 7px;
+  border-radius: 12px;
+  font-size: 10.5px;
+}
+/* The colour of a card follows its verdict tone — the same closed mapping
+   as the pills. */
+[data-tone="supported"] {
+  --tone: var(--atlas-green);
+}
+[data-tone="partial"] {
+  --tone: var(--atlas-amber);
+}
+[data-tone="insufficient"] {
+  --tone: var(--atlas-slate);
+}
+[data-tone="negative"] {
+  --tone: var(--atlas-red);
+}
+[data-tone="fault"],
+[data-tone="neutral"] {
+  --tone: var(--system-grey);
+}
+.explore-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 272px;
+  min-height: 236px;
+  height: 100%;
+  box-sizing: border-box;
+  padding: 16px;
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  color: var(--atlas-text);
+  background:
+    radial-gradient(120% 80% at 0% 0%, color-mix(in srgb, var(--tone) 18%, transparent) 0%, rgba(8, 38, 66, 0) 60%),
+    var(--hero-gradient);
+  border: 1px solid color-mix(in srgb, var(--tone) 50%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 40px -16px rgba(0, 0, 0, 0.85),
+    0 0 30px -8px color-mix(in srgb, var(--tone) 55%, transparent);
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+a.explore-card:active {
+  transform: scale(0.97);
+}
+.explore-card-line {
+  position: absolute;
+  top: 0;
+  left: 18%;
+  right: 18%;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0) 0%, var(--tone) 50%, rgba(255, 255, 255, 0) 100%);
+}
+.explore-card-review {
+  background: rgba(3, 17, 31, 0.5);
+  border: 1px dashed rgba(148, 160, 179, 0.3);
+  box-shadow: none;
+}
+.explore-question {
+  flex: 1;
+  font-size: 18px;
+  line-height: 24px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
+  color: var(--atlas-text);
+}
+.explore-question-dim {
+  color: var(--atlas-text-dim);
+}
+.explore-read {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(30, 197, 245, 0.12);
+  color: var(--atlas-cyan-strong);
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 700;
+}
+.explore-review {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 160, 179, 0.15);
+  color: var(--atlas-text-mute);
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+}
+/* A compact pill (26px) inside cards. */
+.tone-sm {
+  height: 26px;
+  box-sizing: border-box;
+  padding: 0 11px 0 9px;
+  font-size: 12px;
+  line-height: 1;
+}
+.tone-sm::before {
+  width: 7px;
+  height: 7px;
+}
+/* Previously researched: a 236×204 snap card, tinted by its outcome. */
+.recent-card {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 236px;
+  height: 204px;
+  box-sizing: border-box;
+  padding: 16px;
+  border-radius: var(--radius-panel);
+  color: var(--atlas-text);
+  background:
+    radial-gradient(130% 90% at 0% 0%, color-mix(in srgb, var(--tone, var(--system-grey)) 21%, transparent) 0%, transparent 55%),
+    linear-gradient(180deg, #072641 0%, #061b30 100%);
+  border: 1px solid color-mix(in srgb, var(--tone, var(--system-grey)) 42%, transparent);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 18px 34px -14px rgba(0, 0, 0, 0.75),
+    0 0 26px -8px color-mix(in srgb, var(--tone, var(--system-grey)) 45%, transparent);
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.recent-card:active {
+  transform: scale(0.97);
+}
+.recent-card-skeleton {
+  --tone: var(--system-grey);
+  opacity: 0.6;
+}
+.recent-card-question {
+  flex: 1;
+  min-height: 0;
+  max-height: 66px; /* three lines; the box must not show a fourth */
+  align-self: stretch;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 700;
+}
+.verdict-glyph {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 30px;
+  height: 30px;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  color: var(--tone);
+  background: color-mix(in srgb, var(--tone) 16%, transparent);
+  border: 1.5px solid var(--tone);
+  box-shadow: 0 0 16px -2px color-mix(in srgb, var(--tone) 70%, transparent);
+}
+
+/* V7 ENTRANCE (HANDOFF §4.9): once per screen, opacity + 8px rise,
+   0.32s; items stagger at most ~40ms; everything settles by ~0.4s. */
+@keyframes ap-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: ap-rise 320ms var(--ease-rise) backwards;
+}
+
+/* ---------------------------------------------------------------- *
  * MOTION
  * ---------------------------------------------------------------- */
 @keyframes atlas-fade-up {
@@ -1672,8 +2059,16 @@ button.card:active,
 @media (prefers-reduced-motion: reduce) {
   .enter,
   .sheet-enter,
-  .expand-enter {
+  .expand-enter,
+  .rise {
     animation: none;
+  }
+  .send-square,
+  .recent-card,
+  .explore-card,
+  .composer-chips .chip {
+    transition: none;
+    transform: none;
   }
   .pulse-dot {
     animation: none;
@@ -1705,6 +2100,9 @@ button.card:active,
    screen there is no dock. */
 .app-column {
   padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 8.5rem);
+  /* Decoration and edge-bleeding strips never widen the page. `clip`
+     (not `hidden`) creates no scroll container. */
+  overflow-x: clip;
 }
 @media (min-width: 640px) {
   .app-column {

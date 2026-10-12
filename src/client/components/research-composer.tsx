@@ -30,7 +30,9 @@ type Phase = "input" | "thinking" | "result" | "starting";
 // `initialQuestion` (D-172): text a Pulse card handed over, dropped into
 // the same editable field a typed question uses. It changes nothing after
 // that — the flow below is untouched.
-export function ResearchComposer({ hero = false, initialQuestion = "" }: { hero?: boolean; initialQuestion?: string }) {
+// `notice` (V7): a line the screen places above the title — the "From
+// Pulse" pill. Presentation only.
+export function ResearchComposer({ initialQuestion = "", notice = null }: { initialQuestion?: string; notice?: React.ReactNode }) {
   const { dict, refresh } = useApp();
   const router = useRouter();
   const [question, setQuestion] = useState(initialQuestion);
@@ -164,68 +166,64 @@ export function ResearchComposer({ hero = false, initialQuestion = "" }: { hero?
 
   const canStart = canStartProof(subject);
 
-  // V7 (the approved Figma direction): the composer is a left-aligned card
-  // led by the search emblem, the title's last word lit, a pill field that
-  // grows, the solid cyan send disc, and the examples as a column of chips.
+  // V7 (docs/design/v7, HANDOFF §4.1): the title 36/800 with its last word
+  // lit, the subtitle, one 64px input box (search glass · growing field ·
+  // 48px cyan send square) with a static soft glow, and the examples as a
+  // column of chips that prefill the field.
   return (
-    <section data-testid="composer" className="text-left">
-      <div className={hero ? "flex items-start gap-4" : ""}>
-        {hero && (
-          <span className="composer-orb shrink-0" aria-hidden>
-            <AskIcon size={22} strokeWidth={1.8} />
-          </span>
-        )}
-        <div className="min-w-0 flex-1">
-          <h1 className="display text-[1.55rem] font-semibold leading-[1.15] text-[var(--atlas-text-strong)] sm:text-[1.9rem]">
-            <AccentTitle text={dict.composer.title} />
-          </h1>
-          <p className="mt-1.5 text-[1rem] text-[var(--atlas-text-dim)]">{dict.composer.subtitle}</p>
-        </div>
+    <section data-testid="composer" className="flex flex-col gap-5 text-left">
+      {notice}
+      <div className="flex flex-col gap-3">
+        <h1 className="verify-title rise">
+          <AccentTitle text={dict.composer.title} />
+        </h1>
+        <p className="verify-sub rise" style={{ animationDelay: "32ms" }}>
+          {dict.composer.subtitle}
+        </p>
       </div>
 
       {phase === "input" || phase === "thinking" ? (
         <>
-          <div className="mt-5 flex items-end gap-2.5">
-            <div className="field field-pill flex flex-1 items-start gap-3 px-4 py-[0.8rem] text-left">
-              <AskIcon size={18} className="field-icon mt-[0.2rem]" />
-              <textarea
-                ref={fieldRef}
-                rows={1}
-                value={question}
-                onChange={(e) => setQuestion(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && !e.shiftKey) {
-                    e.preventDefault();
-                    void submit();
-                  }
-                }}
-                placeholder={dict.composer.placeholder}
-                maxLength={2000}
-                aria-label={dict.composer.title}
-                data-testid="composer-input"
-                disabled={phase === "thinking"}
-                className="field-grow text-[1.05rem]"
-              />
-            </div>
+          <div className="composer-box rise" style={{ animationDelay: "63ms" }}>
+            <AskIcon size={20} strokeWidth={2.2} className="composer-glass" />
+            <textarea
+              ref={fieldRef}
+              rows={1}
+              value={question}
+              onChange={(e) => setQuestion(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  void submit();
+                }
+              }}
+              placeholder={dict.composer.placeholder}
+              maxLength={2000}
+              aria-label={dict.composer.title}
+              data-testid="composer-input"
+              disabled={phase === "thinking"}
+              className="field-grow composer-field"
+            />
             <button
               type="button"
               onClick={() => void submit()}
               disabled={!question.trim() || phase === "thinking"}
               aria-label={dict.ask.continue}
               data-testid="composer-submit"
-              className="send-orb h-[52px] w-[52px] shrink-0"
+              className="send-square"
             >
-              {phase === "thinking" ? <span className="pulse-dot" aria-hidden /> : <ArrowIcon size={22} />}
+              {phase === "thinking" ? <span className="pulse-dot" aria-hidden /> : <ArrowIcon size={20} strokeWidth={2.6} />}
             </button>
           </div>
 
-          <div className="mt-5">
-            <p className="text-[0.8rem] font-semibold uppercase tracking-[0.08em] text-[var(--atlas-text-faint)]">{dict.composer.tryAsking}</p>
-            <ul className="composer-chips mt-2.5 flex flex-col gap-2" data-testid="composer-examples">
+          <div className="flex flex-col gap-2.5 rise" style={{ animationDelay: "94ms" }}>
+            <p className="label-caps">{dict.composer.tryAsking}</p>
+            <ul className="composer-chips flex flex-col gap-2" data-testid="composer-examples">
               {dict.ask.examples.map((ex) => (
                 <li key={ex}>
                   <button type="button" onClick={() => setQuestion(ex)} className="chip" data-testid="composer-example">
-                    {ex}
+                    <AskIcon size={16} strokeWidth={2.2} className="chip-glass" />
+                    <span>{ex}</span>
                   </button>
                 </li>
               ))}

@@ -265,6 +265,17 @@ export const en = {
     placeholder: "Ask or paste a link…",
     tryAsking: "Try asking",
   },
+  // V7 — "Explore ATLAS Proofs" on Verify (HANDOFF §4.1a, §5a): the
+  // published read-only Proofs, free to read.
+  explore: {
+    title: "Explore ATLAS Proofs",
+    free: "Free to read",
+    sub: "Real research you can open before running your own. Reading a Proof never uses a Research.",
+    checked: "Checked",
+    read: "Read the Proof",
+    inReview: "In quality review · coming soon",
+    note: "Checked on a date means what the evidence showed then, not that it holds now.",
+  },
   progress: {
     title: "Research process",
     // Keyed by the presentation stage (research-model RESEARCH_STAGES);

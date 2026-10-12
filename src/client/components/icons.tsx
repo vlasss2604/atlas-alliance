@@ -215,7 +215,7 @@ export function ProfileIcon(p: IconProps) {
 }
 export function ArrowIcon(p: IconProps) {
   return (
-    <Svg {...p} strokeWidth={1.8}>
+    <Svg strokeWidth={1.8} {...p}>
       <path d="M4 10h11m0 0-4.2-4.2M15 10l-4.2 4.2" />
     </Svg>
   );
