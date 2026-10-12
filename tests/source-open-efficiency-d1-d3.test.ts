@@ -508,10 +508,19 @@ describe("D3 — documents fetched before the source-open axis was refused are e
     expect(await reservedOpens(jobId)).toBe(0);
   });
 
-  it("no refund is possible: the reservation module still has no decrement and the executor never touches the counter directly", () => {
+  it("no refund is possible: the reservation module's only decrement is the D-173 settlement of a COMPLETED call, and the executor never touches the counter directly", () => {
     const reservation = readFileSync("src/server/engine/budget-reservation.ts", "utf-8");
     expect(reservation).toContain("A reservation is never refunded on failure");
-    expect(reservation).not.toMatch(/SET\s+\$\{column\}\s*=\s*\$\{column\}\s*-/);
+    // D-173 (accepted, 77368b8): a completed model call settles its
+    // reservation down to its actual cost. That is the ONE decrement, and
+    // it lives in settleJobBudgetReservation; a failure path still has none.
+    const decrements = [...reservation.matchAll(/SET\s+\$\{column\}\s*=\s*\$\{column\}\s*-/g)];
+    expect(decrements).toHaveLength(1);
+    const settleStart = reservation.indexOf("export async function settleJobBudgetReservation(");
+    const settleEnd = reservation.indexOf("\nexport ", settleStart + 1);
+    expect(settleStart).toBeGreaterThan(0);
+    expect(decrements[0].index!).toBeGreaterThan(settleStart);
+    expect(decrements[0].index!).toBeLessThan(settleEnd);
     const executor = readFileSync("src/server/engine/s4-executor.ts", "utf-8");
     expect(executor).not.toMatch(/source_opens_reserved\s*[-=]/);
     expect(executor).not.toMatch(/sourceOpensReserved\s*[-:]\s*sql/);

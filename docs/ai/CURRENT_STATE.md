@@ -47,7 +47,16 @@ Where the system actually is. Not a history — for that, `git log --oneline`.
   technical boundaries, recovery, call counts, cost and latency model) to
   that file, because the default reporter swallows test stdout.
 
-## RESEARCH QUALITY V1 (D-176) — IMPLEMENTED, OFFLINE-VERIFIED, UNCOMMITTED; LIVE QUALITY BENCHMARK NOT RUN
+## D-176 ANCHOR SCOPE FIX (D-178) — IMPLEMENTED, OFFLINE-VERIFIED, UNCOMMITTED
+
+The mechanism anchor applies only to a claim that asserts a mechanism,
+read from the REQUIRED requirement kinds (`claimAssertsMechanism`):
+FLOW_RELATIONSHIP or NET_EFFECT_ESTABLISHED. Anchored in Pattern v1: PRT,
+RS, UTL, VC, BSE. Not anchored: TOKEN_UTILITY, PASSIVE_HOLDER_OUTCOME,
+MECHANISM_CURRENT_STATE. Fixes the 8 regressions `d24786e` introduced;
+round-7 C2 / C4 expectations updated where they pinned the Jito defect.
+
+## RESEARCH QUALITY V1 (D-176) — COMMITTED `d24786e`; LIVE QUALITY BENCHMARK NOT RUN
 
 Global, project-general rules from the two live Jito runs (`b817eb99`,
 `d3b7cd2c`): the same question was classified as two intents and moved

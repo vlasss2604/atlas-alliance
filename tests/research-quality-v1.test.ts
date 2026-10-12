@@ -3,7 +3,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { interpretations, projectMemoryItems, projects, researchAttempts, researchJobs, sources, topics, users } from "../src/server/db/schema";
 import { loadFetchTargets, runSearchPhase } from "../src/server/engine/acquisition-phases";
-import { evaluateClaimSupport, MECHANISM_ANCHOR_COMPONENTS, type ClaimEvaluationInput } from "../src/server/engine/claim-evaluator";
+import {
+  claimAssertsMechanism,
+  evaluateClaimSupport,
+  MECHANISM_ANCHOR_COMPONENTS,
+  MECHANISM_ASSERTING_REQUIREMENT_KINDS,
+  type ClaimEvaluationInput,
+} from "../src/server/engine/claim-evaluator";
 import type { ComponentWorkItem } from "../src/server/engine/contract-view";
 import { runResearchController, type WorkExecutor } from "../src/server/engine/controller";
 import { loadJobContractView } from "../src/server/engine/job-contract-view";
@@ -226,6 +232,75 @@ describe("P0 — verdict relevance: a claim is anchored to its mechanism", () =>
     // Durability likewise rests on the mechanism it is about.
     const durable = flow({ lineage: [step(1, "SOURCE_OF_VALUE", ["e1"])], nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"])], durability: durability("SUPPORTED", ["e9"]) });
     expect(evaluateClaimSupport(evalInput("PROTOCOL_REVENUE_TO_TOKEN", [durable])).status).toBe("INSUFFICIENT_EVIDENCE");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// D-176 SCOPE FIX — the anchor applies only to a claim that asserts a mechanism
+// ---------------------------------------------------------------------------
+
+describe("D-176 scope: the anchor applies only where the claim itself asserts a mechanism", () => {
+  const requirementsOf = (intent: string) => PATTERN_V1_CONTENT.intentRequirements![intent].requirements;
+
+  it("decided from the Pattern's own requirement kinds: a value movement (FLOW_RELATIONSHIP) or a supply effect (NET_EFFECT) asserts a mechanism; a component, an attribute, a lifecycle does not", () => {
+    const asserting = Object.keys(PATTERN_V1_CONTENT.intentRequirements!)
+      .filter((i) => claimAssertsMechanism(requirementsOf(i)))
+      .sort();
+    expect(asserting).toEqual(["BURN_OR_SUPPLY_EFFECT", "PROTOCOL_REVENUE_TO_TOKEN", "REWARD_SOURCE", "USAGE_TO_TOKEN_LINKAGE", "VALUE_CAPTURE"]);
+    expect([...MECHANISM_ASSERTING_REQUIREMENT_KINDS].sort()).toEqual(["FLOW_RELATIONSHIP", "NET_EFFECT_ESTABLISHED"]);
+    // Only a REQUIRED atom asserts anything: an optional relationship does not.
+    expect(claimAssertsMechanism([{ requirementId: "X-1", kind: "FLOW_RELATIONSHIP", optionality: "OPTIONAL", relationshipFrom: "SOURCE_OF_VALUE", relationshipTo: "DESTINATION" }])).toBe(false);
+    expect(claimAssertsMechanism([{ requirementId: "X-1", kind: "COMPONENT_ESTABLISHED", optionality: "REQUIRED", components: ["SOURCE_OF_VALUE"] }])).toBe(false);
+  });
+
+  // One evidence world: revenue established on a flow with NO mechanism.
+  const revenueOnly = () =>
+    flow({
+      lineage: [step(1, "SOURCE_OF_VALUE", ["e1"]), step(6, "DESTINATION", ["e2"])],
+      nodes: [node("VALUE_SOURCE", "SOURCE_OF_VALUE", "SUPPORTED", ["e1"]), node("DESTINATION", "DESTINATION", "SUPPORTED", ["e2"])],
+      attributes: attrs({ valueSource: "FEES", destinationKind: "BURN" }),
+      shape: "COMPLETE_PATH",
+    });
+
+  it("'Does the protocol generate revenue?' (a component claim) keeps its verdict without any mechanism component", () => {
+    const r = evaluateClaimSupport(evalInput("TOKEN_UTILITY", [revenueOnly()]));
+    expect(r.status).toBe("SUPPORTED");
+    expect(r.reasonCodes).not.toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+  });
+
+  it("'Does protocol revenue fund token buybacks?' (a value-movement claim) over the SAME evidence is anchored: INSUFFICIENT_EVIDENCE until the mechanism is established, then SUPPORTED", () => {
+    const bare = evaluateClaimSupport(evalInput("PROTOCOL_REVENUE_TO_TOKEN", [revenueOnly()]));
+    expect(bare.status).toBe("INSUFFICIENT_EVIDENCE");
+    expect(bare.reasonCodes).toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    expect(bare.requirementResults.every((x) => x.status === "SATISFIED")).toBe(true); // atoms untouched
+    const anchored = evaluateClaimSupport(evalInput("PROTOCOL_REVENUE_TO_TOKEN", [withMechanism(revenueOnly())]));
+    expect(anchored.status).toBe("SUPPORTED");
+    // Every mechanism-asserting intent stays anchored over a mechanism-free flow.
+    for (const intent of ["REWARD_SOURCE", "USAGE_TO_TOKEN_LINKAGE", "VALUE_CAPTURE"]) {
+      const r = evaluateClaimSupport(evalInput(intent, [{ ...revenueOnly(), netEffect: netEffect("SUPPORTED", ["e8"]) }]));
+      expect(r.status, intent).toBe("INSUFFICIENT_EVIDENCE");
+      expect(r.reasonCodes, intent).toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    }
+  });
+
+  it("a lifecycle/status claim reads its own state components: 'is it live?' with a current state and no spec stays SUPPORTED", () => {
+    const live = flow({
+      lineage: [step(5, "CURRENT_STATE", ["e4"])],
+      lifecycle: "CURRENT",
+    });
+    const r = evaluateClaimSupport(evalInput("MECHANISM_CURRENT_STATE", [live]));
+    expect(r.reasonCodes).not.toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    expect(r.status).toBe("SUPPORTED");
+  });
+
+  it("an attribute claim ('who receives it?') is never anchored", () => {
+    const holders = flow({
+      lineage: [step(6, "RECIPIENT", ["e3"])],
+      attributes: attrs({ recipientKind: "PASSIVE_HOLDER" }),
+    });
+    const r = evaluateClaimSupport(evalInput("PASSIVE_HOLDER_OUTCOME", [holders]));
+    expect(r.reasonCodes).not.toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    expect(r.status).not.toBe("INSUFFICIENT_EVIDENCE");
   });
 });
 

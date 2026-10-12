@@ -590,9 +590,10 @@ const VERDICT_RANK: Record<ClaimRequirementStatus, number> = { SATISFIED: 0, PAR
 // THE MECHANISM ANCHOR (Research Quality V1, D-176).
 //
 // AN UPSTREAM ECONOMIC FACT MAY BE ESTABLISHED WITHOUT SUPPORTING THE
-// USER'S ASSERTED MECHANISM. Every in-scope intent is a claim about a
-// Token Value Capture MECHANISM — a buyback, a burn, a fee share, a
-// reward programme. The atoms a requirement set names are the economics
+// USER'S ASSERTED MECHANISM. A claim that value MOVES from a source to a
+// destination, or that it has a supply EFFECT, is a claim about a Token
+// Value Capture MECHANISM — a buyback, a burn, a fee share, a reward
+// programme. The atoms such a requirement set names are the economics
 // around that mechanism: where value comes from (SOURCE_OF_VALUE), where
 // it ends up (DESTINATION), whether supply changed (NET_EFFECT). Those
 // atoms can hold on a flow that carries NO mechanism at all: "priority
@@ -628,7 +629,36 @@ const VERDICT_RANK: Record<ClaimRequirementStatus, number> = { SATISFIED: 0, PAR
 // which components constitute "the mechanism" is the S6 role model
 // (NODE_COMPONENTS: MECHANISM) plus the two lifecycle facts about it, and
 // is the same for every intent.
+//
+// SCOPE (D-176 scope fix, founder decision 2026-10-11). The anchor applies
+// ONLY to a claim that ASSERTS a mechanism, read from the claim's own
+// structure — the kinds of its REQUIRED atoms in the Pattern's requirement
+// set — never from the question's words and never from an intent list:
+//
+//   FLOW_RELATIONSHIP       "value moves from <source> to <destination>":
+//                           the movement IS the mechanism's work, so the
+//                           claim asserts one;
+//   NET_EFFECT_ESTABLISHED  "the token's supply changed because of it":
+//                           an effect attributed to a mechanism.
+//
+// Every other kind states a fact that needs no mechanism to be true:
+// COMPONENT_ESTABLISHED ("the protocol generates revenue"), FLOW_ATTRIBUTE
+// ("who receives it"), LIFECYCLE (the state of a mechanism, read from that
+// mechanism's own state components — CURRENT_STATE and the execution
+// record) and DURABILITY_ESTABLISHED. Anchoring those would demand
+// documentation, approval or execution merely to keep a verdict their own
+// evidence already earned — the regression the scope fix closes. A true
+// mechanism claim keeps the anchor exactly as before.
 export const MECHANISM_ANCHOR_COMPONENTS: readonly string[] = ["MECHANISM_SPEC", "GOVERNANCE_BASIS", "EXECUTION_EVIDENCE"];
+
+export const MECHANISM_ASSERTING_REQUIREMENT_KINDS: ReadonlySet<ClaimRequirement["kind"]> = new Set<ClaimRequirement["kind"]>([
+  "FLOW_RELATIONSHIP",
+  "NET_EFFECT_ESTABLISHED",
+]);
+
+export function claimAssertsMechanism(requirements: readonly ClaimRequirement[]): boolean {
+  return requirements.some((r) => r.optionality === "REQUIRED" && MECHANISM_ASSERTING_REQUIREMENT_KINDS.has(r.kind));
+}
 
 function flowCarriesMechanismAnchor(flow: MechanismFlow): boolean {
   return MECHANISM_ANCHOR_COMPONENTS.some((c) => lineageComponentStatus(flow, c) !== null);
@@ -869,8 +899,9 @@ export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportR
   // must include one that carries the asserted mechanism in some
   // established form. NOT_SUPPORTED and INSUFFICIENT_EVIDENCE pass through
   // untouched — a refutation is a finding about the mechanism, and absence
-  // is already absence.
-  if (status === "SUPPORTED" || status === "PARTIALLY_SUPPORTED") {
+  // is already absence. Only for a claim that asserts a mechanism (see
+  // claimAssertsMechanism).
+  if ((status === "SUPPORTED" || status === "PARTIALLY_SUPPORTED") && claimAssertsMechanism(requirementSet.requirements)) {
     const matched = new Set(required.flatMap((r) => r.matchedFlowIds));
     const anchored = assembly.flows.some((f) => matched.has(f.flowId) && flowCarriesMechanismAnchor(f));
     if (!anchored) {

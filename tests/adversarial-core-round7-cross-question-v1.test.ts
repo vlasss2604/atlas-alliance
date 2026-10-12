@@ -675,12 +675,22 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
     expect(s5(m, "SOURCE_OF_VALUE").status).toBe("SUPPORTED");
     expect(req(m.TOKEN_UTILITY, "TU-1").status).toBe("SATISFIED");
     expect(verdicts(m).TOKEN_UTILITY).toBe("SUPPORTED");
-    expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("PARTIALLY_SUPPORTED");
+    // D-176 (scope-fixed): "does revenue reach / capture value for the
+    // token?" ASSERTS a mechanism (a FLOW_RELATIONSHIP / NET_EFFECT claim),
+    // and revenue alone establishes none — exactly the Jito shape the anchor
+    // exists for. These two used to read PARTIALLY_SUPPORTED off the
+    // revenue atom; the atoms themselves are unchanged. The revenue-only
+    // question above (TOKEN_UTILITY) asserts no mechanism and keeps its
+    // SUPPORTED.
+    expect(verdicts(m).PROTOCOL_REVENUE_TO_TOKEN).toBe("INSUFFICIENT_EVIDENCE");
+    expect(m.PROTOCOL_REVENUE_TO_TOKEN.claim.reasonCodes).toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    expect(req(m.PROTOCOL_REVENUE_TO_TOKEN, "PRT-1").status).toBe("SATISFIED");
     expect(req(m.PROTOCOL_REVENUE_TO_TOKEN, "PRT-2").status).toBe("UNSATISFIED");
     expect(verdicts(m).PASSIVE_HOLDER_OUTCOME).toBe("INSUFFICIENT_EVIDENCE");
     expect(verdicts(m).BURN_OR_SUPPLY_EFFECT).toBe("INSUFFICIENT_EVIDENCE");
     expect(verdicts(m).MECHANISM_CURRENT_STATE).toBe("INSUFFICIENT_EVIDENCE");
-    expect(verdicts(m).VALUE_CAPTURE).toBe("PARTIALLY_SUPPORTED");
+    expect(verdicts(m).VALUE_CAPTURE).toBe("INSUFFICIENT_EVIDENCE");
+    expect(m.VALUE_CAPTURE.claim.reasonCodes).toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
     expect(m.TOKEN_UTILITY.proof.confidenceScore).toBe(20);
   });
 
@@ -715,8 +725,13 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
   });
 
   it("C4 (DECIDED, Round 7.5): 'where do fees go?' with an established destination S6 cannot classify (a multisig address) no longer reads the same as a treasury — the destination stays established and cited, the relationship atom drops to PARTIAL on REQUIRED_RELATIONSHIP_UNRESOLVED, and the revenue question can no longer be SUPPORTED. WHERE != WHO", () => {
-    const opaque = ask([...sovProven(), flowPath(), destOpaque()], { identity: IDENTITY });
-    const treasury = ask([...sovProven(), flowPath(), destTreasury()], { identity: IDENTITY });
+    // D-176 (scope-fixed): the revenue -> token question asserts a
+    // mechanism, so both worlds carry the documented one (specLive) — what
+    // this pin compares is WHERE vs WHO at the destination, not whether a
+    // mechanism exists. Without it, both worlds are INSUFFICIENT_EVIDENCE
+    // on ASSERTED_MECHANISM_NOT_ESTABLISHED (pinned at the end).
+    const opaque = ask([...sovProven(), flowPath(), specLive(), destOpaque()], { identity: IDENTITY });
+    const treasury = ask([...sovProven(), flowPath(), specLive(), destTreasury()], { identity: IDENTITY });
     laws(opaque, "C4");
     // Nothing about the destination is withdrawn.
     expect(s5(opaque, "DESTINATION").status).toBe("SUPPORTED");
@@ -734,6 +749,12 @@ describe("C. revenue / fees / value capture over one evidence world", () => {
     expect(req(treasury.PROTOCOL_REVENUE_TO_TOKEN, "PRT-2").status).toBe("SATISFIED");
     expect(VERDICT_RANK[verdicts(opaque).PROTOCOL_REVENUE_TO_TOKEN]).toBeLessThan(VERDICT_RANK[verdicts(treasury).PROTOCOL_REVENUE_TO_TOKEN]);
     expect(verdicts(opaque).PROTOCOL_REVENUE_TO_TOKEN).toBe("PARTIALLY_SUPPORTED");
+    // The mechanism-free worlds: the anchor holds both at INSUFFICIENT_EVIDENCE.
+    for (const dest of [destOpaque(), destTreasury()]) {
+      const bare = ask([...sovProven(), flowPath(), dest], { identity: IDENTITY });
+      expect(verdicts(bare).PROTOCOL_REVENUE_TO_TOKEN).toBe("INSUFFICIENT_EVIDENCE");
+      expect(bare.PROTOCOL_REVENUE_TO_TOKEN.claim.reasonCodes).toContain("ASSERTED_MECHANISM_NOT_ESTABLISHED");
+    }
   });
 
   it("C5. holders vs treasury: the same revenue world with a treasury recipient refutes 'do holders receive value?' and leaves 'does revenue reach the token?' untouched; with a holder recipient both hold — the two questions never disagree about the recipient they share", () => {
