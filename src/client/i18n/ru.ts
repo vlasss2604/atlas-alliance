@@ -21,6 +21,7 @@ export const ru: Dict = {
     pulse: "Pulse",
     verify: "Проверить",
     proofs: "Proofs",
+    tagline: "Криптопроверка · Экономика",
   },
   home: {
     tagline: "Проверка криптоактивов",

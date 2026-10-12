@@ -1,51 +1,42 @@
 // THE EVIDENCE-NETWORK FIELD — the logo's atmosphere behind every screen.
 //
-// What the AP logo has behind the mark: a near-black ground, a soft cyan
-// illumination, and a faint constellation of nodes joined by thin lines.
-// This draws a restrained echo of that: one radial light at the top, a
-// vignette, and one static SVG of ~40 nodes and their nearest-neighbour
-// links at very low opacity, masked so it fades out before the reading
-// column's first result. Fixed, non-interactive, no filter, no animation
-// — a single paint. Content readability is never in competition with it.
-//
-// The constellation is deterministic (a seeded generator), so server and
-// client render the same markup and the page never re-shuffles.
+// V7 (docs/design/v7, HANDOFF §4.0): the page gradient, two large static
+// glows (cyan top-left, violet bottom-right) and the faint evidence
+// network of the approved mockups (`.ap-net`), drawn once from fixed
+// coordinates. Fixed, non-interactive, no filter, no animation — a single
+// paint. Content readability is never in competition with it.
 
-function seeded(seed: number): () => number {
-  let s = seed >>> 0;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 0xffffffff;
-  };
-}
+const LINES =
+  "233.5,25.7,306.1,61.8 233.5,25.7,268.6,168.4 306.1,61.8,268.6,168.4 268.6,168.4,350.9,247.5 350.9,247.5,227.8,306.8 40.9,386.6,72.8,446.6 40.9,386.6,156.8,465.0 227.8,306.8,210.5,435.0 72.8,446.6,156.8,465.0 156.8,465.0,210.5,435.0 210.5,435.0,355.0,470.3 355.0,470.3,358.7,593.3 55.3,609.1,168.6,632.7 55.3,609.1,19.7,742.1 168.6,632.7,249.4,616.1 168.6,632.7,119.8,748.9 249.4,616.1,358.7,593.3 19.7,742.1,119.8,748.9 361.4,757.0,277.5,883.9 361.4,757.0,307.9,905.7 34.6,905.1,152.3,882.2 34.6,905.1,86.2,1053.6 152.3,882.2,277.5,883.9 277.5,883.9,307.9,905.7 277.5,883.9,316.0,986.0 307.9,905.7,316.0,986.0 86.2,1053.6,137.6,1038.9 86.2,1053.6,118.1,1134.9 137.6,1038.9,118.1,1134.9 316.0,986.0,272.0,1118.8 272.0,1118.8,345.0,1195.9 345.0,1195.9,321.0,1294.0"
+    .split(" ")
+    .map((l) => l.split(",").map(Number));
 
-const rand = seeded(20260907);
-const NODES = Array.from({ length: 42 }, () => ({
-  x: Math.round(rand() * 1000),
-  y: Math.round(rand() * 600),
-  r: 1 + Math.round(rand() * 1.6 * 10) / 10,
-}));
-const LINKS: [number, number][] = [];
-for (let i = 0; i < NODES.length; i++) {
-  // Each node links to its two nearest neighbours; duplicates are dropped.
-  const d = NODES.map((n, j) => ({ j, d: j === i ? Infinity : Math.hypot(n.x - NODES[i].x, n.y - NODES[i].y) }))
-    .sort((a, b) => a.d - b.d)
-    .slice(0, 2);
-  for (const { j } of d) {
-    const key: [number, number] = i < j ? [i, j] : [j, i];
-    if (!LINKS.some(([a, b]) => a === key[0] && b === key[1])) LINKS.push(key);
-  }
-}
+// Plain nodes, and the few "lit" nodes that carry a soft halo.
+const NODES =
+  "22.2,82.7 233.5,25.7 306.1,61.8 350.9,247.5 40.9,386.6 227.8,306.8 72.8,446.6 156.8,465.0 210.5,435.0 355.0,470.3 55.3,609.1 168.6,632.7 249.4,616.1 358.7,593.3 119.8,748.9 361.4,757.0 34.6,905.1 152.3,882.2 307.9,905.7 86.2,1053.6 137.6,1038.9 316.0,986.0 272.0,1118.8 345.0,1195.9"
+    .split(" ")
+    .map((n) => n.split(",").map(Number));
+const LIT = "268.6,168.4 19.7,742.1 277.5,883.9 118.1,1134.9"
+  .split(" ")
+  .map((n) => n.split(",").map(Number));
 
 export function AtlasField() {
   return (
     <div className="atlas-field" aria-hidden>
-      <svg className="atlas-network" viewBox="0 0 1000 600" preserveAspectRatio="xMidYMin slice" aria-hidden>
-        {LINKS.map(([a, b]) => (
-          <line key={`${a}-${b}`} x1={NODES[a].x} y1={NODES[a].y} x2={NODES[b].x} y2={NODES[b].y} />
+      <span className="atlas-glow atlas-glow-cyan" />
+      <span className="atlas-glow atlas-glow-violet" />
+      <svg className="atlas-network" viewBox="0 0 390 1300" preserveAspectRatio="xMidYMin slice" aria-hidden>
+        {LINES.map(([x1, y1, x2, y2], i) => (
+          <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} />
         ))}
-        {NODES.map((n, i) => (
-          <circle key={i} cx={n.x} cy={n.y} r={n.r} />
+        {NODES.map(([cx, cy], i) => (
+          <circle key={i} cx={cx} cy={cy} r={1.5} />
+        ))}
+        {LIT.map(([cx, cy], i) => (
+          <g key={i}>
+            <circle cx={cx} cy={cy} r={7} fill="rgba(30, 197, 245, 0.13)" />
+            <circle cx={cx} cy={cy} r={2.4} fill="rgba(170, 240, 255, 0.9)" />
+          </g>
         ))}
       </svg>
     </div>

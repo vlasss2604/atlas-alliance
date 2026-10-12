@@ -21,6 +21,16 @@ export function AtlasMark({ size = 40, hero = false }: { size?: number; hero?: b
   );
 }
 
+// THE BARE SHIELD (V7): the same asset without the orb disc — how the
+// approved mockups draw it in the header lockup (44×47) and raised above
+// the dock (64×68). Size and inset live in the stylesheet class.
+export function AtlasShield({ className }: { className: string }) {
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={ATLAS_SHIELD_SRC} alt="" draggable={false} className={`atlas-shield ${className}`} aria-hidden />
+  );
+}
+
 // THE IN-PAGE HEADER OF A SUB-SCREEN: one back link. The brand lives in
 // the app header above every screen, so it is never restated here.
 export function AtlasHeader({

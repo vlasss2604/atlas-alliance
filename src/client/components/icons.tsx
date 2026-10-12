@@ -9,12 +9,14 @@
 
 type IconProps = { size?: number; className?: string; strokeWidth?: number };
 
-function Svg({ size = 16, className, strokeWidth = 1.6, children }: IconProps & { children: React.ReactNode }) {
+// `box` lets the three navigation icons keep the approved V7 drawings,
+// which sit on a 24-unit grid.
+function Svg({ size = 16, className, strokeWidth = 1.6, box = 20, children }: IconProps & { box?: number; children: React.ReactNode }) {
   return (
     <svg
       width={size}
       height={size}
-      viewBox="0 0 20 20"
+      viewBox={`0 0 ${box} ${box}`}
       fill="none"
       stroke="currentColor"
       strokeWidth={strokeWidth}
@@ -178,19 +180,20 @@ export function AskIcon(p: IconProps) {
     </Svg>
   );
 }
+// Proofs: a list of checked lines (V7 navigation drawing).
 export function ResearchIcon(p: IconProps) {
   return (
-    <Svg {...p}>
-      <rect x="4.5" y="3" width="11" height="14" rx="2.5" />
-      <path d="M7.5 7.5h5M7.5 10.5h5M7.5 13.5h3" />
+    <Svg strokeWidth={1.8} {...p} box={24}>
+      <path d="M3 6h11M3 12h11M3 18h11" />
+      <path d="M17 5.5l1.5 1.5 2.5-2.5M17 11.5l1.5 1.5 2.5-2.5M17 17.5l1.5 1.5 2.5-2.5" />
     </Svg>
   );
 }
 // Pulse: one beat on a flat line — fresh claims arriving.
 export function PulseIcon(p: IconProps) {
   return (
-    <Svg {...p}>
-      <path d="M3 10.5h3.2l2-5 3.6 9 2-4h3.2" />
+    <Svg strokeWidth={1.8} {...p} box={24}>
+      <path d="M2 13h4l3-8 4 14 3-8h6" />
     </Svg>
   );
 }
@@ -204,9 +207,9 @@ export function AnalyticsIcon(p: IconProps) {
 }
 export function ProfileIcon(p: IconProps) {
   return (
-    <Svg {...p}>
-      <circle cx="10" cy="7.2" r="3" />
-      <path d="M4.4 16.4a5.8 5.8 0 0 1 11.2 0" />
+    <Svg strokeWidth={2} {...p} box={24}>
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4.5 21c1.4-4 4.2-6 7.5-6s6.1 2 7.5 6" />
     </Svg>
   );
 }

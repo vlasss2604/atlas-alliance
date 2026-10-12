@@ -12,13 +12,41 @@
    is a restrained echo. Everything here is presentation. */
 
 :root {
-  /* Ground and surfaces */
-  --atlas-bg: #060a12;
-  --atlas-bg-top: #0b1424;
-  --atlas-bg-raised: #101a2b;
-  --surface-1: #0f1727;
-  --surface-2: #141f33;
-  --surface-3: #1a2740;
+  /* Ground and surfaces — V7 (docs/design/v7/tokens): a bluer navy than V6.
+     Text and state colours below stay at the accepted V7 code baseline. */
+  --atlas-bg: #041627;
+  --atlas-bg-top: #06213b;
+  --atlas-bg-raised: #08294b;
+  --surface-1: #061b30;
+  --surface-2: #0b1a2e;
+  --surface-3: #0c2c4a;
+  --surface-input: #03111f;
+  --page-gradient:
+    radial-gradient(110% 55% at 0% 0%, rgba(30, 197, 245, 0.14) 0%, rgba(30, 197, 245, 0) 60%),
+    radial-gradient(90% 45% at 100% 100%, rgba(123, 92, 255, 0.14) 0%, rgba(123, 92, 255, 0) 60%),
+    linear-gradient(180deg, #06213b 0%, #041627 100%);
+  --hero-gradient: linear-gradient(180deg, #08294b 0%, #061b30 100%);
+  --panel-gradient: linear-gradient(180deg, rgba(8, 38, 66, 0.92) 0%, rgba(6, 27, 48, 0.92) 100%);
+  --edge-hero: rgba(30, 197, 245, 0.42);
+  --on-cyan: #03111f;
+  --atlas-cyan-light: #4fd8ff;
+  --atlas-cyan-press: #12b4ec;
+  --atlas-cyan-line: #7fe6ff;
+  /* System states (failed, cancelled, budget limit) are not findings: grey, never red. */
+  --system-grey: #7f8ea3;
+  --system-grey-ink: #c9d2de;
+  --atlas-text-soft: #c9d5e2;
+  --atlas-text-mute: #8fa3b8;
+  --radius-hero: 24px;
+  --radius-panel: 22px;
+  --radius-card: 20px;
+  --radius-button: 16px;
+  --radius-chip: 14px;
+  --shadow-hero: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 22px 44px -18px rgba(0, 0, 0, 0.85), 0 0 36px -6px rgba(30, 197, 245, 0.3);
+  --shadow-panel: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 20px 40px -16px rgba(0, 0, 0, 0.8);
+  --shadow-cta: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 8px 22px rgba(30, 197, 245, 0.45);
+  --glow-active: drop-shadow(0 0 6px rgba(30, 197, 245, 0.55));
+  --ease-rise: cubic-bezier(0.2, 0.7, 0.2, 1);
   --surface-accent: #0e1b2d; /* the one cyan-tinted surface */
   --atlas-glass: rgba(15, 23, 39, 0.78);
   --hairline: rgba(160, 190, 224, 0.11);
@@ -70,7 +98,7 @@
 @theme inline {
   --color-background: var(--atlas-bg);
   --color-foreground: var(--atlas-text);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-inter);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -82,7 +110,7 @@ body {
 body {
   background: var(--atlas-bg);
   color: var(--atlas-text);
-  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-family: var(--font-inter), "Inter", system-ui, sans-serif;
   min-height: 100dvh;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;
@@ -107,23 +135,52 @@ body {
   z-index: 0;
   pointer-events: none;
   overflow: hidden;
-  background:
-    radial-gradient(90% 50% at 50% -8%, rgba(30, 197, 245, 0.16) 0%, rgba(30, 197, 245, 0.05) 38%, transparent 68%),
-    radial-gradient(120% 90% at 50% 110%, rgba(0, 0, 0, 0.55) 0%, transparent 60%),
-    linear-gradient(180deg, var(--atlas-bg-top) 0%, var(--atlas-bg) 52vh);
+  background: var(--page-gradient);
+}
+/* V7: two large static glows — cyan top-left, violet bottom-right. */
+.atlas-glow {
+  position: absolute;
+  border-radius: 9999px;
+}
+.atlas-glow-cyan {
+  top: 150px;
+  left: -110px;
+  width: 280px;
+  height: 280px;
+  background: radial-gradient(circle, rgba(30, 197, 245, 0.2) 0%, rgba(30, 197, 245, 0) 70%);
+}
+.atlas-glow-violet {
+  bottom: 60px;
+  right: -120px;
+  width: 320px;
+  height: 320px;
+  background: radial-gradient(circle, rgba(123, 92, 255, 0.2) 0%, rgba(123, 92, 255, 0) 70%);
 }
 .atlas-network {
   position: absolute;
   top: 0;
   left: 0;
   width: 100%;
-  height: 72vh;
-  opacity: 0.55;
-  fill: rgba(142, 230, 255, 0.55);
-  stroke: rgba(30, 197, 245, 0.16);
+  height: 100%;
+  fill: rgba(142, 230, 255, 0.5);
+  stroke: rgba(30, 197, 245, 0.17);
   stroke-width: 0.8;
-  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, transparent 100%);
-  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, transparent 100%);
+}
+/* V7: a dark fade above the handset dock so content sinks under it. */
+.dock-fade {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 20;
+  height: 140px;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(4, 22, 39, 0) 0%, rgba(4, 22, 39, 0.85) 55%, #041627 100%);
+}
+@media (min-width: 640px) {
+  .dock-fade {
+    display: none;
+  }
 }
 .atlas-grid,
 .atlas-arcs {
@@ -281,11 +338,36 @@ button.card:active,
   color: var(--atlas-text-dim);
 }
 /* The wordmark: ATLAS in silver, PROOF in cyan — the logo's two metals. */
+/* V7 header lockup: "ATLAS PROOF" 17/800, the tagline 9/600 uppercase. */
 .wordmark {
-  font-weight: 500;
-  letter-spacing: 0.3em;
+  font-size: 17px;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+  color: var(--atlas-text-strong);
+}
+.brand-tagline {
+  font-size: 9px;
+  line-height: 1.3;
+  font-weight: 600;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--atlas-silver);
+  white-space: nowrap;
+  color: #a9b8c8;
+}
+.atlas-shield {
+  display: block;
+  flex: none;
+  box-sizing: border-box;
+  object-fit: contain;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+.brand-shield {
+  width: 44px;
+  height: 47px;
+  padding: 4px 2px;
 }
 .text-gradient-cyan {
   color: var(--atlas-cyan-strong);
@@ -1310,16 +1392,20 @@ button.card:active,
  * NAVIGATION — header on a desk, three-place bar on a handset
  * (Pulse · Verify shield · Proofs, D-172); Profile top-right on both.
  * ---------------------------------------------------------------- */
+/* V7 header: 76px on a handset — the bare shield, the two-line lockup,
+   and the profile circle at the right. */
 .app-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 0 0.7rem;
-  margin-bottom: 0.5rem;
+  height: 76px;
+  box-sizing: border-box;
+  padding: 14px 0 8px;
 }
 @media (min-width: 640px) {
   .app-header {
+    height: auto;
     padding: 1.1rem 0 1rem;
     margin-bottom: 1.25rem;
     border-bottom: 1px solid var(--hairline);
@@ -1328,7 +1414,7 @@ button.card:active,
 .brand-lockup {
   display: flex;
   align-items: center;
-  gap: 0.7rem;
+  gap: 10px;
   min-width: 0;
 }
 /* V7: the compact lockup is shown on every screen, Verify included —
@@ -1347,7 +1433,7 @@ button.card:active,
   gap: 0.45rem;
   font-size: 0.95rem;
   font-weight: 500;
-  color: var(--atlas-text-dim);
+  color: var(--atlas-text-soft);
   padding: 0.5rem 0.9rem;
   border-radius: 9999px;
   border: 1px solid transparent;
@@ -1361,7 +1447,8 @@ button.card:active,
   background: rgba(255, 255, 255, 0.04);
 }
 .app-nav-item-active {
-  color: var(--atlas-cyan-strong);
+  color: var(--atlas-text-strong);
+  font-weight: 700;
   background: var(--cyan-dim);
   border-color: rgba(30, 197, 245, 0.22);
 }
@@ -1371,75 +1458,80 @@ button.card:active,
   border-radius: 9999px;
   transition: transform var(--motion-micro) var(--ease-out);
 }
-.home-orb:hover,
-.dock-home:hover {
-  transform: translateY(-1px);
-}
 .home-orb:active,
 .dock-home:active {
-  transform: scale(0.96);
+  transform: scale(0.97);
 }
-.home-orb:hover > .orb,
-.dock-home:hover > .orb {
+.home-orb:hover > .orb {
   box-shadow:
     0 0 0 1px rgba(30, 197, 245, 0.16),
     0 0 22px rgba(30, 197, 245, 0.42);
 }
-.home-orb-active > .orb,
-.dock-home.home-orb-active > .orb {
+.home-orb-active > .orb {
   box-shadow:
     0 0 0 3px var(--cyan-dim),
     0 0 22px rgba(30, 197, 245, 0.42);
 }
+/* Profile: a 40px circle on a handset (#061B30, cyan edge, soft glow);
+   lit with the cyan gradient on /profile. On a wide screen it keeps the
+   word beside the icon. */
 .profile-link {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 0.45rem;
+  flex: none;
+  width: 40px;
+  height: 40px;
+  box-sizing: border-box;
   font-size: 0.95rem;
   font-weight: 500;
-  color: var(--atlas-text-dim);
-  padding: 0.5rem 0.6rem;
+  color: #f1f5f9;
   border-radius: 9999px;
-  border: 1px solid transparent;
+  background: var(--surface-1);
+  border: 1px solid rgba(30, 197, 245, 0.4);
+  box-shadow: 0 0 10px rgba(30, 197, 245, 0.2);
   transition:
     color var(--motion-transition) var(--ease-out),
     background-color var(--motion-transition) var(--ease-out),
-    border-color var(--motion-transition) var(--ease-out);
+    transform var(--motion-micro) var(--ease-out);
+}
+.profile-link:active {
+  transform: scale(0.97);
 }
 @media (min-width: 640px) {
   .profile-link {
-    padding: 0.5rem 0.9rem;
+    width: auto;
+    padding: 0.5rem 0.9rem 0.5rem 0.75rem;
   }
 }
-.profile-link:hover {
-  color: var(--atlas-text);
-  background: rgba(255, 255, 255, 0.04);
-}
 .profile-link-active {
-  color: var(--atlas-cyan-strong);
-  background: var(--cyan-dim);
-  border-color: rgba(30, 197, 245, 0.22);
+  color: var(--on-cyan);
+  background: linear-gradient(180deg, var(--atlas-cyan-light) 0%, var(--atlas-cyan-press) 100%);
+  border-color: var(--atlas-cyan-strong);
+  box-shadow:
+    0 0 0 4px rgba(30, 197, 245, 0.14),
+    0 0 18px rgba(30, 197, 245, 0.55);
 }
 
+/* V7 dock: a floating bar 10px from the edges, 70px, radius 22; three
+   equal columns; the bare shield raised 46px above the centre. */
 .dock {
   position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  left: 10px;
+  right: 10px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 10px);
   z-index: 30;
+  height: 70px;
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   align-items: end;
-  padding: 0.45rem 0.5rem calc(env(safe-area-inset-bottom, 0px) + 0.55rem);
-  background: rgba(8, 13, 22, 0.94);
-  border-top: 1px solid rgba(30, 197, 245, 0.22);
-  border-radius: 1.4rem 1.4rem 0 0;
-  box-shadow:
-    0 -1px 0 0 rgba(142, 230, 255, 0.06) inset,
-    0 -14px 34px -18px rgba(30, 197, 245, 0.22),
-    0 -12px 30px -18px rgba(0, 0, 0, 0.9);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+  padding-bottom: 10px;
+  background: var(--surface-1);
+  border: 1px solid rgba(30, 197, 245, 0.35);
+  border-radius: var(--radius-panel);
+  box-shadow: 0 0 18px rgba(30, 197, 245, 0.15);
 }
 @media (min-width: 640px) {
   .dock {
@@ -1452,54 +1544,49 @@ button.card:active,
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  gap: 0.3rem;
-  min-height: 3.25rem;
-  padding: 0.45rem 0.1rem 0.25rem;
-  font-size: 0.78rem;
+  gap: 4px;
+  height: 52px;
+  min-width: 0;
+  font-size: 11px;
   font-weight: 500;
-  color: var(--atlas-text-dim);
-  border-radius: 0.9rem;
-  transition: color var(--motion-transition) var(--ease-out);
+  color: var(--atlas-text-soft);
+  transition: transform var(--motion-micro) var(--ease-out);
 }
-.dock-item > svg {
-  border-radius: 9999px;
-  padding: 0.3rem;
-  box-sizing: content-box;
-  transition:
-    background-color var(--motion-transition) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out);
+.dock-item:active {
+  transform: scale(0.97);
 }
 .dock-item-active {
-  color: var(--atlas-cyan-strong);
-}
-.dock-item-active > svg {
-  background: var(--cyan-dim);
-  box-shadow: 0 0 0 1px rgba(30, 197, 245, 0.22);
+  color: var(--atlas-text-strong);
+  font-weight: 700;
+  filter: var(--glow-active);
 }
 .dock-home {
-  justify-self: center;
+  position: relative;
+  height: 52px;
+  justify-self: stretch;
   flex-direction: column;
   align-items: center;
-  gap: 0.2rem;
-  margin-top: -1.7rem;
-  padding: 0.3rem 0.5rem 0.25rem;
-  background: var(--atlas-bg);
-  border-radius: 1.6rem;
+  justify-content: flex-end;
+  border-radius: 0;
+}
+.dock-shield {
+  position: absolute;
+  top: -46px;
+  left: 50%;
+  width: 64px;
+  height: 68px;
+  margin-left: -32px;
+  padding: 6px 4px;
 }
 .dock-home-label {
-  font-size: 0.78rem;
-  font-weight: 600;
-  color: var(--atlas-text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--atlas-text-soft);
 }
 .dock-home.home-orb-active .dock-home-label {
-  color: var(--atlas-cyan-strong);
-}
-.dock-home > .orb {
-  box-shadow:
-    0 0 0 1px rgba(30, 197, 245, 0.14),
-    0 0 0 5px rgba(8, 13, 22, 0.94),
-    0 0 26px rgba(30, 197, 245, 0.4),
-    0 10px 24px -12px rgba(0, 0, 0, 0.8);
+  font-weight: 700;
+  color: var(--atlas-text-strong);
+  filter: var(--glow-active);
 }
 
 /* ---------------------------------------------------------------- *
@@ -1550,11 +1637,17 @@ button.card:active,
   position: absolute;
   top: 4px;
   right: 6px;
-  width: 8px;
-  height: 8px;
+  width: 7px;
+  height: 7px;
   border-radius: 9999px;
   background: var(--atlas-cyan);
   box-shadow: 0 0 8px var(--cyan-glow);
+}
+/* In the dock the dot sits at the icon's top-right corner. */
+.dock-item.unread-dot::after {
+  top: 0;
+  right: auto;
+  left: calc(50% + 9px);
 }
 @keyframes atlas-pulse {
   0%,

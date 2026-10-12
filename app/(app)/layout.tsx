@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 import { AppProvider } from "@/src/client/app-context";
-import { AppHeader, AtlasDock } from "@/src/client/components/app-chrome";
+import { AppHeader, AtlasDock, DockFade } from "@/src/client/components/app-chrome";
 import { AtlasField } from "@/src/client/components/atlas-field";
 
 // THE SHELL. One calm page background, a header that carries the brand
@@ -16,6 +16,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         <AppHeader />
         {children}
       </div>
+      <DockFade />
       <AtlasDock />
     </AppProvider>
   );

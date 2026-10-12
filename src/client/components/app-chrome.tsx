@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { useApp } from "../app-context";
-import { AtlasMark } from "./atlas-header";
+import { AtlasMark, AtlasShield } from "./atlas-header";
 import { ProfileIcon, PulseIcon, ResearchIcon } from "./icons";
 
 // THE APP SHELL V5 — PULSE · [ VERIFY ] · PROOFS (D-172).
@@ -46,9 +46,8 @@ export function AppHeader() {
       {dict.nav[key]}
     </Link>
   );
-  // Verify (Home) carries the brand itself as its centred hero, so the
-  // header does not repeat it there: hidden on a handset, an invisible
-  // spacer on a wide screen so the nav stays centred.
+  // V7 (HANDOFF §4.0): the shield and wordmark sit on every screen,
+  // Verify included, on every width.
   const onVerify = pathname === VERIFY_HREF;
   return (
     <header className="app-header" data-testid="app-header">
@@ -56,15 +55,15 @@ export function AppHeader() {
         href={VERIFY_HREF}
         className={`brand-lockup ${onVerify ? "brand-lockup-home" : ""}`}
         data-testid="brand-lockup"
-        aria-label={`ATLAS PROOF — ${dict.home.tagline}`}
+        aria-label={`ATLAS PROOF — ${dict.nav.tagline}`}
       >
-        <AtlasMark size={32} />
-        <span className="min-w-0">
-          <span className="wordmark block text-[0.8rem] leading-none text-[var(--atlas-text-strong)]">
+        <AtlasShield className="brand-shield" />
+        <span className="flex min-w-0 flex-col gap-0.5">
+          <span className="wordmark">
             ATLAS <span className="text-[var(--atlas-cyan)]">PROOF</span>
           </span>
-          <span className="mt-1 block text-[0.72rem] leading-none tracking-[0.02em] text-[var(--atlas-text-dim)]">
-            {dict.home.tagline}
+          <span className="brand-tagline" data-testid="brand-tagline">
+            {dict.nav.tagline}
           </span>
         </span>
       </Link>
@@ -114,17 +113,22 @@ export function AtlasDock() {
   );
   return (
     <nav className="dock sm:hidden" aria-label={dict.nav.primary} data-testid="app-dock">
-      {item("pulse", <PulseIcon size={22} />)}
+      {item("pulse", <PulseIcon size={24} />)}
       <Link
         href={VERIFY_HREF}
         className={`dock-home ${pathname === VERIFY_HREF ? "home-orb-active" : ""}`}
         aria-label={dict.nav.verify}
         data-testid="dock-verify"
       >
-        <AtlasMark size={56} />
+        <AtlasShield className="dock-shield" />
         <span className="dock-home-label">{dict.nav.verify}</span>
       </Link>
-      {item("proofs", <ResearchIcon size={22} />, unread ? "unread-dot" : "")}
+      {item("proofs", <ResearchIcon size={24} />, unread ? "unread-dot" : "")}
     </nav>
   );
+}
+
+// The dark fade above the handset dock (V7): content sinks under the bar.
+export function DockFade() {
+  return <div className="dock-fade" aria-hidden />;
 }

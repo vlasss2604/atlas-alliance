@@ -95,7 +95,9 @@ describe("navigation: Pulse — Verify — Proofs, Profile top-right", () => {
     // The shield sits between Pulse and Proofs, raised from the centre.
     expect(dock.indexOf('item("pulse"')).toBeLessThan(dock.indexOf("dock-verify"));
     expect(dock.indexOf("dock-verify")).toBeLessThan(dock.indexOf('item("proofs"'));
-    expect(dock).toContain("<AtlasMark size={56} />");
+    // V7: the bare shield (no orb disc), 64×68, raised 46px above the bar.
+    expect(dock).toContain('<AtlasShield className="dock-shield" />');
+    expect(readFileSync("app/globals.css", "utf8")).toMatch(/\.dock-shield \{[^}]*top: -46px;[^}]*width: 64px;[^}]*height: 68px;/);
     expect(dock).toContain('className={`dock-home ${pathname === VERIFY_HREF ? "home-orb-active" : ""}`}');
     expect(chrome).toContain('const VERIFY_HREF = "/home";');
     expect(chrome).toContain('pulse: { href: "/pulse" }');

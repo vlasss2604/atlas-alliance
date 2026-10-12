@@ -12,6 +12,8 @@ export const en = {
     pulse: "Pulse",
     verify: "Verify",
     proofs: "Proofs",
+    // V7 header lockup, second line (HANDOFF D1; shown uppercase).
+    tagline: "Crypto Verification · Economics",
   },
   home: {
     title: "ATLAS PROOF",
