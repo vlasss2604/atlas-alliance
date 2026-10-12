@@ -1,0 +1,434 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ATLAS PROOF v2 — Research in progress</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0;background:#06213B}
+a{color:#1EC5F5}a:hover{color:#8EE6FF}
+button,input{font-family:inherit}
+input::placeholder{color:#7F8EA3}
+svg{display:block}
+main>*{flex-shrink:0}
+button,a{transition:transform .15s ease,box-shadow .2s ease}
+button:active,a:active{transform:scale(.97)}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1EC5F5;outline-offset:2px}
+@keyframes ap-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes ap-spin{to{transform:rotate(360deg)}}
+@keyframes ap-draw{from{stroke-dashoffset:440}to{stroke-dashoffset:0}}
+@keyframes ap-pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+@keyframes ap-blink{0%,100%{opacity:.3}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@keyframes ap-fade-in{from{opacity:0}to{opacity:1}}
+/* evidence network: static layer, no animation (performance) */
+</style>
+</helmet>
+<div class="ap-root" style="width: 390px; height: 844px; position: relative; overflow: hidden; isolation: isolate; box-sizing: border-box; background: radial-gradient(110% 55% at 0% 0%, rgba(30,197,245,0.14) 0%, rgba(30,197,245,0) 60%), radial-gradient(90% 45% at 100% 100%, rgba(123,143,242,0.14) 0%, rgba(123,143,242,0) 60%), linear-gradient(180deg, #06213B 0%, #041627 100%); color: #F3F7FB; font-family: Inter, system-ui, sans-serif;">
+
+  <div aria-hidden="true" style="position: absolute; z-index: -1; top: 170px; left: -120px; width: 320px; height: 320px; border-radius: 50%; background: radial-gradient(circle, {{ v.blob }} 0%, rgba(30,197,245,0) 70%);  pointer-events: none;"></div>
+  <div aria-hidden="true" style="position: absolute; z-index: -1; bottom: 40px; right: -130px; width: 330px; height: 330px; border-radius: 50%; background: radial-gradient(circle, rgba(123,143,242,0.2) 0%, rgba(123,143,242,0) 70%);  pointer-events: none;"></div>
+
+        <div aria-hidden="true" class="ap-net" style="position: absolute; z-index: -1; left: 0; top: 0; width: 390px; height: 1500px; pointer-events: none;"><svg width="390" height="1500" viewBox="0 0 390 1500" aria-hidden="true" style="display: block;"><g stroke="rgba(30,197,245,0.17)" stroke-width="0.8" fill="none"><line x1="233.5" y1="25.7" x2="306.1" y2="61.8"></line><line x1="233.5" y1="25.7" x2="268.6" y2="168.4"></line><line x1="306.1" y1="61.8" x2="268.6" y2="168.4"></line><line x1="268.6" y1="168.4" x2="350.9" y2="247.5"></line><line x1="350.9" y1="247.5" x2="227.8" y2="306.8"></line><line x1="40.9" y1="386.6" x2="72.8" y2="446.6"></line><line x1="40.9" y1="386.6" x2="156.8" y2="465.0"></line><line x1="227.8" y1="306.8" x2="210.5" y2="435.0"></line><line x1="72.8" y1="446.6" x2="156.8" y2="465.0"></line><line x1="156.8" y1="465.0" x2="210.5" y2="435.0"></line><line x1="210.5" y1="435.0" x2="355.0" y2="470.3"></line><line x1="355.0" y1="470.3" x2="358.7" y2="593.3"></line><line x1="55.3" y1="609.1" x2="168.6" y2="632.7"></line><line x1="55.3" y1="609.1" x2="19.7" y2="742.1"></line><line x1="168.6" y1="632.7" x2="249.4" y2="616.1"></line><line x1="168.6" y1="632.7" x2="119.8" y2="748.9"></line><line x1="249.4" y1="616.1" x2="358.7" y2="593.3"></line><line x1="19.7" y1="742.1" x2="119.8" y2="748.9"></line><line x1="361.4" y1="757.0" x2="277.5" y2="883.9"></line><line x1="361.4" y1="757.0" x2="307.9" y2="905.7"></line><line x1="34.6" y1="905.1" x2="152.3" y2="882.2"></line><line x1="34.6" y1="905.1" x2="86.2" y2="1053.6"></line><line x1="152.3" y1="882.2" x2="277.5" y2="883.9"></line><line x1="277.5" y1="883.9" x2="307.9" y2="905.7"></line><line x1="277.5" y1="883.9" x2="316.0" y2="986.0"></line><line x1="307.9" y1="905.7" x2="316.0" y2="986.0"></line><line x1="86.2" y1="1053.6" x2="137.6" y2="1038.9"></line><line x1="86.2" y1="1053.6" x2="118.1" y2="1134.9"></line><line x1="137.6" y1="1038.9" x2="118.1" y2="1134.9"></line><line x1="316.0" y1="986.0" x2="272.0" y2="1118.8"></line><line x1="272.0" y1="1118.8" x2="345.0" y2="1195.9"></line><line x1="345.0" y1="1195.9" x2="321.0" y2="1294.0"></line><line x1="76.4" y1="1274.2" x2="135.5" y2="1332.3"></line><line x1="76.4" y1="1274.2" x2="30.7" y2="1384.2"></line><line x1="135.5" y1="1332.3" x2="217.2" y2="1264.4"></line><line x1="135.5" y1="1332.3" x2="30.7" y2="1384.2"></line><line x1="135.5" y1="1332.3" x2="136.3" y2="1438.2"></line><line x1="217.2" y1="1264.4" x2="321.0" y2="1294.0"></line><line x1="321.0" y1="1294.0" x2="354.6" y2="1389.0"></line><line x1="30.7" y1="1384.2" x2="136.3" y2="1438.2"></line><line x1="136.3" y1="1438.2" x2="258.2" y2="1433.3"></line><line x1="258.2" y1="1433.3" x2="354.6" y2="1389.0"></line></g><circle cx="22.2" cy="82.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="233.5" cy="25.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="306.1" cy="61.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="268.6" cy="168.4" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="268.6" cy="168.4" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="350.9" cy="247.5" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="40.9" cy="386.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="227.8" cy="306.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="72.8" cy="446.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="156.8" cy="465.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="210.5" cy="435.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="355.0" cy="470.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="55.3" cy="609.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="168.6" cy="632.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="249.4" cy="616.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="358.7" cy="593.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="19.7" cy="742.1" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="19.7" cy="742.1" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="119.8" cy="748.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="361.4" cy="757.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="34.6" cy="905.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="152.3" cy="882.2" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="277.5" cy="883.9" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="277.5" cy="883.9" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="307.9" cy="905.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="86.2" cy="1053.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="137.6" cy="1038.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="316.0" cy="986.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="118.1" cy="1134.9" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="118.1" cy="1134.9" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="272.0" cy="1118.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="345.0" cy="1195.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="76.4" cy="1274.2" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="135.5" cy="1332.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="217.2" cy="1264.4" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="321.0" cy="1294.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="30.7" cy="1384.2" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="30.7" cy="1384.2" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="136.3" cy="1438.2" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="136.3" cy="1438.2" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="258.2" cy="1433.3" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="258.2" cy="1433.3" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="354.6" cy="1389.0" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="354.6" cy="1389.0" r="2.4" fill="rgba(170,240,255,0.9)"></circle></svg></div>
+
+  <header style="height: 76px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="ATLAS PROOF" style="width: 44px; height: 47px; box-sizing: border-box; padding: 4px 2px; object-fit: contain;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 17px; font-weight: 800; letter-spacing: 0.01em;">ATLAS <span style="color: #1EC5F5;">PROOF</span></span>
+        <span style="font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #A9B8C8;">{{ t.tagline }}</span>
+      </div>
+    </div>
+    <a href="V2-Profile.dc.html" aria-label="{{ t.profile }}" style="width: 40px; height: 40px; box-sizing: border-box; border-radius: 50%; background: #061B30; border: 1px solid rgba(30,197,245,0.4); box-shadow: 0 0 10px rgba(30,197,245,0.2); color: #F1F5F9; display: flex; align-items: center; justify-content: center; text-decoration: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21c1.4-4 4.2-6 7.5-6s6.1 2 7.5 6"></path></svg>
+    </a>
+  </header>
+
+  <main class="ap-scroll" style="position: absolute; top: 76px; left: 0; right: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; padding: 0 16px 140px; display: flex; flex-direction: column; gap: 16px;">
+    <a href="V2-Home.dc.html" style="align-self: flex-start; height: 44px; display: flex; align-items: center; gap: 4px; color: #C9D5E2; font-size: 14px; line-height: 18px; font-weight: 500; text-decoration: none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>{{ t.back }}
+    </a>
+
+    <section aria-label="Question" style="position: relative; z-index: 1; display: flex; align-items: flex-start; gap: 14px; margin-top: -6px;">
+      <span style="animation: ap-fade-in 260ms ease 171ms backwards; width: 48px; height: 48px; flex: none; box-sizing: border-box; border-radius: 28%; background: radial-gradient(circle at 50% 22%, rgba(26,86,130,0.95) 0%, rgba(26,86,130,0) 72%), #0B1A2E; border: 1px solid rgba(110,185,240,0.38); box-shadow: 0 0 18px -6px rgba(90,180,240,0.55); display: flex; align-items: center; justify-content: center;"><img src="/_blob/1e77ecff1f889ac0d5d88b2f39066c83" alt="" style="width: 62%; height: 62%; object-fit: contain;"></span>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+        <span style="height: 18px; display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 700; color: {{ v.kickerColor }}; animation: ap-fade-in 260ms ease 189ms backwards;">
+          <span style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: {{ v.ring }}; box-shadow: 0 0 10px {{ v.ring }}; animation: {{ v.dotAnim }};"></span>{{ kicker }}
+        </span>
+        <h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 800; animation: ap-fade-in 260ms ease 171ms backwards;">Raydium</h1>
+        <p style="margin: 0; font-size: 15px; line-height: 22px; color: #C9D5E2;">Does Raydium use protocol fees to buy back RAY, and is it happening now?</p>
+      </div>
+    </section>
+
+    <section aria-label="Status" style="position: relative; overflow: hidden; padding: 26px 18px 22px; border-radius: 24px; background: linear-gradient(180deg, #08294B 0%, #061B30 100%); border: 1px solid {{ v.edge }}; box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 22px 44px -18px rgba(0,0,0,0.85), 0 0 36px -6px {{ v.glow }}; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; animation: ap-fade-in 260ms ease 243ms backwards;">
+      <span aria-hidden="true" style="position: absolute; top: 0; left: 15%; right: 15%; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0) 0%, {{ v.ring }} 50%, rgba(255,255,255,0) 100%);"></span>
+
+      <div style="position: relative; width: 176px; height: 176px; flex: none;">
+        <svg aria-hidden="true" width="296" height="196" viewBox="-60 -10 296 196" style="position: absolute; left: -60px; top: -10px; overflow: visible; pointer-events: none;">
+          <sc-for list="{{ srcs }}" as="q" hint-placeholder-count="2">
+            <sc-if value="{{ q.show }}" hint-placeholder-val="{{ false }}">
+              <g style="animation: ap-fade-in 260ms ease both;">
+                <line x1="{{ q.x1 }}" y1="{{ q.y1 }}" x2="{{ q.x2 }}" y2="{{ q.y2 }}" stroke="{{ q.line }}" stroke-width="1.4" stroke-linecap="round" stroke-dasharray="{{ q.dash }}" style="transition: stroke .5s ease; animation: {{ q.lineAnim }};"></line>
+                <circle cx="{{ q.x }}" cy="{{ q.y }}" r="12" fill="{{ q.halo }}" style="transition: fill .5s ease;"></circle>
+                <circle cx="{{ q.x }}" cy="{{ q.y }}" r="6" fill="{{ q.fill }}" stroke="{{ q.stroke }}" stroke-width="1.6" style="transform-box: fill-box; transform-origin: center; transition: fill .5s ease, stroke .5s ease; animation: ap-fade-in 240ms cubic-bezier(.2,.7,.2,1) both;"></circle>
+              </g>
+            </sc-if>
+          </sc-for>
+        </svg>
+        <sc-for list="{{ srcs }}" as="q" hint-placeholder-count="2">
+          <sc-if value="{{ q.show }}" hint-placeholder-val="{{ false }}">
+            <div style="position: absolute; left: {{ q.lx }}; top: {{ q.ly }}; width: 84px; display: flex; flex-direction: column; align-items: center; gap: 1px; text-align: center; pointer-events: none; animation: ap-fade-in 260ms ease 54ms both;">
+              <span style="font-size: 10.5px; line-height: 13px; font-weight: 700; color: #DCE4EC;">{{ q.label }}</span>
+              <span style="font-size: 10px; line-height: 12px; font-weight: 600; color: {{ q.wordInk }}; transition: color .5s ease;">{{ q.word }}</span>
+            </div>
+          </sc-if>
+        </sc-for>
+        <svg aria-hidden="true" width="176" height="176" viewBox="0 0 176 176" style="position: absolute; left: 0; top: 0;">
+          <circle cx="88" cy="88" r="84" fill="none" stroke="{{ v.soft }}" stroke-width="1.2" stroke-dasharray="2 7"></circle>
+        </svg>
+        <sc-if value="{{ v.spinner }}" hint-placeholder-val="{{ true }}">
+          <svg aria-hidden="true" width="176" height="176" viewBox="0 0 176 176" style="position: absolute; left: 0; top: 0; animation: ap-spin {{ v.spinDur }} linear infinite;">
+            <circle cx="88" cy="88" r="70" fill="none" stroke="rgba(30,197,245,0.14)" stroke-width="4"></circle>
+            <circle cx="88" cy="88" r="70" fill="none" stroke="#1EC5F5" stroke-width="4" stroke-linecap="round" stroke-dasharray="96 344" style="filter: drop-shadow(0 0 6px rgba(30,197,245,0.9));"></circle>
+          </svg>
+        </sc-if>
+        <sc-if value="{{ v.staticRing }}" hint-placeholder-val="{{ false }}">
+          <svg aria-hidden="true" width="176" height="176" viewBox="0 0 176 176" style="position: absolute; left: 0; top: 0;">
+            <circle cx="88" cy="88" r="70" fill="none" stroke="{{ v.track }}" stroke-width="4"></circle>
+            <circle cx="88" cy="88" r="70" fill="none" stroke="{{ v.ring }}" stroke-width="4" stroke-linecap="round" stroke-dasharray="{{ v.arcDash }}" transform="rotate(-90 88 88)" style="filter: drop-shadow(0 0 6px {{ v.glow }}); animation: {{ v.arcAnim }};"></circle>
+          </svg>
+        </sc-if>
+        <div style="position: absolute; left: 32px; top: 32px; width: 112px; height: 112px; box-sizing: border-box; border-radius: 50%; background: radial-gradient(circle at 50% 30%, #0E3A62 0%, #05182C 72%); border: 1px solid {{ v.soft }}; box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 0 30px {{ v.glow }}; display: flex; align-items: center; justify-content: center; animation: {{ v.discAnim }};">
+          <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="" style="width: 62px; height: 58px; object-fit: contain; opacity: {{ v.shieldOpacity }};">
+        </div>
+        <sc-if value="{{ v.badge }}" hint-placeholder-val="{{ false }}">
+          <div style="position: absolute; right: 30px; bottom: 30px; width: 36px; height: 36px; box-sizing: border-box; border-radius: 50%; background: {{ v.badgeBg }}; border: 3px solid #061B30; box-shadow: 0 0 16px {{ v.glow }}; display: flex; align-items: center; justify-content: center; color: {{ v.badgeInk }}; animation: ap-pop 240ms cubic-bezier(.2,.7,.2,1) 315ms backwards;">
+            <sc-if value="{{ v.bCheck }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></sc-if>
+            <sc-if value="{{ v.bAsk }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 9.2a2.8 2.8 0 1 1 4 2.5c-.8.4-1.2 1-1.2 1.8"></path><path d="M12 17.5h.01"></path></svg></sc-if>
+            <sc-if value="{{ v.bAlert }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8"></path><path d="M12 18h.01"></path></svg></sc-if>
+            <sc-if value="{{ v.bStop }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor"></rect></svg></sc-if>
+            <sc-if value="{{ v.bLimit }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16a8 8 0 1 1 16 0"></path><path d="M12 16l4-5"></path></svg></sc-if>
+          </div>
+        </sc-if>
+      </div>
+
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+        <sc-if value="{{ isLive }}" hint-placeholder-val="{{ true }}">
+          <span style="height: 24px; box-sizing: border-box; padding: 0 10px; display: flex; align-items: center; gap: 7px; border-radius: 12px; background: rgba(30,197,245,0.1); border: 1px solid rgba(30,197,245,0.45); box-shadow: 0 0 14px -6px rgba(30,197,245,0.7); color: #8EE6FF; font-size: 12px; line-height: 1; font-weight: 600;">
+            <span style="width: 7px; height: 7px; border-radius: 50%; background: #1EC5F5; box-shadow: 0 0 8px #1EC5F5; animation: ap-blink 2.4s ease-in-out infinite;"></span>{{ t.inProgress }}
+          </span>
+        </sc-if>
+        <h2 style="margin: 0; font-size: 23px; line-height: 28px; font-weight: 800; letter-spacing: -0.01em;">{{ heroTitle }}</h2>
+        <sc-if value="{{ hasSub }}" hint-placeholder-val="{{ true }}">
+          <p style="margin: 0; max-width: 300px; font-size: 14px; line-height: 21px; color: #AFC0D1;">{{ heroSub }}</p>
+        </sc-if>
+      </div>
+
+      <sc-if value="{{ isClarify }}" hint-placeholder-val="{{ false }}">
+        <div style="width: 100%; display: flex; flex-direction: column; gap: 10px; text-align: left;">
+          <div style="padding: 14px; border-radius: 14px; background: rgba(30,197,245,0.07); border: 1px solid rgba(30,197,245,0.3); font-size: 15px; line-height: 22px; font-weight: 600; color: #E6ECF4;">{{ t.clarifyQ }}</div>
+          <label for="ans" style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);">{{ t.clarifyPh }}</label>
+          <div style="height: 54px; box-sizing: border-box; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 14px; border-radius: 16px; background: #03111F; border: 1.5px solid rgba(30,197,245,0.6); box-shadow: 0 0 0 4px rgba(30,197,245,0.06);">
+            <input id="ans" type="text" placeholder="{{ t.clarifyPh }}" style="flex: 1; min-width: 0; height: 44px; padding: 0; background: none; border: 0; outline: none; color: #F3F7FB; font-size: 15px;">
+            <button type="button" style="height: 42px; box-sizing: border-box; padding: 0 16px; border-radius: 12px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 6px 16px rgba(30,197,245,0.45); color: #03111F; font-size: 14px; line-height: 1; font-weight: 800;">{{ t.clarifySend }}</button>
+          </div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isFailed }}" hint-placeholder-val="{{ false }}">
+        <div style="width: 100%; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: rgba(53,209,162,0.07); border: 1px solid rgba(53,209,162,0.35); display: flex; align-items: center; gap: 10px; font-size: 13.5px; line-height: 19px; color: #9CEBD2; text-align: left;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#35D1A2" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none;"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>{{ t.notSpent }}
+        </div>
+      </sc-if>
+      <sc-if value="{{ hasCta }}" hint-placeholder-val="{{ false }}">
+        <a href="{{ ctaHref }}" style="width: 100%; height: 52px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 16px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 8px 22px rgba(30,197,245,0.45); color: #03111F; font-size: 16px; line-height: 20px; font-weight: 800; text-decoration: none;">{{ cta }}</a>
+      </sc-if>
+      <sc-if value="{{ canStop }}" hint-placeholder-val="{{ true }}">
+        <button type="button" onClick="{{ stopRun }}" style="height: 44px; box-sizing: border-box; padding: 0 18px; display: flex; align-items: center; gap: 8px; border-radius: 22px; background: rgba(3,17,31,0.5); border: 1px solid rgba(148,160,179,0.35); color: #C4CEDB; font-size: 14px; line-height: 1; font-weight: 600;">
+          <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor"></rect></svg>{{ t.stop }}
+        </button>
+      </sc-if>
+    </section>
+
+    <section aria-label="Steps" style="padding: 18px 16px 16px; border-radius: 22px; background: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%); border: 1px solid rgba(30,197,245,0.16); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 40px -16px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 16px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 320ms backwards;">
+      <h3 style="margin: 0; font-size: 17px; line-height: 22px; font-weight: 800;">{{ t.stepsTitle }}</h3>
+      <div style="display: flex; flex-direction: column;">
+        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="6">
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              <sc-if value="{{ s.isDone }}" hint-placeholder-val="{{ true }}">
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(53,209,162,0.14); border: 1.5px solid rgba(53,209,162,0.6); display: flex; align-items: center; justify-content: center; color: #7BE6C3;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              </sc-if>
+              <sc-if value="{{ s.isActive }}" hint-placeholder-val="{{ false }}">
+                <span style="position: relative; width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(30,197,245,0.14); border: 1.5px solid rgba(30,197,245,0.35); display: flex; align-items: center; justify-content: center; color: #8EE6FF; font-size: 12px; line-height: 1; font-weight: 800; box-shadow: 0 0 14px rgba(30,197,245,0.4);">
+                  <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" style="position: absolute; left: -1.5px; top: -1.5px; animation: ap-spin 1.4s linear infinite;"><circle cx="14" cy="14" r="13" fill="none" stroke="#1EC5F5" stroke-width="2" stroke-linecap="round" stroke-dasharray="20 62"></circle></svg>{{ s.n }}
+                </span>
+              </sc-if>
+              <sc-if value="{{ s.isPending }}" hint-placeholder-val="{{ false }}">
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(3,17,31,0.6); border: 1.5px solid #2A3F55; display: flex; align-items: center; justify-content: center; color: #6B788B; font-size: 12px; line-height: 1; font-weight: 700;">{{ s.n }}</span>
+              </sc-if>
+              <sc-if value="{{ s.isPaused }}" hint-placeholder-val="{{ false }}">
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(30,197,245,0.14); border: 1.5px solid #1EC5F5; box-shadow: 0 0 12px rgba(30,197,245,0.4); display: flex; align-items: center; justify-content: center; color: #8EE6FF;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 9.2a2.8 2.8 0 1 1 4 2.5c-.8.4-1.2 1-1.2 1.8"></path><path d="M12 17.5h.01"></path></svg></span>
+              </sc-if>
+              <sc-if value="{{ s.isFault }}" hint-placeholder-val="{{ false }}">
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(127,142,163,0.16); border: 1.5px solid #7F8EA3; display: flex; align-items: center; justify-content: center; color: #C9D2DE;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8"></path><path d="M12 18h.01"></path></svg></span>
+              </sc-if>
+              <sc-if value="{{ s.isCancel }}" hint-placeholder-val="{{ false }}">
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(127,142,163,0.16); border: 1.5px solid #7F8EA3; display: flex; align-items: center; justify-content: center; color: #C9D2DE;"><svg width="10" height="10" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"></rect></svg></span>
+              </sc-if>
+              <sc-if value="{{ s.notLast }}" hint-placeholder-val="{{ true }}">
+                <div style="flex: 1; width: 2px; min-height: 14px; margin: 4px 0; border-radius: 1px; background: {{ s.line }};"></div>
+              </sc-if>
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 {{ s.pb }}; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: {{ s.weight }}; color: {{ s.color }};">{{ s.label }}</span>
+                <sc-if value="{{ s.hasTag }}" hint-placeholder-val="{{ false }}">
+                  <span style="height: 20px; box-sizing: border-box; padding: 0 8px; display: flex; align-items: center; border-radius: 10px; background: {{ s.tagBg }}; border: 1px solid {{ s.tagEdge }}; color: {{ s.tagColor }}; font-size: 11px; line-height: 1; font-weight: 700;">{{ s.tag }}</span>
+                </sc-if>
+              </div>
+              <sc-if value="{{ s.hasActions }}" hint-placeholder-val="{{ true }}">
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 14px; background: {{ s.boxBg }}; border: 1px solid {{ s.boxEdge }};">
+                  <sc-for list="{{ s.actions }}" as="a" hint-placeholder-count="2">
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: {{ a.anim }};">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: {{ a.iconColor }};">
+                        <sc-if value="{{ a.isLive }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="animation: ap-spin 1s linear infinite;"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(30,197,245,0.25)" stroke-width="2.6"></circle><path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="#1EC5F5" stroke-width="2.6" stroke-linecap="round"></path></svg></sc-if>
+                        <sc-if value="{{ a.isThink }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"></path></svg></sc-if>
+                        <sc-if value="{{ a.isSearch }}" hint-placeholder-val="{{ true }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M20 20l-4-4"></path></svg></sc-if>
+                        <sc-if value="{{ a.isRead }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h6a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H3z"></path><path d="M21 5h-6a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h7z"></path></svg></sc-if>
+                        <sc-if value="{{ a.isCheck }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4L3 8l4 4"></path><path d="M3 8h13"></path><path d="M17 12l4 4-4 4"></path><path d="M21 16H8"></path></svg></sc-if>
+                        <sc-if value="{{ a.isWrite }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"></path><path d="M13.5 6.5l4 4"></path></svg></sc-if>
+                        <sc-if value="{{ a.isAsk }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 9.2a2.8 2.8 0 1 1 4 2.5c-.8.4-1.2 1-1.2 1.8"></path><path d="M12 17.5h.01"></path></svg></sc-if>
+                        <sc-if value="{{ a.isAlert }}" hint-placeholder-val="{{ false }}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8"></path><path d="M12 18h.01"></path></svg></sc-if>
+                        <sc-if value="{{ a.isStop }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3" fill="currentColor"></rect></svg></sc-if>
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        <sc-if value="{{ a.isLive }}" hint-placeholder-val="{{ false }}">
+                          <span style="font-size: 13.5px; line-height: 20px; font-weight: 600; color: #E6ECF4;">{{ a.text }}</span>
+                        </sc-if>
+                        <sc-if value="{{ a.isStill }}" hint-placeholder-val="{{ true }}">
+                          <span style="font-size: 13.5px; line-height: 20px; color: {{ a.color }};">{{ a.text }}</span>
+                        </sc-if>
+                        <sc-if value="{{ a.hasChip }}" hint-placeholder-val="{{ false }}">
+                          <span style="align-self: flex-start; max-width: 100%; box-sizing: border-box; padding: 5px 9px 5px 7px; display: flex; align-items: flex-start; gap: 6px; border-radius: 8px; background: rgba(3,17,31,0.7); border: 1px solid #22374D; font-size: 11.5px; line-height: 14px; color: #C9D5E2;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7B8FF2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px;"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg><span style="min-width: 0;">{{ a.chip }} <span style="color: #6B788B; white-space: nowrap;">· {{ a.chipState }}</span></span>
+                          </span>
+                        </sc-if>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+      <sc-if value="{{ isLive }}" hint-placeholder-val="{{ true }}">
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding-top: 14px; border-top: 1px solid rgba(30,197,245,0.1); font-size: 13px; line-height: 19px; color: #98A5B8;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1EC5F5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1.5px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 7.5h.01"></path></svg>
+          <span>{{ t.sourceNote }}</span>
+        </div>
+      </sc-if>
+    </section>
+
+    <sc-if value="{{ isRunning }}" hint-placeholder-val="{{ true }}">
+      <section aria-label="What happens next" style="padding: 18px 16px; border-radius: 22px; background: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%); border: 1px solid rgba(30,197,245,0.16); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 40px -16px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 14px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 320ms backwards;">
+        <h3 style="margin: 0; font-size: 17px; line-height: 22px; font-weight: 800;">{{ t.nextTitle }}</h3>
+        <sc-for list="{{ next }}" as="x" hint-placeholder-count="4">
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 32px; height: 32px; flex: none; box-sizing: border-box; border-radius: 10px; background: {{ x.bg }}; border: 1px solid {{ x.edge }}; display: flex; align-items: center; justify-content: center; color: {{ x.ink }};">
+              <sc-if value="{{ x.iCheck }}" hint-placeholder-val="{{ true }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></sc-if>
+              <sc-if value="{{ x.iAsk }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 9.2a2.8 2.8 0 1 1 4 2.5c-.8.4-1.2 1-1.2 1.8"></path><path d="M12 17.5h.01"></path></svg></sc-if>
+              <sc-if value="{{ x.iLimit }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16a8 8 0 1 1 16 0"></path><path d="M12 16l4-5"></path></svg></sc-if>
+              <sc-if value="{{ x.iAlert }}" hint-placeholder-val="{{ false }}"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8"></path><path d="M12 18h.01"></path></svg></sc-if>
+            </span>
+            <div style="flex: 1; min-width: 0; padding-top: 6px; display: flex; flex-direction: column; gap: 2px;"><span style="margin-top: -1px; font-size: 14px; line-height: 20px; font-weight: 700;">{{ x.title }}</span><span style="font-size: 13px; line-height: 19px; color: #AFC0D1;">{{ x.text }}</span></div>
+          </div>
+        </sc-for>
+      </section>
+    </sc-if>
+  </main>
+
+  <div aria-hidden="true" style="position: absolute; left: 0; right: 0; bottom: 0; height: 140px; background: linear-gradient(180deg, rgba(4,22,39,0) 0%, rgba(4,22,39,0.85) 55%, #041627 100%); pointer-events: none;"></div>
+
+  <nav aria-label="Main navigation" style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 70px; box-sizing: border-box; border-radius: 22px; background: #061B30; border: 1px solid rgba(30,197,245,0.35); box-shadow: 0 0 18px rgba(30,197,245,0.15); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; padding-bottom: 10px;">
+    <a href="V2-Pulse.dc.html" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #C9D5E2; font-size: 11px; text-decoration: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13h4l3-8 4 14 3-8h6"></path></svg>Pulse
+    </a>
+    <a href="V2-Home.dc.html" style="height: 52px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; color: #C9D5E2; font-size: 13px; font-weight: 500; text-decoration: none;">
+      <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="" style="position: absolute; top: -46px; left: 50%; margin-left: -32px; width: 64px; height: 68px; box-sizing: border-box; padding: 6px 4px; object-fit: contain;">{{ t.navVerify }}
+    </a>
+    <a href="V2-Library.dc.html" aria-current="page" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #FFFFFF; font-size: 11px; font-weight: 700; text-decoration: none; filter: drop-shadow(0 0 6px rgba(30,197,245,0.55));">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h11M3 12h11M3 18h11"></path><path d="M17 5.5l1.5 1.5 2.5-2.5M17 11.5l1.5 1.5 2.5-2.5M17 17.5l1.5 1.5 2.5-2.5"></path></svg>Proofs
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"autoplay":{"editor":"boolean","default":true,"section":"Demo"},"state":{"editor":"enum","options":["running","queued","clarify","done","budget","failed","cancelled"],"default":"running","section":"Demo"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { tick: 0, stopped: false, intro: true }; }
+componentDidMount() {
+var self = this;
+this.introTimer = setTimeout(function () { self.setState({ intro: false }); }, 1100);
+this.timer = setInterval(function () {
+if ((self.props.autoplay ?? true) === false || self.state.stopped) { return; }
+if (self.state.tick >= 10) { clearInterval(self.timer); return; }
+self.setState({ tick: self.state.tick + 1 });
+}, 1800);
+}
+componentWillUnmount() { clearInterval(this.timer); clearTimeout(this.introTimer); }
+renderVals() {
+var self = this;
+var t = {
+tagline: 'CRYPTO VERIFICATION · ECONOMICS', profile: 'Profile', back: 'Back', navVerify: 'Verify',
+inProgress: 'Research in progress', stop: 'Stop',
+kicker: { running: 'Researching', queued: 'Researching', clarify: 'Needs a clarification', done: 'Proof is ready', budget: 'Stopped early', failed: 'Research failed', cancelled: 'Cancelled' },
+title: { queued: 'Atlas is picking this up', clarify: 'One question before I start', done: 'Proof is ready', budget: 'Stopped early', failed: 'Couldn’t finish this research', cancelled: 'Stopped by you' },
+sub: { running: 'You can leave this screen. ATLAS keeps working and the result will be here when you come back.', queued: 'You can leave this screen. ATLAS keeps working and the result will be here when you come back.', done: 'Your Proof has the verdict, confidence, evidence, sources and honest gaps.', budget: 'Research hit its budget limit — showing an honest result.', failed: 'This is a failure of the run, not a finding about the project.', cancelled: 'The research stopped before an answer. This is not a finding about the project.' },
+cta: { done: 'Open Proof', budget: 'Open Proof', failed: 'Ask another question', cancelled: 'Ask another question' },
+clarifyQ: 'Which project or token do you mean?', clarifyPh: 'Your answer…', clarifySend: 'Send',
+notSpent: 'Your attempt wasn’t spent',
+stepsTitle: 'Research process',
+stages: ['Understanding the question', 'Planning the research', 'Searching sources', 'Reading evidence', 'Verifying the mechanism', 'Building the answer'],
+acts: [
+[{ k: 'think', x: 'Pinning down what to check: what pays for the buyback, how RAY gets bought back, and whether it’s happening now' }],
+[{ k: 'think', x: 'Order of checks: official docs → governance decisions → on-chain data' }],
+[{ k: 'search', x: 'Looking for Raydium’s official documentation', chip: 'Official docs' }, { k: 'search', x: 'Looking for governance decisions on RAY buybacks', chip: 'Governance forum' }],
+[{ k: 'read', x: 'Reading the section on protocol fee distribution' }, { k: 'read', x: 'Reading how RAY buybacks are described' }],
+[{ k: 'check', x: 'Comparing the documented mechanism with what the sources actually support' }, { k: 'check', x: 'Looking for on-chain proof that the buyback is executing' }],
+[{ k: 'write', x: 'Assembling the verdict and evidence into the Proof' }]
+],
+chipState: 'found, not verified',
+tagNow: 'now', tagWait: 'waiting for you', tagFault: 'stopped here', tagCancel: 'stopped by you',
+faultText: 'Stopped because of a technical failure', cancelText: 'Stopped by you',
+sourceNote: 'A found source isn’t evidence yet. ATLAS reads it first and checks what it actually supports.',
+nextTitle: 'What happens next',
+next: [
+{ i: 'check', title: 'Proof is ready', text: 'The result opens right on this screen.' },
+{ i: 'ask', title: 'Needs a clarification', text: 'ARI asks one question — the research continues after your answer.' },
+{ i: 'limit', title: 'Budget limit', text: 'You get an honest result: what it managed to check.' },
+{ i: 'alert', title: 'Failure', text: 'Your attempt isn’t spent. An unfinished check doesn’t mean the mechanism is missing.' }
+]
+};
+// Demo timeline: queued → each action of each stage goes live in turn → done.
+var timeline = [{ state: 'queued', stage: 0, act: 0 }];
+t.acts.forEach(function (list, si) { list.forEach(function (a, ai) { timeline.push({ state: 'running', stage: si, act: ai }); }); });
+timeline.push({ state: 'done', stage: 5, act: 0 });
+var auto = (this.props.autoplay ?? true) !== false;
+var cur;
+if (auto) {
+cur = timeline[Math.min(this.state.tick, timeline.length - 1)];
+if (this.state.stopped && cur.state !== 'done') { cur = { state: 'cancelled', stage: cur.stage, act: cur.act }; }
+} else {
+var st = this.props.state ?? 'running';
+if (['running', 'queued', 'clarify', 'done', 'budget', 'failed', 'cancelled'].indexOf(st) < 0) { st = 'running'; }
+cur = { state: st, stage: st === 'cancelled' ? 2 : 4, act: st === 'cancelled' ? 1 : 1 };
+}
+var state = cur.state;
+var CY = { ring: '#1EC5F5', soft: 'rgba(30,197,245,0.4)', glow: 'rgba(30,197,245,0.35)', edge: 'rgba(30,197,245,0.42)', blob: 'rgba(30,197,245,0.2)', kickerColor: '#8EE6FF', track: 'rgba(30,197,245,0.14)', badgeBg: '#1EC5F5', badgeInk: '#03111F', shieldOpacity: '1' };
+var GR = { ring: '#7F8EA3', soft: 'rgba(127,142,163,0.4)', glow: 'rgba(127,142,163,0.22)', edge: 'rgba(127,142,163,0.4)', blob: 'rgba(127,142,163,0.12)', kickerColor: '#C9D2DE', track: 'rgba(127,142,163,0.16)', badgeBg: '#7F8EA3', badgeInk: '#06111E', shieldOpacity: '0.72' };
+var base = { pulse: false, spinner: false, staticRing: false, badge: false, pingDur: '0s', pingDelay: '0s', spinDur: '2.4s', arcDash: '440', arcAnim: 'none', discAnim: 'none', dotAnim: 'none', bCheck: false, bAsk: false, bAlert: false, bStop: false, bLimit: false };
+var mix = function () { var o = {}; for (var i = 0; i < arguments.length; i++) { var s = arguments[i]; for (var k in s) { o[k] = s[k]; } } return o; };
+var V = {
+running: mix(base, CY, { pulse: true, spinner: true, pingDur: '2.8s', pingDelay: '1.4s', discAnim: 'none', dotAnim: 'ap-blink 2.4s ease-in-out infinite' }),
+queued: mix(base, CY, { pulse: true, spinner: true, spinDur: '4s', pingDur: '4s', pingDelay: '2s', discAnim: 'none', dotAnim: 'ap-blink 2.4s ease-in-out infinite' }),
+clarify: mix(base, CY, { pulse: true, staticRing: true, pingDur: '4.5s', pingDelay: '2.25s', arcDash: '110 330', badge: true, bAsk: true, dotAnim: 'ap-blink 2.4s ease-in-out infinite' }),
+done: mix(base, CY, { staticRing: true, arcDash: '440', arcAnim: 'ap-draw 0.5s cubic-bezier(.2,.7,.2,1) 80ms backwards', badge: true, bCheck: true }),
+budget: mix(base, GR, { staticRing: true, arcDash: '330 110', badge: true, bLimit: true }),
+failed: mix(base, GR, { staticRing: true, arcDash: '150 30 150 110', badge: true, bAlert: true }),
+cancelled: mix(base, GR, { staticRing: true, arcDash: '170 270', badge: true, bStop: true })
+}[state];
+var rpt = function (c, n) { var o = ''; for (var i = 0; i < n; i++) { o += c; } return o; };
+var k0 = cur.stage;
+var plan = {
+running: rpt('d', k0) + 'a' + rpt('p', 5 - k0),
+queued: 'appppp', clarify: 'qppppp', done: 'dddddd', budget: 'dddddd', failed: 'ddddxp',
+cancelled: rpt('d', k0) + 'c' + rpt('p', 5 - k0)
+}[state];
+var seq = 0;
+var mkAct = function (a, mode, fresh) {
+var d = (auto ? 60 : 120 + seq * 40) + 'ms'; seq += 1;
+var kind = mode === 'done' || mode === 'live' ? a.k : mode;
+var o = { text: a.x, anim: fresh ? 'ap-rise 0.45s cubic-bezier(.2,.7,.2,1) ' + d + ' backwards' : 'none', isLive: mode === 'live', isStill: mode !== 'live', hasChip: !!a.chip && (mode === 'done' || mode === 'live'), chip: a.chip || '', chipState: t.chipState, color: '#AFC0D1', iconColor: '#6B788B', isThink: false, isSearch: false, isRead: false, isCheck: false, isWrite: false, isAsk: false, isAlert: false, isStop: false };
+if (mode !== 'live') { o['is' + kind.charAt(0).toUpperCase() + kind.slice(1)] = true; }
+if (mode === 'live') { o.iconColor = '#1EC5F5'; }
+if (mode === 'ask') { o.color = '#BFEFFF'; o.iconColor = '#1EC5F5'; }
+if (mode === 'alert' || mode === 'stop') { o.color = '#C9D2DE'; o.iconColor = '#94A0B3'; }
+return o;
+};
+var steps = t.stages.map(function (label, i) {
+var k = plan.charAt(i);
+var last = i === t.stages.length - 1;
+var s = { n: i + 1, label: label, notLast: !last, pb: last ? '0px' : '18px', isDone: k === 'd', isActive: k === 'a', isPending: k === 'p', isPaused: k === 'q', isFault: k === 'x', isCancel: k === 'c', hasTag: false, tag: '', tagBg: 'transparent', tagEdge: 'transparent', tagColor: '#FFFFFF', line: k === 'd' ? 'rgba(53,209,162,0.45)' : '#22374D', weight: 600, color: '#E6ECF4' };
+if (k === 'a') { s.weight = 800; s.color = '#FFFFFF'; s.hasTag = true; s.tag = t.tagNow; s.tagBg = 'rgba(30,197,245,0.12)'; s.tagEdge = 'rgba(30,197,245,0.45)'; s.tagColor = '#8EE6FF'; }
+if (k === 'p') { s.weight = 500; s.color = '#6B788B'; }
+if (k === 'q') { s.weight = 800; s.color = '#FFFFFF'; s.hasTag = true; s.tag = t.tagWait; s.tagBg = 'rgba(30,197,245,0.12)'; s.tagEdge = 'rgba(30,197,245,0.45)'; s.tagColor = '#8EE6FF'; }
+if (k === 'x' || k === 'c') { s.weight = 800; s.color = '#FFFFFF'; s.hasTag = true; s.tag = k === 'x' ? t.tagFault : t.tagCancel; s.tagBg = 'rgba(127,142,163,0.14)'; s.tagEdge = 'rgba(127,142,163,0.45)'; s.tagColor = '#C9D2DE'; }
+var acts = t.acts[i];
+var list = [];
+var freshAll = !auto;
+if (k === 'd') { list = acts.map(function (a) { return mkAct(a, 'done', freshAll); }); }
+if (k === 'a' && state === 'running') {
+var upto = auto ? cur.act : acts.length - 1;
+list = acts.slice(0, upto).map(function (a) { return mkAct(a, 'done', freshAll); });
+list.push(mkAct(acts[upto], 'live', true));
+}
+if (k === 'x' || k === 'c') {
+var upto2 = auto ? cur.act : acts.length - 1;
+list = acts.slice(0, upto2).map(function (a) { return mkAct(a, 'done', freshAll); });
+list.push(k === 'x' ? mkAct({ x: t.faultText }, 'alert', true) : mkAct({ x: t.cancelText }, 'stop', true));
+}
+if (k === 'q') { list = [mkAct({ x: t.clarifyQ }, 'ask', true)]; }
+s.actions = list;
+s.hasActions = list.length > 0;
+s.boxBg = k === 'a' || k === 'q' ? 'rgba(30,197,245,0.06)' : k === 'x' || k === 'c' ? 'rgba(127,142,163,0.07)' : 'rgba(3,17,31,0.45)';
+s.boxEdge = k === 'a' || k === 'q' ? 'rgba(30,197,245,0.28)' : k === 'x' || k === 'c' ? 'rgba(127,142,163,0.3)' : 'rgba(255,255,255,0.05)';
+return s;
+});
+var NX = { check: ['rgba(30,197,245,0.12)', 'rgba(30,197,245,0.45)', '#8EE6FF'], ask: ['rgba(30,197,245,0.12)', 'rgba(30,197,245,0.45)', '#8EE6FF'], limit: ['rgba(127,142,163,0.14)', 'rgba(127,142,163,0.45)', '#C9D2DE'], alert: ['rgba(127,142,163,0.14)', 'rgba(127,142,163,0.45)', '#C9D2DE'] };
+var next = t.next.map(function (n) { var c = NX[n.i]; return { title: n.title, text: n.text, bg: c[0], edge: c[1], ink: c[2], iCheck: n.i === 'check', iAsk: n.i === 'ask', iLimit: n.i === 'limit', iAlert: n.i === 'alert' }; });
+
+// Sources found by the research, placed around the scanner. Found = dashed slate (a found source is not evidence),
+// reading = cyan dashes flowing in, read = solid cyan, verifying = pulses travelling to the shield. Never verdict colours.
+var SRC = [{ label: 'Official docs', x: -38, y: 50 }, { label: 'Governance forum', x: 214, y: 126 }];
+var W = { found: 'found', reading: 'reading', read: 'read' };
+var srcs = SRC.map(function (q, i) {
+var dxv = 88 - q.x, dyv = 88 - q.y, len = Math.sqrt(dxv * dxv + dyv * dyv), ux = dxv / len, uy = dyv / len;
+var x1 = q.x + ux * 8, y1 = q.y + uy * 8, x2 = 88 - ux * 60, y2 = 88 - uy * 60;
+var k = cur.stage, a = cur.act, st = state;
+var found = false, reading = false, read = false;
+if (st === 'running') { found = k > 2 || (k === 2 && a >= i); reading = k === 3 && a === i; read = k > 3 || (k === 3 && a > i); }
+if (st === 'cancelled') { found = k > 2 || (k === 2 && a > i); read = k > 3 || (k === 3 && a > i); }
+if (st === 'failed') { found = true; read = true; }
+if (st === 'done' || st === 'budget') { found = true; read = true; }
+var grey = st === 'failed' || st === 'cancelled' || st === 'budget';
+var o = { show: found, label: q.label, x: q.x, y: q.y, x1: x1.toFixed(1), y1: y1.toFixed(1), x2: x2.toFixed(1), y2: y2.toFixed(1),
+dx: (x2 - x1).toFixed(1) + 'px', dy: (y2 - y1).toFixed(1) + 'px', lx: (q.x - 42) + 'px', ly: (q.y + 13) + 'px',
+pulse: false, pulseDelay: (i * 0.7) + 's',
+line: 'rgba(148,160,179,0.75)', dash: '3 4', lineAnim: 'none', fill: '#061B30', stroke: '#94A0B3', halo: 'rgba(148,160,179,0.10)', word: W.found, wordInk: '#98A5B8' };
+if (reading) { o.line = 'rgba(30,197,245,0.7)';  o.stroke = '#1EC5F5'; o.halo = 'rgba(30,197,245,0.14)'; o.word = W.reading; o.wordInk = '#8EE6FF'; }
+if (read) { o.line = 'rgba(30,197,245,0.6)'; o.dash = 'none'; o.fill = 'rgba(30,197,245,0.22)'; o.stroke = '#1EC5F5'; o.halo = 'rgba(30,197,245,0.16)'; o.word = W.read; o.wordInk = '#8EE6FF'; }
+if (grey) { o.line = read ? 'rgba(127,142,163,0.6)' : 'rgba(127,142,163,0.55)'; o.lineAnim = 'none'; o.fill = read ? 'rgba(127,142,163,0.2)' : '#061B30'; o.stroke = '#7F8EA3'; o.halo = 'rgba(127,142,163,0.08)'; o.wordInk = '#98A5B8'; }
+return o;
+});
+return {
+srcs: srcs, showIntro: auto && this.state.intro,
+t: t, v: V, steps: steps, next: next,
+isRunning: state === 'running', isLive: state === 'running' || state === 'queued', isClarify: state === 'clarify', isFailed: state === 'failed',
+kicker: t.kicker[state],
+heroTitle: state === 'running' ? t.stages[k0] : t.title[state],
+hasSub: !!t.sub[state], heroSub: t.sub[state] || '',
+hasCta: !!t.cta[state], cta: t.cta[state] || '',
+ctaHref: state === 'done' || state === 'budget' ? 'V2-Result.dc.html' : 'V2-Home.dc.html',
+canStop: state === 'running' || state === 'queued',
+stopRun: function () { self.setState({ stopped: true }); }
+};
+}
+}
+</script>
+</body>
+</html>

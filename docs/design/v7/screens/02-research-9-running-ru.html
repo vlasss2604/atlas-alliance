@@ -1,0 +1,517 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ATLAS PROOF — Research — running (RU copy)</title>
+<!-- Static render of design artboard Progress-RU.dc.html (see ../source). Interactivity lives in the source logic. -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0;background:#06213B}
+a{color:#1EC5F5}a:hover{color:#8EE6FF}
+button,input{font-family:inherit}
+input::placeholder{color:#7F8EA3}
+svg{display:block}
+main>*{flex-shrink:0}
+button,a{transition:transform .15s ease,box-shadow .2s ease}
+button:active,a:active{transform:scale(.97)}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #1EC5F5;outline-offset:2px}
+@keyframes ap-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes ap-spin{to{transform:rotate(360deg)}}
+@keyframes ap-draw{from{stroke-dashoffset:440}to{stroke-dashoffset:0}}
+@keyframes ap-pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+@keyframes ap-blink{0%,100%{opacity:.3}50%{opacity:1}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div style="width: 390px; height: 844px; position: relative; overflow: hidden; isolation: isolate; box-sizing: border-box; background: radial-gradient(110% 55% at 0% 0%, rgba(30,197,245,0.14) 0%, rgba(30,197,245,0) 60%), radial-gradient(90% 45% at 100% 100%, rgba(123,143,242,0.14) 0%, rgba(123,143,242,0) 60%), linear-gradient(180deg, #06213B 0%, #041627 100%); color: #F3F7FB; font-family: Inter, system-ui, sans-serif;">
+
+  <div aria-hidden="true" style="position: absolute; z-index: -1; top: 170px; left: -120px; width: 320px; height: 320px; border-radius: 50%; background: radial-gradient(circle, rgba(30,197,245,0.2) 0%, rgba(30,197,245,0) 70%);  pointer-events: none;"></div>
+  <div aria-hidden="true" style="position: absolute; z-index: -1; bottom: 40px; right: -130px; width: 330px; height: 330px; border-radius: 50%; background: radial-gradient(circle, rgba(123,143,242,0.2) 0%, rgba(123,143,242,0) 70%);  pointer-events: none;"></div>
+
+  <header style="height: 76px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <img src="../assets/atlas-shield.png" alt="ATLAS PROOF" style="width: 44px; height: 47px; box-sizing: border-box; padding: 4px 2px; object-fit: contain;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 17px; font-weight: 800; letter-spacing: 0.01em;">ATLAS <span style="color: #1EC5F5;">PROOF</span></span>
+        <span style="font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #A9B8C8;">ПРОВЕРКА КРИПТОАКТИВОВ</span>
+      </div>
+    </div>
+    <a href="08-profile.html" aria-label="Профиль" style="width: 40px; height: 40px; box-sizing: border-box; border-radius: 50%; background: #061B30; border: 1px solid rgba(30,197,245,0.4); box-shadow: 0 0 10px rgba(30,197,245,0.2); color: #F1F5F9; display: flex; align-items: center; justify-content: center; text-decoration: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21c1.4-4 4.2-6 7.5-6s6.1 2 7.5 6"></path></svg>
+    </a>
+  </header>
+
+  <main style="position: absolute; top: 76px; left: 0; right: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; padding: 0 16px 140px; display: flex; flex-direction: column; gap: 16px;">
+
+    <a href="01-verify.html" style="align-self: flex-start; height: 44px; display: flex; align-items: center; gap: 4px; color: #C9D5E2; font-size: 14px; line-height: 18px; font-weight: 500; text-decoration: none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Назад
+    </a>
+
+    <section aria-label="Question" style="display: flex; align-items: flex-start; gap: 14px; margin-top: -6px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) backwards;">
+      <span style="width: 48px; height: 48px; flex: none; box-sizing: border-box; border-radius: 50%; background: radial-gradient(circle at 50% 30%, #0E3A62 0%, #05182C 75%); border: 1px solid rgba(30,197,245,0.45); box-shadow: 0 0 16px rgba(30,197,245,0.25); display: flex; align-items: center; justify-content: center; font-size: 15px; line-height: 1; font-weight: 800; color: #1EC5F5;">JI</span>
+      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+        <span style="height: 18px; display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 700; color: #8EE6FF;">
+          <span style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: #1EC5F5; box-shadow: 0 0 10px #1EC5F5; animation: ap-blink 2.4s ease-in-out infinite;"></span>Идёт исследование
+        </span>
+        <h1 style="margin: 0; font-size: 24px; line-height: 30px; font-weight: 800;">Jito</h1>
+        <p style="margin: 0; font-size: 15px; line-height: 22px; color: #C9D5E2;">Does Jito use protocol revenue to buy back or burn JTO, and is that mechanism executing now?</p>
+      </div>
+    </section>
+
+    <section aria-label="Status" style="position: relative; overflow: hidden; padding: 26px 18px 22px; border-radius: 24px; background: linear-gradient(180deg, #08294B 0%, #061B30 100%); border: 1px solid rgba(30,197,245,0.42); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 22px 44px -18px rgba(0,0,0,0.85), 0 0 36px -6px rgba(30,197,245,0.35); display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 36ms backwards;">
+      <span aria-hidden="true" style="position: absolute; top: 0; left: 15%; right: 15%; height: 1px; background: linear-gradient(90deg, rgba(255,255,255,0) 0%, #1EC5F5 50%, rgba(255,255,255,0) 100%);"></span>
+
+      <div style="position: relative; width: 176px; height: 176px; flex: none;">
+        <svg aria-hidden="true" width="176" height="176" viewBox="0 0 176 176" style="position: absolute; left: 0; top: 0;">
+          <circle cx="88" cy="88" r="84" fill="none" stroke="rgba(30,197,245,0.4)" stroke-width="1.2" stroke-dasharray="2 7"></circle>
+        </svg>
+        
+          <svg aria-hidden="true" width="176" height="176" viewBox="0 0 176 176" style="position: absolute; left: 0; top: 0; animation: ap-spin 2.4s linear infinite;">
+            <circle cx="88" cy="88" r="70" fill="none" stroke="rgba(30,197,245,0.14)" stroke-width="4"></circle>
+            <circle cx="88" cy="88" r="70" fill="none" stroke="#1EC5F5" stroke-width="4" stroke-linecap="round" stroke-dasharray="96 344" style="filter: drop-shadow(0 0 6px rgba(30,197,245,0.9));"></circle>
+          </svg>
+        
+        
+        <div style="position: absolute; left: 32px; top: 32px; width: 112px; height: 112px; box-sizing: border-box; border-radius: 50%; background: radial-gradient(circle at 50% 30%, #0E3A62 0%, #05182C 72%); border: 1px solid rgba(30,197,245,0.4); box-shadow: inset 0 1px 0 rgba(255,255,255,0.1), 0 0 30px rgba(30,197,245,0.35); display: flex; align-items: center; justify-content: center; animation: none;">
+          <img src="../assets/atlas-shield.png" alt="" style="width: 62px; height: 58px; object-fit: contain; opacity: 1;">
+        </div>
+        
+      </div>
+
+      <div style="display: flex; flex-direction: column; align-items: center; gap: 8px;">
+        
+          <span style="height: 24px; box-sizing: border-box; padding: 0 10px; display: flex; align-items: center; gap: 7px; border-radius: 12px; background: rgba(30,197,245,0.1); border: 1px solid rgba(30,197,245,0.45); box-shadow: 0 0 14px -6px rgba(30,197,245,0.7); color: #8EE6FF; font-size: 12px; line-height: 1; font-weight: 600;">
+            <span style="width: 7px; height: 7px; border-radius: 50%; background: #1EC5F5; box-shadow: 0 0 8px #1EC5F5; animation: ap-blink 2.4s ease-in-out infinite;"></span>Исследование идёт
+          </span>
+        
+        <h2 style="margin: 0; font-size: 23px; line-height: 28px; font-weight: 800; letter-spacing: -0.01em;">Проверяю механизм</h2>
+        
+          <p style="margin: 0; max-width: 300px; font-size: 14px; line-height: 21px; color: #AFC0D1;">Этот экран можно закрыть. ATLAS продолжит работу, и результат появится здесь, когда вы вернётесь.</p>
+        
+      </div>
+
+      
+      
+      
+      
+        <button type="button" style="height: 44px; box-sizing: border-box; padding: 0 18px; display: flex; align-items: center; gap: 8px; border-radius: 22px; background: rgba(3,17,31,0.5); border: 1px solid rgba(148,160,179,0.35); color: #C4CEDB; font-size: 14px; line-height: 1; font-weight: 600;">
+          <svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="5" width="14" height="14" rx="3" fill="currentColor"></rect></svg>Остановить
+        </button>
+      
+    </section>
+
+    <section aria-label="Steps" style="padding: 18px 16px 16px; border-radius: 22px; background: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%); border: 1px solid rgba(30,197,245,0.16); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 40px -16px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 16px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 72ms backwards;">
+      <h3 style="margin: 0; font-size: 17px; line-height: 22px; font-weight: 800;">Ход исследования</h3>
+      <div style="display: flex; flex-direction: column;">
+        
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(53,209,162,0.14); border: 1.5px solid rgba(53,209,162,0.6); display: flex; align-items: center; justify-content: center; color: #7BE6C3;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              
+              
+              
+              
+              
+              
+              
+                <div style="flex: 1; width: 2px; min-height: 14px; margin: 4px 0; border-radius: 1px; background: rgba(53,209,162,0.45);"></div>
+              
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 18px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: 600; color: #E6ECF4;">Разбираю вопрос</span>
+                
+              </div>
+              
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(3,17,31,0.45); border: 1px solid rgba(255,255,255,0.05);">
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 120ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Выделяю, что нужно проверить: откуда выручка, есть ли выкуп или сжигание JTO и работает ли это сейчас</span>
+                        
+                        
+                      </div>
+                    </div>
+                  
+                </div>
+              
+            </div>
+          </div>
+        
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(53,209,162,0.14); border: 1.5px solid rgba(53,209,162,0.6); display: flex; align-items: center; justify-content: center; color: #7BE6C3;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              
+              
+              
+              
+              
+              
+              
+                <div style="flex: 1; width: 2px; min-height: 14px; margin: 4px 0; border-radius: 1px; background: rgba(53,209,162,0.45);"></div>
+              
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 18px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: 600; color: #E6ECF4;">Планирую исследование</span>
+                
+              </div>
+              
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(3,17,31,0.45); border: 1px solid rgba(255,255,255,0.05);">
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 160ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"></path><path d="M19 17l.7 1.8 1.8.7-1.8.7L19 22l-.7-1.8-1.8-.7 1.8-.7z"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Порядок проверки: официальная документация → решения управления → ончейн-данные</span>
+                        
+                        
+                      </div>
+                    </div>
+                  
+                </div>
+              
+            </div>
+          </div>
+        
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(53,209,162,0.14); border: 1.5px solid rgba(53,209,162,0.6); display: flex; align-items: center; justify-content: center; color: #7BE6C3;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              
+              
+              
+              
+              
+              
+              
+                <div style="flex: 1; width: 2px; min-height: 14px; margin: 4px 0; border-radius: 1px; background: rgba(53,209,162,0.45);"></div>
+              
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 18px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: 600; color: #E6ECF4;">Ищу источники</span>
+                
+              </div>
+              
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(3,17,31,0.45); border: 1px solid rgba(255,255,255,0.05);">
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 200ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M20 20l-4-4"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Ищу официальную документацию Jito</span>
+                        
+                        
+                          <span style="align-self: flex-start; max-width: 100%; box-sizing: border-box; padding: 5px 9px 5px 7px; display: flex; align-items: flex-start; gap: 6px; border-radius: 8px; background: rgba(3,17,31,0.7); border: 1px solid #22374D; font-size: 11.5px; line-height: 14px; color: #C9D5E2;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7B8FF2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px;"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg><span style="min-width: 0;">Официальная документация <span style="color: #6B788B; white-space: nowrap;">· найден, не проверен</span></span>
+                          </span>
+                        
+                      </div>
+                    </div>
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 240ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="M20 20l-4-4"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Ищу решения управления по выкупу JTO</span>
+                        
+                        
+                          <span style="align-self: flex-start; max-width: 100%; box-sizing: border-box; padding: 5px 9px 5px 7px; display: flex; align-items: flex-start; gap: 6px; border-radius: 8px; background: rgba(3,17,31,0.7); border: 1px solid #22374D; font-size: 11.5px; line-height: 14px; color: #C9D5E2;">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#7B8FF2" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1px;"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg><span style="min-width: 0;">Форум управления <span style="color: #6B788B; white-space: nowrap;">· найден, не проверен</span></span>
+                          </span>
+                        
+                      </div>
+                    </div>
+                  
+                </div>
+              
+            </div>
+          </div>
+        
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(53,209,162,0.14); border: 1.5px solid rgba(53,209,162,0.6); display: flex; align-items: center; justify-content: center; color: #7BE6C3;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+              
+              
+              
+              
+              
+              
+              
+                <div style="flex: 1; width: 2px; min-height: 14px; margin: 4px 0; border-radius: 1px; background: rgba(53,209,162,0.45);"></div>
+              
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 18px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: 600; color: #E6ECF4;">Читаю доказательства</span>
+                
+              </div>
+              
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(3,17,31,0.45); border: 1px solid rgba(255,255,255,0.05);">
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 280ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h6a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H3z"></path><path d="M21 5h-6a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h7z"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Читаю раздел о распределении комиссий протокола</span>
+                        
+                        
+                      </div>
+                    </div>
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 320ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h6a3 3 0 0 1 3 3v12a2 2 0 0 0-2-2H3z"></path><path d="M21 5h-6a3 3 0 0 0-3 3v12a2 2 0 0 1 2-2h7z"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Читаю обсуждения выкупа JTO</span>
+                        
+                        
+                      </div>
+                    </div>
+                  
+                </div>
+              
+            </div>
+          </div>
+        
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              
+              
+                <span style="position: relative; width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(30,197,245,0.14); border: 1.5px solid rgba(30,197,245,0.35); display: flex; align-items: center; justify-content: center; color: #8EE6FF; font-size: 12px; line-height: 1; font-weight: 800; box-shadow: 0 0 14px rgba(30,197,245,0.4);">
+                  <svg aria-hidden="true" width="28" height="28" viewBox="0 0 28 28" style="position: absolute; left: -1.5px; top: -1.5px; animation: ap-spin 1.4s linear infinite;"><circle cx="14" cy="14" r="13" fill="none" stroke="#1EC5F5" stroke-width="2" stroke-linecap="round" stroke-dasharray="20 62"></circle></svg>5
+                </span>
+              
+              
+              
+              
+              
+              
+                <div style="flex: 1; width: 2px; min-height: 14px; margin: 4px 0; border-radius: 1px; background: #22374D;"></div>
+              
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 18px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: 800; color: #FFFFFF;">Проверяю механизм</span>
+                
+                  <span style="height: 20px; box-sizing: border-box; padding: 0 8px; display: flex; align-items: center; border-radius: 10px; background: rgba(30,197,245,0.12); border: 1px solid rgba(30,197,245,0.45); color: #8EE6FF; font-size: 11px; line-height: 1; font-weight: 700;">сейчас</span>
+                
+              </div>
+              
+                <div style="display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; border-radius: 14px; background: rgba(30,197,245,0.06); border: 1px solid rgba(30,197,245,0.28);">
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 360ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #6B788B;">
+                        
+                        
+                        
+                        
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 4L3 8l4 4"></path><path d="M3 8h13"></path><path d="M17 12l4 4-4 4"></path><path d="M21 16H8"></path></svg>
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">Сопоставляю описание механизма с решениями управления</span>
+                        
+                        
+                      </div>
+                    </div>
+                  
+                    <div style="display: flex; align-items: flex-start; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 400ms backwards;">
+                      <span style="width: 20px; height: 20px; flex: none; display: flex; align-items: center; justify-content: center; color: #1EC5F5;">
+                        <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" style="animation: ap-spin 1s linear infinite;"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(30,197,245,0.25)" stroke-width="2.6"></circle><path d="M12 3a9 9 0 0 1 9 9" fill="none" stroke="#1EC5F5" stroke-width="2.6" stroke-linecap="round"></path></svg>
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                        
+                      </span>
+                      <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+                        
+                          <span style="font-size: 13.5px; line-height: 20px; font-weight: 600; color: #E6ECF4;">Ищу в ончейн-данных подтверждение, что выкуп исполняется</span>
+                        
+                        
+                        
+                      </div>
+                    </div>
+                  
+                </div>
+              
+            </div>
+          </div>
+        
+          <div style="display: flex; gap: 14px;">
+            <div style="width: 28px; flex: none; display: flex; flex-direction: column; align-items: center;">
+              
+              
+              
+                <span style="width: 28px; height: 28px; flex: none; box-sizing: border-box; border-radius: 50%; background: rgba(3,17,31,0.6); border: 1.5px solid #2A3F55; display: flex; align-items: center; justify-content: center; color: #6B788B; font-size: 12px; line-height: 1; font-weight: 700;">6</span>
+              
+              
+              
+              
+              
+            </div>
+            <div style="flex: 1; min-width: 0; padding: 3px 0 0px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px;">
+                <span style="font-size: 15px; line-height: 22px; font-weight: 500; color: #6B788B;">Формирую ответ</span>
+                
+              </div>
+              
+            </div>
+          </div>
+        
+      </div>
+      
+        <div style="display: flex; align-items: flex-start; gap: 10px; padding-top: 14px; border-top: 1px solid rgba(30,197,245,0.1); font-size: 13px; line-height: 19px; color: #98A5B8;">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1EC5F5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1.5px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 7.5h.01"></path></svg>
+          <span>Найденный источник — ещё не доказательство. ATLAS сначала читает его и проверяет, что он действительно подтверждает.</span>
+        </div>
+      
+    </section>
+
+    
+      <section aria-label="What happens next" style="padding: 18px 16px; border-radius: 22px; background: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%); border: 1px solid rgba(30,197,245,0.16); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 40px -16px rgba(0,0,0,0.8); display: flex; flex-direction: column; gap: 14px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 108ms backwards;">
+        <h3 style="margin: 0; font-size: 17px; line-height: 22px; font-weight: 800;">Что будет дальше</h3>
+        
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 32px; height: 32px; flex: none; box-sizing: border-box; border-radius: 10px; background: rgba(30,197,245,0.12); border: 1px solid rgba(30,197,245,0.45); display: flex; align-items: center; justify-content: center; color: #8EE6FF;">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>
+              
+              
+              
+            </span>
+            <div style="flex: 1; min-width: 0; padding-top: 6px; display: flex; flex-direction: column; gap: 2px;"><span style="margin-top: -1px; font-size: 14px; line-height: 20px; font-weight: 700;">Proof готов</span><span style="font-size: 13px; line-height: 19px; color: #AFC0D1;">Результат откроется на этом экране.</span></div>
+          </div>
+        
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 32px; height: 32px; flex: none; box-sizing: border-box; border-radius: 10px; background: rgba(30,197,245,0.12); border: 1px solid rgba(30,197,245,0.45); display: flex; align-items: center; justify-content: center; color: #8EE6FF;">
+              
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.2 9.2a2.8 2.8 0 1 1 4 2.5c-.8.4-1.2 1-1.2 1.8"></path><path d="M12 17.5h.01"></path></svg>
+              
+              
+            </span>
+            <div style="flex: 1; min-width: 0; padding-top: 6px; display: flex; flex-direction: column; gap: 2px;"><span style="margin-top: -1px; font-size: 14px; line-height: 20px; font-weight: 700;">Нужно уточнение</span><span style="font-size: 13px; line-height: 19px; color: #AFC0D1;">ARI задаст один вопрос — после ответа исследование продолжится.</span></div>
+          </div>
+        
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 32px; height: 32px; flex: none; box-sizing: border-box; border-radius: 10px; background: rgba(127,142,163,0.14); border: 1px solid rgba(127,142,163,0.45); display: flex; align-items: center; justify-content: center; color: #C9D2DE;">
+              
+              
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 16a8 8 0 1 1 16 0"></path><path d="M12 16l4-5"></path></svg>
+              
+            </span>
+            <div style="flex: 1; min-width: 0; padding-top: 6px; display: flex; flex-direction: column; gap: 2px;"><span style="margin-top: -1px; font-size: 14px; line-height: 20px; font-weight: 700;">Предел бюджета</span><span style="font-size: 13px; line-height: 19px; color: #AFC0D1;">Покажу честный результат: то, что успел проверить.</span></div>
+          </div>
+        
+          <div style="display: flex; align-items: flex-start; gap: 12px;">
+            <span style="width: 32px; height: 32px; flex: none; box-sizing: border-box; border-radius: 10px; background: rgba(127,142,163,0.14); border: 1px solid rgba(127,142,163,0.45); display: flex; align-items: center; justify-content: center; color: #C9D2DE;">
+              
+              
+              
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M12 6v8"></path><path d="M12 18h.01"></path></svg>
+            </span>
+            <div style="flex: 1; min-width: 0; padding-top: 6px; display: flex; flex-direction: column; gap: 2px;"><span style="margin-top: -1px; font-size: 14px; line-height: 20px; font-weight: 700;">Сбой</span><span style="font-size: 13px; line-height: 19px; color: #AFC0D1;">Попытка не потрачена. Незавершённая проверка не означает, что механизма нет.</span></div>
+          </div>
+        
+      </section>
+    
+  </main>
+
+  <div aria-hidden="true" style="position: absolute; left: 0; right: 0; bottom: 0; height: 140px; background: linear-gradient(180deg, rgba(4,22,39,0) 0%, rgba(4,22,39,0.85) 55%, #041627 100%); pointer-events: none;"></div>
+
+  <nav aria-label="Main navigation" style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 70px; box-sizing: border-box; border-radius: 22px; background: #061B30; border: 1px solid rgba(30,197,245,0.35); box-shadow: 0 0 18px rgba(30,197,245,0.15); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; padding-bottom: 10px;">
+    <a href="06-pulse.html" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #C9D5E2; font-size: 11px; text-decoration: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13h4l3-8 4 14 3-8h6"></path></svg>Pulse
+    </a>
+    <a href="01-verify.html" style="height: 52px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; color: #C9D5E2; font-size: 13px; font-weight: 500; text-decoration: none;">
+      <img src="../assets/atlas-shield.png" alt="" style="position: absolute; top: -46px; left: 50%; margin-left: -32px; width: 64px; height: 68px; box-sizing: border-box; padding: 6px 4px; object-fit: contain;">Проверить
+    </a>
+    <a href="05-proofs-library.html" aria-current="page" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #FFFFFF; font-size: 11px; font-weight: 700; text-decoration: none; filter: drop-shadow(0 0 6px rgba(30,197,245,0.55));">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h11M3 12h11M3 18h11"></path><path d="M17 5.5l1.5 1.5 2.5-2.5M17 11.5l1.5 1.5 2.5-2.5M17 17.5l1.5 1.5 2.5-2.5"></path></svg>Proofs
+    </a>
+  </nav>
+</div>
+</body>
+</html>

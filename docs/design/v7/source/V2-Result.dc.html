@@ -1,0 +1,404 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ATLAS PROOF v2 — Research result</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0;background:#06213B}
+a{color:#1EC5F5}a:hover{color:#8EE6FF}
+button{font-family:inherit}
+svg{display:block}
+main>*{flex-shrink:0}
+button,a{transition:transform .15s ease,box-shadow .2s ease}
+button:active,a:active{transform:scale(.98)}
+button:focus-visible,a:focus-visible{outline:2px solid #1EC5F5;outline-offset:2px}
+@keyframes ap-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@keyframes ap-seg{from{stroke-dasharray:0 314.16}to{stroke-dasharray:34.27 279.89}}
+@keyframes ap-pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+@keyframes ap-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+@keyframes ap-fade-in{from{opacity:0}to{opacity:1}}
+/* evidence network: static layer, no animation (performance) */
+</style>
+</helmet>
+<div class="ap-root" style="width: 390px; height: 844px; position: relative; overflow: hidden; isolation: isolate; box-sizing: border-box; background: radial-gradient(110% 55% at 0% 0%, rgba(30,197,245,0.14) 0%, rgba(30,197,245,0) 60%), radial-gradient(90% 45% at 100% 100%, rgba(123,143,242,0.14) 0%, rgba(123,143,242,0) 60%), linear-gradient(180deg, #06213B 0%, #041627 100%); color: #F3F7FB; font-family: Inter, system-ui, sans-serif;">
+
+  <div aria-hidden="true" style="position: absolute; z-index: -1; top: 200px; left: -130px; width: 320px; height: 320px; border-radius: 50%; background: radial-gradient(circle, rgba(230,181,77,0.12) 0%, rgba(230,181,77,0) 70%);  pointer-events: none;"></div>
+  <div aria-hidden="true" style="position: absolute; z-index: -1; bottom: 40px; right: -120px; width: 320px; height: 320px; border-radius: 50%; background: radial-gradient(circle, rgba(123,143,242,0.2) 0%, rgba(123,143,242,0) 70%);  pointer-events: none;"></div>
+
+        <div aria-hidden="true" class="ap-net" style="position: absolute; z-index: -1; left: 0; top: 0; width: 390px; height: 1500px; pointer-events: none;"><svg width="390" height="1500" viewBox="0 0 390 1500" aria-hidden="true" style="display: block;"><g stroke="rgba(30,197,245,0.17)" stroke-width="0.8" fill="none"><line x1="233.5" y1="25.7" x2="306.1" y2="61.8"></line><line x1="233.5" y1="25.7" x2="268.6" y2="168.4"></line><line x1="306.1" y1="61.8" x2="268.6" y2="168.4"></line><line x1="268.6" y1="168.4" x2="350.9" y2="247.5"></line><line x1="350.9" y1="247.5" x2="227.8" y2="306.8"></line><line x1="40.9" y1="386.6" x2="72.8" y2="446.6"></line><line x1="40.9" y1="386.6" x2="156.8" y2="465.0"></line><line x1="227.8" y1="306.8" x2="210.5" y2="435.0"></line><line x1="72.8" y1="446.6" x2="156.8" y2="465.0"></line><line x1="156.8" y1="465.0" x2="210.5" y2="435.0"></line><line x1="210.5" y1="435.0" x2="355.0" y2="470.3"></line><line x1="355.0" y1="470.3" x2="358.7" y2="593.3"></line><line x1="55.3" y1="609.1" x2="168.6" y2="632.7"></line><line x1="55.3" y1="609.1" x2="19.7" y2="742.1"></line><line x1="168.6" y1="632.7" x2="249.4" y2="616.1"></line><line x1="168.6" y1="632.7" x2="119.8" y2="748.9"></line><line x1="249.4" y1="616.1" x2="358.7" y2="593.3"></line><line x1="19.7" y1="742.1" x2="119.8" y2="748.9"></line><line x1="361.4" y1="757.0" x2="277.5" y2="883.9"></line><line x1="361.4" y1="757.0" x2="307.9" y2="905.7"></line><line x1="34.6" y1="905.1" x2="152.3" y2="882.2"></line><line x1="34.6" y1="905.1" x2="86.2" y2="1053.6"></line><line x1="152.3" y1="882.2" x2="277.5" y2="883.9"></line><line x1="277.5" y1="883.9" x2="307.9" y2="905.7"></line><line x1="277.5" y1="883.9" x2="316.0" y2="986.0"></line><line x1="307.9" y1="905.7" x2="316.0" y2="986.0"></line><line x1="86.2" y1="1053.6" x2="137.6" y2="1038.9"></line><line x1="86.2" y1="1053.6" x2="118.1" y2="1134.9"></line><line x1="137.6" y1="1038.9" x2="118.1" y2="1134.9"></line><line x1="316.0" y1="986.0" x2="272.0" y2="1118.8"></line><line x1="272.0" y1="1118.8" x2="345.0" y2="1195.9"></line><line x1="345.0" y1="1195.9" x2="321.0" y2="1294.0"></line><line x1="76.4" y1="1274.2" x2="135.5" y2="1332.3"></line><line x1="76.4" y1="1274.2" x2="30.7" y2="1384.2"></line><line x1="135.5" y1="1332.3" x2="217.2" y2="1264.4"></line><line x1="135.5" y1="1332.3" x2="30.7" y2="1384.2"></line><line x1="135.5" y1="1332.3" x2="136.3" y2="1438.2"></line><line x1="217.2" y1="1264.4" x2="321.0" y2="1294.0"></line><line x1="321.0" y1="1294.0" x2="354.6" y2="1389.0"></line><line x1="30.7" y1="1384.2" x2="136.3" y2="1438.2"></line><line x1="136.3" y1="1438.2" x2="258.2" y2="1433.3"></line><line x1="258.2" y1="1433.3" x2="354.6" y2="1389.0"></line></g><circle cx="22.2" cy="82.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="233.5" cy="25.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="306.1" cy="61.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="268.6" cy="168.4" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="268.6" cy="168.4" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="350.9" cy="247.5" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="40.9" cy="386.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="227.8" cy="306.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="72.8" cy="446.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="156.8" cy="465.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="210.5" cy="435.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="355.0" cy="470.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="55.3" cy="609.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="168.6" cy="632.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="249.4" cy="616.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="358.7" cy="593.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="19.7" cy="742.1" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="19.7" cy="742.1" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="119.8" cy="748.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="361.4" cy="757.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="34.6" cy="905.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="152.3" cy="882.2" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="277.5" cy="883.9" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="277.5" cy="883.9" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="307.9" cy="905.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="86.2" cy="1053.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="137.6" cy="1038.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="316.0" cy="986.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="118.1" cy="1134.9" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="118.1" cy="1134.9" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="272.0" cy="1118.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="345.0" cy="1195.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="76.4" cy="1274.2" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="135.5" cy="1332.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="217.2" cy="1264.4" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="321.0" cy="1294.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="30.7" cy="1384.2" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="30.7" cy="1384.2" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="136.3" cy="1438.2" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="136.3" cy="1438.2" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="258.2" cy="1433.3" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="258.2" cy="1433.3" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="354.6" cy="1389.0" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="354.6" cy="1389.0" r="2.4" fill="rgba(170,240,255,0.9)"></circle></svg></div>
+
+  <header style="height: 76px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="ATLAS PROOF" style="width: 44px; height: 47px; box-sizing: border-box; padding: 4px 2px; object-fit: contain;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 17px; font-weight: 800; letter-spacing: 0.01em;">ATLAS <span style="color: #1EC5F5;">PROOF</span></span>
+        <span style="font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #A9B8C8;">CRYPTO VERIFICATION · ECONOMICS</span>
+      </div>
+    </div>
+    <a href="V2-Profile.dc.html" aria-label="Profile" style="width: 40px; height: 40px; box-sizing: border-box; border-radius: 50%; background: #061B30; border: 1px solid rgba(30,197,245,0.4); box-shadow: 0 0 10px rgba(30,197,245,0.2); color: #F1F5F9; display: flex; align-items: center; justify-content: center; text-decoration: none;">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21c1.4-4 4.2-6 7.5-6s6.1 2 7.5 6"></path></svg>
+    </a>
+  </header>
+
+  <main class="ap-scroll" style="position: absolute; top: 76px; left: 0; right: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; padding: 0 16px 140px; display: flex; flex-direction: column; gap: 18px;">
+    <a href="V2-Library.dc.html" style="align-self: flex-start; height: 44px; display: flex; align-items: center; gap: 4px; color: #C9D5E2; font-size: 14px; line-height: 18px; font-weight: 500; text-decoration: none;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>Back
+    </a>
+
+    <div style="display: flex; flex-direction: column; gap: 12px; margin-top: -8px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) backwards;">
+      <div style="height: 32px; display: flex; align-items: center; gap: 10px;">
+        <span style="width: 32px; height: 32px; flex: none; box-sizing: border-box; border-radius: 28%; background: radial-gradient(circle at 50% 22%, rgba(26,86,130,0.95) 0%, rgba(26,86,130,0) 72%), #0B1A2E; border: 1px solid rgba(110,185,240,0.38); box-shadow: 0 0 16px -6px rgba(90,180,240,0.5); display: flex; align-items: center; justify-content: center;"><img src="/_blob/1e77ecff1f889ac0d5d88b2f39066c83" alt="" style="width: 62%; height: 62%; object-fit: contain;"></span>
+        <span style="font-size: 15px; line-height: 20px; font-weight: 700;">Raydium</span>
+        <span style="font-size: 13px; line-height: 20px; color: #98A5B8;">Research result</span>
+      </div>
+      <h1 style="margin: 0; font-size: 24px; line-height: 28px; font-weight: 800; letter-spacing: -0.01em;">Does Raydium use protocol fees to buy back RAY, and is it happening now?</h1>
+    </div>
+
+    <section aria-label="Answer" style="position: relative; border-radius: 24px; background: linear-gradient(180deg, #08294B 0%, #061B30 100%); border: 1px solid rgba(30,197,245,0.42); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 22px 44px -18px rgba(0,0,0,0.85), 0 0 36px -6px rgba(30,197,245,0.3); overflow: hidden; animation: ap-fade-in 260ms ease 68ms backwards;">
+      <span aria-hidden="true" style="position: absolute; top: 0; left: 15%; right: 15%; height: 1px; background: linear-gradient(90deg, rgba(30,197,245,0) 0%, #8EE6FF 50%, rgba(30,197,245,0) 100%);"></span>
+      <div style="position: relative; padding: 18px 16px; display: flex; align-items: center; gap: 16px;">
+        <div style="position: relative; width: 116px; height: 116px; flex: none;">
+          <svg width="116" height="116" viewBox="0 0 120 120" aria-hidden="true">
+            <circle cx="60" cy="60" r="39" fill="#03111F" stroke="rgba(30,197,245,0.16)" stroke-width="1"></circle>
+            <circle cx="60" cy="60" r="50" fill="none" stroke="rgba(30,197,245,0.06)" stroke-width="11"></circle>
+            <g transform="rotate(-90 60 60)" fill="none" stroke-width="9">
+              <sc-for list="{{ segs }}" as="g" hint-placeholder-count="8">
+                <circle cx="60" cy="60" r="50" stroke="{{ g.color }}" stroke-dasharray="34.27 279.89" stroke-dashoffset="{{ g.offset }}" style="filter: {{ g.filter }}; animation: ap-seg 350ms cubic-bezier(.2,.7,.2,1) {{ g.delay }} backwards;"></circle>
+              </sc-for>
+            </g>
+          </svg>
+          <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; animation: ap-pop 240ms cubic-bezier(.2,.7,.2,1) 270ms backwards;">
+            <span style="display: flex; align-items: baseline; font-size: 30px; line-height: 30px; font-weight: 800; font-variant-numeric: tabular-nums;">{{ ringNum }}<span style="color: #6B788B;">/{{ ringTotal }}</span></span>
+            <span style="font-size: 11px; line-height: 13px; color: #AFC0D1;">verified</span>
+          </div>
+        </div>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px;">
+          <span style="align-self: flex-start; height: 30px; box-sizing: border-box; padding: 0 12px 0 10px; display: flex; align-items: center; gap: 7px; border-radius: 15px; background: rgba(230,181,77,0.09); border: 1px solid rgba(230,181,77,0.55); color: #F3D58C; font-size: 13px; line-height: 1; font-weight: 600; white-space: nowrap; animation: ap-fade-in 260ms ease 117ms backwards;"><span style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: #E6B54D; box-shadow: 0 0 8px #E6B54D;"></span>Partially supported</span>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <span style="display: flex; gap: 3px; animation: ap-fade-in 260ms ease 320ms backwards;" aria-hidden="true">
+              <span style="width: 22px; height: 5px; border-radius: 3px; background: #E6B54D; box-shadow: 0 0 8px rgba(230,181,77,0.6); transform-origin: left; animation: ap-grow 400ms ease-out 320ms backwards;"></span>
+              <span style="width: 22px; height: 5px; border-radius: 3px; background: #22374D;"></span>
+              <span style="width: 22px; height: 5px; border-radius: 3px; background: #22374D;"></span>
+            </span>
+            <span style="font-size: 13px; line-height: 16px; color: #C9D5E2; animation: ap-fade-in 260ms ease 320ms backwards;">Low confidence</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 4px; font-size: 12px; line-height: 16px; color: #AFC0D1;">
+            <span style="display: flex; align-items: center; gap: 8px; animation: ap-fade-in 260ms ease 320ms backwards;"><span style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: #35D1A2; box-shadow: 0 0 6px #35D1A2;"></span>2 verified</span>
+            <span style="display: flex; align-items: center; gap: 8px; animation: ap-fade-in 260ms ease 320ms backwards;"><span style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: #E6B54D; box-shadow: 0 0 6px #E6B54D;"></span>1 partly</span>
+            <span style="display: flex; align-items: center; gap: 8px; animation: ap-fade-in 260ms ease 320ms backwards;"><span style="width: 7px; height: 7px; flex: none; border-radius: 50%; background: #94A0B3;"></span>5 unresolved</span>
+          </div>
+        </div>
+      </div>
+      <div style="position: relative; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid rgba(30,197,245,0.16); background: rgba(3,17,31,0.55);">
+        <div style="height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;"><span style="font-size: 20px; line-height: 20px; font-weight: 800; font-variant-numeric: tabular-nums;">{{ fig.a }}</span><span style="font-size: 11px; line-height: 13px; color: #98A5B8;">checks</span></div>
+        <div style="height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-left: 1px solid rgba(30,197,245,0.12);"><span style="font-size: 20px; line-height: 20px; font-weight: 800; font-variant-numeric: tabular-nums;">{{ fig.b }}</span><span style="font-size: 11px; line-height: 13px; color: #98A5B8;">sources</span></div>
+        <div style="height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-left: 1px solid rgba(30,197,245,0.12);"><span style="font-size: 20px; line-height: 20px; font-weight: 800; font-variant-numeric: tabular-nums;">{{ fig.c }}</span><span style="font-size: 11px; line-height: 13px; color: #98A5B8;">evidence items</span></div>
+        <div style="height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border-left: 1px solid rgba(30,197,245,0.12);"><span style="font-size: 20px; line-height: 20px; font-weight: 800; font-variant-numeric: tabular-nums; color: #35D1A2; text-shadow: 0 0 12px rgba(53,209,162,0.5);">{{ fig.d }}</span><span style="font-size: 11px; line-height: 13px; color: #98A5B8;">verified</span></div>
+      </div>
+      <div style="position: relative; padding: 4px 16px 6px; border-top: 1px solid rgba(30,197,245,0.12);">
+        <sc-for list="{{ answer }}" as="s" hint-placeholder-count="3">
+          <div style="display: flex; align-items: flex-start; gap: 12px; padding: 12px 0; border-top: 1px solid {{ s.divider }}; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) {{ s.delay }} backwards;">
+            <span style="width: 26px; height: 26px; flex: none; box-sizing: border-box; border-radius: 50%; background: {{ s.bg }}; border: 1.5px solid {{ s.color }}; color: {{ s.glyphInk }}; display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1; font-weight: 800;">{{ s.glyph }}<span style="display: {{ s.half }}; width: 12px; height: 12px; box-sizing: border-box; border-radius: 50%; border: 2px solid currentColor; background: linear-gradient(90deg, currentColor 50%, transparent 50%);"></span></span>
+            <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;"><span style="font-size: 14.5px; line-height: 20px; font-weight: 700; margin-top: 2px;">{{ s.heading }}</span><span style="font-size: 13.5px; line-height: 20px; color: #AFC0D1;">{{ s.text }}</span></div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+
+    <section class="ap-chain-sec" aria-label="Research path" style="display: flex; flex-direction: column; gap: 10px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 72ms backwards;">
+      <a href="#checked" style="height: 24px; display: flex; align-items: center; justify-content: space-between; color: #F3F7FB; text-decoration: none;">
+        <span style="font-size: 17px; line-height: 22px; font-weight: 800;">What the research followed</span>
+        <span style="display: flex; align-items: center; gap: 4px; font-size: 12px; line-height: 1; color: #8EE6FF;">8 checks<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></span>
+      </a>
+      <div style="margin: 0 -16px; padding: 18px 16px 16px; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent 100%); mask-image: linear-gradient(90deg, #000 86%, transparent 100%); border-top: 1px solid rgba(30,197,245,0.12); border-bottom: 1px solid rgba(30,197,245,0.12); background: linear-gradient(180deg, rgba(8,38,66,0.5) 0%, rgba(6,27,48,0.3) 100%);">
+        <ol aria-label="Research path" style="margin: 0; padding: 0; list-style: none; display: flex; width: max-content;">
+          <sc-for list="{{ chain }}" as="n" hint-placeholder-count="8">
+            <li style="position: relative; width: 86px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;">
+              <sc-if value="{{ n.notLast }}" hint-placeholder-val="{{ true }}">
+                <span aria-hidden="true" style="position: absolute; top: 16px; left: 50%; width: 86px; height: 2px; background: linear-gradient(90deg, {{ n.color }} 0%, rgba(160,190,224,0.18) 70%); opacity: 0.85;">
+                </span>
+              </sc-if>
+              <span class="ap-chain-node" style="--rs: {{ n.rs }}; --re: {{ n.re }}; position: relative; z-index: 1; width: 34px; height: 34px; box-sizing: border-box; border-radius: 50%; background: {{ n.markBg }}; border: 2px solid {{ n.color }}; box-shadow: {{ n.markShadow }}; color: {{ n.markInk }}; display: flex; align-items: center; justify-content: center; font-size: 14px; line-height: 1; font-weight: 800; animation: ap-pop 240ms cubic-bezier(.2,.7,.2,1) {{ n.delay }} backwards;">{{ n.glyph }}<span style="display: {{ n.half }}; width: 14px; height: 14px; box-sizing: border-box; border-radius: 50%; border: 2px solid currentColor; background: linear-gradient(90deg, currentColor 50%, transparent 50%);"></span></span>
+              <span style="font-size: 12.5px; line-height: 16px; font-weight: 700; color: #E6ECF4; padding: 0 4px;">{{ n.word }}</span>
+              <span style="font-size: 11px; line-height: 13px; font-weight: 600; color: {{ n.stateInk }};">{{ n.state }}</span>
+            </li>
+          </sc-for>
+        </ol>
+      </div>
+    </section>
+
+    <section id="checked" class="ap-check-sec" aria-label="What ATLAS checked" style="border-radius: 22px; background: linear-gradient(180deg, rgba(8,38,66,0.94) 0%, rgba(6,27,48,0.94) 100%); border: 1px solid rgba(30,197,245,0.16); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 40px -16px rgba(0,0,0,0.8); overflow: hidden; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 108ms backwards;">
+      <div style="padding: 18px 16px 14px; display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid rgba(30,197,245,0.12);">
+        <h2 style="margin: 0; font-size: 21px; line-height: 26px; font-weight: 800; letter-spacing: -0.01em;">What ATLAS checked</h2>
+        <div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px;" aria-hidden="true">
+          <sc-for list="{{ segs }}" as="g" hint-placeholder-count="8">
+            <div class="ap-check-seg" style="--rs: {{ g.rs }}; --re: {{ g.re }}; height: 7px; border-radius: 4px; background: {{ g.bar }}; box-shadow: {{ g.barGlow }}; transform-origin: left; animation: ap-grow 350ms ease-out {{ g.delay }} backwards;"></div>
+          </sc-for>
+        </div>
+        <div style="display: flex; gap: 16px; font-size: 12px; line-height: 16px; color: #AFC0D1;">
+          <span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: #35D1A2;"></span>2 verified</span>
+          <span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: #E6B54D;"></span>1 partly</span>
+          <span style="display: flex; align-items: center; gap: 7px;"><span style="width: 8px; height: 8px; flex: none; border-radius: 50%; background: #94A0B3;"></span>5 unresolved</span>
+        </div>
+      </div>
+
+      <article style="padding: 16px; display: flex; flex-direction: column; gap: 10px; background: radial-gradient(120% 70% at 0% 0%, rgba(230,181,77,0.08) 0%, rgba(230,181,77,0) 55%);">
+        <h3 style="margin: 0; font-size: 15.5px; line-height: 22px; font-weight: 800;">What pays for the buyback?</h3>
+        <p style="margin: 0; font-size: 14px; line-height: 21px; color: #DCE4EC;">Raydium protocol allocates a percentage of trading fees to RAY token buybacks across all pool types. The sources describe this, but nothing read from the chain ties what happened to the documented mechanism itself.</p>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 12px; line-height: 16px; color: #98A5B8;">
+          <span style="display: flex; align-items: center; gap: 6px; color: #F3D58C; font-weight: 600;"><span style="width: 11px; height: 11px; flex: none; box-sizing: border-box; border-radius: 50%; border: 1.5px solid currentColor; background: linear-gradient(90deg, currentColor 50%, transparent 50%);"></span>Partly verified from official docs</span>
+          <span style="display: flex; align-items: center; gap: 5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg>docs.raydium.io</span>
+          <span style="display: flex; align-items: center; gap: 5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path></svg>1 Oct 2026</span>
+        </div>
+        <button onClick="{{ toggleEv }}" aria-expanded="{{ evOpen }}" style="align-self: flex-start; height: 34px; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 17px; background: rgba(30,197,245,0.1); border: 1px solid rgba(30,197,245,0.5); box-shadow: 0 0 12px rgba(30,197,245,0.18); color: #1EC5F5; font-size: 12px; line-height: 1; font-weight: 700; white-space: nowrap;">{{ evLabel }}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="{{ evChevron }}"></path></svg></button>
+        <sc-if value="{{ evOpen }}" hint-placeholder-val="{{ false }}">
+          <div style="margin-top: 2px; padding: 14px; border-radius: 16px; background: rgba(3,17,31,0.6); border: 1px solid rgba(30,197,245,0.18); display: flex; flex-direction: column; gap: 10px; animation: ap-rise 320ms ease-out backwards;">
+            <span style="display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 700;">Evidence behind this answer<span style="font-weight: 500; color: #98A5B8;">· 1 source</span></span>
+            <span style="align-self: flex-start; height: 22px; box-sizing: border-box; padding: 0 9px; display: flex; align-items: center; border-radius: 11px; background: rgba(123,143,242,0.14); border: 1px solid rgba(123,143,242,0.35); color: #C2CEFF; font-size: 11px; line-height: 1; font-weight: 600;">Official docs</span>
+            <p style="margin: 0; font-size: 13.5px; line-height: 21px; color: #E6ECF4;"><mark style="background-color: transparent; background-image: linear-gradient(180deg, rgba(30,197,245,0) 56%, rgba(30,197,245,0.34) 56%); background-repeat: no-repeat; background-size: 100% 100%; color: inherit;">Raydium fees are split between liquidity providers, RAY buybacks, and treasury destinations.</mark></p>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <div style="padding: 10px 12px; border-radius: 12px; background: rgba(53,209,162,0.07); border: 1px solid rgba(53,209,162,0.3); display: flex; flex-direction: column; gap: 3px;">
+                <span style="display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8FECD0;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none;"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>{{ t.establishes }}</span>
+                <span style="font-size: 12.5px; line-height: 18px; color: #E6ECF4;">{{ ev.can }}</span>
+              </div>
+              <div style="padding: 10px 12px; border-radius: 12px; background: rgba(148,160,179,0.07); border: 1px solid rgba(148,160,179,0.3); display: flex; flex-direction: column; gap: 3px;">
+                <span style="display: flex; align-items: center; gap: 5px; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #C4CEDB;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" aria-hidden="true" style="flex: none;"><path d="M6 6l12 12M18 6L6 18"></path></svg>{{ t.notEstablishes }}</span>
+                <span style="font-size: 12.5px; line-height: 18px; color: #DCE4EC;">{{ ev.cannot }}</span>
+              </div>
+            </div>
+            <span style="font-size: 12px; line-height: 17px; color: #98A5B8;">{{ ev.from }}</span>
+            <div style="display: flex; gap: 14px; font-size: 12.5px; line-height: 1; font-weight: 700;">
+              <a href="V2-Source.dc.html" style="height: 32px; display: flex; align-items: center; gap: 5px; text-decoration: none;">Snapshot<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></a>
+              <a href="#" style="height: 32px; display: flex; align-items: center; gap: 5px; color: #AFC0D1; text-decoration: none;">Open original<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17L17 7"></path><path d="M8 7h9v9"></path></svg></a>
+            </div>
+          </div>
+        </sc-if>
+      </article>
+
+      <article style="padding: 16px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid rgba(30,197,245,0.1); background: radial-gradient(120% 70% at 0% 0%, rgba(53,209,162,0.08) 0%, rgba(53,209,162,0) 55%);">
+        <h3 style="margin: 0; font-size: 15.5px; line-height: 22px; font-weight: 800;">Does Raydium have a protocol fee buyback mechanism for RAY?</h3>
+        <p style="margin: 0; font-size: 14px; line-height: 21px; color: #DCE4EC;">Raydium protocol allocates a percentage of trading fees to RAY buybacks across multiple pool types with defined split percentages.</p>
+        <p style="margin: 0; font-size: 13px; line-height: 19px; color: #98A5B8;">Also confirmed: how the value gets there.</p>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; font-size: 12px; line-height: 16px; color: #98A5B8;">
+          <span style="display: flex; align-items: center; gap: 6px; color: #8FECD0; font-weight: 600;"><span style="font-size: 12px; line-height: 1;">✓</span>Verified from official docs</span>
+          <span style="display: flex; align-items: center; gap: 5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3h8l4 4v14H6z"></path><path d="M14 3v4h4"></path></svg>docs.raydium.io</span>
+          <span style="display: flex; align-items: center; gap: 5px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"></rect><path d="M4 10h16M9 3v4M15 3v4"></path></svg>1 Oct 2026</span>
+        </div>
+        <button style="align-self: flex-start; height: 34px; box-sizing: border-box; padding: 0 12px; display: flex; align-items: center; gap: 6px; border-radius: 17px; background: rgba(30,197,245,0.1); border: 1px solid rgba(30,197,245,0.5); color: #1EC5F5; font-size: 12px; line-height: 1; font-weight: 700; white-space: nowrap;">Evidence · 8<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" aria-hidden="true"><path d="M6 9l6 6 6-6"></path></svg></button>
+      </article>
+
+      <sc-for list="{{ open }}" as="r" hint-placeholder-count="5">
+        <div style="padding: 14px 16px; display: flex; align-items: flex-start; gap: 12px; border-top: 1px solid rgba(30,197,245,0.1);">
+          <span style="width: 26px; height: 26px; flex: none; box-sizing: border-box; border-radius: 50%; border: 1.5px solid #6B788B; color: #C4CEDB; display: flex; align-items: center; justify-content: center; font-size: 12px; line-height: 1; font-weight: 800;">?</span>
+          <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px;">
+            <span style="margin-top: 2px; font-size: 14.5px; line-height: 20px; font-weight: 700;">{{ r.q }}</span>
+            <span style="font-size: 12.5px; line-height: 17px; color: #98A5B8;">Unresolved · {{ r.note }}</span>
+          </div>
+        </div>
+      </sc-for>
+    </section>
+
+    <section aria-label="{{ t.unclearTitle }}" style="padding: 18px 16px 10px; border-radius: 22px; background: rgba(148,160,179,0.06); border: 1px dashed rgba(148,160,179,0.35); display: flex; flex-direction: column; gap: 8px; animation: ap-rise 320ms cubic-bezier(.2,.7,.2,1) 144ms backwards;">
+      <div style="display: flex; flex-direction: column; gap: 4px; padding-bottom: 6px;">
+        <h2 style="margin: 0; font-size: 17px; line-height: 22px; font-weight: 800;">{{ t.unclearTitle }}</h2>
+        <p style="margin: 0; font-size: 13px; line-height: 19px; color: #98A5B8;">{{ t.unclearSub }}</p>
+      </div>
+      <sc-for list="{{ unclear }}" as="u" hint-placeholder-count="5">
+        <div style="border-radius: 16px; background: {{ u.bg }}; border: 1px solid {{ u.edge }}; overflow: hidden; transition: border-color .25s ease;">
+          <button type="button" onClick="{{ u.toggle }}" aria-expanded="{{ u.open }}" style="width: 100%; box-sizing: border-box; padding: 12px 12px 12px 14px; display: flex; align-items: flex-start; gap: 10px; background: none; border: 0; color: #F3F7FB; text-align: left;">
+            <span style="width: 24px; height: 24px; flex: none; box-sizing: border-box; border-radius: 50%; border: 1.5px solid #6B788B; color: #C4CEDB; display: flex; align-items: center; justify-content: center; font-size: 11px; line-height: 1; font-weight: 800;">?</span>
+            <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-size: 14.5px; line-height: 20px; font-weight: 700;">{{ u.q }}</span>
+              <span style="align-self: flex-start; height: 20px; box-sizing: border-box; padding: 0 8px; display: inline-flex; align-items: center; gap: 5px; border-radius: 10px; background: {{ u.chipBg }}; border: 1px solid {{ u.chipEdge }}; color: {{ u.chipInk }}; font-size: 11px; line-height: 1; font-weight: 700; white-space: nowrap; max-width: 100%;"><span style="width: 5px; height: 5px; flex: none; border-radius: 50%; background: currentColor;"></span><span style="overflow: hidden; text-overflow: ellipsis;">{{ u.kindLabel }}</span></span>
+            </span>
+            <span style="height: 24px; display: flex; align-items: center; color: #8FA3B8;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; transform: rotate({{ u.rot }}); transition: transform .25s ease;"><path d="M6 9l6 6 6-6"></path></svg></span>
+          </button>
+          <sc-if value="{{ u.open }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 0 14px 14px 14px; display: flex; flex-direction: column; gap: 10px; animation: ap-rise 240ms ease-out backwards;">
+              <span style="font-size: 12.5px; line-height: 17px; color: #8FA3B8;">{{ u.kindHint }}</span>
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8FA3B8;">{{ t.notEstablished }}</span>
+                <span style="font-size: 14px; line-height: 20px; color: #F3F7FB;">{{ u.what }}</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 2px;">
+                <span style="font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8FA3B8;">{{ t.why }}</span>
+                <span style="font-size: 13.5px; line-height: 19px; color: #DCE4EC;">{{ u.why }}</span>
+              </div>
+              <div style="padding: 10px 12px; border-radius: 12px; background: rgba(30,197,245,0.07); border: 1px solid rgba(30,197,245,0.28); display: flex; flex-direction: column; gap: 3px;">
+                <span style="display: flex; align-items: center; gap: 6px; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #8EE6FF;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18h6"></path><path d="M10 21h4"></path><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.1 1 1.9V16h5v-.2c0-.8.4-1.4 1-1.9A6 6 0 0 0 12 3z"></path></svg>{{ t.help }}</span>
+                <span style="font-size: 13.5px; line-height: 19px; color: #E6ECF4;">{{ u.help }}</span>
+                <span style="font-size: 12px; line-height: 16px; color: #8FA3B8;">{{ u.helpNote }}</span>
+              </div>
+              <sc-if value="{{ u.hasExcluded }}" hint-placeholder-val="{{ false }}">
+                <button type="button" onClick="{{ u.toggleX }}" aria-expanded="{{ u.xOpen }}" style="align-self: flex-start; height: 30px; padding: 0 2px; display: flex; align-items: center; gap: 6px; background: none; border: 0; color: #AFC0D1; font-size: 12.5px; line-height: 1; font-weight: 600;">{{ u.xLabel }}<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="transform: rotate({{ u.xRot }}); transition: transform .25s ease;"><path d="M6 9l6 6 6-6"></path></svg></button>
+                <sc-if value="{{ u.xOpen }}" hint-placeholder-val="{{ false }}">
+                  <div style="margin-top: -4px; padding: 9px 11px; border-radius: 11px; background: rgba(3,17,31,0.55); border: 1px solid rgba(255,255,255,0.06); display: flex; flex-direction: column; gap: 5px; animation: ap-rise 200ms ease-out backwards;">
+                    <sc-for list="{{ u.excluded }}" as="x" hint-placeholder-count="2">
+                      <span style="display: flex; gap: 8px; font-size: 12.5px; line-height: 17px; color: #98A5B8;"><span style="flex: none; color: #6B788B;">·</span><span><span style="color: #C9D5E2;">{{ x.src }}</span> — {{ x.reason }}</span></span>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </sc-if>
+            </div>
+          </sc-if>
+        </div>
+      </sc-for>
+      <p style="margin: 6px 0 2px; font-size: 12.5px; line-height: 18px; color: #7F93A8;">{{ t.unclearNever }}</p>
+    </section>
+
+    <button style="align-self: flex-start; height: 48px; box-sizing: border-box; padding: 0 18px; display: flex; align-items: center; gap: 8px; border-radius: 16px; background: rgba(3,17,31,0.5); border: 1px solid rgba(30,197,245,0.4); color: #E6ECF4; font-size: 15px; line-height: 1; font-weight: 700;">Open full audit<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg></button>
+  </main>
+
+  <div aria-hidden="true" style="position: absolute; left: 0; right: 0; bottom: 0; height: 140px; background: linear-gradient(180deg, rgba(4,22,39,0) 0%, rgba(4,22,39,0.85) 55%, #041627 100%); pointer-events: none;"></div>
+
+  <nav aria-label="Main navigation" style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 70px; box-sizing: border-box; border-radius: 22px; background: #061B30; border: 1px solid rgba(30,197,245,0.35); box-shadow: 0 0 18px rgba(30,197,245,0.15); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; padding-bottom: 10px;">
+    <a href="V2-Pulse.dc.html" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #C9D5E2; font-size: 11px; text-decoration: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13h4l3-8 4 14 3-8h6"></path></svg>Pulse
+    </a>
+    <a href="V2-Home.dc.html" style="height: 52px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; color: #C9D5E2; font-size: 13px; font-weight: 500; text-decoration: none;">
+      <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="" style="position: absolute; top: -46px; left: 50%; margin-left: -32px; width: 64px; height: 68px; box-sizing: border-box; padding: 6px 4px; object-fit: contain;">Verify
+    </a>
+    <a href="V2-Library.dc.html" aria-current="page" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #FFFFFF; font-size: 11px; font-weight: 700; text-decoration: none; filter: drop-shadow(0 0 6px rgba(30,197,245,0.55));">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h11M3 12h11M3 18h11"></path><path d="M17 5.5l1.5 1.5 2.5-2.5M17 11.5l1.5 1.5 2.5-2.5M17 17.5l1.5 1.5 2.5-2.5"></path></svg>Proofs
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lang":{"editor":"enum","options":["en","ru"],"default":"en","section":"Screen"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+constructor(props) {
+super(props);
+this.state = { ev: false, t: 99999, intro: false, openU: 0, xOpen: false };
+}
+renderVals() {
+var self = this;
+var S = {
+CONFIRMED: { half: 'none', color: '#35D1A2', ink: '#8FECD0', glyph: '✓', state: 'Verified', filled: true, rgb: '53,209,162' },
+PARTIAL: { half: 'block', color: '#E6B54D', ink: '#F3D58C', glyph: '', state: 'Partly verified', filled: true, rgb: '230,181,77' },
+NOT_ESTABLISHED: { half: 'none', color: '#94A0B3', ink: '#C4CEDB', glyph: '?', state: 'Unresolved', filled: false, rgb: '148,160,179' },
+CONTRADICTED: { half: 'none', color: '#EC6F6F', ink: '#F7ADAD', glyph: '✕', state: 'Contradicted', filled: true, rgb: '236,111,111' }
+};
+var rows = [
+{ c: 'SOURCE_OF_VALUE', word: 'Revenue', s: 'PARTIAL' },
+{ c: 'FLOW_PATH', word: 'Flow', s: 'CONFIRMED' },
+{ c: 'MECHANISM_SPEC', word: 'Buyback', s: 'CONFIRMED' },
+{ c: 'GOVERNANCE_BASIS', word: 'Approval', s: 'NOT_ESTABLISHED' },
+{ c: 'CURRENT_STATE', word: 'Active now', s: 'NOT_ESTABLISHED' },
+{ c: 'EXECUTION_EVIDENCE', word: 'Execution', s: 'NOT_ESTABLISHED' },
+{ c: 'DESTINATION', word: 'Where it goes', s: 'NOT_ESTABLISHED' },
+{ c: 'NET_EFFECT', word: 'Supply impact', s: 'NOT_ESTABLISHED' }
+];
+var chain = rows.map(function (r, i) {
+var t = S[r.s];
+return {
+word: r.word, state: t.state, stateInk: t.ink, color: t.color, glyph: t.glyph, half: t.half,
+markBg: t.filled ? t.color : '#061B30', markInk: t.filled ? '#06111A' : t.ink,
+markShadow: t.filled ? '0 0 0 3px rgba(' + t.rgb + ',0.18), 0 0 14px rgba(' + t.rgb + ',0.55)' : 'none',
+notLast: i < rows.length - 1, flow: t.filled && i < rows.length - 1, flowDelay: (i * 0.5) + 's', delay: (180 + i * 35) + 'ms', rs: (20 + i * 16) + 'px', re: (90 + i * 16) + 'px'
+};
+});
+var segs = rows.map(function (r, i) {
+var t = S[r.s];
+return {
+color: t.filled ? t.color : '#22374D', offset: String(-(2.5 + i * 39.27)), filter: t.filled ? 'drop-shadow(0 0 4px rgba(' + t.rgb + ',0.85))' : 'none', delay: (120 + i * 45) + 'ms', rs: (40 + i * 22) + 'px', re: (120 + i * 22) + 'px',
+bar: t.filled ? t.color : '#22374D', barGlow: t.filled ? '0 0 10px rgba(' + t.rgb + ',0.7)' : 'none'
+};
+});
+var A = [
+{ s: 'CONFIRMED', heading: 'What is confirmed', text: 'The sources confirm how the value gets there and how the buyback is designed to work.' },
+{ s: 'PARTIAL', heading: 'What is not fully confirmed', text: 'There is evidence about what pays for the buyback, but it is not fully confirmed.' },
+{ s: 'NOT_ESTABLISHED', heading: 'What is still unclear', text: 'The available evidence does not show that the buyback is happening now, that it has actually executed, or where the bought tokens go.' }
+];
+var answer = A.map(function (a, i) {
+var t = S[a.s];
+return { heading: a.heading, text: a.text, glyph: t.glyph, half: t.half, color: t.color, bg: t.filled ? 'rgba(' + t.rgb + ',0.16)' : 'transparent', glyphInk: t.ink, divider: i === 0 ? 'transparent' : 'rgba(30,197,245,0.1)', delay: (300 + i * 60) + 'ms' };
+});
+var open = [
+{ q: 'Is the buyback happening now?', note: 'the available evidence does not settle this' },
+{ q: 'Has the buyback actually executed?', note: 'the available evidence does not settle this' },
+{ q: 'Where do the bought tokens go?', note: 'the available evidence does not settle this' },
+{ q: 'Who approved it?', note: 'the available evidence does not settle this' },
+{ q: 'Does total supply actually decrease?', note: 'the available evidence does not settle this' }
+];
+var ev = this.state.ev;
+
+// ---- MOCK DATA. Shapes only use what the engine already persists: a boundary kind per component
+// (SUBSTANTIVE = checked, not established; TECHNICAL = incomplete coverage; CONFIGURATION = no supported verification route),
+// excluded evidence with its exclusion code, and the per-source-class can/cannot caveats. ----
+var lang = (this.props.lang ?? 'en') === 'ru' ? 'ru' : 'en';
+var T = {
+en: {
+unclearTitle: 'What remains unclear', unclearSub: 'Open a link to see what is missing and what would help.',
+notEstablished: 'Not established', why: 'Why', help: 'What could help',
+establishes: 'What this establishes', notEstablishes: 'What this does not establish',
+kinds: { SUBSTANTIVE: 'Checked, not established', TECHNICAL: 'Not fully checked', CONFIGURATION: 'No supported verification route' },
+kindHints: { SUBSTANTIVE: 'Sources were read; none establishes this.', TECHNICAL: 'The run stopped before every relevant source was checked.', CONFIGURATION: 'ATLAS has no supported route to verify this yet.' },
+unclearNever: 'These describe the evidence checked, not proof that the thing is absent. What would help is a direction for further checking, not a guarantee.',
+moreSources: function (n) { return n + ' source' + (n === 1 ? '' : 's') + ' found, not admitted'; }, hideSources: 'Hide'
+},
+ru: {
+unclearTitle: 'Что остаётся неясным', unclearSub: 'Откройте звено, чтобы увидеть, чего не хватает и что помогло бы.',
+notEstablished: 'Не установлено', why: 'Почему', help: 'Что могло бы помочь',
+establishes: 'Что это подтверждает', notEstablishes: 'Чего это не подтверждает',
+kinds: { SUBSTANTIVE: 'Проверено, не установлено', TECHNICAL: 'Проверено не полностью', CONFIGURATION: 'Нет пути проверки' },
+kindHints: { SUBSTANTIVE: 'Источники прочитаны; ни один этого не устанавливает.', TECHNICAL: 'Исследование остановилось раньше, чем были проверены все релевантные источники.', CONFIGURATION: 'У ATLAS пока нет поддерживаемого пути, чтобы это проверить.' },
+unclearNever: 'Это описание проверенных доказательств, а не доказательство того, что чего-то нет. «Что помогло бы» — направление дальнейшей проверки, а не гарантия.',
+moreSources: function (n) { var w = n % 10 === 1 && n % 100 !== 11 ? 'источник найден, не принят' : 'источника найдено, не приняты'; return n + ' ' + w; }, hideSources: 'Скрыть'
+}
+}[lang];
+var K = {
+SUBSTANTIVE: { bg: 'rgba(3,17,31,0.45)', edge: 'rgba(148,160,179,0.22)', chipBg: 'rgba(148,160,179,0.12)', chipEdge: 'rgba(148,160,179,0.4)', chipInk: '#C4CEDB' },
+TECHNICAL: { bg: 'rgba(3,17,31,0.45)', edge: 'rgba(127,142,163,0.22)', chipBg: 'rgba(127,142,163,0.12)', chipEdge: 'rgba(127,142,163,0.4)', chipInk: '#C9D2DE' },
+CONFIGURATION: { bg: 'rgba(3,17,31,0.45)', edge: 'rgba(123,143,242,0.22)', chipBg: 'rgba(123,143,242,0.12)', chipEdge: 'rgba(123,143,242,0.4)', chipInk: '#C2CEFF' }
+};
+var U = lang === 'ru' ? [
+{ q: 'Происходит ли выкуп сейчас?', kind: 'SUBSTANTIVE', what: 'Что выкуп RAY идёт в текущем периоде, а не только описан.', why: 'Документация описывает механизм, но не показывает, что он исполняется. Текущее состояние можно установить только по ончейн-записям или официальному отчёту за период.', help: 'Доказательство, которое несёт текущее состояние этого механизма: например, ончейн-записи за недавний период или официальный отчёт за период.', helpNote: 'Любой такой источник будет прочитан и взвешен, как остальные; ни один тип источника не гарантирует результат.', excluded: [{ src: 'Пост в X @RaydiumProtocol', reason: 'публичное заявление, не несёт текущего состояния' }] },
+{ q: 'Исполнялся ли выкуп на самом деле?', kind: 'SUBSTANTIVE', what: 'Что хотя бы одна операция выкупа реально состоялась.', why: 'Найденные источники говорят о правиле распределения комиссий, но ни один не фиксирует завершённое исполнение.', help: 'Доказательство завершённого исполнения, которое можно привязать именно к этому механизму: ончейн-записи — один из путей, не единственный.', helpNote: 'Движение средств само по себе не равно исполнению заявленного механизма; связь всё равно будет взвешена.', excluded: [{ src: 'Обзор в медиа', reason: 'слишком косвенно, чтобы установить исполнение' }, { src: 'Страница документации (2024)', reason: 'не фиксирует завершённое исполнение' }] },
+{ q: 'Куда идут выкупленные токены?', kind: 'CONFIGURATION', what: 'Адрес или назначение, куда поступает выкупленный RAY.', why: 'У ATLAS пока нет поддерживаемого источника, который мог бы независимо проверить назначение для этого механизма.', help: 'Поддерживаемый путь проверки адресов назначения выкупа, например ончейн-источник, который ATLAS может читать. Это ограничение ATLAS, а не вывод о проекте.', helpNote: 'Пока такого пути нет, звено остаётся непроверенным, не опровергнутым.', excluded: [] },
+{ q: 'Кто это одобрил?', kind: 'TECHNICAL', what: 'Формальное решение управления, на котором основан выкуп.', why: 'Исследование остановилось раньше, чем удалось проверить 2 известных релевантных источника.', help: 'Повторная проверка, когда появится бюджет: известные источники по управлению ещё не прочитаны.', helpNote: 'Это ограничение данного исследования, а не вывод о проекте.', excluded: [] },
+{ q: 'Уменьшается ли общее предложение?', kind: 'SUBSTANTIVE', what: 'Что выкуп приводит к снижению общего предложения RAY.', why: 'Выкуп не равен сжиганию, а удержание токенов не равно сокращению предложения. Ни один источник не описывает, что происходит с токенами после выкупа.', help: 'Доказательство того, что происходит с выкупленными токенами во времени: запись о сжигании или изменение предложения, которое можно с ними связать.', helpNote: 'Снимок предложения в один момент не показывает его изменение; удержанные токены — не сокращение.', excluded: [{ src: 'Агрегатор данных', reason: 'нет даты публикации' }] }
+] : [
+{ q: 'Is the buyback happening now?', kind: 'SUBSTANTIVE', what: 'That RAY buybacks are running in the current period, not only described.', why: 'The documentation describes the mechanism but does not show it executing. Current state can only be established from on-chain records or an official report for the period.', help: 'Evidence that carries current state for this mechanism — for example on-chain records for a recent period, or an official report for the period.', helpNote: 'Any such source would be read and weighed like the others; no single source type guarantees the outcome.', excluded: [{ src: 'X post by @RaydiumProtocol', reason: 'public statement, does not carry current state' }] },
+{ q: 'Has the buyback actually executed?', kind: 'SUBSTANTIVE', what: 'That at least one buyback operation actually took place.', why: 'The sources found state the fee-split rule, but none reports a completed execution.', help: 'Evidence of a completed execution that can be tied to this specific mechanism — on-chain records are one route, not the only one.', helpNote: 'Money moving is not, by itself, the claimed mechanism executing; the link would still be weighed.', excluded: [{ src: 'Research media overview', reason: 'too indirect to establish execution' }, { src: 'Documentation page (2024)', reason: 'does not report a completed execution' }] },
+{ q: 'Where do the bought tokens go?', kind: 'CONFIGURATION', what: 'The address or destination that receives the bought RAY.', why: 'ATLAS does not yet have a supported source that can independently verify the destination for this mechanism.', help: 'A supported verification route for buyback destination addresses, for example an on-chain source ATLAS can read. This is a limit of ATLAS, not a finding about the project.', helpNote: 'Until such a route exists, this link stays unverified, not disproved.', excluded: [] },
+{ q: 'Who approved it?', kind: 'TECHNICAL', what: 'The formal governance decision the buyback rests on.', why: 'This Research stopped before 2 known relevant sources could be checked.', help: 'A re-run when budget allows: known governance sources were not read yet.', helpNote: 'This is a limit of the research run, not a finding about the project.', excluded: [] },
+{ q: 'Does total supply actually decrease?', kind: 'SUBSTANTIVE', what: 'That the buyback reduces total RAY supply.', why: 'A buyback is not a burn, and held tokens are not a supply reduction. No source describes what happens to the tokens after they are bought.', help: 'Evidence of what happens to the bought tokens over time — a burn record or a supply change that can be linked to them.', helpNote: 'A point-in-time supply figure does not show a supply change; held tokens are not a reduction.', excluded: [{ src: 'Data aggregator page', reason: 'no publication date' }] }
+];
+var openU = this.state.openU; var xOpen = this.state.xOpen;
+var unclear = U.map(function (u, i) {
+var k = K[u.kind]; var isOpen = openU === i;
+return { q: u.q, kind: u.kind, kindLabel: T.kinds[u.kind], what: u.what, why: u.why, help: u.help, helpNote: u.helpNote,
+excluded: u.excluded, hasExcluded: u.excluded.length > 0, kindHint: T.kindHints[u.kind],
+xOpen: isOpen && xOpen, xRot: isOpen && xOpen ? '180deg' : '0deg', xLabel: isOpen && xOpen ? T.hideSources : T.moreSources(u.excluded.length), toggleX: function () { self.setState({ xOpen: !self.state.xOpen }); },
+open: isOpen, rot: isOpen ? '180deg' : '0deg', bg: k.bg, edge: isOpen ? 'rgba(30,197,245,0.35)' : k.edge, chipBg: k.chipBg, chipEdge: k.chipEdge, chipInk: k.chipInk,
+toggle: function () { self.setState({ openU: self.state.openU === i ? -1 : i, xOpen: false }); } };
+});
+// Evidence card: the source-class caveat the engine already stores (SOURCE_CLASS_CAVEATS → OFFICIAL_DOCS).
+var evCard = lang === 'ru'
+? { from: 'Источник — собственная документация проекта.', can: 'Показывает, что проект официально документирует.', cannot: 'Документация сама по себе не устанавливает, что описанное происходит.' }
+: { from: "This comes from the project's own documentation.", can: 'Shows what the project officially documents.', cannot: 'Documentation alone does not establish that the documented thing is happening.' };
+// Assembly clock: ring segments land in PROOF_PATH_ORDER, the verified count follows them, figures count up.
+var t = this.state.t;
+var ringNum = rows.filter(function (r, i) { return r.s === 'CONFIRMED' && 550 + i * 100 + 250 <= t; }).length;
+var ease = function (x) { x = Math.min(1, Math.max(0, x)); return 1 - Math.pow(1 - x, 3); };
+var k = ease((t - 700) / 800);
+var FIG = { checks: rows.length, sources: 2, items: 27, verified: rows.filter(function (r) { return r.s === 'CONFIRMED'; }).length };
+var fig = { a: Math.round(FIG.checks * k), b: Math.round(FIG.sources * k), c: Math.round(FIG.items * k), d: Math.round(FIG.verified * k) };
+return {
+ringNum: ringNum, ringTotal: rows.length, fig: fig, showIntro: this.state.intro, t: T, unclear: unclear, ev: evCard,
+chain: chain, segs: segs, answer: answer, open: open,
+evOpen: ev, evLabel: ev ? 'Hide evidence' : 'Evidence · 6', evChevron: ev ? 'M6 15l6-6 6 6' : 'M6 9l6 6 6-6',
+toggleEv: function () { self.setState({ ev: !self.state.ev }); }
+};
+}
+}
+</script>
+</body>
+</html>

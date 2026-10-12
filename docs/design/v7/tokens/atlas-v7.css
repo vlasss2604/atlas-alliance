@@ -1,0 +1,100 @@
+/* ATLAS PROOF — V7 design tokens (from the approved mockups, 2026-10-12).
+ * Map these onto the EXISTING variables in app/globals.css (same names where they exist).
+ * State colours are identical to the app already: do not change their meaning.
+ * Everything here is presentation. */
+
+:root {
+  /* Ground (bluer navy than V6) */
+  --atlas-bg: #041627;            /* page bottom; was #060a12 */
+  --atlas-bg-top: #06213B;        /* page top; was #0b1424 */
+  --atlas-bg-raised: #08294B;     /* hero panel top */
+  --surface-1: #061B30;           /* dock, header buttons, panel bottom */
+  --surface-2: #0B1A2E;           /* avatar tiles */
+  --surface-3: #0C2C4A;           /* captured-content article */
+  --surface-input: #03111F;       /* inputs, segmented controls */
+  --page-gradient: radial-gradient(110% 55% at 0% 0%, rgba(30,197,245,0.14) 0%, rgba(30,197,245,0) 60%), radial-gradient(90% 45% at 100% 100%, rgba(123,92,255,0.14) 0%, rgba(123,92,255,0) 60%), linear-gradient(180deg, #06213B 0%, #041627 100%);
+  --hero-gradient: linear-gradient(180deg, #08294B 0%, #061B30 100%);
+  --panel-gradient: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%);
+  --glow-violet: rgba(123,92,255,0.2);  /* bottom-right background glow */
+
+  /* Text */
+  --atlas-text-strong: #FFFFFF;
+  --atlas-text: #F3F7FB;          /* body on navy (headings use #FFFFFF) */
+  --atlas-text-2: #E6ECF4;        /* card text, answer sentences */
+  --atlas-text-soft: #C9D5E2;     /* subtitles, inactive dock labels */
+  --atlas-text-dim: #AFC0D1;      /* secondary copy */
+  --atlas-text-mute: #8FA3B8;     /* meta lines, handles, notes */
+  --atlas-text-faint: #6B788B;    /* pending stages, uppercase labels (#7F93A8 on panels) */
+  --atlas-silver: #D6DEE8;
+
+  /* Brand cyan — unchanged */
+  --atlas-cyan: #1EC5F5;
+  --atlas-cyan-strong: #8EE6FF;   /* cyan text on navy */
+  --atlas-cyan-light: #4FD8FF;    /* top of primary button gradient */
+  --atlas-cyan-press: #12B4EC;    /* bottom of primary button gradient */
+  --atlas-cyan-soft: #BFEFFF;
+  --atlas-cyan-line: #7FE6FF;     /* 1px top highlight line on hero panels */
+  --on-cyan: #03111F;             /* text on cyan buttons */
+  --edge-soft: rgba(30,197,245,0.16);  /* every panel */
+  --edge: rgba(30,197,245,0.3);
+  --edge-hero: rgba(30,197,245,0.42);  /* the one hero panel per screen */
+  --atlas-indigo: #7B8FF2;
+
+  /* Result states — identical to the app; ONLY for result statuses/verdicts */
+  --atlas-green: #35D1A2;  --atlas-green-ink: #8FECD0;   /* Verified / Supported */
+  --atlas-amber: #E6B54D;  --atlas-amber-ink: #F3D58C;   /* Partly verified / Partially supported */
+  --atlas-slate: #94A0B3;  --atlas-slate-ink: #C4CEDB;   /* Unresolved / Insufficient evidence */
+  --atlas-red: #EC6F6F;    --atlas-red-ink: #F7ADAD;     /* Contradicted / Not supported */
+  /* System states (failed, cancelled, budget limit) are NOT findings: grey, never red */
+  --system-grey: #7F8EA3;  --system-grey-ink: #C9D2DE;
+
+  /* Shape */
+  --radius-hero: 24px;   /* hero panel */
+  --radius-panel: 22px;  /* panels, dock */
+  --radius-card: 20px;   /* cards, Verify input */
+  --radius-button: 16px; /* primary buttons (52px tall) */
+  --radius-chip: 14px;   /* chips, rows, dialogs buttons */
+  --radius-tile: 28%;    /* project avatars */
+
+  /* Elevation */
+  --shadow-hero: inset 0 1px 0 rgba(255,255,255,0.08), 0 22px 44px -18px rgba(0,0,0,0.85), 0 0 36px -6px rgba(30,197,245,0.3);
+  --shadow-panel: inset 0 1px 0 rgba(255,255,255,0.06), 0 20px 40px -16px rgba(0,0,0,0.8);
+  --shadow-cta: inset 0 1px 0 rgba(255,255,255,0.5), 0 8px 22px rgba(30,197,245,0.45);
+  --shadow-dock: 0 0 18px rgba(30,197,245,0.15);
+  --glow-active: drop-shadow(0 0 6px rgba(30,197,245,0.55));  /* active dock item */
+
+  /* Type — Inter (accepted UI V7). Colours here are approximate: where they differ from the UI V7 code baseline (d0dafcc), keep the baseline. */
+  --font-display: "Inter", system-ui, sans-serif;
+  /* h1 34–36px / 1.02 / 800 / -0.02em
+     h2 (section) 17–20px / 22–24px / 800
+     hero title in scanner 23px / 28px / 800
+     body 15px / 22px; secondary 13–14px / 19–21px; meta 12px / 16px
+     uppercase label 12px / 16px / 700 / 0.08em
+     header wordmark 17px / 800; tagline 9px / 600 / 0.08em uppercase
+     dock labels 11px (Verify 13px) */
+
+  /* Motion — CSS only, all disabled under prefers-reduced-motion */
+  --ease-rise: cubic-bezier(.2,.7,.2,1);
+}
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+/* ---- Keyframes (all CSS; every animation stops under prefers-reduced-motion) ---- */
+/* ap-rise — entrance of blocks: fade + rise 14px, 0.45–0.6s, staggered 60–90ms */
+@keyframes ap-rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+/* ap-spin — the ONLY loop: scanner arc and active-stage spinner while a job runs */
+@keyframes ap-spin{to{transform:rotate(360deg)}}
+/* ap-draw — scanner ring closing on Proof ready */
+@keyframes ap-draw{from{stroke-dashoffset:440}to{stroke-dashoffset:0}}
+/* ap-pop — pop-in of marks, badges, dialogs */
+@keyframes ap-pop{from{opacity:0;transform:scale(.94)}to{opacity:1;transform:none}}
+/* ap-blink — slow status-dot blink while a job runs (2.4s) */
+@keyframes ap-blink{0%,100%{opacity:.3}50%{opacity:1}}
+/* ap-fade-in — opacity-only entrance (used where position must not move during a morph) */
+@keyframes ap-fade-in{from{opacity:0}to{opacity:1}}
+/* ap-seg — Proof ring segment landing (one per component, in PROOF_PATH_ORDER) */
+@keyframes ap-seg{from{stroke-dasharray:0 314.16}to{stroke-dasharray:34.27 279.89}}
+/* ap-grow — bars growing from the left (library overview, checks bar, confidence) */
+@keyframes ap-grow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+/* ap-fade — dialog backdrop fade */
+@keyframes ap-fade{from{opacity:0}to{opacity:1}}

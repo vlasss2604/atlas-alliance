@@ -1,0 +1,367 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "Artboard-lr65.dc.html": {
+      "h": 600,
+      "page": "page-a9a7n6",
+      "title": "Artboard 1",
+      "w": 800,
+      "x": 0,
+      "y": 0
+    },
+    "Checked.dc.html": {
+      "h": 844,
+      "title": "4 · What ATLAS checked",
+      "w": 390,
+      "x": 1410,
+      "y": 0
+    },
+    "Library.dc.html": {
+      "h": 844,
+      "title": "2 · Research Library",
+      "w": 390,
+      "x": 470,
+      "y": 0
+    },
+    "Main.dc.html": {
+      "h": 844,
+      "title": "1 · Verify (Home)",
+      "w": 390,
+      "x": 0,
+      "y": 0
+    },
+    "Progress-Budget.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R5 · Предел бюджета",
+      "w": 390,
+      "x": 1880,
+      "y": 2600
+    },
+    "Progress-Cancelled.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R7 · Отменено",
+      "w": 390,
+      "x": 2820,
+      "y": 2600
+    },
+    "Progress-Clarify.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R3 · Нужно уточнение",
+      "w": 390,
+      "x": 940,
+      "y": 2600
+    },
+    "Progress-Done.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R4 · Proof готов",
+      "w": 390,
+      "x": 1410,
+      "y": 2600
+    },
+    "Progress-EN.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R2 · Research in progress (EN)",
+      "w": 390,
+      "x": 470,
+      "y": 2600
+    },
+    "Progress-Failed.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R6 · Сбой",
+      "w": 390,
+      "x": 2350,
+      "y": 2600
+    },
+    "Progress-RU.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "R1 · Идёт исследование (RU)",
+      "w": 390,
+      "x": 0,
+      "y": 2600
+    },
+    "Result.dc.html": {
+      "h": 844,
+      "title": "3 · Research result",
+      "w": 390,
+      "x": 940,
+      "y": 0
+    },
+    "Source.dc.html": {
+      "h": 844,
+      "title": "5 · Source snapshot",
+      "w": 390,
+      "x": 1880,
+      "y": 0
+    },
+    "V2-Home.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "v2 · 1 Verify",
+      "w": 390,
+      "x": 0,
+      "y": 1300
+    },
+    "V2-Library.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "v2 · 5 Proofs (library)",
+      "w": 390,
+      "x": 1880,
+      "y": 1300
+    },
+    "V2-Result.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "v2 · 3 Proof: evidence chain",
+      "w": 390,
+      "x": 940,
+      "y": 1300
+    },
+    "V2-Source.dc.html": {
+      "h": 844,
+      "is_interactive": true,
+      "title": "v2 · 4 Source snapshot",
+      "w": 390,
+      "x": 1410,
+      "y": 1300
+    },
+    "V2-Live.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "v2 · 2 Research in progress (live)",
+      "x": 470,
+      "y": 1300
+    },
+    "V2-Pulse.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "v2 · 6 Pulse",
+      "x": 2350,
+      "y": 1300
+    },
+    "V2-FromPulse.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "v2 · 7 Verify from Pulse",
+      "x": 2820,
+      "y": 1300
+    },
+    "V2-Profile.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "v2 · 8 Profile",
+      "x": 3290,
+      "y": 1300
+    },
+    "V2-PublicProof.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "v2 · 9 Published Proof (read-only)",
+      "x": 3760,
+      "y": 1300
+    },
+    "V2-FreeWelcome.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "free · 1 Welcome",
+      "x": 0,
+      "y": 3900
+    },
+    "V2-FreePick.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "free · 2 Pick a project",
+      "x": 470,
+      "y": 3900
+    },
+    "V2-FreeAsk.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "free · 3 Question → replay",
+      "x": 940,
+      "y": 3900
+    },
+    "V2-FreeReplay.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "free · 4 Replay (~10 s)",
+      "x": 1410,
+      "y": 3900
+    },
+    "V2-PulseDemo.dc.html": {
+      "h": 844,
+      "w": 390,
+      "is_interactive": true,
+      "title": "free · 5 Pulse demo → −20% promo code",
+      "x": 1880,
+      "y": 3900
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-10-12T03:12:58.626Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {},
+  "notes": {
+    "progressEngine": {
+      "fill": "blue",
+      "text": "Связь с движком (ветка claude/phase-5-research-memory):\n\n• Состояние экрана = research_job_state: QUEUED, RUNNING, AWAITING_CLARIFICATION, SUCCEEDED, BUDGET_LIMIT_REACHED, FAILED, CANCELLED. QUEUED — в Tweaks (state = queued).\n• Активный этап = deriveProgress(): фаза SEARCHING → «Ищу источники», FETCHING → «Читаю доказательства», EXTRACTING → «Проверяю механизм»; до фазы — по progressStage.\n• Второй этап — «Планирую исследование», пока память выключена (D-169).\n• Тексты состояний, «Остановить», «Ваш ответ…», «Отправить», «Задать другой вопрос», «Попытка не потрачена» — из i18n.\n• Цвета V7: сбой, отмена и предел бюджета — серые (это не вывод о проекте), зелёный/жёлтый/красный — только вердикты.",
+      "w": 360,
+      "x": 3290,
+      "y": 2600
+    },
+    "progressNeeds": {
+      "fill": "orange",
+      "text": "Нужно от движка (сейчас этого нет):\n\n1. Строки действий под этапами (что ищет, что читает, что сверяет). Сейчас живой канал отдаёт только state, фазу и finishedAt. Без новых событий показываем только этапы, без строк.\n2. Этап остановки для «Сбой» и «Отменено». Сейчас deriveProgress помечает все этапы пройденными у любого завершённого job — для сбоя это вводит в заблуждение.\n3. Кнопка «Открыть Proof» — новая: сейчас страница сама превращается в результат.",
+      "w": 360,
+      "x": 3290,
+      "y": 3120
+    },
+    "rowTitle": {
+      "kind": "title1",
+      "maxW": 2270,
+      "text": "ATLAS PROOF — 5 экранов (доработка)",
+      "w": 240,
+      "x": 0,
+      "y": -300
+    },
+    "rowTitleProgress": {
+      "kind": "title1",
+      "maxW": 3210,
+      "text": "Research in Progress — по логике движка (RU / EN)",
+      "w": 240,
+      "x": 0,
+      "y": 2340
+    },
+    "rowTitleV2": {
+      "kind": "title1",
+      "maxW": 4150,
+      "text": "v2 — сквозной прототип по логике приложения (Play на «v2 · 1 Verify»)",
+      "w": 240,
+      "x": 0,
+      "y": 1040
+    },
+    "flowChain": {
+      "fill": "blue",
+      "x": 4230,
+      "y": 1300,
+      "w": 360,
+      "text": "Как пройти прототип:\n1 Verify → стрелка или пример про Raydium\n2 Research in progress — этапы идут сами (около 20 секунд), «Stop» → состояние Cancelled\n3 «Open Proof» → результат\n4 «Snapshot» в доказательстве → снимок источника\n5 Proofs в нижнем меню → библиотека\n6 Pulse в нижнем меню → лента; «Verify» на карточке Raydium → 7 Verify с подставленным утверждением → стрелка → исследование\n8 Иконка профиля вверху справа → профиль (язык EN/RU переключает экран, «Delete account» — два подтверждения)\n\nЦепочка доказательств = компоненты результата в порядке PROOF_PATH_ORDER (result-surface.ts): откуда ценность → как движется → механизм → решение управления → активно ли → исполнено ли → куда идут токены → эффект на supply. В этом примере 8 из 10 компонентов.\nСтатусы — из ResultStatus: Verified ✓, Partly verified ◐, Unresolved ?, Contradicted ✕."
+    },
+    "flowNeeds": {
+      "fill": "orange",
+      "x": 4230,
+      "y": 1820,
+      "w": 360,
+      "text": "Не из кода, предложение дизайна:\n• Кнопка «Open Proof» — в приложении экран сам переключается на результат.\n• Строки действий на экране исследования — движок сейчас отдаёт только состояние и фазу.\n• Кольцо 2/8 и горизонтальная лента цепочки — новая подача тех же статусов.\n• Демо-таймер на экране 2 есть только в прототипе."
+    },
+    "pulseProfile": {
+      "fill": "blue",
+      "x": 4230,
+      "y": 2340,
+      "w": 360,
+      "text": "Pulse и профиль — по коду:\n• Pulse (pulse/page.tsx, pulse-card.tsx): заголовок, подзаголовок и пометка «только для поиска тем» из i18n; карточки — фикстуры фазы A из pulse-fixtures.ts дословно, с плашкой «Sample data · prototype», как в приложении. Группы «Last 48 hours» (до 12) и «Earlier» (до 8, приглушены). На карточке: кто сказал, X, тип источника, возраст, текст и одно действие Verify. «Open on X» нет — у фикстур нет настоящей ссылки. Live-индикаторов нет — их нет и в коде.\n• Verify из Pulse: текст карточки попадает в поле ввода, сверху «From Pulse · @handle · Review or edit the claim before you continue.»\n• Профиль (строки profile в en.ts/ru.ts): Access level (Private Beta + остаток исследований или «доступ по приглашению»), Language, Privacy, Help, Delete account с двумя подтверждениями и «Account deleted.»."
+    },
+    "pulseProfileNeeds": {
+      "fill": "orange",
+      "x": 4230,
+      "y": 2900,
+      "w": 360,
+      "text": "Пример или чего нет в коде:\n• Число «3 Research remaining» — пример; в приложении это счётчик сервера (me.privateBeta.remaining). Меняется в Tweaks, там же состояние «нет доступа».\n• Страницы профиля в загруженной копии репозитория нет — экран собран по строкам i18n; порядок блоков — предложение.\n• Имени и аватара пользователя нет: в строках профиля их нет.\n• Кнопки Cancel / OK — как у системного окна подтверждения.\n• «Verify» работает только у карточки Raydium (демо одного исследования)."
+    },
+    "motion": {
+      "fill": "blue",
+      "x": 4650,
+      "y": 1300,
+      "w": 360,
+      "text": "Движение — как у серьёзного продукта:\n• Двигается только то, что меняется. Появление блоков: прозрачность + сдвиг 8px, 0,2–0,3 с, без отскоков; всё на экране устанавливается за ~0,4 с.\n• Один индикатор работы: пока идёт исследование, вращается дуга сканера и спиннер активного этапа; точка статуса медленно мигает. Больше ничего не крутится.\n• Нет вечных украшений: фоновые пятна, сеть доказательств, свечения — статичные.\n• Нет «шоу»: без морфинга экранов, досчёта цифр, вспышек и бегущих точек. Кольцо результата прорисовывается за ~0,5 с, вердикт спокойно проявляется.\n• Источники вокруг сканера меняют вид без анимации: серый пунктир = найден (ещё не доказательство), голубая линия = прочитан.\n• Нажатие: лёгкое уменьшение до 97%. Раскрытие доказательств и переключатель языка — 0,2–0,3 с.\n• «Уменьшить движение» в системе — всё сразу, без анимаций."
+    },
+    "motionNeeds": {
+      "fill": "orange",
+      "x": 4650,
+      "y": 2000,
+      "w": 360,
+      "text": "Для приложения:\n• Анимировать только transform и opacity. Не анимировать размеры, тени, фильтры и фон.\n• Никаких циклов на скриптах (счётчики, таймеры перерисовки).\n• Узлы источников вокруг сканера требуют событий «источник найден / прочитан» от движка — до этого сканер без узлов."
+    },
+    "explore": {
+      "fill": "blue",
+      "x": 0,
+      "y": 2200,
+      "w": 360,
+      "text": "Explore ATLAS Proofs (главный Verify) — концепт, принят 12.10.\n\n• Специально опубликованные Proof, только чтение. Открытие не запускает Research и не тратит лимит.\n• Вердикт и дата показываются только там, где есть утверждённый Proof. В макете это один Raydium (его Proof — экран 3). Pump.fun, Lido, Jupiter, Jito — «на проверке качества», без вердикта: вердикты не назначаются заранее.\n• У Jupiter/Jito нет Verify: в бете они не доступны для самостоятельной проверки.\n• Под списком и на самом Proof: дата проверки описывает доказательства на ту дату, не состояние сейчас.\n• Разница «читать готовый» / «запустить свой»: зелёный баннер + иконка глаза против голубой кнопки «Run your own verification», которая ведёт в composer, а не стартует Research.\n\nMock: даты, темы, вердикт Raydium. Публичного sharing, новых модулей и API нет."
+    },
+    "rowTitleFree": {
+      "kind": "title1",
+      "maxW": 2740,
+      "text": "Демо-режим для рекламы (Play на «free · 1 Welcome»): приветствие → проект → повтор → Proof → пуш Pulse → Pulse-демо → скидка к запуску. Включается только по рекламной ссылке; основное приложение — ряд v2.",
+      "w": 240,
+      "x": 0,
+      "y": 3640
+    },
+    "freeNotes": {
+      "fill": "blue",
+      "x": 2350,
+      "y": 3900,
+      "w": 360,
+      "text": "Бесплатная версия (free tier), 12.10:\n• Без регистрации: зашёл в бота → открыл → смотрит.\n• 5 проектов-витрин; Proof открывается только там, где он реально опубликован (в макете — Raydium). Остальные «на проверке качества».\n• «Посмотреть проверку» — ПОВТОР завершённого исследования (~10 с), с постоянной плашкой REPLAY и датой. Не живой запуск, не тратит Research, нет кнопки Stop и блока «что дальше». Есть «Сразу к Proof».\n• Дальше — экран v2 · 9 Published Proof (read-only) с кнопкой «Run your own verification» → по подписке.\n• Пока человек читает Proof (через ~4 с) сверху выезжает уведомление «Pulse · демо — Новое заявление pump.fun в X → Проверить». Подписано как демо, карточка — образец из фикстур. Нажатие ведёт в Pulse-демо на эту карточку (подсвечена, чип NEW).\n• Pulse-демо (free · 5): карточка Raydium = «Proof прочитан ✓» → обратно в Proof; Verify на остальных → шторка «по подписке» с «Записаться в ранний доступ» и честным текстом согласия (бот может написать, отписка, приглашение не гарантировано).\n\nMock: тексты, даты, вопросы. Early Access / согласие на сообщения бота — следующий экран, после аудита Claude Code.\n\n• Финал (через ~12 с в Pulse-демо или по Verify → шторка): без цены. «Понравилось? Заберите скидку −20% при запуске» — Получить скидку / Нет, спасибо. «Получить» → бот выдаёт личный промокод (в макете ATLAS-20 — mock), показывает в приложении и дублирует в чат; напоминает в день запуска. Платить сейчас не нужно. Замер интереса = доля получивших код; готовность платить проверяется в день запуска по использованным кодам. Выдача только по явному нажатию.\n• На экране кода: «Публичный запуск планируется в ноябре, бот напишет в день запуска, код действует 30 дней после него». Ориентир без точной даты; срок кода считается от запуска, не от сегодня. Если запуск сдвинется больше чем на месяц — одно сообщение бота «готовим запуск, код в силе»."
+    }
+  },
+  "order": [
+    "Main.dc.html",
+    "Library.dc.html",
+    "Result.dc.html",
+    "Checked.dc.html",
+    "Source.dc.html",
+    "V2-Home.dc.html",
+    "V2-Live.dc.html",
+    "V2-Library.dc.html",
+    "V2-Result.dc.html",
+    "V2-Source.dc.html",
+    "V2-Pulse.dc.html",
+    "V2-FromPulse.dc.html",
+    "V2-Profile.dc.html",
+    "V2-PublicProof.dc.html",
+    "Progress-RU.dc.html",
+    "Progress-EN.dc.html",
+    "Progress-Done.dc.html",
+    "Progress-Clarify.dc.html",
+    "Progress-Budget.dc.html",
+    "Progress-Failed.dc.html",
+    "Progress-Cancelled.dc.html",
+    "Artboard-lr65.dc.html",
+    "V2-FreeWelcome.dc.html",
+    "V2-FreePick.dc.html",
+    "V2-FreeAsk.dc.html",
+    "V2-FreeReplay.dc.html",
+    "V2-PulseDemo.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "page-1",
+      "name": "Page 1"
+    },
+    {
+      "id": "page-a9a7n6",
+      "name": "Page 2"
+    }
+  ],
+  "title": "Design"
+}

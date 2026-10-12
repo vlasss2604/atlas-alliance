@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ATLAS PROOF v2 — Free: Pulse demo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;display=swap">
+<style>
+body{margin:0;background:#06213B}
+a{color:#1EC5F5}a:hover{color:#8EE6FF}
+button,input,textarea{font-family:inherit}
+svg{display:block}
+main>*{flex-shrink:0}
+ul{margin:0;padding:0;list-style:none}
+button,a{transition:transform .15s ease,box-shadow .2s ease,background-color .2s ease}
+button:active,a:active{transform:scale(.97)}
+button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #1EC5F5;outline-offset:2px}
+@keyframes ap-rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes ap-drift{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(28px,22px) scale(1.15)}}
+@keyframes ap-glow{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes ap-spin{to{transform:rotate(360deg)}}
+@keyframes ap-line{from{stroke-dashoffset:140}to{stroke-dashoffset:0}}
+@keyframes ap-fade{from{opacity:0}to{opacity:1}}
+@keyframes ap-pop{0%{opacity:0;transform:scale(.92)}100%{opacity:1;transform:none}}
+@keyframes ap-sheen{0%{transform:translateX(-140%)}55%,100%{transform:translateX(700%)}}
+@keyframes ap-breathe{0%,100%{box-shadow:0 0 0 5px rgba(30,197,245,.06),0 0 22px rgba(30,197,245,.18)}50%{box-shadow:0 0 0 8px rgba(30,197,245,.11),0 0 42px rgba(30,197,245,.36)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* evidence network: static layer, no animation (performance) */
+</style>
+</helmet>
+<div class="ap-root" style="width: 390px; height: 844px; position: relative; overflow: hidden; isolation: isolate; box-sizing: border-box; background: radial-gradient(110% 55% at 0% 0%, rgba(30,197,245,0.14) 0%, rgba(30,197,245,0) 60%), radial-gradient(90% 45% at 100% 100%, rgba(123,92,255,0.14) 0%, rgba(123,92,255,0) 60%), linear-gradient(180deg, #06213B 0%, #041627 100%); color: #F3F7FB; font-family: Inter, system-ui, sans-serif;">
+
+  <div aria-hidden="true" style="position: absolute; z-index: -1; top: 200px; right: -120px; width: 300px; height: 300px; border-radius: 50%; background: radial-gradient(circle, rgba(30,197,245,0.18) 0%, rgba(30,197,245,0) 70%); animation: ap-drift 17s ease-in-out infinite; pointer-events: none;"></div>
+  <div aria-hidden="true" style="position: absolute; z-index: -1; bottom: 40px; left: -120px; width: 320px; height: 320px; border-radius: 50%; background: radial-gradient(circle, rgba(123,92,255,0.2) 0%, rgba(123,92,255,0) 70%); animation: ap-drift 22s ease-in-out -8s infinite reverse; pointer-events: none;"></div>
+
+    <div aria-hidden="true" class="ap-net" style="position: absolute; z-index: -1; left: 0; top: 0; width: 390px; height: 1500px; pointer-events: none;"><svg width="390" height="1500" viewBox="0 0 390 1500" aria-hidden="true" style="display: block;"><g stroke="rgba(30,197,245,0.17)" stroke-width="0.8" fill="none"><line x1="233.5" y1="25.7" x2="306.1" y2="61.8"></line><line x1="233.5" y1="25.7" x2="268.6" y2="168.4"></line><line x1="306.1" y1="61.8" x2="268.6" y2="168.4"></line><line x1="268.6" y1="168.4" x2="350.9" y2="247.5"></line><line x1="350.9" y1="247.5" x2="227.8" y2="306.8"></line><line x1="40.9" y1="386.6" x2="72.8" y2="446.6"></line><line x1="40.9" y1="386.6" x2="156.8" y2="465.0"></line><line x1="227.8" y1="306.8" x2="210.5" y2="435.0"></line><line x1="72.8" y1="446.6" x2="156.8" y2="465.0"></line><line x1="156.8" y1="465.0" x2="210.5" y2="435.0"></line><line x1="210.5" y1="435.0" x2="355.0" y2="470.3"></line><line x1="355.0" y1="470.3" x2="358.7" y2="593.3"></line><line x1="55.3" y1="609.1" x2="168.6" y2="632.7"></line><line x1="55.3" y1="609.1" x2="19.7" y2="742.1"></line><line x1="168.6" y1="632.7" x2="249.4" y2="616.1"></line><line x1="168.6" y1="632.7" x2="119.8" y2="748.9"></line><line x1="249.4" y1="616.1" x2="358.7" y2="593.3"></line><line x1="19.7" y1="742.1" x2="119.8" y2="748.9"></line><line x1="361.4" y1="757.0" x2="277.5" y2="883.9"></line><line x1="361.4" y1="757.0" x2="307.9" y2="905.7"></line><line x1="34.6" y1="905.1" x2="152.3" y2="882.2"></line><line x1="34.6" y1="905.1" x2="86.2" y2="1053.6"></line><line x1="152.3" y1="882.2" x2="277.5" y2="883.9"></line><line x1="277.5" y1="883.9" x2="307.9" y2="905.7"></line><line x1="277.5" y1="883.9" x2="316.0" y2="986.0"></line><line x1="307.9" y1="905.7" x2="316.0" y2="986.0"></line><line x1="86.2" y1="1053.6" x2="137.6" y2="1038.9"></line><line x1="86.2" y1="1053.6" x2="118.1" y2="1134.9"></line><line x1="137.6" y1="1038.9" x2="118.1" y2="1134.9"></line><line x1="316.0" y1="986.0" x2="272.0" y2="1118.8"></line><line x1="272.0" y1="1118.8" x2="345.0" y2="1195.9"></line><line x1="345.0" y1="1195.9" x2="321.0" y2="1294.0"></line><line x1="76.4" y1="1274.2" x2="135.5" y2="1332.3"></line><line x1="76.4" y1="1274.2" x2="30.7" y2="1384.2"></line><line x1="135.5" y1="1332.3" x2="217.2" y2="1264.4"></line><line x1="135.5" y1="1332.3" x2="30.7" y2="1384.2"></line><line x1="135.5" y1="1332.3" x2="136.3" y2="1438.2"></line><line x1="217.2" y1="1264.4" x2="321.0" y2="1294.0"></line><line x1="321.0" y1="1294.0" x2="354.6" y2="1389.0"></line><line x1="30.7" y1="1384.2" x2="136.3" y2="1438.2"></line><line x1="136.3" y1="1438.2" x2="258.2" y2="1433.3"></line><line x1="258.2" y1="1433.3" x2="354.6" y2="1389.0"></line></g><circle cx="22.2" cy="82.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="233.5" cy="25.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="306.1" cy="61.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="268.6" cy="168.4" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="268.6" cy="168.4" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="350.9" cy="247.5" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="40.9" cy="386.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="227.8" cy="306.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="72.8" cy="446.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="156.8" cy="465.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="210.5" cy="435.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="355.0" cy="470.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="55.3" cy="609.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="168.6" cy="632.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="249.4" cy="616.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="358.7" cy="593.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="19.7" cy="742.1" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="19.7" cy="742.1" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="119.8" cy="748.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="361.4" cy="757.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="34.6" cy="905.1" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="152.3" cy="882.2" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="277.5" cy="883.9" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="277.5" cy="883.9" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="307.9" cy="905.7" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="86.2" cy="1053.6" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="137.6" cy="1038.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="316.0" cy="986.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="118.1" cy="1134.9" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="118.1" cy="1134.9" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="272.0" cy="1118.8" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="345.0" cy="1195.9" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="76.4" cy="1274.2" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="135.5" cy="1332.3" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="217.2" cy="1264.4" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="321.0" cy="1294.0" r="1.5" fill="rgba(142,230,255,0.5)"></circle><circle cx="30.7" cy="1384.2" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="30.7" cy="1384.2" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="136.3" cy="1438.2" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="136.3" cy="1438.2" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="258.2" cy="1433.3" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="258.2" cy="1433.3" r="2.4" fill="rgba(170,240,255,0.9)"></circle><circle cx="354.6" cy="1389.0" r="7" fill="rgba(30,197,245,0.13)"></circle><circle cx="354.6" cy="1389.0" r="2.4" fill="rgba(170,240,255,0.9)"></circle></svg></div>
+
+  <header style="height: 76px; box-sizing: border-box; display: flex; align-items: center; justify-content: space-between; padding: 14px 16px 8px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="ATLAS PROOF" style="width: 44px; height: 47px; box-sizing: border-box; padding: 4px 2px; object-fit: contain;">
+      <div style="display: flex; flex-direction: column; gap: 2px;">
+        <span style="font-size: 17px; font-weight: 800; letter-spacing: 0.01em;">ATLAS <span style="color: #1EC5F5;">PROOF</span></span>
+        <span style="font-size: 9px; font-weight: 600; letter-spacing: 0.08em; color: #A9B8C8;">CRYPTO VERIFICATION · ECONOMICS</span>
+      </div>
+    </div>
+    <a href="V2-Profile.dc.html" aria-label="Profile" style="width: 40px; height: 40px; box-sizing: border-box; border-radius: 50%; background: #061B30; border: 1px solid rgba(30,197,245,0.4); box-shadow: 0 0 10px rgba(30,197,245,0.2); color: #F1F5F9; display: flex; align-items: center; justify-content: center; text-decoration: none;"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4.5 21c1.4-4 4.2-6 7.5-6s6.1 2 7.5 6"></path></svg></a>
+  </header>
+
+  <main class="ap-scroll" style="position: absolute; top: 76px; left: 0; right: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; box-sizing: border-box; padding: 12px 16px 140px; display: flex; flex-direction: column; gap: 22px;">
+
+    <div style="display: flex; flex-direction: column; gap: 10px; animation: ap-rise 0.6s cubic-bezier(.2,.7,.2,1) backwards;">
+      <div style="display: flex; align-items: center; gap: 12px;">
+        <h1 style="margin: 0; font-size: 34px; line-height: 1.02; font-weight: 800; letter-spacing: -0.02em;">Pulse</h1>
+        <svg aria-hidden="true" width="70" height="30" viewBox="0 0 70 30" style="overflow: visible;"><path d="M2 17h14l5-12 9 21 5-10h33" fill="none" stroke="#1EC5F5" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="140" style="filter: drop-shadow(0 0 6px rgba(30,197,245,0.8)); animation: ap-line 1.4s cubic-bezier(.4,0,.2,1) 250ms backwards;"></path></svg>
+      </div>
+      <p style="margin: 0; font-size: 15px; line-height: 22px; color: #C9D5E2; text-wrap: pretty;">{{ t.subtitle }}</p>
+      <p style="margin: 0; display: flex; gap: 8px; align-items: flex-start; font-size: 13px; line-height: 19px; color: #8FA3B8;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#1EC5F5" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 1.5px;"><circle cx="12" cy="12" r="9"></circle><path d="M12 11v5"></path><path d="M12 7.5h.01"></path></svg>
+        <span>{{ t.note }}</span>
+      </p>
+    </div>
+
+    <div style="padding: 12px 14px; border-radius: 16px; background: rgba(3,17,31,0.55); border: 1px dashed rgba(148,160,179,0.4); display: flex; flex-direction: column; gap: 6px; animation: ap-rise 0.6s cubic-bezier(.2,.7,.2,1) 80ms backwards;">
+      <span style="align-self: flex-start; height: 22px; box-sizing: border-box; padding: 0 9px; display: flex; align-items: center; gap: 6px; border-radius: 11px; background: rgba(148,160,179,0.12); border: 1px solid rgba(148,160,179,0.4); color: #C9D2DE; font-size: 11.5px; line-height: 1; font-weight: 700;"><span style="width: 6px; height: 6px; border-radius: 50%; background: #94A0B3;"></span>{{ t.demoTitle }}</span>
+      <span style="font-size: 13px; line-height: 19px; color: #AFC0D1;">{{ t.demoBody }}</span>
+    </div>
+
+    <section aria-label="{{ t.freshTitle }}" style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; padding: 0 2px; font-size: 17px; line-height: 22px; font-weight: 800;">{{ t.freshTitle }}</h2>
+      <ul style="display: flex; flex-direction: column; gap: 12px;">
+          <sc-for list="{{ fresh }}" as="p" hint-placeholder-count="3">
+            <li style="position: relative; overflow: hidden; padding: 16px 16px 16px; border-radius: 20px; background: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%); border: 1px solid {{ p.cardEdge }}; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 36px -16px rgba(0,0,0,0.8){{ p.cardGlow }}; display: flex; flex-direction: column; gap: 12px; animation: ap-rise 0.5s cubic-bezier(.2,.7,.2,1) {{ p.delay }} backwards;">
+              <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <sc-if value="{{ p.hasLogo }}" hint-placeholder-val="{{ true }}">
+                  <span style="width: 40px; height: 40px; flex: none; box-sizing: border-box; border-radius: 28%; background: {{ p.avBg }}; border: 1px solid {{ p.avEdge }}; box-shadow: 0 0 16px -6px rgba(90,180,240,0.5); display: flex; align-items: center; justify-content: center; overflow: hidden;"><img src="{{ p.logo }}" alt="" style="width: {{ p.logoSize }}; height: {{ p.logoSize }}; object-fit: {{ p.fit }};"></span>
+                </sc-if>
+                <sc-if value="{{ p.noLogo }}" hint-placeholder-val="{{ false }}">
+                  <span style="width: 40px; height: 40px; flex: none; box-sizing: border-box; border-radius: 28%; background: {{ p.avBg }}; border: 1px solid {{ p.avEdge }}; box-shadow: 0 0 16px -6px {{ p.avGlow }}; display: flex; align-items: center; justify-content: center; color: {{ p.avInk }}; font-size: 11px; line-height: 1; font-weight: 700; letter-spacing: 0.02em;">{{ p.initials }}</span>
+                </sc-if>
+                <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+                  <p style="margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;"><span style="font-size: 15px; line-height: 20px; font-weight: 800;">{{ p.name }}</span><sc-if value="{{ p.isNew }}" hint-placeholder-val="{{ false }}"><span style="height: 18px; box-sizing: border-box; padding: 0 7px; display: inline-flex; align-items: center; gap: 4px; border-radius: 9px; background: rgba(30,197,245,0.14); border: 1px solid rgba(30,197,245,0.5); color: #8EE6FF; font-size: 10.5px; line-height: 1; font-weight: 800; letter-spacing: 0.04em; vertical-align: middle;"><span style="width: 5px; height: 5px; border-radius: 50%; background: #1EC5F5;"></span>{{ t.newChip }}</span></sc-if><span style="font-size: 13px; line-height: 18px; color: #8FA3B8;">{{ p.handle }}</span></p>
+                  <p style="margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; line-height: 16px; color: #8FA3B8;">
+                    <span style="height: 20px; box-sizing: border-box; padding: 0 7px 0 5px; display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; background: rgba(214,222,232,0.07); border: 1px solid rgba(214,222,232,0.2); color: #D6DEE8; font-weight: 600;"><svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h12v8H9.5L6 16.5v-3H4z"></path></svg>X</span>
+                    <span style="color: {{ p.typeInk }}; font-weight: 600;">{{ p.type }}</span><span aria-hidden="true">·</span><span>{{ p.age }}</span>
+                  </p>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8FA3B8;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"></path><path d="M7 17L17 7"></path></svg>{{ t.claimed }}</span>
+                <p style="margin: 0; font-size: 15px; line-height: 22px; color: #E6ECF4;">{{ p.text }}</p>
+              </div>
+              <p style="margin: 0; padding: 10px 12px; border-radius: 12px; background: rgba(30,197,245,0.06); border: 1px solid rgba(30,197,245,0.2); font-size: 13.5px; line-height: 19px; font-weight: 600; color: #BFEFFF;">{{ p.question }}</p>
+              <div style="display: flex; align-items: center;">
+                <sc-if value="{{ p.hasLink }}" hint-placeholder-val="{{ true }}"><a href="V2-PublicProof.dc.html" style="height: 40px; box-sizing: border-box; padding: 0 16px 0 14px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px; background: rgba(53,209,162,0.1); border: 1px solid rgba(53,209,162,0.5); color: #8FECD0; font-size: 14px; line-height: 1; font-weight: 800; text-decoration: none;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg>{{ t.proofRead }}</a></sc-if>
+                <sc-if value="{{ p.noLink }}" hint-placeholder-val="{{ false }}"><button type="button" onClick="{{ p.gate }}" style="height: 40px; box-sizing: border-box; padding: 0 16px 0 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 6px 18px rgba(30,197,245,0.42); color: #03111F; font-size: 14px; line-height: 1; font-weight: 800;">{{ t.verify }}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg></button></sc-if>
+              </div>
+            </li>
+          </sc-for>
+      </ul>
+    </section>
+
+    <section aria-label="{{ t.earlier }}" style="display: flex; flex-direction: column; gap: 12px;">
+      <h2 style="margin: 0; padding: 0 2px; font-size: 17px; line-height: 22px; font-weight: 800; color: #9DB0C4;">{{ t.earlier }}</h2>
+      <ul style="display: flex; flex-direction: column; gap: 12px; opacity: 0.8;">
+          <sc-for list="{{ earlier }}" as="p" hint-placeholder-count="3">
+            <li style="position: relative; overflow: hidden; padding: 16px 16px 16px; border-radius: 20px; background: linear-gradient(180deg, rgba(8,38,66,0.92) 0%, rgba(6,27,48,0.92) 100%); border: 1px solid {{ p.cardEdge }}; box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 36px -16px rgba(0,0,0,0.8){{ p.cardGlow }}; display: flex; flex-direction: column; gap: 12px; animation: ap-rise 0.5s cubic-bezier(.2,.7,.2,1) {{ p.delay }} backwards;">
+              <div style="display: flex; align-items: flex-start; gap: 12px;">
+                <sc-if value="{{ p.hasLogo }}" hint-placeholder-val="{{ true }}">
+                  <span style="width: 40px; height: 40px; flex: none; box-sizing: border-box; border-radius: 28%; background: {{ p.avBg }}; border: 1px solid {{ p.avEdge }}; box-shadow: 0 0 16px -6px rgba(90,180,240,0.5); display: flex; align-items: center; justify-content: center; overflow: hidden;"><img src="{{ p.logo }}" alt="" style="width: {{ p.logoSize }}; height: {{ p.logoSize }}; object-fit: {{ p.fit }};"></span>
+                </sc-if>
+                <sc-if value="{{ p.noLogo }}" hint-placeholder-val="{{ false }}">
+                  <span style="width: 40px; height: 40px; flex: none; box-sizing: border-box; border-radius: 28%; background: {{ p.avBg }}; border: 1px solid {{ p.avEdge }}; box-shadow: 0 0 16px -6px {{ p.avGlow }}; display: flex; align-items: center; justify-content: center; color: {{ p.avInk }}; font-size: 11px; line-height: 1; font-weight: 700; letter-spacing: 0.02em;">{{ p.initials }}</span>
+                </sc-if>
+                <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px;">
+                  <p style="margin: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px;"><span style="font-size: 15px; line-height: 20px; font-weight: 800;">{{ p.name }}</span><sc-if value="{{ p.isNew }}" hint-placeholder-val="{{ false }}"><span style="height: 18px; box-sizing: border-box; padding: 0 7px; display: inline-flex; align-items: center; gap: 4px; border-radius: 9px; background: rgba(30,197,245,0.14); border: 1px solid rgba(30,197,245,0.5); color: #8EE6FF; font-size: 10.5px; line-height: 1; font-weight: 800; letter-spacing: 0.04em; vertical-align: middle;"><span style="width: 5px; height: 5px; border-radius: 50%; background: #1EC5F5;"></span>{{ t.newChip }}</span></sc-if><span style="font-size: 13px; line-height: 18px; color: #8FA3B8;">{{ p.handle }}</span></p>
+                  <p style="margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 12px; line-height: 16px; color: #8FA3B8;">
+                    <span style="height: 20px; box-sizing: border-box; padding: 0 7px 0 5px; display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; background: rgba(214,222,232,0.07); border: 1px solid rgba(214,222,232,0.2); color: #D6DEE8; font-weight: 600;"><svg width="12" height="12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h12v8H9.5L6 16.5v-3H4z"></path></svg>X</span>
+                    <span style="color: {{ p.typeInk }}; font-weight: 600;">{{ p.type }}</span><span aria-hidden="true">·</span><span>{{ p.age }}</span>
+                  </p>
+                </div>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8FA3B8;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 7h10v10"></path><path d="M7 17L17 7"></path></svg>{{ t.claimed }}</span>
+                <p style="margin: 0; font-size: 15px; line-height: 22px; color: #E6ECF4;">{{ p.text }}</p>
+              </div>
+              <p style="margin: 0; padding: 10px 12px; border-radius: 12px; background: rgba(30,197,245,0.06); border: 1px solid rgba(30,197,245,0.2); font-size: 13.5px; line-height: 19px; font-weight: 600; color: #BFEFFF;">{{ p.question }}</p>
+              <div style="display: flex; align-items: center;">
+                <sc-if value="{{ p.hasLink }}" hint-placeholder-val="{{ true }}"><a href="V2-FromPulse.dc.html" style="height: 40px; box-sizing: border-box; padding: 0 16px 0 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 6px 18px rgba(30,197,245,0.42); color: #03111F; font-size: 14px; line-height: 1; font-weight: 800; text-decoration: none;">{{ t.verify }}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg></a></sc-if>
+                <sc-if value="{{ p.noLink }}" hint-placeholder-val="{{ false }}"><button type="button" style="height: 40px; box-sizing: border-box; padding: 0 16px 0 18px; display: inline-flex; align-items: center; gap: 8px; border-radius: 20px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 6px 18px rgba(30,197,245,0.42); color: #03111F; font-size: 14px; line-height: 1; font-weight: 800; text-decoration: none;">{{ t.verify }}<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M13 6l6 6-6 6"></path></svg></button></sc-if>
+              </div>
+            </li>
+          </sc-for>
+      </ul>
+    </section>
+  </main>
+
+  <sc-if value="{{ endOpen }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" style="position: absolute; inset: 0; z-index: 25; background: rgba(2,10,20,0.74); display: flex; align-items: flex-end; padding: 0 10px 10px; box-sizing: border-box; animation: ap-fade 0.2s ease-out backwards;">
+      <div style="width: 100%; box-sizing: border-box; padding: 22px 18px 16px; border-radius: 24px; background: linear-gradient(180deg, #0A2E52 0%, #061B30 100%); border: 1px solid rgba(30,197,245,0.42); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 30px 60px -20px rgba(0,0,0,0.9); display: flex; flex-direction: column; gap: 14px; animation: ap-pop 0.25s cubic-bezier(.2,.7,.2,1) backwards;">
+        <sc-if value="{{ endAsk }}" hint-placeholder-val="{{ true }}">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="width: 44px; height: 44px; flex: none; box-sizing: border-box; border-radius: 50%; background: radial-gradient(circle at 50% 30%, #0E3A62 0%, #05182C 75%); border: 1px solid rgba(30,197,245,0.45); box-shadow: 0 0 20px rgba(30,197,245,0.3); display: flex; align-items: center; justify-content: center;"><img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="" style="width: 26px; height: 24px; object-fit: contain;"></span>
+            <span style="font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8EE6FF;">{{ t.endKicker }}</span>
+          </div>
+          <h2 style="margin: 0; font-size: 21px; line-height: 27px; font-weight: 800; letter-spacing: -0.01em;">{{ t.endTitle }}</h2>
+          <div style="display: flex; align-items: center; gap: 10px;"><span style="height: 28px; box-sizing: border-box; padding: 0 12px 0 10px; display: inline-flex; align-items: center; gap: 6px; border-radius: 14px; background: rgba(53,209,162,0.12); border: 1px solid rgba(53,209,162,0.5); color: #8FECD0; font-size: 13px; line-height: 1; font-weight: 800;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12V22H4V12"></path><path d="M22 7H2v5h20z"></path><path d="M12 22V7"></path><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7zM12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"></path></svg>{{ t.endOffer }}</span></div>
+          <p style="margin: 0; font-size: 13.5px; line-height: 19px; color: #C9D5E2;">{{ t.endText }}</p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button type="button" onClick="{{ endYes }}" style="width: 100%; height: 52px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 16px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 8px 22px rgba(30,197,245,0.45); color: #03111F; font-size: 16px; line-height: 20px; font-weight: 800;">{{ t.endYes }}</button>
+            <button type="button" onClick="{{ endNo }}" style="width: 100%; height: 44px; background: none; border: 0; color: #AFC0D1; font-size: 14px; line-height: 18px; font-weight: 600;">{{ t.endNo }}</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ endJoin }}" hint-placeholder-val="{{ false }}">
+          <span style="align-self: flex-start; height: 24px; box-sizing: border-box; padding: 0 10px 0 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; background: rgba(30,197,245,0.12); border: 1px solid rgba(30,197,245,0.5); color: #BFEFFF; font-size: 11.5px; line-height: 1; font-weight: 700;">{{ t.joinChip }}</span>
+          <h2 style="margin: 0; font-size: 21px; line-height: 27px; font-weight: 800; letter-spacing: -0.01em;">{{ t.joinTitle }}</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 20px; color: #C9D5E2;">{{ t.joinText }}</p>
+          <div style="display: flex; flex-direction: column; gap: 8px;">
+            <button type="button" onClick="{{ endDone }}" style="width: 100%; height: 52px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 16px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 8px 22px rgba(30,197,245,0.45); color: #03111F; font-size: 16px; line-height: 20px; font-weight: 800;">{{ t.joinCta }}</button>
+            <button type="button" onClick="{{ endLater }}" style="width: 100%; height: 44px; background: none; border: 0; color: #AFC0D1; font-size: 14px; line-height: 18px; font-weight: 600;">{{ t.gateLater }}</button>
+          </div>
+          <span style="font-size: 11.5px; line-height: 16px; color: #7F93A8;">{{ t.gateNote }}</span>
+        </sc-if>
+        <sc-if value="{{ endDoneView }}" hint-placeholder-val="{{ false }}">
+          <div style="display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 4px 0 0;">
+            <span style="width: 48px; height: 48px; box-sizing: border-box; border-radius: 50%; background: rgba(53,209,162,0.12); border: 1px solid rgba(53,209,162,0.5); display: flex; align-items: center; justify-content: center; color: #35D1A2;"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"></path></svg></span>
+            <h2 style="margin: 0; font-size: 20px; line-height: 26px; font-weight: 800;">{{ t.doneTitle }}</h2>
+          </div>
+          <div style="padding: 14px 14px 14px 16px; border-radius: 16px; background: #03111F; border: 1.5px dashed rgba(30,197,245,0.6); display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+            <span style="display: flex; flex-direction: column; gap: 3px;"><span style="font-size: 11px; line-height: 14px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: #8FA3B8;">{{ t.promoLabel }}</span><span style="font-size: 24px; line-height: 28px; font-weight: 800; letter-spacing: 0.08em; color: #8EE6FF; font-variant-numeric: tabular-nums;">ATLAS-20</span></span>
+            <button type="button" style="height: 40px; flex: none; box-sizing: border-box; padding: 0 14px; display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; background: rgba(30,197,245,0.12); border: 1px solid rgba(30,197,245,0.5); color: #BFEFFF; font-size: 13px; line-height: 1; font-weight: 700;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"></rect><path d="M5 15V5a2 2 0 0 1 2-2h10"></path></svg>{{ t.copy }}</button>
+          </div>
+          <p style="margin: 0; font-size: 13.5px; line-height: 19px; color: #C9D5E2;">{{ t.doneText }}</p>
+          <a href="V2-Home.dc.html" style="width: 100%; height: 48px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 16px; background: rgba(3,17,31,0.5); border: 1px solid rgba(30,197,245,0.3); color: #DCE4EC; font-size: 15px; line-height: 20px; font-weight: 700; text-decoration: none;">{{ t.doneCta }}</a>
+        </sc-if>
+        <sc-if value="{{ endBye }}" hint-placeholder-val="{{ false }}">
+          <h2 style="margin: 0; font-size: 20px; line-height: 26px; font-weight: 800;">{{ t.byeTitle }}</h2>
+          <p style="margin: 0; font-size: 14px; line-height: 20px; color: #C9D5E2;">{{ t.byeText }}</p>
+          <a href="V2-Home.dc.html" style="width: 100%; height: 48px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; border-radius: 16px; background: rgba(3,17,31,0.5); border: 1px solid rgba(30,197,245,0.3); color: #DCE4EC; font-size: 15px; line-height: 20px; font-weight: 700; text-decoration: none;">{{ t.doneCta }}</a>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ gateOpen }}" hint-placeholder-val="{{ false }}">
+    <div role="dialog" aria-modal="true" style="position: absolute; inset: 0; z-index: 20; background: rgba(2,10,20,0.72); display: flex; align-items: flex-end; padding: 0 10px 10px; box-sizing: border-box; animation: ap-fade 0.2s ease-out backwards;">
+      <div style="width: 100%; box-sizing: border-box; padding: 20px 18px 16px; border-radius: 24px; background: linear-gradient(180deg, #0A2E52 0%, #061B30 100%); border: 1px solid rgba(30,197,245,0.42); box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 30px 60px -20px rgba(0,0,0,0.9); display: flex; flex-direction: column; gap: 14px; animation: ap-pop 0.25s cubic-bezier(.2,.7,.2,1) backwards;">
+        <span style="align-self: flex-start; height: 24px; box-sizing: border-box; padding: 0 10px 0 8px; display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; background: rgba(30,197,245,0.12); border: 1px solid rgba(30,197,245,0.5); color: #BFEFFF; font-size: 11.5px; line-height: 1; font-weight: 700;"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg>{{ t.gateChip }}</span>
+        <h2 style="margin: 0; font-size: 20px; line-height: 26px; font-weight: 800; letter-spacing: -0.01em;">{{ t.gateTitle }}</h2>
+        <p style="margin: 0; font-size: 14px; line-height: 20px; color: #C9D5E2;">{{ t.gateText }}</p>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <button type="button" onClick="{{ gateJoin }}" style="width: 100%; height: 50px; box-sizing: border-box; display: flex; align-items: center; justify-content: center; gap: 8px; border-radius: 16px; background: linear-gradient(180deg, #4FD8FF 0%, #12B4EC 100%); border: 0; box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 8px 22px rgba(30,197,245,0.45); color: #03111F; font-size: 15px; line-height: 20px; font-weight: 800;">{{ t.gateCta }}</button>
+          <button type="button" onClick="{{ closeGate }}" style="width: 100%; height: 44px; background: none; border: 0; color: #AFC0D1; font-size: 14px; line-height: 18px; font-weight: 600;">{{ t.gateLater }}</button>
+        </div>
+        <span style="font-size: 11.5px; line-height: 16px; color: #7F93A8;">{{ t.gateNote }}</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <div aria-hidden="true" style="position: absolute; left: 0; right: 0; bottom: 0; height: 140px; background: linear-gradient(180deg, rgba(4,22,39,0) 0%, rgba(4,22,39,0.85) 55%, #041627 100%); pointer-events: none;"></div>
+
+  <nav aria-label="Main navigation" style="position: absolute; left: 10px; right: 10px; bottom: 10px; height: 70px; box-sizing: border-box; border-radius: 22px; background: #061B30; border: 1px solid rgba(30,197,245,0.35); box-shadow: 0 0 18px rgba(30,197,245,0.15); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: end; padding-bottom: 10px;">
+    <a href="V2-Pulse.dc.html" aria-current="page" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #FFFFFF; font-weight: 700; filter: drop-shadow(0 0 6px rgba(30,197,245,0.55)); font-size: 11px; text-decoration: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 13h4l3-8 4 14 3-8h6"></path></svg>Pulse
+    </a>
+    <a href="V2-Home.dc.html" style="height: 52px; position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; color: #C9D5E2; font-weight: 500; font-size: 13px; text-decoration: none;">
+      <img src="/_blob/e832a09f911c40bba1a4c22548c19ab4" alt="" style="position: absolute; top: -46px; left: 50%; margin-left: -32px; width: 64px; height: 68px; box-sizing: border-box; padding: 6px 4px; object-fit: contain;">Verify
+    </a>
+    <a href="V2-Library.dc.html" style="height: 52px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 4px; color: #C9D5E2; font-size: 11px; text-decoration: none;">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h11M3 12h11M3 18h11"></path><path d="M17 5.5l1.5 1.5 2.5-2.5M17 11.5l1.5 1.5 2.5-2.5M17 17.5l1.5 1.5 2.5-2.5"></path></svg>Proofs
+    </a>
+  </nav>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"lang":{"editor":"enum","options":["en","ru"],"default":"en","section":"Screen"},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+constructor(props) { super(props); this.state = { gate: false, end: '' }; }
+componentDidMount() { var self = this; this.endTimer = setTimeout(function () { if (!self.state.end && !self.state.gate) { self.setState({ end: 'ask' }); } }, 12000); }
+componentWillUnmount() { clearTimeout(this.endTimer); }
+renderVals() {
+var self = this;
+var lang = (this.props.lang ?? 'en') === 'ru' ? 'ru' : 'en';
+// i18n: pulse.* strings exist in en.ts/ru.ts. NEW (mock, need keys + approval): "Claimed", "Fresh" chip, "Verify with ATLAS", "Project claim", and the per-card verify question.
+var T = {
+en: { subtitle: 'Fresh crypto claims worth verifying, selected from X.', note: 'Pulse is for discovery only. Nothing here is verified until you run a Research.', sampleTitle: 'Sample data · prototype', sampleBody: 'These cards are invented examples of the claims Pulse is meant to carry. They are not real posts.', freshTitle: 'Fresh', earlier: 'Earlier', fresh: 'Fresh', claimed: 'Claimed', verify: 'Verify with ATLAS', proofRead: 'Proof read', newChip: 'NEW', endKicker: 'Before you go', endTitle: 'Like what you saw? Grab a discount for the public launch', endOffer: '−20% at launch', endText: 'Pulse and your own Research come with a subscription at the public launch. Get a personal promo code now and use it on launch day.', endYes: 'Get my discount', endNo: 'No, thanks', joinChip: 'Launch discount', joinTitle: 'Your −20% promo code', joinText: 'No payment now. Launch is planned for November; the bot sends the code to this chat and reminds you on launch day.', joinCta: 'Get the code', doneTitle: 'Your code is ready', doneText: 'Sent to you in the bot chat as well. Public launch is planned for November — the bot messages you on launch day, and the code is valid for 30 days after it. Nothing is charged until you subscribe.', promoLabel: 'Promo code', copy: 'Copy', doneCta: 'Back to the Proofs', byeTitle: 'Thanks for looking', byeText: 'The five published Proofs stay free to read whenever you want.', demoTitle: 'Pulse demo · sample claims', demoBody: 'In the free version Pulse is part of the subscription. These sample cards show what it carries; they are not real posts.', gateChip: 'Subscription', gateTitle: 'Verify your own claims with ATLAS', gateText: 'Pulse and your own Research come with a subscription at the public launch.', gateCta: 'Get the launch discount', gateLater: 'Maybe later', gateNote: 'Getting a code means the bot may message you about the launch. You can leave at any time. No payment is taken now.', types: { OFFICIAL_PROJECT: 'Project claim', RESEARCH_DATA: 'Research & data' } },
+ru: { subtitle: 'Свежие крипто-утверждения, которые стоит проверить, — отобраны из X.', note: 'Pulse — только для поиска тем. Ничто здесь не проверено, пока вы не запустите исследование.', sampleTitle: 'Тестовые данные · прототип', sampleBody: 'Эти карточки — придуманные примеры утверждений, которые должен показывать Pulse. Это не настоящие посты.', freshTitle: 'Свежие', earlier: 'Ранее', fresh: 'Свежее', claimed: 'Заявлено', verify: 'Проверить в ATLAS', proofRead: 'Proof прочитан', newChip: 'НОВОЕ', endKicker: 'Перед уходом', endTitle: 'Понравилось? Заберите скидку на подписку к запуску', endOffer: '−20% при запуске', endText: 'Pulse и свои исследования будут по подписке на публичном запуске. Получите личный промокод сейчас и используйте в день запуска.', endYes: 'Получить скидку', endNo: 'Нет, спасибо', joinChip: 'Скидка на старте', joinTitle: 'Ваш промокод на −20%', joinText: 'Платить сейчас не нужно. Запуск планируется в ноябре; бот отправит код в этот чат и напомнит в день запуска.', joinCta: 'Получить код', doneTitle: 'Код готов', doneText: 'Он отправлен и в чат с ботом. Публичный запуск планируется в ноябре — бот напишет вам в день запуска, код действует 30 дней после него. Ничего не списывается, пока вы не подпишетесь.', promoLabel: 'Промокод', copy: 'Копировать', doneCta: 'Назад к Proof', byeTitle: 'Спасибо, что посмотрели', byeText: 'Пять опубликованных Proof остаются бесплатными для чтения в любое время.', demoTitle: 'Демо Pulse · образцы заявлений', demoBody: 'В бесплатной версии Pulse входит в подписку. Эти образцы показывают, что в нём бывает; это не настоящие посты.', gateChip: 'Подписка', gateTitle: 'Проверяйте свои заявления с ATLAS', gateText: 'Pulse и свои исследования будут по подписке на публичном запуске.', gateCta: 'Получить скидку при запуске', gateLater: 'Позже', gateNote: 'Получение кода означает, что бот может написать вам о запуске. Отписаться можно в любой момент. Сейчас ничего не списывается.', types: { OFFICIAL_PROJECT: 'Заявление проекта', RESEARCH_DATA: 'Исследования и данные' } }
+}[lang];
+var GLYPH_BG = 'radial-gradient(circle at 50% 22%, rgba(26,86,130,0.95) 0%, rgba(26,86,130,0) 72%), #0B1A2E';
+var LOGOS = {
+raydium: { logo: '/_blob/1e77ecff1f889ac0d5d88b2f39066c83', kind: 'glyph' },
+lido: { logo: '/_blob/93c58af086cae3349deb4f18601870da', kind: 'glyph' },
+aave: { logo: '/_blob/8a00ff5ec7fb915fc48a2f045472c25d', kind: 'tile' }
+};
+var hue = function (key) { var h = 0; for (var i = 0; i < key.length; i++) { h = (h * 31 + key.charCodeAt(i)) >>> 0; } return h % 360; };
+var age = function (hours) {
+if (lang === 'ru') { if (hours < 24) { var h10 = hours % 10, h100 = hours % 100; return hours + ' ' + (h10 === 1 && h100 !== 11 ? 'час' : h10 >= 2 && h10 <= 4 && (h100 < 12 || h100 > 14) ? 'часа' : 'часов') + ' назад'; } var dd = Math.round(hours / 24); var d10 = dd % 10, d100 = dd % 100; return dd + ' ' + (d10 === 1 && d100 !== 11 ? 'день' : d10 >= 2 && d10 <= 4 && (d100 < 12 || d100 > 14) ? 'дня' : 'дней') + ' назад'; }
+if (hours < 24) { return hours + ' hour' + (hours === 1 ? '' : 's') + ' ago'; }
+var d = Math.round(hours / 24); return d + ' day' + (d === 1 ? '' : 's') + ' ago';
+};
+var TYPES = { OFFICIAL_PROJECT: [T.types.OFFICIAL_PROJECT, '#8EE6FF'], RESEARCH_DATA: [T.types.RESEARCH_DATA, '#B9C4FF'] };
+var Q = lang === 'ru' ? {
+'raydium-buyback-week': 'Соответствует ли задокументированный механизм реальному исполнению?',
+'lido-revenue-split': 'Установлено ли, что эта выручка не доходит до держателей LDO?',
+'pump-fun-daily-buybacks': 'Исполняется ли ежедневный выкуп ончейн, как заявлено?',
+'aave-weekly-buyback-executed': 'Установлено ли исполнение, и где хранятся токены?',
+'jupiter-litterbox-buybacks': 'Выкуп без сжигания: что это даёт предложению JUP?',
+'jito-tiprouter-treasury': 'Доходит ли что-то из этого потока до держателей JTO?',
+'lido-dual-governance-vote': 'Меняет ли это решение то, как LDO получает ценность?'
+} : {
+'raydium-buyback-week': 'Does the documented mechanism match actual execution?',
+'lido-revenue-split': 'Is it established that none of this revenue reaches LDO holders?',
+'pump-fun-daily-buybacks': 'Is the daily buyback executing on-chain as claimed?',
+'aave-weekly-buyback-executed': 'Is the execution established, and where are the tokens held?',
+'jupiter-litterbox-buybacks': 'Buyback without a burn: what does it do to JUP supply?',
+'jito-tiprouter-treasury': 'Does any of this flow reach JTO holders?',
+'lido-dual-governance-vote': 'Does this decision change how LDO captures value?'
+};
+// Phase A fixtures from pulse-fixtures.ts, verbatim (the app labels them as sample data).
+var items = [
+{ id: 'raydium-buyback-week', slug: 'raydium', name: 'Raydium', ticker: 'RAY', source: 'Raydium', handle: '@RaydiumProtocol', type: 'OFFICIAL_PROJECT', h: 3, link: true, text: '12% of trading fees across all Raydium pools go to RAY buybacks. This week: 1.9M RAY bought on-market and sent to the buyback account.' },
+{ id: 'lido-revenue-split', slug: 'lido', name: 'Lido', ticker: 'LDO', source: 'Token Terminal', handle: '@tokenterminal', type: 'RESEARCH_DATA', h: 7, text: 'Lido 30-day protocol revenue is up 18% MoM. The protocol keeps 10% of staking rewards: 5% to the DAO treasury, 5% to node operators. None of it currently reaches LDO holders.' },
+{ id: 'pump-fun-daily-buybacks', isNew: true, slug: 'pump_fun', name: 'Pump.fun', ticker: 'PUMP', source: 'pump.fun', handle: '@pumpdotfun', type: 'OFFICIAL_PROJECT', h: 14, text: 'Buybacks are live: 25% of protocol revenue now goes to PUMP buybacks every day, executed on-chain from the fee wallet.' },
+{ id: 'aave-weekly-buyback-executed', slug: 'aave', name: 'Aave', ticker: 'AAVE', source: 'Aave', handle: '@aave', type: 'OFFICIAL_PROJECT', h: 26, text: 'The Aave Finance Committee executed the first $1M weekly AAVE buyback under the approved Aavenomics proposal. Purchased tokens are held in the Ecosystem Reserve.' },
+{ id: 'jupiter-litterbox-buybacks', slug: 'jupiter', name: 'Jupiter', ticker: 'JUP', source: 'DefiLlama', handle: '@DefiLlama', type: 'RESEARCH_DATA', h: 41, text: 'Jupiter routes 50% of protocol fees to JUP buybacks through the Litterbox trust. Cumulative buybacks passed $60M. No burn: bought tokens are locked for three years.' },
+{ id: 'jito-tiprouter-treasury', slug: 'jito', name: 'Jito', ticker: 'JTO', source: 'Messari', handle: '@MessariCrypto', type: 'RESEARCH_DATA', h: 70, text: 'Jito’s TipRouter sends 2.7% of MEV tips to the JTO DAO treasury and 0.3% to restakers. Treasury inflow was about $4.5M in Q3; nothing is distributed to JTO holders yet.' },
+{ id: 'lido-dual-governance-vote', slug: 'lido', name: 'Lido', ticker: 'LDO', source: 'Lido', handle: '@LidoFinance', type: 'OFFICIAL_PROJECT', h: 110, text: 'The DAO vote to activate Dual Governance passed with 94% in favour. The fee split stays 5% treasury / 5% node operators; no change to LDO value accrual.' }
+];
+var view = function (it, i) {
+var asset = LOGOS[it.slug];
+var hh = hue(it.slug);
+var initials = it.ticker.slice(0, 3).toUpperCase();
+var t = TYPES[it.type];
+return {
+name: it.source, handle: it.handle, type: t[0], typeInk: t[1], age: age(it.h), text: it.text, question: Q[it.id] || '', fresh: it.h <= 24,
+hasLogo: !!asset, noLogo: !asset, logo: asset ? asset.logo : '',
+logoSize: asset && asset.kind === 'tile' ? '100%' : '62%', fit: asset && asset.kind === 'tile' ? 'cover' : 'contain',
+avBg: asset ? (asset.kind === 'tile' ? '#0B1A2E' : GLYPH_BG) : 'radial-gradient(circle at 50% 22%, hsla(' + hh + ',55%,26%,0.95) 0%, hsla(' + hh + ',55%,26%,0) 72%), #0B1A2E',
+avEdge: asset ? (asset.kind === 'tile' ? 'rgba(160,190,224,0.22)' : 'rgba(110,185,240,0.38)') : 'hsla(' + hh + ',60%,62%,0.38)',
+avGlow: 'hsla(' + hh + ',70%,60%,0.45)', avInk: 'hsl(' + hh + ',70%,80%)', initials: initials,
+hasLink: !!it.link, noLink: !it.link, cardEdge: it.isNew ? 'rgba(30,197,245,0.55)' : 'rgba(30,197,245,0.16)', cardGlow: it.isNew ? ', 0 0 30px -6px rgba(30,197,245,0.5)' : '', isNew: !!it.isNew, gate: function () { self.setState({ gate: true }); }, delay: (160 + i * 70) + 'ms'
+};
+};
+var sorted = items.slice().sort(function (a, b) { return a.h - b.h; });
+var fresh = sorted.filter(function (it) { return it.h <= 48; }).slice(0, 12);
+var earlier = sorted.filter(function (it) { return it.h > 48; }).slice(0, 8);
+var e = this.state.end;
+return { gateOpen: this.state.gate, closeGate: function () { self.setState({ gate: false }); }, gateJoin: function () { self.setState({ gate: false, end: 'join' }); },
+endOpen: !!e, endAsk: e === 'ask', endJoin: e === 'join', endDoneView: e === 'done', endBye: e === 'bye',
+endYes: function () { self.setState({ end: 'join' }); }, endLater: function () { self.setState({ end: '' }); }, endNo: function () { self.setState({ end: 'bye' }); }, endDone: function () { self.setState({ end: 'done' }); }, t: T, fresh: fresh.map(view), earlier: earlier.map(function (it, i) { return view(it, i + fresh.length); }) };
+}
+}
+</script>
+</body>
+</html>
