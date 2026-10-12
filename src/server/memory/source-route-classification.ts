@@ -1,9 +1,10 @@
 import { and, eq } from "drizzle-orm";
 
-import type { Database } from "../db/client";
+import type { Database, Transaction } from "../db/client";
 import { projectMemoryItems, projects } from "../db/schema";
 import {
   VALID_ROUTE_CLASSES,
+  isCommunityHost,
   isValidRouteClass,
   normalizePathPrefix,
   resolveSourceRoute,
@@ -49,6 +50,12 @@ export type RouteClassificationRefusal =
   | "ALREADY_CLASSIFIED"
   | "MALFORMED_ROUTE_CONTENT"
   | "UNSUPPORTED_ROUTE_CLASS"
+  // Source Authority Strategy V1 (founder decisions, P0-4 + follow-up): a
+  // community host (isCommunityHost) never carries GOVERNANCE,
+  // OFFICIAL_DOCS or OFFICIAL_REPORT for a broad scope — the whole host or
+  // an all-content root such as /t (isBroadCommunityScope) — because anyone
+  // can post there. A narrower reviewed prefix is the only way.
+  | "COMMUNITY_HOST_BROAD_SCOPE"
   // The swap was performed and then checked against the real resolver, and
   // something other than this route's own class moved. Rolled back.
   | "RESOLUTION_WOULD_CHANGE";
@@ -98,6 +105,68 @@ function representativeUrl(domain: string, pathPrefix: string | null): string {
   return `https://${domain}${pathPrefix === null ? "/" : normalizePathPrefix(pathPrefix)}`;
 }
 
+// The strong classes a community host may never carry for a BROAD scope —
+// founder decisions P0-4 and its follow-up (2026-10-11): every route class
+// there is, GOVERNANCE, OFFICIAL_DOCS and OFFICIAL_REPORT.
+const COMMUNITY_REFUSED_CLASSES: ReadonlySet<RouteClass> = new Set<RouteClass>(["GOVERNANCE", "OFFICIAL_DOCS", "OFFICIAL_REPORT"]);
+
+// A BROAD scope on a community host: no prefix, the root, or a single-
+// segment prefix that is the generic all-content root of forum software —
+// every topic, thread, post, discussion, category or member page lives
+// under it, so it constrains nothing user-generated (Discourse /t /c /p /u
+// /latest, Flarum /d, and the generic topic / thread / post / discussion /
+// forum / member roots). Compared case-insensitively after the authority's
+// own normalization ("/T/" is "/t"). A narrower prefix BELOW one of these
+// (/t/<one-topic>, /c/<one-category>) is not broad: whether it genuinely
+// constrains the content is the owner's reviewed judgement.
+const COMMUNITY_ALL_CONTENT_ROOTS: ReadonlySet<string> = new Set([
+  "/t",
+  "/topic",
+  "/topics",
+  "/thread",
+  "/threads",
+  "/c",
+  "/category",
+  "/categories",
+  "/p",
+  "/post",
+  "/posts",
+  "/d",
+  "/discussion",
+  "/discussions",
+  "/forum",
+  "/forums",
+  "/latest",
+  "/u",
+  "/user",
+  "/users",
+  "/member",
+  "/members",
+]);
+
+export function isBroadCommunityScope(pathPrefix: string | null): boolean {
+  if (pathPrefix === null) return true;
+  const p = normalizePathPrefix(pathPrefix).toLowerCase();
+  return p === "/" || COMMUNITY_ALL_CONTENT_ROOTS.has(p);
+}
+
+// Exported so the combined owner command checks the SAME rule before it
+// shows a preview, rather than a second copy of it.
+export function communityBroadScopeRefusal(
+  domain: string,
+  pathPrefix: string | null,
+  routeClass: RouteClass,
+): { refusal: "COMMUNITY_HOST_BROAD_SCOPE"; detail: string } | null {
+  if (!COMMUNITY_REFUSED_CLASSES.has(routeClass)) return null;
+  if (!isCommunityHost(domain) || !isBroadCommunityScope(pathPrefix)) return null;
+  return {
+    refusal: "COMMUNITY_HOST_BROAD_SCOPE",
+    detail:
+      `${domain} is a community host: ${routeClass} may not apply to ${pathPrefix === null ? "the whole host" : `"${pathPrefix}"`}, ` +
+      `which covers user-generated content. Confirm and classify a narrower prefix you reviewed (for example /proposals).`,
+  };
+}
+
 function sameResolution(a: ResolvedSourceRoute, b: ResolvedSourceRoute): boolean {
   return (
     a.officiality === b.officiality &&
@@ -107,8 +176,10 @@ function sameResolution(a: ResolvedSourceRoute, b: ResolvedSourceRoute): boolean
   );
 }
 
+// Accepts a Transaction too, so the combined owner command can run the two
+// decisions atomically; the inner transaction then becomes a savepoint.
 export async function classifySourceRoute(
-  db: Database,
+  db: Database | Transaction,
   input: RouteClassificationInput,
 ): Promise<RouteClassificationResult> {
   if (!isValidRouteClass(input.routeClass)) {
@@ -156,6 +227,10 @@ export async function classifySourceRoute(
       detail: `route already carries routeClass ${content.routeClass}; re-classification is a different decision`,
     };
   }
+  // A HARD refusal, with no override flag: user-generated content must not
+  // inherit governance or documentation authority from host ownership.
+  const community = communityBroadScopeRefusal(content.domain, content.pathPrefix, routeClass);
+  if (community) return { ok: false, ...community };
 
   // Every ACTIVE route of this project, so the check below can prove that
   // NONE of the others moved — not merely that the target one did.

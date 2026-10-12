@@ -221,6 +221,37 @@ export function isBareSharedPlatformBase(host: string): boolean {
   return SHARED_MULTI_TENANT_PLATFORM_BASE_DOMAINS.has(host);
 }
 
+// SOURCE AUTHORITY STRATEGY V1 (founder decision 2026-10-11, P0-4) — a
+// COMMUNITY HOST: one whose own name says that anyone may publish on it
+// (forum., community., discuss., and the gov./governance. hosts that are,
+// across this domain, almost always a discussion forum). Host ownership
+// says nothing about who wrote a post on such a host, so the owner tooling
+// REFUSES a host-wide GOVERNANCE or OFFICIAL_DOCS classification there; a
+// narrower prefix the owner actually reviewed (/proposals) stays possible.
+//
+// Label-by-label over every label but the top-level one, same discipline
+// as isTestNetworkHost — never a substring, so "forumla.example" is not a
+// forum. Read ONLY by the owner tooling and the candidate review:
+// resolveSourceClass and resolveSourceRoute never consult it, so it can
+// refuse an owner act but cannot change how any url resolves.
+const COMMUNITY_HOST_LABELS = new Set([
+  "forum",
+  "forums",
+  "community",
+  "communities",
+  "discuss",
+  "discussion",
+  "discussions",
+  "discourse",
+  "gov",
+  "governance",
+]);
+
+export function isCommunityHost(host: string): boolean {
+  const labels = host.toLowerCase().replace(/^www\./, "").split(".");
+  return labels.slice(0, -1).some((label) => COMMUNITY_HOST_LABELS.has(label));
+}
+
 // D-129 — the SAME code-owned lists above, read back out as "which
 // domains does THIS module classify into THIS class". Acquisition
 // (s4-executor) uses this to steer search toward hosts whose class the

@@ -56,6 +56,55 @@ RS, UTL, VC, BSE. Not anchored: TOKEN_UTILITY, PASSIVE_HOLDER_OUTCOME,
 MECHANISM_CURRENT_STATE. Fixes the 8 regressions `d24786e` introduced;
 round-7 C2 / C4 expectations updated where they pinned the Jito defect.
 
+## SOURCE AUTHORITY STRATEGY V1 — P0 OWNER WORKFLOW (D-177) — IMPLEMENTED, OFFLINE-VERIFIED, UNCOMMITTED
+
+DISCOVERY ≠ AUTHORITY unchanged: no automatic officiality, class or
+authority; no new source class; no registrable-domain inference. The
+engine observes, the owner decides once per host + prefix + class, and
+every future Research on the project reuses it.
+
+- **Review queue** (`src/server/memory/source-route-candidate-review.ts`,
+  `scripts/review-route-candidates.ts --project=<slug>`, read-only): every
+  OBSERVED candidate of the project, ranked: ownership signal
+  (PATH_ON_CONFIRMED_HOST, then SUBDOMAIN_OF_CONFIRMED_HOST — recomputed by
+  the observer's own `parentConfirmedDomainOf` for older candidates — then
+  none) → critical components of the first job → evidence rows →
+  components → first seen. Shows ≤ 3 urls, a COMMUNITY HOST warning and a
+  NON-BINDING class hint (one literal word in a subdomain label or the
+  proposed path; ambiguous → none). Candidates an ACTIVE route now covers
+  are listed apart.
+- **Reject** (`rejectRouteCandidate`, `scripts/reject-route-candidate.ts`,
+  preview then `--confirm=yes`): OBSERVED → DEPRECATED. The observer no
+  longer proposes that host / host + prefix; a rejected path proposal no
+  longer suppresses other paths on its host (observer fix).
+- **Hard refusal** (`classifySourceRoute`, `COMMUNITY_HOST_BROAD_SCOPE`): a
+  community host (`isCommunityHost`, label-based: forum, community,
+  discuss, discourse, gov, governance, …) never carries GOVERNANCE,
+  OFFICIAL_DOCS or OFFICIAL_REPORT for a broad scope
+  (`isBroadCommunityScope`): the whole host, `/`, or a single-segment
+  all-content root (`/t`, `/topic(s)`, `/thread(s)`, `/c`, `/p`, `/d`,
+  `/u`, `/latest`, …, case-insensitive). A reviewed narrower prefix is
+  allowed (`/proposals`, one topic `/t/<slug>`). No override flag. The
+  resolver never reads either predicate. Discourse category-scoped
+  governance (topics live under `/t/…`) is an open P1 design problem.
+- **Combined owner decision** (`source-route-owner-decision.ts`,
+  `scripts/decide-source-route.ts`): explicit `--domain --prefix --class`;
+  preview (current resolution, candidate provenance and urls, non-binding
+  hint); `--confirm=yes` applies the unchanged confirmation and the
+  unchanged classification in one transaction (two lifecycle records, the
+  first SUPERSEDED by the second); any refusal rolls back both.
+- **Coverage** (`research-coverage.ts`): `AUTHORITY_PENDING_OWNER_REVIEW`
+  reason + finding when a component that admits a route class read a page
+  on an OBSERVED candidate or under a confirmed-but-unclassified prefix →
+  INCOMPLETE_COVERAGE (never CHECKED_AND_NOT_ESTABLISHED), job
+  COVERAGE_LIMITED. Not a verdict.
+- **Rule:** a first Research on an unfamiliar project does not wait for the
+  owner; it records candidates and stays coverage-limited where authority
+  is missing.
+- **P1, not done:** link provenance from official pages, signal-aware fetch
+  ordering, route freshness, Snapshot binding.
+- **Pinned:** `tests/source-authority-strategy-v1.test.ts` (29).
+
 ## RESEARCH QUALITY V1 (D-176) — COMMITTED `d24786e`; LIVE QUALITY BENCHMARK NOT RUN
 
 Global, project-general rules from the two live Jito runs (`b817eb99`,

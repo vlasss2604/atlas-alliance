@@ -123,7 +123,7 @@ export type RouteCandidateSkipReason =
   // A confirmed-domain page at the site root has no path to propose.
   | "NO_PATH_PREFIX";
 
-function candidateDomainOf(content: unknown): string | null {
+export function candidateDomainOf(content: unknown): string | null {
   const c = content as { domain?: unknown } | null;
   return typeof c?.domain === "string" ? c.domain.toLowerCase().replace(/^www\./, "") : null;
 }
@@ -135,12 +135,12 @@ function routePrefixOf(content: unknown): string | null {
 }
 
 // The prefix an OBSERVED path candidate proposes.
-function proposedPrefixOf(content: unknown): string | null {
+export function proposedPrefixOf(content: unknown): string | null {
   const c = content as { proposedPrefix?: unknown } | null;
   return typeof c?.proposedPrefix === "string" ? c.proposedPrefix : null;
 }
 
-function candidateProvenanceOf(content: unknown): RouteCandidateProvenance | null {
+export function candidateProvenanceOf(content: unknown): RouteCandidateProvenance | null {
   const c = content as { observed?: Partial<RouteCandidateProvenance> } | null;
   const o = c?.observed;
   if (!o || typeof o.jobId !== "string") return null;
@@ -168,7 +168,9 @@ export function firstPathSegment(url: string): string | null {
 // there is one; null otherwise. Dot-boundary match only, never a
 // substring — and "confirmed" is asked of the one authority resolver, so
 // this module holds no opinion of its own about lifecycle states.
-async function parentConfirmedDomainOf(
+// Exported so the owner candidate review computes the SAME signal for
+// candidates recorded before it existed, never a second rule.
+export async function parentConfirmedDomainOf(
   tx: Database | Transaction,
   projectId: string,
   host: string,
@@ -225,6 +227,12 @@ export async function observeSourceRouteCandidate(
       .where(and(eq(projectMemoryItems.projectId, input.projectId), eq(projectMemoryItems.kind, "SOURCE_ROUTE")));
 
     const sameHost = rows.filter((r) => candidateDomainOf(r.content) === domain);
+    // A non-OBSERVED PATH PROPOSAL is an owner's rejection of exactly that
+    // proposal (Source Authority Strategy V1: OBSERVED -> DEPRECATED). It
+    // speaks for its own host + prefix and nothing wider — it neither covers
+    // the domain nor stands for the host.
+    const decidedProposal = (r: { content: unknown; lifecycleState: string }) =>
+      r.lifecycleState !== "OBSERVED" && proposedPrefixOf(r.content) !== null;
     if (pathCandidate) {
       // A human row for this domain WITHOUT a prefix, or confirmed at "/",
       // covers the whole domain: classifying it is already theirs to do,
@@ -233,10 +241,13 @@ export async function observeSourceRouteCandidate(
         const p = routePrefixOf(r.content);
         return p === null || normalizePathPrefix(p) === "/";
       };
-      if (sameHost.some((r) => r.lifecycleState !== "OBSERVED" && domainWide(r))) {
+      if (sameHost.some((r) => r.lifecycleState !== "OBSERVED" && !decidedProposal(r) && domainWide(r))) {
         return { outcome: "SKIPPED", reason: "EXISTING_ROUTE_ROW", domain };
       }
-    } else if (sameHost.some((r) => r.lifecycleState !== "OBSERVED")) {
+      if (sameHost.some((r) => decidedProposal(r) && proposedPrefixOf(r.content) === pathPrefix)) {
+        return { outcome: "SKIPPED", reason: "EXISTING_ROUTE_ROW", domain };
+      }
+    } else if (sameHost.some((r) => r.lifecycleState !== "OBSERVED" && !decidedProposal(r))) {
       return { outcome: "SKIPPED", reason: "EXISTING_ROUTE_ROW", domain };
     }
     const parentConfirmedDomain = pathCandidate ? null : await parentConfirmedDomainOf(tx, input.projectId, domain, rows);

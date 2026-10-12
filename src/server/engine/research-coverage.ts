@@ -1,12 +1,21 @@
 import { and, asc, eq, inArray } from "drizzle-orm";
 
 import type { Database, Transaction } from "../db/client";
-import { researchAttempts, researchComponentResults, researchJobs, researchTraceEvents } from "../db/schema";
+import { projectMemoryItems, researchAttempts, researchComponentResults, researchJobs, researchTraceEvents } from "../db/schema";
 import { loadAcquisitionPlan } from "./acquisition-plan";
 import { loadJobContractView } from "./job-contract-view";
 import type { EvidenceSourceClass } from "./providers/types";
 import { TECHNICAL_COMPONENT_CODES, technicalCodeForAttemptHead } from "./research-boundary";
-import { deriveSourceType, resolveSourceClass, resolveSourceRoute } from "./source-authority";
+import {
+  VALID_ROUTE_CLASSES,
+  deriveSourceType,
+  hostnameOf,
+  isUnrecognizedDomain,
+  matchesPathPrefix,
+  resolveSourceClass,
+  resolveSourceRoute,
+} from "./source-authority";
+import { candidateDomainOf, proposedPrefixOf } from "./source-route-candidates";
 import { auditRemainingKnownPaths } from "./targeted-recovery";
 
 // RESEARCH COVERAGE (Research Quality V1, D-176).
@@ -90,7 +99,14 @@ export type CoverageReason =
   | "RECOVERY_BOUND_REACHED"
   | "KNOWN_PATHS_UNEXPLORED"
   | "ADMISSIBLE_CLASS_NEVER_INSPECTED"
-  | "ADMISSIBLE_CLASS_INSPECTED";
+  | "ADMISSIBLE_CLASS_INSPECTED"
+  // Source Authority Strategy V1: the component read a page whose authority
+  // is waiting on an owner decision — an engine-observed route candidate,
+  // or a human-confirmed prefix not yet classified — and the component
+  // admits a class only that decision could give. What the page could have
+  // established was never adjudicated: an authority gap of the RESEARCH,
+  // never a finding about the project.
+  | "AUTHORITY_PENDING_OWNER_REVIEW";
 
 // Operational and configuration stops — the attempt ended before the
 // component's admissible material was inspected. Read from the same closed
@@ -121,6 +137,8 @@ export interface ComponentCoverageInput {
   inspectedClasses: readonly EvidenceSourceClass[];
   remainingPaths: readonly { kind: string; count: number }[];
   recoverySpent: boolean;
+  // See AUTHORITY_PENDING_OWNER_REVIEW. Optional: absent means false.
+  authorityPendingInspected?: boolean;
 }
 
 export interface ComponentCoverageRecord {
@@ -142,7 +160,8 @@ export type CoverageFindingCode =
   | "INFRASTRUCTURE_STOP"
   | "EXECUTION_NOT_COVERED"
   | "GOVERNANCE_NOT_COVERED"
-  | "JOB_TERMINATED_EARLY";
+  | "JOB_TERMINATED_EARLY"
+  | "AUTHORITY_PENDING_OWNER_REVIEW";
 
 export interface CoverageFinding {
   code: CoverageFindingCode;
@@ -206,6 +225,10 @@ export function classifyComponentCoverage(input: ComponentCoverageInput): Compon
   if (status && RESULT_REASON[status]) {
     reasons.add(RESULT_REASON[status]);
     for (const p of input.remainingPaths) if (p.count > 0) reasons.add(input.recoverySpent ? "RECOVERY_BOUND_REACHED" : "KNOWN_PATHS_UNEXPLORED");
+    // A PARTIAL result whose stronger authority waits on the owner stays a
+    // result, with the gap named beside it. SUPPORTED and CONTRADICTED are
+    // already settled by admissible material.
+    if (status === "PARTIALLY_SUPPORTED" && input.authorityPendingInspected) reasons.add("AUTHORITY_PENDING_OWNER_REVIEW");
     return { ...base, coverage: "COMPLETE_WITH_RESULT", reasons: [...reasons].sort() };
   }
 
@@ -237,7 +260,9 @@ export function classifyComponentCoverage(input: ComponentCoverageInput): Compon
   for (const code of input.result?.reasonCodes ?? []) if (TECHNICAL_COMPONENT_CODES.has(code)) technical.add(code);
   const blocking = [...technical].filter((c) => BLOCKING_CODES.has(c)) as CoverageReason[];
   if (blocking.length > 0 && !admissibleInspected) {
-    return { ...base, coverage: "BLOCKED", reasons: blocking.sort() };
+    const blockedReasons: CoverageReason[] = [...blocking];
+    if (input.authorityPendingInspected) blockedReasons.push("AUTHORITY_PENDING_OWNER_REVIEW");
+    return { ...base, coverage: "BLOCKED", reasons: blockedReasons.sort() };
   }
 
   // 6. Known admissible paths left open, or a spent search axis, or a
@@ -245,6 +270,9 @@ export function classifyComponentCoverage(input: ComponentCoverageInput): Compon
   for (const p of input.remainingPaths) if (p.count > 0) reasons.add(input.recoverySpent ? "RECOVERY_BOUND_REACHED" : "KNOWN_PATHS_UNEXPLORED");
   if (technical.has("SEARCH_BUDGET_EXHAUSTED")) reasons.add("SEARCH_BUDGET_EXHAUSTED");
   for (const c of blocking) reasons.add(c);
+  // Read, but its authority was never decided: not "checked and not
+  // established", however much admissible material was read beside it.
+  if (input.authorityPendingInspected) reasons.add("AUTHORITY_PENDING_OWNER_REVIEW");
   if (reasons.size > 0) {
     return { ...base, coverage: "INCOMPLETE_COVERAGE", reasons: [...reasons].sort() };
   }
@@ -286,6 +314,7 @@ export function deriveResearchCoverage(input: ResearchCoverageInput): ResearchCo
   add("INFRASTRUCTURE_STOP", components.filter((c) => c.coverage === "BLOCKED" && c.reasons.some((r) => INFRASTRUCTURE_CODES.has(r))).map((c) => c.component));
   const notCovered = (name: string) => components.filter((c) => c.component === name && c.critical && !isAdequatelyResearched(c.coverage)).map((c) => c.component);
   add("EXECUTION_NOT_COVERED", notCovered("EXECUTION_EVIDENCE"));
+  add("AUTHORITY_PENDING_OWNER_REVIEW", components.filter((c) => c.reasons.includes("AUTHORITY_PENDING_OWNER_REVIEW")).map((c) => c.component));
   add("GOVERNANCE_NOT_COVERED", notCovered("GOVERNANCE_BASIS"));
   if (EARLY_TERMINAL_STATES.has(input.jobState) || input.terminationReason === "BUDGET_EXHAUSTED") {
     findings.push({ code: "JOB_TERMINATED_EARLY", components: [] });
@@ -338,6 +367,28 @@ export async function loadResearchCoverage(db: Database | Transaction, jobId: st
   // chain read.
   const inspected = new Map<string, Set<EvidenceSourceClass>>();
   const classCache = new Map<string, EvidenceSourceClass>();
+  // AUTHORITY PENDING OWNER REVIEW — which extracted documents sit where an
+  // owner decision is still open: an engine-observed candidate (the host,
+  // or the host + proposed prefix), or a human-confirmed prefix that is
+  // not yet classified. Only a host a route class could ever apply to
+  // (isUnrecognizedDomain, the classifier's step 6) counts.
+  const candidateRows = projectId
+    ? await db
+        .select({ content: projectMemoryItems.content })
+        .from(projectMemoryItems)
+        .where(
+          and(
+            eq(projectMemoryItems.projectId, projectId),
+            eq(projectMemoryItems.kind, "SOURCE_ROUTE"),
+            eq(projectMemoryItems.lifecycleState, "OBSERVED"),
+          ),
+        )
+    : [];
+  const openCandidates = candidateRows
+    .map((r) => ({ domain: candidateDomainOf(r.content), prefix: proposedPrefixOf(r.content) }))
+    .filter((c): c is { domain: string; prefix: string | null } => c.domain !== null);
+  const pendingCache = new Map<string, boolean>();
+  const pendingByComponent = new Set<string>();
   for (const row of trace) {
     if (!row.component || !row.targetRef) continue;
     const set = inspected.get(row.component) ?? new Set<EvidenceSourceClass>();
@@ -349,8 +400,10 @@ export async function loadResearchCoverage(db: Database | Transaction, jobId: st
         const route = await resolveSourceRoute(db, projectId, row.targetRef);
         cls = resolveSourceClass(row.targetRef, deriveSourceType(row.targetRef), route.officiality === "CONFIRMED" ? route.routeClass : null);
         classCache.set(row.targetRef, cls);
+        pendingCache.set(row.targetRef, isAuthorityPending(row.targetRef, route, openCandidates));
       }
       set.add(cls);
+      if (pendingCache.get(row.targetRef)) pendingByComponent.add(row.component);
     }
     inspected.set(row.component, set);
   }
@@ -375,8 +428,40 @@ export async function loadResearchCoverage(db: Database | Transaction, jobId: st
       inspectedClasses: [...(inspected.get(component) ?? [])],
       remainingPaths: open?.paths ?? [],
       recoverySpent: open?.recoverySpent ?? false,
+      // Only where a decision COULD matter: the component admits a class
+      // that only an owner route can give.
+      authorityPendingInspected:
+        pendingByComponent.has(component) &&
+        plan.establishingClasses.some((c) => (VALID_ROUTE_CLASSES as readonly string[]).includes(c)),
     });
   }
 
   return deriveResearchCoverage({ intent, jobState: job.state, terminationReason: job.terminationReason, components });
+}
+
+// Is this document's authority waiting on an owner decision? A pure read of
+// the resolved route and the project's OBSERVED candidates.
+export function isAuthorityPending(
+  url: string,
+  route: { officiality: string; routeClass: string | null; matchedPathPrefix: string | null },
+  openCandidates: readonly { domain: string; prefix: string | null }[],
+): boolean {
+  if (route.routeClass !== null || !isUnrecognizedDomain(url)) return false;
+  // Confirmed by a human at a prefix, class not yet decided.
+  if (route.officiality === "CONFIRMED" && route.matchedPathPrefix !== null) return true;
+  const host = hostnameOf(url);
+  if (!host) return false;
+  let path: string;
+  try {
+    path = new URL(url).pathname;
+  } catch {
+    return false;
+  }
+  return openCandidates.some(
+    (c) =>
+      c.domain === host &&
+      // A host candidate speaks for a host nobody confirmed; a path
+      // proposal for its own prefix on a confirmed host.
+      (c.prefix === null ? route.officiality !== "CONFIRMED" : matchesPathPrefix(path, c.prefix)),
+  );
 }

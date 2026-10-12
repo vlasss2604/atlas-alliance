@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 
-import type { Database } from "../db/client";
+import type { Database, Transaction } from "../db/client";
 import { projectMemoryItems, projects } from "../db/schema";
 import {
   isBareSharedPlatformBase,
@@ -192,8 +192,10 @@ function readRouteContent(content: unknown): ReadRouteContent {
 //      "routeClass null" would quietly grant documentation authority.
 //
 // Neither is hypothetical; both follow directly from resolveSourceRoute.
+// Accepts a Transaction too, so the combined owner command can run this
+// and the classification atomically (the inner transaction is a savepoint).
 export async function confirmSourceRoute(
-  db: Database,
+  db: Database | Transaction,
   input: RouteConfirmationInput,
 ): Promise<RouteConfirmationResult> {
   const domainCheck = validateDomain(input.domain);
