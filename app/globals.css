@@ -98,7 +98,7 @@
 @theme inline {
   --color-background: var(--atlas-bg);
   --color-foreground: var(--atlas-text);
-  --font-sans: var(--font-inter);
+  --font-sans: var(--font-inter), var(--font-inter-cyrillic);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -110,7 +110,7 @@ body {
 body {
   background: var(--atlas-bg);
   color: var(--atlas-text);
-  font-family: var(--font-inter), "Inter", system-ui, sans-serif;
+  font-family: var(--font-inter), var(--font-inter-cyrillic), system-ui, sans-serif;
   min-height: 100dvh;
   overscroll-behavior: none;
   -webkit-tap-highlight-color: transparent;

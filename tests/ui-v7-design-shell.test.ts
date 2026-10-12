@@ -94,9 +94,16 @@ describe("V7 shell — background is static", () => {
     expect(readFileSync("app/(app)/layout.tsx", "utf8")).toContain("<DockFade />");
   });
 
-  it("the typography is Inter with Cyrillic", () => {
+  it("the typography is Inter (Latin + Cyrillic) from files in the repo — no Google Fonts at build time", () => {
     const layout = readFileSync("app/layout.tsx", "utf8");
-    expect(layout).toMatch(/Inter\(\{[\s\S]*subsets: \["latin", "cyrillic"\]/);
-    expect(css()).toContain("font-family: var(--font-inter)");
+    expect(layout).not.toContain("next/font/google");
+    expect(layout).toContain('src: "./fonts/inter-latin.woff2"');
+    expect(layout).toContain('src: "./fonts/inter-cyrillic.woff2"');
+    expect(layout).toContain('src: "./fonts/geist-mono-latin.woff2"');
+    expect(layout.match(/weight: "400 800"/g)?.length).toBe(2);
+    for (const f of ["inter-latin", "inter-cyrillic", "geist-mono-latin"]) {
+      expect(readFileSync(`app/fonts/${f}.woff2`).subarray(0, 4).toString("latin1"), f).toBe("wOF2");
+    }
+    expect(css()).toContain("font-family: var(--font-inter), var(--font-inter-cyrillic), system-ui, sans-serif;");
   });
 });
