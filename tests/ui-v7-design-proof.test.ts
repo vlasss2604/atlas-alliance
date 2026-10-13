@@ -97,6 +97,20 @@ describe("what remains unclear", () => {
     }
   });
 
+  it("the card count equals the legend's unresolved count; a partial link is never a card (owner rule 2026-10-13)", () => {
+    for (const f of RESULT_FIXTURES) {
+      const surface = buildResultSurface(f.detail);
+      if (surface.outcomeKind !== "VERDICT") continue;
+      const html = render(f.key);
+      const panel = textOf(html.slice(html.indexOf('data-testid="answer-panel"'), html.indexOf('data-testid="answer-stats"')));
+      const legend = Number(/(\d+) unresolved/.exec(panel)?.[1] ?? 0);
+      const cards = attrValues(html, "unclear-group", "component");
+      expect(cards.length, f.key).toBe(legend);
+      for (const c of cards) expect(surface.table.find((r) => r.component === c)!.status, `${f.key}/${c}`).toBe("NOT_ESTABLISHED");
+      for (const r of surface.table.filter((r) => r.status === "PARTIAL")) expect(cards, `${f.key}/${r.component}`).not.toContain(r.component);
+    }
+  });
+
   it("'Not fully checked' appears only for a technical boundary; 'No supported verification route' only for configuration", () => {
     for (const f of RESULT_FIXTURES) {
       const html = render(f.key);
