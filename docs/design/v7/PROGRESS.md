@@ -138,11 +138,20 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   `source_class = SOCIAL`, while the markdown capture of the same docs is
   `OFFICIAL_DOCS`. The class drives the "What this establishes / does not
   establish" caveats, so it matters. The UI shows it as stored; not touched.
-- **Step 9, waiting for the owner (D14):** the Free / Subscription access
-  states (chip, note, See subscription, the remaining-count) and the
-  subscription sheet. Today's access line (Private Beta · …, ARI • CORE,
-  DEMO · …, no access) is pinned by the DB suites `creator-beta-ux-v1` and
-  `creator-beta-guardrails-v1`; mapping it is a product decision.
+- **D14 — open question for Phase 1b (owner, 2026-10-13):** decided
+  together with the price and payment. Until then the profile access logic
+  and its texts stay exactly as they are (the app is not public). To decide,
+  for each of today's access states, what the profile shows:
+  1. No Research access (today "Research is currently available by private
+     beta invite") — proposed: "Free".
+  2. Private-beta access with attempts left — proposed: "Subscription ·
+     active" with the remaining count; this names a beta invite a
+     subscription, a product decision.
+  3. Beta paused or at capacity — open.
+  4. DEMO (free Research allowance) — open.
+  The subscription sheet stays unbuilt (no price, no payment), and so does
+  "See subscription". The DB suites `creator-beta-ux-v1` and
+  `creator-beta-guardrails-v1` pin today's access line and change with it.
 - **D4 / D5 / D10:** engine events for action lines, the stop point of a
   stopped run, and per-source events.
 - **Phase 1b** (subscription, Stars, "beta" wording) — postponed, price not
@@ -165,7 +174,5 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 
 ## Next
 
-**Owner decision on D14** for the profile access states and the
-subscription sheet (step 9, second part). Otherwise **step 10 — motion and
-QA pass** (HANDOFF §4.9 on every screen; `atlas-shimmer`, `atlas-pulse`; RU
-"подтверждено" under the ring).
+**Step 10 — motion and QA pass** (HANDOFF §4.9 and §8 on every screen),
+then the Phase 1 report.
