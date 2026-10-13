@@ -8,14 +8,14 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 - **Worktree:** `/home/user/src/atlas-proof-v7` (WSL). Not the main checkout.
 - **Branch:** `claude/v7-design`, created from `2f01c90` of
   `claude/phase-5-research-memory`. Unpushed.
-- **Last code commit:** `d4743ab` (step 8 review).
+- **Last code commit:** `05f5324` (step 9, layout).
 - The main checkout `/home/user/src/atlas-proof` belongs to the engine chat
   (D-179). Never switch, reset, stash, clean, merge or pull it.
 - `node_modules` in the worktree is a hardlinked copy of the main repo's
   (gitignored). A Turbopack dev server cannot follow a symlink out of the
   project root.
 
-## Done — Phase 1, steps 1–8
+## Done — Phase 1, steps 1–9 (9: layout only)
 
 | Step | What | Commits |
 |---|---|---|
@@ -36,9 +36,10 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 | 7 | Review: a row leads with the project's last finished verdict; an unfinished newest run adds a grey "Last run didn't finish"; never finished → grey "No verdict yet"; tiles and bar count the same | `c0910e1` |
 | 8 | Pulse, claim-led: title with a static heartbeat, info note, grey dashed sample notice; cards with source, X chip, tinted type, age, Claimed + claim verbatim, boxed verify question (new fixture field `verifyQuestion` EN/RU, the designer's `Q`), Verify with ATLAS; copy from §5a (Fresh, Project claim, Claimed, Verify with ATLAS) | `05faead` |
 | 8 | Review: Pulse → Verify prefills the card's verify question in the display language (`pulsePrefill`; the claim text when a card has none); the From Pulse pill shows the claim as context, folded to two lines (Show all / Show less) | `d4743ab` |
+| 9 | Profile layout: orb with static dotted ring + title, access-level panel (grey edge, existing access line unchanged), EN \| RU switch with a sliding thumb (transform, 0.28s), privacy panel, grey delete row with the existing two confirms, deleted notice. No Help row, no price, no subscription sheet | `05f5324` |
 
 Per step: typecheck, lint (0 errors) and every DB-free test green; last run
-512/512 in 21 files.
+520/520 in 22 files.
 
 ## Owner decisions
 
@@ -137,6 +138,11 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   `source_class = SOCIAL`, while the markdown capture of the same docs is
   `OFFICIAL_DOCS`. The class drives the "What this establishes / does not
   establish" caveats, so it matters. The UI shows it as stored; not touched.
+- **Step 9, waiting for the owner (D14):** the Free / Subscription access
+  states (chip, note, See subscription, the remaining-count) and the
+  subscription sheet. Today's access line (Private Beta · …, ARI • CORE,
+  DEMO · …, no access) is pinned by the DB suites `creator-beta-ux-v1` and
+  `creator-beta-guardrails-v1`; mapping it is a product decision.
 - **D4 / D5 / D10:** engine events for action lines, the stop point of a
   stopped run, and per-source events.
 - **Phase 1b** (subscription, Stars, "beta" wording) — postponed, price not
@@ -159,6 +165,7 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 
 ## Next
 
-**Step 9 — Profile + subscription sheet UI** (`app/(app)/profile/page.tsx`,
-references `08-profile*`, sheet visual `10-demo-6-gate-subscription`), no
-price and no payment (Phase 1b). Then 10 motion and QA.
+**Owner decision on D14** for the profile access states and the
+subscription sheet (step 9, second part). Otherwise **step 10 — motion and
+QA pass** (HANDOFF §4.9 on every screen; `atlas-shimmer`, `atlas-pulse`; RU
+"подтверждено" under the ring).
