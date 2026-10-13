@@ -1,0 +1,13 @@
+-- DOCUMENTARY EXECUTION-CUE MARKER (Founder-approved, D-165).
+--
+-- evidence.execution_rule_version records whether a model-written row is
+-- backed by a validated report of a COMPLETED execution: 1 = the v1
+-- contract (src/server/domain/execution-cue.ts — a verbatim executionCue,
+-- literal in the support fragment, in a closed completed-execution form,
+-- inside an asserted sentence). NULL = legacy, or no such statement. A
+-- model-written row establishes EXECUTION_EVIDENCE only with the marker; a
+-- LIVE / IMPLEMENTING lifecycle label never does.
+--
+-- Forward only. Nullable, no default, no backfill: every existing row stays
+-- NULL.
+ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "execution_rule_version" smallint;

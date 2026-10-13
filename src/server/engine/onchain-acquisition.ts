@@ -1,0 +1,1297 @@
+import { createHash } from "node:crypto";
+
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+
+import type { Database, Transaction } from "../db/client";
+import { evidence, onchainArtifacts, sources } from "../db/schema";
+import type { ConfirmedProjectIdentity } from "../domain/project-identity";
+import type { EvidenceSourceClass } from "./providers/types";
+import type {
+  OnchainArtifact,
+  OnchainIntent,
+  OnchainIntentKind,
+  OnchainSubjectKind,
+} from "./providers/onchain-types";
+import { identifierShapeForChain } from "../domain/identifier-shape";
+import type { LocatorShape } from "./documentary-locator";
+import { brandOnchainArtifact, isOnchainArtifact } from "./providers/onchain-types";
+import { validateOnchainBinding } from "./onchain-binding";
+import { synthesizeOnchainFacts } from "./onchain-facts";
+import { buildCanonicalOnchainUri, onchainSourceUriOf, subjectKindOf } from "./onchain-uri";
+import { reserveJobBudget } from "./budget-reservation";
+import {
+  persistDerivedOnchainSubjects,
+} from "./onchain-subject-provenance";
+import { persistObservedSignatures } from "./onchain-signature-provenance";
+import {
+  DOCUMENTARY_BASE_INTENTS,
+  intentForPromotedSubject,
+  MAX_PROMOTED_INTENTS_PER_ATTEMPT,
+  promoteFromObservation,
+  PROMOTION_ONLY_INTENTS,
+} from "./onchain-subject-promotion";
+import {
+  onchainEnvironmentFor,
+  onchainRetrievalAvailable,
+  resolveOnchainRetriever,
+  type OnchainRetriever,
+} from "./providers/onchain-retriever";
+
+// Structured on-chain acquisition — intent selection, eligibility,
+// containment and persistence for the ONCHAIN_VERIFIABLE path.
+//
+// This module is the boundary where the owner amendments are enforced
+// together. Nothing here is project-specific: every address comes from the
+// project's confirmed identity or from an already-admitted locator.
+
+// ---- AMENDMENT D: mechanism locators ---------------------------------
+//
+// A token mint identifies the PROJECT. It does not reveal which program,
+// vault or wallet EXECUTES a mechanism, and assuming otherwise is how a
+// research engine ends up reading an unrelated account and calling it
+// execution evidence.
+//
+// A mechanism locator is therefore a separate concept with a strict
+// provenance requirement: it may be used only when it came from an
+// eligible admitted source or from an already-CONFIRMED on-chain artifact
+// of this job. A model-extracted address is NEVER promoted automatically —
+// a model naming an address is a claim, not a locator.
+//
+// When no locator exists, mechanism-execution research legitimately stays
+// INSUFFICIENT_EVIDENCE. That is an honest outcome, not a gap to paper over.
+export type MechanismLocatorOrigin =
+  | "CONFIRMED_ONCHAIN_ARTIFACT"
+  | "ADMITTED_EVIDENCE_SOURCE";
+
+// AN ADMITTED LOCATOR IS AN IDENTIFIER, NOT NECESSARILY AN ADDRESS.
+//
+// `value` was called `address`, and the name was the defect. The validator
+// has always classified a locator as ADDRESS_LIKE or SIGNATURE_LIKE
+// (documentary-locator.ts), the locator table has always stored which, and
+// `admittedLocatorsForJob` has always returned it — but both call sites
+// discarded `shape` and copied the value into a field called `address`.
+// Everything downstream then believed it. A documented transaction
+// signature became an ACCOUNT_INFO subject, won a protected source-open
+// reservation, and was refused by the Solana adapter's own pre-call
+// validation, which the loop could only report as PROVIDER_ERROR.
+//
+// So the shape travels with the value. It is not new information and it is
+// not a new authority: it is the validator's existing verdict, no longer
+// thrown away at the hand-off.
+export interface MechanismLocator {
+  value: string;
+  shape: LocatorShape;
+  origin: MechanismLocatorOrigin;
+}
+
+// WHICH KIND OF SUBJECT AN ADMITTED IDENTIFIER IS.
+//
+// Derived from the validator's shape, never guessed from length here: this
+// module does not re-classify identifiers, it asks what was already decided.
+// Total by construction — LocatorShape has exactly two members, and each
+// maps to exactly one OnchainSubjectKind.
+function subjectKindOfLocator(shape: LocatorShape): OnchainSubjectKind {
+  return shape === "SIGNATURE_LIKE" ? "tx" : "account";
+}
+
+// DOES THIS SUBJECT'S IDENTIFIER SHAPE MATCH THE INTENT ADDRESSED TO IT?
+//
+// Asked from the SAME authority that classifies every locator — the
+// per-chain identifier families in domain/identifier-shape.ts — rather
+// than from a second copy of the length rules, and asked FOR THE INTENT'S
+// OWN CHAIN: an EVM-shaped subject under a Solana intent has no shape here,
+// and a base58 subject under an EVM intent has none either.
+//
+// FAIL CLOSED. An identifier of no recognised shape matches nothing, so an
+// unrecognisable subject is refused rather than sent to an endpoint to find
+// out. A `token` subject is an address like an `account` one — the anchor is
+// a mint — so the two share a case rather than pretending to differ.
+export function subjectShapeMatchesIntent(intent: OnchainIntent): boolean {
+  const shape = identifierShapeForChain(intent.chain, intent.subject);
+  if (shape === null) return false;
+  return subjectKindOf(intent.kind) === "tx"
+    ? shape === "SIGNATURE_LIKE"
+    : shape === "ADDRESS_LIKE";
+}
+
+// Subjects this job may legitimately address, in priority order: the
+// project's own confirmed identity first, then any locator that earned its
+// place. Deliberately returns ONLY the anchor when no locator exists.
+//
+// EACH SUBJECT NOW CARRIES ITS KIND rather than a boolean. `isAnchor` could
+// only express "the anchor, or not the anchor", which silently made every
+// non-anchor subject an account — true while the only admitted locators
+// were addresses, and false the moment one was a signature. The kind is the
+// same vocabulary the intents themselves use (`subjectKindOf`), so pairing
+// an intent with a subject is one comparison rather than a convention.
+export function eligibleSubjects(
+  identity: ConfirmedProjectIdentity,
+  locators: readonly MechanismLocator[],
+): { subject: string; kind: OnchainSubjectKind }[] {
+  const out: { subject: string; kind: OnchainSubjectKind }[] = [
+    { subject: identity.tokenAddress!, kind: "token" },
+  ];
+  for (const l of locators) {
+    if (l.value && l.value !== identity.tokenAddress) {
+      out.push({ subject: l.value, kind: subjectKindOfLocator(l.shape) });
+    }
+  }
+  return out;
+}
+
+// ---- intent selection -------------------------------------------------
+//
+// Which intents could bear on a component, given the Pattern's own
+// establishingClasses. Pure data, no project knowledge: a component that
+// cannot be established by ONCHAIN_VERIFIABLE gets nothing.
+// EVERY ACCOUNT-KIND CHAIN NOW STARTS AT ACCOUNT_INFO.
+//
+// A base intent is chosen before any observation exists, so a base intent
+// can never depend on what an earlier one found. That made owner-discovery
+// a question asked before the relationship that gives it meaning was
+// established: a documentary locator that is itself a token account was
+// asked which token accounts it owns — a question a token account cannot
+// answer — and a token-program-owned account with an unresolvable mint was
+// asked it too, despite the classifier having just refused to promote it.
+//
+// The fix is not a call-count optimisation. It is evidence-dependent
+// planning: ACCOUNT_INFO establishes WHAT the subject is, and only then
+// does promotion decide which downstream question is meaningful.
+//
+// TOKEN_ACCOUNT_BALANCE left the account-level maps for the same reason,
+// and because it is now redundant where it was valid: ACCOUNT_INFO's parsed
+// projection already carries amount and decimals for a token account, so
+// the balance arrives with the classification instead of costing a second
+// bounded read of an address that might not be a token account at all.
+const INTENTS_BY_COMPONENT: Record<string, OnchainIntentKind[]> = {
+  CURRENT_STATE: ["TOKEN_SUPPLY"],
+  NET_EFFECT: ["TOKEN_SUPPLY"],
+  // Where value LANDS. Classify the documented account first; promotion
+  // then either discovers the token accounts it owns, or — when the
+  // locator IS a token account for our mint — stops there, because the
+  // holding has already been observed.
+  DESTINATION: ["ACCOUNT_INFO"],
+  RECIPIENT: ["ACCOUNT_INFO"],
+  // Whether a mechanism actually RAN. Two ways in, and the order between
+  // them is deliberate.
+  //
+  // TRANSACTION_DETAIL IS FIRST because it is TERMINAL AND UNREACHABLE ANY
+  // OTHER WAY. A documented transaction costs exactly one read, promotes
+  // nothing, and answers this component's question directly; an account
+  // chain costs its base read plus up to three promoted hops to arrive
+  // somewhere similar, and may arrive somewhere else entirely. With base
+  // intents capped at MAX_ONCHAIN_INTENTS_PER_ATTEMPT, listing the account
+  // chain first would let two documented ADDRESSES consume the whole cap
+  // and leave a documented TRANSACTION unread — the feature would exist and
+  // never fire on precisely the projects that publish most.
+  //
+  // The rule reads POSITION AND SHAPE ONLY — never a result, a memo, an
+  // amount or a mint. It cannot be steered by what a transaction contains,
+  // because nothing has been read when it is applied. And it is inert
+  // without a signature locator: TRANSACTION_DETAIL matches no subject when
+  // every admitted locator is ADDRESS_LIKE, so a job that documents only
+  // addresses behaves exactly as it did before.
+  //
+  // ACCOUNT_INFO still starts every account chain, for the reason it always
+  // did: a signature window is worth having only on a subject bound to this
+  // project, and which subject that is cannot be known before
+  // classification.
+  EXECUTION_EVIDENCE: ["TRANSACTION_DETAIL", "ACCOUNT_INFO"],
+  // SOURCE_OF_VALUE IS ABSENT, AND THE ABSENCE IS THE POINT.
+  //
+  // It mapped to TOKEN_SUPPLY, which is the one intent addressed to the
+  // ANCHOR rather than to a locator — so on any job with a confirmed
+  // identity it fired unconditionally, needing nothing to be discovered
+  // first. A live PUMP acceptance run made the consequence visible: with no
+  // documentary locator admitted, a total-supply level was the only chain
+  // read that could happen, and it arrived filed under this component.
+  //
+  // A supply LEVEL says how many tokens exist. This component asks where
+  // the economic value COMES FROM — fees, issuance, user payments. There is
+  // no reading on which the first answers the second, so the entry did not
+  // meet this map's own stated bar ("which intents could bear on a
+  // component"). Removing it also stops reserving protected on-chain budget
+  // for a read that cannot bear on the question.
+  //
+  // Nothing about NET_EFFECT or CURRENT_STATE changes: a supply level is
+  // the quantity NET_EFFECT is about (and the reconciler, not this map,
+  // refuses to let one level become a change), and a successful read proves
+  // the mint is live at a slot, which is current-state-bearing.
+  // How value MOVES before it reaches anyone. Same start as the other
+  // account-kind components: a raw window on an unclassified documentary
+  // address is history that has not been shown to be about this project at
+  // all, and the manual investigation established that a documented
+  // operational wallet is exactly where such a window says least.
+  FLOW_PATH: ["ACCOUNT_INFO"],
+};
+
+// MAY this component ever reach a chain, given the Pattern and the
+// project's identity — WITHOUT asking whether a subject exists yet?
+//
+// Deliberately separate from `selectOnchainIntents`, because two different
+// questions were being answered by one function and only one of them is
+// about subjects:
+//
+//   CAPACITY  "could this component still need a bounded chain read in this
+//             job?"  — a locator it does not have YET must not answer no,
+//             or the budget protecting that read is released before the
+//             read becomes possible.
+//   ACTION    "may a call be issued right now?" — that one REQUIRES a
+//             subject, and `selectOnchainIntents` still answers it.
+//
+// Everything except the subject step is shared, and shared by CALL rather
+// than by restatement: `selectOnchainIntents` consults this first, so the
+// Pattern gate, the identity gate, the supported-chain gate and the
+// component -> intent map can never drift between the two answers.
+export function componentAdmitsOnchainAcquisition(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): boolean {
+  // The Pattern decides admissibility; acquisition never overrides it.
+  if (!input.establishingClasses.includes("ONCHAIN_VERIFIABLE")) return false;
+  if (!input.identity?.tokenAddress) return false;
+  // THE ENVIRONMENT GATE. Asked of the retriever registry, not of a chain
+  // name: a chain the codebase implements no deterministic environment for
+  // admits nothing here — no intents, no reservation — and is never routed
+  // to another chain's implementation.
+  if (onchainEnvironmentFor(input.identity.chain) === null) return false;
+  return (INTENTS_BY_COMPONENT[input.component] ?? []).length > 0;
+}
+
+// WHAT THIS COMPONENT WILL COST THE LEDGER, asked without a subject.
+//
+// Two different demands, because they are protected differently and become
+// reachable at different moments:
+//
+//   ANCHOR-LEVEL reads address the project's own confirmed identity, which
+//   exists from the first moment the job has one. They are therefore
+//   GUARANTEED: if the component is in the work queue and admits chain
+//   acquisition, these reads WILL be issued and WILL spend the ledger.
+//
+//   ACCOUNT-LEVEL reads address a documentary locator, which may not exist
+//   yet — that is the whole reason the floor exists. They are the START of
+//   a promotion chain, and what they cost end to end is the chain's own
+//   authorised depth, not a flat number.
+//
+// Both are answered through `componentAdmitsOnchainAcquisition`, so the
+// Pattern gate, the identity gate and the supported-chain gate stay in one
+// place and cannot drift.
+export function anchorBaseReadDemand(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): number {
+  if (!componentAdmitsOnchainAcquisition(input)) return 0;
+  const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
+  let anchorKinds = 0;
+  for (const kind of kinds) {
+    if (PROMOTION_ONLY_INTENTS.has(kind)) continue;
+    if (subjectKindOf(kind) === "token") anchorKinds += 1;
+  }
+  // One anchor exists, so one intent per anchor-level kind — bounded by the
+  // same per-attempt cap the executor's own loop is bounded by.
+  return Math.min(anchorKinds, MAX_ONCHAIN_INTENTS_PER_ATTEMPT);
+}
+
+// HOW MANY ACCOUNT-LEVEL BASE READS THIS COMPONENT MAY ISSUE.
+//
+// The anchor side above can answer "one per kind" because a project has
+// exactly ONE confirmed identity. The account side cannot: an account-level
+// intent is issued once per ELIGIBLE LOCATOR, and a job may admit several.
+// `selectOnchainIntents` is what actually bounds that list, at
+// MAX_ONCHAIN_INTENTS_PER_ATTEMPT, so the bound — not a guess about how many
+// locators a project will publish — is the honest worst case.
+//
+// WHY IT MATTERS TO THE RESERVATION, AND WHY THE OLD `1` WAS WRONG. A chain
+// costs its account-level base reads PLUS its promoted hops. The reservation
+// assumed a single base read, so a job that admitted two locators scheduled
+// one more guaranteed-if-a-locator-exists read than was ever protected, and
+// the deterministic chain the floor exists for could be left short by exactly
+// that unit. Counting the bound the executor already enforces makes the two
+// agree by construction.
+//
+// DELIBERATELY LOCATOR-BLIND, exactly like `componentStartsAccountChain`. A
+// locator admitted later in this same job is the case the floor exists for,
+// so the demand may not shrink merely because none has arrived yet. Whether a
+// call may be ISSUED still requires a subject, and `selectOnchainIntents`
+// still decides that.
+export function accountBaseReadDemand(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): number {
+  if (!componentStartsAccountChain(input)) return 0;
+  return MAX_ONCHAIN_INTENTS_PER_ATTEMPT;
+}
+
+// Does this component start a chain at an account-level subject? True
+// WITHOUT a locator, deliberately: a locator admitted later in this same
+// job is exactly the case the reservation exists to keep affordable.
+export function componentStartsAccountChain(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+}): boolean {
+  if (!componentAdmitsOnchainAcquisition(input)) return false;
+  const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
+  for (const kind of kinds) {
+    if (PROMOTION_ONLY_INTENTS.has(kind)) continue;
+    if (subjectKindOf(kind) === "account") return true;
+  }
+  return false;
+}
+
+export function selectOnchainIntents(input: {
+  component: string;
+  establishingClasses: readonly EvidenceSourceClass[];
+  identity: ConfirmedProjectIdentity | null;
+  locators?: readonly MechanismLocator[];
+  maxIntents: number;
+}): OnchainIntent[] {
+  if (!componentAdmitsOnchainAcquisition(input)) return [];
+  const kinds = INTENTS_BY_COMPONENT[input.component] ?? [];
+
+  // The identity's OWN environment — the gate above already established
+  // that one exists. Every intent this call creates is addressed to it;
+  // nothing here names a chain or a network.
+  const environment = onchainEnvironmentFor(input.identity!.chain)!;
+  const subjects = eligibleSubjects(input.identity!, input.locators ?? []);
+  const intents: OnchainIntent[] = [];
+  for (const kind of kinds) {
+    // STRUCTURAL GATE, not a convention. An intent that may only be
+    // reached by promotion is skipped here even if a component map names
+    // it, so re-adding one to a base map cannot silently reintroduce a
+    // question asked before its prerequisite was established.
+    //
+    // The ONE exception is stated as a set rather than as a special case:
+    // a DOCUMENTARY_BASE_INTENT is admitted here, and is then subject to
+    // exactly the same subject-matching rule as every other intent. It
+    // gains no subject of its own — see below.
+    if (PROMOTION_ONLY_INTENTS.has(kind) && !DOCUMENTARY_BASE_INTENTS.has(kind)) continue;
+    const wants = subjectKindOf(kind);
+    for (const s of subjects) {
+      if (intents.length >= input.maxIntents) return intents;
+      // AN INTENT IS PAIRED WITH A SUBJECT OF ITS OWN KIND, and that single
+      // comparison is what keeps every case honest at once: a token-level
+      // read only against the anchor, an account-level read only against an
+      // ADDRESS_LIKE locator, a transaction read only against a
+      // SIGNATURE_LIKE one. Nothing here can hand getTransaction an address
+      // or getAccountInfo a signature, because no subject of the wrong kind
+      // is ever offered to the intent.
+      if (wants !== s.kind) continue;
+      intents.push({
+        kind,
+        chain: environment.chain,
+        network: environment.network,
+        projectAnchor: input.identity!.tokenAddress!,
+        subjectKind: wants,
+        subject: s.subject,
+      });
+    }
+  }
+  return intents;
+}
+
+// ---- AMENDMENT A: scoped structured containment ----------------------
+//
+// Normal fetched documents keep the existing containment rules unchanged.
+// The structured exception applies ONLY to an artifact that came out of
+// the registered retriever path, and only when every condition holds
+// together. An arbitrary URL can never reach this function, and a
+// look-alike canonical URI on a fetched document proves nothing — the
+// decision is made from trusted artifact metadata, never from a string.
+export type StructuredContainmentFailure =
+  | "NOT_A_STRUCTURED_ARTIFACT"
+  | "BINDING_NOT_CONFIRMED";
+
+export type StructuredContainmentOutcome =
+  | { contained: true }
+  | { contained: false; reason: StructuredContainmentFailure };
+
+export function evaluateStructuredContainment(
+  artifact: unknown,
+  identity: ConfirmedProjectIdentity | null,
+): StructuredContainmentOutcome {
+  // (1) produced internally by the retriever path, and (2) of the
+  // structured on-chain artifact type. A plain object shaped like one does
+  // not satisfy the branded type at compile time and fails this guard at
+  // runtime.
+  if (!isOnchainArtifact(artifact)) {
+    return { contained: false, reason: "NOT_A_STRUCTURED_ARTIFACT" };
+  }
+  // (3) complete provenance, (4) chain/network match, (5) binding
+  // CONFIRMED, (6) response passed the adapter schema — all of which
+  // validateOnchainBinding checks together, from artifact fields rather
+  // than from the URI (AMENDMENT C).
+  const outcome = validateOnchainBinding(artifact, identity);
+  if (outcome.binding !== "CONFIRMED") {
+    return { contained: false, reason: "BINDING_NOT_CONFIRMED" };
+  }
+  return { contained: true };
+}
+
+// ---- bounded execution ------------------------------------------------
+//
+// BUDGET (owner-approved): one bounded RPC operation consumes ONE
+// sourceOpens reservation, taken BEFORE the call, against the existing
+// job ceiling. No new axis, no ceiling increase, and the same
+// reservation-before-action contract as every other external action.
+//
+// Loop safety is structural: MAX_ONCHAIN_INTENTS_PER_ATTEMPT bounds how
+// many operations one attempt may perform, the adapter caps page size, and
+// every single call must win its own reservation — so a cheap RPC cannot
+// outrun the budget even if a caller asked for more.
+export const MAX_ONCHAIN_INTENTS_PER_ATTEMPT = 2;
+
+// ---- same-job deterministic reuse -------------------------------------
+//
+// WHICH DETERMINISTIC QUESTIONS MAY BE ANSWERED FROM AN OBSERVATION THIS
+// JOB ALREADY MADE, instead of paying for the same read again.
+//
+// THE CASE THIS CLOSES. Different components legitimately ask the SAME
+// question of the SAME subject in one job: "what kind of account is this"
+// is asked by every component that starts an account chain, and "which
+// token accounts does it own for our mint" by every component that
+// promotes through one. A live run issued 13 chain reads over 6 distinct
+// canonical questions — seven repeats, six of them avoidable — and every
+// repeat came back with a BYTE-IDENTICAL decoded result (`artifact_hash`
+// is sha256 of the canonical result, and it matched every time). Only the
+// observation slot had advanced.
+//
+// MEMBERSHIP IS DECIDED BY ONE PROPERTY: does any code path compare this
+// kind of result BY SLOT? Every slot-precise comparison in the engine —
+// the interval's `t1.slot > t0.slot`, the post-event planner, the
+// burn-spanning selector, the current-proof gate — consumes TOKEN_SUPPLY;
+// the one other comparison ranks entries INSIDE a signature window. No
+// path compares an ACCOUNT_INFO or TOKEN_ACCOUNTS_BY_OWNER by slot, and
+// the reconciler's own freshness gate is measured in DAYS, so a
+// same-attempt-old observation is trivially fresh for it.
+//
+// THE TWO EXCLUSIONS ARE THE POINT, and they are excluded HERE, by
+// construction, rather than left to a caller to remember:
+//
+//   TOKEN_SUPPLY           its canonical URI is identical for every read
+//                          regardless of slot, and the whole supply
+//                          interval is slot arithmetic. Reuse would hand
+//                          the post-event planner the very observation it
+//                          just decided was too early
+//                          (EVERY_CURRENT_OBSERVATION_AT_OR_BEFORE_EVENT),
+//                          collapsing t0 -> event -> t1 toward one
+//                          reading and making the delta unobtainable
+//                          exactly when a burn is discovered late.
+//
+//   SIGNATURES_FOR_ADDRESS a window of the NEWEST signatures at read time.
+//                          Its entire purpose is to expose recent
+//                          activity; reusing an earlier window would pin a
+//                          component to a staler view of the chain and
+//                          silently narrow what is discoverable.
+//
+// A kind is added here only by a reviewed decision, never by default.
+export const REUSABLE_INTENT_KINDS: ReadonlySet<OnchainIntentKind> = new Set([
+  // Immutable by identity: the subject IS the signature, reads are at
+  // `finalized`, and the slot that matters is the transaction's own —
+  // carried inside the result, not a function of when it was read.
+  "TRANSACTION_DETAIL",
+  // Consumed for classification and program/owner binding, which is what
+  // decides promotion. Its balance rides along and the fact statement
+  // names its own slot, so a reused reading stays true about the moment it
+  // describes.
+  "ACCOUNT_INFO",
+  // Consumed for token-account discovery and mint binding. The mint filter
+  // is the project anchor structurally, not a caller's choice.
+  "TOKEN_ACCOUNTS_BY_OWNER",
+]);
+
+// THE OBSERVATION THIS JOB ALREADY HAS FOR EXACTLY THIS QUESTION, or null.
+//
+// IDENTITY IS THE CANONICAL URI, WITHIN THIS JOB. The URI already encodes
+// chain, network, project anchor, subject kind, subject and intent kind, so
+// equality on it IS "the same deterministic question". The job predicate is
+// inside the query and never optional: another job's observation is
+// unreachable here exactly as it is through every other path.
+//
+// GREATEST SLOT WINS, the same tie-break `onchain-current-proof-supply-gate`
+// already applies — where several readings of one question exist, the most
+// recent is the one to consume.
+//
+// REBUILDING IS TRANSPORT, NOT TRUST — the doctrine
+// `onchain-supply-candidate-store` already states for its own historical
+// reads. Every rule that decides what this artifact may establish still runs
+// afterwards, over this object: binding, fact synthesis, promotion, all
+// unchanged. FAIL CLOSED: a row whose stored shape does not reconstruct into
+// the question that was asked returns null and the caller pays for a real
+// read.
+export async function findReusableSameJobArtifact(
+  db: Database | Transaction,
+  jobId: string,
+  intent: OnchainIntent,
+): Promise<OnchainArtifact | null> {
+  if (!REUSABLE_INTENT_KINDS.has(intent.kind)) return null;
+  const canonicalUri = buildCanonicalOnchainUri(intent);
+  const [row] = await db
+    .select()
+    .from(onchainArtifacts)
+    .where(
+      and(
+        eq(onchainArtifacts.researchJobId, jobId),
+        eq(onchainArtifacts.canonicalUri, canonicalUri),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot))
+    .limit(1);
+  if (!row) return null;
+
+  // The stored row must describe the question that was actually asked.
+  // Every one of these is already implied by the canonical URI; asserting
+  // them is what makes a future URI change fail closed instead of silently
+  // resolving to a different observation.
+  if (
+    row.intentKind !== intent.kind ||
+    row.chain !== intent.chain ||
+    row.network !== intent.network ||
+    row.projectAnchor !== intent.projectAnchor ||
+    row.subject !== intent.subject ||
+    row.subjectKind !== intent.subjectKind
+  ) {
+    return null;
+  }
+  const result = row.normalizedResult as { kind?: unknown } | null;
+  if (!result || typeof result !== "object" || result.kind !== intent.kind) return null;
+  if (typeof row.slot !== "number" || !Number.isInteger(row.slot) || row.slot < 0) return null;
+
+  return brandOnchainArtifact({
+    intent,
+    canonicalUri: row.canonicalUri,
+    result: result as OnchainArtifact["result"],
+    // Not stored, and deliberately not reconstructed: the normalized text
+    // exists to be hashed at retrieval, and the hash it produced is what
+    // travels below.
+    normalizedText: JSON.stringify(result),
+    provenance: {
+      chain: intent.chain,
+      network: intent.network,
+      projectAnchor: row.projectAnchor,
+      subjectKind: intent.subjectKind,
+      subject: row.subject,
+      // THE ORIGINAL POSITION, never "now". This is the whole reason reuse
+      // is honest: the observation still describes the moment it was made.
+      slot: row.slot,
+      // The two column-to-provenance conversions the historical loader in
+      // onchain-supply-candidate-store already performs, applied the same
+      // way so the two readers cannot disagree about what a row means.
+      blockTime: row.blockTime === null ? null : Math.floor(row.blockTime.getTime() / 1000),
+      blockHash: row.blockHash,
+      finality: row.finality === "finalized" ? "finalized" : "confirmed",
+      retrievalMethod: "RPC",
+      providerId: row.providerId,
+      providerMethod: row.providerMethod,
+      requestParams: row.requestParams as Record<string, string | number | boolean>,
+      retrievedAt: row.retrievedAt,
+      rawResponseHash: row.rawResponseHash,
+      artifactHash: row.artifactHash,
+      transactionSignature: row.transactionSignature,
+    },
+  });
+}
+
+// ---- scheduling -------------------------------------------------------
+//
+// ONE STEP OF WORK, WAITING ITS TURN. `depth` is the promotion depth the
+// subject sits at (0 for a base intent), and `seq` is the order it entered
+// the work list.
+export interface ScheduledStep {
+  intent: OnchainIntent;
+  depth: number;
+  parent: string | null;
+  seq: number;
+}
+
+// CHAIN-FIRST SCHEDULING: DEEPEST STEP FIRST, INSERTION ORDER TO BREAK TIES.
+//
+// THE DEFECT THIS CLOSES, and it is structural rather than budgetary. The
+// work list used to be strict FIFO, so every base intent was served before
+// any promoted child. `MAX_PROMOTED_INTENTS_PER_ATTEMPT` (3) then bounded the
+// promotions ACROSS the whole attempt, and with two admitted locators the
+// three permitted promotions were spent starting BOTH chains instead of
+// finishing either:
+//
+//   ACCOUNT_INFO(L1)            -> promotes TOKEN_ACCOUNTS_BY_OWNER(L1)   [1]
+//   ACCOUNT_INFO(L2)            -> promotes TOKEN_ACCOUNTS_BY_OWNER(L2)   [2]
+//   TOKEN_ACCOUNTS_BY_OWNER(L1) -> promotes SIGNATURES_FOR_ADDRESS(ta1)   [3]
+//   TOKEN_ACCOUNTS_BY_OWNER(L2) -> refused, PROMOTION_INTENT_CAP_REACHED
+//   SIGNATURES_FOR_ADDRESS(ta1) -> refused, PROMOTION_INTENT_CAP_REACHED
+//
+// So EXECUTION_EVIDENCE could never reach TRANSACTION_DETAIL on a project
+// that documents two addresses, no matter how much source-open capacity
+// remained — the reads it needed were unreachable, not unaffordable. A
+// mechanism that did not run and one whose execution could not be looked at
+// are different findings, and the schedule was quietly turning the second
+// into the first.
+//
+// Serving the deepest available step first means a chain that has STARTED
+// continues to its own terminal observation before an unrelated base intent
+// may claim the remaining promotions. One complete chain is exactly what the
+// architecture promises — `computeOnchainSourceOpenReserve` protects ONE, and
+// `promotedReadsForComponent` sizes ONE — so this makes the schedule agree
+// with the budget instead of contradicting it.
+//
+// NOTHING IS UNBOUNDED, AND NOTHING IS PRIORITISED BY OUTCOME. The same two
+// counters still bind: at most MAX_ONCHAIN_INTENTS_PER_ATTEMPT base intents
+// enter the list, at most MAX_PROMOTED_INTENTS_PER_ATTEMPT are ever added to
+// it, every step is refused past MAX_PROMOTION_DEPTH, and each one must still
+// win its own reservation before it may call anything. The list therefore
+// still cannot exceed those two sums, and every step that was going to be
+// taken is still taken — only the ORDER changed. Nothing here reads a
+// result, so a chain that found a burn and a chain that found nothing are
+// scheduled identically.
+//
+// A TOTAL ORDER, so the sequence cannot depend on array identity, iteration
+// order or how many steps happen to share a depth: deeper wins, and equal
+// depths are served in the order they were created.
+export function takeNextScheduledStep(queue: ScheduledStep[]): ScheduledStep {
+  let best = 0;
+  for (let i = 1; i < queue.length; i += 1) {
+    const candidate = queue[i]!;
+    const incumbent = queue[best]!;
+    if (
+      candidate.depth > incumbent.depth ||
+      (candidate.depth === incumbent.depth && candidate.seq < incumbent.seq)
+    ) {
+      best = i;
+    }
+  }
+  return queue.splice(best, 1)[0]!;
+}
+
+export interface StructuredOnchainOutcome {
+  evidenceIds: string[];
+  sourceOpensSpent: number;
+  observations: string[];
+}
+
+export interface RunStructuredOnchainDeps {
+  db: Database | Transaction;
+  jobId: string;
+  attemptId: string | null;
+  item: { step: number; component: string };
+  plan: {
+    establishingClasses: readonly EvidenceSourceClass[];
+    confirmedIdentity: ConfirmedProjectIdentity | null;
+  };
+  maxSourceOpens: number;
+  // Seams, so tests drive this without any network and without touching
+  // the module-level resolver.
+  retriever?: OnchainRetriever | null;
+  reserve?: (axis: "sourceOpens", amount: number, max: number) => Promise<boolean>;
+  recordTrace?: (event: OnchainTraceEvent) => Promise<void>;
+  locators?: readonly MechanismLocator[];
+}
+
+export interface OnchainTraceEvent {
+  operationType:
+    | "FETCH_ATTEMPTED"
+    | "FETCH_OK"
+    | "FETCH_FAILED"
+    | "CANDIDATE_SKIPPED_BUDGET"
+    // A read this job had already made. Not a fetch, and never recorded as
+    // one — see REUSABLE_INTENT_KINDS.
+    | "CANDIDATE_DEDUPED"
+    // A base subject the engine will not address. Reused rather than given
+    // a new operation type: the subject came from a locator, and this is
+    // the existing name for refusing one.
+    | "LOCATOR_REJECTED"
+    // Promotion decisions. An action the engine took, never a claim.
+    | "SUBJECT_PROMOTED"
+    | "SUBJECT_PROMOTION_REJECTED"
+    | "SUBJECT_PROMOTION_BUDGET_EXHAUSTED"
+    | "SUBJECT_PROMOTION_DEPTH_LIMIT"
+    | "SUBJECT_PROMOTION_TERMINAL";
+  targetRef: string;
+  status: "OK" | "FAILED" | "SKIPPED";
+  reasonCode?:
+    | "NONE"
+    | "PROVIDER_ERROR"
+    | "SOURCE_OPEN_BUDGET_EXHAUSTED"
+    | "PROMOTION_DEPTH_LIMIT"
+    | "PROMOTION_NO_ELIGIBLE_SUBJECT"
+    | "PROMOTION_BINDING_NOT_CONFIRMED"
+    | "PROMOTION_INTENT_CAP_REACHED"
+    | "PROMOTION_TERMINAL_OBSERVATION"
+    | "PROMOTION_RELATIONSHIP_UNRESOLVED"
+    | "SUBJECT_SHAPE_MISMATCH"
+    | "ARTIFACT_ALREADY_OBSERVED_IN_JOB";
+}
+
+export async function runStructuredOnchainAcquisition(
+  deps: RunStructuredOnchainDeps,
+): Promise<StructuredOnchainOutcome> {
+  const empty: StructuredOnchainOutcome = {
+    evidenceIds: [],
+    sourceOpensSpent: 0,
+    observations: [],
+  };
+
+  const identity = deps.plan.confirmedIdentity;
+  const intents = selectOnchainIntents({
+    component: deps.item.component,
+    establishingClasses: deps.plan.establishingClasses,
+    identity,
+    locators: deps.locators ?? [],
+    maxIntents: MAX_ONCHAIN_INTENTS_PER_ATTEMPT,
+  });
+  if (intents.length === 0) return empty;
+
+  // An unconfigured environment must not fail the attempt — it simply has
+  // no structured capability, and the normal path continues.
+  //
+  // RESOLVED FOR THE INTENTS' OWN ENVIRONMENT. Every intent of one attempt
+  // shares the identity's (chain, network), so the first names it for all.
+  // The registry answers for that exact key and nothing else: a process
+  // holding only a Solana retriever has no capability for an Ethereum
+  // identity, and records that honestly rather than reaching for the wrong
+  // chain.
+  const environment = { chain: intents[0].chain, network: intents[0].network };
+  let retriever: OnchainRetriever;
+  if (deps.retriever) retriever = deps.retriever;
+  else if (onchainRetrievalAvailable(environment.chain, environment.network)) {
+    retriever = resolveOnchainRetriever(environment.chain, environment.network);
+  }
+  else return { ...empty, observations: ["ONCHAIN_RETRIEVER_NOT_CONFIGURED"] };
+
+  const reserve =
+    deps.reserve ??
+    ((axis, amount, max) => reserveJobBudget(deps.db, deps.jobId, axis, amount, max));
+  const trace = deps.recordTrace ?? (async () => {});
+
+  const evidenceIds: string[] = [];
+  const observations: string[] = [];
+  let sourceOpensSpent = 0;
+
+  // STAGED EXPANSION, NOT RECURSION. A work list that starts with the base
+  // intents and may gain AT MOST MAX_PROMOTED_INTENTS_PER_ATTEMPT more,
+  // each one depth-stamped and each one refused past MAX_PROMOTION_DEPTH.
+  // The loop cannot outlive those two counters, and every iteration must
+  // still win its own budget reservation before it may call anything.
+  //
+  // `seq` is insertion order, and it exists so the scheduling rule below is
+  // a TOTAL order over the work list rather than a preference with ties.
+  const queue: ScheduledStep[] = intents.map((intent, seq) => ({
+    intent,
+    depth: 0,
+    parent: null,
+    seq,
+  }));
+  let nextSeq = queue.length;
+  // Every (kind, subject) this attempt has already addressed. A promoted
+  // subject that would repeat one is refused, so a chain cannot loop back
+  // on itself or re-read the same account twice.
+  const visited = new Set<string>();
+  let promotedIssued = 0;
+
+  while (queue.length > 0) {
+    const step = takeNextScheduledStep(queue);
+    const intent = step.intent;
+    if (!retriever.supports(intent.chain, intent.network, intent.kind)) continue;
+    const visitKey = `${intent.kind}::${intent.subject}`;
+    if (visited.has(visitKey)) continue;
+    visited.add(visitKey);
+    const uri = buildCanonicalOnchainUri(intent);
+
+    // THE SHAPE CHECK COMES BEFORE THE RESERVATION, AND THAT IS THE POINT.
+    //
+    // The Solana adapter already refuses a subject whose shape contradicts
+    // its intent, and refuses it before any request is built — so nothing
+    // unsafe ever reached an endpoint. But it does so by THROWING, which
+    // lands in the catch below, after a source open has been spent, and is
+    // recorded as PROVIDER_ERROR: a protected read consumed for nothing, and
+    // a failure attributed to a provider that was never contacted.
+    //
+    // Both halves are fixed by asking the question one step earlier. The
+    // engine can answer it alone, so it costs no budget and names itself.
+    //
+    // DEFENCE IN DEPTH, NOT THE PRIMARY GUARANTEE. `selectOnchainIntents`
+    // now pairs each intent with a subject of its own kind, and promotion
+    // builds subjects from decoded results, so a mismatch should be
+    // unreachable. This is the assertion that says so out loud, and the one
+    // that will catch a future map or rule that stops being true.
+    if (!subjectShapeMatchesIntent(intent)) {
+      await trace({
+        operationType:
+          step.depth === 0 ? "LOCATOR_REJECTED" : "SUBJECT_PROMOTION_REJECTED",
+        targetRef: uri,
+        status: "SKIPPED",
+        reasonCode: "SUBJECT_SHAPE_MISMATCH",
+      });
+      observations.push("ONCHAIN_SUBJECT_SHAPE_MISMATCH");
+      continue;
+    }
+
+    // REUSE IS ASKED BEFORE THE RESERVATION, WHICH IS WHAT MAKES IT FREE.
+    //
+    // `visited` already stops one attempt re-reading its own subject. This
+    // is the case it cannot see: a LATER component, in a fresh call, asking
+    // the same deterministic question the job has already answered. Asking
+    // here means a reused observation costs no budget, issues no call, and
+    // cannot be refused by an exhausted ledger.
+    //
+    // It is a CONSUMPTION, not a fetch. The artifact keeps its original id,
+    // slot, provider and content; the only thing that changes is which
+    // component's facts are synthesized from it below — through exactly the
+    // same persistence path a fresh read uses, which resolves to the
+    // existing artifact row rather than writing a second observation.
+    let artifact: OnchainArtifact;
+    const reused = await findReusableSameJobArtifact(deps.db, deps.jobId, intent);
+    if (reused !== null) {
+      await trace({
+        operationType: "CANDIDATE_DEDUPED",
+        targetRef: uri,
+        status: "SKIPPED",
+        reasonCode: "ARTIFACT_ALREADY_OBSERVED_IN_JOB",
+      });
+      observations.push("ONCHAIN_ARTIFACT_REUSED_IN_JOB");
+      artifact = reused;
+    } else {
+      // Reservation BEFORE the call, always.
+      const reserved = await reserve("sourceOpens", 1, deps.maxSourceOpens);
+      if (!reserved) {
+        await trace({
+          operationType: step.depth === 0 ? "CANDIDATE_SKIPPED_BUDGET" : "SUBJECT_PROMOTION_BUDGET_EXHAUSTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "SOURCE_OPEN_BUDGET_EXHAUSTED",
+        });
+        observations.push("ONCHAIN_SOURCE_OPEN_BUDGET_EXHAUSTED");
+        break;
+      }
+      sourceOpensSpent += 1;
+      await trace({ operationType: "FETCH_ATTEMPTED", targetRef: uri, status: "OK" });
+
+      try {
+        artifact = await retriever.retrieve(intent);
+      } catch {
+        // Fail closed: a provider failure is never evidence about the chain,
+        // and never a reason to try the same call again.
+        await trace({
+          operationType: "FETCH_FAILED",
+          targetRef: uri,
+          status: "FAILED",
+          reasonCode: "PROVIDER_ERROR",
+        });
+        observations.push("ONCHAIN_RETRIEVAL_FAILED");
+        continue;
+      }
+    }
+
+    const persisted = await persistOnchainArtifactAndFacts({
+      db: deps.db,
+      jobId: deps.jobId,
+      artifact,
+      identity,
+      target: deps.item,
+    });
+    if (persisted.rejectedReason) {
+      observations.push(`ONCHAIN_REJECTED:${persisted.rejectedReason}`);
+      await trace({
+        operationType: "FETCH_FAILED",
+        targetRef: uri,
+        status: "FAILED",
+        reasonCode: "PROVIDER_ERROR",
+      });
+      continue;
+    }
+    await trace({ operationType: "FETCH_OK", targetRef: uri, status: "OK" });
+    evidenceIds.push(...persisted.evidenceIds);
+
+    // DURABLE PROVENANCE FOR WHAT THIS OBSERVATION DISCOVERED. The same
+    // stores the owner scripts write, written by the normal path now, so a
+    // promoted subject is not a value held in memory for the length of a
+    // loop — it is a row anything can later re-check.
+    const binding = validateOnchainBinding(artifact, identity);
+    const bindingConfirmed = binding.binding === "CONFIRMED";
+    if (persisted.artifactId && bindingConfirmed) {
+      await persistDerivedOnchainSubjects({
+        db: deps.db,
+        artifactId: persisted.artifactId,
+        artifact,
+        binding,
+      });
+      await persistObservedSignatures({
+        db: deps.db,
+        artifactId: persisted.artifactId,
+        artifact,
+        binding,
+      });
+    }
+
+    // PROMOTION. At most one step further, and only when a typed rule
+    // says this observation earned it.
+    const outcome = promoteFromObservation({
+      artifact,
+      bindingConfirmed,
+      depth: step.depth,
+      component: deps.item.component,
+      visited,
+    });
+    if (outcome.promoted.length === 0) {
+      // Not a failure. Most of these are the system declining to go
+      // further, which is the behaviour the bounds exist to produce.
+      if (outcome.refusal === "TERMINAL_OBSERVATION") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_TERMINAL",
+          targetRef: uri,
+          status: "OK",
+          reasonCode: "PROMOTION_TERMINAL_OBSERVATION",
+        });
+      } else if (outcome.refusal === "DEPTH_LIMIT") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_DEPTH_LIMIT",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_DEPTH_LIMIT",
+        });
+      } else if (outcome.refusal === "BINDING_NOT_CONFIRMED") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_BINDING_NOT_CONFIRMED",
+        });
+      } else if (outcome.refusal === "RELATIONSHIP_UNRESOLVED") {
+        // NOT the same as "no eligible subject". The account is known to be
+        // a token account whose mint could not be established, so the
+        // engine stopped rather than guessed — and a reader of the trace
+        // must be able to tell that apart from an exhausted search.
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_RELATIONSHIP_UNRESOLVED",
+        });
+      } else if (outcome.refusal === "NO_ELIGIBLE_SUBJECT") {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_NO_ELIGIBLE_SUBJECT",
+        });
+      }
+      continue;
+    }
+
+    for (const promoted of outcome.promoted) {
+      if (promotedIssued >= MAX_PROMOTED_INTENTS_PER_ATTEMPT) {
+        await trace({
+          operationType: "SUBJECT_PROMOTION_REJECTED",
+          targetRef: uri,
+          status: "SKIPPED",
+          reasonCode: "PROMOTION_INTENT_CAP_REACHED",
+        });
+        break;
+      }
+      const nextIntent = intentForPromotedSubject(promoted);
+      promotedIssued += 1;
+      // The canonical URI of the NEXT read is the safe identifier for this
+      // decision: addresses and signatures are public, and no endpoint,
+      // credential or provider string can reach a trace row.
+      await trace({
+        operationType: "SUBJECT_PROMOTED",
+        targetRef: buildCanonicalOnchainUri(nextIntent),
+        status: "OK",
+        reasonCode: "NONE",
+      });
+      queue.push({
+        intent: nextIntent,
+        depth: promoted.depth,
+        parent: promoted.parentSubject,
+        seq: nextSeq,
+      });
+      nextSeq += 1;
+    }
+  }
+
+  return { evidenceIds, sourceOpensSpent, observations };
+}
+
+// ---- persistence ------------------------------------------------------
+
+function hashUrl(url: string): string {
+  return `sha256:${createHash("sha256").update(url).digest("hex")}`;
+}
+
+function extractionUnitKey(
+  jobId: string,
+  artifactHash: string,
+  step: number,
+  component: string,
+  fragment: string,
+): string {
+  return `sha256:${createHash("sha256")
+    .update([jobId, artifactHash, String(step), component, fragment].join(" "))
+    .digest("hex")}`;
+}
+
+export interface PersistOnchainResult {
+  artifactId: string | null;
+  evidenceIds: string[];
+  rejectedReason: StructuredContainmentFailure | null;
+}
+
+// Persists ONE retrieval artifact and the deterministic facts derived from
+// it. The artifact row is written once; every fact references it.
+//
+// SOURCE CLASS SAFETY: sourceClass is set to ONCHAIN_VERIFIABLE here, by
+// code, only AFTER containment/binding succeeded on trusted artifact
+// metadata. resolveSourceClass is deliberately NOT consulted — it
+// classifies by hostname, and a canonical URI has no meaningful host. No
+// model and no document can reach this assignment.
+export interface PersistArtifactResult {
+  artifactId: string | null;
+  sourceId: string | null;
+  rejectedReason: StructuredContainmentFailure | null;
+}
+
+// Persists ONE retrieval artifact and its canonical-URI source row, and
+// nothing else. Extracted from persistOnchainArtifactAndFacts so a caller
+// that must NOT write Evidence — establishing durable subject provenance
+// is such a caller — can reuse the identical containment check, source
+// resolution and idempotent artifact insert instead of a second copy that
+// could drift from it.
+//
+// Containment/binding is still checked here: an artifact that fails it is
+// not persisted at all, so there is no path that stores an unbound
+// observation and decides what to do about it afterwards.
+// The two provenance modes a structured observation may be stored in.
+// A discriminated union rather than an optional jobId, so a caller
+// cannot omit the job by accident and land in the standalone mode: it
+// has to name the mode it wants.
+export type OnchainArtifactOrigin =
+  | { kind: "RESEARCH_JOB"; jobId: string }
+  | { kind: "STANDALONE_STRUCTURED_OBSERVATION" };
+
+export async function persistOnchainArtifact(input: {
+  db: Database | Transaction;
+  origin: OnchainArtifactOrigin;
+  artifact: OnchainArtifact;
+  identity: ConfirmedProjectIdentity | null;
+}): Promise<PersistArtifactResult> {
+  const { db, origin, artifact, identity } = input;
+
+  const containment = evaluateStructuredContainment(artifact, identity);
+  if (!containment.contained) {
+    return { artifactId: null, sourceId: null, rejectedReason: containment.reason };
+  }
+
+  const p = artifact.provenance;
+  const jobId = origin.kind === "RESEARCH_JOB" ? origin.jobId : null;
+
+  // The canonical URI's shared identity row — created ONLY for a
+  // research-job artifact. A standalone observation has no document to
+  // point at, and inventing a sources row to say otherwise is exactly the
+  // false assertion this mode exists to avoid. sourceType ONCHAIN is
+  // descriptive only; it grants no class by itself.
+  let sourceId: string | null = null;
+  if (origin.kind === "RESEARCH_JOB") {
+    // The SOURCE is the observed target without its position: a read pinned
+    // to an explicit block observes the same thing as a head read, so both
+    // share one source row. Identity for every URI with no block selector.
+    const sourceUri = onchainSourceUriOf(artifact.canonicalUri);
+    const urlHash = hashUrl(sourceUri);
+    const [existingSource] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
+    sourceId = existingSource?.id ?? null;
+    if (!sourceId) {
+      const [created] = await db
+        .insert(sources)
+        .values({ url: sourceUri, urlHash, sourceType: "ONCHAIN" })
+        .onConflictDoNothing({ target: sources.urlHash })
+        .returning({ id: sources.id });
+      if (created) sourceId = created.id;
+      else {
+        const [afterRace] = await db.select().from(sources).where(eq(sources.urlHash, urlHash));
+        sourceId = afterRace!.id;
+      }
+    }
+  }
+
+  // One retrieval, stored once. A replayed identical observation inside
+  // one job resolves to the same row rather than duplicating provenance.
+  const [insertedArtifact] = await db
+    .insert(onchainArtifacts)
+    .values({
+      originKind: origin.kind,
+      researchJobId: jobId,
+      sourceId,
+      canonicalUri: artifact.canonicalUri,
+      chain: p.chain,
+      network: p.network,
+      projectAnchor: p.projectAnchor,
+      subjectKind: p.subjectKind,
+      subject: p.subject,
+      intentKind: artifact.intent.kind,
+      slot: p.slot,
+      blockTime: p.blockTime === null ? null : new Date(p.blockTime * 1000),
+      blockHash: p.blockHash,
+      finality: p.finality,
+      transactionSignature: p.transactionSignature,
+      retrievalMethod: p.retrievalMethod,
+      providerId: p.providerId,
+      providerMethod: p.providerMethod,
+      requestParams: p.requestParams,
+      retrievedAt: p.retrievedAt,
+      rawResponseHash: p.rawResponseHash,
+      artifactHash: p.artifactHash,
+      normalizedResult: JSON.parse(artifact.normalizedText),
+    })
+    // A standalone row's job id is NULL, and Postgres treats NULLs as
+    // distinct — so the job-scoped arbiter constrains nothing there. The
+    // partial unique index is what makes a standalone replay idempotent,
+    // and it is named explicitly for that mode.
+    //
+    // SLOT IS PART OF THE ARBITER because it is part of the observation's
+    // identity: the same reading at a LATER chain position is a second
+    // observation, not a repeat of the first (see the index comments in
+    // schema/engine.ts). Without it, an unchanged value read again was
+    // silently dropped.
+    .onConflictDoNothing(
+      origin.kind === "RESEARCH_JOB"
+        ? {
+            target: [
+              onchainArtifacts.researchJobId,
+              onchainArtifacts.artifactHash,
+              onchainArtifacts.slot,
+            ],
+          }
+        : {
+            target: [onchainArtifacts.artifactHash, onchainArtifacts.slot],
+            where: sql`${onchainArtifacts.researchJobId} IS NULL`,
+          },
+    )
+    .returning({ id: onchainArtifacts.id });
+
+  let artifactId = insertedArtifact?.id;
+  if (!artifactId) {
+    // SCOPED to the same mode. Looking up by hash alone would let a
+    // research-job insert that hit a conflict resolve to a STANDALONE
+    // row with identical content — a different row, in a different mode,
+    // silently returned as if it were this job's. The hash is a content
+    // address, so identical content across modes is expected, not rare.
+    // MATCHES THE ARBITER EXACTLY, slot included. A lookup by hash alone
+    // would now match SEVERAL rows — the same value observed at different
+    // slots — and take whichever Postgres returned first, resolving this
+    // observation to a different one. The conflict target and the recovery
+    // read must describe the same identity or they disagree by design.
+    const [existing] = await db
+      .select({ id: onchainArtifacts.id })
+      .from(onchainArtifacts)
+      .where(
+        and(
+          eq(onchainArtifacts.artifactHash, p.artifactHash),
+          eq(onchainArtifacts.slot, p.slot),
+          jobId === null
+            ? isNull(onchainArtifacts.researchJobId)
+            : eq(onchainArtifacts.researchJobId, jobId),
+        ),
+      );
+    artifactId = existing?.id;
+  }
+  if (!artifactId) return { artifactId: null, sourceId, rejectedReason: null };
+  return { artifactId, sourceId, rejectedReason: null };
+}
+
+// Persists ONE retrieval artifact and the deterministic facts derived
+// from it. The artifact row is written once; every fact references it.
+//
+// SOURCE CLASS SAFETY: sourceClass is set to ONCHAIN_VERIFIABLE here, by
+// code, only AFTER containment/binding succeeded on trusted artifact
+// metadata. resolveSourceClass is deliberately NOT consulted — it
+// classifies by hostname, and a canonical URI has no meaningful host. No
+// model and no document can reach this assignment.
+export async function persistOnchainArtifactAndFacts(input: {
+  db: Database | Transaction;
+  jobId: string;
+  artifact: OnchainArtifact;
+  identity: ConfirmedProjectIdentity | null;
+  target: { step: number; component: string };
+}): Promise<PersistOnchainResult> {
+  const { db, jobId, artifact, identity, target } = input;
+  // Facts require a job — evidence.research_job_id is NOT NULL — so this
+  // path is RESEARCH_JOB by construction. That is also why a standalone
+  // artifact cannot become Evidence: there is no route from it to here.
+  const stored = await persistOnchainArtifact({
+    db,
+    origin: { kind: "RESEARCH_JOB", jobId },
+    artifact,
+    identity,
+  });
+  if (stored.rejectedReason !== null) {
+    return { artifactId: null, evidenceIds: [], rejectedReason: stored.rejectedReason };
+  }
+  const { artifactId, sourceId } = stored;
+  if (!artifactId || !sourceId) return { artifactId: null, evidenceIds: [], rejectedReason: null };
+  const p = artifact.provenance;
+
+  // MANY facts, ONE artifact.
+  const facts = synthesizeOnchainFacts(artifact, target);
+  const evidenceIds: string[] = [];
+  for (const fact of facts) {
+    const [row] = await db
+      .insert(evidence)
+      .values({
+        researchJobId: jobId,
+        proofId: null,
+        sourceId,
+        onchainArtifactId: artifactId,
+        // THE ONLY WRITER OF THIS COLUMN, ANYWHERE.
+        //
+        // `fact.onchainFactKind` exists only on SynthesizedFact, which only
+        // deterministic chain synthesis produces. A model-extracted fact
+        // has no such field to offer, so no document, prompt or classifier
+        // can reach this value — the guarantee is structural, not a rule
+        // this insert is trusted to follow.
+        onchainFactKind: fact.onchainFactKind,
+        // D-158 PHASE 2 — machine-owned invocation provenance, present only
+        // on a fact derived from an attributable transfer. Sourced from the
+        // synthesized fact, which derived it from node-reported CPI
+        // structure; there is no path from model output to this column.
+        onchainProvenance: fact.onchainProvenance ?? null,
+        patternStep: fact.step,
+        component: fact.component,
+        relationship: fact.relationship,
+        directness: fact.directness,
+        fragment: fact.supportFragment,
+        summary: fact.statement,
+        mechanismState: fact.mechanismState,
+        sourceClass: "ONCHAIN_VERIFIABLE",
+        // A canonical chain read is not a project's own published claim;
+        // officiality is a separate axis and stays CLAIMED unless a
+        // human-confirmed route says otherwise (D-074 untouched).
+        officiality: "CLAIMED",
+        entityBinding: "CONFIRMED",
+        fetchedAt: p.retrievedAt,
+        publishedAt: fact.publishedAt,
+        doesNotProve: fact.doesNotProve,
+        retrievedUrl: artifact.canonicalUri,
+        contentHash: p.rawResponseHash,
+        extractionUnitKey: extractionUnitKey(
+          jobId,
+          p.artifactHash,
+          fact.step,
+          fact.component,
+          fact.supportFragment,
+        ),
+      })
+      // Must mirror the partial index's own predicate
+      // (uq_evidence_extraction_unit_key ... WHERE extraction_unit_key IS
+      // NOT NULL) — Postgres cannot infer the arbiter index otherwise. The
+      // unit key already includes the job id, so idempotency stays
+      // job-scoped without narrowing the clause here.
+      .onConflictDoNothing({
+        target: evidence.extractionUnitKey,
+        where: sql`${evidence.extractionUnitKey} IS NOT NULL`,
+      })
+      .returning({ id: evidence.id });
+    if (row) evidenceIds.push(row.id);
+  }
+
+  return { artifactId, evidenceIds, rejectedReason: null };
+}

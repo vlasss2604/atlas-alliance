@@ -1,0 +1,20 @@
+-- "NO ELIGIBLE SUBJECT" AND "COULD NOT ESTABLISH ELIGIBILITY" ARE
+-- DIFFERENT RESEARCH STATEMENTS.
+--
+-- Bounded promotion refuses an SPL Token / Token-2022 owned account whose
+-- mint could not be parsed. That refusal is not "there was nothing to
+-- promote" — it is "we know this IS a token account and we could not tell
+-- which one, so we stopped". Both were recorded under
+-- PROMOTION_NO_ELIGIBLE_SUBJECT, which made a fail-closed unresolved
+-- identity indistinguishable at readback from a genuinely exhausted one.
+--
+-- That is the same collapse this engine refuses everywhere else: not found
+-- is not not inspected, an unparsed payload is not an absent one, and
+-- failing to establish something is not establishing its opposite.
+--
+-- Additive only: no existing value is renamed or removed, and every
+-- historical row keeps exactly the meaning it was written with. Rows
+-- written before this migration stay PROMOTION_NO_ELIGIBLE_SUBJECT and are
+-- NOT rewritten — backfilling them would invent a distinction the engine
+-- was not drawing at the time.
+ALTER TYPE "public"."trace_reason_code" ADD VALUE 'PROMOTION_RELATIONSHIP_UNRESOLVED';

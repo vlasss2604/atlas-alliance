@@ -1,0 +1,2 @@
+CREATE TYPE "public"."research_job_origin" AS ENUM('PRODUCT', 'OWNER_MANUAL_ALPHA');--> statement-breakpoint
+ALTER TABLE "research_jobs" ADD COLUMN "origin" "research_job_origin" DEFAULT 'PRODUCT' NOT NULL;

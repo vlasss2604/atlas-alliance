@@ -1,0 +1,701 @@
+// Structured on-chain retrieval — shared types (owner-approved V1).
+//
+// ONCHAIN_VERIFIABLE is an EVIDENCE CLASS, never a website, a provider, or
+// a transport. This module defines what a structured on-chain observation
+// IS, independent of who served it: a typed intent, a typed result, and
+// the provenance needed to re-verify it later.
+//
+// Nothing here is chain-specific beyond the chain enum; per-chain address
+// encoding, RPC method mapping and response decoding live in adapters.
+
+import type { SupportedChain } from "../../domain/project-identity";
+
+// ONE RESEARCH CORE, MULTIPLE EVIDENCE ENVIRONMENTS. The chain vocabulary
+// here is the SAME one a confirmed project identity uses, so an intent can
+// be addressed to whichever chain a human confirmed. Which of those chains
+// actually has a retriever is a separate, code-owned question answered by
+// the retriever registry (onchain-retriever.ts) — a chain being nameable
+// here confers no capability, and nothing here guesses one.
+export type OnchainChain = SupportedChain;
+
+// D-131 — production networks only. A test network is not weaker
+// authority, it is a DIFFERENT asset universe, so v1 does not model one
+// at all: there is no enum member for it and no endpoint configured, which
+// makes testnet data structurally unreachable rather than filtered later.
+export type OnchainNetwork = "mainnet";
+
+// The (chain, network) pair an observation was made in. Everything
+// deterministic — retriever resolution, canonical URIs, provenance, and
+// every temporal comparison — is scoped to exactly one of these.
+export interface OnchainEnvironment {
+  chain: OnchainChain;
+  network: OnchainNetwork;
+}
+
+export function onchainEnvironmentKey(env: OnchainEnvironment): string {
+  return `${env.chain}/${env.network}`;
+}
+
+export function sameOnchainEnvironment(a: OnchainEnvironment, b: OnchainEnvironment): boolean {
+  return a.chain === b.chain && a.network === b.network;
+}
+
+export type OnchainFinality = "finalized" | "confirmed";
+
+export type OnchainIntentKind =
+  | "TOKEN_SUPPLY"
+  | "ACCOUNT_INFO"
+  | "TOKEN_ACCOUNT_BALANCE"
+  | "SIGNATURES_FOR_ADDRESS"
+  | "TRANSACTION_DETAIL"
+  // Which SPL token accounts a given wallet holds FOR ONE SPECIFIC MINT.
+  // The mint filter is not a parameter a caller chooses: it is the
+  // intent's projectAnchor, so this intent structurally cannot ask about
+  // any mint other than the project's confirmed identity.
+  | "TOKEN_ACCOUNTS_BY_OWNER";
+
+// AMENDMENT C — the project ANCHOR and the queried SUBJECT are distinct
+// and both are preserved. The anchor is the project's confirmed identity
+// (its mint/contract); the subject is what this particular intent reads,
+// which may be a derived account or a transaction. Collapsing them would
+// make "some account related to something" indistinguishable from "this
+// project's own token", which is exactly the confusion D-134 exists to
+// prevent.
+export type OnchainSubjectKind = "token" | "account" | "tx";
+
+export interface OnchainIntent {
+  kind: OnchainIntentKind;
+  chain: OnchainChain;
+  network: OnchainNetwork;
+  // The project's confirmed identity address. Never derived, never
+  // model-supplied — it comes from an ACTIVE PROJECT_IDENTITY record.
+  projectAnchor: string;
+  subjectKind: OnchainSubjectKind;
+  // What this intent reads. Equal to projectAnchor for a direct token
+  // read; a derived account or transaction otherwise (see AMENDMENT D:
+  // a derived subject requires admitted provenance, never a guess).
+  subject: string;
+  // Bounded, intent-specific parameters. Never a free-form RPC payload.
+  limit?: number;
+  // AN EXPLICIT CHAIN POSITION, for a historical read. Absent means "the
+  // finalized head", which is what every read meant before this field
+  // existed, and an intent without it keeps its canonical URI byte for byte.
+  // Present only on an EVM TOKEN_SUPPLY read at a named block; the adapter
+  // refuses it anywhere else and refuses a block that is not finalized.
+  // Part of the canonical target, so two reads at two blocks are two
+  // acquisition targets rather than one deduplicated read.
+  block?: number;
+}
+
+// ---- typed results ---------------------------------------------------
+// Each is a normalized projection of a validated RPC response. No field
+// is optional-by-convenience: a missing value means the fact cannot be
+// synthesized, not that a default is assumed.
+
+export interface TokenSupplyResult {
+  kind: "TOKEN_SUPPLY";
+  mint: string;
+  amountRaw: string; // integer string — never a float, never rounded
+  decimals: number;
+}
+
+// A token account, as jsonParsed account data described it. Present ONLY
+// when the account is program-owned by an SPL Token program AND the node
+// returned a parsed mint — so a null here means "not established", never
+// "not a token account".
+//
+// WHY THE MINT MATTERS MORE THAN THE BALANCE. A documented address that
+// turns out to be a token account is only relevant to this project if it
+// is a token account for THIS project.s mint. Without that field the
+// binding cannot be made from this observation at all, and the honest
+// alternative is to fail closed.
+//
+// `owner` here is the SPL token-account OWNER (the wallet with authority
+// over it), which is a different concept from AccountInfoResult.ownerProgram
+// (the program that owns the account.s data). They are never merged.
+export interface ParsedTokenAccountRef {
+  mint: string;
+  owner: string | null;
+  amountRaw: string | null;
+  decimals: number | null;
+  state: string | null;
+}
+
+// WHY THIS IS AN EXPLICIT THREE-STATE AND NOT A NULLABLE FIELD.
+//
+// A nullable tokenAccount collapses two different answers into one value:
+// "this is not a token account" and "this MIGHT be one and we could not
+// tell". A consumer reading null cannot distinguish them, and the first
+// version of this projection duly had one that treated both as an ordinary
+// wallet — turning a failure to establish token-account identity into
+// positive evidence of non-token status. That is the exact inversion the
+// engine refuses everywhere else.
+//
+// So the relation is stated, not inferred from a null.
+export type TokenAccountRelation =
+  // The account.s data is owned by a program that is not an SPL Token
+  // program. It is genuinely not a token account, and asking which token
+  // accounts it owns is a well-formed question.
+  | "NOT_TOKEN_PROGRAM_OWNED"
+  // Program-owned by SPL Token or Token-2022 AND the node parsed a
+  // well-formed mint. `tokenAccount` carries it.
+  | "TOKEN_ACCOUNT_PARSED"
+  // Program-owned by an SPL Token program, but the parsed identity is
+  // absent, malformed or unsupported. We know it is a token account and we
+  // do NOT know which mint. Fail closed: it is neither usable as a bound
+  // subject nor demotable to an ordinary wallet.
+  | "TOKEN_PROGRAM_OWNED_UNRESOLVED";
+
+export interface AccountInfoResult {
+  kind: "ACCOUNT_INFO";
+  address: string;
+  exists: boolean;
+  // The program that owns the account.s DATA. Not an economic owner.
+  ownerProgram: string | null;
+  executable: boolean | null;
+  lamports: string | null;
+  // Which of the three the account is. ALWAYS read this before
+  // tokenAccount: it is the field that separates "not a token account"
+  // from "could not be established".
+  tokenAccountRelation: TokenAccountRelation;
+  // Populated ONLY when tokenAccountRelation === "TOKEN_ACCOUNT_PARSED".
+  // Null on both other relations, which is why it must never be read as a
+  // classification on its own.
+  tokenAccount: ParsedTokenAccountRef | null;
+}
+
+export interface TokenAccountBalanceResult {
+  kind: "TOKEN_ACCOUNT_BALANCE";
+  account: string;
+  mint: string | null;
+  amountRaw: string;
+  decimals: number;
+}
+
+// ONE SPL token account, as the node parsed it and as this adapter
+// re-validated it. Every field here was checked against the REQUEST
+// before the row was admitted: the account address is well-formed, its
+// program owner is an SPL Token program, and the parsed owner and mint
+// equal the ones asked for. An entry that failed any of those is not
+// present at all — it is dropped, never downgraded.
+export interface TokenAccountRef {
+  // The token account's own pubkey — a THIRD address, distinct from both
+  // the project anchor and the documentary wallet that owns it.
+  account: string;
+  // Echoed back from the parsed response, having been checked equal to
+  // the requested owner. Kept rather than assumed so the artifact records
+  // what the node actually said.
+  owner: string;
+  mint: string;
+  // Integer string, exactly as served. Never a number: a u64 balance
+  // exceeds what a double can represent without loss, and a silently
+  // rounded balance is a wrong fact that looks right.
+  amountRaw: string;
+  decimals: number;
+}
+
+export interface TokenAccountsByOwnerResult {
+  kind: "TOKEN_ACCOUNTS_BY_OWNER";
+  // The wallet asked about — an admitted documentary locator.
+  owner: string;
+  // The confirmed project mint the query was filtered to.
+  mint: string;
+  accounts: TokenAccountRef[];
+  // How many returned entries failed binding and were dropped. An
+  // observation about the RESPONSE, not about the chain: it exists so a
+  // silently filtered result cannot be mistaken for a clean one.
+  rejectedCount: number;
+}
+
+export interface SignatureRef {
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  err: boolean;
+  // The transaction's SPL Memo, when it carries one. Present in the RPC
+  // response and previously discarded by the typed projection, which made
+  // it impossible to tell a labelled operational transaction apart from an
+  // unlabelled one without fetching each transaction in full — the
+  // expensive read this field exists to avoid needing.
+  //
+  // UNTRUSTED, AND NOT A FACT. A memo is arbitrary text written by
+  // whoever signed the transaction. Anyone can write "daily burn" into
+  // one. It is a HINT for choosing which transaction is worth fetching,
+  // never evidence of what a transaction did — that remains the job of
+  // decoding the actual instructions. Bounded on the way in, because it
+  // is externally controlled content entering artifact text.
+  memo: string | null;
+}
+
+export interface SignaturesForAddressResult {
+  kind: "SIGNATURES_FOR_ADDRESS";
+  address: string;
+  signatures: SignatureRef[];
+}
+
+// A deterministically decoded SPL Token Burn / BurnChecked instruction.
+// Recognized ONLY by the adapter, from the actual instruction, never
+// inferred from a transfer to an address that "looks like" a burn address
+// (owner instruction, explicit).
+export interface BurnInstructionRef {
+  programId: string;
+  instructionType: "Burn" | "BurnChecked";
+  mint: string;
+  sourceAccount: string;
+  authority: string | null;
+  amountRaw: string;
+  decimals: number | null;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
+}
+
+// ONE parsed SPL Token instruction, of a kind this adapter recognises.
+// Deliberately NOT interpreted: a Transfer to an address someone calls a
+// burn address is a TRANSFER, and CloseAccount is CloseAccount. Naming
+// what an instruction IS is decoding; naming what it MEANS is not this
+// layer's job and never becomes one.
+export interface TokenInstructionRef {
+  programId: string;
+  // "burn" | "burnChecked" | "transfer" | "transferChecked" |
+  // "closeAccount" — the RPC's own parsed type, lowercased by the node.
+  type: string;
+  mint: string | null;
+  // Source/subject token account, where the instruction names one.
+  account: string | null;
+  destination: string | null;
+  authority: string | null;
+  amountRaw: string | null;
+  decimals: number | null;
+  // True when this came from meta.innerInstructions rather than the
+  // top-level message — a CPI, not something the signer wrote directly.
+  inner: boolean;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
+}
+
+// A token balance as the RPC reported it, before or after execution.
+// amountRaw stays a string for the same reason every other balance does.
+export interface TokenBalanceRef {
+  accountIndex: number;
+  account: string | null;
+  mint: string;
+  owner: string | null;
+  amountRaw: string;
+  decimals: number;
+}
+
+export interface TransactionDetailResult {
+  kind: "TRANSACTION_DETAIL";
+  signature: string;
+  slot: number;
+  blockTime: number | null;
+  succeeded: boolean;
+  // Empty when the transaction contains no SPL burn instruction. An empty
+  // list is NEVER a fact that no burn happened — absence of evidence is
+  // not evidence of absence.
+  burns: BurnInstructionRef[];
+  // Every distinct program the transaction invoked, outer and inner.
+  programs: string[];
+  // The transaction's account keys, in order, bounded.
+  accountKeys: string[];
+  // Recognised SPL Token instructions, decoded but never interpreted.
+  tokenInstructions: TokenInstructionRef[];
+  // Creation/initialization/sync instructions, kept apart from movement.
+  // Empty is NEVER a fact that an account was not created or initialized —
+  // only that no such instruction was decoded from this transaction.
+  lifecycleInstructions: AccountLifecycleRef[];
+  // Instructions the node did not parse, preserved verbatim and
+  // uninterpreted.
+  //
+  // OPTIONAL, AND THE DIFFERENCE MATTERS. Absent means the artifact was
+  // stored before this field existed, so nothing is known either way. An
+  // empty array means the transaction was read with this capability and
+  // genuinely carried no unparsed instruction. Collapsing the two would
+  // turn a gap in the record into a finding about the chain.
+  rawInstructions?: RawInstructionRef[];
+  preTokenBalances: TokenBalanceRef[];
+  postTokenBalances: TokenBalanceRef[];
+  // EVM ONLY: the ERC-20 Transfer logs the transaction's receipt carries
+  // FROM THE CONFIRMED PROJECT-TOKEN CONTRACT, decoded and never
+  // interpreted. A log of any other contract is not in this list at all.
+  //
+  // OPTIONAL, AND THE DIFFERENCE MATTERS, exactly as for rawInstructions:
+  // absent means a Solana transaction or an artifact stored before this
+  // field existed; empty means an EVM receipt was read and carried no such
+  // log. Neither is a finding that nothing moved.
+  evmTokenTransfers?: EvmTokenTransferRef[];
+}
+
+// The EVM zero address, exactly. Only this address makes a Transfer a
+// ZERO_ADDRESS_TRANSFER; conventional "dead" addresses are not it.
+export const EVM_ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+// ONE ERC-20 Transfer(address,address,uint256) log, as the receipt reported
+// it. A movement, never a destruction: a transfer to the zero address is
+// still a transfer, and whether the token contract destroyed anything is not
+// something this log says.
+export interface EvmTokenTransferRef {
+  // Position of the log in the block, as the node reported it.
+  logIndex: number;
+  // The emitting contract — always the project anchor, as confirmed.
+  token: string;
+  // Lowercase 20-byte addresses decoded from the indexed topics.
+  from: string;
+  to: string;
+  // uint256, as an integer string. Never a number.
+  amountRaw: string;
+}
+
+export type OnchainResult =
+  | TokenAccountsByOwnerResult
+  | TokenSupplyResult
+  | AccountInfoResult
+  | TokenAccountBalanceResult
+  | SignaturesForAddressResult
+  | TransactionDetailResult;
+
+// ---- provenance ------------------------------------------------------
+// Everything required to re-verify the observation later. Incomplete
+// provenance makes an artifact ineligible to establish anything.
+
+export interface OnchainProvenance {
+  chain: OnchainChain;
+  network: OnchainNetwork;
+  projectAnchor: string;
+  subjectKind: OnchainSubjectKind;
+  subject: string;
+  // CHAIN POSITION of the observation: the canonical monotonic ordinal the
+  // chain itself provides inside this (chain, network). On Solana that is
+  // the slot; on an EVM chain it will be the block number. The field (and
+  // the persisted column) keeps its Solana name — renaming stored data for
+  // vocabulary is not a change this seam makes — and generic code that
+  // needs to reason about ordering reads it through `chainPositionOf` /
+  // `compareChainPositions` below, which refuse to compare across
+  // environments.
+  slot: number;
+  blockTime: number | null;
+  blockHash: string | null;
+  finality: OnchainFinality;
+  // How it was obtained. providerId identifies the endpoint by a
+  // code-owned LABEL, never a URL and never a credential.
+  retrievalMethod: "RPC";
+  providerId: string;
+  providerMethod: string;
+  // Request parameters after redaction. Addresses are public; nothing
+  // credential-bearing is ever placed here.
+  requestParams: Record<string, string | number | boolean>;
+  transactionSignature: string | null;
+  retrievedAt: Date;
+  rawResponseHash: string;
+  artifactHash: string;
+}
+
+// ---- chain position --------------------------------------------------
+// What generic code may know about WHERE in a chain an observation sits,
+// without assuming Solana terminology. An ordinal is meaningful only
+// inside one environment: slot 200 on Solana and block 200 on Ethereum are
+// not before, after, or equal to one another — they are incomparable, and
+// a comparison across environments fails closed rather than ordering them.
+
+export interface ChainPosition {
+  // The chain's own monotonic ordinal (Solana slot, EVM block number).
+  ordinal: number;
+  blockTime: number | null;
+  blockHash: string | null;
+  finality: OnchainFinality;
+}
+
+// The minimum an observation must carry to be placed: its environment and
+// its ordinal. OnchainProvenance satisfies it directly.
+export type PositionedObservation = Pick<OnchainProvenance, "chain" | "network" | "slot">;
+
+export function chainPositionOf(p: OnchainProvenance): ChainPosition {
+  return {
+    ordinal: p.slot,
+    blockTime: p.blockTime,
+    blockHash: p.blockHash,
+    finality: p.finality,
+  };
+}
+
+export type ChainPositionComparison =
+  | { comparable: true; order: "BEFORE" | "SAME" | "AFTER" }
+  // The two positions are not in one environment, or one of them carries
+  // no usable ordinal. Neither is an ordering; both are refusals.
+  | { comparable: false; reason: "CHAIN_MISMATCH" | "NETWORK_MISMATCH" | "INVALID_POSITION" };
+
+function isUsableOrdinal(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0;
+}
+
+// Where `a` stands relative to `b`, or why the question has no answer.
+// Chain is checked before network so a cross-chain pair is named as such
+// even when the network labels happen to coincide.
+export function compareChainPositions(
+  a: PositionedObservation,
+  b: PositionedObservation,
+): ChainPositionComparison {
+  if (a.chain !== b.chain) return { comparable: false, reason: "CHAIN_MISMATCH" };
+  if (a.network !== b.network) return { comparable: false, reason: "NETWORK_MISMATCH" };
+  if (!isUsableOrdinal(a.slot) || !isUsableOrdinal(b.slot)) {
+    return { comparable: false, reason: "INVALID_POSITION" };
+  }
+  if (a.slot < b.slot) return { comparable: true, order: "BEFORE" };
+  if (a.slot > b.slot) return { comparable: true, order: "AFTER" };
+  return { comparable: true, order: "SAME" };
+}
+
+// ---- the trusted artifact -------------------------------------------
+// SOURCE CLASS SAFETY (owner amendment): eligibility for
+// ONCHAIN_VERIFIABLE must depend on trusted internal metadata produced by
+// the registered retriever path — NOT on a URI prefix, which our own code
+// generates and which any caller could imitate.
+//
+// The brand below is a module-private symbol. A structurally identical
+// object literal built anywhere else does not carry it and cannot be
+// forged: nothing outside this module can obtain the symbol's value, and
+// TypeScript will not let an unbranded object satisfy the type. This is
+// the "trusted structured-artifact marker" — the in-process half; the
+// persisted half is the onchain_artifacts row, which only the retriever
+// path writes.
+declare const ONCHAIN_ARTIFACT_BRAND: unique symbol;
+
+export interface OnchainArtifact {
+  readonly [ONCHAIN_ARTIFACT_BRAND]: true;
+  canonicalUri: string;
+  intent: OnchainIntent;
+  result: OnchainResult;
+  provenance: OnchainProvenance;
+  // Canonical JSON serialization of `result` — the literal text a
+  // deterministic fact quotes from, so traceability is exact rather than
+  // paraphrased.
+  normalizedText: string;
+}
+
+// The ONLY constructor. Adapters call this; nothing else can produce a
+// value of type OnchainArtifact.
+export function brandOnchainArtifact(
+  artifact: Omit<OnchainArtifact, typeof ONCHAIN_ARTIFACT_BRAND>,
+): OnchainArtifact {
+  return artifact as OnchainArtifact;
+}
+
+// Runtime companion to the compile-time brand, for the persistence and
+// classification boundaries where a value may arrive as `unknown`.
+export function isOnchainArtifact(value: unknown): value is OnchainArtifact {
+  if (!value || typeof value !== "object") return false;
+  const a = value as Partial<OnchainArtifact>;
+  return (
+    typeof a.canonicalUri === "string" &&
+    typeof a.normalizedText === "string" &&
+    !!a.intent &&
+    !!a.result &&
+    !!a.provenance
+  );
+}
+
+// ---- account lifecycle ------------------------------------------------
+// ONE parsed instruction that says something about how a token account
+// came to exist, what it is, or that its wrapped-SOL balance was synced.
+//
+// WHY THIS IS SEPARATE FROM TokenInstructionRef. That type answers "what
+// moved?" and its `authority` field is whoever signed a movement — an
+// owner, a delegate or a multisig signer, indistinguishably. This type
+// answers "who owns this account?", and the only fields that can answer it
+// are an initialization's `owner` and an ATA creation's `wallet`. Keeping
+// them in one shape would let an authority be read as an owner, which is
+// the exact confusion that made an ephemeral account's ownership
+// unrecoverable.
+//
+// FOUR CONCEPTS, NEVER COLLAPSED: owner, authority, payer and close
+// destination are distinct roles. They are frequently the same address and
+// that coincidence proves nothing, so each has its own field and no field
+// is ever populated from another.
+export interface AccountLifecycleRef {
+  programId: string;
+  // The RPC's own parsed type: createAccount | createAccountWithSeed |
+  // transfer | create | createIdempotent | initializeAccount |
+  // initializeAccount2 | initializeAccount3 | syncNative.
+  type: string;
+  inner: boolean;
+  // The account being created, initialized or synced, where the
+  // instruction names one.
+  account: string | null;
+  mint: string | null;
+  // THE TOKEN-ACCOUNT OWNER, and only ever that. Populated exclusively
+  // from an initializeAccount* `owner` or an ATA create `wallet`. Never
+  // from an authority. Never from System createAccount's `owner`, which
+  // names a PROGRAM, not a person — see assignedProgram.
+  owner: string | null;
+  // The program a System-created account was assigned to. A token account
+  // is assigned to the SPL Token program; reading this as an owner would
+  // report the Token program as the owner of every token account on
+  // Solana.
+  assignedProgram: string | null;
+  // Who funded the account. Distinct from owner: paying rent for an
+  // account confers no control over it.
+  payer: string | null;
+  source: string | null;
+  destination: string | null;
+  // String for the same reason every other on-chain amount is.
+  lamports: string | null;
+  // Named explicitly by ATA creation, so the token program behind an ATA
+  // is decoded rather than assumed.
+  tokenProgram: string | null;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
+}
+
+// AN INSTRUCTION THIS ADAPTER CANNOT READ, KEPT ANYWAY.
+//
+// The node parses the programs it knows; everything else comes back as a
+// program id, an account list and an opaque data blob. Until now those
+// were dropped, so a transaction's most consequential instruction could
+// leave nothing behind but its program id in `programs[]` — and once the
+// raw response was gone, no later decoding was possible even in
+// principle.
+//
+// THIS ASSIGNS NO MEANING. It records that a program was invoked, which
+// accounts it was handed and what bytes it was given. What the program
+// does, what the instruction asks it to do, and whether any of it
+// amounts to a swap, a purchase or anything else is not represented
+// here and is not knowable from here. Keeping the material is what
+// makes a later, separately-decided decoding possible; it is not that
+// decision.
+export interface RawInstructionRef {
+  programId: string;
+  // The accounts the instruction was handed, in order. Order is part of
+  // the meaning to whichever program reads it, so it is preserved as
+  // given and never sorted.
+  accounts: string[];
+  // Base58, exactly as the node reported it. Never truncated: a shortened
+  // blob looks decodable and is not, which is worse than keeping none.
+  data: string;
+  inner: boolean;
+  // WHERE IN THE TRANSACTION THIS INSTRUCTION SAT.
+  //
+  // instructionIndex is its position among its siblings: among the
+  // message's own instructions for an outer one, or within its group for
+  // an inner one. parentIndex is the ordinal of the OUTER instruction an
+  // inner instruction was invoked from, and null for an outer instruction,
+  // which has no parent.
+  //
+  // `inner` stays the authoritative answer to "is this a CPI", so the
+  // combination inner=true with parentIndex=null reads as "inner, parent
+  // not reported" rather than as "outer". A linkage that was not reported
+  // is left absent, never reconstructed.
+  //
+  // Optional because an artifact stored before these fields existed does
+  // not carry them, and must not be made to look as though it did.
+  instructionIndex?: number;
+  parentIndex?: number | null;
+  // HOW DEEP THE CPI STACK WAS WHEN THIS INSTRUCTION RAN, as the node
+  // reported it. 1 is a top-level instruction the signer wrote; 2 was
+  // invoked by a top-level instruction; 3 was invoked by something at
+  // depth 2, and so on.
+  //
+  // This is what makes CALLER attribution possible at all beyond the
+  // single-level case: parentIndex names the OUTER instruction a whole
+  // inner group belongs to, never the instruction that actually invoked
+  // this one. Without a depth, an inner instruction could sit at any
+  // level of that group and its caller is not recoverable.
+  //
+  // Optional and nullable, and the difference is load-bearing: absent
+  // means the artifact predates this field or the node did not report it,
+  // and attribution must then answer UNKNOWN rather than assume depth 2.
+  // It is never fabricated.
+  stackHeight?: number | null;
+}

@@ -1,0 +1,16 @@
+# ATLAS PROOF — Wave 1 nightly backup (oneshot, started by atlas-backup.timer).
+# Install: /etc/systemd/system/atlas-backup.service
+[Unit]
+Description=ATLAS PROOF Postgres backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=postgres
+Group=postgres
+Environment=ATLAS_DB_NAME=atlas_beta
+Environment=ATLAS_BACKUP_DIR=/var/backups/atlas
+Environment=ATLAS_BACKUP_KEEP_DAYS=14
+# Uncomment after configuring rclone for the postgres user:
+#Environment=ATLAS_BACKUP_RCLONE_REMOTE=atlasbackup:atlas
+ExecStart=/bin/sh /opt/atlas/app/deploy/wave1/atlas-backup.sh

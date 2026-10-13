@@ -1,0 +1,1 @@
+ALTER TABLE "research_jobs" ADD COLUMN "termination_reason" text;

@@ -1,0 +1,18 @@
+-- AN OPERATOR-RUN OBSERVATION IS NOT A RESEARCH ACQUISITION.
+--
+-- The persisting owner scripts (one bounded on-chain read that becomes
+-- Evidence; one acquired or extracted document) must create a research_jobs
+-- row, because Evidence requires one. They created it with the default
+-- origin, PRODUCT — the same origin a real Research job carries — and the
+-- historical total-supply loader, which admits any prior RESEARCH_JOB-origin
+-- artifact from a different job, could therefore select an operator's
+-- TOKEN_SUPPLY probe as the historical t0 of a later Research. Owner activity
+-- was one step from moving a Proof.
+--
+-- The distinction belongs to the PRODUCING JOB, and this value states it.
+-- OWNER_OBSERVATION means: an operator-run bounded acquisition or
+-- observation, persisted and inspectable, and NOT a Research acquisition —
+-- so never an automatic historical observation for another job. PRODUCT and
+-- OWNER_MANUAL_ALPHA keep their meaning; the default stays PRODUCT; no
+-- existing row is rewritten.
+ALTER TYPE "public"."research_job_origin" ADD VALUE IF NOT EXISTS 'OWNER_OBSERVATION';

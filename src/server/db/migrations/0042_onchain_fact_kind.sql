@@ -1,0 +1,49 @@
+-- NET_EFFECT HARDENING B1 — persist the deterministic on-chain fact kind.
+--
+-- THE PROBLEM THIS SOLVES.
+--
+-- `onchain-facts.ts` synthesizes chain observations deterministically,
+-- bypassing the model entirely, and pairs each one with a hand-authored
+-- sentence stating exactly what it does NOT establish:
+--
+--   a transfer is "a movement, never a purchase and never a destruction"
+--   a balance is  "a position at a moment, never a history"
+--   a supply read "does not show how the supply changed over time"
+--   a burn        "does NOT prove the burned tokens came from a buyback"
+--
+-- Every one of those is a real semantic boundary, and every one of them was
+-- PROSE ON A ROW that no code could read. The synthesizer knew which kind
+-- of observation it had made and discarded that knowledge one line later.
+-- Reconciliation therefore could not tell a burn from a balance, and
+-- NET_EFFECT could be established by either — the false positive this
+-- round exists to make impossible.
+--
+-- WHAT MAY WRITE IT.
+--
+-- Deterministic on-chain fact synthesis, and nothing else. Not model
+-- extraction, not the lexical flow classifiers in mechanism-assembler.ts
+-- (whose own comment records that "tokens are not burned" still classifies
+-- BURN), not source-class inference, not parsing of does_not_prove. The
+-- column is unreachable from `ExtractedFact`, the model's output type,
+-- because the kind lives on a separate `SynthesizedFact` type that only
+-- this one code path can produce.
+--
+-- WHY AN ENUM RATHER THAN TEXT.
+--
+-- `mechanism_state` is deliberately free text: it is model prose, and its
+-- dictionary belongs to CORE rather than to the schema. This is the
+-- opposite case. It is code-authored, closed, and it is the basis of a
+-- supply-semantics DECISION — so a value outside the vocabulary must be
+-- impossible at the database level rather than merely unexpected.
+--
+-- NULL IS MEANINGFUL AND COMMON. Every documentary, data-provider and
+-- model-extracted row has no typed on-chain semantics and correctly stores
+-- NULL. Reconciliation reads that absence as absence: such a row can still
+-- establish other components exactly as before, and can never establish a
+-- supply reduction.
+--
+-- Additive only: one enum type, one nullable column. No existing table,
+-- column or row changes meaning, nothing is backfilled, and no historical
+-- row becomes invalid.
+CREATE TYPE "public"."onchain_fact_kind" AS ENUM('TOKEN_SUPPLY', 'ACCOUNT_INFO', 'ACCOUNT_TOKEN_RELATION', 'ACCOUNT_TOKEN_RELATION_FOREIGN', 'TOKEN_ACCOUNT_BALANCE', 'TOKEN_ACCOUNTS_BY_OWNER', 'SIGNATURES_FOR_ADDRESS', 'TRANSACTION_DETAIL', 'NATIVE_TRANSFER', 'TOKEN_TRANSFER', 'BURN', 'RECIPROCAL_ASSET_FLOW', 'DECODED_EXCHANGE');--> statement-breakpoint
+ALTER TABLE "evidence" ADD COLUMN "onchain_fact_kind" "onchain_fact_kind";

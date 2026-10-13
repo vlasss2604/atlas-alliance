@@ -1,0 +1,14 @@
+-- D-158 PHASE 2 — machine-owned invocation provenance on Evidence.
+--
+-- Carries, for a deterministic on-chain observation, which program invoked
+-- the instruction that moved the stated asset into the stated account, at
+-- which invocation and CPI depth, in which transaction and slot.
+--
+-- Additive and nullable. NULL on every existing row and on every
+-- documentary, data-provider and model-extracted row — and NULL is never
+-- read as permissive: an obligation that requires provenance is unmet
+-- without it.
+--
+-- Written by exactly one code path (the on-chain fact synthesis). No
+-- extraction output can populate it.
+ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "onchain_provenance" jsonb;

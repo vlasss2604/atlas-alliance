@@ -1,0 +1,829 @@
+import type { PatternContent, ClaimRequirement } from "../domain/pattern";
+import { intentRequirementsFor } from "../domain/pattern";
+import type { MechanismAssemblyResult, MechanismFlow, MechanismGapKind } from "./mechanism-assembler";
+
+// Phase 6, S7 — Claim-Level Support (phase-6-s7-plan.md, D-105..D-111).
+//
+// Pure, deterministic, model-free, network-free. Consumes the frozen S6
+// MechanismAssemblyResult and a CORE-authored IntentRequirementSet
+// (Pattern.intentRequirements, D-105) and produces a ClaimSupportResult.
+// S7 never re-adjudicates S5/S6: existence, classification, gaps, and
+// lifecycle are read verbatim from S6's output — this file only asks
+// "do the atoms this intent requires hold on some coherent S6 flow?"
+//
+// S7 v1 is INTENT-SUFFICIENCY JUDGMENT (§3.3), not arbitrary natural-
+// language claim verification: research_task free text is never read
+// here, by construction — this module's input type has no field for it.
+
+export type ClaimSupportStatus = "SUPPORTED" | "PARTIALLY_SUPPORTED" | "NOT_SUPPORTED" | "INSUFFICIENT_EVIDENCE";
+export type ClaimRequirementStatus = "SATISFIED" | "PARTIAL" | "CONTRADICTED" | "UNSATISFIED";
+
+// §20 — the closed, 20-member reason code vocabulary. No free text, no
+// dynamically constructed codes.
+export type ClaimReasonCode =
+  | "REQUIRED_COMPONENT_MISSING"
+  | "REQUIRED_ATOM_UNSATISFIED"
+  | "REQUIRED_PATH_PARTIAL"
+  | "REQUIRED_PATH_CONTRADICTED"
+  | "REQUIRED_RELATIONSHIP_UNRESOLVED"
+  | "TOKEN_STATE_MISMATCH"
+  | "ACTOR_MISMATCH"
+  | "DESTINATION_MISMATCH"
+  | "TEMPORAL_SCOPE_MISMATCH"
+  | "NET_EFFECT_NOT_ESTABLISHED"
+  | "DURABILITY_NOT_ESTABLISHED"
+  | "FLOW_IDENTITY_UNRESOLVED"
+  | "BRANCH_ATTRIBUTION_UNRESOLVED"
+  | "FLOW_ENUMERATION_INCOMPLETE"
+  | "NUMERIC_VALUE_NOT_ESTABLISHED"
+  | "QUANTIFIER_NOT_ESTABLISHED"
+  | "STRENGTH_NOT_ESTABLISHED"
+  | "CLAIM_PROPOSITION_NOT_STRUCTURED"
+  | "INTENT_NOT_CLASSIFIED"
+  | "NO_RELEVANT_FLOW";
+
+export interface MechanismGapRef {
+  flowId: string | null;
+  kind: MechanismGapKind;
+  component: string | null;
+  afterStep: number | null;
+}
+
+export interface ClaimProvenance {
+  flowIds: string[];
+  componentResultKeys: { step: number; component: string }[];
+  evidenceIds: string[];
+}
+
+export interface ClaimRequirementResult {
+  requirementId: string;
+  optionality: "REQUIRED" | "OPTIONAL";
+  status: ClaimRequirementStatus;
+  reasonCodes: ClaimReasonCode[];
+  matchedFlowIds: string[];
+  blockingGaps: MechanismGapRef[];
+  provenance: ClaimProvenance;
+}
+
+// D-110 — deliberately no confidence/probability field anywhere in this
+// schema; checked by a dedicated regression test, same discipline as
+// S6's D-103 test.
+export interface ClaimSupportResult {
+  researchJobId: string;
+  patternVersion: number;
+  intent: string;
+  requirementSetVersion: number;
+  status: ClaimSupportStatus;
+  reasonCodes: ClaimReasonCode[];
+  requirementResults: ClaimRequirementResult[];
+  contextGaps: MechanismGapRef[];
+}
+
+export interface ClaimEvaluationInput {
+  researchJobId: string;
+  patternVersion: number;
+  pattern: PatternContent;
+  intent: string;
+  taskType: string | null;
+  requirementSetVersion: number;
+  assembly: MechanismAssemblyResult;
+}
+
+// §25 — closed system-failure vocabulary. Everything else is a
+// successful ClaimSupportResult (SUPPORTED/PARTIALLY_SUPPORTED/
+// NOT_SUPPORTED/INSUFFICIENT_EVIDENCE are ALL success, never a failure).
+export class ClaimEvaluationInvariantError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ClaimEvaluationInvariantError";
+  }
+}
+
+const EMPTY_PROVENANCE: ClaimProvenance = { flowIds: [], componentResultKeys: [], evidenceIds: [] };
+
+function sortedIds(ids: string[]): string[] {
+  return [...new Set(ids)].sort();
+}
+
+function gapRef(flowId: string | null, gap: { kind: MechanismGapKind; component: string | null; afterStep: number | null }): MechanismGapRef {
+  return { flowId, kind: gap.kind, component: gap.component, afterStep: gap.afterStep };
+}
+
+// The Pattern-step components a flow's lineage carries, as a lookup by
+// component name. Used only to ask "is this component an established
+// element ON THIS flow" — never to recompute its status (read verbatim).
+function lineageComponentStatus(flow: MechanismFlow, component: string): "SUPPORTED" | "PARTIALLY_SUPPORTED" | null {
+  const node = flow.nodes.find((n) => n.component === component);
+  if (node) return node.componentStatus === "PARTIALLY_SUPPORTED" ? "PARTIALLY_SUPPORTED" : "SUPPORTED";
+  if (component === "NET_EFFECT" && flow.netEffect) return flow.netEffect.componentStatus === "PARTIALLY_SUPPORTED" ? "PARTIALLY_SUPPORTED" : "SUPPORTED";
+  if (component === "DURABILITY_BASIS" && flow.durability) return flow.durability.componentStatus === "PARTIALLY_SUPPORTED" ? "PARTIALLY_SUPPORTED" : "SUPPORTED";
+  // GOVERNANCE_BASIS / RECIPIENT / FLOW_PATH / EXECUTION_EVIDENCE /
+  // CURRENT_STATE are not their own node in S6's model (§4) — check the
+  // lineage step directly for a positional match instead. A lineage step
+  // carries no status of its own; S6 records a PARTIALLY_SUPPORTED
+  // component it attached as a positioned PARTIAL_COMPONENT gap, and that
+  // is read here so a partial non-node component is never reported as
+  // fully established. Read verbatim from S6, never re-adjudicated.
+  const step = flow.lineage.find((s) => s.component === component);
+  if (!step) return null;
+  const partial = flow.gaps.some((g) => g.kind === "PARTIAL_COMPONENT" && g.component === component);
+  return partial ? "PARTIALLY_SUPPORTED" : "SUPPORTED";
+}
+
+// WHICH ESTABLISHED COMPONENTS AN ATTRIBUTE OR LIFECYCLE VALUE RESTS ON.
+//
+// S6 classifies each FlowAttribute over the admitted text of specific
+// established components (mechanism-assembler.ts buildFlow: valueSource
+// from SOURCE_OF_VALUE, destinationKind from DESTINATION, recipientKind
+// from RECIPIENT, direction from SOURCE_OF_VALUE + FLOW_PATH +
+// EXECUTION_EVIDENCE, tokenState from RECIPIENT + DESTINATION) and derives
+// lifecycle CURRENT from CURRENT_STATE. A value classified from a
+// PARTIALLY_SUPPORTED component is exactly as partial as that component:
+// an INDIRECT-only recipient row that names "holders" does not make
+// "holders receive" fully SUPPORTED, any more than the same row would
+// under COMPONENT_ESTABLISHED. Every other atom kind already propagates
+// REQUIRED_PATH_PARTIAL from a partial component; these two did not, and
+// were the one route by which a component the reducer capped could reach
+// a fully SUPPORTED claim. Code-owned mirror of buildFlow, never a model.
+const ATTRIBUTE_BASIS_COMPONENTS: Record<string, readonly string[]> = {
+  valueSource: ["SOURCE_OF_VALUE"],
+  destinationKind: ["DESTINATION"],
+  recipientKind: ["RECIPIENT"],
+  direction: ["SOURCE_OF_VALUE", "FLOW_PATH", "EXECUTION_EVIDENCE"],
+  tokenState: ["RECIPIENT", "DESTINATION"],
+};
+// Lifecycle CURRENT rests on CURRENT_STATE alone; HISTORICAL additionally
+// needs an established execution (S6 computeLifecycle).
+function lifecycleBasisComponents(lifecycle: MechanismFlow["lifecycle"]): readonly string[] {
+  return lifecycle === "HISTORICAL" ? ["EXECUTION_EVIDENCE", "CURRENT_STATE"] : ["CURRENT_STATE"];
+}
+
+function anyBasisComponentPartial(flow: MechanismFlow, components: readonly string[]): boolean {
+  return components.some((c) => lineageComponentStatus(flow, c) === "PARTIALLY_SUPPORTED");
+}
+
+// The component result keys an attribute or lifecycle verdict rests on —
+// the basis components that are actually established on this flow. S8
+// cites Evidence ONLY through these keys (proof-builder.ts intersects a
+// requirement's evidence ids with the named components' supporting ids),
+// so a verdict that named none was a Proof with no citation at all: a
+// NOT_SUPPORTED "holders do not receive value" that could not point at the
+// row saying the treasury does. The keys are the same code-owned basis
+// map the partial check reads; nothing here widens what S7 asserts.
+function basisResultKeys(flow: MechanismFlow, components: readonly string[]): { step: number; component: string }[] {
+  return components
+    .filter((c) => flow.lineage.some((s) => s.component === c))
+    .map((c) => ({ step: stepOfComponent(flow, c), component: c }))
+    .filter((k) => k.step !== -1);
+}
+
+function gapsForComponentOnFlow(flow: MechanismFlow, component: string): MechanismGapRef[] {
+  return flow.gaps.filter((g) => g.component === component).map((g) => gapRef(flow.flowId, g));
+}
+
+// ADDRESS EXISTS != ECONOMIC ROLE ESTABLISHED. WHERE != WHO.
+// (Founder decisions C4 and M3.)
+//
+// S6 records, on an ESTABLISHED component, that the economic role the
+// component must play is unresolved: a DESTINATION whose kind the closed
+// dictionary does not recognise (an opaque multisig address is a place,
+// not a treasury), and a RECIPIENT classified PASSIVE_HOLDER whose text
+// never links holding to entitlement or receipt (naming holders says who
+// got something, not that holding is what entitled them). Both are
+// positioned *_UNRESOLVED gaps on a component that IS established, which
+// is why every check that only asks "is this component established on
+// this flow?" used to walk straight past them.
+//
+// This is the whole of the two fixes: a requirement whose MEANING depends
+// on that role may not be satisfied from the role-less fact. Nothing else
+// changes — the component stays established, its evidence stays
+// admissible, and any requirement that does not depend on the role
+// (existence, token state, a positive incompatibility with a different
+// role) reads exactly as before.
+const ROLE_UNRESOLVED_GAP_KIND: Record<string, MechanismGapKind> = {
+  DESTINATION: "DESTINATION_UNRESOLVED",
+  RECIPIENT: "RECIPIENT_UNRESOLVED",
+};
+
+function roleUnresolvedGaps(flow: MechanismFlow, component: string): MechanismGapRef[] {
+  const kind = ROLE_UNRESOLVED_GAP_KIND[component];
+  if (!kind) return [];
+  return flow.gaps.filter((g) => g.component === component && g.kind === kind).map((g) => gapRef(flow.flowId, g));
+}
+
+// The component whose ROLE a flow attribute asserts. Only these two
+// attributes ARE a role claim about a component; valueSource, direction
+// and tokenState are not, and are deliberately absent so an unresolved
+// recipient role can never weaken an unrelated token-state match.
+const ATTRIBUTE_ROLE_COMPONENT: Record<string, string> = {
+  recipientKind: "RECIPIENT",
+  destinationKind: "DESTINATION",
+};
+
+// A CONTRADICTED_COMPONENT gap's own S6 provenance carries the
+// contradicting evidence ids (§18 of the S6 plan: "both id sets"). This
+// is what makes a CONTRADICTED atom's own provenance invariant (§22)
+// satisfiable without S7 inventing or re-deriving anything.
+function gapEvidenceIds(flow: MechanismFlow, kinds: MechanismGapKind[], component?: string): string[] {
+  const ids: string[] = [];
+  for (const g of flow.gaps) {
+    if (!kinds.includes(g.kind)) continue;
+    if (component !== undefined && g.component !== component) continue;
+    ids.push(...g.provenance.evidenceIds);
+  }
+  return sortedIds(ids);
+}
+
+// Fallback provenance for a FLOW_ATTRIBUTE/LIFECYCLE verdict: S6 does not
+// expose which single lineage step's text produced a given classification
+// or lifecycle value, so the whole flow's established evidence anchors
+// the claim ("this flow, as a whole, is what carries this attribute").
+function allFlowEvidenceIds(flow: MechanismFlow): string[] {
+  const ids: string[] = [];
+  for (const step of flow.lineage) ids.push(...step.evidenceIds);
+  return sortedIds(ids);
+}
+
+function evidenceIdsForComponentsOnFlow(flow: MechanismFlow, components: string[]): string[] {
+  const ids: string[] = [];
+  for (const step of flow.lineage) {
+    if (components.includes(step.component)) ids.push(...step.evidenceIds);
+  }
+  if (components.includes("NET_EFFECT") && flow.netEffect) ids.push(...flow.netEffect.provenance.evidenceIds);
+  if (components.includes("DURABILITY_BASIS") && flow.durability) ids.push(...flow.durability.provenance.evidenceIds);
+  return sortedIds(ids);
+}
+
+interface FlowVerdict {
+  status: ClaimRequirementStatus;
+  reasonCodes: ClaimReasonCode[];
+  blockingGaps: MechanismGapRef[];
+  evidenceIds: string[];
+  componentResultKeys: { step: number; component: string }[];
+}
+
+// COMPONENT_ESTABLISHED — every referenced component must be an
+// established element on THIS flow (D-108: never combine across flows,
+// automatic here since a single flow is evaluated at a time).
+function evaluateComponentEstablished(req: ClaimRequirement, flow: MechanismFlow): FlowVerdict | null {
+  const components = req.components ?? [];
+  let anyRelevant = false;
+  let worst: ClaimRequirementStatus = "SATISFIED";
+  const reasonCodes = new Set<ClaimReasonCode>();
+  const blockingGaps: MechanismGapRef[] = [];
+  for (const component of components) {
+    const status = lineageComponentStatus(flow, component);
+    const gaps = gapsForComponentOnFlow(flow, component);
+    if (status === null && gaps.length === 0) continue; // not relevant to this flow at all
+    anyRelevant = true;
+    if (status === "PARTIALLY_SUPPORTED") {
+      if (worst === "SATISFIED") worst = "PARTIAL";
+      reasonCodes.add("REQUIRED_PATH_PARTIAL");
+    } else if (status === "SUPPORTED") {
+      // contributes nothing to worst
+    } else {
+      // status === null: not established on this flow — check WHY via gaps.
+      const contradicted = gaps.some((g) => g.kind === "CONTRADICTED_COMPONENT");
+      if (contradicted) {
+        worst = "CONTRADICTED";
+        reasonCodes.add("REQUIRED_PATH_CONTRADICTED");
+      } else if (worst !== "CONTRADICTED") {
+        worst = "UNSATISFIED";
+        reasonCodes.add("REQUIRED_COMPONENT_MISSING");
+      }
+      blockingGaps.push(...gaps);
+    }
+  }
+  if (!anyRelevant) return null;
+  const establishedEvidenceIds = evidenceIdsForComponentsOnFlow(flow, components);
+  const evidenceIds =
+    worst === "CONTRADICTED"
+      ? sortedIds([...establishedEvidenceIds, ...gapEvidenceIds(flow, ["CONTRADICTED_COMPONENT"])])
+      : establishedEvidenceIds;
+  return {
+    status: worst,
+    reasonCodes: [...reasonCodes],
+    blockingGaps,
+    evidenceIds,
+    componentResultKeys: components.map((c) => ({ step: stepOfComponent(flow, c), component: c })).filter((k) => k.step !== -1),
+  };
+}
+
+function stepOfComponent(flow: MechanismFlow, component: string): number {
+  const step = flow.lineage.find((s) => s.component === component);
+  if (step) return step.step;
+  const gap = flow.gaps.find((g) => g.component === component);
+  return gap?.afterStep ?? -1;
+}
+
+// FLOW_RELATIONSHIP — source and destination must BOTH be established on
+// the SAME flow (D-108's coherent-flow rule — trivially enforced since
+// this function is called once per flow, never synthesizing across flows).
+function evaluateFlowRelationship(req: ClaimRequirement, flow: MechanismFlow): FlowVerdict | null {
+  const from = req.relationshipFrom!;
+  const to = req.relationshipTo!;
+  const fromStatus = lineageComponentStatus(flow, from);
+  const toStatus = lineageComponentStatus(flow, to);
+  const fromGaps = gapsForComponentOnFlow(flow, from);
+  const toGaps = gapsForComponentOnFlow(flow, to);
+  if (fromStatus === null && toStatus === null && fromGaps.length === 0 && toGaps.length === 0) return null;
+
+  const branchUnresolved = [...fromGaps, ...toGaps].some((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED");
+  const contradicted = [...fromGaps, ...toGaps].some((g) => g.kind === "CONTRADICTED_COMPONENT");
+  const unresolvedRelationship = [...fromGaps, ...toGaps].some((g) => g.kind === "DESTINATION_UNRESOLVED" || g.kind === "RECIPIENT_UNRESOLVED");
+
+  if (fromStatus !== null && toStatus !== null) {
+    // C4 — BOTH ENDPOINTS ESTABLISHED IS NOT YET A RELATIONSHIP. This atom
+    // asserts that value from `from` reaches `to`, which is a claim about
+    // what `to` economically IS: "does revenue reach the token?" reads
+    // differently for a burn address, a treasury and an opaque address the
+    // dictionary could not classify. When S6 has positively recorded that
+    // an endpoint's role is unresolved, the existence of the endpoint
+    // cannot stand in for it: the atom drops to PARTIAL, so a
+    // destination-dependent claim can never read SUPPORTED off an opaque
+    // address, and REQUIRED_RELATIONSHIP_UNRESOLVED names why.
+    //
+    // PARTIAL and not UNSATISFIED, deliberately. UNSATISFIED is this
+    // file's verdict for an endpoint that is NOT ESTABLISHED, and it
+    // carries no componentResultKeys — so it would have dropped the
+    // citation of every established destination row the Proof rests on,
+    // which is the one thing the decision says not to do ("do NOT
+    // globally invalidate all evidence rows that contain an unknown
+    // destination"). It would also collapse an unrecognised kind into the
+    // same verdict as a genuinely unpairable branch (Round 6.6 HIGH-1),
+    // erasing a decided distinction. PARTIAL keeps the lineage cited,
+    // keeps the limitation visible as a blocking gap (which lowers the
+    // band), and makes SATISFIED unreachable. Absence of a role is
+    // absence, never a positive incompatibility.
+    const roleGaps = [...roleUnresolvedGaps(flow, from), ...roleUnresolvedGaps(flow, to)];
+    const partialEndpoint = fromStatus === "PARTIALLY_SUPPORTED" || toStatus === "PARTIALLY_SUPPORTED";
+    const status: ClaimRequirementStatus = roleGaps.length > 0 || partialEndpoint ? "PARTIAL" : "SATISFIED";
+    const reasonCodes: ClaimReasonCode[] = [];
+    // The role-less endpoint is named first: it is the reason the atom
+    // cannot be SATISFIED, and REQUIRED_PATH_PARTIAL alone would read as
+    // an authority limitation rather than an unknown economic role.
+    if (roleGaps.length > 0) reasonCodes.push("REQUIRED_RELATIONSHIP_UNRESOLVED");
+    if (partialEndpoint) reasonCodes.push("REQUIRED_PATH_PARTIAL");
+    return {
+      status,
+      reasonCodes: reasonCodes.sort(),
+      blockingGaps: roleGaps,
+      evidenceIds: evidenceIdsForComponentsOnFlow(flow, [from, to]),
+      componentResultKeys: [
+        { step: stepOfComponent(flow, from), component: from },
+        { step: stepOfComponent(flow, to), component: to },
+      ],
+    };
+  }
+
+  if (contradicted) {
+    return {
+      status: "CONTRADICTED",
+      reasonCodes: ["REQUIRED_PATH_CONTRADICTED"],
+      blockingGaps: [...fromGaps, ...toGaps].filter((g) => g.kind === "CONTRADICTED_COMPONENT"),
+      evidenceIds: gapEvidenceIds(flow, ["CONTRADICTED_COMPONENT"]),
+      // The refuted endpoints, so S8 can cite whatever support S5 kept on
+      // them (a measured non-decrease keeps its burn as support).
+      componentResultKeys: [from, to]
+        .map((c) => ({ step: stepOfComponent(flow, c), component: c }))
+        .filter((k) => k.step !== -1),
+    };
+  }
+  if (branchUnresolved) {
+    return {
+      status: "UNSATISFIED",
+      reasonCodes: ["BRANCH_ATTRIBUTION_UNRESOLVED"],
+      blockingGaps: [...fromGaps, ...toGaps].filter((g) => g.kind === "BRANCH_ATTRIBUTION_UNRESOLVED"),
+      evidenceIds: [],
+      componentResultKeys: [],
+    };
+  }
+  if (unresolvedRelationship) {
+    return {
+      status: "UNSATISFIED",
+      reasonCodes: ["REQUIRED_RELATIONSHIP_UNRESOLVED"],
+      blockingGaps: [...fromGaps, ...toGaps].filter((g) => g.kind === "DESTINATION_UNRESOLVED" || g.kind === "RECIPIENT_UNRESOLVED"),
+      evidenceIds: [],
+      componentResultKeys: [],
+    };
+  }
+  return {
+    status: "UNSATISFIED",
+    reasonCodes: ["REQUIRED_COMPONENT_MISSING"],
+    blockingGaps: [...fromGaps, ...toGaps],
+    evidenceIds: [],
+    componentResultKeys: [],
+  };
+}
+
+const ATTRIBUTE_MISMATCH_CODE: Record<string, ClaimReasonCode> = {
+  tokenState: "TOKEN_STATE_MISMATCH",
+  recipientKind: "ACTOR_MISMATCH",
+  destinationKind: "DESTINATION_MISMATCH",
+  valueSource: "REQUIRED_ATOM_UNSATISFIED",
+  direction: "REQUIRED_ATOM_UNSATISFIED",
+};
+
+// FLOW_ATTRIBUTE — exact normalized equality only (D-096/D-101 discipline
+// inherited verbatim: no semantic equivalence, no alias inference). A
+// positively established value outside expectedValues is a positive
+// incompatibility (CONTRADICTED); an unestablished (UNKNOWN/null)
+// attribute is absence, never incompatibility (UNSATISFIED, §12).
+function evaluateFlowAttribute(req: ClaimRequirement, flow: MechanismFlow): FlowVerdict | null {
+  const attribute = req.attribute!;
+  const expected = new Set((req.expectedValues ?? []).map((v) => v.toLowerCase()));
+  const raw = flow.attributes[attribute];
+  const value = raw === null ? null : String(raw);
+  const isUnestablished = value === null || value.toUpperCase() === "UNKNOWN";
+  const code = ATTRIBUTE_MISMATCH_CODE[attribute] ?? "REQUIRED_ATOM_UNSATISFIED";
+  const evidenceIds = allFlowEvidenceIds(flow);
+
+  if (evidenceIds.length === 0) return null; // nothing established on this flow at all — not a candidate
+
+  if (isUnestablished) {
+    // §20 precision: when the underlying component IS established but S6
+    // positively flagged its classification as unresolved (FLOW_IDENTITY_
+    // UNRESOLVED — currently only produced for SOURCE_OF_VALUE/valueSource,
+    // mechanism-assembler.ts), surface that specific code instead of the
+    // generic REQUIRED_ATOM_UNSATISFIED. Still absence, not incompatibility
+    // — status stays UNSATISFIED, never CONTRADICTED (§18.1: not proof of
+    // a positive incompatibility, just an unresolved identity).
+    const identityGaps = attribute === "valueSource" ? gapsForComponentOnFlow(flow, "SOURCE_OF_VALUE").filter((g) => g.kind === "FLOW_IDENTITY_UNRESOLVED") : [];
+    return {
+      status: "UNSATISFIED",
+      reasonCodes: identityGaps.length > 0 ? ["FLOW_IDENTITY_UNRESOLVED"] : ["REQUIRED_ATOM_UNSATISFIED"],
+      blockingGaps: identityGaps,
+      evidenceIds: [],
+      componentResultKeys: [],
+    };
+  }
+  const basis = ATTRIBUTE_BASIS_COMPONENTS[attribute] ?? [];
+  const componentResultKeys = basisResultKeys(flow, basis);
+  if (expected.has(value.toLowerCase())) {
+    // A match classified from a partially supported component is a
+    // partial match — see ATTRIBUTE_BASIS_COMPONENTS. A positive
+    // incompatibility below stays CONTRADICTED regardless: partial
+    // authority is a confidence matter, not a reason to soften a finding.
+    //
+    // M3 — AND a match on a role the flow carries but whose basis S6 left
+    // role-unresolved is equally not a full match. The only case Pattern
+    // v1 reaches is recipientKind = PASSIVE_HOLDER with no holding ->
+    // entitlement/receipt bridge: the recipient IS holders, so the value
+    // stands and a mismatch against a different role below is still a real
+    // refutation, but "holders receive something" does not fully establish
+    // "passive holding entitles holders to receive it". PARTIAL, never
+    // SATISFIED — the atom keeps its evidence and its citation, and
+    // PASSIVE_HOLDER_OUTCOME lands on PARTIALLY_SUPPORTED instead of
+    // SUPPORTED. destinationKind never arrives here role-unresolved: an
+    // unrecognised kind is UNKNOWN and was already answered above.
+    const roleGaps = roleUnresolvedGaps(flow, ATTRIBUTE_ROLE_COMPONENT[attribute] ?? "");
+    const partialBasis = anyBasisComponentPartial(flow, basis);
+    if (roleGaps.length > 0 || partialBasis) {
+      const reasonCodes: ClaimReasonCode[] = [];
+      if (roleGaps.length > 0) reasonCodes.push("REQUIRED_RELATIONSHIP_UNRESOLVED");
+      if (partialBasis) reasonCodes.push("REQUIRED_PATH_PARTIAL");
+      return { status: "PARTIAL", reasonCodes: reasonCodes.sort(), blockingGaps: roleGaps, evidenceIds, componentResultKeys };
+    }
+    return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys };
+  }
+  return { status: "CONTRADICTED", reasonCodes: [code], blockingGaps: [], evidenceIds, componentResultKeys };
+}
+
+// NET_EFFECT_ESTABLISHED — consumed verbatim from S6/S5; never
+// recomputed from a destinationKind/mechanism label (§17, mutations 5/6/26).
+function evaluateNetEffectEstablished(_req: ClaimRequirement, flow: MechanismFlow): FlowVerdict | null {
+  const gaps = gapsForComponentOnFlow(flow, "NET_EFFECT");
+  if (flow.netEffect) {
+    const status: ClaimRequirementStatus = flow.netEffect.componentStatus === "PARTIALLY_SUPPORTED" ? "PARTIAL" : "SATISFIED";
+    return {
+      status,
+      reasonCodes: status === "PARTIAL" ? ["REQUIRED_PATH_PARTIAL"] : [],
+      blockingGaps: [],
+      evidenceIds: sortedIds(flow.netEffect.provenance.evidenceIds),
+      componentResultKeys: [{ step: 7, component: "NET_EFFECT" }],
+    };
+  }
+  if (gaps.length === 0) return null;
+  const contradicted = gaps.some((g) => g.kind === "CONTRADICTED_COMPONENT");
+  return {
+    status: contradicted ? "CONTRADICTED" : "UNSATISFIED",
+    reasonCodes: [contradicted ? "REQUIRED_PATH_CONTRADICTED" : "NET_EFFECT_NOT_ESTABLISHED"],
+    blockingGaps: gaps,
+    evidenceIds: contradicted ? gapEvidenceIds(flow, ["CONTRADICTED_COMPONENT"], "NET_EFFECT") : [],
+    // A CONTRADICTED NET_EFFECT is the one refutation that KEEPS support
+    // (B2: the burn stays established while the measured interval refutes
+    // net reduction). Naming the component lets S8 cite that burn; without
+    // it a NOT_SUPPORTED supply verdict cited nothing at all.
+    componentResultKeys: contradicted ? [{ step: 7, component: "NET_EFFECT" }] : [],
+  };
+}
+
+// LIFECYCLE — consumed verbatim from S6's already-computed value; never
+// re-derived from currentState/temporalBasis directly (§14, no S6
+// re-adjudication). HISTORICAL is itself a positive structural fact
+// (S6 only reaches it when execution was established AND a deprecated/
+// paused state or newer-conflict was positively found, per S6's
+// computeLifecycle) — a CURRENT requirement against it is therefore a
+// positive incompatibility (CONTRADICTED), while NOT_ESTABLISHED is
+// genuine absence (UNSATISFIED). This is the one place the plan's §14
+// summary table and §18 point 3's normative NOT_SUPPORTED condition
+// could be read two ways; this file resolves it by keeping "HISTORICAL
+// is a positive fact" internally consistent rather than silently
+// treating every temporal mismatch the same.
+function evaluateLifecycle(req: ClaimRequirement, flow: MechanismFlow): FlowVerdict | null {
+  const expected = req.expectedLifecycle!;
+  const actual = flow.lifecycle;
+  const evidenceIds = allFlowEvidenceIds(flow);
+  if (evidenceIds.length === 0) return null; // nothing established on this flow at all — not a candidate
+  const satisfied = expected === "CURRENT" ? actual === "CURRENT" : actual === "CURRENT" || actual === "HISTORICAL";
+  if (satisfied) {
+    // Lifecycle CURRENT rests on CURRENT_STATE (S6 computeLifecycle). When
+    // that component is only PARTIALLY_SUPPORTED — every chain read is
+    // CLAIMED by design (D-074) — the lifecycle is exactly as partial.
+    const basis = lifecycleBasisComponents(actual);
+    const componentResultKeys = basisResultKeys(flow, basis);
+    if (anyBasisComponentPartial(flow, basis)) {
+      return { status: "PARTIAL", reasonCodes: ["REQUIRED_PATH_PARTIAL"], blockingGaps: [], evidenceIds, componentResultKeys };
+    }
+    return { status: "SATISFIED", reasonCodes: [], blockingGaps: [], evidenceIds, componentResultKeys };
+  }
+  if (expected === "CURRENT" && actual === "HISTORICAL") {
+    return {
+      status: "CONTRADICTED",
+      reasonCodes: ["TEMPORAL_SCOPE_MISMATCH"],
+      blockingGaps: [],
+      evidenceIds,
+      componentResultKeys: basisResultKeys(flow, lifecycleBasisComponents(actual)),
+    };
+  }
+  return {
+    status: "UNSATISFIED",
+    reasonCodes: ["TEMPORAL_SCOPE_MISMATCH"],
+    blockingGaps: [],
+    evidenceIds: [],
+    componentResultKeys: [],
+  };
+}
+
+// DURABILITY_ESTABLISHED — REQUIRED only when CORE explicitly marks it so
+// (§15); absence never blocks an unrelated intent's other atoms.
+function evaluateDurabilityEstablished(_req: ClaimRequirement, flow: MechanismFlow): FlowVerdict | null {
+  const gaps = gapsForComponentOnFlow(flow, "DURABILITY_BASIS");
+  if (flow.durability) {
+    const status: ClaimRequirementStatus = flow.durability.componentStatus === "PARTIALLY_SUPPORTED" ? "PARTIAL" : "SATISFIED";
+    return {
+      status,
+      reasonCodes: status === "PARTIAL" ? ["REQUIRED_PATH_PARTIAL"] : [],
+      blockingGaps: [],
+      evidenceIds: sortedIds(flow.durability.provenance.evidenceIds),
+      componentResultKeys: [{ step: 8, component: "DURABILITY_BASIS" }],
+    };
+  }
+  if (gaps.length === 0) return null;
+  return { status: "UNSATISFIED", reasonCodes: ["DURABILITY_NOT_ESTABLISHED"], blockingGaps: gaps, evidenceIds: [], componentResultKeys: [] };
+}
+
+const VERDICT_RANK: Record<ClaimRequirementStatus, number> = { SATISFIED: 0, PARTIAL: 1, CONTRADICTED: 2, UNSATISFIED: 3 };
+
+function evaluateRequirement(req: ClaimRequirement, assembly: MechanismAssemblyResult): ClaimRequirementResult {
+  const perFlow: { flow: MechanismFlow; verdict: FlowVerdict }[] = [];
+  for (const flow of assembly.flows) {
+    let verdict: FlowVerdict | null;
+    switch (req.kind) {
+      case "COMPONENT_ESTABLISHED":
+        verdict = evaluateComponentEstablished(req, flow);
+        break;
+      case "FLOW_RELATIONSHIP":
+        verdict = evaluateFlowRelationship(req, flow);
+        break;
+      case "FLOW_ATTRIBUTE":
+        verdict = evaluateFlowAttribute(req, flow);
+        break;
+      case "NET_EFFECT_ESTABLISHED":
+        verdict = evaluateNetEffectEstablished(req, flow);
+        break;
+      case "LIFECYCLE":
+        verdict = evaluateLifecycle(req, flow);
+        break;
+      case "DURABILITY_ESTABLISHED":
+        verdict = evaluateDurabilityEstablished(req, flow);
+        break;
+    }
+    if (verdict) perFlow.push({ flow, verdict });
+  }
+
+  // §9/§11 — existential across relevant flows, best tier wins. A flow
+  // that SATISFIES the atom is sufficient regardless of what any other,
+  // unrelated flow shows (no cherry-picking WITHIN one flow's own
+  // verdict — each verdict above is already computed against exactly
+  // one flow's own lineage/gaps, never synthesized from two).
+  if (perFlow.length === 0) {
+    return {
+      requirementId: req.requirementId,
+      optionality: req.optionality,
+      status: "UNSATISFIED",
+      reasonCodes: ["NO_RELEVANT_FLOW"],
+      matchedFlowIds: [],
+      blockingGaps: [],
+      provenance: EMPTY_PROVENANCE,
+    };
+  }
+
+  const bestRank = Math.min(...perFlow.map((p) => VERDICT_RANK[p.verdict.status]));
+  const winners = perFlow.filter((p) => VERDICT_RANK[p.verdict.status] === bestRank);
+
+  const matchedFlowIds = sortedIds(winners.map((w) => w.flow.flowId));
+  const reasonCodes = [...new Set(winners.flatMap((w) => w.verdict.reasonCodes))].sort();
+  const blockingGaps = winners.flatMap((w) => w.verdict.blockingGaps);
+  const evidenceIds = sortedIds(winners.flatMap((w) => w.verdict.evidenceIds));
+  const componentResultKeys = winners
+    .flatMap((w) => w.verdict.componentResultKeys)
+    .filter((k, i, arr) => arr.findIndex((o) => o.step === k.step && o.component === k.component) === i)
+    .sort((a, b) => a.step - b.step || (a.component < b.component ? -1 : 1));
+
+  const status = winners[0].verdict.status;
+  if ((status === "SATISFIED" || status === "PARTIAL" || status === "CONTRADICTED") && evidenceIds.length === 0) {
+    throw new ClaimEvaluationInvariantError(`requirement ${req.requirementId} is ${status} without provenance`);
+  }
+
+  return {
+    requirementId: req.requirementId,
+    optionality: req.optionality,
+    status,
+    reasonCodes,
+    matchedFlowIds,
+    blockingGaps,
+    provenance: { flowIds: matchedFlowIds, componentResultKeys, evidenceIds },
+  };
+}
+
+function contextGapsFor(assembly: MechanismAssemblyResult, relevantFlowIds: Set<string>): MechanismGapRef[] {
+  const refs: MechanismGapRef[] = [];
+  for (const flow of assembly.flows) {
+    if (relevantFlowIds.has(flow.flowId)) continue;
+    for (const gap of flow.gaps) refs.push(gapRef(flow.flowId, gap));
+  }
+  for (const gap of assembly.unassignedGaps) refs.push(gapRef(null, gap));
+  return refs.sort(compareGapRefs);
+}
+
+function compareGapRefs(a: MechanismGapRef, b: MechanismGapRef): number {
+  const aAfter = a.afterStep ?? -1;
+  const bAfter = b.afterStep ?? -1;
+  if (aAfter !== bAfter) return aAfter - bAfter;
+  if (a.kind !== b.kind) return a.kind < b.kind ? -1 : 1;
+  const aComp = a.component ?? "";
+  const bComp = b.component ?? "";
+  return aComp < bComp ? -1 : aComp > bComp ? 1 : 0;
+}
+
+function baseResult(input: ClaimEvaluationInput): Omit<ClaimSupportResult, "status" | "reasonCodes" | "requirementResults" | "contextGaps"> {
+  return { researchJobId: input.researchJobId, patternVersion: input.patternVersion, intent: input.intent, requirementSetVersion: input.requirementSetVersion };
+}
+
+// §6/D-106 — the 3 out-of-scope intents are handled BEFORE any CORE
+// lookup is attempted; they deliberately have no intentRequirements
+// entry, and that absence is not a configuration error for them.
+//
+// RC-5 — NOT A PROVABLE CLAIM, SO NOT A SUPPORT VERDICT. A methodology
+// question ("what evidence would be required to attribute X to Y?") asks
+// for an evidentiary standard, not for a proposition about a project. It
+// has no CORE requirement set because it is out of scope, so there is no
+// atom to satisfy and nothing that could be partially supported.
+const UNPROVABLE_CLAIM_INTENTS = new Set(["CLAIM_FACT_CHECK"]);
+const UNCLASSIFIED_INTENTS = new Set(["UNKNOWN", "SCENARIO_CAUSAL_IMPACT"]);
+
+export function evaluateClaimSupport(input: ClaimEvaluationInput): ClaimSupportResult {
+  const { intent, taskType, pattern, assembly } = input;
+
+  if (UNCLASSIFIED_INTENTS.has(intent)) {
+    return { ...baseResult(input), status: "INSUFFICIENT_EVIDENCE", reasonCodes: ["INTENT_NOT_CLASSIFIED"], requirementResults: [], contextGaps: [] };
+  }
+  if (UNPROVABLE_CLAIM_INTENTS.has(intent)) {
+    // RC-5, measured on the frozen panel. This used to return
+    // PARTIALLY_SUPPORTED whenever S6 had assembled any mechanism at all,
+    // which put two contradictory statements in one row: the reason code
+    // said the proposition could not be structured, while the status said
+    // it was partly proven. A professional reads the status, so a question
+    // ATLAS cannot analyse as a claim came back looking partly answered.
+    //
+    // Whether S6 assembled a mechanism is a fact about the JOB, not about
+    // this question: no amount of mechanism evidence can partially satisfy
+    // a proposition that was never structured. So the two branches now
+    // agree on the honest outcome and differ only in what they can say
+    // about why — NO_RELEVANT_FLOW when the job found no mechanism at all.
+    //
+    // This is strictly a LOWERING: SUPPORTED and PARTIALLY_SUPPORTED are
+    // both now unreachable for these intents, and NOT_SUPPORTED stays
+    // structurally unreachable (no requirement set means no positive
+    // incompatibility check is possible). Nothing here widens scope, and
+    // the in-scope CLAIM_VERIFICATION ceiling further below — which caps a
+    // genuinely evaluated claim — is untouched.
+    if (assembly.flows.length === 0) {
+      return {
+        ...baseResult(input),
+        status: "INSUFFICIENT_EVIDENCE",
+        reasonCodes: ["CLAIM_PROPOSITION_NOT_STRUCTURED", "NO_RELEVANT_FLOW"],
+        requirementResults: [],
+        contextGaps: contextGapsFor(assembly, new Set()),
+      };
+    }
+    return {
+      ...baseResult(input),
+      status: "INSUFFICIENT_EVIDENCE",
+      reasonCodes: ["CLAIM_PROPOSITION_NOT_STRUCTURED"],
+      requirementResults: [],
+      contextGaps: [],
+    };
+  }
+
+  const requirementSet = intentRequirementsFor(pattern, intent); // throws IntentConfigurationError
+
+  const seen = new Set<string>();
+  for (const req of requirementSet.requirements) {
+    if (seen.has(req.requirementId)) {
+      throw new ClaimEvaluationInvariantError(`duplicate requirementId "${req.requirementId}" in CORE intentRequirements for ${intent}`);
+    }
+    seen.add(req.requirementId);
+  }
+
+  const requirementResults = requirementSet.requirements
+    .map((req) => evaluateRequirement(req, assembly))
+    .sort((a, b) => (a.requirementId < b.requirementId ? -1 : 1));
+
+  const required = requirementResults.filter((r) => r.optionality === "REQUIRED");
+  const relevantFlowIds = new Set(requirementResults.flatMap((r) => r.matchedFlowIds));
+  const contextGaps = contextGapsFor(assembly, relevantFlowIds);
+
+  // A CLAIM WITH NOTHING REQUIRED IS NOT A PROPOSITION. The schema demands
+  // at least one requirement but not that any be REQUIRED, and the
+  // compound rule below reads an empty required set as vacuously
+  // satisfied — so an all-OPTIONAL set would have made any question
+  // SUPPORTED with no flow, no evidence and no citation, even with its
+  // optional atom positively contradicted. That is the one false
+  // SUPPORTED no reducer downstream could catch (S8 copies the verdict).
+  // Treated exactly as an unstructurable claim: the atoms are still
+  // evaluated and reported, the verdict is INSUFFICIENT_EVIDENCE.
+  if (required.length === 0) {
+    return {
+      ...baseResult(input),
+      status: "INSUFFICIENT_EVIDENCE",
+      reasonCodes: ["CLAIM_PROPOSITION_NOT_STRUCTURED"],
+      requirementResults,
+      contextGaps,
+    };
+  }
+
+  let status: ClaimSupportStatus;
+  const reasonCodes = new Set<ClaimReasonCode>();
+
+  // D-108, extended to the whole compound requirement (not just one
+  // relational atom): SUPPORTED requires every REQUIRED atom satisfied
+  // AND at least one flow that satisfies ALL of them in common. Without
+  // this, "source established on flow A" + "recipient established on
+  // flow B" as two independent FLOW_ATTRIBUTE atoms could each report
+  // SATISFIED while describing two unrelated mechanisms — exactly the
+  // cherry-picking §9/D-108 forbids, just spread across atoms instead of
+  // within one relational atom. In the normal case (one real coherent
+  // mechanism) this costs nothing: a flow that already satisfies every
+  // atom on its own trivially appears in every atom's matchedFlowIds.
+  const allSatisfied = required.length === 0 || required.every((r) => r.status === "SATISFIED");
+  const commonFlowExists =
+    required.length === 0 ||
+    required.every((r) => r.matchedFlowIds.length > 0) &&
+      required
+        .map((r) => new Set(r.matchedFlowIds))
+        .reduce((acc, set) => new Set([...acc].filter((id) => set.has(id))))
+        .size > 0;
+
+  if (allSatisfied && commonFlowExists) {
+    status = "SUPPORTED";
+  } else if (allSatisfied && !commonFlowExists) {
+    status = "PARTIALLY_SUPPORTED";
+    reasonCodes.add("REQUIRED_ATOM_UNSATISFIED");
+  } else if (required.some((r) => r.status === "CONTRADICTED")) {
+    status = "NOT_SUPPORTED";
+    for (const r of required) if (r.status === "CONTRADICTED") r.reasonCodes.forEach((c) => reasonCodes.add(c));
+  } else if (required.every((r) => r.status === "SATISFIED" || r.status === "PARTIAL") && required.some((r) => r.status === "PARTIAL")) {
+    status = "PARTIALLY_SUPPORTED";
+    reasonCodes.add("REQUIRED_PATH_PARTIAL");
+  } else if (required.some((r) => r.status === "SATISFIED" || r.status === "PARTIAL")) {
+    status = "PARTIALLY_SUPPORTED";
+    reasonCodes.add("REQUIRED_ATOM_UNSATISFIED");
+  } else {
+    status = "INSUFFICIENT_EVIDENCE";
+    for (const r of required) r.reasonCodes.forEach((c) => reasonCodes.add(c));
+  }
+
+  // §3.2/D-106 — structural ceiling for CLAIM_VERIFICATION task_type
+  // (and any CORE-declared per-intent ceiling), applied AFTER normal
+  // evaluation, capping only when it would otherwise exceed the ceiling.
+  // Never lifts a lower status up to the ceiling.
+  const ceilingApplies = taskType === "CLAIM_VERIFICATION" || requirementSet.ceiling === "PARTIALLY_SUPPORTED";
+  if (ceilingApplies && status === "SUPPORTED") {
+    status = "PARTIALLY_SUPPORTED";
+    reasonCodes.add("CLAIM_PROPOSITION_NOT_STRUCTURED");
+  }
+
+  return { ...baseResult(input), status, reasonCodes: [...reasonCodes].sort(), requirementResults, contextGaps };
+}

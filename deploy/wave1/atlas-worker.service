@@ -1,0 +1,26 @@
+# ATLAS PROOF — Wave 1 research worker (one process, both phase capabilities).
+# Install: /etc/systemd/system/atlas-worker.service
+[Unit]
+Description=ATLAS PROOF research worker
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlas
+Group=atlas
+WorkingDirectory=/opt/atlas/app
+EnvironmentFile=/etc/atlas/atlas.env
+EnvironmentFile=/etc/atlas/worker.env
+ExecStartPre=/bin/sh /opt/atlas/app/deploy/wave1/preflight-env.sh worker
+# Single node process (tsx loaded as an import hook), so SIGTERM reaches the
+# worker's own graceful shutdown (pg-boss stop, pool end) directly.
+ExecStart=/usr/bin/node --import tsx src/server/jobs/worker.ts
+Restart=always
+RestartSec=10
+TimeoutStopSec=60
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

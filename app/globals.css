@@ -1,26 +1,1358 @@
 @import "tailwindcss";
 
+/* ATLAS PROOF — VISUAL SYSTEM V6, DERIVED FROM THE AP MARK.
+   The logo is: a near-black navy disc, one electric cyan, brushed silver,
+   a thin luminous double ring, a faint evidence network, one controlled
+   glow. The interface translates that DNA: a deep navy ground with one
+   soft cyan light and a faint constellation; navy glass surfaces with a
+   cyan edge-light reserved for the one surface that matters; electric
+   cyan for the active, the verified and the primary action only; silver
+   for identity and structure; four state colours that mean one thing
+   each. The mark is the brightest object on any screen; everything else
+   is a restrained echo. Everything here is presentation. */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Ground and surfaces */
+  --atlas-bg: #060a12;
+  --atlas-bg-top: #0b1424;
+  --atlas-bg-raised: #101a2b;
+  --surface-1: #0f1727;
+  --surface-2: #141f33;
+  --surface-3: #1a2740;
+  --surface-accent: #0e1b2d; /* the one cyan-tinted surface */
+  --atlas-glass: rgba(15, 23, 39, 0.78);
+  --hairline: rgba(160, 190, 224, 0.11);
+  --hairline-strong: rgba(160, 190, 224, 0.22);
+  --atlas-border: var(--hairline);
+
+  /* Text — headline, body, muted, faint; silver for identity */
+  --atlas-text-strong: #ffffff;
+  --atlas-text: #e6ecf4;
+  --atlas-text-dim: #98a5b8;
+  --atlas-text-faint: #6b788b;
+  --atlas-silver: #d6dee8;
+
+  /* Brand — electric cyan, three strengths, and its light */
+  --atlas-cyan: #1ec5f5;
+  --atlas-cyan-strong: #8ee6ff;
+  --atlas-cyan-deep: #0d8fbf;
+  --atlas-teal: #2fc4b8;
+  --cyan-dim: rgba(30, 197, 245, 0.12);
+  --cyan-glow: rgba(30, 197, 245, 0.32);
+  --cyan-edge: rgba(30, 197, 245, 0.34);
+  /* Structural accent — a cold indigo for governance and structure only */
+  --atlas-indigo: #7b8ff2;
+  --indigo-dim: rgba(123, 143, 242, 0.14);
+
+  /* State — one colour each */
+  --atlas-green: #35d1a2; /* verified: a controlled cyan-green */
+  --atlas-amber: #e6b54d; /* partly verified */
+  --atlas-red: #ec6f6f; /* contradicted */
+  --atlas-slate: #94a0b3; /* unresolved */
+  --violet: var(--atlas-amber);
+  --violet-dim: rgba(230, 181, 77, 0.14);
+  --green-dim: rgba(53, 209, 162, 0.14);
+  --amber-dim: rgba(230, 181, 77, 0.14);
+  --red-dim: rgba(236, 111, 111, 0.14);
+  --slate-dim: rgba(148, 160, 179, 0.14);
+
+  /* Motion — micro 100–180, transition 150–250, large 200–350 */
+  --motion-micro: 140ms;
+  --motion-transition: 200ms;
+  --motion-large: 280ms;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
 }
 
 @theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
+  --color-background: var(--atlas-bg);
+  --color-foreground: var(--atlas-text);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--atlas-bg);
+  color: var(--atlas-text);
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  min-height: 100dvh;
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+  font-feature-settings: "cv02", "cv03", "cv04", "ss01";
+  letter-spacing: -0.011em;
+}
+
+/* Keyboard focus: one cyan ring, everywhere, only for keyboard users. */
+:focus-visible {
+  outline: 2px solid var(--atlas-cyan);
+  outline-offset: 2px;
+  border-radius: 0.5rem;
+}
+
+/* ---------------------------------------------------------------- *
+ * GROUND — the logo's atmosphere: one cyan light, a vignette, a faint
+ * constellation. Fixed, behind everything, one paint.
+ * ---------------------------------------------------------------- */
+.atlas-field {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  background:
+    radial-gradient(90% 50% at 50% -8%, rgba(30, 197, 245, 0.16) 0%, rgba(30, 197, 245, 0.05) 38%, transparent 68%),
+    radial-gradient(120% 90% at 50% 110%, rgba(0, 0, 0, 0.55) 0%, transparent 60%),
+    linear-gradient(180deg, var(--atlas-bg-top) 0%, var(--atlas-bg) 52vh);
+}
+.atlas-network {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 72vh;
+  opacity: 0.55;
+  fill: rgba(142, 230, 255, 0.55);
+  stroke: rgba(30, 197, 245, 0.16);
+  stroke-width: 0.8;
+  mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, transparent 100%);
+  -webkit-mask-image: linear-gradient(180deg, #000 0%, rgba(0, 0, 0, 0.7) 45%, transparent 100%);
+}
+.atlas-grid,
+.atlas-arcs {
+  display: none;
+}
+
+/* ---------------------------------------------------------------- *
+ * SURFACES — navy glass, layered; one cyan-lit hero.
+ * ---------------------------------------------------------------- */
+.glass {
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  border-radius: 1.25rem;
+}
+.panel {
+  position: relative;
+  border-radius: 1.25rem;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.04) inset,
+    0 16px 40px -24px rgba(0, 0, 0, 0.9);
+}
+.panel-raised {
+  background: var(--surface-2);
+}
+/* The executive surface: deep navy glass with a cyan edge-light, a light
+   along the top, a soft depth shadow and one faint ring motif — the
+   logo's ring, echoed once, at the top-right corner. */
+.panel-hero {
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(30, 197, 245, 0.07) 0%, rgba(30, 197, 245, 0) 40%),
+    linear-gradient(135deg, rgba(20, 31, 51, 0.92) 0%, rgba(14, 27, 45, 0.92) 100%);
+  border-color: var(--cyan-edge);
+  box-shadow:
+    0 1px 0 0 rgba(142, 230, 255, 0.12) inset,
+    0 0 0 1px rgba(30, 197, 245, 0.06),
+    0 0 48px -14px rgba(30, 197, 245, 0.28),
+    0 28px 64px -30px rgba(0, 0, 0, 0.95);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.panel-hero::after {
+  content: "";
+  position: absolute;
+  top: -5.5rem;
+  right: -5.5rem;
+  width: 15rem;
+  height: 15rem;
+  border-radius: 9999px;
+  pointer-events: none;
+  border: 1px solid rgba(30, 197, 245, 0.16);
+  box-shadow: inset 0 0 0 0.95rem transparent, inset 0 0 0 1px rgba(30, 197, 245, 0.08);
+  mask-image: radial-gradient(circle at 30% 70%, #000 30%, transparent 70%);
+  -webkit-mask-image: radial-gradient(circle at 30% 70%, #000 30%, transparent 70%);
+}
+/* A section surface: a bordered area that groups rows or cards without
+   boxing each of them — findings, uncertainty. */
+.panel-section {
+  position: relative;
+  border-radius: 1.25rem;
+  background: var(--atlas-glass);
+  border: 1px solid var(--hairline);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset;
+}
+.tone-edge {
+  overflow: hidden;
+}
+.tone-edge::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 3px;
+  background: var(--edge, transparent);
+  box-shadow: 0 0 14px 0 var(--edge, transparent);
+}
+.row-card {
+  position: relative;
+  border-radius: 1.15rem;
+  background: var(--surface-1);
+  border: 1px solid var(--hairline);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out);
+}
+.row-card:hover {
+  border-color: var(--hairline-strong);
+  background: var(--surface-2);
+}
+.row-card:active {
+  transform: scale(0.995);
+}
+
+/* ---------------------------------------------------------------- *
+ * TYPOGRAPHY
+ * ---------------------------------------------------------------- */
+.eyebrow,
+.section-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--atlas-text-dim);
+}
+.eyebrow-cyan,
+.eyebrow-violet {
+  color: var(--atlas-text-dim);
+}
+/* The wordmark: ATLAS in silver, PROOF in cyan — the logo's two metals. */
+.wordmark {
+  font-weight: 500;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--atlas-silver);
+}
+.text-gradient-cyan {
+  color: var(--atlas-cyan-strong);
+}
+.display {
+  letter-spacing: -0.022em;
+}
+
+/* ---------------------------------------------------------------- *
+ * THE ATLAS MARK — the one luminous object. The ring is drawn in the
+ * SVG; the halo is this shadow, so its strength lives here.
+ * ---------------------------------------------------------------- */
+.orb {
+  position: relative;
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  background: #070c15;
+  box-shadow:
+    0 0 0 1px rgba(30, 197, 245, 0.08),
+    0 0 14px rgba(30, 197, 245, 0.22);
+  transition: box-shadow var(--motion-transition) var(--ease-out);
+}
+.orb-sm {
+  box-shadow:
+    0 0 0 1px rgba(30, 197, 245, 0.06),
+    0 0 10px rgba(30, 197, 245, 0.18);
+}
+.orb-hero {
+  box-shadow:
+    0 0 0 1px rgba(30, 197, 245, 0.1),
+    0 0 28px rgba(30, 197, 245, 0.34),
+    0 0 72px rgba(30, 197, 245, 0.12);
+}
+.orb > svg {
+  display: block;
+}
+
+/* ---------------------------------------------------------------- *
+ * TONES — verdict / status pills. Sentence case, a leading dot.
+ * ---------------------------------------------------------------- */
+.tone {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  padding: 0.4rem 0.9rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  white-space: nowrap;
+  line-height: 1.1;
+}
+.tone::before {
+  content: "";
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 9999px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
+  flex: none;
+}
+.tone-supported {
+  color: #7be6c3;
+  background: var(--green-dim);
+  border-color: rgba(53, 209, 162, 0.35);
+}
+.tone-partial {
+  color: #f0cd7c;
+  background: var(--amber-dim);
+  border-color: rgba(230, 181, 77, 0.35);
+}
+.tone-insufficient {
+  color: #bac4d3;
+  background: var(--slate-dim);
+  border-color: rgba(148, 160, 179, 0.32);
+}
+.tone-negative {
+  color: #f5a3a3;
+  background: var(--red-dim);
+  border-color: rgba(236, 111, 111, 0.35);
+}
+.tone-fault {
+  color: #c9d2de;
+  background: rgba(100, 116, 139, 0.16);
+  border-color: rgba(148, 163, 184, 0.35);
+}
+.tone-neutral {
+  color: var(--atlas-text-dim);
+  background: rgba(148, 163, 184, 0.09);
+  border-color: rgba(148, 163, 184, 0.2);
+}
+.dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 9999px;
+  flex: none;
+}
+.dot-supported {
+  background: var(--atlas-green);
+}
+.dot-partial {
+  background: var(--atlas-amber);
+}
+.dot-insufficient {
+  background: var(--atlas-slate);
+}
+.dot-negative {
+  background: var(--atlas-red);
+}
+.dot-fault,
+.dot-neutral {
+  background: rgba(148, 163, 184, 0.6);
+}
+
+/* ---------------------------------------------------------------- *
+ * CONTROLS — one primary, one secondary, small actions, chips.
+ * ---------------------------------------------------------------- */
+.pill {
+  border-radius: 9999px;
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    opacity var(--motion-micro) var(--ease-out),
+    background-color var(--motion-micro) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
+}
+.pill:active {
+  transform: scale(0.97);
+}
+/* The primary action: electric cyan, one glow. */
+.cta {
+  background: linear-gradient(180deg, #4fd6fb 0%, var(--atlas-cyan) 55%, #14b1e2 100%);
+  color: #05202b;
+  font-weight: 600;
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.25) inset,
+    0 8px 22px -10px var(--cyan-glow);
+}
+.cta:hover:not(:disabled) {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.3) inset,
+    0 10px 28px -10px rgba(30, 197, 245, 0.5);
+}
+.cta:disabled {
+  opacity: 0.45;
+  box-shadow: none;
+}
+/* A secondary action: an outlined pill that lights its edge on hover. */
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--hairline-strong);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--atlas-text);
+  font-weight: 500;
+  transition:
+    background-color var(--motion-micro) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out),
+    color var(--motion-transition) var(--ease-out),
+    transform var(--motion-micro) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
+}
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--cyan-edge);
+  color: var(--atlas-text-strong);
+  box-shadow: 0 0 0 1px rgba(30, 197, 245, 0.06);
+}
+.btn-secondary:active {
+  transform: scale(0.98);
+}
+/* A small in-place action — "Evidence · 3", "View excerpt". Looks like a
+   control, sits in a byline. */
+.btn-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(30, 197, 245, 0.28);
+  background: rgba(30, 197, 245, 0.06);
+  color: var(--atlas-cyan-strong);
+  padding: 0.28rem 0.7rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  line-height: 1.1;
+  white-space: nowrap;
+  transition:
+    background-color var(--motion-micro) var(--ease-out),
+    border-color var(--motion-micro) var(--ease-out),
+    transform var(--motion-micro) var(--ease-out);
+}
+.btn-action:hover {
+  background: rgba(30, 197, 245, 0.14);
+  border-color: rgba(30, 197, 245, 0.5);
+}
+.btn-action:active {
+  transform: scale(0.97);
+}
+.btn-action[aria-expanded="true"] {
+  background: rgba(30, 197, 245, 0.16);
+  border-color: rgba(30, 197, 245, 0.55);
+}
+/* A quiet text action with its icon — Open original, Snapshot. */
+.link-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+  transition: color var(--motion-micro) var(--ease-out);
+}
+.link-action:hover {
+  color: var(--atlas-cyan-strong);
+}
+
+/* The composer's send control — the cyan disc. */
+.send-orb {
+  display: grid;
+  place-items: center;
+  border-radius: 9999px;
+  color: #05202b;
+  background: linear-gradient(180deg, #4fd6fb 0%, var(--atlas-cyan) 60%, #14b1e2 100%);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.25) inset,
+    0 8px 24px -8px var(--cyan-glow);
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out),
+    opacity var(--motion-micro) var(--ease-out);
+}
+.send-orb:hover:not(:disabled) {
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.3) inset,
+    0 10px 30px -8px rgba(30, 197, 245, 0.55);
+}
+.send-orb:active:not(:disabled) {
+  transform: scale(0.95);
+}
+.send-orb:disabled {
+  opacity: 0.35;
+  box-shadow: none;
+}
+.send-orb .pulse-dot {
+  background: #05202b;
+  box-shadow: none;
+}
+
+.field {
+  width: 100%;
+  background: rgba(6, 10, 18, 0.55);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 1.25rem;
+  color: var(--atlas-text);
+  outline: none;
+  transition:
+    border-color var(--motion-transition) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out);
+}
+.field::placeholder {
+  color: var(--atlas-text-faint);
+}
+.field:focus,
+.field:focus-within {
+  border-color: rgba(30, 197, 245, 0.65);
+  background: rgba(6, 10, 18, 0.75);
+  box-shadow:
+    0 0 0 3px var(--cyan-dim),
+    0 0 24px -6px var(--cyan-glow);
+}
+.field-icon {
+  color: var(--atlas-text-faint);
+  flex: none;
+  transition: color var(--motion-transition) var(--ease-out);
+}
+.field:focus-within .field-icon {
+  color: var(--atlas-cyan);
+}
+
+/* Suggested questions — quiet chips that light on hover. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-radius: 9999px;
+  padding: 0.55rem 0.95rem;
+  text-align: left;
+  font-size: 0.9rem;
+  line-height: 1.3;
+  border: 1px solid var(--hairline);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--atlas-text-dim);
+  transition:
+    border-color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out),
+    color var(--motion-transition) var(--ease-out),
+    transform var(--motion-micro) var(--ease-out);
+}
+.chip:hover {
+  background: var(--cyan-dim);
+  border-color: var(--cyan-edge);
+  color: var(--atlas-text-strong);
+}
+.chip:active {
+  transform: scale(0.985);
+}
+.chip-violet,
+.chip-cyan,
+.chip-teal {
+  color: var(--atlas-text);
+}
+
+/* ---------------------------------------------------------------- *
+ * PROGRESS RAIL
+ * ---------------------------------------------------------------- */
+.rail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.rail-item {
+  display: grid;
+  grid-template-columns: 1.5rem 1fr;
+  gap: 0.75rem;
+  align-items: start;
+  padding-bottom: 0.85rem;
+}
+.rail-item:last-child {
+  padding-bottom: 0;
+}
+.rail-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  border: 1px solid var(--hairline-strong);
+  background: var(--surface-2);
+  font-size: 0.7rem;
+  color: var(--atlas-text-dim);
+  flex: none;
+}
+.rail-item:not(:last-child) .rail-mark::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 1px;
+  height: 0.85rem;
+  transform: translateX(-50%);
+  background: var(--hairline);
+}
+.rail-mark-done {
+  border-color: rgba(53, 209, 162, 0.5);
+  color: #7be6c3;
+  background: var(--green-dim);
+}
+.rail-mark-active {
+  border-color: rgba(30, 197, 245, 0.8);
+  color: var(--atlas-cyan-strong);
+  background: var(--cyan-dim);
+  box-shadow: 0 0 12px var(--cyan-glow);
+}
+
+/* ---------------------------------------------------------------- *
+ * RESULT LADDER (deep surfaces)
+ * ---------------------------------------------------------------- */
+.ladder-item {
+  margin-left: -0.5rem;
+  margin-right: -0.5rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  border-left: 2px solid transparent;
+  border-radius: 0.75rem;
+  transition:
+    background 140ms ease,
+    border-left-color 140ms ease;
+}
+.ladder-item:last-child {
+  border-bottom: none;
+}
+.ladder-item:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+.ladder-item-open {
+  background: rgba(255, 255, 255, 0.04);
+  border-bottom-color: transparent;
+  border-left-color: var(--row-accent, var(--hairline-strong));
+}
+@media (min-width: 1024px) {
+  .ladder-item {
+    margin-left: -0.65rem;
+    margin-right: -0.65rem;
+    padding-left: 0.65rem;
+    padding-right: 0.65rem;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * RESULT ANSWER DISCLOSURE (one copy of the text; see research-result)
+ * ---------------------------------------------------------------- */
+.answer-detail > summary::-webkit-details-marker {
+  display: none;
+}
+.answer-detail > summary::marker {
+  content: "";
+}
+@supports selector(::details-content) {
+  @media (min-width: 1024px) {
+    .answer-detail > summary {
+      display: none;
+    }
+    .answer-detail::details-content {
+      content-visibility: visible;
+    }
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * EXECUTIVE STATS — the work behind the answer, in four figures.
+ * ---------------------------------------------------------------- */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.6rem;
+}
+@media (min-width: 640px) {
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.stat {
+  position: relative;
+  border-radius: 0.9rem;
+  border: 1px solid var(--hairline);
+  background: rgba(6, 10, 18, 0.35);
+  padding: 0.75rem 0.95rem;
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.03) inset;
+}
+.stat-n {
+  display: block;
+  font-size: 1.4rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  color: var(--atlas-text-strong);
+}
+.stat-l {
+  display: block;
+  margin-top: 0.2rem;
+  font-size: 0.85rem;
+  color: var(--atlas-text-dim);
+}
+.stat-verified .stat-n {
+  color: #7be6c3;
+}
+
+/* ---------------------------------------------------------------- *
+ * RESEARCH PATH — the verification chain. A connector that reads as
+ * one line, luminous verified nodes, restrained partial and open ones.
+ * Scrolls sideways on a handset with a fade; fits the desk column.
+ * ---------------------------------------------------------------- */
+.path {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  overflow-x: auto;
+  padding: 0.35rem 0 0.4rem;
+  scrollbar-width: none;
+}
+.path::-webkit-scrollbar {
+  display: none;
+}
+@media (max-width: 767px) {
+  .path {
+    mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+  }
+}
+.path-node {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1 1 0;
+  min-width: 5.4rem;
+  padding: 0.2rem 0.35rem 0;
+  text-align: center;
+  font-size: 0.88rem;
+  font-weight: 500;
+  line-height: 1.2;
+  color: var(--atlas-text);
+}
+@media (min-width: 768px) {
+  .path-node {
+    min-width: 0;
+  }
+}
+/* the connector — a line from this node's centre to the next's */
+.path-node::before {
+  content: "";
+  position: absolute;
+  top: 0.85rem;
+  left: 50%;
+  right: -50%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--node, var(--hairline-strong)) 0%, rgba(160, 190, 224, 0.18) 60%);
+  opacity: 0.8;
+}
+.path-node:last-child::before {
+  display: none;
+}
+.path-mark {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 1.7rem;
+  height: 1.7rem;
+  border-radius: 9999px;
+  background: var(--atlas-bg);
+  border: 2px solid var(--node, var(--hairline-strong));
+  color: var(--node, var(--atlas-text-dim));
+  font-size: 0.8rem;
+  font-weight: 700;
+  transition:
+    transform var(--motion-micro) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
+}
+.path-mark-filled {
+  background: var(--node);
+  color: #06111a;
+  box-shadow:
+    0 0 0 3px color-mix(in srgb, var(--node) 18%, transparent),
+    0 0 14px color-mix(in srgb, var(--node) 55%, transparent);
+}
+.path-node:hover .path-mark {
+  transform: translateY(-1px);
+}
+.path-state {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+}
+
+/* ---------------------------------------------------------------- *
+ * FINDING ROWS — the analytical table on the result.
+ * ---------------------------------------------------------------- */
+.finding {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.5rem 1.5rem;
+  padding: 1.2rem 1.25rem 1.2rem 1.6rem;
+  border-bottom: 1px solid var(--hairline);
+  transition: background-color var(--motion-transition) var(--ease-out);
+}
+@media (min-width: 640px) {
+  .finding {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.6fr);
+    padding: 1.4rem 1.6rem 1.4rem 1.9rem;
+  }
+}
+.finding:last-child {
+  border-bottom: 0;
+}
+.finding:hover {
+  background: rgba(30, 197, 245, 0.035);
+}
+/* the state rail — a luminous bar in the row's state colour */
+.finding::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1.4rem;
+  bottom: 1.4rem;
+  width: 3px;
+  border-radius: 0 9999px 9999px 0;
+  background: var(--row-accent, var(--hairline-strong));
+  box-shadow: 0 0 10px color-mix(in srgb, var(--row-accent, transparent) 45%, transparent);
+}
+.finding-open {
+  background: rgba(30, 197, 245, 0.045);
+}
+/* The evidence block a tap on "Evidence · N" opens beneath a finding —
+   its own tinted surface, so the change of state is unmistakable. */
+.row-evidence {
+  margin-top: 0.9rem;
+  border-radius: 0.9rem;
+  border: 1px solid rgba(30, 197, 245, 0.2);
+  background:
+    linear-gradient(180deg, rgba(30, 197, 245, 0.06) 0%, rgba(30, 197, 245, 0.02) 100%),
+    rgba(6, 10, 18, 0.35);
+  padding: 0.9rem 1rem 1rem;
+  box-shadow: 0 1px 0 0 rgba(142, 230, 255, 0.08) inset;
+}
+.row-evidence-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--atlas-cyan-strong);
+}
+.state-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.65rem;
+  font-size: 0.88rem;
+  color: var(--atlas-text-dim);
+}
+.state-glyph {
+  display: inline-grid;
+  place-items: center;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 9999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #06111a;
+  background: var(--row-accent, var(--atlas-slate));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--row-accent, transparent) 45%, transparent);
+  flex: none;
+}
+.state-word {
+  font-weight: 600;
+  color: var(--atlas-text);
+}
+.byline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+.counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.1rem;
+  font-size: 0.92rem;
+  color: var(--atlas-text-dim);
+}
+.counts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+/* ---------------------------------------------------------------- *
+ * EVIDENCE CARDS — the proof behind the answer, as objects. One accent
+ * edge and one icon per source family: cyan documentation, indigo
+ * governance, teal chain, silver measured / reported.
+ * ---------------------------------------------------------------- */
+.evidence-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.8rem;
+}
+@media (min-width: 768px) {
+  .evidence-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .evidence-grid > .evidence-card-wide {
+    grid-column: 1 / -1;
+  }
+}
+.evidence-card {
+  --kind: var(--atlas-cyan);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  border-radius: 1rem;
+  border: 1px solid var(--hairline);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025) 0%, rgba(255, 255, 255, 0) 40%),
+    var(--surface-1);
+  padding: 1rem 1.15rem 1rem 1.3rem;
+  box-shadow: 0 10px 28px -20px rgba(0, 0, 0, 0.9);
+  transition:
+    border-color var(--motion-transition) var(--ease-out),
+    transform var(--motion-transition) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
+}
+.evidence-card::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 1rem;
+  bottom: 1rem;
+  width: 3px;
+  border-radius: 0 9999px 9999px 0;
+  background: var(--kind);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--kind) 40%, transparent);
+}
+.evidence-card:hover {
+  border-color: var(--hairline-strong);
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px -20px rgba(0, 0, 0, 0.95);
+}
+.evidence-card[data-relation="CONTRADICTS"] {
+  border-color: rgba(236, 111, 111, 0.4);
+}
+.kind-docs {
+  --kind: var(--atlas-cyan);
+}
+.kind-governance {
+  --kind: var(--atlas-indigo);
+}
+.kind-chain {
+  --kind: var(--atlas-teal);
+}
+.kind-data {
+  --kind: var(--atlas-silver);
+}
+/* the kind badge: icon + label, tinted with the family's accent */
+.kind {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 0.55rem;
+  padding: 0.22rem 0.55rem 0.22rem 0.45rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--kind);
+  background: color-mix(in srgb, var(--kind) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--kind) 22%, transparent);
+}
+.kind-onchain {
+  --kind: var(--atlas-teal);
+}
+
+/* ---------------------------------------------------------------- *
+ * PROJECT AVATAR — initials on a navy disc, one deterministic hue.
+ * ---------------------------------------------------------------- */
+.avatar {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  border-radius: 9999px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: hsl(var(--hue, 190) 70% 78%);
+  background:
+    radial-gradient(circle at 50% 30%, hsl(var(--hue, 190) 55% 22% / 0.9) 0%, transparent 70%),
+    var(--surface-2);
+  border: 1px solid hsl(var(--hue, 190) 60% 60% / 0.35);
+  box-shadow: 0 0 0 1px hsl(var(--hue, 190) 60% 60% / 0.06);
+}
+/* The tagline under the wordmark: small, tracked, a hairline either side. */
+.tagline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--atlas-text-dim);
+}
+.tagline::before,
+.tagline::after {
+  content: "";
+  width: 1.75rem;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--hairline-strong));
+}
+.tagline::after {
+  background: linear-gradient(90deg, var(--hairline-strong), transparent);
+}
+/* A loading placeholder that keeps the row's shape. */
+.skeleton {
+  border-radius: 0.5rem;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
+  background-size: 200% 100%;
+  animation: atlas-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes atlas-shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skeleton {
+    animation: none;
+  }
+}
+
+/* ---------------------------------------------------------------- *
+ * HISTORY ROWS
+ * ---------------------------------------------------------------- */
+.history-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 1rem;
+  padding: 1rem 0.5rem;
+  border-bottom: 1px solid var(--hairline);
+  border-radius: 0.85rem;
+  transition: background-color var(--motion-micro) var(--ease-out);
+}
+li:last-child > .history-row {
+  border-bottom: 0;
+}
+.history-row:hover {
+  background: rgba(30, 197, 245, 0.04);
+}
+
+/* ---------------------------------------------------------------- *
+ * NAVIGATION — header on a desk, five-item bar on a handset.
+ * ---------------------------------------------------------------- */
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0 0.7rem;
+  margin-bottom: 0.5rem;
+}
+@media (min-width: 640px) {
+  .app-header {
+    padding: 1.1rem 0 1rem;
+    margin-bottom: 1.25rem;
+    border-bottom: 1px solid var(--hairline);
+  }
+}
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-width: 0;
+}
+.brand-lockup-home {
+  display: none;
+}
+@media (min-width: 640px) {
+  .brand-lockup-home {
+    display: flex;
+    visibility: hidden;
+  }
+}
+.app-nav {
+  align-items: center;
+  gap: 0.25rem;
+}
+.app-nav-item {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+  padding: 0.5rem 0.9rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  transition:
+    color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out);
+}
+.app-nav-item:hover {
+  color: var(--atlas-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+.app-nav-item-active {
+  color: var(--atlas-cyan-strong);
+  background: var(--cyan-dim);
+  border-color: rgba(30, 197, 245, 0.22);
+}
+.home-orb,
+.dock-home {
+  display: inline-flex;
+  border-radius: 9999px;
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.home-orb:hover,
+.dock-home:hover {
+  transform: translateY(-1px);
+}
+.home-orb:active,
+.dock-home:active {
+  transform: scale(0.96);
+}
+.home-orb:hover > .orb,
+.dock-home:hover > .orb {
+  box-shadow:
+    0 0 0 1px rgba(30, 197, 245, 0.16),
+    0 0 22px rgba(30, 197, 245, 0.42);
+}
+.home-orb-active > .orb,
+.dock-home.home-orb-active > .orb {
+  box-shadow:
+    0 0 0 3px var(--cyan-dim),
+    0 0 22px rgba(30, 197, 245, 0.42);
+}
+.profile-link {
+  display: none;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+  padding: 0.5rem 0.9rem;
+  border-radius: 9999px;
+  border: 1px solid transparent;
+  transition:
+    color var(--motion-transition) var(--ease-out),
+    background-color var(--motion-transition) var(--ease-out),
+    border-color var(--motion-transition) var(--ease-out);
+}
+@media (min-width: 640px) {
+  .profile-link {
+    display: inline-flex;
+  }
+}
+.profile-link:hover {
+  color: var(--atlas-text);
+  background: rgba(255, 255, 255, 0.04);
+}
+.profile-link-active {
+  color: var(--atlas-cyan-strong);
+  background: var(--cyan-dim);
+  border-color: rgba(30, 197, 245, 0.22);
+}
+
+.dock {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  align-items: end;
+  padding: 0.4rem 0.5rem calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+  background: rgba(8, 13, 22, 0.94);
+  border-top: 1px solid rgba(30, 197, 245, 0.16);
+  box-shadow: 0 -12px 30px -18px rgba(0, 0, 0, 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+@media (min-width: 640px) {
+  .dock {
+    display: none;
+  }
+}
+.dock-item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  min-height: 3.25rem;
+  padding: 0.45rem 0.1rem 0.25rem;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--atlas-text-dim);
+  border-radius: 0.9rem;
+  transition: color var(--motion-transition) var(--ease-out);
+}
+.dock-item > svg {
+  border-radius: 9999px;
+  padding: 0.3rem;
+  box-sizing: content-box;
+  transition:
+    background-color var(--motion-transition) var(--ease-out),
+    box-shadow var(--motion-transition) var(--ease-out);
+}
+.dock-item-active {
+  color: var(--atlas-cyan-strong);
+}
+.dock-item-active > svg {
+  background: var(--cyan-dim);
+  box-shadow: 0 0 0 1px rgba(30, 197, 245, 0.22);
+}
+.dock-home {
+  justify-self: center;
+  margin-top: -1.7rem;
+  padding: 0.3rem;
+  background: var(--atlas-bg);
+  border-radius: 9999px;
+}
+.dock-home > .orb {
+  box-shadow:
+    0 0 0 1px rgba(30, 197, 245, 0.12),
+    0 0 22px rgba(30, 197, 245, 0.34),
+    0 10px 24px -12px rgba(0, 0, 0, 0.8);
+}
+
+/* ---------------------------------------------------------------- *
+ * MOTION
+ * ---------------------------------------------------------------- */
+@keyframes atlas-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.enter {
+  animation: atlas-fade-up var(--motion-transition) var(--ease-out) both;
+}
+@keyframes atlas-sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+.sheet-enter {
+  animation: atlas-sheet-up var(--motion-large) var(--ease-out) both;
+}
+/* an expanded block of evidence under a row */
+@keyframes atlas-expand {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.expand-enter {
+  animation: atlas-expand var(--motion-transition) var(--ease-out) both;
+}
+.unread-dot::after {
+  content: "";
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--atlas-cyan);
+  box-shadow: 0 0 8px var(--cyan-glow);
+}
+@keyframes atlas-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.pulse-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 9999px;
+  background: var(--atlas-cyan);
+  box-shadow: 0 0 8px var(--cyan-glow);
+  animation: atlas-pulse 1.2s var(--ease-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .enter,
+  .sheet-enter,
+  .expand-enter {
+    animation: none;
+  }
+  .pulse-dot {
+    animation: none;
+    opacity: 1;
+  }
+  .pill,
+  .pill:active,
+  .chip,
+  .row-card,
+  .send-orb,
+  .btn-secondary,
+  .btn-action,
+  .evidence-card,
+  .path-mark {
+    transition: none;
+    transform: none;
+  }
+}
+
+.safe-bottom {
+  padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.5rem);
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(152, 165, 184, 0.25) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(152, 165, 184, 0.25);
+  border-radius: 9999px;
 }

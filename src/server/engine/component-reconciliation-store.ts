@@ -1,0 +1,500 @@
+import { and, desc, eq, inArray, isNotNull, or } from "drizzle-orm";
+
+import type { Database, Transaction } from "../db/client";
+import {
+  resolveConfirmedIdentity,
+  type ConfirmedProjectIdentity,
+} from "../domain/project-identity";
+import { evidence, researchAttempts, researchComponentResults, researchJobs, researchPatterns, researchPlans } from "../db/schema";
+import { loadProductConfig } from "../config/product";
+import { componentRequirementsFor, patternContentSchema } from "../domain/pattern";
+import { parseContract } from "../memory/contract";
+import { loadActivePatternVersion, MissingActivePatternError } from "./active-pattern";
+import type { ComponentWorkItem } from "./contract-view";
+import {
+  acquisitionBoundaryFromAttempt,
+  reconcileComponent,
+  type AcquisitionBoundary,
+  type ComponentReconciliationResult,
+  type EvidenceRow,
+} from "./component-reconciler";
+import { applicableFactKindsForComponent } from "./onchain-facts";
+
+// Phase 6, S5 — persistence boundary (phase-6-s5-plan.md §11.3, §17). This
+// is the ONLY module that touches the DB for reconciliation: it loads
+// exactly what reconcileComponent() (pure, DB-free) needs, then upserts its
+// result. All the actual rules live in component-reconciler.ts — nothing
+// here decides establishment/contradiction/supersession/token-state.
+
+// HIGH-4 (deep audit) fix — the previous version of this function read
+// "the first research_patterns row for this topic", with no status filter
+// and no ORDER BY: on a topic carrying a RETIRED v1 alongside an ACTIVE
+// v2, it silently reconciled against whichever row Postgres's heap
+// happened to return first — proven non-deterministic and, in the deep
+// audit's repro, the RETIRED version. This reuses the SAME Phase-6-safe
+// ACTIVE-only lookup S4 already established (active-pattern.ts) rather
+// than inventing a second selector, and additionally cross-checks the
+// job's own frozen contract.patternVersion (the same check
+// buildContractView performs at plan time, §5.1) — defensively re-verified
+// here since S5 can run at a different moment than plan-time. Either
+// disagreement is a hard, typed configuration failure — never a silent
+// fallback to some other row.
+// Exported for the Memory adoption path (memory-evidence-adoption.ts), which
+// must resolve component requirements against exactly the Pattern S5 will
+// reconcile under — the same row, the same cross-check, no second loader.
+export async function loadActivePatternContentForJob(db: Database | Transaction, jobId: string) {
+  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job) throw new Error(`research job not found: ${jobId}`);
+  if (!job.topicId) throw new Error(`research job ${jobId} has no topicId`);
+
+  const activeVersion = await loadActivePatternVersion(db, job.topicId);
+  if (activeVersion === null) {
+    throw new MissingActivePatternError(
+      `no ACTIVE research_patterns row for topic ${job.topicId} — refusing to reconcile without a confirmed active Pattern version`,
+    );
+  }
+
+  const [planRow] = await db
+    .select()
+    .from(researchPlans)
+    .where(eq(researchPlans.researchJobId, jobId))
+    .orderBy(desc(researchPlans.version))
+    .limit(1);
+  if (planRow) {
+    const contract = parseContract(planRow.contract);
+    if (contract.patternVersion !== activeVersion) {
+      throw new MissingActivePatternError(
+        `job ${jobId}'s frozen contract.patternVersion=${contract.patternVersion} does not match topic ${job.topicId}'s ` +
+          `current ACTIVE Pattern version=${activeVersion} — refusing to reconcile against a Pattern the job was not planned under`,
+      );
+    }
+  }
+
+  const [pattern] = await db
+    .select()
+    .from(researchPatterns)
+    .where(and(eq(researchPatterns.topicId, job.topicId), eq(researchPatterns.version, activeVersion)));
+  if (!pattern) {
+    throw new Error(`ACTIVE research_patterns row for topic ${job.topicId} version ${activeVersion} vanished between lookup and read`);
+  }
+  // Same discipline as plan-job.ts's loadActivePattern — a malformed
+  // Pattern must not silently reach reconciliation.
+  return patternContentSchema.parse(pattern.content);
+}
+
+// WHAT THE RECONCILER IS ALLOWED TO SEE.
+//
+// THE DEFECT THIS CLOSES. `onchainFactAppliesToComponent` was correct and
+// unreachable: the reconciler asked it per row, but this loader selected
+// rows by (job, step, component) alone, so the one row the rule exists for
+// — a BURN filed at EXECUTION_EVIDENCE, because a transaction is reachable
+// only through that component's promotion chain — was never among the rows
+// NET_EFFECT was asked about. The rule passed its unit tests (which hand
+// the row to the pure function directly) and could not fire in production.
+//
+// The query is therefore a union of exactly two things, and the job
+// predicate is OUTSIDE the union so neither branch can leave this job:
+//
+//   A. this component's own Evidence — unchanged, ordinary semantics;
+//   B. Evidence of this job carrying a persisted `onchain_fact_kind` the
+//      closed applicability map declares relevant to THIS component.
+//
+// (B) IS DELIBERATELY NARROW, IN THREE INDEPENDENT WAYS.
+//
+//   * It is keyed on `onchain_fact_kind`, which ONLY deterministic chain
+//     synthesis ever writes (onchain-acquisition.ts says so at the single
+//     insert that sets it). Documentary, model-extracted, OFFICIAL_DOCS,
+//     DATA_PROVIDER and SOCIAL rows carry NULL there, and NULL matches no
+//     entry in an IN list — so documentary visibility cannot widen through
+//     this route even by accident.
+//   * The kind list comes from `applicableFactKindsForComponent`, derived
+//     from the same closed map the reconciler consults, so an
+//     ONCHAIN_VERIFIABLE row whose kind is not mapped to this component —
+//     TOKEN_TRANSFER, TOKEN_ACCOUNT_BALANCE, TOKEN_ACCOUNTS_BY_OWNER — is
+//     not selected at all. A component with no mapped kind gets branch (A)
+//     verbatim, i.e. exactly today's behaviour.
+//   * Selection is not admission. Every row loaded here still faces
+//     `onchainFactAppliesToComponent` in the pure reconciler, then job
+//     scope, class admissibility, entity binding, directness, relationship,
+//     freshness, supersession and dedup — unchanged.
+//
+// NOTHING IS COPIED. One Evidence row, one id, one artifact, one source,
+// one provenance chain, read by a second component. No row is written, no
+// count grows, and the row keeps its own step and component.
+async function loadEvidenceRows(
+  db: Database | Transaction,
+  jobId: string,
+  step: number,
+  component: string,
+): Promise<EvidenceRow[]> {
+  const ownComponent = and(
+    eq(evidence.patternStep, step),
+    eq(evidence.component, component),
+  );
+  const crossKinds = applicableFactKindsForComponent(component);
+  const rows = await db
+    .select()
+    .from(evidence)
+    .where(
+      and(
+        // The job boundary is never inside the union: another job's BURN
+        // is unreachable through applicability, exactly as it is through
+        // every other path.
+        eq(evidence.researchJobId, jobId),
+        crossKinds.length > 0
+          ? or(ownComponent, inArray(evidence.onchainFactKind, [...crossKinds]))
+          : ownComponent,
+      ),
+    );
+  return rows.map(toEvidenceRow);
+}
+
+// One projection, used by both reads, so the two can never disagree about
+// what a row IS — only about which rows they select.
+function toEvidenceRow(r: typeof evidence.$inferSelect): EvidenceRow {
+  return {
+    id: r.id,
+    researchJobId: r.researchJobId,
+    sourceId: r.sourceId,
+    evidenceContractVersion: r.evidenceContractVersion,
+    patternStep: r.patternStep,
+    component: r.component,
+    relationship: r.relationship,
+    directness: r.directness,
+    fragment: r.fragment,
+    summary: r.summary,
+    mechanismState: r.mechanismState,
+    mechanismStateRuleVersion: r.mechanismStateRuleVersion,
+    executionRuleVersion: r.executionRuleVersion,
+    sourceClass: r.sourceClass,
+    officiality: r.officiality,
+    entityBinding: r.entityBinding,
+    onchainFactKind: r.onchainFactKind,
+    // D-158 PHASE 2 — read verbatim from the column the on-chain synthesis
+    // wrote. Never re-derived here, and never defaulted to anything but
+    // null: this store does not decide provenance, it carries it.
+    onchainProvenance: (r.onchainProvenance ?? null) as EvidenceRow["onchainProvenance"],
+    fetchedAt: r.fetchedAt,
+    publishedAt: r.publishedAt,
+    publishedAtRuleVersion: r.publishedAtRuleVersion,
+    reusedFromMemoryId: r.reusedFromMemoryId,
+    extractionUnitKey: r.extractionUnitKey,
+    contentHash: r.contentHash,
+  };
+}
+
+// D-158 STEP 1 — THE ROWS A STRUCTURAL OBLIGATION MAY INSPECT.
+//
+// A SECOND QUERY, NOT A WIDER FIRST ONE. `loadEvidenceRows` answers "what
+// evidence may speak for this component", and its union is governed by the
+// closed applicability map. This answers a different question — "what
+// machine-owned provenance does this job hold" — and the two must not share
+// a result set, or the ordinary answer would silently inherit the wider one.
+//
+// SELECTED BY THE PROVENANCE COLUMN ALONE. `onchain_provenance` is written
+// by exactly one code path, the deterministic on-chain synthesis. No
+// documentary, data-provider or model-extracted row carries it, so no
+// amount of model output can place a row in this result — the narrowing is
+// structural, not a rule this query is trusted to follow. Component, class,
+// relationship and step are deliberately NOT predicates here: excluding by
+// component is precisely what this query exists to avoid, and including by
+// any model-authored label is what it must never do.
+//
+// Job-scoped, like every other read in this module.
+async function loadObligationProvenanceRows(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<EvidenceRow[]> {
+  const rows = await db
+    .select()
+    .from(evidence)
+    .where(and(eq(evidence.researchJobId, jobId), isNotNull(evidence.onchainProvenance)));
+  return rows.map(toEvidenceRow);
+}
+
+// The one write this module performs — a deterministic upsert keyed by
+// (research_job_id, pattern_step, component), matching the table's own
+// unique index. A replay with identical inputs produces an identical row,
+// never a duplicate (§11.3's "delete + rerun -> byte-identical" invariant
+// depends on the pure function; this only has to not accumulate rows).
+async function persistResult(
+  db: Database | Transaction,
+  jobId: string,
+  result: ComponentReconciliationResult,
+  now: Date,
+): Promise<void> {
+  await db
+    .insert(researchComponentResults)
+    .values({
+      researchJobId: jobId,
+      patternStep: result.step,
+      component: result.component,
+      status: result.status,
+      reasonCodes: result.reasonCodes,
+      supportingEvidenceIds: result.supportingEvidenceIds,
+      contradictingEvidenceIds: result.contradictingEvidenceIds,
+      excludedEvidence: result.excludedEvidence,
+      currentState: result.currentState,
+      temporalBasisField: result.temporalBasis?.basisField ?? null,
+      temporalBasisAt: result.temporalBasis ? new Date(result.temporalBasis.at) : null,
+      tokenStateMentions: result.tokenStateMentions,
+      requiresFreshEvidence: result.requiresFreshEvidence,
+      updatedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: [
+        researchComponentResults.researchJobId,
+        researchComponentResults.patternStep,
+        researchComponentResults.component,
+      ],
+      set: {
+        status: result.status,
+        reasonCodes: result.reasonCodes,
+        supportingEvidenceIds: result.supportingEvidenceIds,
+        contradictingEvidenceIds: result.contradictingEvidenceIds,
+        excludedEvidence: result.excludedEvidence,
+        currentState: result.currentState,
+        temporalBasisField: result.temporalBasis?.basisField ?? null,
+        temporalBasisAt: result.temporalBasis ? new Date(result.temporalBasis.at) : null,
+        tokenStateMentions: result.tokenStateMentions,
+        requiresFreshEvidence: result.requiresFreshEvidence,
+        updatedAt: now,
+      },
+    });
+}
+
+// The one entry point a caller (controller integration, a backfill script,
+// a test) needs: load what's required, reconcile purely, persist. Never
+// widens scope beyond ComponentWorkItem's own (step, component) — no
+// budget, no provider, no search here (§17.1 boundary, restated at the
+// integration edge too).
+//
+// MEDIUM-3 (deep audit): a PatternConfigurationError from
+// componentRequirementsFor (CORE not configured for this component at
+// all) is deliberately NOT caught here — it propagates to the caller as a
+// real system/configuration failure, never silently persisted as a false
+// INSUFFICIENT_EVIDENCE row. Same posture for MissingActivePatternError
+// (HIGH-4): a Pattern selection failure is a configuration failure, not
+// an evidentiary outcome, and must not produce a derived-projection row
+// that looks like one.
+//
+// RC-1 — PatternSemanticDriftError (the persisted Pattern declares fewer
+// structural obligations than the code contract requires) takes the SAME
+// posture, and for the same reason: reconciling anyway would persist a
+// component result computed under weaker semantics than the code owns,
+// which is indistinguishable in the row from an honest one. It propagates.
+// D-158 PHASE 2 — the project's human-confirmed identity for this job, or
+// null. Degrade-never-throw is deliberately NOT used: a failure to read it
+// would otherwise look like "no programs confirmed" and silently make an
+// obligation unmet for the wrong reason. It throws, and reconciliation
+// fails loudly, exactly as a missing Pattern does.
+async function loadConfirmedIdentityForJob(
+  db: Database | Transaction,
+  jobId: string,
+): Promise<ConfirmedProjectIdentity | null> {
+  const [job] = await db.select().from(researchJobs).where(eq(researchJobs.id, jobId));
+  if (!job) throw new Error(`research job not found: ${jobId}`);
+  if (!job.projectId) return null;
+  return resolveConfirmedIdentity(db, job.projectId);
+}
+
+export async function reconcileAndPersistComponent(
+  db: Database | Transaction,
+  jobId: string,
+  item: Pick<ComponentWorkItem, "step" | "component">,
+  now: Date,
+): Promise<ComponentReconciliationResult> {
+  const [pattern, config, evidenceRows, confirmedIdentity, acquisitionBoundary] = await Promise.all([
+    loadActivePatternContentForJob(db, jobId),
+    loadProductConfig(db),
+    loadEvidenceRows(db, jobId, item.step, item.component),
+    loadConfirmedIdentityForJob(db, jobId),
+    loadAcquisitionBoundary(db, jobId, item),
+  ]);
+  const requirements = { component: item.component, ...componentRequirementsFor(pattern, item.component) };
+  // A SECOND READ ONLY WHEN THE CONTRACT NAMES AN OBLIGATION. A component
+  // that declares none cannot use these rows, and the reducer would ignore
+  // them, so the query is not issued at all — a component without
+  // obligations behaves exactly as it did, down to the database traffic.
+  const obligationEvidence =
+    (requirements.structuralObligations?.length ?? 0) > 0
+      ? await loadObligationProvenanceRows(db, jobId)
+      : [];
+  const result = reconcileComponent({
+    jobId,
+    item,
+    requirements,
+    evidence: evidenceRows,
+    // Passed SEPARATELY from `evidence` on purpose: these rows are visible
+    // to structural obligations and to nothing else.
+    obligationEvidence,
+    // Absent identity is passed through as null rather than omitted: an
+    // identity-dependent obligation must then be UNMET, which is a
+    // different and stronger statement than "not evaluated".
+    confirmedIdentity,
+    // The boundary the component's own latest S4 attempt closed on, if any
+    // — read, never inferred. See loadAcquisitionBoundary.
+    acquisitionBoundary,
+    now,
+    freshnessPolicyDays: config.memory_stale_after_days,
+  });
+  await persistResult(db, jobId, result, now);
+  return result;
+}
+
+// BOUNDED SEARCH FINALIZATION / ROUTE-AWARE ACQUISITION V1 — WHERE THE
+// ATTEMPT STOPPED, read from the attempt record the product already keeps.
+//
+// The reducer sees Evidence rows and nothing else, so on its own it cannot
+// tell "the record is silent" from "this run was never allowed to look" —
+// the API's coverage projection already reads research_attempts for the
+// same reason. This reads the LATEST attempt for the (job, step, component)
+// and reduces it through the reducer's own closed rule
+// (`acquisitionBoundaryFromAttempt`): only a SKIPPED attempt whose reason
+// starts with one of the two boundary codes yields a value. A missing
+// attempt row, any other status, or any other reason is null, and the
+// reducer runs exactly as before. Nothing here is spent or written.
+//
+// RESEARCH RELIABILITY V1 (B2) — THE DOCUMENT-LOCAL BOUNDARY OUTLIVES A
+// LATER LOOK. A targeted second attempt reads OTHER admissible documents
+// for the component; it never re-reads a document whose extraction
+// already failed (that document was extracted-attempted, so it is not a
+// remaining path). When that later attempt closes without Evidence and
+// without a boundary of its own, the component's own document is still
+// "read, not inspected" (Round 5.5, Founder decision C), and the record
+// keeps EXTRACTION_NOT_COMPLETED rather than paraphrasing it as "nothing
+// found". The two search-stage boundaries do NOT persist this way: the
+// second pass exists precisely to search and open what they named, so a
+// fruitless second look after them is a substantive absence. Only
+// Evidence lifts the document-local code — the reducer never reaches the
+// boundary when Evidence exists.
+async function loadAcquisitionBoundary(
+  db: Database | Transaction,
+  jobId: string,
+  item: Pick<ComponentWorkItem, "step" | "component">,
+): Promise<AcquisitionBoundary | null> {
+  const attempts = await db
+    .select({ status: researchAttempts.status, reason: researchAttempts.reason })
+    .from(researchAttempts)
+    .where(
+      and(
+        eq(researchAttempts.researchJobId, jobId),
+        eq(researchAttempts.patternStep, item.step),
+        eq(researchAttempts.component, item.component),
+      ),
+    )
+    .orderBy(desc(researchAttempts.attemptNumber));
+  const [latest] = attempts;
+  const boundary = acquisitionBoundaryFromAttempt(latest);
+  if (boundary !== null) return boundary;
+  for (const earlier of attempts.slice(1)) {
+    if (acquisitionBoundaryFromAttempt(earlier) === "EXTRACTION_NOT_COMPLETED") return "EXTRACTION_NOT_COMPLETED";
+  }
+  return null;
+}
+
+// HIGH-2 (deep audit) fix — the smallest deterministic recovery
+// mechanism: reconcile every (step, component) in `workQueue` whose S4
+// attempt is already terminal (SUCCEEDED/FAILED/SKIPPED), regardless of
+// whether it was already reconciled. reconcileAndPersistComponent is an
+// idempotent derived-projection upsert (§11.3) — calling it again for an
+// already-current row is a wasted read, never a correctness or budget
+// problem, and never touches search/fetch/model budget (no WorkExecutor,
+// no provider, nothing paid happens here). This is the sweep that makes
+// S5 eventually consistent no matter when/where a crash happened between
+// an S4 attempt's terminal UPDATE and its own S5 persistence — including
+// a crash that happened on a PRIOR run of this job entirely, which the
+// controller's own per-attempt `reconcile` hook structurally cannot ever
+// revisit (a SUCCEEDED component is filtered out of `pending` before the
+// controller's loop runs at all).
+//
+// A pending (not-yet-terminal, i.e. STARTED-and-still-within-lease, or
+// never-attempted) component is intentionally left alone — reconciling it
+// now would either read a stale/incomplete Evidence set for it, or (per
+// §12) attempt to synthesize a result for work that has not actually
+// finished; neither is this sweep's job. It runs unconditionally after
+// every runS4ResearchJob call (see that module), so a component only
+// pending because it isn't due yet will be swept the moment it does
+// become terminal, either via the per-attempt hook or the next sweep.
+//
+// ---- THE ONE EXCEPTION: ACQUISITION HAS DEFINITIVELY STOPPED ----------
+//
+// "It will be swept the moment it becomes terminal" is true for every
+// pending component EXCEPT one class, and a live run found it: a component
+// that will never GET an attempt because the work loop died before its
+// turn. `BudgetExhaustedError` is thrown at the reservation boundary, so
+// the controller's loop aborts mid-queue — every item after the throwing
+// one is left with no attempt row at all, and no later sweep can change
+// that, because nothing will ever attempt them again.
+//
+// That alone would only be lost coverage. What made it a correctness
+// defect is that the post-exhaustion continuation in run-job.ts WRITES
+// EVIDENCE INTO EXACTLY SUCH A COMPONENT: `runSupplyDeltaMaterialization`
+// files a TOTAL_SUPPLY_DELTA under the component whose question it answers,
+// after the attempt loop is already dead. So one stage of that block
+// produced establishing evidence and the next stage — this sweep — refused
+// to read it, on a condition the component could never satisfy. Evidence
+// that was already acquired and already paid for was discarded, and the
+// job reported the component as MISSING rather than as what the evidence
+// deterministically supports.
+//
+// THE EXCEPTION IS OPT-IN AND NARROW. `acquisitionStopped` is passed by
+// ONE caller — the post-exhaustion path, where no further source read may
+// be spent by anyone. During ordinary acquisition the gate is byte-for-byte
+// what it was: a pending component with partial evidence is NOT reconciled
+// early, because more evidence may still arrive.
+//
+// AND IT IS EVIDENCE-BACKED, NEVER SYNTHETIC. Eligibility asks
+// `loadEvidenceRows` — THE SAME QUERY the reducer itself will use, not a
+// second predicate that could drift from it. So "eligible" means precisely
+// "this reducer has persisted inputs worth evaluating": rows filed at this
+// (job, step, component), plus the cross-component kinds the applicability
+// map already lets it read. A component with no such rows is left exactly
+// as before — untouched, unreconciled, and reported as never completed.
+// "Work never finished" and "the evidence is insufficient" stay different
+// findings, which is the whole point.
+//
+// NOTHING IS SPENT. This path reserves no budget, constructs no executor,
+// and calls no provider — it reads persisted rows and writes a derived
+// projection, exactly as the terminal-attempt path above already does.
+export interface ReconcileOutstandingOptions {
+  // True only where acquisition has definitively stopped for this job, so
+  // a pending component can no longer become terminal by waiting.
+  acquisitionStopped?: boolean;
+}
+
+export async function reconcileOutstandingComponents(
+  db: Database | Transaction,
+  jobId: string,
+  workQueue: Pick<ComponentWorkItem, "step" | "component">[],
+  now: Date,
+  options: ReconcileOutstandingOptions = {},
+): Promise<void> {
+  if (workQueue.length === 0) return;
+
+  const attemptRows = await db.select().from(researchAttempts).where(eq(researchAttempts.researchJobId, jobId));
+  const latestByKey = new Map<string, { attemptNumber: number; status: string }>();
+  for (const row of attemptRows) {
+    const key = `${row.patternStep}:${row.component}`;
+    const prior = latestByKey.get(key);
+    if (!prior || row.attemptNumber >= prior.attemptNumber) {
+      latestByKey.set(key, { attemptNumber: row.attemptNumber, status: row.status });
+    }
+  }
+
+  const TERMINAL_STATUSES = new Set(["SUCCEEDED", "FAILED", "SKIPPED"]);
+  for (const item of workQueue) {
+    const latest = latestByKey.get(`${item.step}:${item.component}`);
+    if (latest !== undefined && TERMINAL_STATUSES.has(latest.status)) {
+      await reconcileAndPersistComponent(db, jobId, item, now);
+      continue;
+    }
+    // Pending. Ordinarily that ends it — see the exception above.
+    if (options.acquisitionStopped !== true) continue;
+    // Evidence-backed, asked with the reducer's own selection so the two
+    // can never disagree about what counts as an input.
+    const inputs = await loadEvidenceRows(db, jobId, item.step, item.component);
+    if (inputs.length === 0) continue;
+    await reconcileAndPersistComponent(db, jobId, item, now);
+  }
+}

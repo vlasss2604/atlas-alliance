@@ -1,0 +1,423 @@
+// VERIFICATION — A COMPOSITION MODE OVER THE EXISTING RESULT.
+//
+// (The file keeps its historical name; the user-facing mode is VERIFICATION.)
+//
+// Verification answers a different question from a research result. The
+// result says WHAT ATLAS FOUND; verification says WHAT FROM THIS CLAIM
+// ACTUALLY SURVIVED VERIFICATION — what stood up, the main gaps, whether
+// there is a real contradiction, and where the evidence stops. Same record,
+// same selector, same blocks — a different emphasis and order, and a few
+// small derivations the research page does not need.
+//
+// IT IS NOT A SECOND ENGINE, AND THE SHAPE OF THIS FILE IS HOW. Every state
+// below is a persisted component status read through the SAME two functions
+// the research screen already uses — `deriveResultLadder` for the rows and
+// `unresolvedFrom` for the boundary — and every analytical block comes from
+// the SAME plan `chooseAnalyticalBlocks` produced. There is no audit verdict
+// (the Proof's verdict is relabelled), no severity (nothing upstream carries
+// one), no risk score, and no sentence that is not a restatement of a stored
+// row. The functions here choose, order and group; they assert nothing.
+import { chooseAnalyticalBlocks, type AnalyticalOutputInputV1, type AnalyticalOutputPlanV1, type PlannedBlock, type PlannedMetric } from "./output-plan";
+import type { ProofState } from "./components/result-blocks/types";
+import {
+  deriveResultLadder,
+  resultBriefing,
+  unresolvedFrom,
+  type LadderComponentInput,
+  type OutcomeKind,
+  type RealityState,
+  type ResultRow,
+  type UnresolvedItem,
+} from "./research-model";
+
+// RUNG STATE → BLOCK STATE. The ladder's own asymmetry, kept: only a
+// positive contradiction is red, and "not established" is never "false".
+export function proofStateOfRung(state: RealityState): ProofState | null {
+  switch (state) {
+    case "VERIFIED":
+      return "ESTABLISHED";
+    case "PARTIAL":
+      return "PARTLY_ESTABLISHED";
+    case "NOT_HAPPENING":
+      return "CONTRADICTED";
+    case "UNRESOLVED":
+      return "NOT_ESTABLISHED";
+    default:
+      return null;
+  }
+}
+
+// ONE ROW OF THE CHECK TABLE: the claim ATLAS set out to test, what the
+// admitted evidence established about it, the state, and how many sources
+// stand behind it. The claim label is the ladder's own sentence for the
+// component, so no project claim is ever manufactured from prose.
+export interface AuditCheck {
+  component: string;
+  check: string;
+  established: string;
+  state: ProofState;
+  reasonCodes: readonly string[];
+  blocked: boolean;
+  sources: number;
+}
+
+export interface AuditBoundaryItem {
+  component: string;
+  label: string;
+  detail: string;
+  reasonCodes: readonly string[];
+  // A gap in the PROJECT RECORD (the sources ATLAS read did not establish
+  // it) as opposed to a gap in the RUN (the sources could not be opened).
+  // The second is a limitation of the research and says nothing about the
+  // project, and the two must never share a list.
+  kind: "NOT_ESTABLISHED" | "PARTLY_ESTABLISHED" | "COULD_NOT_CHECK";
+}
+
+// A CONTRADICTED CHECK, WITH THE MEASUREMENT THAT CONTRADICTS IT WHERE THE
+// RECORD CARRIES ONE. `measured` is the selector's own METRIC entries whose
+// evidence row is among the component's persisted CONTRADICTING evidence —
+// copied, never derived: no quantity is read here that the plan did not
+// already type, and an empty list is the honest state when the
+// contradiction rests on something other than a planned number.
+export interface AuditContradiction extends AuditCheck {
+  measured: PlannedMetric[];
+}
+
+// COVERAGE COUNTS. How many checks ended in each state — an index of the
+// record's shape, never a score: they are not summed, not divided, and no
+// fraction is formed from them. A blocked check is counted as NOT CHECKED
+// rather than not established, because the two are different facts.
+export interface AuditCounts {
+  established: number;
+  partlyEstablished: number;
+  contradicted: number;
+  notEstablished: number;
+  notChecked: number;
+}
+
+export interface AuditComposition {
+  question: string;
+  verdict: string | null;
+  confidenceBand: string | null;
+  counts: AuditCounts;
+  // ONE SENTENCE, AND NOT ONE OF OURS. The lead sentence of the research
+  // screen's own short answer — a contradiction if there is one, else what
+  // stood, else what partly stood, else what did not — so the audit's
+  // summary is the result's summary, not a second phrasing of it. Null
+  // only when that derivation has nothing to say.
+  summary: string | null;
+  coverage: { step: number; component: string; state: ProofState }[];
+  checks: AuditCheck[];
+  // WHAT STOOD UP: the established checks, ladder order, at most three.
+  // When nothing was established, the partly-established checks stand in
+  // for them — and are then not also listed as gaps; a check is one thing
+  // on this page.
+  stoodUp: AuditCheck[];
+  // THE MAIN GAPS, two to four: one of each open kind in the priority the
+  // short answer already uses — could not check, not established, partly
+  // established with a stated reason — then round again, ladder order
+  // within a kind, until the cap. Round-robin so a record with four
+  // blocked checks shows what ELSE is open too; never a score.
+  gaps: AuditBoundaryItem[];
+  // CONTRADICTIONS: checks whose persisted state is CONTRADICTED. Only
+  // that state — never a gap dressed as one.
+  contradictions: AuditContradiction[];
+  // THE VERIFICATION BOUNDARY, complete: every partly-established check
+  // with a stated reason, every unestablished one, every one that could
+  // not be checked — the derivation, before this page decides where each
+  // check appears.
+  boundary: AuditBoundaryItem[];
+  // WHAT IS STILL OPEN: the boundary MINUS the checks shown under WHAT
+  // STOOD UP. A check is one thing on this page, and every count of open
+  // checks — the main gaps, "N more in full verification", "N further
+  // open checks" — is arithmetic over THIS list, never over `boundary`.
+  // On the first fresh run two partly-established checks stood in for
+  // "what stood up" (nothing was fully established), were rightly kept
+  // out of the main gaps, and were still counted among the open checks
+  // — so the page said a check both held and remained open. The rule:
+  //   open = boundary items whose component is not in stoodUp
+  // i.e. PARTLY_ESTABLISHED with a stated gap and not standing in for
+  // "what stood up", NOT_ESTABLISHED, and BLOCKED / not checked.
+  // CONTRADICTED is not open: it is resolved, against the claim, and has
+  // its own panel. Upstream states are untouched; only the accounting is.
+  open: AuditBoundaryItem[];
+  // WHERE THE AUDIT STOPS: the single most important open boundary, chosen
+  // by the priority the short answer already uses for its "main
+  // limitation" — a BLOCKED check first (ATLAS could not look, which bears
+  // on everything else), else the first check the sources did not
+  // establish, else the first partly-established check with a stated
+  // reason. Ladder order within each. Null when every check stood.
+  gap: AuditBoundaryItem | null;
+  // HOW THE CLAIM HOLDS UP: the selector's FLOW, exactly as planned, when
+  // it touches a selected finding (what stood up, a gap, a contradiction).
+  // Every stage state is the plan's; the block exists to show where the
+  // claim stops being proven, so a chain that touches none of the findings
+  // on this page explains nothing here and is not shown. Null when the
+  // selector planned no flow — a sparse record yields no chain.
+  chain: Extract<PlannedBlock, { type: "FLOW" }> | null;
+  // The selector's analytical signals — METRIC, TABLE, CHART, TIMELINE —
+  // exactly as chosen, FILTERED to those that bear on a gap or a
+  // contradiction. Verification shows a measure only when it helps explain
+  // an exception; a block the selector chose that touches nothing open is
+  // omitted here — composition, not truth.
+  analytical: PlannedBlock[];
+  // The selector's evidence choice, filtered to the components of the
+  // selected findings (contradictions, gaps, what stood up). When nothing
+  // survives the filter the selector's choice stands unfiltered rather
+  // than the page showing none.
+  evidence: Extract<PlannedBlock, { type: "EVIDENCE_SNAPSHOT" }> | null;
+  deep: Extract<PlannedBlock, { type: "DEEP_PROOF" }> | null;
+  plan: AnalyticalOutputPlanV1;
+}
+
+const ANALYTICAL: ReadonlySet<PlannedBlock["type"]> = new Set(["METRIC", "TABLE", "CHART", "TIMELINE"]);
+
+export function composeAudit(args: {
+  input: AnalyticalOutputInputV1;
+  // The component rows WITH coverage where the payload carries it, so a
+  // BLOCKED check can be told apart from an unestablished one. The
+  // selector's input carries no coverage, and does not need to.
+  components: readonly LadderComponentInput[];
+  outcomeKind: OutcomeKind;
+  projectName?: string | null;
+  plan?: AnalyticalOutputPlanV1;
+}): AuditComposition {
+  const plan = args.plan ?? chooseAnalyticalBlocks(args.input);
+  const ladder = deriveResultLadder(args.components);
+  // Both groups, mechanism first: an audit lists every check that was made.
+  const rows = [...ladder.mechanism, ...ladder.value].filter((r) => r.state !== "NOT_ASSESSED");
+
+  const proofMap = plan.orderedBlocks.find((b) => b.type === "PROOF_MAP");
+  const coverage = proofMap && proofMap.type === "PROOF_MAP" ? proofMap.spec.cells : [];
+  const codes = new Map(
+    args.components.map((c) => [c.component, (c.reasonCodes ?? []).filter((x): x is string => typeof x === "string")]),
+  );
+
+  const boundary = auditBoundary(rows, args.outcomeKind, codes);
+  const checks = auditChecks(rows, codes);
+  const stoodUp = auditStoodUp(checks);
+  const standing = new Set(stoodUp.map((c) => c.component));
+  const openBoundary = auditOpen(boundary, stoodUp);
+  const gaps = auditGaps(openBoundary);
+  const contradictions = auditContradictions(checks, args.components, plan);
+  const open = new Set([...gaps.map((g) => g.component), ...contradictions.map((c) => c.component)]);
+  const selected = new Set([...open, ...standing]);
+  const explains = (b: PlannedBlock) => b.refs.components.some((k) => open.has(k.component));
+  const chain = plan.orderedBlocks.find(
+    (b): b is Extract<PlannedBlock, { type: "FLOW" }> => b.type === "FLOW" && b.refs.components.some((k) => selected.has(k.component)),
+  );
+  const evidenceBlock = plan.orderedBlocks.find((b) => b.type === "EVIDENCE_SNAPSHOT") as AuditComposition["evidence"];
+  const evidenceById = new Map(args.input.evidence.map((e) => [e.id, e]));
+  const tied = evidenceBlock
+    ? evidenceBlock.spec.evidenceIds.filter((id) => {
+        const c = evidenceById.get(id)?.component;
+        return c !== null && c !== undefined && selected.has(c);
+      })
+    : [];
+  const briefing = resultBriefing({
+    verdict: args.input.verdict,
+    outcomeKind: args.outcomeKind,
+    projectName: args.projectName ?? null,
+    components: args.components.map((c) => ({ component: c.component, status: c.status })),
+    rows,
+  });
+
+  return {
+    question: args.input.question.text,
+    verdict: args.input.verdict,
+    confidenceBand: args.input.confidenceBand,
+    counts: auditCounts(checks),
+    summary: briefing.shortAnswer[0] ?? null,
+    coverage,
+    checks,
+    stoodUp,
+    gaps,
+    contradictions,
+    boundary,
+    open: openBoundary,
+    gap: auditGap(rows, openBoundary),
+    chain: chain ?? null,
+    analytical: plan.orderedBlocks.filter((b) => ANALYTICAL.has(b.type) && explains(b)),
+    evidence:
+      evidenceBlock && tied.length > 0
+        ? { ...evidenceBlock, spec: { evidenceIds: tied } }
+        : (evidenceBlock ?? null),
+    deep: (plan.orderedBlocks.find((b) => b.type === "DEEP_PROOF") as AuditComposition["deep"]) ?? null,
+    plan,
+  };
+}
+
+// CLAIM VS REALITY — EVERY CHECK, AS A TABLE ROW.
+//
+// The "claim" column is the ladder's own label for the component ("The
+// project documents the mechanism", "Where the value is meant to go"): the
+// proposition ATLAS set out to test, in the words the result screen already
+// uses. The "established" column is the row's own `shows` sentence where the
+// evidence reached something, and its persisted `reason` where it did not.
+// Nothing is read from a fragment and no project statement is invented to
+// fill the left-hand column.
+export function auditChecks(
+  rows: readonly ResultRow[],
+  codes: ReadonlyMap<string, readonly string[]> = new Map(),
+): AuditCheck[] {
+  return rows.flatMap((r) => {
+    const state = proofStateOfRung(r.state);
+    if (state === null) return [];
+    const blocked = r.coverage === "BLOCKED";
+    return [
+      {
+        component: r.component,
+        check: r.label,
+        established: blocked
+          ? (r.limitation ?? "Sources for this check could not be opened.")
+          : (r.shows ?? r.reason ?? "—"),
+        state,
+        reasonCodes: codes.get(r.component) ?? [],
+        blocked,
+        sources: r.admittedCount,
+      },
+    ];
+  });
+}
+
+// THE COUNTS. Arithmetic over the checks above and nothing else.
+export function auditCounts(checks: readonly AuditCheck[]): AuditCounts {
+  const n = (pred: (c: AuditCheck) => boolean) => checks.filter(pred).length;
+  return {
+    established: n((c) => !c.blocked && c.state === "ESTABLISHED"),
+    partlyEstablished: n((c) => !c.blocked && c.state === "PARTLY_ESTABLISHED"),
+    contradicted: n((c) => !c.blocked && c.state === "CONTRADICTED"),
+    notEstablished: n((c) => !c.blocked && c.state === "NOT_ESTABLISHED"),
+    notChecked: n((c) => c.blocked),
+  };
+}
+
+// CONTRADICTIONS, WITH WHAT WAS MEASURED. Only checks whose persisted
+// state is CONTRADICTED; beside each, the planned METRIC entries whose
+// evidence row the engine itself listed as CONTRADICTING that component.
+// The number shown against a contradiction is therefore one the selector
+// already qualified AND one the reconciler already tied to the
+// contradiction — never a figure chosen here because it looked relevant.
+export function auditContradictions(
+  checks: readonly AuditCheck[],
+  components: readonly LadderComponentInput[],
+  plan: AnalyticalOutputPlanV1,
+): AuditContradiction[] {
+  const contradicting = new Map(components.map((c) => [c.component, new Set(c.contradictingEvidenceIds ?? [])]));
+  const metrics = plan.orderedBlocks.flatMap((b) => (b.type === "METRIC" ? b.spec.metrics : []));
+  return checks
+    .filter((c) => !c.blocked && c.state === "CONTRADICTED")
+    .map((c) => ({
+      ...c,
+      measured: metrics.filter((m) => m.component === c.component && (contradicting.get(c.component)?.has(m.evidenceId) ?? false)),
+    }));
+}
+
+// THE VERIFICATION BOUNDARY — WHAT COULD NOT BE VERIFIED, AND WHY, IN THREE KINDS.
+//
+//   NOT_ESTABLISHED   the sources ATLAS read did not establish it
+//   PARTLY_ESTABLISHED the evidence went part of the way; the reason says
+//                      which part is missing
+//   COULD_NOT_CHECK   the sources could not be opened — a limit of the run
+//
+// The unresolved items come from `unresolvedFrom`, the research screen's
+// own derivation, which already knows a BLOCKED row from an unestablished
+// one. Partly-established rows are added with their persisted reason,
+// because "attribution not established" and "state not fully live" are the
+// boundaries an audit exists to name. Nothing is inferred, and a row with
+// no stated reason contributes no sentence.
+export function auditBoundary(
+  rows: readonly ResultRow[],
+  outcomeKind: OutcomeKind,
+  codes: ReadonlyMap<string, readonly string[]> = new Map(),
+): AuditBoundaryItem[] {
+  const unresolved: AuditBoundaryItem[] = unresolvedFrom(rows, outcomeKind).map((u: UnresolvedItem) => ({
+    component: u.component,
+    label: u.label,
+    detail: u.detail,
+    reasonCodes: codes.get(u.component) ?? [],
+    kind: u.blocked ? "COULD_NOT_CHECK" : "NOT_ESTABLISHED",
+  }));
+  const partial: AuditBoundaryItem[] = rows
+    .filter((r) => r.state === "PARTIAL" && r.reason !== null)
+    .map((r) => ({
+      component: r.component,
+      label: r.label,
+      detail: r.reason!,
+      reasonCodes: codes.get(r.component) ?? [],
+      kind: "PARTLY_ESTABLISHED",
+    }));
+  // Partial checks first — they are the sharper boundaries — then the
+  // unestablished ones, then what could not be checked at all, each group
+  // in ladder order.
+  return [
+    ...partial,
+    ...unresolved.filter((u) => u.kind === "NOT_ESTABLISHED"),
+    ...unresolved.filter((u) => u.kind === "COULD_NOT_CHECK"),
+  ];
+}
+
+// WHAT IS STILL OPEN — the boundary without the checks that stood up.
+// The one place the rule lives; `composeAudit` derives the main gaps, the
+// stopping boundary and every "more"/"further" count from this list.
+export function auditOpen(boundary: readonly AuditBoundaryItem[], stoodUp: readonly AuditCheck[]): AuditBoundaryItem[] {
+  const standing = new Set(stoodUp.map((c) => c.component));
+  return boundary.filter((b) => !standing.has(b.component));
+}
+
+// WHERE VERIFICATION STOPS — THE ONE BOUNDARY THAT MATTERS MOST, by the
+// priority the short answer already applies to its "main limitation": a
+// blocked check outranks an unestablished one, because ATLAS could not
+// look and that bears on how much the rest covers; an unestablished check
+// outranks a partly established one. Ladder order decides within a kind.
+// Nothing is scored, and nothing is chosen for how it reads.
+//
+// Only a check in the given list can be chosen — pass the OPEN list, so a
+// partly-established check that stands in for "what stood up" is never
+// also where verification stops; the next row of the same kind is.
+export function auditGap(rows: readonly ResultRow[], boundary: readonly AuditBoundaryItem[]): AuditBoundaryItem | null {
+  const byComponent = new Map(boundary.map((b) => [b.component, b]));
+  const first = (pred: (r: ResultRow) => boolean) => {
+    const r = rows.find((row) => pred(row) && byComponent.has(row.component));
+    return r ? (byComponent.get(r.component) ?? null) : null;
+  };
+  return (
+    first((r) => r.coverage === "BLOCKED") ??
+    first((r) => r.state === "UNRESOLVED") ??
+    first((r) => r.state === "PARTIAL" && r.reason !== null)
+  );
+}
+
+// THREE, NOT FIVE. The top of a verification is the three checks most
+// useful for understanding it quickly; the complete list, with sources, is
+// the full verification and lives nowhere else. Same priority, shorter cut.
+
+export const MAX_STOOD_UP = 3;
+export const MAX_GAPS = 4;
+
+// WHAT STOOD UP. Established, ladder order, at most three. If nothing was
+// established, the partly-established checks stand in — they are what
+// held, part of the way — so a sparse record still says what it can.
+export function auditStoodUp(checks: readonly AuditCheck[], cap = MAX_STOOD_UP): AuditCheck[] {
+  const established = checks.filter((c) => !c.blocked && c.state === "ESTABLISHED");
+  if (established.length > 0) return established.slice(0, cap);
+  return checks.filter((c) => !c.blocked && c.state === "PARTLY_ESTABLISHED").slice(0, cap);
+}
+
+// THE MAIN GAPS. One of each kind in priority order, then round again,
+// ladder order within a kind, until the cap. Four blocked checks on a
+// sparse record would otherwise fill the whole list with "not checked"
+// and say nothing about what the sources did not establish.
+export function auditGaps(boundary: readonly AuditBoundaryItem[], cap = MAX_GAPS): AuditBoundaryItem[] {
+  const kinds: AuditBoundaryItem["kind"][] = ["COULD_NOT_CHECK", "NOT_ESTABLISHED", "PARTLY_ESTABLISHED"];
+  const queues = kinds.map((k) => boundary.filter((b) => b.kind === k));
+  const out: AuditBoundaryItem[] = [];
+  while (out.length < cap && queues.some((q) => q.length > 0)) {
+    for (const q of queues) {
+      if (out.length >= cap) break;
+      const next = q.shift();
+      if (next) out.push(next);
+    }
+  }
+  return out;
+}

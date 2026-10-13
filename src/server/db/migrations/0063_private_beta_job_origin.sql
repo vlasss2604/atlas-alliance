@@ -1,0 +1,11 @@
+-- PRIVATE BETA JOB ORIGIN (Founder-approved, D-167).
+--
+-- PRIVATE_BETA means: a Research admitted for an approved private-beta USER
+-- (a server-owned beta grant on the existing subscription entitlement), run
+-- through the same real pipeline as OWNER_MANUAL_ALPHA. The origin is
+-- written once at job creation and read by the live-admission gate at every
+-- phase; it never widens what a PRODUCT job may do, and the public product
+-- path stays closed.
+--
+-- Forward only. Adds one enum value; no row is touched.
+ALTER TYPE "public"."research_job_origin" ADD VALUE IF NOT EXISTS 'PRIVATE_BETA';

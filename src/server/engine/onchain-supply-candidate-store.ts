@@ -1,0 +1,401 @@
+import { and, desc, eq, inArray, isNotNull, like, lt, ne, or } from "drizzle-orm";
+
+import type { Database, Transaction } from "../db/client";
+import { evidence, onchainArtifacts, researchJobs } from "../db/schema";
+import { REAL_RESEARCH_ACQUISITION_ORIGINS } from "./research-acquisition-origin";
+import type { PersistedObservation } from "./onchain-event-anchored-supply-interval";
+import {
+  buildCanonicalOnchainUri,
+  parseCanonicalOnchainUri,
+  pinnedOnchainUriPrefix,
+} from "./onchain-uri";
+import { brandOnchainArtifact, EVM_ZERO_ADDRESS } from "./providers/onchain-types";
+import type {
+  BurnInstructionRef,
+  OnchainArtifact,
+  OnchainChain,
+  OnchainIntent,
+  OnchainNetwork,
+  TransactionDetailResult,
+} from "./providers/onchain-types";
+import type {
+  AnchorBurnEvent,
+  AnchorEventKind,
+} from "./onchain-event-anchored-supply-interval";
+
+// HISTORICAL t0 CANDIDATE RETRIEVAL — rows, never a winner.
+//
+// The one database read the current-proof gate needs, and it is deliberately
+// the dumbest thing that could work: a bounded set of PRIOR Research
+// total-supply readings of the SAME token, positioned before the event.
+// Whether any of them may serve as t0, and which one does, are B2b2's
+// questions and are asked over the rows this returns.
+//
+// WHAT BOUNDS IT, AND WHY EACH BOUND IS RETRIEVAL RATHER THAN SEMANTICS:
+//
+//   canonical URI    chain, network, anchor, subject kind, subject and
+//                    intent in one indexed value. Not a semantic filter —
+//                    an observation of a different token or a different
+//                    intent is not a candidate at all, it is another row.
+//   slot < event     the only positions that could precede the event. A row
+//                    after it can never be t0 under any policy.
+//   RESEARCH_JOB     standalone owner-script observations are excluded at
+//                    the query, matching the product policy B2b2 enforces
+//                    again over what comes back. Belt and braces on purpose:
+//                    a standalone row must not travel this far.
+//   not this job     t0 must come from a PRIOR Research.
+//   acquired by a    the PRODUCING JOB's origin is in the code-owned
+//   real Research    positive allowlist REAL_RESEARCH_ACQUISITION_ORIGINS.
+//                    A RESEARCH_JOB-origin artifact is not enough on its
+//                    own: the persisting owner scripts create a job because
+//                    Evidence requires one, and such an OWNER_OBSERVATION
+//                    job is not a Research. This query is the ONE boundary
+//                    where cross-job candidate eligibility is decided; the
+//                    pure selectors never re-derive it.
+//
+// It never orders by value, never aggregates, never picks a "best", and
+// returns every row it retrieved. The one ordering it applies is by slot
+// descending, which is a retrieval bound rather than a choice: the selector
+// takes the GREATEST eligible slot before the event, so a limit applied to
+// the newest rows cannot remove the row it would have picked.
+//
+// NO NEW INDEX AND NO SCHEMA CHANGE. `ix_onchain_artifacts_uri` already
+// covers the canonical URI predicate.
+
+// A generous bound, not a tuning knob. It exists so an unusually long
+// research history cannot turn one gate decision into an unbounded read.
+export const MAX_HISTORICAL_SUPPLY_CANDIDATES = 200;
+
+// A retrieved observation, with the row id it came from. The id is what a
+// writer needs to record provenance edges; the observation is what the pure
+// layer judges. Kept together so nothing has to re-query to pair them, and
+// deliberately NOT folded into PersistedObservation — that type is the pure
+// layer's, and a database key has no place in it.
+export interface LoadedSupplyObservation {
+  onchainArtifactId: string;
+  observation: PersistedObservation;
+}
+
+export interface HistoricalSupplyCandidateQuery {
+  // The Research asking. Its own readings are never t0.
+  currentResearchJobId: string;
+  // The project's CURRENTLY ACTIVE token address, resolved by the caller.
+  projectAnchor: string;
+  chain: OnchainChain;
+  network: OnchainNetwork;
+  // The deterministic event's slot. Strictly before, never at.
+  beforeSlot: number;
+  limit?: number;
+}
+
+interface SupplyRow {
+  mint: unknown;
+  amountRaw: unknown;
+  decimals: unknown;
+}
+
+// Reconstruction hygiene, not selection: a row whose stored result is not a
+// well-formed total-supply reading cannot be turned back into an artifact at
+// all, so it is not returned. Everything about whether a well-formed one is
+// USABLE stays with B2a and B2b2.
+function readSupplyResult(
+  normalized: unknown,
+): { mint: string; amountRaw: string; decimals: number } | null {
+  if (typeof normalized !== "object" || normalized === null) return null;
+  const row = normalized as SupplyRow & { kind?: unknown };
+  if (row.kind !== "TOKEN_SUPPLY") return null;
+  if (typeof row.mint !== "string" || row.mint.length === 0) return null;
+  if (typeof row.amountRaw !== "string" || row.amountRaw.length === 0) return null;
+  if (typeof row.decimals !== "number" || !Number.isInteger(row.decimals)) return null;
+  return { mint: row.mint, amountRaw: row.amountRaw, decimals: row.decimals };
+}
+
+export async function loadHistoricalSupplyCandidates(
+  db: Database | Transaction,
+  query: HistoricalSupplyCandidateQuery,
+): Promise<LoadedSupplyObservation[]> {
+  const canonicalUri = buildCanonicalOnchainUri({
+    kind: "TOKEN_SUPPLY",
+    chain: query.chain,
+    network: query.network,
+    projectAnchor: query.projectAnchor,
+    subjectKind: "token",
+    subject: query.projectAnchor,
+  });
+
+  // INNER JOIN on the producing job, and the origin allowlist applied in
+  // the query: an artifact whose job row is missing, or whose job's origin
+  // is not an admitted Research-acquisition origin, is not a candidate and
+  // is not returned. `inArray` over the allowlist is the positive form —
+  // a future origin is excluded until it is added to the set.
+  // EXPLICIT-BLOCK READS (EVM V1). A read pinned to a named historical
+  // block has the same target plus a `?block=` selector, and is retrieved
+  // alongside head reads — including one THIS job took, because a pinned
+  // read observes the past rather than re-observing the present. Whether it
+  // may serve is still B2b2's rule (isExplicitBlockSupplyRead). A target
+  // with no pinned reads — every Solana one — returns exactly what it did.
+  // A LIKE prefix, with the pattern characters escaped so the target is
+  // matched literally.
+  const pinnedPrefix = pinnedOnchainUriPrefix(canonicalUri).replace(/[\\%_]/g, (c) => `\\${c}`);
+  const isPinned = like(onchainArtifacts.canonicalUri, `${pinnedPrefix}%`);
+  const rows = await db
+    .select({ artifact: onchainArtifacts })
+    .from(onchainArtifacts)
+    .innerJoin(researchJobs, eq(researchJobs.id, onchainArtifacts.researchJobId))
+    .where(
+      and(
+        or(eq(onchainArtifacts.canonicalUri, canonicalUri), isPinned),
+        lt(onchainArtifacts.slot, query.beforeSlot),
+        eq(onchainArtifacts.originKind, "RESEARCH_JOB"),
+        isNotNull(onchainArtifacts.researchJobId),
+        or(
+          ne(onchainArtifacts.researchJobId, query.currentResearchJobId),
+          and(eq(onchainArtifacts.researchJobId, query.currentResearchJobId), isPinned),
+        ),
+        inArray(researchJobs.origin, [...REAL_RESEARCH_ACQUISITION_ORIGINS]),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot))
+    .limit(Math.max(1, query.limit ?? MAX_HISTORICAL_SUPPLY_CANDIDATES));
+
+  const out: LoadedSupplyObservation[] = [];
+  for (const { artifact: row } of rows) {
+    const loaded = toSupplyObservation(row);
+    if (loaded !== null) out.push(loaded);
+  }
+  return out;
+}
+
+// The row is what the retriever path wrote; rebuilding the in-process
+// artifact from it is transport, not trust. Every rule that decides whether it
+// may be used still runs afterwards, over this object. A row whose stored
+// result is not a well-formed total-supply reading cannot be rebuilt at all,
+// so it is not returned.
+function toSupplyObservation(row: ArtifactRow): LoadedSupplyObservation | null {
+  const result = readSupplyResult(row.normalizedResult);
+  if (result === null) return null;
+  if (row.researchJobId === null) return null;
+  const supply = { kind: "TOKEN_SUPPLY" as const, ...result };
+  // The explicit block, when the stored target names one, so the rebuilt
+  // intent is the intent that was issued.
+  const block = parseCanonicalOnchainUri(row.canonicalUri)?.block ?? null;
+  return {
+    onchainArtifactId: row.id,
+    observation: {
+      artifact: brandOnchainArtifact({
+        intent: {
+          kind: "TOKEN_SUPPLY",
+          chain: row.chain as OnchainChain,
+          network: row.network as OnchainNetwork,
+          projectAnchor: row.projectAnchor,
+          subjectKind: "token",
+          subject: row.subject,
+          ...(block === null ? {} : { block }),
+        },
+        canonicalUri: row.canonicalUri,
+        result: supply,
+        normalizedText: JSON.stringify(supply),
+        provenance: provenanceOf(row),
+      }),
+      originKind: "RESEARCH_JOB",
+      researchJobId: row.researchJobId,
+    },
+  };
+}
+
+// ---- the rest of the current-Research context -------------------------
+//
+// Same discipline as the historical loader above: these retrieve ROWS the
+// pure layer then judges. Neither decides eligibility, neither selects an
+// anchor, and neither looks outside the current job.
+
+type ArtifactRow = typeof onchainArtifacts.$inferSelect;
+
+function provenanceOf(row: ArtifactRow): OnchainArtifact["provenance"] {
+  return {
+    chain: row.chain as OnchainChain,
+    network: row.network as OnchainNetwork,
+    projectAnchor: row.projectAnchor,
+    subjectKind: row.subjectKind as OnchainIntent["subjectKind"],
+    subject: row.subject,
+    slot: row.slot,
+    blockTime: row.blockTime === null ? null : Math.floor(row.blockTime.getTime() / 1000),
+    blockHash: row.blockHash,
+    finality: row.finality === "finalized" ? "finalized" : "confirmed",
+    retrievalMethod: "RPC",
+    providerId: row.providerId,
+    providerMethod: row.providerMethod,
+    requestParams: row.requestParams as Record<string, string | number | boolean>,
+    transactionSignature: row.transactionSignature,
+    retrievedAt: row.retrievedAt,
+    rawResponseHash: row.rawResponseHash,
+    artifactHash: row.artifactHash,
+  };
+}
+
+// THIS Research's own total-supply readings. The gate needs them to answer
+// "do I already hold one after the event" and to establish the measurement
+// domain; it decides both, this only fetches.
+export async function loadCurrentJobSupplyObservations(
+  db: Database | Transaction,
+  query: {
+    currentResearchJobId: string;
+    projectAnchor: string;
+    chain: OnchainChain;
+    network: OnchainNetwork;
+  },
+): Promise<LoadedSupplyObservation[]> {
+  const canonicalUri = buildCanonicalOnchainUri({
+    kind: "TOKEN_SUPPLY",
+    chain: query.chain,
+    network: query.network,
+    projectAnchor: query.projectAnchor,
+    subjectKind: "token",
+    subject: query.projectAnchor,
+  });
+  const rows = await db
+    .select()
+    .from(onchainArtifacts)
+    .where(
+      and(
+        eq(onchainArtifacts.canonicalUri, canonicalUri),
+        eq(onchainArtifacts.originKind, "RESEARCH_JOB"),
+        eq(onchainArtifacts.researchJobId, query.currentResearchJobId),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot));
+
+  const out: LoadedSupplyObservation[] = [];
+  for (const row of rows) {
+    const loaded = toSupplyObservation(row);
+    if (loaded !== null) out.push(loaded);
+  }
+  return out;
+}
+
+// Reconstruction hygiene for a transaction, exactly as for a supply row: a
+// stored result that cannot be turned back into the shape the pure layer
+// reads is skipped rather than repaired.
+function readTransactionResult(normalized: unknown): TransactionDetailResult | null {
+  if (typeof normalized !== "object" || normalized === null) return null;
+  const row = normalized as Record<string, unknown>;
+  if (row.kind !== "TRANSACTION_DETAIL") return null;
+  if (typeof row.signature !== "string" || row.signature.length === 0) return null;
+  if (!Number.isInteger(row.slot)) return null;
+  if (!Array.isArray(row.burns)) return null;
+  if (row.evmTokenTransfers !== undefined) {
+    if (!Array.isArray(row.evmTokenTransfers)) return null;
+    for (const transfer of row.evmTokenTransfers) {
+      if (typeof transfer !== "object" || transfer === null) return null;
+      const t = transfer as Record<string, unknown>;
+      for (const key of ["token", "from", "to", "amountRaw"]) {
+        if (typeof t[key] !== "string" || (t[key] as string).length === 0) return null;
+      }
+    }
+  }
+  for (const burn of row.burns) {
+    if (typeof burn !== "object" || burn === null) return null;
+    const b = burn as Record<string, unknown>;
+    if (typeof b.mint !== "string" || b.mint.length === 0) return null;
+    if (typeof b.sourceAccount !== "string" || b.sourceAccount.length === 0) return null;
+    if (typeof b.amountRaw !== "string" || b.amountRaw.length === 0) return null;
+  }
+  return row as unknown as TransactionDetailResult;
+}
+
+// THE DETERMINISTIC EVENTS THIS RESEARCH ESTABLISHED.
+//
+// A transaction artifact of this job is not by itself an event: what makes
+// it one is that deterministic synthesis filed a BURN fact from it. So the
+// artifacts are narrowed to those an `evidence` row with
+// `onchain_fact_kind = 'BURN'` actually points at — "established by this
+// Research" read literally, from the row that establishes it.
+//
+// It emits ONE candidate per decoded burn of the ACTIVE mint, and ranks
+// none of them. Which event an interval is anchored on is the pure layer's
+// decision; which slot bounds acquisition coverage is the gate's.
+//
+// EVM V1: a ZERO_ADDRESS_TRANSFER fact makes its artifact an event source
+// the same way, and emits one ZERO_ADDRESS_TRANSFER candidate per Transfer
+// of the active token to the zero address. Each kind is emitted only from an
+// artifact a fact OF THAT KIND points at, so a BURN-only job loads exactly
+// the events it always did.
+export async function loadCurrentJobBurnEvents(
+  db: Database | Transaction,
+  query: {
+    currentResearchJobId: string;
+    projectAnchor: string;
+  },
+): Promise<AnchorBurnEvent[]> {
+  const established = await db
+    .selectDistinct({ artifactId: evidence.onchainArtifactId, kind: evidence.onchainFactKind })
+    .from(evidence)
+    .where(
+      and(
+        eq(evidence.researchJobId, query.currentResearchJobId),
+        inArray(evidence.onchainFactKind, ["BURN", "ZERO_ADDRESS_TRANSFER"]),
+        isNotNull(evidence.onchainArtifactId),
+      ),
+    );
+  const kindsByArtifact = new Map<string, Set<AnchorEventKind>>();
+  for (const r of established) {
+    if (r.artifactId === null) continue;
+    const kinds = kindsByArtifact.get(r.artifactId) ?? new Set<AnchorEventKind>();
+    kinds.add(r.kind === "ZERO_ADDRESS_TRANSFER" ? "ZERO_ADDRESS_TRANSFER" : "BURN");
+    kindsByArtifact.set(r.artifactId, kinds);
+  }
+  const artifactIds = [...kindsByArtifact.keys()];
+  if (artifactIds.length === 0) return [];
+
+  const rows = await db
+    .select()
+    .from(onchainArtifacts)
+    .where(
+      and(
+        inArray(onchainArtifacts.id, artifactIds),
+        eq(onchainArtifacts.researchJobId, query.currentResearchJobId),
+        eq(onchainArtifacts.projectAnchor, query.projectAnchor),
+      ),
+    )
+    .orderBy(desc(onchainArtifacts.slot));
+
+  const out: AnchorBurnEvent[] = [];
+  for (const row of rows) {
+    const result = readTransactionResult(row.normalizedResult);
+    if (result === null) continue;
+    const artifact = brandOnchainArtifact({
+      intent: {
+        kind: "TRANSACTION_DETAIL",
+        chain: row.chain as OnchainChain,
+        network: row.network as OnchainNetwork,
+        projectAnchor: row.projectAnchor,
+        subjectKind: "tx",
+        subject: row.subject,
+      },
+      canonicalUri: row.canonicalUri,
+      result,
+      normalizedText: JSON.stringify(result),
+      provenance: provenanceOf(row),
+    });
+    const kinds = kindsByArtifact.get(row.id);
+    if (kinds?.has("BURN")) {
+      result.burns.forEach((burn: BurnInstructionRef, burnIndex: number) => {
+        if (burn.mint !== query.projectAnchor) return;
+        out.push({ artifact, burnIndex, researchJobId: row.researchJobId });
+      });
+    }
+    if (kinds?.has("ZERO_ADDRESS_TRANSFER") && result.succeeded) {
+      (result.evmTokenTransfers ?? []).forEach((transfer, transferIndex) => {
+        if (transfer.token !== query.projectAnchor) return;
+        if (transfer.to !== EVM_ZERO_ADDRESS) return;
+        out.push({
+          artifact,
+          burnIndex: transferIndex,
+          researchJobId: row.researchJobId,
+          eventKind: "ZERO_ADDRESS_TRANSFER",
+        });
+      });
+    }
+  }
+  return out;
+}

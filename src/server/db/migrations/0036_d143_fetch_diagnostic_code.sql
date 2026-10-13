@@ -1,0 +1,1 @@
+ALTER TABLE "research_trace_events" ADD COLUMN "diagnostic_code" text;

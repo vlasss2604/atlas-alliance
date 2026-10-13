@@ -1,0 +1,309 @@
+import { readFileSync } from "node:fs";
+
+import { describe, expect, it } from "vitest";
+
+import { deriveQuestionFindings, findingExplanation } from "../src/client/research-model";
+
+// THE TOP OF THE RESULT, AS ONE OBJECT.
+//
+// Three things were wrong with it, all presentation and none of them about
+// what the research found:
+//
+//   The project identity and the question sat in a header ABOVE the panel
+//   where the answer began, so the screen read as a banner beside an
+//   unrelated result window.
+//
+//   The question — the one thing a reader most needs on returning to a
+//   finished research — was a grey subtitle under a 2.15rem project name.
+//   The project names the subject; the question names the task.
+//
+//   The boundary described ATLAS's workflow ("The evidence stops at…")
+//   rather than the reader's knowledge, and the source footnote invited
+//   exactly the source arithmetic this product refuses.
+
+// The finished result is ONE component (research-result.tsx), rendered by
+// the page; the composition pins read the component.
+const PAGE = "src/client/components/research-result.tsx";
+const page = readFileSync(PAGE, "utf-8");
+
+// Comments legitimately quote the old copy to explain why it is gone, so
+// strip them before scanning for it.
+const code = page
+  .replace(/\{\s*\/\*[\s\S]*?\*\/\s*\}/g, "")
+  .replace(/\/\*[\s\S]*?\*\//g, "")
+  .replace(/^\s*\/\/.*$/gm, "");
+
+/* ------------------------------------------------------------------ */
+/* 1-2. ONE COMPOSITION, WITH THE QUESTION IN IT                       */
+/* ------------------------------------------------------------------ */
+
+describe("the top of the result is one object", () => {
+  it("TEST 1: the question renders inside the primary result panel", () => {
+    const panelAt = code.indexOf('data-testid="answer-panel"');
+    const questionAt = code.indexOf('data-testid="result-question"');
+    const answerAt = code.indexOf('data-testid="answer-text"');
+    expect(panelAt).toBeGreaterThan(-1);
+    expect(questionAt).toBeGreaterThan(panelAt);
+    // And it leads that panel — question, then status, then answer.
+    expect(questionAt).toBeLessThan(answerAt);
+    expect(code).toContain("{job.originalQuestion}");
+  });
+
+  it("TEST 2: the question is the heading, not a weak detached subtitle", () => {
+    // It is the h1 of the screen: a question-driven product headlines the
+    // question, not the project.
+    expect(code).toMatch(/<h1[^>]*data-testid="result-question"/);
+
+    // Above it, the project is an identity line rather than a display
+    // heading — the old 2.15rem project name is gone.
+    expect(code).not.toContain("sm:text-[2.15rem]");
+    expect(code).not.toMatch(/<h1[^>]*>\s*\{projectName\}/);
+    expect(code).toContain("{projectName}");
+
+    // The question is set larger than the answer body, and in full text
+    // colour — not the dim token it used to be a subtitle in. Scoped to
+    // the <h1> tag itself, since the small label above it is legitimately
+    // dim.
+    const h1 = /<h1([\s\S]*?)>/.exec(code)?.[1] ?? "";
+    expect(h1).toContain("text-[1.4rem]");
+    expect(h1).toContain("font-semibold");
+    expect(h1).not.toContain("var(--atlas-text-dim)");
+    // Larger than the answer body it sits above — which is itself the
+    // largest running text on the screen.
+    expect(code).toContain("text-[1.15rem]");
+  });
+
+  it("TEST 2b: only one heading competes at the top", () => {
+    expect((code.match(/<h1/g) ?? [])).toHaveLength(1);
+  });
+});
+
+
+/* ------------------------------------------------------------------ */
+/* 3-4. THE BOUNDARY DESCRIBES KNOWLEDGE, NOT WORKFLOW                 */
+/* ------------------------------------------------------------------ */
+
+describe("the unresolved block names the fact, not the process", () => {
+  it("TEST 3: process language is gone from the normal result", () => {
+    for (const phrase of [
+      "The evidence stops at",
+      "evidence collection ends",
+      "this stage ends",
+      "ATLAS stopped here",
+      "At this stage",
+    ]) {
+      expect(code, phrase).not.toContain(phrase);
+    }
+  });
+
+  // THIS DUTY MOVED, IT DID NOT LAPSE.
+  //
+  // The `answer-boundary` callout these two tests read is gone. It named
+  // the single most important open check and explained it — which the
+  // short answer's own "Main limitation" sentence now does, in the same
+  // words from the same persisted reason code. On a live Raydium result
+  // the two rendered back to back saying the same thing, and "Still open"
+  // said it a third time.
+  //
+  // The obligations are unchanged and are now discharged by the still-open
+  // section, so these tests follow them there rather than being deleted.
+  const BRIEFING = "src/client/components/result-briefing.tsx";
+  const MODEL = "src/client/research-model.ts";
+
+  it("TEST 3b: it names the unresolved thing and why", () => {
+    const brief = readFileSync(BRIEFING, "utf-8");
+    const block = brief.slice(brief.indexOf('data-testid="unresolved-section"'));
+    // The unresolved finding's own label, then its canonical explanation.
+    expect(block).toContain("{u.label}");
+    expect(block).toContain("{u.detail}");
+    // And the callout it replaced is really gone from the answer panel.
+    expect(code).not.toContain('data-testid="answer-boundary"');
+  });
+
+  it("TEST 4: an evidence gap and a research limitation are labelled differently", () => {
+    // The distinction is now made where the copy is derived: a blocked
+    // check speaks with its limitation, an ordinary gap with its reason.
+    const model = readFileSync(MODEL, "utf-8");
+    expect(model).toContain("detail: (blocked ? r.limitation : r.reason) ?? fallback");
+    // And a blocked check carries an extra line saying whose limit it is.
+    const brief = readFileSync(BRIEFING, "utf-8");
+    expect(brief).toContain("{u.blocked && (");
+    expect(brief).toContain("not evidence for or against the project");
+  });
+
+  it("TEST 4b: the limitation wording still refuses to blame the project", () => {
+    const [blocked] = deriveQuestionFindings(
+      [{ label: "Is it running now?", patternStep: 4, component: "EXECUTION_EVIDENCE", supportingComponents: [] }],
+      [
+        {
+          component: "EXECUTION_EVIDENCE",
+          status: "INSUFFICIENT_EVIDENCE",
+          reasonCodes: ["NO_EVIDENCE_FOUND"],
+          coverage: "BLOCKED",
+        },
+      ],
+    );
+    const text = findingExplanation(blocked).join(" ");
+    expect(text).toContain("unavailable during this research run");
+    expect(text).toContain("not evidence for or against the project");
+    // It must never borrow the evidence-gap sentence, which asserts that
+    // checking actually happened.
+    expect(text).not.toContain("sources checked here");
+
+    // And a genuine gap stays a statement about the evidence.
+    const [gap] = deriveQuestionFindings(
+      [{ label: "Is it running now?", patternStep: 4, component: "EXECUTION_EVIDENCE", supportingComponents: [] }],
+      [
+        {
+          component: "EXECUTION_EVIDENCE",
+          status: "INSUFFICIENT_EVIDENCE",
+          reasonCodes: ["MISSING_EXECUTION_EVIDENCE"],
+          coverage: "COMPLETED",
+        },
+      ],
+    );
+    const gapText = findingExplanation(gap).join(" ");
+    // A genuine gap is explained by its persisted reason code, and says
+    // nothing about research coverage.
+    expect(gapText).toContain("nothing checked shows it actually running");
+    expect(gapText).not.toContain("unavailable during this research run");
+    expect(gapText).not.toContain("research coverage");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 5-7. SOURCE METADATA                                                */
+/* ------------------------------------------------------------------ */
+
+describe("the normal result shows what the answer rests on, and nothing else", () => {
+  it("TEST 5: the not-used count is gone from the normal result", () => {
+    expect(code).not.toContain("not used as evidence");
+    expect(code).not.toContain("readDocs - usedDocs");
+    expect(code).not.toMatch(/\{readDocs\}\s*\{readDocs === 1/);
+  });
+
+  it("TEST 6: the answer's footnote states freshness, never a source count", () => {
+    // A count of sources invited source arithmetic. What a reader needs
+    // beside the answer is WHEN the evidence was checked and how recent
+    // the newest admitted source is — two persisted dates, no score.
+    expect(code).not.toContain("usedDocs");
+    expect(code).not.toContain("used as evidence");
+    const meta = code.slice(code.indexOf('data-testid="answer-meta"'));
+    expect(meta.slice(0, 500)).toContain("Checked {surface.checkedOn}");
+    expect(meta.slice(0, 500)).toContain("Newest source");
+  });
+
+  it("TEST 6b: the footnote is a footnote, never styled as a score", () => {
+    const meta = code.slice(code.indexOf('data-testid="answer-meta"') - 400);
+    const block = meta.slice(0, 700);
+    // Smallest text on the panel, in the dim token — no tone class, no
+    // progress or confidence affordance.
+    expect(block).toContain("text-[0.88rem]");
+    expect(block).toContain("var(--atlas-text-dim)");
+    expect(block).not.toContain("tone-");
+    expect(block).not.toContain("confidence");
+  });
+
+  it("TEST 7: the full audit keeps the complete accounting", () => {
+    // The accounting moved to the audit surface, which is where a
+    // professional needs it — as a register with reasons rather than four
+    // role-bucketed document lists inside the result.
+    expect(code).toContain('data-testid="audit-entry"');
+    const audit = readFileSync("src/client/components/research-audit.tsx", "utf-8");
+    expect(audit).toContain("Sources used");
+    expect(audit).toContain("Checked but not used");
+    expect(audit).toContain("Read during research; no research point relied on it.");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* 8-12. NOTHING BELOW THE SURFACE MOVED                               */
+/* ------------------------------------------------------------------ */
+
+describe("presentation only", () => {
+  it("TEST 8: canonical status derivation is untouched", () => {
+    const rows = deriveQuestionFindings(
+      [
+        { label: "A", patternStep: 6, component: "DESTINATION", supportingComponents: [] },
+        { label: "B", patternStep: 4, component: "EXECUTION_EVIDENCE", supportingComponents: [] },
+        { label: "C", patternStep: 7, component: "NET_EFFECT", supportingComponents: [] },
+      ],
+      [
+        { component: "DESTINATION", status: "SUPPORTED", coverage: "COMPLETED" },
+        { component: "EXECUTION_EVIDENCE", status: "INSUFFICIENT_EVIDENCE", coverage: "COMPLETED" },
+        { component: "NET_EFFECT", status: "CONTRADICTED", coverage: "COMPLETED" },
+      ],
+    );
+    expect(rows.map((r) => r.stateLabel)).toEqual([
+      "Confirmed",
+      "Not established",
+      "Contradicted",
+    ]);
+  });
+
+  it("TEST 9: the question projection contract is unchanged", () => {
+    const projection = readFileSync("src/server/engine/question-projection.ts", "utf-8");
+    expect(projection).toContain("export const PROJECTION_VERSION = 1");
+    expect(projection).toContain("export const MIN_FINDINGS = 2");
+    expect(projection).toContain("export const MAX_FINDINGS = 5");
+    // The surface model still consumes it exactly as before.
+    expect(readFileSync("src/client/result-surface.ts", "utf-8")).toContain("questionFindings: detail.questionFindings");
+    expect(code).toContain("buildResultSurface(detail)");
+  });
+
+  it("TEST 10: no model call and no research call reaches the screen", () => {
+    for (const file of [PAGE, "src/client/components/result-ladder.tsx", "src/client/research-model.ts"]) {
+      const src = readFileSync(file, "utf-8");
+      expect(src, file).not.toContain("anthropic");
+      expect(src, file).not.toContain("generateQuestionProjection");
+    }
+  });
+
+  it("TEST 11 + 12: the engine and its schema were not touched by this round", () => {
+    // The generation hook and its ordering are exactly as the previous
+    // round left them.
+    // QUESTION_PROJECTION_LIFECYCLE_V1: the projection is generated by the
+    // worker after the terminal state is committed, never from run-job.ts
+    // (the job is still RUNNING there and the store would refuse it).
+    const runJob = readFileSync("src/server/engine/run-job.ts", "utf-8");
+    expect(runJob).not.toContain("generateQuestionProjectionSafely(");
+    const worker = readFileSync("src/server/jobs/worker.ts", "utf-8");
+    expect(worker).toContain("generateQuestionProjectionSafely(\n    db,\n    jobId,");
+    expect(worker).toContain("generateQuestionProjectionSafely(ctx.db, jobId)");
+    // Still strictly after the Proof: the Proof is built inside
+    // runS4ResearchJob, the projection only after the worker's terminal
+    // transaction that follows it.
+    const single = worker.indexOf("generateQuestionProjectionSafely(\n    db,\n    jobId,");
+    expect(worker.lastIndexOf("transitionJobState(tx, jobId, resolvedOutcome.state", single)).toBeLessThan(single);
+    // And 0040 is still the newest migration.
+    const journal = JSON.parse(
+      readFileSync("src/server/db/migrations/meta/_journal.json", "utf-8"),
+    ) as { entries: { idx: number; tag: string }[] };
+    // A presentation round may ADD its own derived table; it may never
+    // alter an engine-owned one. So this guard is no longer "0040 is
+    // still newest" — the Full Research Audit legitimately added 0041 —
+    // but the invariant it protected, which is stronger and durable: no
+    // migration touches a canonical research table.
+    const newest = journal.entries[journal.entries.length - 1];
+    const sql = readFileSync(`src/server/db/migrations/${newest.tag}.sql`, "utf-8");
+    // A round may ADD to a canonical table — B1 added a nullable
+    // evidence.onchain_fact_kind under owner approval — but nothing may
+    // DESTROY or REDEFINE one. That is the invariant this guard was
+    // really protecting, and it is the durable form of it: additive
+    // columns are safe by construction, retypes and drops are not.
+    expect(sql).not.toMatch(/DROP (TABLE|COLUMN|TYPE)/i);
+    expect(sql).not.toMatch(/ALTER COLUMN/i);
+    expect(sql).not.toMatch(/SET NOT NULL/i);
+    expect(sql).not.toMatch(/RENAME/i);
+    // Any ALTER TABLE on a canonical table must be an ADD COLUMN, or a
+    // CHECK-constraint rebuild — a shape backstop Postgres validates
+    // against every existing row before accepting, so it can no more
+    // destroy or redefine data than an added nullable column can
+    // (0049 realigned the documentary-locator backstop with the
+    // application's identifier families this way).
+    for (const stmt of sql.split("--> statement-breakpoint")) {
+      if (!/ALTER TABLE "(proofs|evidence|research_component_results|research_claim_support|research_attempts|sources|research_question_projections)"/.test(stmt)) continue;
+      expect(stmt).toMatch(/ADD COLUMN|DROP CONSTRAINT IF EXISTS|ADD CONSTRAINT "[a-z_]+"\s+CHECK/i);
+    }
+  });
+});

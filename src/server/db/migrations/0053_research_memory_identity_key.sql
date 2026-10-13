@@ -1,0 +1,17 @@
+-- ROUND 3.5 — FOUNDER-APPROVED SEMANTICS (H11).
+--
+-- DOCUMENTARY MEMORY IS BOUND TO THE TOKEN IDENTITY IT WAS VERIFIED
+--    UNDER (H11). The candidate writer records the project's confirmed
+--    token identity (domain/project-identity.ts `identityBindingKey`:
+--    chain and token address, never a row id) at the moment the row is
+--    written. Adoption compares it to the identity confirmed TODAY and
+--    refuses a row whose identity differs — fail closed, no inference that
+--    the old fact became false, no deletion, no automatic rebinding.
+--
+--    NULLABLE, ADDITIVE, NEVER BACKFILLED. A row written before this column
+--    existed carries NULL, which reads as "verified under no confirmed
+--    identity": it stays adoptable for a project that has no identity and
+--    is refused for a project that has one. Backfilling from the identity
+--    ACTIVE today would be exactly the automatic rebinding this rule
+--    forbids; re-establishment is an owner act.
+ALTER TABLE "research_memory" ADD COLUMN "identity_key" text;

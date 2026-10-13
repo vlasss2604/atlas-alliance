@@ -1,0 +1,17 @@
+-- D-150 — SOURCE_RESOURCE_SELECTED: why a component may read a document
+-- that no search ever returned.
+--
+-- D-148 put human-approved resources into acquisition. Extraction replay
+-- (D-141) builds each component's corpus from CANDIDATE_RETURNED rows
+-- alone, and a seeded resource has none — it was never returned by a
+-- query. So a seeded document could be fetched, sealed with full
+-- authority, and then never shown to any extractor.
+--
+-- This is a NEW operation type rather than a reused CANDIDATE_RETURNED,
+-- because CANDIDATE_RETURNED means "a search returned this" and that would
+-- be false. Forging it would corrupt search provenance and analytics to
+-- make an unrelated map work.
+--
+-- Additive only: one enum value. No table, no column, no backfill, and no
+-- existing row changes meaning.
+ALTER TYPE "public"."trace_operation_type" ADD VALUE 'SOURCE_RESOURCE_SELECTED';

@@ -1,0 +1,11 @@
+-- TEMPORAL PROVENANCE MARKER (Founder-approved).
+--
+-- evidence.published_at_rule_version records WHICH RULE produced
+-- published_at: 1 = the strict publication-date rule introduced in commit
+-- ac67257 (explicit publication / last-updated date of the document itself,
+-- else null). NULL = legacy or unknown provenance.
+--
+-- Forward only. Nullable, no default, no backfill: every existing row stays
+-- NULL (legacy). An unmarked date remains provenance and never creates
+-- CURRENT or lifecycle temporal truth.
+ALTER TABLE "evidence" ADD COLUMN IF NOT EXISTS "published_at_rule_version" smallint;
