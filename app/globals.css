@@ -3749,6 +3749,206 @@ details[open] > .source-tech-summary svg {
 }
 
 /* ---------------------------------------------------------------- *
+ * V7 PROFILE (HANDOFF §4.7) — orb + title, the access level panel, the
+ * EN | RU switch with a sliding thumb, privacy, and a grey delete row.
+ * The access panel's edge is grey: the Free / Subscription states and
+ * their colours wait for D14 (Phase 1b).
+ * ---------------------------------------------------------------- */
+.profile-orb {
+  position: relative;
+  flex: none;
+  width: 76px;
+  height: 76px;
+  border-radius: 9999px;
+  /* the static dotted ring */
+  border: 1.5px dotted rgba(30, 197, 245, 0.45);
+  box-sizing: border-box;
+}
+.profile-orb-disc {
+  position: absolute;
+  left: 6.5px;
+  top: 6.5px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  background: radial-gradient(circle at 50% 30%, #0e3a62 0%, #05182c 75%);
+  border: 1px solid rgba(30, 197, 245, 0.5);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    0 0 26px rgba(30, 197, 245, 0.35);
+  color: #8ee6ff;
+}
+.profile-access {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 16px;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #08294b 0%, #061b30 100%);
+  border: 1px solid rgba(148, 160, 179, 0.4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 20px 40px -16px rgba(0, 0, 0, 0.8),
+    0 0 34px -6px rgba(148, 160, 179, 0.18);
+}
+.profile-label {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7f93a8;
+}
+.profile-access-line {
+  margin: 0;
+  font-size: 15px;
+  line-height: 22px;
+  color: #dce4ec;
+}
+.profile-panel {
+  padding: 16px;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(8, 38, 66, 0.92) 0%, rgba(6, 27, 48, 0.92) 100%);
+  border: 1px solid rgba(30, 197, 245, 0.16);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 20px 40px -16px rgba(0, 0, 0, 0.8);
+}
+.profile-language {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.profile-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  box-sizing: border-box;
+  border-radius: 11px;
+  background: rgba(30, 197, 245, 0.1);
+  border: 1px solid rgba(30, 197, 245, 0.32);
+  color: #8ee6ff;
+}
+.profile-icon-grey {
+  background: rgba(148, 160, 179, 0.1);
+  border-color: rgba(148, 160, 179, 0.32);
+  color: #c4cedb;
+}
+.profile-row-title {
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 700;
+  color: var(--atlas-text-strong);
+}
+.profile-row-note {
+  font-size: 13.5px;
+  line-height: 19px;
+  color: #afc0d1;
+}
+.profile-switch {
+  position: relative;
+  flex: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 132px;
+  height: 40px;
+  box-sizing: border-box;
+  padding: 3px;
+  border-radius: 20px;
+  background: #03111f;
+  border: 1px solid rgba(30, 197, 245, 0.3);
+}
+/* The thumb slides by transform only (HANDOFF §4.9: 0.2–0.3s). */
+.profile-switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 62px;
+  height: 32px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #4fd8ff 0%, #12b4ec 100%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 4px 14px rgba(30, 197, 245, 0.5);
+  transition: transform 280ms var(--ease-rise);
+}
+.profile-switch[data-value="RU"] .profile-switch-thumb {
+  transform: translateX(63px);
+}
+.profile-switch-option {
+  position: relative;
+  z-index: 1;
+  height: 32px;
+  font-size: 13px;
+  line-height: 1;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #afc0d1;
+  transition: color 200ms ease;
+}
+.profile-switch-option[aria-pressed="true"] {
+  color: #03111f;
+}
+/* Grey, never red: deleting an account is not a verdict. */
+.profile-delete {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 16px;
+  border-radius: 22px;
+  background: rgba(6, 27, 48, 0.7);
+  border: 1px solid rgba(148, 160, 179, 0.22);
+  text-align: left;
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.profile-delete .profile-row-title {
+  color: #c9d2de;
+}
+.profile-delete:active:not(:disabled) {
+  transform: scale(0.97);
+}
+.profile-delete:disabled {
+  opacity: 0.55;
+}
+.profile-toast {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  padding: 10px 16px;
+  border-radius: 9999px;
+  background: rgba(6, 27, 48, 0.9);
+  border: 1px solid rgba(148, 160, 179, 0.35);
+  color: #dce4ec;
+  font-size: 14px;
+  font-weight: 600;
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-switch-thumb,
+  .profile-switch-option,
+  .profile-delete,
+  .profile-delete:active:not(:disabled) {
+    transition: none;
+    transform: none;
+  }
+  .profile-switch[data-value="RU"] .profile-switch-thumb {
+    transform: translateX(63px);
+  }
+}
+
+/* ---------------------------------------------------------------- *
  * MOTION
  * ---------------------------------------------------------------- */
 @keyframes atlas-fade-up {
