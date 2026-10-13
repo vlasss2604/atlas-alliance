@@ -434,14 +434,20 @@ describe("source snapshot — the capture reads as a document", () => {
     }
   });
 
-  it("the default view is the document, with the exact text one click away", () => {
+  it("the document is one tap away, and its exact text one more", () => {
     const page = readFileSync(PAGE, "utf-8");
-    // Raw is opt-in — the readable form answers "what does this source
-    // say?", and the exact text answers "is this really what you stored?".
+    // Both are opt-in (owner decision, step 6 review): the cited passage
+    // answers "what did the research read here?", the document answers
+    // "what does this source say?", and the exact text answers "is this
+    // really what you stored?".
     expect(page).toContain("dict.snapshot.showExact");
     expect(en.snapshot.showExact).toBe("Show exact captured text");
-    expect(page).toContain("useState(false)");
+    expect(page).toContain("const [showFull, setShowFull] = useState(false);");
+    expect(page).toContain("const [showRaw, setShowRaw] = useState(false);");
     expect(page).toContain("snapshot-raw");
+    const full = page.slice(page.indexOf("{showFull && ("), page.indexOf("</article>"));
+    expect(full).toContain("<SnapshotDocumentView");
+    expect(full).toContain('data-testid="snapshot-raw"');
   });
 });
 
@@ -559,20 +565,21 @@ describe("source snapshot — a flattened capture is not a document", () => {
     expect(flat).toContain("snapshot.fullLength.toLocaleString()");
   });
 
-  it("the structured reader is untouched and still the default for markdown", () => {
+  it("the structured reader is untouched and still how markdown opens", () => {
     const page = readFileSync(PAGE, "utf-8");
-    const structured = page.slice(
-      page.indexOf("{structured ? ("),
-      page.indexOf('data-testid="snapshot-flat-note"'),
-    );
-    // Same document view, still the default for a structured capture.
-    expect(structured).toContain("<SnapshotDocumentView");
-    // Its opt-in exact text is unchanged, and offered only on this branch
-    // — the flat branch has its own "full captured text" control instead.
+    const full = page.slice(page.indexOf("{showFull && ("), page.indexOf("</article>"));
+    // Same document view; a structured capture opens as it unless the
+    // reader asked for the exact text. A flat capture always opens as text.
+    expect(full).toContain("{structured && !showRaw ? (");
+    expect(full.indexOf("{structured && !showRaw ? (")).toBeLessThan(full.indexOf("<SnapshotDocumentView"));
+    // Its opt-in exact text is unchanged, and offered only for a structured
+    // capture whose document is open — a flat capture's full text IS the
+    // exact text, so it has no second switch.
     expect(page).toContain("dict.snapshot.showExact");
     expect(page).toContain("dict.snapshot.showDocument");
     expect(en.snapshot.showDocument).toBe("Show as document");
-    expect(page).toContain("{structured && (");
+    expect(page).toContain("{structured && showFull && (");
+    expect(page).toContain("{!structured && (");
     // And the branch is chosen by the stored representation, not by size,
     // not by sniffing the text.
     expect(page).toContain("preservesStructure(snapshot.representation)");
@@ -880,19 +887,26 @@ describe("source snapshot — the V7 hero panel", () => {
     expect(rule(".source-domain")).toContain("flex-wrap: wrap");
   });
 
-  it("a structured capture also shows the cited passage — the row's own fragment", () => {
-    const page = readFileSync(PAGE, "utf-8");
-    const structured = page.slice(
-      page.indexOf("{structured ? ("),
-      page.indexOf('data-testid="snapshot-flat-note"'),
-    );
-    const excerpt = structured.slice(structured.indexOf('data-testid="snapshot-structured-excerpt"'));
-    expect(structured.indexOf("<SnapshotDocumentView")).toBeLessThan(
-      structured.indexOf('data-testid="snapshot-structured-excerpt"'),
-    );
-    expect(structured).toContain("{snapshot.fragment && (");
+  it("every capture leads with the cited passage, then the whole capture behind one control", () => {
+    const page = codeOf(PAGE);
+    const at = (needle: string) => page.indexOf(needle);
+    // One excerpt for both kinds of capture — not one per branch.
+    expect(page.match(/data-testid="snapshot-excerpt"/g)?.length).toBe(1);
+    expect(page).not.toContain("snapshot-structured-excerpt");
+    // Order: what the capture is (flat only), the passage, the control,
+    // and only then the document or its text.
+    expect(at("{!structured && (")).toBeLessThan(at('data-testid="snapshot-excerpt"'));
+    expect(at('data-testid="snapshot-excerpt"')).toBeLessThan(at('data-testid="toggle-full-capture"'));
+    expect(at('data-testid="toggle-full-capture"')).toBeLessThan(at("{showFull && ("));
+    expect(at("{showFull && (")).toBeLessThan(at("<SnapshotDocumentView"));
+    // The passage is the row's own fragment, under the static mark.
+    const excerpt = page.slice(at("{snapshot.fragment && ("), at('data-testid="toggle-full-capture"'));
     expect(excerpt).toContain("dict.snapshot.relevantExcerpt");
     expect(excerpt).toContain('<mark className="highlight">{snapshot.fragment}</mark>');
+    // The control says how much is behind it, and whether it is open.
+    const toggle = page.slice(at("onClick={() => setShowFull("), at("{showFull && ("));
+    expect(toggle).toContain("aria-expanded={showFull}");
+    expect(toggle).toContain("snapshot.fullLength.toLocaleString()");
   });
 
   it("the highlighter mark is static", () => {

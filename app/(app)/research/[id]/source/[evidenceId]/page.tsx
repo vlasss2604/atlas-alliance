@@ -48,6 +48,8 @@ export default function SourceSnapshotPage() {
 
   const [snapshot, setSnapshot] = useState<SourceSnapshotView | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  // The whole capture, and (structured only) its exact text: both opt-in.
+  const [showFull, setShowFull] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
 
   useEffect(() => {
@@ -164,15 +166,20 @@ export default function SourceSnapshotPage() {
           </div>
         </div>
 
-        {/* TWO KINDS OF CAPTURE, TWO WAYS TO READ ONE.
-            What was STORED decides this, never what the text looks like. A
-            markdown source kept its own structure and opens as the document
-            it is. An HTML page was flattened to text by the transport before
-            it was ever persisted, so it has no structure to show — and
-            leading with all of it means burying the cited passage under an
-            average of 18,000 characters of navigation and boilerplate.
-            Neither branch guesses: reconstructing headings out of flat text
-            would invent a structure ATLAS did not preserve. */}
+        {/* ONE ORDER FOR EVERY CAPTURE (owner decision, step 6 review):
+            what the capture is, the passage the research cited, and only
+            then the whole capture behind one control. Leading with the
+            document buries the cited passage — under an average of 18,000
+            characters of navigation on a flattened page, and under tables
+            and headings on a structured one.
+
+            What was STORED still decides how the whole capture reads, never
+            what the text looks like. A markdown source kept its own
+            structure and opens as the document it is; an HTML page was
+            flattened to text by the transport before it was persisted, so it
+            opens as that text. Neither branch guesses: reconstructing
+            headings out of flat text would invent a structure ATLAS did not
+            preserve. */}
         <article className="source-article" data-testid="snapshot-content">
           <div className="source-article-head">
             <div className="min-w-0">
@@ -180,10 +187,9 @@ export default function SourceSnapshotPage() {
               {/* THE EXACT TEXT STAYS REACHABLE. Typesetting is a reading
                   aid, so a reader checking a quotation character by
                   character — or checking it against the hash — must be
-                  able to see what was actually stored. It is opt-in
-                  because the readable form is the one that answers "what
-                  does this source say?". */}
-              {structured && (
+                  able to see what was actually stored. Offered once the
+                  document is open, because that is what it switches. */}
+              {structured && showFull && (
                 <button
                   type="button"
                   onClick={() => setShowRaw((v) => !v)}
@@ -199,84 +205,61 @@ export default function SourceSnapshotPage() {
             </span>
           </div>
 
-          {structured ? (
-            <div className="mt-4">
-              {showRaw ? (
-                <pre
-                  className="overflow-x-auto break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
-                  data-testid="snapshot-raw"
-                >
-                  {snapshot.content}
-                </pre>
-              ) : (
+          {/* SAY WHAT WAS KEPT, PLAINLY. A reader who is shown prose where
+              they expected a page deserves the reason, and the reason is a
+              fact about the capture rather than an apology for it. */}
+          {!structured && (
+            <p className="mt-4 text-[13px] leading-[19px] text-[#afc0d1]" data-testid="snapshot-flat-note">
+              {dict.snapshot.flatNote}
+            </p>
+          )}
+
+          {/* THE PASSAGE THE RESEARCH ACTUALLY CITED, FIRST. It is this
+              Evidence row's own `fragment` — the same words the finding
+              quoted, not a summary of them and not a passage chosen here. */}
+          {snapshot.fragment && (
+            <div className="mt-4" data-testid="snapshot-excerpt">
+              <p className="source-excerpt-label">{dict.snapshot.relevantExcerpt}</p>
+              <blockquote className="source-quote">
+                <QuoteIcon />
+                <mark className="highlight">{snapshot.fragment}</mark>
+              </blockquote>
+            </div>
+          )}
+
+          {/* THE WHOLE CAPTURE IS KEPT AND REACHABLE, JUST NOT DEFAULT.
+              An audit needs every character; a reader needs the passage.
+              Nothing here is hidden, rewritten or shortened — the full
+              capture is one tap away, exactly as stored. */}
+          <div className="mt-5">
+            <button
+              type="button"
+              onClick={() => setShowFull((v) => !v)}
+              className="source-article-toggle inline-flex items-center gap-2"
+              aria-expanded={showFull}
+              data-testid="toggle-full-capture"
+            >
+              <ChevronIcon
+                className={`shrink-0 transition-transform duration-200 ${showFull ? "rotate-90" : ""}`}
+              />
+              {showFull ? dict.snapshot.hideFull : dict.snapshot.showFull}
+              <span className="opacity-70">
+                {dict.snapshot.characters(snapshot.fullLength.toLocaleString())}
+              </span>
+            </button>
+          </div>
+
+          {showFull && (
+            <div className="mt-4 border-t border-[var(--hairline)] pt-4">
+              {structured && !showRaw ? (
                 <SnapshotDocumentView
                   content={snapshot.content}
                   markdown={isMarkdown}
                   baseUrl={sourceUrl}
                 />
-              )}
-
-              {/* THE PASSAGE THE RESEARCH CITED, under the document it came
-                  from (V7). The same words as the flat branch shows first:
-                  this Evidence row's own fragment, never a passage chosen
-                  here. */}
-              {snapshot.fragment && (
-                <div className="mt-5" data-testid="snapshot-structured-excerpt">
-                  <p className="source-excerpt-label">{dict.snapshot.relevantExcerpt}</p>
-                  <blockquote className="source-quote">
-                    <QuoteIcon />
-                    <mark className="highlight">{snapshot.fragment}</mark>
-                  </blockquote>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="mt-4">
-              {/* SAY WHAT WAS KEPT, PLAINLY. A reader who is shown prose
-                  where they expected a page deserves the reason, and the
-                  reason is a fact about the capture rather than an apology
-                  for it. */}
-              <p className="text-[13px] leading-[19px] text-[#afc0d1]" data-testid="snapshot-flat-note">
-                {dict.snapshot.flatNote}
-              </p>
-
-              {/* THE PASSAGE THE RESEARCH ACTUALLY CITED, FIRST. It is this
-                  Evidence row's own `fragment` — the same words the finding
-                  quoted, not a summary of them and not a passage chosen
-                  here. On a flattened capture it is the ~2% a reader came
-                  for. */}
-              <div className="mt-5" data-testid="snapshot-excerpt">
-                <p className="source-excerpt-label">{dict.snapshot.relevantExcerpt}</p>
-                <blockquote className="source-quote">
-                  <QuoteIcon />
-                  <mark className="highlight">{snapshot.fragment}</mark>
-                </blockquote>
-              </div>
-
-              {/* THE WHOLE CAPTURE IS KEPT AND REACHABLE, JUST NOT DEFAULT.
-                  An audit needs every character; a reader needs the passage.
-                  Nothing here is hidden, rewritten or shortened — the full
-                  text is one click away, exactly as stored. */}
-              <div className="mt-5">
-                <button
-                  type="button"
-                  onClick={() => setShowRaw((v) => !v)}
-                  className="source-article-toggle inline-flex items-center gap-2"
-                  data-testid="toggle-raw-capture"
-                >
-                  <ChevronIcon
-                    className={`shrink-0 transition-transform duration-200 ${showRaw ? "rotate-90" : ""}`}
-                  />
-                  {showRaw ? dict.snapshot.hideFull : dict.snapshot.showFull}
-                  <span className="opacity-70">
-                    {dict.snapshot.characters(snapshot.fullLength.toLocaleString())}
-                  </span>
-                </button>
-              </div>
-
-              {showRaw && (
+              ) : (
                 <pre
-                  className="mt-4 overflow-x-auto border-t border-[var(--hairline)] pt-4 break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
+                  className="overflow-x-auto break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
                   data-testid="snapshot-raw"
                 >
                   {snapshot.content}
