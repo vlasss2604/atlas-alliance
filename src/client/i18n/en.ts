@@ -446,6 +446,35 @@ export const en = {
       SUBSTANTIVE: "This describes the evidence checked, not proof that the thing is absent.",
     } as Record<string, string>,
     openAudit: "Open full audit",
+    // V7 "What remains unclear" (HANDOFF §4.3, §5): one card per unresolved
+    // link. The chip is boundaryOf(...).kind and nothing else.
+    unclearSub: "Open a link to see what is missing and what would help.",
+    unclearLabels: { what: "Not established", why: "Why", help: "What could help" },
+    boundaryChips: {
+      SUBSTANTIVE: "Checked, not established",
+      TECHNICAL: "Not fully checked",
+      CONFIGURATION: "No supported verification route",
+    } as Record<string, string>,
+    boundaryHints: {
+      SUBSTANTIVE: "Sources were read; none establishes this.",
+      TECHNICAL: "The run stopped before every relevant source was checked.",
+      CONFIGURATION: "ATLAS has no supported route to verify this yet.",
+    } as Record<string, string>,
+    // One template per boundary kind until the Founder approves richer
+    // wording (D13): a direction for further checking, never a promise.
+    helpTemplates: {
+      SUBSTANTIVE:
+        "Evidence that carries this specific point for this mechanism; any such source would be read and weighed like the others — no source type guarantees the outcome.",
+      TECHNICAL:
+        "A re-run when budget allows: known relevant sources were not read yet. This is a limit of the research run, not a finding about the project.",
+      CONFIGURATION:
+        "A supported verification route for this point. This is a limit of what ATLAS can verify today, not a finding about the project; the link stays unverified, not disproved.",
+    } as Record<string, string>,
+    excludedToggle: (n: number) => `${n} ${n === 1 ? "source" : "sources"} found, not admitted`,
+    excludedHide: "Hide",
+    unclearClosing:
+      "These describe the evidence checked, not proof that the thing is absent. What would help is a direction for further checking, not a guarantee.",
+    evidenceRows: { establishes: "What this establishes", notEstablishes: "What this does not establish" },
   },
   // D-171: the full audit and the source snapshot — the rest of the Proof
   // journey. The record's own words (projection labels and summary,

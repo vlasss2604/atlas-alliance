@@ -904,128 +904,333 @@ button.card:active,
  * contradicted). The glyph is the state's glyph in the state's colour;
  * the text is the sentence, byte for byte.
  * ---------------------------------------------------------------- */
-.answer-block {
+/* ---------------------------------------------------------------- *
+ * V7 PROOF — the answer panel (HANDOFF §4.3): ring, verdict, confidence,
+ * figures, the answer in headed blocks. State colours mean one thing each.
+ * ---------------------------------------------------------------- */
+[data-status="CONFIRMED"] {
+  --st: var(--atlas-green);
+  --st-ink: #8fecd0;
+}
+[data-status="PARTIAL"] {
+  --st: var(--atlas-amber);
+  --st-ink: #f3d58c;
+}
+[data-status="CONTRADICTED"] {
+  --st: var(--atlas-red);
+  --st-ink: #f7adad;
+}
+[data-status="NOT_ESTABLISHED"] {
+  --st: var(--atlas-slate);
+  --st-ink: #c4cedb;
+}
+.result-title {
+  margin: 0;
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--atlas-text-strong);
+}
+.answer-v7 {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-hero);
+  background: var(--hero-gradient);
+  border: 1px solid var(--edge-hero);
+  box-shadow: var(--shadow-hero);
+}
+.answer-v7 .scanner-line {
+  background: linear-gradient(90deg, rgba(30, 197, 245, 0) 0%, var(--atlas-cyan-strong) 50%, rgba(30, 197, 245, 0) 100%);
+}
+.proof-ring {
+  position: relative;
+  flex: none;
+  width: 116px;
+  height: 116px;
+}
+.ring-seg {
+  stroke: var(--st);
+  filter: drop-shadow(0 0 4px color-mix(in srgb, var(--st) 85%, transparent));
+  animation: ap-seg 350ms var(--ease-rise) backwards;
+}
+.ring-seg[data-status="NOT_ESTABLISHED"] {
+  stroke: #22374d;
+  filter: none;
+}
+.proof-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  animation: ap-pop 240ms var(--ease-rise) 270ms backwards;
+}
+.proof-ring-n {
+  display: flex;
+  align-items: baseline;
+  font-size: 30px;
+  line-height: 30px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--atlas-text-strong);
+}
+/* The verdict pill in the panel: 30px, a static soft glow. */
+.answer-pill .tone {
+  height: 30px;
+  box-sizing: border-box;
+  padding: 0 12px 0 10px;
+  font-size: 13px;
+  animation: ap-fade-in 300ms ease 117ms backwards;
+}
+.answer-pill {
+  align-self: flex-start;
+}
+.confidence-bar {
+  display: flex;
+  gap: 3px;
+}
+.confidence-bar > span {
+  width: 22px;
+  height: 5px;
+  border-radius: 3px;
+  background: #22374d;
+}
+/* The lit cells take the verdict's tone, as in the reference. */
+.confidence-bar > .confidence-on {
+  background: var(--tone, var(--atlas-cyan));
+  box-shadow: 0 0 8px color-mix(in srgb, var(--tone, var(--atlas-cyan)) 60%, transparent);
+  transform-origin: left;
+  animation: ap-grow 400ms ease-out 320ms backwards;
+}
+.legend-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 9999px;
+  background: var(--st);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--st) 80%, transparent);
+}
+.legend-dot[data-status="NOT_ESTABLISHED"] {
+  box-shadow: none;
+}
+.figures-row {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  column-gap: 0.85rem;
-  align-items: start;
-  padding: 0.9rem 0;
-  border-top: 1px solid var(--hairline);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--edge-soft);
+  background: rgba(3, 17, 31, 0.55);
+}
+.figure {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  height: 58px;
+  text-align: center;
+}
+.figure + .figure {
+  border-left: 1px solid rgba(30, 197, 245, 0.12);
+}
+.figure-n {
+  font-size: 20px;
+  line-height: 20px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  color: var(--atlas-text-strong);
+}
+.figure-verified .figure-n {
+  color: var(--atlas-green);
+  text-shadow: 0 0 12px rgba(53, 209, 162, 0.5);
+}
+.figure-l {
+  font-size: 11px;
+  line-height: 13px;
+  color: var(--atlas-text-dim);
+}
+.answer-list {
+  display: flex;
+  flex-direction: column;
+  padding: 4px 16px 6px;
+  border-top: 1px solid rgba(30, 197, 245, 0.12);
+}
+.answer-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(30, 197, 245, 0.1);
 }
 .answer-block:first-child {
   border-top: 0;
-  padding-top: 0.2rem;
-}
-.answer-glyph {
-  --tone: var(--atlas-slate);
-  display: grid;
-  place-items: center;
-  width: 1.9rem;
-  height: 1.9rem;
-  margin-top: 0.1rem;
-  border-radius: 9999px;
-  font-size: 0.85rem;
-  font-weight: 700;
-  color: var(--tone);
-  background: color-mix(in srgb, var(--tone) 12%, transparent);
-  border: 1px solid color-mix(in srgb, var(--tone) 45%, transparent);
-  box-shadow: 0 0 12px -4px color-mix(in srgb, var(--tone) 70%, transparent);
 }
 .answer-heading {
-  font-size: 0.8rem;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  margin-top: 2px;
+  font-size: 14.5px;
+  line-height: 20px;
+  font-weight: 700;
+  color: var(--atlas-text-strong);
+}
+.answer-sentence {
+  font-size: 13.5px;
+  line-height: 20px;
   color: var(--atlas-text-dim);
+}
+.answer-plain {
+  padding: 10px 0;
+  font-size: 14.5px;
+  line-height: 21px;
+  color: var(--atlas-text);
+}
+.answer-plain-lead {
+  font-weight: 600;
+  color: var(--atlas-text-strong);
+}
+.answer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 10px 16px 14px;
+  border-top: 1px solid rgba(30, 197, 245, 0.1);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--atlas-text-dim);
+}
+/* A state glyph: a circle in the state colour. */
+.glyph {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  border: 1.5px solid var(--st);
+  background: color-mix(in srgb, var(--st) 16%, transparent);
+  color: var(--st-ink);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 800;
+}
+.glyph[data-status="NOT_ESTABLISHED"] {
+  background: transparent;
+}
+.glyph-filled {
+  border: 0;
+  background: none;
+  font-size: 10px;
+}
+.half-disc {
+  display: block;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border-radius: 9999px;
+  border: 2px solid currentColor;
+  background: linear-gradient(90deg, currentColor 50%, transparent 50%);
+}
+.glyph-filled .half-disc {
+  width: 11px;
+  height: 11px;
+  border-width: 1.5px;
+}
+.half-disc-lg {
+  width: 14px;
+  height: 14px;
 }
 
 /* ---------------------------------------------------------------- *
- * RESEARCH PATH — the verification chain. A connector that reads as
- * one line, luminous verified nodes, restrained partial and open ones.
- * Scrolls sideways on a handset with a fade; fits the desk column.
+ * V7 RESEARCH PATH — a horizontal strip of the same components; the
+ * right edge fades out; connectors after a filled node are tinted.
  * ---------------------------------------------------------------- */
-.path {
-  display: flex;
-  align-items: stretch;
-  gap: 0;
+.path-strip {
+  margin: 0 -16px;
+  padding: 18px 16px 16px;
   overflow-x: auto;
-  padding: 0.35rem 0 0.4rem;
   scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(90deg, #000 86%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 86%, transparent 100%);
+  border-top: 1px solid rgba(30, 197, 245, 0.12);
+  border-bottom: 1px solid rgba(30, 197, 245, 0.12);
+  background: linear-gradient(180deg, rgba(8, 38, 66, 0.5) 0%, rgba(6, 27, 48, 0.3) 100%);
 }
-.path::-webkit-scrollbar {
+.path-strip::-webkit-scrollbar {
   display: none;
 }
-@media (max-width: 767px) {
-  .path {
-    mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
-    -webkit-mask-image: linear-gradient(90deg, #000 88%, transparent 100%);
+@media (min-width: 640px) {
+  .path-strip {
+    margin: 0 -32px;
+    padding: 18px 32px 16px;
   }
+}
+.path-v7 {
+  display: flex;
+  width: max-content;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 .path-node {
   position: relative;
   display: flex;
+  flex: none;
   flex-direction: column;
   align-items: center;
-  gap: 0.5rem;
-  flex: 1 1 0;
-  min-width: 5.4rem;
-  padding: 0.2rem 0.35rem 0;
+  gap: 8px;
+  width: 86px;
   text-align: center;
-  font-size: 0.88rem;
-  font-weight: 500;
-  line-height: 1.2;
-  color: var(--atlas-text);
 }
-@media (min-width: 768px) {
-  .path-node {
-    min-width: 0;
-  }
-}
-/* the connector — a line from this node's centre to the next's */
-.path-node::before {
-  content: "";
+.path-link {
   position: absolute;
-  top: 0.85rem;
+  top: 16px;
   left: 50%;
-  right: -50%;
+  width: 86px;
   height: 2px;
-  background: linear-gradient(90deg, var(--node, var(--hairline-strong)) 0%, rgba(160, 190, 224, 0.18) 60%);
-  opacity: 0.8;
+  opacity: 0.85;
+  background: linear-gradient(90deg, var(--st) 0%, rgba(160, 190, 224, 0.18) 70%);
 }
-.path-node:last-child::before {
-  display: none;
+.path-link[data-status="NOT_ESTABLISHED"] {
+  background: linear-gradient(90deg, rgba(148, 160, 179, 0.6) 0%, rgba(160, 190, 224, 0.18) 70%);
 }
-.path-mark {
+.path-mark-v7 {
   position: relative;
   z-index: 1;
-  display: grid;
-  place-items: center;
-  width: 1.7rem;
-  height: 1.7rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  box-sizing: border-box;
   border-radius: 9999px;
-  background: var(--atlas-bg);
-  border: 2px solid var(--node, var(--hairline-strong));
-  color: var(--node, var(--atlas-text-dim));
-  font-size: 0.8rem;
-  font-weight: 700;
-  transition:
-    transform var(--motion-micro) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out);
-}
-.path-mark-filled {
-  background: var(--node);
-  color: #06111a;
+  background: var(--st);
+  border: 2px solid var(--st);
   box-shadow:
-    0 0 0 3px color-mix(in srgb, var(--node) 18%, transparent),
-    0 0 14px color-mix(in srgb, var(--node) 55%, transparent);
+    0 0 0 3px color-mix(in srgb, var(--st) 18%, transparent),
+    0 0 14px color-mix(in srgb, var(--st) 55%, transparent);
+  color: #06111a;
+  font-size: 14px;
+  line-height: 1;
+  font-weight: 800;
+  animation: ap-pop 240ms var(--ease-rise) backwards;
 }
-.path-node:hover .path-mark {
-  transform: translateY(-1px);
+.path-mark-v7[data-status="NOT_ESTABLISHED"] {
+  background: var(--surface-1);
+  box-shadow: none;
+  color: var(--st-ink);
+}
+.path-word {
+  padding: 0 4px;
+  font-size: 12.5px;
+  line-height: 16px;
+  font-weight: 700;
+  color: #e6ecf4;
 }
 .path-state {
-  font-size: 0.8rem;
-  font-weight: 500;
-  color: var(--atlas-text-dim);
+  font-size: 11px;
+  line-height: 13px;
+  font-weight: 600;
+  color: var(--st-ink);
 }
 
 /* ---------------------------------------------------------------- *
@@ -2440,6 +2645,314 @@ a.explore-card:active {
 }
 
 /* ---------------------------------------------------------------- *
+ * V7 PROOF — What ATLAS checked, evidence, What remains unclear.
+ * ---------------------------------------------------------------- */
+.checked-panel {
+  overflow: hidden;
+  border-radius: var(--radius-panel);
+  background: linear-gradient(180deg, rgba(8, 38, 66, 0.94) 0%, rgba(6, 27, 48, 0.94) 100%);
+  border: 1px solid var(--edge-soft);
+  box-shadow: var(--shadow-panel);
+  scroll-margin-top: 16px;
+}
+.checks-bar {
+  display: grid;
+  gap: 4px;
+}
+.checks-seg {
+  height: 7px;
+  border-radius: 4px;
+  background: var(--st);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--st) 70%, transparent);
+  transform-origin: left;
+  animation: ap-grow 350ms ease-out backwards;
+}
+.checks-seg[data-status="NOT_ESTABLISHED"] {
+  background: #22374d;
+  box-shadow: none;
+}
+.finding-v7 {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border-top: 1px solid rgba(30, 197, 245, 0.1);
+  background: radial-gradient(120% 70% at 0% 0%, color-mix(in srgb, var(--st) 8%, transparent) 0%, transparent 55%);
+  list-style: none;
+}
+.finding-v7:first-child {
+  border-top: 0;
+}
+.finding-compact {
+  background: none;
+  padding: 14px 16px;
+}
+.finding-label {
+  margin: 0;
+  font-size: 15.5px;
+  line-height: 22px;
+  font-weight: 800;
+  color: var(--atlas-text-strong);
+}
+.finding-compact .finding-label {
+  font-size: 14.5px;
+  line-height: 20px;
+  font-weight: 700;
+}
+.finding-answer {
+  margin: 0;
+  font-size: 14px;
+  line-height: 21px;
+  color: #dce4ec;
+}
+.finding-v7 .state-line {
+  gap: 8px 10px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #98a5b8;
+}
+.finding-v7 .state-word[data-status] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--st-ink);
+  font-weight: 600;
+}
+.finding-compact .state-line {
+  display: block;
+  font-size: 12.5px;
+  line-height: 18px;
+}
+.finding-compact .state-word {
+  color: #c4cedb;
+  font-weight: 600;
+}
+.evidence-pill {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 12px;
+  border-radius: 17px;
+  background: rgba(30, 197, 245, 0.1);
+  border: 1px solid rgba(30, 197, 245, 0.5);
+  box-shadow: 0 0 12px rgba(30, 197, 245, 0.18);
+  color: var(--atlas-cyan);
+  font-size: 12px;
+  line-height: 1;
+  font-weight: 700;
+  white-space: nowrap;
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.evidence-pill:active {
+  transform: scale(0.97);
+}
+.finding-v7 .row-evidence {
+  margin-top: 2px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 16px;
+  border: 1px solid rgba(30, 197, 245, 0.18);
+  background: rgba(3, 17, 31, 0.6);
+  box-shadow: none;
+}
+.finding-v7 .row-evidence-title {
+  gap: 6px;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--atlas-text-strong);
+}
+.kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border-radius: 11px;
+  background: rgba(123, 143, 242, 0.14);
+  border: 1px solid rgba(123, 143, 242, 0.35);
+  color: #c2ceff;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 600;
+}
+/* The excerpt's static highlighter mark — no sweep, no sheen. */
+.highlight {
+  background-color: transparent;
+  background-image: linear-gradient(180deg, rgba(30, 197, 245, 0) 56%, rgba(30, 197, 245, 0.34) 56%);
+  background-repeat: no-repeat;
+  color: inherit;
+}
+.establish-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 10px 12px;
+  border-radius: 12px;
+}
+.establish-yes {
+  background: rgba(53, 209, 162, 0.07);
+  border: 1px solid rgba(53, 209, 162, 0.3);
+}
+.establish-no {
+  background: rgba(148, 160, 179, 0.07);
+  border: 1px solid rgba(148, 160, 179, 0.3);
+}
+.establish-label {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.establish-yes .establish-label {
+  color: #8fecd0;
+}
+.establish-no .establish-label {
+  color: #c4cedb;
+}
+.establish-text {
+  font-size: 12.5px;
+  line-height: 18px;
+  color: #e6ecf4;
+}
+.link-muted {
+  color: var(--atlas-text-dim);
+}
+.source-card-v7 {
+  padding: 14px 16px;
+  border-radius: var(--radius-card);
+  background: var(--panel-gradient);
+  border: 1px solid var(--edge-soft);
+  box-shadow: var(--shadow-panel);
+}
+.source-card-v7[data-relation="CONTRADICTS"] {
+  border-color: rgba(236, 111, 111, 0.45);
+  box-shadow:
+    inset 3px 0 0 var(--atlas-red),
+    var(--shadow-panel);
+}
+/* WHAT REMAINS UNCLEAR — the approved dashed panel. */
+.unclear-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 16px 16px;
+  border-radius: var(--radius-panel);
+  border: 1px dashed rgba(148, 160, 179, 0.38);
+  background: rgba(3, 17, 31, 0.45);
+}
+.unclear-card {
+  list-style: none;
+  border-radius: 16px;
+  border: 1px solid rgba(148, 160, 179, 0.24);
+  background: rgba(6, 27, 48, 0.7);
+}
+.unclear-card-open {
+  border-color: rgba(30, 197, 245, 0.35);
+}
+.unclear-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  width: 100%;
+  padding: 12px 14px;
+}
+.boundary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  box-sizing: border-box;
+  padding: 0 9px;
+  border-radius: 11px;
+  border: 1px solid rgba(148, 160, 179, 0.4);
+  background: rgba(148, 160, 179, 0.1);
+  color: #c4cedb;
+  font-size: 11px;
+  line-height: 1;
+  font-weight: 700;
+}
+.boundary-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+}
+.unclear-label {
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #7f93a8;
+}
+.help-box {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(30, 197, 245, 0.06);
+  border: 1px solid rgba(30, 197, 245, 0.28);
+}
+.help-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  line-height: 14px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--atlas-cyan-strong);
+}
+.excluded-toggle {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: #c9d5e2;
+}
+.excluded-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: rgba(3, 17, 31, 0.6);
+  border: 1px solid #22374d;
+  font-size: 12px;
+  line-height: 16px;
+}
+@keyframes ap-seg {
+  from {
+    stroke-dasharray: 0 400;
+  }
+}
+@keyframes ap-grow {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* ---------------------------------------------------------------- *
  * MOTION
  * ---------------------------------------------------------------- */
 @keyframes atlas-fade-up {
@@ -2531,8 +3044,18 @@ a.explore-card:active {
   .scanner-ring-draw,
   .scanner-badge,
   .process-mark-done,
-  .process-spin {
+  .process-spin,
+  .ring-seg,
+  .proof-ring-center,
+  .answer-pill .tone,
+  .confidence-on,
+  .checks-seg,
+  .path-mark-v7 {
     animation: none;
+  }
+  .evidence-pill {
+    transition: none;
+    transform: none;
   }
   .cta-wide,
   .stop-button {

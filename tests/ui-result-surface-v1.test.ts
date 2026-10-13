@@ -321,11 +321,17 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     expect(technical.remainingPaths).toBe(4);
     const html = render(f.detail);
     const first = textOf(firstScreenOf(html));
-    // The group's one sentence carries the count; the reading it must
-    // never be given stands beside it.
+    // V7 (owner decision 2026-10-13): one card per unresolved link. Each
+    // technical card carries its own count of unread sources, the counts
+    // sum to the group's, and the reading it must never be given stands
+    // beside the reason.
     // D-171: plain words — "this Research stopped", never "research limit".
-    expect(first).toContain("This Research stopped before 4 known relevant sources could be checked.");
-    expect(first).toContain("Not every source could be checked");
+    const technicalRows = surface.table.filter((r) => r.status === "NOT_ESTABLISHED" && r.boundary?.kind === "TECHNICAL");
+    const perRow = technicalRows.map((r) => r.boundary?.remainingPaths ?? 0);
+    expect(perRow.reduce((a, b) => a + b, 0)).toBe(4);
+    for (const n of perRow.filter((n) => n > 0)) expect(first).toContain(`This Research stopped before ${n} known relevant ${n === 1 ? "source" : "sources"} could be checked.`);
+    expect(attrValues(html, "unclear-group", "kind").filter((k) => k === "TECHNICAL")).toHaveLength(technicalRows.length);
+    expect(first.split("Not fully checked").length - 1).toBe(technicalRows.length);
     expect(first).not.toContain("Research limit reached");
     expect(first).toContain(BOUNDARY_NEVER.TECHNICAL);
     // The row itself says the same thing, not "no evidence".
@@ -337,7 +343,7 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     expect(surface.answer.sentences.join(" ").split("research limit was reached").length - 1).toBe(1);
   });
 
-  it("a substantive gap is explained on its row and nowhere else (the real Aave shape: six checks, one exclusion reason, no boundary group)", () => {
+  it("a substantive gap is explained on its row and, since V7, in its own unresolved card — never as 'not found' (the real Aave shape: six checks, one exclusion reason, no boundary group)", () => {
     const detail = aaveDetail("EXCLUDED");
     const surface = buildResultSurface(detail);
     // No group for it: the row already says what was not established and,
@@ -347,12 +353,24 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     const substantive = surface.table.filter((r) => r.status === "NOT_ESTABLISHED" && r.boundary?.kind === "SUBSTANTIVE");
     expect(substantive.map((r) => r.component).sort()).toEqual(["DESTINATION", "FLOW_PATH", "GOVERNANCE_BASIS", "MECHANISM_SPEC", "RECIPIENT", "SOURCE_OF_VALUE"]);
     for (const r of substantive) expect(r.established).toBe("Sources discussed this, but none met the standard this claim requires.");
-    // On the page: once per row, inside the findings; never in the
-    // unclear block, which holds only the configuration limit.
+    // On the page: once per row inside the findings, and — the V7 owner
+    // decision (2026-10-13) — once per row as the "Why" of its own card in
+    // What remains unclear, the chip read from the boundary kind alone:
+    // "Checked, not established", never "not found". The configuration
+    // link keeps its own kind.
     const html = render(detail);
-    expect(attrValues(html, "unclear-group", "kind")).toEqual(["CONFIGURATION"]);
+    const unresolved = surface.chain.filter((n) => n.status === "NOT_ESTABLISHED").map((n) => surface.table.find((r) => r.component === n.component)!);
+    expect(attrValues(html, "unclear-group", "kind")).toEqual(unresolved.map((r) => r.boundary?.kind ?? "SUBSTANTIVE"));
+    expect(attrValues(html, "unclear-group", "kind")).toContain("CONFIGURATION");
     expect(textOf(blockOf(html, "research-table", "sources")).split("Sources discussed this, but none met the standard this claim requires.").length - 1).toBe(6);
-    expect(textOf(blockOf(html, "unclear-section", "audit-entry"))).not.toContain("Sources discussed this");
+    const unclear = textOf(blockOf(html, "unclear-section", "audit-entry"));
+    expect(unclear.split("Sources discussed this, but none met the standard this claim requires.").length - 1).toBe(6);
+    // One chip per substantive card — the six above and any other
+    // substantive link — and nothing else carries it.
+    const substantiveCards = attrValues(html, "unclear-group", "kind").filter((k) => k === "SUBSTANTIVE").length;
+    expect(substantiveCards).toBeGreaterThanOrEqual(6);
+    expect(unclear.split("Checked, not established").length - 1).toBe(substantiveCards);
+    expect(unclear.toLowerCase()).not.toMatch(/not found|no evidence/);
   });
 
   it("fixture 3 (substantive): no technical or configuration group, the persisted reason on each item, and no research-limit language anywhere", () => {
@@ -364,7 +382,10 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     expect(exec.boundary?.kind).toBe("SUBSTANTIVE");
     expect(exec.established).toBe("The mechanism is described, but nothing checked shows it actually running.");
     const html = render(f.detail);
-    expect(count(html, "unclear-section")).toBe(0);
+    // V7: the substantive links are listed as unresolved cards, each read
+    // "Checked, not established" — and still no research-limit language.
+    expect(count(html, "unclear-section")).toBe(1);
+    expect(attrValues(html, "unclear-group", "kind").every((k) => k === "SUBSTANTIVE")).toBe(true);
     const text = textOf(firstScreenOf(html));
     expect(text).not.toContain("research limit");
     expect(text).not.toContain("source route");
@@ -381,8 +402,8 @@ describe("the boundary — three kinds, read from persisted truth", () => {
     expect(text).toContain(BOUNDARY_COPY.CONFIGURATION);
     expect(text).toContain(BOUNDARY_NEVER.CONFIGURATION);
     // The only place "not executing" may appear is the sentence that says
-    // this must NOT be read that way.
-    const claims = text.replace(BOUNDARY_NEVER.CONFIGURATION, "").toLowerCase();
+    // this must NOT be read that way (V7: once per configuration card).
+    const claims = text.replaceAll(BOUNDARY_NEVER.CONFIGURATION, "").toLowerCase();
     expect(claims).not.toMatch(/is not executing|not running|no buyback/);
     expect(surface.answer.sentences.join(" ")).toContain("currently lacks a source route that can independently verify this");
   });

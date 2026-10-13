@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 import { ResearchAudit } from "../src/client/components/research-audit";
 import { ResearchResult } from "../src/client/components/research-result";
+import { en } from "../src/client/i18n/en";
 import { researchAnswer } from "../src/client/research-model";
 import {
   BOUNDARY_COPY,
@@ -61,7 +62,15 @@ describe("human language on every surface", () => {
   it("the result and the audit's research points show none of the engine's phrases, on every fixture", () => {
     for (const f of RESULT_FIXTURES) {
       const { detail } = resultFixture(f.key);
-      const result = visibleText(render(createElement(ResearchResult, { detail, jobId: detail.job.id })));
+      // One approved exception: the V7 field label of an unresolved card,
+      // "Not established" (HANDOFF §5, Founder-accepted), shown above what
+      // was not established. It is a heading, not a status word for a
+      // finding; every other occurrence stays forbidden.
+      const resultHtml = render(createElement(ResearchResult, { detail, jobId: detail.job.id })).replaceAll(
+        `<p class="unclear-label">${en.result.unclearLabels.what}</p>`,
+        "",
+      );
+      const result = visibleText(resultHtml);
       const auditHtml = render(createElement(ResearchAudit, { detail, jobId: detail.job.id, projection: null }));
       // The technical record is the engine's own ledger, by design; the
       // research points above it are the reader's surface.

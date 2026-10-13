@@ -533,7 +533,7 @@ describe("TEST 8 — an admitted source sentence never becomes an ATLAS conclusi
     const page = readFileSync(RESULT, "utf-8");
     for (const prop of [
       "<FindingsTable rows={surface.table} jobId={jobId} />",
-      "<UnclearSection groups={surface.boundary} />",
+      "<UnclearSection surface={surface} detail={detail} noun={noun} />",
     ]) {
       expect(page, prop).toContain(prop);
     }
@@ -576,7 +576,7 @@ describe("the deep result is intact beneath the new layer", () => {
     // The surface's rows ARE the result — the findings table and the
     // unclear block, fed by the surface model, in that order.
     expect(page.indexOf("<FindingsTable rows={surface.table} jobId={jobId} />")).toBeGreaterThan(-1);
-    expect(page.indexOf("<UnclearSection groups={surface.boundary} />")).toBeGreaterThan(page.indexOf("<FindingsTable"));
+    expect(page.indexOf("<UnclearSection surface={surface} detail={detail} noun={noun} />")).toBeGreaterThan(page.indexOf("<FindingsTable"));
   });
 
   it("the surface summarises the SAME rows the ladder renders", () => {

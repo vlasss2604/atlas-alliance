@@ -96,7 +96,7 @@ describe("the result page is one Research object — no competing modes", () => 
     const panelAt = code.indexOf("<AnswerPanel");
     const tableAt = code.indexOf("<FindingsTable rows={surface.table} jobId={jobId} />");
     const sourcesAt = code.indexOf("<SourcesSection cards={surface.keyEvidence} jobId={jobId} />");
-    const openAt = code.indexOf("<UnclearSection groups={surface.boundary} />");
+    const openAt = code.indexOf("<UnclearSection surface={surface} detail={detail} noun={noun} />");
     const doorAt = code.indexOf('data-testid="audit-entry"');
     expect(panelAt).toBeGreaterThan(-1);
     expect(tableAt).toBeGreaterThan(panelAt);

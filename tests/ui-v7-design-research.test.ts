@@ -81,7 +81,7 @@ describe("research screen — states", () => {
     for (const kind of ["budget", "failed", "cancelled"]) {
       expect(css()).toContain(`.scanner-panel[data-kind="${kind}"]`);
     }
-    const grey = css().slice(css().indexOf('.scanner-panel[data-kind="budget"],'), css().indexOf(".scanner-line {"));
+    const grey = css().slice(css().indexOf('.scanner-panel[data-kind="budget"],'), css().indexOf("\n.scanner-line {"));
     expect(grey).toContain("--scan: var(--system-grey);");
     expect(grey).not.toMatch(/atlas-red|atlas-amber|atlas-green/);
   });
