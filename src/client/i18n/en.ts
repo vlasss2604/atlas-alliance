@@ -106,6 +106,14 @@ export const en = {
     loading: "Loading…",
     inProgress: "In progress",
     projectsResearched: "Projects researched",
+    // V7 library filter tiles (D7), keyed by library-filter LIBRARY_FILTERS.
+    filterLabel: "Filter by verdict",
+    filters: {
+      ALL: "All",
+      SUPPORTED: "Supported",
+      PARTIALLY_SUPPORTED: "Partially",
+      INSUFFICIENT_EVIDENCE: "Insufficient",
+    } as Record<string, string>,
     empty: "No research yet. Ask ARI your first question.",
     // Human-readable состояния: предложены планом Фазы 3 §6; финальное
     // утверждение copy — за владельцем до public release.

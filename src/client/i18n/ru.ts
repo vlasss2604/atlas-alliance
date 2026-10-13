@@ -104,6 +104,14 @@ export const ru: Dict = {
     loading: "Загрузка…",
     inProgress: "В работе",
     projectsResearched: "Исследованные проекты",
+    // RU — на проверку владельцу (V7 шаг 7).
+    filterLabel: "Фильтр по вердикту",
+    filters: {
+      ALL: "Все",
+      SUPPORTED: "Подтверждено",
+      PARTIALLY_SUPPORTED: "Частично",
+      INSUFFICIENT_EVIDENCE: "Недостаточно",
+    },
     empty: "Исследований пока нет. Задайте ARI первый вопрос.",
     states: {
       QUEUED: "Atlas принимает задачу",
