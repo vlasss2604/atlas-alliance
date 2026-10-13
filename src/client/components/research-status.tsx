@@ -54,12 +54,16 @@ export function ResearchStatus({
   memoryEnabled = false,
   onCancel,
   cancelling = false,
+  onOpenProof,
 }: {
   job: StatusJob;
   memoryEnabled?: boolean;
   // The existing cancel flow; the Stop button renders only when given.
   onCancel?: () => void;
   cancelling?: boolean;
+  // A budget-limited run WITH a Proof: "Open Proof" shows it. The page
+  // passes this only when a Proof exists; without one there is no button.
+  onOpenProof?: () => void;
 }) {
   const dict = useDict();
   const kind = statusKind(job.state);
@@ -109,7 +113,8 @@ export function ResearchStatus({
             {kicker[kind]}
           </span>
           <h1 className="status-name status-fade">{projectName}</h1>
-          <p className="status-question">{job.originalQuestion}</p>
+          {/* Arrives with the name, never before it. */}
+          <p className="status-question status-fade">{job.originalQuestion}</p>
         </div>
       </section>
 
@@ -142,6 +147,11 @@ export function ResearchStatus({
           <Link href="/home" className="cta-wide" data-testid="ask-another">
             {dict.ask.newQuestion}
           </Link>
+        )}
+        {kind === "budget" && onOpenProof && (
+          <button type="button" onClick={onOpenProof} className="cta-wide" data-testid="open-proof">
+            {dict.progress.openProof}
+          </button>
         )}
         {live && onCancel && (
           <button type="button" onClick={onCancel} disabled={cancelling} className="stop-button" data-testid="stop-research">

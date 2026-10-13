@@ -85,6 +85,9 @@ export default function ResearchDetailPage() {
     return () => window.clearTimeout(t);
   }, [settling]);
 
+  // A budget-limited run's Proof is opened from its status screen.
+  const [budgetOpen, setBudgetOpen] = useState(false);
+
   // The existing cancel flow (POST /cancel), behind one confirmation.
   const [cancelling, setCancelling] = useState(false);
   const cancel = useCallback(() => {
@@ -153,11 +156,14 @@ export default function ResearchDetailPage() {
   const { job } = detail;
   const finished = isTerminal(job.state as JobState);
   const kind = statusKind(job.state);
-  // Failed, cancelled and budget-limited runs keep the status screen on
-  // top (grey: not a finding); their result, if a Proof exists, follows.
-  const stoppedEarly = kind === "failed" || kind === "cancelled" || kind === "budget";
-  const showStatus = !finished || settling || stoppedEarly;
-  const showResult = finished && !settling && (!stoppedEarly || detail.proof !== null);
+  // Failed and cancelled runs keep the status screen on top (grey: not a
+  // finding); their result, if a Proof exists, follows. A budget-limited
+  // run shows its status with "Open Proof" when a Proof exists (02-7), and
+  // the result once that is tapped; without a Proof there is no button.
+  const stoppedEarly = kind === "failed" || kind === "cancelled";
+  const budgetProof = kind === "budget" && detail.proof !== null;
+  const showStatus = !finished || settling || stoppedEarly || (kind === "budget" && !budgetOpen);
+  const showResult = finished && !settling && (stoppedEarly ? detail.proof !== null : kind === "budget" ? budgetProof && budgetOpen : true);
 
   return (
     <main className="flex flex-col gap-4 pb-6">
@@ -166,7 +172,13 @@ export default function ResearchDetailPage() {
       {/* ---- STATUS: while live the subject, the question and the engine's
            own progress lead — there is no result yet. ---- */}
       {showStatus && (
-        <ResearchStatus job={job} memoryEnabled={me?.memoryEnabled ?? false} onCancel={finished ? undefined : cancel} cancelling={cancelling} />
+        <ResearchStatus
+          job={job}
+          memoryEnabled={me?.memoryEnabled ?? false}
+          onCancel={finished ? undefined : cancel}
+          cancelling={cancelling}
+          onOpenProof={budgetProof ? () => setBudgetOpen(true) : undefined}
+        />
       )}
       {!finished && (
         <>

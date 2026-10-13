@@ -96,6 +96,23 @@ describe("research screen — states", () => {
     const budget = status(jobIn("BUDGET_LIMIT_REACHED"));
     expect(budget).not.toContain('data-testid="ask-another"');
     expect(budget).not.toContain('data-testid="attempt-chip"');
+    // Without a Proof there is no Open Proof button.
+    expect(budget).not.toContain('data-testid="open-proof"');
+  });
+
+  it("a budget-limited run WITH a Proof offers Open Proof (02-7); no other state does", () => {
+    const withProof = (state: string) =>
+      renderToStaticMarkup(createElement(DictScope, { dict: en }, createElement(ResearchStatus, { job: jobIn(state), onOpenProof: () => {} })));
+    expect(withProof("BUDGET_LIMIT_REACHED")).toContain(`data-testid="open-proof">${en.progress.openProof}<`);
+    for (const s of ["RUNNING", "SUCCEEDED", "FAILED", "CANCELLED", "AWAITING_CLARIFICATION"]) {
+      expect(withProof(s), s).not.toContain('data-testid="open-proof"');
+    }
+  });
+
+  it("the question arrives with the project name, not before it", () => {
+    const html = status(jobIn("RUNNING"));
+    expect(html).toMatch(/class="status-name status-fade"/);
+    expect(html).toMatch(/class="status-question status-fade"/);
   });
 
   it("Stop exists only for a live job and only when the page hands it the cancel flow", () => {
@@ -164,24 +181,31 @@ describe("research screen — the page", () => {
     expect(page).toMatch(/\{!finished && \([\s\S]*data-testid="progress-slot-live"/);
   });
 
-  it("a stopped-early run keeps the status on top and shows a result only when a Proof exists", () => {
+  it("failed / cancelled keep the status on top with a result only when a Proof exists; budget opens its Proof by a tap", () => {
     const page = codeOf(PAGE);
-    expect(page).toContain('const stoppedEarly = kind === "failed" || kind === "cancelled" || kind === "budget";');
-    expect(page).toContain("const showResult = finished && !settling && (!stoppedEarly || detail.proof !== null);");
+    expect(page).toContain('const stoppedEarly = kind === "failed" || kind === "cancelled";');
+    expect(page).toContain('const budgetProof = kind === "budget" && detail.proof !== null;');
+    expect(page).toContain("onOpenProof={budgetProof ? () => setBudgetOpen(true) : undefined}");
+    expect(page).toContain(
+      'const showResult = finished && !settling && (stoppedEarly ? detail.proof !== null : kind === "budget" ? budgetProof && budgetOpen : true);',
+    );
     expect(page).toContain("{showResult && <ResearchResult detail={detail} jobId={jobId} />}");
   });
 
-  it("Stop is the existing cancel flow behind one confirmation", () => {
+  it("Stop is the existing cancel flow behind the approved confirmation", () => {
     const page = codeOf(PAGE);
     expect(page).toContain("window.confirm(dict.progress.cancelConfirm)");
     expect(page).toContain(".cancelJob(jobId)");
+    expect(en.progress.cancelConfirm).toBe("Stop the research? It will end now, before an answer.");
+    expect(ru.progress.cancelConfirm).toBe("Остановить исследование? Оно завершится сейчас, до ответа.");
   });
 
   it("the auto-switch to the result stays; the ring is only held long enough to close once", () => {
     const page = codeOf(PAGE);
     expect(page).toContain('if (e.state === "SUCCEEDED") setSettling(true);');
     expect(page).toContain("window.setTimeout(() => setSettling(false), 700)");
-    expect(page).not.toMatch(/Open Proof|openProof/);
+    // No Open Proof on a succeeded run: only the budget status carries it.
+    expect(codeOf("src/client/components/research-status.tsx")).toContain('{kind === "budget" && onOpenProof && (');
   });
 });
 

@@ -296,8 +296,10 @@ export const en = {
     failedSub: "This is a failure of the run, not a finding about the project.",
     failedChip: "Your attempt wasn't spent",
     cancelledSub: "The research stopped before an answer. This is not a finding about the project.",
-    // Owner review: new copy for the Stop confirmation (not in the mockups).
-    cancelConfirm: "Stop this research? It ends now, before an answer.",
+    // Owner-approved 2026-10-13: the Stop confirmation.
+    cancelConfirm: "Stop the research? It will end now, before an answer.",
+    // A budget-limited run that has a Proof opens it from the status screen.
+    openProof: "Open Proof",
     tags: { now: "now", waiting: "waiting for you" },
     next: {
       title: "What happens next",

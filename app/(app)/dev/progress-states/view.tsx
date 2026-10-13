@@ -20,7 +20,13 @@ export function ProgressStatesView({ fixtureKey }: { fixtureKey: string }) {
   return (
     <main className="flex flex-col gap-4 pb-6" data-testid="progress-states-page">
       <AtlasHeader compact back={{ href: "/research", label: dict.detailPage.back }} />
-      <ResearchStatus job={job} memoryEnabled={me?.memoryEnabled ?? false} onCancel={finished ? undefined : () => {}} />
+      {/* The budget fixture is shown as a run that HAS a Proof (02-7). */}
+      <ResearchStatus
+        job={job}
+        memoryEnabled={me?.memoryEnabled ?? false}
+        onCancel={finished ? undefined : () => {}}
+        onOpenProof={job.state === "BUDGET_LIMIT_REACHED" ? () => {} : undefined}
+      />
       {!finished && (
         <>
           <ResearchProgress job={job} memoryEnabled={me?.memoryEnabled ?? false} />
