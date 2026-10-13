@@ -252,12 +252,14 @@ export const en = {
     title: "Pulse",
     subtitle: "Fresh crypto claims worth verifying, selected from X.",
     note: "Pulse is for discovery only. Nothing here is verified until you run a Research.",
-    fresh: "Last 48 hours",
+    // V7 claim-led Pulse (HANDOFF §5a).
+    fresh: "Fresh",
     earlier: "Earlier",
     empty: "No new claims in the last 48 hours.",
-    sourceTypes: { OFFICIAL_PROJECT: "Official", RESEARCH_DATA: "Research & data" } as Record<string, string>,
+    sourceTypes: { OFFICIAL_PROJECT: "Project claim", RESEARCH_DATA: "Research & data" } as Record<string, string>,
     sourceX: "X",
-    verify: "Verify",
+    claimed: "Claimed",
+    verify: "Verify with ATLAS",
     openOnX: "Open on X",
     // On the Verify screen, when it was opened from a Pulse card.
     fromPulse: (handle: string) => `From Pulse · ${handle}`,

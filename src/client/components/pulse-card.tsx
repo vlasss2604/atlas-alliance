@@ -3,53 +3,79 @@
 import Link from "next/link";
 
 import { useDict } from "../app-context";
+import { displayLanguage } from "../display-language";
 import { verifyPathForPulse } from "../pulse-launch";
 import { pulsePublishedAt, type PulseItem } from "../pulse-fixtures";
 import { relativeAge } from "../research-model";
 import { ArrowIcon, ExternalIcon, SocialIcon } from "./icons";
 import { ProjectAvatar } from "./project-avatar";
 
-// ONE PULSE CARD. Who said it (project, account, source type), what was
-// said — the source text verbatim — how fresh it is, and one action:
-// Verify. The text is the record's own words in its own language; only
-// the labels around it are ATLAS's (EN / RU through the dictionary).
+// ONE PULSE CARD, CLAIM-LED (V7, HANDOFF §4.6). Who said it (project,
+// account, source type), how fresh it is, what was CLAIMED — the source
+// text verbatim — and the question a Research would answer about it. One
+// action: Verify. The claim is the record's own words in its own language;
+// the labels around it are ATLAS's (EN / RU through the dictionary), and
+// the verify question is the fixture's own, in the display language.
 //
 // No live indicator, no seen/unseen state, no category, no fake link: an
 // "Open on X" action renders only when the item carries a genuine URL.
-export function PulseCard({ item, now }: { item: PulseItem; now?: number }) {
+export function PulseCard({ item, now, index = 0 }: { item: PulseItem; now?: number; index?: number }) {
   const dict = useDict();
   const age = relativeAge(pulsePublishedAt(item, now), now);
+  const question = item.verifyQuestion[displayLanguage()];
   return (
-    <li className="panel px-5 py-5 sm:px-6" data-testid="pulse-card" data-pulse-id={item.id} data-source-type={item.source.type}>
+    <li
+      className="pulse-card-v7 rise"
+      style={{ animationDelay: `${60 + Math.min(index, 2) * 40}ms` }}
+      data-testid="pulse-card"
+      data-pulse-id={item.id}
+      data-source-type={item.source.type}
+    >
       <div className="flex items-start gap-3">
         <ProjectAvatar name={item.project.name} ticker={item.project.ticker} slug={item.project.slug} size={40} />
-        <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
           <p className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-            <span className="text-[1.02rem] font-semibold text-[var(--atlas-text-strong)]" data-testid="pulse-source-name">
+            <span className="pulse-name" data-testid="pulse-source-name">
               {item.source.displayName}
             </span>
-            <span className="text-[0.9rem] text-[var(--atlas-text-dim)]" data-testid="pulse-source-handle">
+            <span className="pulse-handle" data-testid="pulse-source-handle">
               {item.source.handle}
             </span>
           </p>
-          <p className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[0.82rem] text-[var(--atlas-text-dim)]">
-            <span className="kind kind-social">
+          <p className="pulse-meta">
+            <span className="pulse-x">
               <SocialIcon size={12} />
               {dict.pulse.sourceX}
             </span>
-            <span data-testid="pulse-source-type">{dict.pulse.sourceTypes[item.source.type]}</span>
+            <span className="pulse-type" data-type={item.source.type} data-testid="pulse-source-type">
+              {dict.pulse.sourceTypes[item.source.type]}
+            </span>
             <span aria-hidden>·</span>
             <span data-testid="pulse-age">{age}</span>
           </p>
         </div>
       </div>
 
-      <p className="mt-3.5 text-[1.02rem] leading-[1.5] text-[var(--atlas-text)]" data-testid="pulse-text">
-        {item.text}
-      </p>
+      <div className="flex flex-col gap-1.5">
+        <span className="pulse-claimed" data-testid="pulse-claimed">
+          <ClaimIcon />
+          {dict.pulse.claimed}
+        </span>
+        <p className="pulse-text" data-testid="pulse-text">
+          {item.text}
+        </p>
+      </div>
 
-      <p className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Link href={verifyPathForPulse(item.id)} className="cta pill inline-flex items-center gap-2 px-5 py-2.5 text-[0.95rem] font-semibold" data-testid="pulse-verify">
+      {/* The question a Research would answer — ATLAS's framing of the
+          claim, not a finding about it. Nothing here is verified. */}
+      {question && (
+        <p className="pulse-question" data-testid="pulse-verify-question">
+          {question}
+        </p>
+      )}
+
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Link href={verifyPathForPulse(item.id)} className="pulse-cta" data-testid="pulse-verify">
           {dict.pulse.verify}
           <ArrowIcon size={16} />
         </Link>
@@ -61,5 +87,14 @@ export function PulseCard({ item, now }: { item: PulseItem; now?: number }) {
         )}
       </p>
     </li>
+  );
+}
+
+function ClaimIcon() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M7 7h10v10" />
+      <path d="M7 17L17 7" />
+    </svg>
   );
 }

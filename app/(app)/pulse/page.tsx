@@ -18,6 +18,10 @@ import { pulseItems, splitPulseFeed } from "@/src/client/pulse-fixtures";
 // a 48-hour window newest first, 8–12 as a cap, "Earlier" kept apart,
 // honest when it is thin — so the screen can be judged before anything
 // live exists.
+//
+// V7 (HANDOFF §4.6): the heartbeat beside the title is static — Pulse is
+// not live, so nothing on this screen pretends to be. The sample notice is
+// grey, because amber is a result colour.
 export default function PulsePage() {
   const dict = useDict();
   // Ages are computed at render; a fixed instant after mount keeps every
@@ -32,48 +36,71 @@ export default function PulsePage() {
   const sample = items.length > 0;
 
   return (
-    <main className="enter flex flex-col gap-7 pt-4">
-      <div>
-        <h1 className="display text-[1.7rem] font-semibold text-[var(--atlas-text-strong)] sm:text-[2rem]">{dict.pulse.title}</h1>
-        <p className="mt-1.5 text-[1.02rem] text-[var(--atlas-text-dim)]">{dict.pulse.subtitle}</p>
-        <p className="mt-1.5 text-[0.95rem] text-[var(--atlas-text-faint)]" data-testid="pulse-note">
-          {dict.pulse.note}
+    <main className="flex flex-col gap-[22px] pt-3">
+      <div className="flex flex-col gap-2.5 rise">
+        <div className="flex items-center gap-3">
+          <h1 className="library-title">{dict.pulse.title}</h1>
+          <HeartbeatLine />
+        </div>
+        <p className="library-sub">{dict.pulse.subtitle}</p>
+        <p className="library-keep" data-testid="pulse-note">
+          <InfoIcon />
+          <span>{dict.pulse.note}</span>
         </p>
       </div>
 
       {sample && (
-        <p className="glass px-4 py-3 text-[0.9rem] text-[var(--atlas-text-dim)]" data-testid="pulse-sample-notice">
-          <span className="font-semibold text-[var(--atlas-amber)]">{dict.pulse.sampleTitle}</span>
-          {" — "}
-          {dict.pulse.sampleBody}
-        </p>
+        <div className="pulse-sample rise" style={{ animationDelay: "40ms" }} data-testid="pulse-sample-notice">
+          <span className="pulse-sample-pill">{dict.pulse.sampleTitle}</span>
+          <span className="pulse-sample-body">{dict.pulse.sampleBody}</span>
+        </div>
       )}
 
-      <section data-testid="pulse-fresh">
-        <h2 className="px-1 text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-strong)]">{dict.pulse.fresh}</h2>
+      <section className="flex flex-col gap-3" data-testid="pulse-fresh">
+        <h2 className="pulse-h2">{dict.pulse.fresh}</h2>
         {fresh.length === 0 ? (
-          <p className="mt-3 px-1 text-[0.98rem] text-[var(--atlas-text-dim)]" data-testid="pulse-empty">
+          <p className="px-0.5 text-[0.98rem] text-[var(--atlas-text-dim)]" data-testid="pulse-empty">
             {dict.pulse.empty}
           </p>
         ) : (
-          <ul className="mt-3 flex flex-col gap-4">
-            {fresh.map((item) => (
-              <PulseCard key={item.id} item={item} now={now} />
+          <ul className="flex flex-col gap-3">
+            {fresh.map((item, i) => (
+              <PulseCard key={item.id} item={item} now={now} index={i} />
             ))}
           </ul>
         )}
       </section>
 
       {earlier.length > 0 && (
-        <section data-testid="pulse-earlier">
-          <h2 className="px-1 text-[1.15rem] font-semibold tracking-tight text-[var(--atlas-text-dim)]">{dict.pulse.earlier}</h2>
-          <ul className="mt-3 flex flex-col gap-4 opacity-80">
-            {earlier.map((item) => (
-              <PulseCard key={item.id} item={item} now={now} />
+        <section className="flex flex-col gap-3" data-testid="pulse-earlier">
+          <h2 className="pulse-h2 pulse-h2-dim">{dict.pulse.earlier}</h2>
+          <ul className="flex flex-col gap-3 opacity-80">
+            {earlier.map((item, i) => (
+              <PulseCard key={item.id} item={item} now={now} index={fresh.length + i} />
             ))}
           </ul>
         </section>
       )}
     </main>
+  );
+}
+
+// A heartbeat drawn once, standing still: the mark of the screen, not a
+// live indicator.
+function HeartbeatLine() {
+  return (
+    <svg width="70" height="30" viewBox="0 0 70 30" aria-hidden className="pulse-heartbeat">
+      <path d="M2 17h14l5-12 9 21 5-10h33" fill="none" stroke="var(--atlas-cyan)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function InfoIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--atlas-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="mt-[1.5px] shrink-0">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 11v5" />
+      <path d="M12 7.5h.01" />
+    </svg>
   );
 }

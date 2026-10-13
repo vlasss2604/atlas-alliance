@@ -33,6 +33,10 @@ export interface PulseItem {
   ageHours: number;
   // A genuine post URL when one exists. Always null for a fixture.
   sourceUrl: string | null;
+  // V7 claim-led card (HANDOFF §4.6): the question a Research would answer
+  // about this claim, in both display languages. Fixture data, not i18n —
+  // ATLAS's framing of the claim, never a summary of it.
+  verifyQuestion: { EN: string; RU: string };
 }
 
 // The intended live window: a card is "fresh" for about 48 hours; older
@@ -50,6 +54,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "12% of trading fees across all Raydium pools go to RAY buybacks. This week: 1.9M RAY bought on-market and sent to the buyback account.",
     ageHours: 3,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Does the documented mechanism match actual execution?",
+      RU: "Соответствует ли задокументированный механизм реальному исполнению?",
+    },
   },
   {
     id: "lido-revenue-split",
@@ -58,6 +66,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "Lido 30-day protocol revenue is up 18% MoM. The protocol keeps 10% of staking rewards: 5% to the DAO treasury, 5% to node operators. None of it currently reaches LDO holders.",
     ageHours: 7,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Is it established that none of this revenue reaches LDO holders?",
+      RU: "Установлено ли, что эта выручка не доходит до держателей LDO?",
+    },
   },
   {
     id: "pump-fun-daily-buybacks",
@@ -66,6 +78,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "Buybacks are live: 25% of protocol revenue now goes to PUMP buybacks every day, executed on-chain from the fee wallet.",
     ageHours: 14,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Is the daily buyback executing on-chain as claimed?",
+      RU: "Исполняется ли ежедневный выкуп ончейн, как заявлено?",
+    },
   },
   {
     id: "aave-weekly-buyback-executed",
@@ -74,6 +90,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "The Aave Finance Committee executed the first $1M weekly AAVE buyback under the approved Aavenomics proposal. Purchased tokens are held in the Ecosystem Reserve.",
     ageHours: 26,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Is the execution established, and where are the tokens held?",
+      RU: "Установлено ли исполнение, и где хранятся токены?",
+    },
   },
   {
     id: "jupiter-litterbox-buybacks",
@@ -82,6 +102,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "Jupiter routes 50% of protocol fees to JUP buybacks through the Litterbox trust. Cumulative buybacks passed $60M. No burn: bought tokens are locked for three years.",
     ageHours: 41,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Buyback without a burn: what does it do to JUP supply?",
+      RU: "Выкуп без сжигания: что это даёт предложению JUP?",
+    },
   },
   {
     id: "jito-tiprouter-treasury",
@@ -90,6 +114,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "Jito's TipRouter sends 2.7% of MEV tips to the JTO DAO treasury and 0.3% to restakers. Treasury inflow was about $4.5M in Q3; nothing is distributed to JTO holders yet.",
     ageHours: 70,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Does any of this flow reach JTO holders?",
+      RU: "Доходит ли что-то из этого потока до держателей JTO?",
+    },
   },
   {
     id: "lido-dual-governance-vote",
@@ -98,6 +126,10 @@ const PULSE_FIXTURES: readonly PulseItem[] = [
     text: "The DAO vote to activate Dual Governance passed with 94% in favour. The fee split stays 5% treasury / 5% node operators; no change to LDO value accrual.",
     ageHours: 110,
     sourceUrl: null,
+    verifyQuestion: {
+      EN: "Does this decision change how LDO captures value?",
+      RU: "Меняет ли это решение то, как LDO получает ценность?",
+    },
   },
 ];
 
