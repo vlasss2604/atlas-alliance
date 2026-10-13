@@ -8,7 +8,7 @@ import type { ResearchJobListItem } from "../src/client/api";
 import { ResearchGroupCard } from "../src/client/components/research-group-card";
 import { en } from "../src/client/i18n/en";
 import { ru } from "../src/client/i18n/ru";
-import { LIBRARY_FILTERS, libraryCounts, matchesFilter, verdictBar } from "../src/client/library-filter";
+import { LIBRARY_FILTERS, libraryCounts, matchesFilter, rowHeadline, verdictBar } from "../src/client/library-filter";
 import { groupResearchRuns } from "../src/client/research-model";
 
 // V7 STEP 7 — THE RESEARCH LIBRARY (HANDOFF §4.5, D7).
@@ -49,39 +49,59 @@ function job(over: Record<string, unknown> = {}) {
   } as ResearchJobListItem;
 }
 
-// One group per project; the latest run of each decides its row.
+// One group per project. A row leads with its latest FINISHED verdict
+// (owner decision, step 7 review); an unfinished newest run adds a note.
 const LIBRARY = groupResearchRuns([
   job({ id: "a1", projectSlug: "a", projectName: "A", verdict: "SUPPORTED" }),
   job({ id: "b1", projectSlug: "b", projectName: "B", verdict: "PARTIALLY_SUPPORTED" }),
   job({ id: "c1", projectSlug: "c", projectName: "C", verdict: "PARTIALLY_SUPPORTED" }),
   job({ id: "d1", projectSlug: "d", projectName: "D", verdict: "INSUFFICIENT_EVIDENCE" }),
   job({ id: "e1", projectSlug: "e", projectName: "E", verdict: "NOT_SUPPORTED" }),
-  // A failed latest run — a product fault, not a finding.
+  // A failed run and nothing finished before it: no verdict yet.
   job({ id: "f1", projectSlug: "f", projectName: "F", state: "FAILED", verdict: null }),
-  // A budget stop that persisted a verdict: the row's pill shows the
-  // stop, so the overview must not count the verdict behind it.
+  // A budget stop that persisted a verdict is not a finished verdict.
   job({ id: "g1", projectSlug: "g", projectName: "G", state: "BUDGET_LIMIT_REACHED", verdict: "SUPPORTED" }),
+  // A finished partial verdict, then a newer cancelled run: the row keeps
+  // the partial verdict and notes the unfinished run.
+  job({ id: "h0", projectSlug: "h", projectName: "H", verdict: "PARTIALLY_SUPPORTED", finishedAt: "2026-09-10T10:00:00.000Z" }),
+  job({ id: "h1", projectSlug: "h", projectName: "H", state: "CANCELLED", verdict: null }),
   // An older SUPPORTED run of B never outranks its newer partial one.
   job({ id: "b0", projectSlug: "b", projectName: "B", verdict: "SUPPORTED", finishedAt: "2026-09-01T10:00:00.000Z" }),
 ]);
 
 describe("library overview — counted from what each row shows", () => {
   it("a group counts under a verdict only when its pill is that verdict", () => {
-    expect(LIBRARY).toHaveLength(7);
+    expect(LIBRARY).toHaveLength(8);
     expect(libraryCounts(LIBRARY)).toEqual({
-      ALL: 7,
+      ALL: 8,
       SUPPORTED: 1,
-      PARTIALLY_SUPPORTED: 2,
+      PARTIALLY_SUPPORTED: 3,
       INSUFFICIENT_EVIDENCE: 1,
     });
   });
 
-  it("a failed or budget-stopped latest run is under All alone", () => {
+  it("an unfinished newest run keeps the last finished verdict, with a note", () => {
+    const h = LIBRARY.find((g) => g.key === "h")!;
+    expect(h.latest.id).toBe("h1");
+    const headline = rowHeadline(h);
+    expect(headline.lastRunUnfinished).toBe(true);
+    expect(headline.outcome?.kind).toBe("VERDICT");
+    expect(headline.outcome?.verdict).toBe("PARTIALLY_SUPPORTED");
+    expect(LIBRARY_FILTERS.filter((f) => matchesFilter(h, f))).toEqual(["ALL", "PARTIALLY_SUPPORTED"]);
+  });
+
+  it("no finished verdict ever: no verdict yet, under All alone", () => {
     for (const key of ["f", "g"]) {
       const group = LIBRARY.find((g) => g.key === key)!;
       expect(group, key).toBeDefined();
+      expect(rowHeadline(group), key).toEqual({ outcome: null, lastRunUnfinished: true });
       expect(LIBRARY_FILTERS.filter((f) => matchesFilter(group, f)), key).toEqual(["ALL"]);
     }
+  });
+
+  it("a finished newest run is the headline as before, with no note", () => {
+    const b = LIBRARY.find((g) => g.key === "b")!;
+    expect(rowHeadline(b)).toEqual({ outcome: expect.objectContaining({ verdict: "PARTIALLY_SUPPORTED" }), lastRunUnfinished: false });
   });
 
   it("the bar adds up to every project, in a fixed order, grey for no verdict", () => {
@@ -89,7 +109,7 @@ describe("library overview — counted from what each row shows", () => {
     expect(bar.reduce((n, p) => n + p.count, 0)).toBe(LIBRARY.length);
     expect(bar).toEqual([
       { tone: "supported", count: 1 },
-      { tone: "partial", count: 2 },
+      { tone: "partial", count: 3 },
       { tone: "insufficient", count: 1 },
       { tone: "negative", count: 1 },
       { tone: "neutral", count: 2 },
@@ -98,7 +118,7 @@ describe("library overview — counted from what each row shows", () => {
 
   it("the filter hides rows and never changes one", () => {
     const shown = LIBRARY.filter((g) => matchesFilter(g, "PARTIALLY_SUPPORTED"));
-    expect(shown.map((g) => g.key).sort()).toEqual(["b", "c"]);
+    expect(shown.map((g) => g.key).sort()).toEqual(["b", "c", "h"]);
     expect(shown.every((g) => LIBRARY.includes(g))).toBe(true);
     expect(LIBRARY.filter((g) => matchesFilter(g, "ALL"))).toEqual(LIBRARY);
   });
@@ -162,11 +182,45 @@ describe("library row — the V7 list row", () => {
     expect(readFileSync(CARD, "utf8")).toContain("href={`/research/${");
   });
 
-  it("a failed latest run gets a grey dot and its state pill", () => {
+  it("a failed run with no finished verdict before it: grey No verdict yet, and the note", () => {
     const groups = groupResearchRuns([job({ state: "FAILED", verdict: null })]);
     const html = renderToStaticMarkup(createElement(ResearchGroupCard, { group: groups[0] }));
-    expect(html).toContain("lib-avatar-dot dot-fault");
-    expect(html).toContain('data-verdict="NONE"');
+    expect(html).toContain("lib-avatar-dot dot-neutral");
+    expect(html).toMatch(/class="tone tone-neutral"[^>]*data-testid="group-latest" data-verdict="NONE"[^>]*>No verdict yet</);
+    expect(html).toMatch(/data-testid="group-last-run-unfinished"[^>]*>Last run didn&#x27;t finish</);
+  });
+
+  it("a cancelled newest run after a finished verdict: that verdict, then the note", () => {
+    const groups = groupResearchRuns([
+      job({ id: "old", verdict: "SUPPORTED", finishedAt: "2026-09-10T10:00:00.000Z" }),
+      job({ id: "new", state: "CANCELLED", verdict: null }),
+    ]);
+    const html = renderToStaticMarkup(createElement(ResearchGroupCard, { group: groups[0] }));
+    expect(html).toMatch(/class="tone tone-supported"[^>]*data-testid="group-latest" data-verdict="SUPPORTED"/);
+    expect(html).toContain("lib-avatar-dot dot-supported");
+    expect(html.indexOf('data-testid="group-latest"')).toBeLessThan(html.indexOf('data-testid="group-last-run-unfinished"'));
+    // The runs behind the row keep their own outcomes when opened.
+    expect(html).toContain("2 runs");
+  });
+
+  it("a finished newest run shows no note", () => {
+    const html = renderToStaticMarkup(createElement(ResearchGroupCard, { group: groupResearchRuns([job()])[0] }));
+    expect(html).not.toContain("group-last-run-unfinished");
+  });
+
+  it("the new words exist in EN and RU", () => {
+    expect(en.history.lastRunUnfinished).toBe("Last run didn't finish");
+    expect(en.history.noVerdictYet).toBe("No verdict yet");
+    expect(ru.history.lastRunUnfinished).toBe("Последний запуск не удался");
+    expect(ru.history.noVerdictYet).toBe("Пока нет вердикта");
+  });
+
+  it("the note is grey, never a result colour", () => {
+    const css = readFileSync(CSS, "utf8");
+    const at = css.indexOf(".lib-row-note {");
+    expect(at).toBeGreaterThan(-1);
+    const body = css.slice(at, css.indexOf(".lib-row-meta {", at));
+    expect(body).not.toMatch(/--atlas-(green|amber|red|slate)|#e6b54d|#35d1a2|#ec6f6f/i);
   });
 });
 

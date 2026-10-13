@@ -3516,6 +3516,26 @@ details[open] > .source-tech-summary svg {
   font-size: 12px;
   gap: 6px;
 }
+/* The newest run did not finish: grey, because a fault, a cancel or a
+   budget stop is not a finding about the project. */
+.lib-row-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: #9aa8ba;
+}
+.lib-row-note::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 9999px;
+  background: rgba(148, 163, 184, 0.6);
+}
 .lib-row-meta {
   font-size: 12.5px;
   line-height: 17px;

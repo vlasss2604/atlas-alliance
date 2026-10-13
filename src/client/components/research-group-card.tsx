@@ -5,18 +5,24 @@ import { useState } from "react";
 
 import type { ResearchJobListItem } from "../api";
 import { useDict } from "../app-context";
+import { rowHeadline } from "../library-filter";
 import { outcomeText } from "../localize";
 import { jobOutcome, relativeAge, type ProjectGroup } from "../research-model";
 import { ProjectAvatar } from "./project-avatar";
 
 // RESEARCH HISTORY, NOT A JOB LOG. A project researched eight times is ONE
 // card with eight runs behind it (the Figma library row): the avatar
-// tile with the latest outcome's dot on its corner, the project with that
+// tile with the headline outcome's dot on its corner, the project with that
 // outcome as a pill beside it, runs · questions, then when it was last
 // researched. It opens to the questions asked and their runs.
+//
+// The headline is rowHeadline (library-filter.ts): a newest run that did
+// not finish never replaces the project's last finished verdict — the row
+// keeps that verdict and says, in grey, that the last run did not finish.
 export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobListItem> }) {
   const [open, setOpen] = useState(false);
-  const latest = jobOutcome(group.latest);
+  const headline = rowHeadline(group);
+  const tone = headline.outcome?.tone ?? "neutral";
   const dict = useDict();
   return (
     <li className="list-none" data-testid={`group-${group.key}`}>
@@ -25,15 +31,20 @@ export function ResearchGroupCard({ group }: { group: ProjectGroup<ResearchJobLi
           <ProjectAvatar name={group.projectName} ticker={group.latest.projectTicker} slug={group.latest.projectSlug ?? group.key} size={48} />
           {/* The same outcome as the pill, in the same colour — never a
               second judgement. */}
-          <span className={`lib-avatar-dot dot-${latest.tone}`} aria-hidden data-testid="group-dot" />
+          <span className={`lib-avatar-dot dot-${tone}`} aria-hidden data-testid="group-dot" />
         </span>
         <span className="lib-row-body">
           <span className="history-head">
             <span className="truncate text-[17px] leading-[22px] font-extrabold text-[var(--atlas-text-strong)]">{group.projectName}</span>
-            <span className={`tone tone-${latest.tone}`} data-testid="group-latest" data-verdict={latest.verdict ?? "NONE"}>
-              {outcomeText(latest, dict)}
+            <span className={`tone tone-${tone}`} data-testid="group-latest" data-verdict={headline.outcome?.verdict ?? "NONE"}>
+              {headline.outcome ? outcomeText(headline.outcome, dict) : dict.history.noVerdictYet}
             </span>
           </span>
+          {headline.lastRunUnfinished && (
+            <span className="lib-row-note" data-testid="group-last-run-unfinished">
+              {dict.history.lastRunUnfinished}
+            </span>
+          )}
           <span className="lib-row-meta">
             <span data-testid="group-run-count">{dict.history.runs(group.runCount)}</span>
             {group.questions.length > 1 && <span data-testid="group-question-count"> · {dict.history.questions(group.questions.length)}</span>}

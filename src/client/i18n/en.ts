@@ -344,6 +344,10 @@ export const en = {
     runs: (n: number): string => `${n} ${n === 1 ? "run" : "runs"}`,
     questions: (n: number): string => `${n} questions`,
     lastResearched: (age: string): string => `last researched ${age}`,
+    // V7 library row (step 7 review): the newest run did not finish, so the
+    // row keeps the last finished verdict, or has none yet.
+    lastRunUnfinished: "Last run didn't finish",
+    noVerdictYet: "No verdict yet",
   },
   // Keyed by research-model's OutcomeView.kind and by the verdict code.
   outcome: {

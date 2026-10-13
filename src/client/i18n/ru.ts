@@ -318,6 +318,8 @@ export const ru: Dict = {
     runs: (n) => `${n} ${ruPlural(n, "запуск", "запуска", "запусков")}`,
     questions: (n) => `${n} ${ruPlural(n, "вопрос", "вопроса", "вопросов")}`,
     lastResearched: (age) => `последнее исследование ${age}`,
+    lastRunUnfinished: "Последний запуск не удался",
+    noVerdictYet: "Пока нет вердикта",
   },
   outcome: {
     IN_PROGRESS: "В работе",
