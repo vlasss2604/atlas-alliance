@@ -27,7 +27,7 @@ Read `CLAUDE.md` first and follow its working style (one scoped step at a time, 
 10. **Product structure (Founder decision 2026-10-12 — replaces the "private beta" wording of the canonical context §9):**
    - There is **no private beta**. The app launches as **Free + Subscription**.
    - **Free:** the five showcase projects (Raydium, Pump.fun, Lido, Jupiter, Jito; Aave as reserve) with **one published read-only Proof each**, opened from "Explore ATLAS Proofs" on Home. Reading a published Proof never starts a Research. Own Research and Pulse are locked and lead to the subscription sheet.
-   - **Subscription:** $49 / month via Telegram Stars opens own Research and Pulse. The price appears **only on the subscription sheet** of the main app — never in demo mode, never in the profile card.
+   - **Subscription:** opens own Research and Pulse, paid via Telegram Stars. **The price is not approved yet** ($49 / month is a working figure only) and **payments are postponed** — do not build the payment flow or show any price until the Founder approves it (Phase 1b, separate go). The price will appear only on the subscription sheet of the main app — never in demo mode, never in the profile card.
    - **Demo mode:** the same app with a `demo` flag, entered only from the ad link. Spec: `DEMO_MODE_SPEC.md`.
    - A verdict is shown **only** where an approved published Proof exists. Projects whose Proof has not passed quality review show "In quality review · coming soon" and no verdict. Jupiter and Jito are listed, but if their question cannot be verified in the current scope they stay in review — never present an unsupported check as done.
    - Existing capacity / paused / limit copy (`home.*`) keeps its logic; only the word "beta" leaves the UI (see D14).
@@ -369,7 +369,7 @@ Everything not listed here already exists in i18n or comes from the record. Comp
 | profile.proNote | Your own Research and Pulse are open. | Свои исследования и Pulse открыты. |
 | subscription.title | Verify your own claims with ATLAS | Проверяйте свои утверждения в ATLAS |
 | subscription.text | Own Research and Pulse open with a subscription. | Свои исследования и Pulse открываются по подписке. |
-| subscription.price | $49 / month | $49 / месяц |
+| subscription.price | (price not approved — do not ship) | (цена не утверждена) |
 
 Pulse verify questions per fixture item (EN/RU) are in `source/V2-Pulse.dc.html` (`Q`). They are fixture data, not i18n.
 
@@ -448,7 +448,7 @@ RU wording is the designer's; mark it for Founder review in the first report.
 - **D12 · Pulse lifecycle.** The direction is to highlight fresh claims for 24h and keep up to 7 days; the code today has a 48h window plus "Earlier". Follow the code, and do not fake timestamps.
 - **D10 · Source nodes around the scanner.** These need per-source live events (found, read, being compared) from the engine; this is the same gap as D4. Out of scope for the UI task: build the visual behind a flag, or skip it until the events exist.
 - **D14 · "Beta" leaves the UI.** `home.betaLabel`, `home.betaRemaining`, `profile.noAccess`, `me.privateBeta.*` and the "paused beta" copy: rename to free/subscription terms. Whether a subscription carries a Research quota (and the counter is shown) is a Founder decision; the mockup shows "3 Research remaining" as an example only.
-- **D15 · Subscription sheet.** $49 / month via Telegram Stars (no auto-renew; Stars → monthly entitlement with an expiry). The discounted tariff for promo-code holders. Confirm the Stars amount and the entitlement rule before building payments.
+- **D15 · Subscription sheet and price — postponed.** The price is not approved ($49 / month is a working figure). Build nothing for payments until the Founder approves the price. Then: Telegram Stars (no auto-renew; Stars → monthly entitlement with an expiry). The discounted tariff for promo-code holders. Confirm the Stars amount and the entitlement rule before building payments.
 - **D16 · Published Proofs.** Which completed jobs become the five published Proofs is the Founder's quality-review decision, one by one. The publish action is a flag on a job plus an entry in `published_proofs`; it is set by the Founder (admin command), never automatically.
 - **D17 · Demo notice vs real bot message.** The "push" on the published Proof is an in-app overlay. Whether the bot also sends a real message at that moment is a Founder decision; the mockup does not require it.
 - **D18 · Promo code details.** Code format, bot message texts, `launch_at`, and the "still preparing" message if launch slips. The mockup shows `ATLAS-20` and "November" as examples.

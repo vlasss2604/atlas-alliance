@@ -13,7 +13,7 @@ All durations below are **estimates by the designer, not measurements**. They co
 | Phase | What | Estimate (working days) | Depends on |
 |---|---|---|---|
 | 1 | **App design** — all screens in V7, with motion | **7–10** | nothing (UI only) |
-| 1b | Subscription (Stars) + entitlements, no "beta" wording | **2–3** | D14, D15 |
+| 1b | Subscription (Stars) + entitlements, no "beta" wording — **postponed until the Founder approves the price** | **2–3** | D14, D15 |
 | 2 | **Engine completion** (D-179 Research Quality V1 and whatever the audit finds) | **not estimable from the design side** — the audit gives the number | Founder + engine audit |
 | 3 | **Five projects** — run, quality-review, publish; Explore + published route live | **2–3 eng days + 5 real runs + Founder review per Proof** | Phase 2 state, D16, D19 |
 | 4 | **Demo mode** (ad link, replay, notice, Pulse demo, end sheet, promo codes, metrics) | **4–6** | Phase 3 (needs ≥1 published Proof) |
@@ -74,7 +74,8 @@ Steps as in `HANDOFF.md` §3. Per step: implement → typecheck → lint → tes
 
 **Done when:** `HANDOFF.md` §8.
 
-### Phase 1b — Subscription and the end of "beta" (2–3 days)
+### Phase 1b — Subscription and the end of "beta" (2–3 days) — postponed
+The price is not approved yet. Do not start this phase until the Founder approves the price and says go.
 - Rename beta keys/fields (D14), remove the word from UI, keep capacity/paused logic.
 - Stars invoice for $49 (D15), webhook → entitlement with expiry (no auto-renew), `me.subscription` in the session payload, gating: free users → subscription sheet from composer, Pulse Verify, published-Proof CTA.
 - Discounted tariff for unused promo codes (the code table comes in Phase 4; the sheet just reads `me.promo`).
