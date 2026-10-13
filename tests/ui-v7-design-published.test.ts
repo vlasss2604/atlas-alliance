@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 
 import { DictScope } from "../src/client/app-context";
+import { navPlaceOf } from "../src/client/components/app-chrome";
 import { ResearchResult } from "../src/client/components/research-result";
 import { en } from "../src/client/i18n/en";
 import { ru } from "../src/client/i18n/ru";
@@ -86,6 +87,15 @@ describe("the published route fails closed until Phase 3", () => {
     expect(page).toContain('if (process.env.NODE_ENV === "production") notFound();');
     const view = codeOf("app/(app)/dev/published-proof/view.tsx");
     expect(view).toContain("jobId={null} published={{");
+  });
+});
+
+describe("navigation on a published Proof", () => {
+  it("lights Verify (reached from Explore on Verify); every other route keeps its own place", () => {
+    expect(navPlaceOf("/proofs/published/raydium")).toBe("/home");
+    for (const p of ["/home", "/pulse", "/research", "/research/abc", "/profile", "/proofs"]) expect(navPlaceOf(p), p).toBe(p);
+    const chrome = codeOf("src/client/components/app-chrome.tsx");
+    expect(chrome.match(/const pathname = navPlaceOf\(usePathname\(\)\);/g)?.length).toBe(2);
   });
 });
 

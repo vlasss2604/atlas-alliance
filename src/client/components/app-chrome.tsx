@@ -32,8 +32,15 @@ function isActive(pathname: string, href: string): boolean {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+// THE PLACE A ROUTE BELONGS TO, for lighting the navigation. A published
+// Proof is reached from Explore on Verify, so it lights Verify (owner
+// decision 2026-10-13); every other route is its own place.
+export function navPlaceOf(pathname: string): string {
+  return pathname.startsWith("/proofs/published/") ? VERIFY_HREF : pathname;
+}
+
 export function AppHeader() {
-  const pathname = usePathname();
+  const pathname = navPlaceOf(usePathname());
   const { me, dict } = useApp();
   const unread = (me?.unreadCount ?? 0) > 0;
   const item = (key: keyof typeof ITEMS, icon: React.ReactNode, extra = "") => (
@@ -98,7 +105,7 @@ export function AppHeader() {
 }
 
 export function AtlasDock() {
-  const pathname = usePathname();
+  const pathname = navPlaceOf(usePathname());
   const { me, dict } = useApp();
   const unread = (me?.unreadCount ?? 0) > 0;
   const item = (key: keyof typeof ITEMS, icon: React.ReactNode, extra = "") => (

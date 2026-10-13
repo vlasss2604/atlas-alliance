@@ -284,8 +284,8 @@ export const en = {
     dateNote: (date: string) => `Checked ${date}. The verdict describes the evidence on that date, not the state today.`,
     ownCta: "Run your own verification",
     ownNote: "Starts a new Research and uses one of your attempts — only after you confirm.",
-    // Owner review: new copy (not in the mockups) for a published route
-    // with no published Proof behind it yet.
+    // Owner-approved 2026-10-13: a published route with no published
+    // Proof behind it yet.
     unavailableTitle: "This Proof isn't published yet",
     unavailableText: "It is still in quality review. Nothing is shown until an approved Proof exists.",
   },
