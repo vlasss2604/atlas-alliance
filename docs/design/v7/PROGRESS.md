@@ -8,7 +8,7 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 - **Worktree:** `/home/user/src/atlas-proof-v7` (WSL). Not the main checkout.
 - **Branch:** `claude/v7-design`, created from `2f01c90` of
   `claude/phase-5-research-memory`. Unpushed.
-- **Last code commit:** `05faead` (step 8).
+- **Last code commit:** `d4743ab` (step 8 review).
 - The main checkout `/home/user/src/atlas-proof` belongs to the engine chat
   (D-179). Never switch, reset, stash, clean, merge or pull it.
 - `node_modules` in the worktree is a hardlinked copy of the main repo's
@@ -35,9 +35,10 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 | 7 | Research Library: lit title, keep note with shield; overview panel (real count, latest-verdict bar, All / Supported / Partially / Insufficient tiles, D7) counted by `library-filter.ts` from what each pill shows; one panel of divided rows (48px avatar with outcome dot, pill, runs · questions, last researched); In progress first; bar settles by 0.4s | `49f0a3b` |
 | 7 | Review: a row leads with the project's last finished verdict; an unfinished newest run adds a grey "Last run didn't finish"; never finished → grey "No verdict yet"; tiles and bar count the same | `c0910e1` |
 | 8 | Pulse, claim-led: title with a static heartbeat, info note, grey dashed sample notice; cards with source, X chip, tinted type, age, Claimed + claim verbatim, boxed verify question (new fixture field `verifyQuestion` EN/RU, the designer's `Q`), Verify with ATLAS; copy from §5a (Fresh, Project claim, Claimed, Verify with ATLAS) | `05faead` |
+| 8 | Review: Pulse → Verify prefills the card's verify question in the display language (`pulsePrefill`; the claim text when a card has none); the From Pulse pill shows the claim as context, folded to two lines (Show all / Show less) | `d4743ab` |
 
 Per step: typecheck, lint (0 errors) and every DB-free test green; last run
-507/507 in 21 files.
+512/512 in 21 files.
 
 ## Owner decisions
 
@@ -87,9 +88,12 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 - **Library rows** keep opening to their questions and runs (D-169).
 - **RU filter labels** «Все · Подтверждено · Частично · Недостаточно» —
   approved.
-- **Pulse → Verify prefill:** stays the claim text, as `07-verify-from-pulse`
-  shows (HANDOFF §4.6 says the verify question; the mockup and step 2 use
-  the text). The verify question is shown on the card only.
+- **Pulse → Verify prefill (step 8 review):** the field gets the card's
+  verify question in the display language; the claim text is shown above
+  it in the From Pulse pill as context, folded to two lines. A card without
+  a verify question prefills its claim text. The 07 mockup (claim in the
+  field) was a designer error. Research still starts only by the button.
+- **Pulse heartbeat:** static — confirmed.
 - **Payment:** postponed; the price is **not approved** ($49 is a working
   figure). No payment flow, no price anywhere. Phase 1b waits for the owner.
 
@@ -109,8 +113,7 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   "Not established" on an unresolved card.
 - Library rows open to their questions and runs instead of linking
   straight to the latest result (owner decision).
-- Pulse: the mockup draws the heartbeat once (`ap-line`); here it is static
-  (§4.9: Pulse is not live). The `lockedNote` for Free users waits for 1b.
+- Pulse: the `lockedNote` for Free users waits for 1b.
 - RU composer placeholder is clipped at the edge (no ellipsis); Pump.fun's
   avatar shows "PUM" (3-letter ticker rule); dates use the browser's
   format ("1 окт. 2026 г.").
@@ -120,6 +123,8 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 - **Step 10 (motion and QA pass):** RU "подтверждено" under the ring is a
   little wider than the disc; the existing `atlas-shimmer` skeleton and
   `atlas-pulse` dot to be checked against HANDOFF §4.9.
+- **`pulse-phase-a-v1`** (DB suite): its Home handoff assertions were
+  updated to the verify-question prefill in step 8 review; not run yet.
 - **Tests with the `atlas_test` database:** only with the owner's explicit
   permission, at a time the engine chat is not running tests. Not run yet
   for: `pulse-phase-a-v1` (its dock assertion was updated in step 1),
