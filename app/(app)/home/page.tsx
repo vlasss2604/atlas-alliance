@@ -11,7 +11,8 @@ import { PulseIcon } from "@/src/client/components/icons";
 import { RecentProofCard } from "@/src/client/components/recent-proof-card";
 import { ResearchComposer } from "@/src/client/components/research-composer";
 import { betaBlockOf } from "@/src/client/beta-status";
-import { pulseItemById, type PulseItem } from "@/src/client/pulse-fixtures";
+import { PulseNotice } from "@/src/client/components/pulse-notice";
+import { pulseItemById, pulsePrefill, type PulseItem } from "@/src/client/pulse-fixtures";
 import { pulseIdFromSearch } from "@/src/client/pulse-launch";
 import { groupResearchRuns } from "@/src/client/research-model";
 import { showcaseBySlug, showcaseProofs, showcaseSlugFromSearch } from "@/src/client/showcase-proofs";
@@ -26,10 +27,12 @@ import { showcaseBySlug, showcaseProofs, showcaseSlugFromSearch } from "@/src/cl
 // real record from the server; no verdict is invented for a job that has
 // none.
 //
-// OPENED FROM A PULSE CARD (`?pulse=<id>`): the card's text lands in the
-// same editable input, verbatim, with a pill above the title saying where
-// it came from. Nothing starts and nothing is spent by opening it; the
-// start flow after that is the composer's own, unchanged.
+// OPENED FROM A PULSE CARD (`?pulse=<id>`): the card's verify question, in
+// the display language, lands in the same editable input (its claim text
+// when it has no question — pulsePrefill), and the pill above the title
+// says where it came from and shows the claim as context. Nothing starts
+// and nothing is spent by opening it; the start flow after that is the
+// composer's own, unchanged.
 type PulseLaunch = { kind: "none" } | { kind: "open"; item: PulseItem } | { kind: "unavailable" };
 
 export default function HomePage() {
@@ -76,21 +79,14 @@ export default function HomePage() {
     .sort((a, b) => Date.parse(b.finishedAt ?? b.createdAt) - Date.parse(a.finishedAt ?? a.createdAt))
     .slice(0, 6);
 
+  const pulseQuestion = pulse.kind === "open" ? pulsePrefill(pulse.item, lang) : "";
   const pulseNotice =
-    pulse.kind === "none" ? null : (
+    pulse.kind === "none" ? null : pulse.kind === "open" ? (
+      <PulseNotice item={pulse.item} prefilledQuestion={pulseQuestion !== pulse.item.text} />
+    ) : (
       <p className="from-pulse rise" data-testid="pulse-notice" data-kind={pulse.kind}>
         <PulseIcon size={16} strokeWidth={2} className="from-pulse-icon" />
-        <span>
-          {pulse.kind === "open" ? (
-            <>
-              <span className="font-bold text-[var(--atlas-cyan-strong)]">{dict.pulse.fromPulse(pulse.item.source.handle)}</span>
-              {" · "}
-              {dict.pulse.fromPulseEditable}
-            </>
-          ) : (
-            dict.pulse.unavailable
-          )}
-        </span>
+        <span>{dict.pulse.unavailable}</span>
       </p>
     );
 
@@ -109,8 +105,8 @@ export default function HomePage() {
             <ResearchComposer key={`proof-${proofSlug}-${lang}`} initialQuestion={proofQuestion} />
           ) : (
             <ResearchComposer
-              key={pulse.kind === "open" ? pulse.item.id : "plain"}
-              initialQuestion={pulse.kind === "open" ? pulse.item.text : ""}
+              key={pulse.kind === "open" ? `${pulse.item.id}-${lang}` : "plain"}
+              initialQuestion={pulseQuestion}
               notice={pulseNotice}
             />
           )}

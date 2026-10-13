@@ -264,6 +264,9 @@ export const en = {
     // On the Verify screen, when it was opened from a Pulse card.
     fromPulse: (handle: string) => `From Pulse · ${handle}`,
     fromPulseEditable: "Review or edit the claim before you continue.",
+    // The claim shown as context above a prefilled verify question.
+    contextMore: "Show all",
+    contextLess: "Show less",
     unavailable: "That Pulse item is no longer available. Ask your question here.",
     // Phase A: the offline cards are invented examples, said so on screen.
     sampleTitle: "Sample data · prototype",

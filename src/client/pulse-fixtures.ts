@@ -36,7 +36,8 @@ export interface PulseItem {
   // V7 claim-led card (HANDOFF §4.6): the question a Research would answer
   // about this claim, in both display languages. Fixture data, not i18n —
   // ATLAS's framing of the claim, never a summary of it.
-  verifyQuestion: { EN: string; RU: string };
+  // Optional: a card without one prefills its claim text instead.
+  verifyQuestion?: { EN: string; RU: string };
 }
 
 // The intended live window: a card is "fresh" for about 48 hours; older
@@ -152,6 +153,16 @@ export function splitPulseFeed(items: readonly PulseItem[]): { fresh: PulseItem[
     fresh: sorted.filter((i) => i.ageHours <= PULSE_FRESH_HOURS).slice(0, PULSE_MAX_FRESH),
     earlier: sorted.filter((i) => i.ageHours > PULSE_FRESH_HOURS).slice(0, PULSE_MAX_EARLIER),
   };
+}
+
+// WHAT A PULSE CARD PUTS IN THE VERIFY FIELD (owner decision, step 8
+// review): its verify question in the display language — the question a
+// Research would answer — and, only when the card has none, the claim text
+// verbatim. Either way it is editable and starts nothing; the claim itself
+// is shown above the field as context.
+export function pulsePrefill(item: PulseItem, language: "EN" | "RU"): string {
+  const question = item.verifyQuestion?.[language]?.trim();
+  return question ? question : item.text;
 }
 
 // The instant a fixture "was published", derived from its age at render.

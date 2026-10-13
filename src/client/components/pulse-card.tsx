@@ -22,7 +22,7 @@ import { ProjectAvatar } from "./project-avatar";
 export function PulseCard({ item, now, index = 0 }: { item: PulseItem; now?: number; index?: number }) {
   const dict = useDict();
   const age = relativeAge(pulsePublishedAt(item, now), now);
-  const question = item.verifyQuestion[displayLanguage()];
+  const question = item.verifyQuestion?.[displayLanguage()];
   return (
     <li
       className="pulse-card-v7 rise"

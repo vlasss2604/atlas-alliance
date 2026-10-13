@@ -1946,6 +1946,26 @@ button.card:active,
   margin-top: 1px;
   color: var(--atlas-cyan);
 }
+/* The claim as context above a prefilled verify question: the source's
+   words, folded to two lines until the reader opens them. */
+.from-pulse-claim {
+  color: #c9d5e2;
+  overflow-wrap: anywhere;
+}
+.from-pulse-claim-folded {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.from-pulse-toggle {
+  align-self: flex-start;
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 600;
+  color: var(--atlas-cyan);
+}
 /* The static decorative ring behind the top-right corner. */
 .verify-ring {
   position: absolute;

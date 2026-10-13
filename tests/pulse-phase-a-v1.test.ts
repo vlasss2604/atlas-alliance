@@ -281,14 +281,17 @@ describe("Pulse → Verify: a prefill of the existing Home input, nothing more",
     expect(pulseItemById(pulseIdFromSearch("?pulse=does-not-exist")!)).toBeNull();
   });
 
-  it("Home reads ?pulse=<id>, prefills the EXISTING composer with the exact text, keeps it editable, and names the source", () => {
+  it("Home reads ?pulse=<id>, prefills the EXISTING composer with the card's verify question (else its exact text), keeps it editable, and names the source", () => {
     const home = codeOf(HOME);
     expect(home).toContain("pulseIdFromSearch(window.location.search)");
     expect(home).toContain("pulseItemById(id)");
     expect(home).toContain('setPulse(item ? { kind: "open", item } : { kind: "unavailable" })');
-    expect(home).toContain('initialQuestion={pulse.kind === "open" ? pulse.item.text : ""}');
-    expect(home).toContain('key={pulse.kind === "open" ? pulse.item.id : "plain"}');
-    expect(home).toContain("dict.pulse.fromPulse(pulse.item.source.handle)");
+    // Owner decision (V7 step 8 review): the verify question in the display
+    // language, the claim text only when the card has none (pulsePrefill).
+    expect(home).toContain('const pulseQuestion = pulse.kind === "open" ? pulsePrefill(pulse.item, lang) : "";');
+    expect(home).toContain("initialQuestion={pulseQuestion}");
+    expect(home).toContain('key={pulse.kind === "open" ? `${pulse.item.id}-${lang}` : "plain"}');
+    expect(codeOf("src/client/components/pulse-notice.tsx")).toContain("dict.pulse.fromPulse(item.source.handle)");
     expect(home).toContain("dict.pulse.unavailable");
     // The composer takes the text into its own editable state and nothing else changed:
     // the same interpret → gate → startResearch flow, the same idempotency key.

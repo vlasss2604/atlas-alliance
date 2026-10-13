@@ -10,7 +10,8 @@ import { PulseCard } from "../src/client/components/pulse-card";
 import { setDisplayLanguage } from "../src/client/display-language";
 import { en, type Dict } from "../src/client/i18n/en";
 import { ru } from "../src/client/i18n/ru";
-import { pulseItems } from "../src/client/pulse-fixtures";
+import { PulseNotice } from "../src/client/components/pulse-notice";
+import { pulseItems, pulsePrefill, type PulseItem } from "../src/client/pulse-fixtures";
 
 // V7 STEP 8 — PULSE, CLAIM-LED (HANDOFF §4.6, §5a).
 //
@@ -39,7 +40,8 @@ const card = (dict: Dict, index = 0) =>
 describe("Pulse fixtures — every card carries its verify question", () => {
   it("each fixture has a question in EN and RU, a question and never a link", () => {
     for (const item of pulseItems()) {
-      const { EN, RU } = item.verifyQuestion;
+      expect(item.verifyQuestion, item.id).toBeDefined();
+      const { EN, RU } = item.verifyQuestion!;
       expect(EN.trim().length, item.id).toBeGreaterThan(10);
       expect(RU.trim().length, item.id).toBeGreaterThan(10);
       expect(EN.endsWith("?"), item.id).toBe(true);
@@ -53,8 +55,8 @@ describe("Pulse fixtures — every card carries its verify question", () => {
 
   it("the questions are the designer's, verbatim (source/V2-Pulse.dc.html)", () => {
     const raydium = pulseItems().find((i) => i.id === "raydium-buyback-week")!;
-    expect(raydium.verifyQuestion.EN).toBe("Does the documented mechanism match actual execution?");
-    expect(raydium.verifyQuestion.RU).toBe("Соответствует ли задокументированный механизм реальному исполнению?");
+    expect(raydium.verifyQuestion!.EN).toBe("Does the documented mechanism match actual execution?");
+    expect(raydium.verifyQuestion!.RU).toBe("Соответствует ли задокументированный механизм реальному исполнению?");
   });
 });
 
@@ -70,7 +72,7 @@ describe("Pulse card — claim-led", () => {
     expect(at('data-testid="pulse-text"')).toBeLessThan(at('data-testid="pulse-verify-question"'));
     expect(at('data-testid="pulse-verify-question"')).toBeLessThan(at('data-testid="pulse-verify"'));
     expect(html).toContain(">Claimed<");
-    expect(html).toContain(item.verifyQuestion.EN);
+    expect(html).toContain(item.verifyQuestion!.EN);
     expect(html).toContain(`href="/home?pulse=${item.id}"`);
     expect(html).toContain("Verify with ATLAS");
     expect(html).not.toContain('data-testid="pulse-open-source"');
@@ -80,8 +82,8 @@ describe("Pulse card — claim-led", () => {
     setDisplayLanguage("RU");
     const item = pulseItems()[0];
     const html = card(ru);
-    expect(html).toContain(item.verifyQuestion.RU);
-    expect(html).not.toContain(item.verifyQuestion.EN);
+    expect(html).toContain(item.verifyQuestion!.RU);
+    expect(html).not.toContain(item.verifyQuestion!.EN);
     expect(html).toContain(item.text);
     expect(html).toContain(">Заявлено<");
     expect(html).toContain("Проверить в ATLAS");
@@ -132,7 +134,7 @@ describe("Pulse screen — nothing pretends to be live", () => {
     const escaped = (t: string) => t.replace(/&/g, "&amp;").replace(/'/g, "&#x27;");
     for (const item of pulseItems()) {
       expect(html).toContain(escaped(item.text));
-      expect(html).toContain(escaped(item.verifyQuestion.EN));
+      expect(html).toContain(escaped(item.verifyQuestion!.EN));
     }
     expect(html).toContain('data-testid="pulse-sample-notice"');
     expect(html).toContain('data-testid="pulse-fresh"');
@@ -161,7 +163,7 @@ describe("Pulse in Russian", () => {
       .map((m) => m[0])
       .filter((w) => !["ATLAS", "X", "Pulse", "PUM", "JI"].includes(w));
     expect(latin).toEqual([]);
-    for (const item of pulseItems()) expect(text).toContain(item.verifyQuestion.RU);
+    for (const item of pulseItems()) expect(text).toContain(item.verifyQuestion!.RU);
     setDisplayLanguage("EN");
   });
 });
@@ -179,7 +181,61 @@ describe("Pulse copy (HANDOFF §5a) and the unchanged handoff", () => {
     expect(Object.keys(ru.pulse).sort()).toEqual(Object.keys(en.pulse).sort());
   });
 
-  it("Verify still prefills the claim text, as 07-verify-from-pulse shows", () => {
-    expect(codeOf(HOME)).toContain('initialQuestion={pulse.kind === "open" ? pulse.item.text : ""}');
+});
+
+// PULSE → VERIFY (owner decision, step 8 review): the field gets the card's
+// verify question in the display language; the claim is shown above it as
+// context. A card without a question prefills its claim, as before. Only the
+// id travels, and only the explicit Start Proof starts a Research.
+describe("Pulse → Verify — the verify question, the claim as context", () => {
+  const item = pulseItems().find((i) => i.id === "raydium-buyback-week")!;
+  const bare: PulseItem = { ...item, verifyQuestion: undefined };
+
+  it("the prefill is the verify question in the display language", () => {
+    expect(pulsePrefill(item, "EN")).toBe(item.verifyQuestion!.EN);
+    expect(pulsePrefill(item, "RU")).toBe(item.verifyQuestion!.RU);
+  });
+
+  it("without a question — missing or blank — the claim text, verbatim", () => {
+    expect(pulsePrefill(bare, "EN")).toBe(item.text);
+    expect(pulsePrefill(bare, "RU")).toBe(item.text);
+    expect(pulsePrefill({ ...item, verifyQuestion: { EN: "  ", RU: "" } }, "RU")).toBe(item.text);
+  });
+
+  it("Home puts the prefill in the existing composer and remounts it per item and language", () => {
+    const home = codeOf(HOME);
+    expect(home).toContain('const pulseQuestion = pulse.kind === "open" ? pulsePrefill(pulse.item, lang) : "";');
+    expect(home).toContain("initialQuestion={pulseQuestion}");
+    expect(home).toContain('key={pulse.kind === "open" ? `${pulse.item.id}-${lang}` : "plain"}');
+    expect(home).toContain("<PulseNotice item={pulse.item} prefilledQuestion={pulseQuestion !== pulse.item.text} />");
+    // Only the id travels; nothing in the handoff carries the text.
+    expect(codeOf("src/client/pulse-launch.ts")).not.toMatch(/text|encodeURIComponent/);
+    // Opening it starts nothing: Home never calls the start endpoint.
+    expect(home).not.toMatch(/startResearch|interpret\(/);
+  });
+
+  it("with a question prefilled, the notice shows the claim verbatim, folded to two lines", () => {
+    const html = renderToStaticMarkup(createElement(DictScope, { dict: en }, createElement(PulseNotice, { item, prefilledQuestion: true })));
+    expect(html).toContain("From Pulse · @RaydiumProtocol");
+    expect(html).toMatch(/class="from-pulse-claim from-pulse-claim-folded" data-testid="pulse-notice-claim">12% of trading fees/);
+    expect(html).toContain(item.text);
+    expect(html).not.toContain(en.pulse.fromPulseEditable);
+    const css = readFileSync(CSS, "utf8");
+    const folded = css.slice(css.indexOf(".from-pulse-claim-folded {"), css.indexOf(".from-pulse-toggle {"));
+    expect(folded).toContain("-webkit-line-clamp: 2;");
+  });
+
+  it("with the claim prefilled, the notice keeps its review-or-edit hint and does not repeat the claim", () => {
+    const html = renderToStaticMarkup(createElement(DictScope, { dict: en }, createElement(PulseNotice, { item: bare, prefilledQuestion: false })));
+    expect(html).toContain(en.pulse.fromPulseEditable);
+    expect(html).not.toContain('data-testid="pulse-notice-claim"');
+    expect(html).not.toContain(item.text);
+  });
+
+  it("the fold control's words exist in EN and RU", () => {
+    expect(en.pulse.contextMore).toBe("Show all");
+    expect(en.pulse.contextLess).toBe("Show less");
+    expect(ru.pulse.contextMore).toBe("Показать полностью");
+    expect(ru.pulse.contextLess).toBe("Свернуть");
   });
 });
