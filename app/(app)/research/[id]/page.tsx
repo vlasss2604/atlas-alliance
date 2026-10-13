@@ -10,6 +10,7 @@ import { BetaFeedbackPrompt } from "@/src/client/components/beta-feedback-prompt
 import { DeveloperDetails } from "@/src/client/components/developer-details";
 import { ResearchProgress } from "@/src/client/components/research-progress";
 import { ResearchResult } from "@/src/client/components/research-result";
+import { ResearchStatus, statusKind, WhatHappensNext } from "@/src/client/components/research-status";
 import { isTerminal, type JobState } from "@/src/client/research-model";
 import { useJobEvents, type JobEvent } from "@/src/client/use-job-events";
 
@@ -74,6 +75,30 @@ export default function ResearchDetailPage() {
 
   const live = detail !== null && !isTerminal(detail.job.state as JobState);
 
+  // V7: when a job this screen watched SUCCEEDS, the scanner closes its ring
+  // once (0.5s) before the result replaces it — the existing auto-switch,
+  // held just long enough to be seen. Never on reopening a finished job.
+  const [settling, setSettling] = useState(false);
+  useEffect(() => {
+    if (!settling) return;
+    const t = window.setTimeout(() => setSettling(false), 700);
+    return () => window.clearTimeout(t);
+  }, [settling]);
+
+  // The existing cancel flow (POST /cancel), behind one confirmation.
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = useCallback(() => {
+    if (!jobId || !window.confirm(dict.progress.cancelConfirm)) return;
+    setCancelling(true);
+    api
+      .cancelJob(jobId)
+      .catch(() => {})
+      .finally(() => {
+        setCancelling(false);
+        load();
+      });
+  }, [jobId, dict, load]);
+
   // LIVE STATE COMES FROM THE SERVER, ALWAYS. Each event is a fresh read of
   // the job row, so `acquisitionPhase` here is the engine's own persisted
   // phase and not a client guess.
@@ -95,6 +120,7 @@ export default function ResearchDetailPage() {
           : prev,
       );
       if (isTerminal(e.state)) {
+        if (e.state === "SUCCEEDED") setSettling(true);
         load();
         void refresh();
       }
@@ -125,42 +151,32 @@ export default function ResearchDetailPage() {
   }
 
   const { job } = detail;
-  const projectName = job.projectName ?? job.projectTicker ?? dict.detailPage.unresolvedProject;
   const finished = isTerminal(job.state as JobState);
+  const kind = statusKind(job.state);
+  // Failed, cancelled and budget-limited runs keep the status screen on
+  // top (grey: not a finding); their result, if a Proof exists, follows.
+  const stoppedEarly = kind === "failed" || kind === "cancelled" || kind === "budget";
+  const showStatus = !finished || settling || stoppedEarly;
+  const showResult = finished && !settling && (!stoppedEarly || detail.proof !== null);
 
   return (
-    <main className="enter flex flex-col gap-5 pb-6">
+    <main className="flex flex-col gap-4 pb-6">
       <AtlasHeader compact back={{ href: "/research", label: dict.detailPage.back }} />
 
-      {/* ---- LIVE: the subject and the question are the header — there is
-           no result yet for them to belong to — and progress leads. ---- */}
+      {/* ---- STATUS: while live the subject, the question and the engine's
+           own progress lead — there is no result yet. ---- */}
+      {showStatus && (
+        <ResearchStatus job={job} memoryEnabled={me?.memoryEnabled ?? false} onCancel={finished ? undefined : cancel} cancelling={cancelling} />
+      )}
       {!finished && (
         <>
-          <section className="flex items-start gap-4 px-1 pt-1">
-            <span
-              className="orb h-14 w-14 shrink-0 text-[0.95rem] font-semibold text-[var(--atlas-cyan)] sm:h-16 sm:w-16"
-              aria-hidden
-            >
-              {projectName.slice(0, 2).toUpperCase()}
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="section-label">{dict.detailPage.researching}</p>
-              <p className="mt-1 text-[1.2rem] font-semibold leading-tight tracking-tight">{projectName}</p>
-              <p className="mt-1.5 text-[1rem] leading-snug text-[var(--atlas-text-dim)]">{job.originalQuestion}</p>
-            </div>
-          </section>
-          <section className="panel p-5 sm:p-6" data-testid="live-banner">
-            <div className="flex items-center gap-3">
-              <span className="pulse-dot" aria-hidden />
-              <p className="text-[1.05rem] font-medium">{dict.detailPage.inProgress}</p>
-            </div>
-            <p className="mt-2 text-[0.95rem] text-[var(--atlas-text-dim)]">
-              {dict.detailPage.leaveNote}
-            </p>
-          </section>
+          {/* The rail never runs for a finished job: deriveProgress cannot
+              say where a stopped run stopped (D5), so nothing is shown as
+              done that the record does not say was done. */}
           <div data-testid="progress-slot-live">
             <ResearchProgress job={job} memoryEnabled={me?.memoryEnabled ?? false} />
           </div>
+          {job.state !== "AWAITING_CLARIFICATION" && <WhatHappensNext />}
         </>
       )}
 
@@ -173,7 +189,7 @@ export default function ResearchDetailPage() {
       )}
 
       {/* ---- FINISHED: the one result surface. ------------------------ */}
-      {finished && <ResearchResult detail={detail} jobId={jobId} />}
+      {showResult && <ResearchResult detail={detail} jobId={jobId} />}
 
       {/* D-170: the one-time feedback prompt, right after a finished Result
           with a Proof, only when the server says it is due. */}

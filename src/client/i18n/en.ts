@@ -289,6 +289,23 @@ export const en = {
       EXTRACT: "Verifying the mechanism",
       VERDICT: "Building the answer",
     } as Record<string, string>,
+    // V7 research screen (HANDOFF §4.2, §5).
+    foundNote: "A found source isn't evidence yet. ATLAS reads it first and checks what it actually supports.",
+    doneSub: "Your Proof has the verdict, confidence, evidence, sources and honest gaps.",
+    failedTitle: "Couldn't finish this research",
+    failedSub: "This is a failure of the run, not a finding about the project.",
+    failedChip: "Your attempt wasn't spent",
+    cancelledSub: "The research stopped before an answer. This is not a finding about the project.",
+    // Owner review: new copy for the Stop confirmation (not in the mockups).
+    cancelConfirm: "Stop this research? It ends now, before an answer.",
+    tags: { now: "now", waiting: "waiting for you" },
+    next: {
+      title: "What happens next",
+      ready: { title: "Proof is ready", text: "The result opens right on this screen." },
+      clarify: { title: "Needs a clarification", text: "ARI asks one question — the research continues after your answer." },
+      budget: { title: "Budget limit", text: "You get an honest result: what it managed to check." },
+      failure: { title: "Failure", text: "Your attempt isn't spent. An unfinished check doesn't mean the mechanism is missing." },
+    },
   },
   detailPage: {
     back: "Back",

@@ -41,14 +41,15 @@ export function AtlasHeader({
 }) {
   if (!back) return null;
   return (
-    <header className="pt-1 pb-1">
+    <header>
+      {/* V7: a 44px touch target, 14/500, soft text, a 16px chevron. */}
       <Link
         href={back.href}
-        className="inline-flex items-center gap-1.5 text-[0.92rem] text-[var(--atlas-text-dim)] transition-colors hover:text-[var(--atlas-cyan-strong)]"
+        className="inline-flex h-11 items-center gap-1 text-[14px] leading-[18px] font-medium text-[var(--atlas-text-soft)] transition-colors hover:text-[var(--atlas-cyan-strong)]"
         data-testid="back-link"
       >
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden>
-          <path d="M10 3 5 8l5 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M15 18l-6-6 6-6" />
         </svg>
         {back.label}
       </Link>
