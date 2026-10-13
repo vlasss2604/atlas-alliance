@@ -23,7 +23,8 @@ import {
 import { useDict } from "../app-context";
 import type { Dict } from "../i18n/en";
 import { getPlatform } from "../platform";
-import { canonicalDocumentKey, domainOf, exclusionLabel, SOURCE_CLASS_LABELS, sourceClassCaveat, verdictTone, type JobState } from "../research-model";
+import { canonicalDocumentKey, domainOf, exclusionLabel, retrievedOn, SOURCE_CLASS_LABELS, sourceClassCaveat, verdictTone, type JobState } from "../research-model";
+import { verifyPathForShowcase } from "../showcase-proofs";
 import { CalendarIcon, ChevronIcon, ExternalIcon, QuoteIcon, SnapshotIcon, SourceKindIcon, sourceKindFamily } from "./icons";
 import { ProjectAvatar } from "./project-avatar";
 import { OutcomeBadge } from "./verdict-badge";
@@ -63,20 +64,35 @@ const ANSWER_KIND_STATUS: Record<Exclude<AnswerKind, "NONE">, ResultStatus> = {
 // The confidence bands, weakest first: the bar lights one cell per band.
 const CONFIDENCE_ORDER = ["Low", "Limited", "Strong", "Very strong"];
 
-export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; jobId: string | null }) {
+// `published` (HANDOFF §4.8): the same Proof as a published, read-only
+// record that belongs to ATLAS, not the reader — a banner, the published
+// label, the date it was checked, and "Run your own verification", which
+// only prefills the composer. Nothing personal and no audit; the caller
+// passes no jobId, so no owner-only snapshot route is offered either.
+export function ResearchResult({
+  detail,
+  jobId,
+  published = null,
+}: {
+  detail: ResearchJobDetail;
+  jobId: string | null;
+  published?: { slug: string; checkedAt: string } | null;
+}) {
   const dict = useDict();
   const surface = buildResultSurface(detail);
   const projectName = detail.job.projectName ?? detail.job.projectTicker ?? dict.detailPage.unresolvedProject;
   const noun = mechanismNounOf([detail.job.originalQuestion, ...surface.table.filter((r) => r.primary).map((r) => r.label)]);
   return (
-    <article className="flex flex-col gap-[18px]" data-testid="research-result">
-      <ResultHead detail={detail} projectName={projectName} />
+    <article className="flex flex-col gap-[18px]" data-testid="research-result" data-mode={published ? "published" : "own"}>
+      {published && <PublishedBanner />}
+      <ResultHead detail={detail} projectName={projectName} published={published !== null} />
       <AnswerPanel surface={surface} detail={detail} />
       <ResearchPath chain={surface.chain} noun={noun} />
       <FindingsTable rows={surface.table} jobId={jobId} />
       <SourcesSection cards={surface.keyEvidence} jobId={jobId} />
       <UnclearSection surface={surface} detail={detail} noun={noun} />
-      {jobId && (
+      {published && <PublishedFooter slug={published.slug} checkedAt={published.checkedAt} />}
+      {jobId && !published && (
         <p className="pb-2">
           <Link href={`/research/${jobId}/audit`} className="btn-secondary px-5 py-3 text-[0.98rem]" data-testid="audit-entry">
             {dict.result.openAudit}
@@ -92,7 +108,7 @@ export function ResearchResult({ detail, jobId }: { detail: ResearchJobDetail; j
 /* HEAD — the project and the question                                 */
 /* ------------------------------------------------------------------ */
 
-function ResultHead({ detail, projectName }: { detail: ResearchJobDetail; projectName: string }) {
+function ResultHead({ detail, projectName, published = false }: { detail: ResearchJobDetail; projectName: string; published?: boolean }) {
   const dict = useDict();
   const { job } = detail;
   return (
@@ -100,12 +116,53 @@ function ResultHead({ detail, projectName }: { detail: ResearchJobDetail; projec
       <p className="flex h-8 items-center gap-2.5">
         <ProjectAvatar name={job.projectName} ticker={job.projectTicker} slug={job.projectSlug} size={32} />
         <span className="text-[15px] leading-5 font-bold text-[var(--atlas-text-strong)]">{projectName}</span>
-        <span className="text-[13px] leading-5 text-[var(--atlas-text-dim)]">{dict.result.label}</span>
+        <span className="text-[13px] leading-5 text-[var(--atlas-text-dim)]" data-testid="result-label">
+          {published ? dict.published.label : dict.result.label}
+        </span>
       </p>
       <h1 className="result-title" data-testid="result-question">
         {job.originalQuestion}
       </h1>
     </header>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* PUBLISHED — banner and footer (HANDOFF §4.8)                        */
+/* ------------------------------------------------------------------ */
+
+function PublishedBanner() {
+  const dict = useDict();
+  return (
+    <div className="published-banner rise" data-testid="published-banner">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden className="mt-px flex-none">
+        <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+      <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <span className="text-[13.5px] leading-[18px] font-bold text-[#8fecd0]">{dict.published.bannerTitle}</span>
+        <span className="text-[12.5px] leading-[17px] text-[var(--atlas-text-dim)]">{dict.published.bannerText}</span>
+      </span>
+    </div>
+  );
+}
+
+// The date it was checked, then the one action: the composer, prefilled
+// with this Proof's question. It never starts a Research by itself.
+function PublishedFooter({ slug, checkedAt }: { slug: string; checkedAt: string }) {
+  const dict = useDict();
+  return (
+    <div className="flex flex-col gap-2.5" data-testid="published-footer">
+      <p className="flex items-start gap-2 text-[12.5px] leading-[17px] text-[var(--atlas-text-mute)]" data-testid="published-date-note">
+        <CalendarIcon size={14} className="mt-px flex-none" />
+        <span>{dict.published.dateNote(retrievedOn(checkedAt) ?? checkedAt)}</span>
+      </p>
+      <Link href={verifyPathForShowcase(slug)} className="cta-wide gap-2" data-testid="published-own-cta">
+        {dict.published.ownCta}
+        <ChevronIcon size={14} />
+      </Link>
+      <p className="text-center text-[12px] leading-4 text-[#7f93a8]">{dict.published.ownNote}</p>
+    </div>
   );
 }
 

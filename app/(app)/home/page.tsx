@@ -14,7 +14,7 @@ import { betaBlockOf } from "@/src/client/beta-status";
 import { pulseItemById, type PulseItem } from "@/src/client/pulse-fixtures";
 import { pulseIdFromSearch } from "@/src/client/pulse-launch";
 import { groupResearchRuns } from "@/src/client/research-model";
-import { showcaseProofs } from "@/src/client/showcase-proofs";
+import { showcaseBySlug, showcaseProofs, showcaseSlugFromSearch } from "@/src/client/showcase-proofs";
 
 // HOME — THE VERIFY SCREEN (D-172 names it Verify; the route stays /home).
 //
@@ -39,6 +39,9 @@ export default function HomePage() {
   const block = betaBlockOf(me);
   const [jobs, setJobs] = useState<ResearchJobListItem[] | null>(null);
   const [pulse, setPulse] = useState<PulseLaunch>({ kind: "none" });
+  // "Run your own verification" from a published Proof (`?proof=<slug>`):
+  // that Proof's question lands in the composer, editable. Nothing starts.
+  const [proofSlug, setProofSlug] = useState<string | null>(null);
 
   useEffect(() => {
     void api
@@ -58,6 +61,15 @@ export default function HomePage() {
     }, 0);
     return () => window.clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    const slug = showcaseSlugFromSearch(window.location.search);
+    if (!slug) return;
+    const t = window.setTimeout(() => setProofSlug(slug), 0);
+    return () => window.clearTimeout(t);
+  }, []);
+  const lang = me?.language === "RU" ? "RU" : "EN";
+  const proofQuestion = proofSlug ? (showcaseBySlug(proofSlug)?.question[lang] ?? null) : null;
 
   const recent = groupResearchRuns(jobs ?? [])
     .flatMap((group) => group.questions.map((q) => q.latest))
@@ -93,11 +105,15 @@ export default function HomePage() {
         <section className="relative pt-3" data-testid="home-composer">
           {/* A remount per Pulse item puts its text into the composer's own
               state; the composer itself is unchanged. */}
-          <ResearchComposer
-            key={pulse.kind === "open" ? pulse.item.id : "plain"}
-            initialQuestion={pulse.kind === "open" ? pulse.item.text : ""}
-            notice={pulseNotice}
-          />
+          {proofQuestion && pulse.kind === "none" ? (
+            <ResearchComposer key={`proof-${proofSlug}-${lang}`} initialQuestion={proofQuestion} />
+          ) : (
+            <ResearchComposer
+              key={pulse.kind === "open" ? pulse.item.id : "plain"}
+              initialQuestion={pulse.kind === "open" ? pulse.item.text : ""}
+              notice={pulseNotice}
+            />
+          )}
         </section>
       )}
 

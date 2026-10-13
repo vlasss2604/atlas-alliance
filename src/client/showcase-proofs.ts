@@ -42,8 +42,25 @@ export function showcaseProofs(env: string | undefined = process.env.NODE_ENV): 
   return env === "production" ? [] : orderShowcase(SHOWCASE_DEV_FIXTURE);
 }
 
-// Where "Read the Proof" leads: the read-only published route (HANDOFF §4.8,
-// built in step 5).
+// Where "Read the Proof" leads: the read-only published route (HANDOFF §4.8).
 export function publishedProofPath(slug: string): string {
   return `/proofs/published/${encodeURIComponent(slug)}`;
+}
+
+// "Run your own verification": Verify with this Proof's question in the
+// composer, editable. Only the showcase id travels in the URL — never free
+// text — and an unknown id prefills nothing.
+const SLUG = /^[a-z0-9_-]{1,64}$/;
+
+export function verifyPathForShowcase(slug: string): string {
+  return `/home?proof=${encodeURIComponent(slug)}`;
+}
+
+export function showcaseSlugFromSearch(search: string): string | null {
+  const v = new URLSearchParams(search).get("proof");
+  return v && SLUG.test(v) ? v : null;
+}
+
+export function showcaseBySlug(slug: string, list: readonly ShowcaseProof[] = showcaseProofs()): ShowcaseProof | null {
+  return list.find((p) => p.slug === slug) ?? null;
 }

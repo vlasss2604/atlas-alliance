@@ -2952,6 +2952,19 @@ a.explore-card:active {
   }
 }
 
+/* V7 published, read-only Proof (HANDOFF §4.8): a green-tinted banner —
+   green here means "free to read", as on the Explore chip. */
+.published-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 11px 13px;
+  border-radius: var(--radius-chip);
+  background: rgba(53, 209, 162, 0.07);
+  border: 1px solid rgba(53, 209, 162, 0.35);
+  color: #8fecd0;
+}
+
 /* ---------------------------------------------------------------- *
  * MOTION
  * ---------------------------------------------------------------- */
