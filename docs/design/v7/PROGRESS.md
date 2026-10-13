@@ -8,14 +8,14 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 - **Worktree:** `/home/user/src/atlas-proof-v7` (WSL). Not the main checkout.
 - **Branch:** `claude/v7-design`, created from `2f01c90` of
   `claude/phase-5-research-memory`. Unpushed.
-- **Last code commit:** `c0910e1` (step 7 review).
+- **Last code commit:** `05faead` (step 8).
 - The main checkout `/home/user/src/atlas-proof` belongs to the engine chat
   (D-179). Never switch, reset, stash, clean, merge or pull it.
 - `node_modules` in the worktree is a hardlinked copy of the main repo's
   (gitignored). A Turbopack dev server cannot follow a symlink out of the
   project root.
 
-## Done — Phase 1, steps 1–7
+## Done — Phase 1, steps 1–8
 
 | Step | What | Commits |
 |---|---|---|
@@ -34,9 +34,10 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 | 6 | Review: the Relevant excerpt leads every snapshot; the whole capture is behind Show full captured text (`toggle-full-capture`); Show exact captured text once a structured document is open | `1cc7853` |
 | 7 | Research Library: lit title, keep note with shield; overview panel (real count, latest-verdict bar, All / Supported / Partially / Insufficient tiles, D7) counted by `library-filter.ts` from what each pill shows; one panel of divided rows (48px avatar with outcome dot, pill, runs · questions, last researched); In progress first; bar settles by 0.4s | `49f0a3b` |
 | 7 | Review: a row leads with the project's last finished verdict; an unfinished newest run adds a grey "Last run didn't finish"; never finished → grey "No verdict yet"; tiles and bar count the same | `c0910e1` |
+| 8 | Pulse, claim-led: title with a static heartbeat, info note, grey dashed sample notice; cards with source, X chip, tinted type, age, Claimed + claim verbatim, boxed verify question (new fixture field `verifyQuestion` EN/RU, the designer's `Q`), Verify with ATLAS; copy from §5a (Fresh, Project claim, Claimed, Verify with ATLAS) | `05faead` |
 
 Per step: typecheck, lint (0 errors) and every DB-free test green; last run
-495/495 in 20 files.
+507/507 in 21 files.
 
 ## Owner decisions
 
@@ -86,6 +87,9 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 - **Library rows** keep opening to their questions and runs (D-169).
 - **RU filter labels** «Все · Подтверждено · Частично · Недостаточно» —
   approved.
+- **Pulse → Verify prefill:** stays the claim text, as `07-verify-from-pulse`
+  shows (HANDOFF §4.6 says the verify question; the mockup and step 2 use
+  the text). The verify question is shown on the card only.
 - **Payment:** postponed; the price is **not approved** ($49 is a working
   figure). No payment flow, no price anywhere. Phase 1b waits for the owner.
 
@@ -105,6 +109,8 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   "Not established" on an unresolved card.
 - Library rows open to their questions and runs instead of linking
   straight to the latest result (owner decision).
+- Pulse: the mockup draws the heartbeat once (`ap-line`); here it is static
+  (§4.9: Pulse is not live). The `lockedNote` for Free users waits for 1b.
 - RU composer placeholder is clipped at the edge (no ellipsis); Pump.fun's
   avatar shows "PUM" (3-letter ticker rule); dates use the browser's
   format ("1 окт. 2026 г.").
@@ -148,6 +154,6 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 
 ## Next
 
-**Step 8 — Pulse** (`app/(app)/pulse/page.tsx`, `pulse-card.tsx`, references
-`06-pulse`, `06-pulse-ru`): claim-led cards (HANDOFF §4.6). Then 9 Profile +
-subscription sheet UI (no price), 10 motion and QA.
+**Step 9 — Profile + subscription sheet UI** (`app/(app)/profile/page.tsx`,
+references `08-profile*`, sheet visual `10-demo-6-gate-subscription`), no
+price and no payment (Phase 1b). Then 10 motion and QA.
