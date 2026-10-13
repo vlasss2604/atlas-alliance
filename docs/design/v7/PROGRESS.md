@@ -8,14 +8,14 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 - **Worktree:** `/home/user/src/atlas-proof-v7` (WSL). Not the main checkout.
 - **Branch:** `claude/v7-design`, created from `2f01c90` of
   `claude/phase-5-research-memory`. Unpushed.
-- **Last code commit:** `1cc7853` (step 6 review).
+- **Last code commit:** `49f0a3b` (step 7).
 - The main checkout `/home/user/src/atlas-proof` belongs to the engine chat
   (D-179). Never switch, reset, stash, clean, merge or pull it.
 - `node_modules` in the worktree is a hardlinked copy of the main repo's
   (gitignored). A Turbopack dev server cannot follow a symlink out of the
   project root.
 
-## Done — Phase 1, steps 1–6
+## Done — Phase 1, steps 1–7
 
 | Step | What | Commits |
 |---|---|---|
@@ -32,9 +32,10 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 | 5 | Review: a published Proof lights Verify; "not published yet" copy approved | `7df985b` |
 | 6 | Source snapshot as one hero panel: eyebrow, domain bar with kind chip (wraps under a long RU chip, the domain is never cut), capture date and note, Captured content article, footer Open original · Technical details (native `<details>`, rows below both cells); truncation note grey, not amber | `39e40f5` |
 | 6 | Review: the Relevant excerpt leads every snapshot; the whole capture is behind Show full captured text (`toggle-full-capture`); Show exact captured text once a structured document is open | `1cc7853` |
+| 7 | Research Library: lit title, keep note with shield; overview panel (real count, latest-verdict bar, All / Supported / Partially / Insufficient tiles, D7) counted by `library-filter.ts` from what each pill shows; one panel of divided rows (48px avatar with outcome dot, pill, runs · questions, last researched); In progress first; bar settles by 0.4s | `49f0a3b` |
 
 Per step: typecheck, lint (0 errors) and every DB-free test green; last run
-474/474 in 19 files.
+489/489 in 20 files.
 
 ## Owner decisions
 
@@ -73,6 +74,10 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   document (markdown) or text (HTML) follows behind "Show full captured
   text" — the same order for every kind of capture.
 - **PROGRESS.md:** updated after every step, in its own small commit.
+- **Library filter (D7, step 7):** a group counts under a verdict only when
+  its pill shows that verdict; a failed, cancelled or budget-stopped latest
+  run is under All alone and draws a grey bar part; a NOT_SUPPORTED latest
+  draws a red part (no tile of its own). A tile with 0 is disabled.
 - **Payment:** postponed; the price is **not approved** ($49 is a working
   figure). No payment flow, no price anywhere. Phase 1b waits for the owner.
 
@@ -90,6 +95,11 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   already says it; configuration cards keep their never line.
 - The engine-phrase scan allows one exception: the approved field label
   "Not established" on an unresolved card.
+- Library rows keep opening to their questions and runs (D-169); the
+  mockup's row links straight to the latest result. Awaiting owner
+  confirmation.
+- RU filter labels «Все · Подтверждено · Частично · Недостаточно» —
+  for owner review.
 - RU composer placeholder is clipped at the edge (no ellipsis); Pump.fun's
   avatar shows "PUM" (3-letter ticker rule); dates use the browser's
   format ("1 окт. 2026 г.").
@@ -133,7 +143,6 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 
 ## Next
 
-**Step 7 — Proofs / Research Library** (`app/(app)/research/page.tsx`,
-`research-group-card.tsx`, reference `05-proofs-library`), with the D7
-filter tiles. Then 8 Pulse, 9 Profile + subscription sheet UI (no price),
-10 motion and QA.
+**Step 8 — Pulse** (`app/(app)/pulse/page.tsx`, `pulse-card.tsx`, references
+`06-pulse`, `06-pulse-ru`): claim-led cards (HANDOFF §4.6). Then 9 Profile +
+subscription sheet UI (no price), 10 motion and QA.
