@@ -8,14 +8,14 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 - **Worktree:** `/home/user/src/atlas-proof-v7` (WSL). Not the main checkout.
 - **Branch:** `claude/v7-design`, created from `2f01c90` of
   `claude/phase-5-research-memory`. Unpushed.
-- **Last code commit before this file:** `7df985b`.
+- **Last code commit:** `1cc7853` (step 6 review).
 - The main checkout `/home/user/src/atlas-proof` belongs to the engine chat
   (D-179). Never switch, reset, stash, clean, merge or pull it.
 - `node_modules` in the worktree is a hardlinked copy of the main repo's
   (gitignored). A Turbopack dev server cannot follow a symlink out of the
   project root.
 
-## Done — Phase 1, steps 1–5
+## Done — Phase 1, steps 1–6
 
 | Step | What | Commits |
 |---|---|---|
@@ -30,9 +30,11 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 | 4 | Review: unresolved cards equal the legend's unresolved count; PARTIAL never a card | `5381674` |
 | 5 | Published read-only Proof: banner, label, date note, Run your own verification (`/home?proof=<slug>`), fail-closed `/proofs/published/[slug]`, dev preview `/dev/published-proof` | `8ed8b22` |
 | 5 | Review: a published Proof lights Verify; "not published yet" copy approved | `7df985b` |
+| 6 | Source snapshot as one hero panel: eyebrow, domain bar with kind chip (wraps under a long RU chip, the domain is never cut), capture date and note, Captured content article, footer Open original · Technical details (native `<details>`, rows below both cells); truncation note grey, not amber | `39e40f5` |
+| 6 | Review: the Relevant excerpt leads every snapshot; the whole capture is behind Show full captured text (`toggle-full-capture`); Show exact captured text once a structured document is open | `1cc7853` |
 
 Per step: typecheck, lint (0 errors) and every DB-free test green; last run
-468/468 in 19 files.
+474/474 in 19 files.
 
 ## Owner decisions
 
@@ -67,6 +69,10 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   quality review. Nothing is shown until an approved Proof exists."; RU
   «Этот Proof ещё не опубликован» / «Он ещё на проверке качества. Пока нет
   утверждённого Proof, здесь ничего не показывается.»).
+- **Source snapshot:** every capture leads with the Relevant excerpt; the
+  document (markdown) or text (HTML) follows behind "Show full captured
+  text" — the same order for every kind of capture.
+- **PROGRESS.md:** updated after every step, in its own small commit.
 - **Payment:** postponed; the price is **not approved** ($49 is a working
   figure). No payment flow, no price anywhere. Phase 1b waits for the owner.
 
@@ -100,6 +106,11 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
   `ui-result-language`, `ui-source-provenance`, `ui-top-result-composition`,
   `creator-beta-ux-v1`, `creator-beta-guardrails-v1`,
   `research-library-read-access-v1`, `research-audit`.
+- **Engine question — source class:** the HTML capture of
+  `docs.raydium.io/ray/ray-buybacks` (the Raydium job `fd1252ef…`) carries
+  `source_class = SOCIAL`, while the markdown capture of the same docs is
+  `OFFICIAL_DOCS`. The class drives the "What this establishes / does not
+  establish" caveats, so it matters. The UI shows it as stored; not touched.
 - **D4 / D5 / D10:** engine events for action lines, the stop point of a
   stopped run, and per-source events.
 - **Phase 1b** (subscription, Stars, "beta" wording) — postponed, price not
@@ -122,7 +133,7 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 
 ## Next
 
-**Step 6 — Source snapshot** (`app/(app)/research/[id]/source/[evidenceId]/page.tsx`,
-references `04-source`, `04-source-technical`). Then 7 Library (with D7
-filter tiles), 8 Pulse, 9 Profile + subscription sheet UI (no price), 10
-motion and QA.
+**Step 7 — Proofs / Research Library** (`app/(app)/research/page.tsx`,
+`research-group-card.tsx`, reference `05-proofs-library`), with the D7
+filter tiles. Then 8 Pulse, 9 Profile + subscription sheet UI (no price),
+10 motion and QA.
