@@ -70,7 +70,7 @@ export default function OnboardingPage() {
         {screens.map((_, i) => (
           <span
             key={i}
-            className={`h-1.5 rounded-full transition-all ${
+            className={`h-1.5 rounded-full transition-colors ${
               i === screen ? "w-6 bg-[var(--atlas-cyan)]" : "w-1.5 bg-white/20"
             }`}
           />

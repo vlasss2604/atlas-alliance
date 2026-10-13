@@ -191,7 +191,7 @@ function AnswerPanel({ surface, detail }: { surface: ResultSurface; detail: Rese
                 {confirmed}
                 <span className="text-[var(--atlas-text-faint)]">/{surface.chain.length}</span>
               </span>
-              <span className="text-[11px] leading-[13px] text-[var(--atlas-text-dim)]">{dict.result.figures.verified}</span>
+              <span className="proof-ring-label">{dict.result.figures.verified}</span>
             </span>
           </div>
         )}
@@ -277,7 +277,7 @@ function ProofRing({ chain }: { chain: readonly ProofNode[] }) {
             r="50"
             strokeDasharray={`${seg.toFixed(2)} ${(C - seg).toFixed(2)}`}
             strokeDashoffset={(-(gap / 2) - i * slot).toFixed(2)}
-            style={{ animationDelay: `${120 + i * 45}ms` }}
+            style={{ animationDelay: `${60 + i * 45}ms` }}
           />
         ))}
       </g>
@@ -406,7 +406,7 @@ function ResearchPath({ chain, noun }: { chain: readonly ProofNode[]; noun: stri
               data-component={n.component}
             >
               {i < chain.length - 1 && <span className="path-link" data-status={n.status} aria-hidden />}
-              <span className="path-mark-v7" data-status={n.status} style={{ animationDelay: `${180 + i * 35}ms` }} aria-hidden>
+              <span className="path-mark-v7" data-status={n.status} style={{ animationDelay: `${100 + i * 35}ms` }} aria-hidden>
                 {n.status === "CONFIRMED" ? "✓" : n.status === "PARTIAL" ? <span className="half-disc half-disc-lg" /> : n.status === "CONTRADICTED" ? "✕" : "?"}
               </span>
               <span className="path-word">{pathWord(n.component, noun, dict)}</span>
@@ -440,7 +440,7 @@ function FindingsTable({ rows: all, jobId }: { rows: readonly ResearchTableRow[]
         <h2 className="text-[21px] leading-[26px] font-extrabold tracking-[-0.01em] text-[var(--atlas-text-strong)]">{dict.result.checkedTitle}</h2>
         <div className="checks-bar" style={{ gridTemplateColumns: `repeat(${ordered.length}, minmax(0, 1fr))` }} aria-hidden>
           {ordered.map((r, i) => (
-            <span key={r.component} className="checks-seg" data-status={r.status} style={{ animationDelay: `${120 + i * 45}ms` }} />
+            <span key={r.component} className="checks-seg" data-status={r.status} style={{ animationDelay: `${60 + i * 45}ms` }} />
           ))}
         </div>
         <p className="counts flex flex-wrap gap-x-4 gap-y-1 text-[12px] leading-4 text-[var(--atlas-text-dim)]" data-testid="research-counts">

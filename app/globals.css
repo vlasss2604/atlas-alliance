@@ -227,7 +227,6 @@ body {
   transition:
     transform var(--motion-micro) var(--ease-out),
     border-color var(--motion-transition) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out),
     background-color var(--motion-transition) var(--ease-out);
 }
 a.card:hover,
@@ -395,7 +394,7 @@ button.card:active,
   box-shadow:
     0 0 0 1px rgba(30, 197, 245, 0.08),
     0 0 14px rgba(30, 197, 245, 0.22);
-  transition: box-shadow var(--motion-transition) var(--ease-out);
+  transition: none;
 }
 .orb-sm {
   box-shadow:
@@ -511,8 +510,7 @@ button.card:active,
   transition:
     transform var(--motion-micro) var(--ease-out),
     opacity var(--motion-micro) var(--ease-out),
-    background-color var(--motion-micro) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out);
+    background-color var(--motion-micro) var(--ease-out);
 }
 .pill:active {
   transform: scale(0.97);
@@ -550,8 +548,7 @@ button.card:active,
     background-color var(--motion-micro) var(--ease-out),
     border-color var(--motion-transition) var(--ease-out),
     color var(--motion-transition) var(--ease-out),
-    transform var(--motion-micro) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out);
+    transform var(--motion-micro) var(--ease-out);
 }
 .btn-secondary:hover {
   background: var(--surface-2);
@@ -619,7 +616,6 @@ button.card:active,
     0 8px 24px -8px var(--cyan-glow);
   transition:
     transform var(--motion-micro) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out),
     opacity var(--motion-micro) var(--ease-out);
 }
 .send-orb:hover:not(:disabled) {
@@ -648,7 +644,6 @@ button.card:active,
   outline: none;
   transition:
     border-color var(--motion-transition) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out),
     background-color var(--motion-transition) var(--ease-out);
 }
 .field::placeholder {
@@ -966,7 +961,6 @@ button.card:active,
   align-items: center;
   justify-content: center;
   gap: 4px;
-  animation: ap-pop 240ms var(--ease-rise) 270ms backwards;
 }
 .proof-ring-n {
   display: flex;
@@ -976,6 +970,16 @@ button.card:active,
   font-weight: 800;
   font-variant-numeric: tabular-nums;
   color: var(--atlas-text-strong);
+}
+/* The word under "n/total" stays inside the disc in both languages
+   (RU «подтверждено» is the longest): 10px, slightly tightened. */
+.proof-ring-label {
+  max-width: 72px;
+  font-size: 10px;
+  line-height: 12px;
+  letter-spacing: -0.01em;
+  text-align: center;
+  color: var(--atlas-text-dim);
 }
 /* The verdict pill in the panel: 30px, a static soft glow. */
 .answer-pill .tone {
@@ -1003,7 +1007,7 @@ button.card:active,
   background: var(--tone, var(--atlas-cyan));
   box-shadow: 0 0 8px color-mix(in srgb, var(--tone, var(--atlas-cyan)) 60%, transparent);
   transform-origin: left;
-  animation: ap-grow 400ms ease-out 320ms backwards;
+  animation: ap-grow 300ms ease-out 160ms backwards;
 }
 .legend-dot {
   flex: none;
@@ -1386,8 +1390,7 @@ button.card:active,
   box-shadow: 0 10px 28px -20px rgba(0, 0, 0, 0.9);
   transition:
     border-color var(--motion-transition) var(--ease-out),
-    transform var(--motion-transition) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out);
+    transform var(--motion-transition) var(--ease-out);
 }
 .evidence-card::before {
   content: "";
@@ -1496,25 +1499,11 @@ button.card:active,
 .tagline::after {
   background: linear-gradient(90deg, var(--hairline-strong), transparent);
 }
-/* A loading placeholder that keeps the row's shape. */
+/* A loading placeholder that keeps the row's shape. It holds still:
+   a shimmer is a decorative loop (HANDOFF §4.9). */
 .skeleton {
   border-radius: 0.5rem;
-  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04));
-  background-size: 200% 100%;
-  animation: atlas-shimmer 1.4s ease-in-out infinite;
-}
-@keyframes atlas-shimmer {
-  from {
-    background-position: 200% 0;
-  }
-  to {
-    background-position: -200% 0;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .skeleton {
-    animation: none;
-  }
+  background: rgba(255, 255, 255, 0.06);
 }
 
 /* ---------------------------------------------------------------- *
@@ -1548,8 +1537,7 @@ button.card:active,
     0 12px 30px -22px rgba(0, 0, 0, 0.9);
   transition:
     transform var(--motion-micro) var(--ease-out),
-    border-color var(--motion-transition) var(--ease-out),
-    box-shadow var(--motion-transition) var(--ease-out);
+    border-color var(--motion-transition) var(--ease-out);
 }
 .history-row:hover {
   border-color: var(--edge);
@@ -4008,17 +3996,8 @@ details[open] > .source-tech-summary svg {
   right: auto;
   left: calc(50% + 9px);
 }
-@keyframes atlas-pulse {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.85);
-  }
-  50% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
+/* The working dot (a live job, an interpretation in flight): the one
+   allowed slow status blink, opacity only — ap-blink, 2.4s (§4.9). */
 .pulse-dot {
   display: inline-block;
   width: 10px;
@@ -4026,9 +4005,17 @@ details[open] > .source-tech-summary svg {
   border-radius: 9999px;
   background: var(--atlas-cyan);
   box-shadow: 0 0 8px var(--cyan-glow);
-  animation: atlas-pulse 1.2s var(--ease-out) infinite;
+  animation: ap-blink 2.4s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
+  /* The safety net (HANDOFF §8): with reduced motion nothing animates or
+     transitions anywhere — the named rules below say why per element. */
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
   .enter,
   .sheet-enter,
   .expand-enter,
