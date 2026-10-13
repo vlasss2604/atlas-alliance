@@ -105,253 +105,307 @@ export default function SourceSnapshotPage() {
   const structured = preservesStructure(snapshot.representation);
 
   return (
-    <main className="enter flex flex-col gap-5 pb-6">
+    <main className="flex flex-col gap-3.5 pb-6">
       <AtlasHeader compact back={back} />
 
-      {/* THE SOURCE'S IDENTITY, AND ONLY ITS IDENTITY.
-          A reader arrives here asking "whose document am I looking at, and
-          when was it taken?". That is four short lines — publisher, kind,
-          date, and what this copy is — and they were previously competing
-          for attention with eight key/value rows of transport detail. A
-          response code and a sha256 answer a DIFFERENT question, asked
-          later and by fewer people, so they move behind a disclosure.
-          Nothing is dropped: every field that was on this card is still on
-          this card. */}
-      <section
-        className="panel panel-raised px-5 py-7 sm:px-8 sm:py-9"
-        data-testid="snapshot-header"
-      >
-        <div className="flex flex-col items-center text-center">
-          <p className="eyebrow eyebrow-cyan">{dict.snapshot.eyebrow}</p>
+      {/* ONE HERO PANEL (V7, HANDOFF §4.4): the source's identity, the
+          captured content as an inner article, then a two-cell footer —
+          the way out to the live page, and the transport record behind a
+          disclosure. Nothing is dropped from what the card carried: the
+          same fields, regrouped. */}
+      <section className="source-hero rise" data-testid="snapshot-header">
+        <span className="source-hero-light" aria-hidden />
 
-          {/* The domain is the headline because it is the strongest
-              identity the data actually carries: `sources.title` and
-              `sources.publisher` are null on every row, and inventing a
-              prettier name for a publisher would be a fabricated
-              provenance claim on the one screen that exists to prevent
-              them. */}
-          <h1 className="mt-3.5 text-[1.32rem] font-semibold leading-tight tracking-tight sm:text-[1.55rem]">
-            {domain}
-          </h1>
+        {/* THE SOURCE'S IDENTITY, AND ONLY ITS IDENTITY.
+            A reader arrives here asking "whose document am I looking at,
+            and when was it taken?" — publisher, kind, date, and what this
+            copy is. A response code and a sha256 answer a DIFFERENT
+            question, asked later and by fewer people, so they sit behind
+            the disclosure in the footer. */}
+        <div className="source-id">
+          <p className="source-eyebrow">
+            <ShieldIcon />
+            {dict.snapshot.eyebrow}
+          </p>
 
-          <div className="mt-3.5 flex flex-wrap items-center justify-center gap-x-3 gap-y-2 text-[0.76rem]">
+          <div className="source-domain">
+            <LockIcon />
+            {/* The domain is the headline because it is the strongest
+                identity the data actually carries: `sources.title` and
+                `sources.publisher` are null on every row, and inventing a
+                prettier name for a publisher would be a fabricated
+                provenance claim on the one screen that exists to prevent
+                them. */}
+            <h1>{domain}</h1>
             {/* WHAT KIND OF SOURCE, from the engine's own classification.
                 A KIND marker, never a score: no number, no ranking, and a
                 row that carries no class simply shows no badge. */}
             {snapshot.sourceClass && (
-              <span
-                className="rounded-full border border-[var(--hairline-strong)] bg-[rgba(255,255,255,0.035)] px-2.5 py-[0.28rem] text-[0.68rem] font-medium tracking-[0.09em] text-[var(--atlas-text)]/80 uppercase"
-                data-testid="snapshot-source-class"
-              >
+              <span className="kind-chip" data-testid="snapshot-source-class">
                 {dict.result.sourceKindChips[sourceClassLabel(snapshot.sourceClass)] ?? sourceClassLabel(snapshot.sourceClass)}
-              </span>
-            )}
-            {captured && (
-              <span
-                className="inline-flex items-center gap-1.5 text-[var(--atlas-text-dim)]"
-                data-testid="snapshot-captured"
-              >
-                <ClockIcon />
-                {dict.snapshot.captured(captured)}
               </span>
             )}
           </div>
 
-          <p
-            className="mt-4 max-w-[34rem] text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]"
-            data-testid="snapshot-representation-note"
-          >
-            {dict.snapshot.representation[snapshot.representation]}
-          </p>
+          <div className="source-capture">
+            <span className="source-capture-icon" aria-hidden>
+              <CameraIcon />
+            </span>
+            <div className="min-w-0 flex-1">
+              {captured && (
+                <p className="source-capture-title" data-testid="snapshot-captured">
+                  {dict.snapshot.captured(captured)}
+                </p>
+              )}
+              <p className="source-capture-note" data-testid="snapshot-representation-note">
+                {dict.snapshot.representation[snapshot.representation]}
+              </p>
+            </div>
+          </div>
+        </div>
 
+        {/* TWO KINDS OF CAPTURE, TWO WAYS TO READ ONE.
+            What was STORED decides this, never what the text looks like. A
+            markdown source kept its own structure and opens as the document
+            it is. An HTML page was flattened to text by the transport before
+            it was ever persisted, so it has no structure to show — and
+            leading with all of it means burying the cited passage under an
+            average of 18,000 characters of navigation and boilerplate.
+            Neither branch guesses: reconstructing headings out of flat text
+            would invent a structure ATLAS did not preserve. */}
+        <article className="source-article" data-testid="snapshot-content">
+          <div className="source-article-head">
+            <div className="min-w-0">
+              <h2>{structured ? dict.snapshot.capturedContent : dict.snapshot.extractedText}</h2>
+              {/* THE EXACT TEXT STAYS REACHABLE. Typesetting is a reading
+                  aid, so a reader checking a quotation character by
+                  character — or checking it against the hash — must be
+                  able to see what was actually stored. It is opt-in
+                  because the readable form is the one that answers "what
+                  does this source say?". */}
+              {structured && (
+                <button
+                  type="button"
+                  onClick={() => setShowRaw((v) => !v)}
+                  className="source-article-toggle"
+                  data-testid="toggle-raw-capture"
+                >
+                  {showRaw ? dict.snapshot.showDocument : dict.snapshot.showExact}
+                </button>
+              )}
+            </div>
+            <span className="source-doc-icon" aria-hidden>
+              <DocumentIcon />
+            </span>
+          </div>
+
+          {structured ? (
+            <div className="mt-4">
+              {showRaw ? (
+                <pre
+                  className="overflow-x-auto break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
+                  data-testid="snapshot-raw"
+                >
+                  {snapshot.content}
+                </pre>
+              ) : (
+                <SnapshotDocumentView
+                  content={snapshot.content}
+                  markdown={isMarkdown}
+                  baseUrl={sourceUrl}
+                />
+              )}
+
+              {/* THE PASSAGE THE RESEARCH CITED, under the document it came
+                  from (V7). The same words as the flat branch shows first:
+                  this Evidence row's own fragment, never a passage chosen
+                  here. */}
+              {snapshot.fragment && (
+                <div className="mt-5" data-testid="snapshot-structured-excerpt">
+                  <p className="source-excerpt-label">{dict.snapshot.relevantExcerpt}</p>
+                  <blockquote className="source-quote">
+                    <QuoteIcon />
+                    <mark className="highlight">{snapshot.fragment}</mark>
+                  </blockquote>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-4">
+              {/* SAY WHAT WAS KEPT, PLAINLY. A reader who is shown prose
+                  where they expected a page deserves the reason, and the
+                  reason is a fact about the capture rather than an apology
+                  for it. */}
+              <p className="text-[13px] leading-[19px] text-[#afc0d1]" data-testid="snapshot-flat-note">
+                {dict.snapshot.flatNote}
+              </p>
+
+              {/* THE PASSAGE THE RESEARCH ACTUALLY CITED, FIRST. It is this
+                  Evidence row's own `fragment` — the same words the finding
+                  quoted, not a summary of them and not a passage chosen
+                  here. On a flattened capture it is the ~2% a reader came
+                  for. */}
+              <div className="mt-5" data-testid="snapshot-excerpt">
+                <p className="source-excerpt-label">{dict.snapshot.relevantExcerpt}</p>
+                <blockquote className="source-quote">
+                  <QuoteIcon />
+                  <mark className="highlight">{snapshot.fragment}</mark>
+                </blockquote>
+              </div>
+
+              {/* THE WHOLE CAPTURE IS KEPT AND REACHABLE, JUST NOT DEFAULT.
+                  An audit needs every character; a reader needs the passage.
+                  Nothing here is hidden, rewritten or shortened — the full
+                  text is one click away, exactly as stored. */}
+              <div className="mt-5">
+                <button
+                  type="button"
+                  onClick={() => setShowRaw((v) => !v)}
+                  className="source-article-toggle inline-flex items-center gap-2"
+                  data-testid="toggle-raw-capture"
+                >
+                  <ChevronIcon
+                    className={`shrink-0 transition-transform duration-200 ${showRaw ? "rotate-90" : ""}`}
+                  />
+                  {showRaw ? dict.snapshot.hideFull : dict.snapshot.showFull}
+                  <span className="opacity-70">
+                    {dict.snapshot.characters(snapshot.fullLength.toLocaleString())}
+                  </span>
+                </button>
+              </div>
+
+              {showRaw && (
+                <pre
+                  className="mt-4 overflow-x-auto border-t border-[var(--hairline)] pt-4 break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
+                  data-testid="snapshot-raw"
+                >
+                  {snapshot.content}
+                </pre>
+              )}
+            </div>
+          )}
+
+          {/* Truncation is a fact about the capture, not a finding about
+              the project, so it is neutral rather than amber. */}
+          {snapshot.truncated && (
+            <p className="source-note mt-5" data-testid="snapshot-truncated">
+              {dict.snapshot.truncated(snapshot.content.length.toLocaleString(), snapshot.fullLength.toLocaleString())}
+            </p>
+          )}
+        </article>
+
+        <div className="source-foot">
           <a
             href={sourceUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-5 inline-flex items-center gap-1.5 text-[0.78rem] font-medium text-[var(--atlas-cyan)] hover:underline"
+            className="source-original"
             data-testid="snapshot-open-original"
           >
             {dict.result.openOriginal}
-            <svg width="10" height="10" viewBox="0 0 12 12" fill="none" aria-hidden>
-              <path
-                d="M4 2h6v6M10 2 3 9"
-                stroke="currentColor"
-                strokeWidth="1.3"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
+            <ArrowIcon />
           </a>
+
+          {/* THE TRANSPORT RECORD, KEPT AND DEMOTED. Closed by default
+              because it answers "can I check this?" rather than "what am I
+              looking at?" — and an audit trail nobody can find is worth
+              nothing, so it stays one tap away. The rows stay a
+              left-aligned key/value list: centred metadata is decoration,
+              and this is the part that has to be read precisely. */}
+          <details className="source-tech-details" data-testid="snapshot-technical">
+            <summary className="source-tech-summary">
+              <span>{dict.snapshot.technical}</span>
+              <ChevronDownIcon />
+            </summary>
+
+            <dl className="source-tech rise grid text-left sm:grid-cols-2">
+              <Row label={dict.snapshot.rows.type} value={snapshot.contentType} />
+              <Row label={dict.snapshot.rows.response} value={`HTTP ${snapshot.httpStatus}`} />
+              <Row label={dict.snapshot.rows.size} value={dict.snapshot.bytes(snapshot.byteLength.toLocaleString())} />
+              <Row label={dict.snapshot.rows.captured} value={captured ?? "—"} />
+              <Row label={dict.snapshot.rows.retrievedFrom} value={snapshot.retrievedUrl} mono />
+              {snapshot.finalUrl !== snapshot.retrievedUrl && (
+                <Row label={dict.snapshot.rows.landedOn} value={snapshot.finalUrl} mono />
+              )}
+              {/* The hashes cover the WHOLE capture, including anything the
+                  body above truncates. They say "this is the text that was
+                  captured" and deliberately nothing more — not a
+                  notarisation, and published nowhere. */}
+              <Row label={dict.snapshot.rows.contentHash} value={snapshot.contentHash} mono />
+              <Row label={dict.snapshot.rows.textHash} value={snapshot.textSha256} mono />
+            </dl>
+          </details>
         </div>
-
-        {/* THE TRANSPORT RECORD, KEPT AND DEMOTED. Closed by default
-            because it answers "can I check this?" rather than "what am I
-            looking at?" — and an audit trail nobody can find is worth
-            nothing, so it stays one click away rather than one page away.
-            The rows themselves stay a left-aligned key/value grid: centred
-            metadata is decoration, and this is the part that has to be
-            read precisely. */}
-        <details
-          className="group mt-7 border-t border-[var(--hairline)] pt-4"
-          data-testid="snapshot-technical"
-        >
-          <summary className="mx-auto flex w-fit cursor-pointer list-none items-center gap-2 text-[0.74rem] text-[var(--atlas-text-dim)] transition-colors select-none hover:text-[var(--atlas-text)]/85 [&::-webkit-details-marker]:hidden">
-            <ChevronIcon className="shrink-0 transition-transform duration-200 group-open:rotate-90" />
-            {dict.snapshot.technical}
-          </summary>
-
-          <dl className="mt-5 grid gap-x-8 gap-y-3 text-left text-[0.75rem] sm:grid-cols-2">
-            <Row label={dict.snapshot.rows.type} value={snapshot.contentType} />
-            <Row label={dict.snapshot.rows.response} value={`HTTP ${snapshot.httpStatus}`} />
-            <Row label={dict.snapshot.rows.size} value={dict.snapshot.bytes(snapshot.byteLength.toLocaleString())} />
-            <Row label={dict.snapshot.rows.captured} value={captured ?? "—"} />
-            <Row label={dict.snapshot.rows.retrievedFrom} value={snapshot.retrievedUrl} mono />
-            {snapshot.finalUrl !== snapshot.retrievedUrl && (
-              <Row label={dict.snapshot.rows.landedOn} value={snapshot.finalUrl} mono />
-            )}
-            {/* The hashes cover the WHOLE capture, including anything the
-                body below truncates. They say "this is the text that was
-                captured" and deliberately nothing more — not a
-                notarisation, and published nowhere. */}
-            <Row label={dict.snapshot.rows.contentHash} value={snapshot.contentHash} mono />
-            <Row label={dict.snapshot.rows.textHash} value={snapshot.textSha256} mono />
-          </dl>
-        </details>
-      </section>
-
-      {/* TWO KINDS OF CAPTURE, TWO WAYS TO READ ONE.
-          What was STORED decides this, never what the text looks like. A
-          markdown source kept its own structure and opens as the document
-          it is. An HTML page was flattened to text by the transport before
-          it was ever persisted, so it has no structure to show — and
-          leading with all of it means burying the cited passage under an
-          average of 18,000 characters of navigation and boilerplate.
-          Neither branch guesses: reconstructing headings out of flat text
-          would invent a structure ATLAS did not preserve. */}
-      <section className="panel p-5 sm:p-6" data-testid="snapshot-content">
-        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1.5">
-          <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-            {structured ? dict.snapshot.capturedContent : dict.snapshot.extractedText}
-          </p>
-          {/* THE EXACT TEXT STAYS REACHABLE. Typesetting is a reading aid,
-              so a reader checking a quotation character by character — or
-              checking it against the hash — must be able to see what was
-              actually stored. It is opt-in because the readable form is
-              the one that answers "what does this source say?". */}
-          {structured && (
-            <button
-              type="button"
-              onClick={() => setShowRaw((v) => !v)}
-              className="text-[0.72rem] text-[var(--atlas-text-dim)] underline-offset-2 hover:text-[var(--atlas-cyan)] hover:underline"
-              data-testid="toggle-raw-capture"
-            >
-              {showRaw ? dict.snapshot.showDocument : dict.snapshot.showExact}
-            </button>
-          )}
-        </div>
-
-        {structured ? (
-          <div className="mt-4">
-            {showRaw ? (
-              <pre
-                className="overflow-x-auto break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
-                data-testid="snapshot-raw"
-              >
-                {snapshot.content}
-              </pre>
-            ) : (
-              <SnapshotDocumentView
-                content={snapshot.content}
-                markdown={isMarkdown}
-                baseUrl={sourceUrl}
-              />
-            )}
-          </div>
-        ) : (
-          <div className="mt-3.5">
-            {/* SAY WHAT WAS KEPT, PLAINLY. A reader who is shown prose
-                where they expected a page deserves the reason, and the
-                reason is a fact about the capture rather than an apology
-                for it. */}
-            <p
-              className="text-[0.82rem] leading-relaxed text-[var(--atlas-text-dim)]"
-              data-testid="snapshot-flat-note"
-            >
-              {dict.snapshot.flatNote}
-            </p>
-
-            {/* THE PASSAGE THE RESEARCH ACTUALLY CITED, FIRST. It is this
-                Evidence row's own `fragment` — the same words the finding
-                quoted, not a summary of them and not a passage chosen
-                here. On a flattened capture it is the ~2% a reader came
-                for. */}
-            <div className="mt-5" data-testid="snapshot-excerpt">
-              <p className="eyebrow" style={{ color: "var(--atlas-text-dim)" }}>
-                {dict.snapshot.relevantExcerpt}
-              </p>
-              <blockquote className="mt-2 border-l-2 border-[rgba(45,212,191,0.4)] pl-3.5 text-[0.86rem] leading-relaxed text-[var(--atlas-text)]/92">
-                {snapshot.fragment}
-              </blockquote>
-            </div>
-
-            {/* THE WHOLE CAPTURE IS KEPT AND REACHABLE, JUST NOT DEFAULT.
-                An audit needs every character; a reader needs the passage.
-                Nothing here is hidden, rewritten or shortened — the full
-                text is one click away, exactly as stored. */}
-            <button
-              type="button"
-              onClick={() => setShowRaw((v) => !v)}
-              className="mt-5 inline-flex items-center gap-2 text-[0.74rem] text-[var(--atlas-text-dim)] underline-offset-2 hover:text-[var(--atlas-cyan)] hover:underline"
-              data-testid="toggle-raw-capture"
-            >
-              <ChevronIcon
-                className={`shrink-0 transition-transform duration-200 ${showRaw ? "rotate-90" : ""}`}
-              />
-              {showRaw ? dict.snapshot.hideFull : dict.snapshot.showFull}
-              <span className="text-[var(--atlas-text-dim)]/70">
-                {dict.snapshot.characters(snapshot.fullLength.toLocaleString())}
-              </span>
-            </button>
-
-            {showRaw && (
-              <pre
-                className="mt-4 overflow-x-auto border-t border-[var(--hairline)] pt-4 break-words whitespace-pre-wrap font-mono text-[0.75rem] leading-relaxed text-[var(--atlas-text)]/85"
-                data-testid="snapshot-raw"
-              >
-                {snapshot.content}
-              </pre>
-            )}
-          </div>
-        )}
-
-        {snapshot.truncated && (
-          <p
-            className="mt-5 rounded-lg border border-[rgba(251,191,36,0.2)] bg-[rgba(251,191,36,0.05)] px-3 py-2 text-[0.76rem] leading-snug text-[#fcd34d]"
-            data-testid="snapshot-truncated"
-          >
-            {dict.snapshot.truncated(snapshot.content.length.toLocaleString(), snapshot.fullLength.toLocaleString())}
-          </p>
-        )}
       </section>
     </main>
   );
 }
 
-// What was actually preserved, per representation (dict.snapshot.representation).
-// An HTML page did not survive as a page and is never described as one.
-
-// The same two glyphs the rest of the product uses: one "this is an age"
-// signal, and one disclosure marker, so this screen does not introduce a
-// third convention for either.
-function ClockIcon() {
+// The glyphs of the V7 snapshot board: a shield for ATLAS's own label, a
+// lock for the source's address, a camera for the capture, a page for the
+// captured document, and a quote mark for the cited passage. All static.
+function ShieldIcon() {
   return (
-    <svg width="11" height="11" viewBox="0 0 12 12" fill="none" aria-hidden className="shrink-0">
-      <circle cx="6" cy="6" r="4.6" stroke="currentColor" strokeWidth="1.1" />
-      <path d="M6 3.4V6l1.8 1.2" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round" />
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--atlas-cyan)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
+      <path d="M12 3l7 3v5c0 4.5-3 8.3-7 9.5-4-1.2-7-5-7-9.5V6z" />
+      <path d="M9 12l2 2 4-4" />
     </svg>
   );
 }
 
+function LockIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#35D1A2" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden className="shrink-0">
+      <rect x="5" y="11" width="14" height="10" rx="2" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+function CameraIcon() {
+  return (
+    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 8h3l2-3h6l2 3h3v11H4z" />
+      <circle cx="12" cy="13" r="3.5" />
+    </svg>
+  );
+}
+
+function DocumentIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v4h4" />
+    </svg>
+  );
+}
+
+function QuoteIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--atlas-cyan)" aria-hidden>
+      <path d="M4 17V11c0-3 2-5.5 5-6l.7 1.6C8 7.3 7.2 8.6 7 10h3v7zm9 0V11c0-3 2-5.5 5-6l.7 1.6C17 7.3 16.2 8.6 16 10h3v7z" />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M7 17L17 7" />
+      <path d="M8 7h9v9" />
+    </svg>
+  );
+}
+
+function ChevronDownIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+// The disclosure marker of the flat capture's "full text" control.
 function ChevronIcon({ className = "" }: { className?: string }) {
   return (
     <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden className={className}>
@@ -368,15 +422,9 @@ function ChevronIcon({ className = "" }: { className?: string }) {
 
 function Row({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div className="min-w-0">
-      <dt className="text-[0.68rem] tracking-wider text-[var(--atlas-text-dim)] uppercase">
-        {label}
-      </dt>
-      <dd
-        className={`mt-0.5 break-all text-[var(--atlas-text)]/90 ${mono ? "font-mono text-[0.7rem]" : ""}`}
-      >
-        {value}
-      </dd>
+    <div className="source-tech-row">
+      <dt>{label}</dt>
+      <dd className={mono ? "font-mono text-[0.72rem]" : ""}>{value}</dd>
     </div>
   );
 }

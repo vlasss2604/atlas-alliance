@@ -47,16 +47,17 @@ function Block({ block }: { block: DocumentBlock }) {
       // document sits INSIDE the snapshot rather than competing with it,
       // while keeping its internal hierarchy intact.
       const tag = `h${Math.min(block.level + 1, 6)}`;
+      // V7 (HANDOFF §4.4): 16 / 15 / 14px, bold, on the snapshot article.
       const size =
         block.level === 1
-          ? "mt-7 text-[1.02rem]"
+          ? "mt-6 text-[16px] leading-[22px]"
           : block.level === 2
-            ? "mt-6 text-[0.95rem]"
-            : "mt-5 text-[0.88rem]";
+            ? "mt-5 text-[15px] leading-[20px]"
+            : "mt-4 text-[14px] leading-[20px]";
       return createElement(
         tag,
         {
-          className: `${size} font-semibold leading-snug tracking-tight text-[var(--atlas-text)] first:mt-0`,
+          className: `${size} font-bold text-[var(--atlas-text-strong)] first:mt-0`,
         },
         <Inline nodes={block.content} />,
       );
@@ -64,7 +65,7 @@ function Block({ block }: { block: DocumentBlock }) {
 
     case "paragraph":
       return (
-        <p className="mt-3 text-[0.86rem] leading-[1.65] text-[var(--atlas-text)]/88 first:mt-0">
+        <p className="mt-3 [:is(h2,h3,h4,h5,h6)+&]:mt-1.5 text-[13.5px] leading-[21px] text-[#b5c3d2] [overflow-wrap:anywhere] first:mt-0">
           <Inline nodes={block.content} />
         </p>
       );

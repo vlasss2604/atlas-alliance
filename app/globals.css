@@ -2966,6 +2966,298 @@ a.explore-card:active {
 }
 
 /* ---------------------------------------------------------------- *
+ * V7 SOURCE SNAPSHOT (HANDOFF §4.4) — one hero panel: the identity,
+ * the captured content as an inner article, and a two-cell footer
+ * (Open original · Technical details) with the rows opening below it.
+ * ---------------------------------------------------------------- */
+.source-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #08294b 0%, #061b30 100%);
+  border: 1px solid rgba(30, 197, 245, 0.42);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 22px 44px -18px rgba(0, 0, 0, 0.85),
+    0 0 36px -6px rgba(30, 197, 245, 0.3);
+}
+.source-hero-light {
+  position: absolute;
+  top: 0;
+  left: 15%;
+  right: 15%;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(30, 197, 245, 0) 0%, #7fe6ff 50%, rgba(30, 197, 245, 0) 100%);
+  pointer-events: none;
+}
+.source-id {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 16px 16px;
+}
+.source-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 20px;
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: 600;
+  color: #afc0d1;
+}
+/* The domain is the identity, so it is never cut: when the kind chip does
+   not fit beside it (a long RU label), the chip wraps under it. */
+.source-domain {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-height: 54px;
+  box-sizing: border-box;
+  padding: 10px 10px 10px 14px;
+  border-radius: 16px;
+  background: #03111f;
+  border: 1px solid rgba(30, 197, 245, 0.3);
+  box-shadow:
+    inset 0 2px 10px rgba(0, 0, 0, 0.45),
+    0 0 0 4px rgba(30, 197, 245, 0.05);
+}
+.source-domain h1 {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-size: 19px;
+  line-height: 24px;
+  font-weight: 800;
+  color: var(--atlas-text-strong);
+  overflow-wrap: anywhere;
+}
+.source-domain .kind-chip {
+  flex: none;
+  height: 24px;
+  font-size: 11.5px;
+}
+.source-capture {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.source-capture-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 9999px;
+  background: rgba(30, 197, 245, 0.12);
+  border: 1px solid rgba(30, 197, 245, 0.55);
+  color: var(--atlas-cyan);
+}
+.source-capture-title {
+  margin-top: 4px;
+  font-size: 15px;
+  line-height: 22px;
+  font-weight: 800;
+  color: var(--atlas-text-strong);
+}
+.source-capture-note {
+  margin-top: 4px;
+  font-size: 13px;
+  line-height: 19px;
+  color: #afc0d1;
+}
+.source-article {
+  margin: 0 10px;
+  padding: 16px 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #0c2c4a 0%, #0a2541 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 14px 28px -10px rgba(0, 0, 0, 0.7);
+}
+.source-article-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.source-article-head h2 {
+  margin: 0;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 800;
+  color: var(--atlas-text-strong);
+}
+.source-article-toggle {
+  margin-top: 2px;
+  font-size: 12px;
+  line-height: 16px;
+  color: #9db0c4;
+  text-align: left;
+}
+.source-article-toggle:hover {
+  color: var(--atlas-cyan);
+}
+.source-doc-icon {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+  background: rgba(143, 168, 255, 0.12);
+  border: 1px solid rgba(143, 168, 255, 0.3);
+  color: #a9bbff;
+}
+.source-excerpt-label {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #6b788b;
+}
+.source-quote {
+  position: relative;
+  margin: 8px 0 0;
+  padding: 14px 14px 14px 42px;
+  border-radius: 14px;
+  background: rgba(30, 197, 245, 0.08);
+  border: 1px solid rgba(30, 197, 245, 0.32);
+  box-shadow: 0 0 22px -6px rgba(30, 197, 245, 0.35);
+  font-size: 15px;
+  line-height: 24px;
+  color: var(--atlas-text-strong);
+  overflow-wrap: anywhere;
+}
+.source-quote > svg {
+  position: absolute;
+  left: 14px;
+  top: 17px;
+}
+.source-quote .highlight {
+  padding: 0 1px;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+}
+/* Not a finding about the project, so neutral — never amber. */
+.source-note {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(148, 160, 179, 0.07);
+  border: 1px solid rgba(148, 160, 179, 0.28);
+  font-size: 12.5px;
+  line-height: 18px;
+  color: #c4cedb;
+}
+/* The footer: "Open original" sits over the left half of the technical
+   disclosure's summary row, so the rows still open below both cells and
+   the disclosure stays a native, closed-by-default <details>. */
+.source-foot {
+  position: relative;
+  margin-top: 12px;
+  border-top: 1px solid rgba(30, 197, 245, 0.16);
+}
+.source-original {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 50%;
+  height: 52px;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 700;
+  color: var(--atlas-cyan);
+  transition: transform var(--motion-micro) var(--ease-out);
+}
+.source-original:active {
+  transform: scale(0.97);
+}
+.source-tech-summary {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 52px;
+  box-sizing: border-box;
+  padding: 6px 12px;
+  text-align: center;
+  margin-left: 50%;
+  border-left: 1px solid rgba(30, 197, 245, 0.16);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 600;
+  color: #afc0d1;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.source-tech-summary::-webkit-details-marker {
+  display: none;
+}
+.source-tech-summary:hover {
+  color: var(--atlas-text-strong);
+}
+.source-tech-summary svg {
+  transition: transform 200ms var(--ease-out);
+}
+details[open] > .source-tech-summary svg {
+  transform: rotate(180deg);
+}
+.source-tech {
+  margin: 0 12px 12px;
+  padding: 4px 14px;
+  column-gap: 24px;
+  border-radius: 12px;
+  background: rgba(3, 17, 31, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+.source-tech-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+  padding: 8px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
+  font-size: 12.5px;
+  line-height: 17px;
+}
+.source-tech-row:first-child {
+  border-top-color: transparent;
+}
+.source-tech-row dt {
+  flex: none;
+  color: #98a5b8;
+}
+.source-tech-row dd {
+  min-width: 0;
+  margin: 0;
+  color: #e6ecf4;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+@media (prefers-reduced-motion: reduce) {
+  .source-original,
+  .source-tech-summary svg {
+    transition: none;
+    transform: none;
+  }
+}
+
+/* ---------------------------------------------------------------- *
  * MOTION
  * ---------------------------------------------------------------- */
 @keyframes atlas-fade-up {

@@ -847,3 +847,77 @@ describe("the Snapshot action on the result", () => {
     expect(audit).toContain("{card.snapshotHref && jobId && (");
   });
 });
+
+/* ---------------------------------------------------------------- *
+ * V7 (HANDOFF §4.4) — ONE HERO PANEL, THE SAME RECORD
+ * ---------------------------------------------------------------- */
+
+describe("source snapshot — the V7 hero panel", () => {
+  const css = readFileSync("app/globals.css", "utf-8");
+  const rule = (selector: string) => {
+    const at = css.indexOf(`\n${selector} {`);
+    expect(at, selector).toBeGreaterThan(-1);
+    return css.slice(at, css.indexOf("}", at));
+  };
+
+  it("identity, captured content and footer live in the one panel, in that order", () => {
+    const page = codeOf(PAGE);
+    const at = (needle: string) => page.indexOf(needle);
+    const hero = at('className="source-hero rise" data-testid="snapshot-header"');
+    expect(hero).toBeGreaterThan(-1);
+    expect(hero).toBeLessThan(at('data-testid="snapshot-content"'));
+    expect(at('data-testid="snapshot-content"')).toBeLessThan(at('data-testid="snapshot-open-original"'));
+    expect(at('data-testid="snapshot-open-original"')).toBeLessThan(at('data-testid="snapshot-technical"'));
+    // The footer and the article close inside the hero section.
+    expect(at("</article>")).toBeLessThan(at('className="source-foot"'));
+    expect(at('className="source-foot"')).toBeLessThan(at("</section>"));
+  });
+
+  it("the domain is never cut: no ellipsis, and the kind chip wraps under it instead", () => {
+    const h1 = rule(".source-domain h1");
+    expect(h1).not.toMatch(/text-overflow|white-space:\s*nowrap/);
+    expect(h1).toContain("overflow-wrap: anywhere");
+    expect(rule(".source-domain")).toContain("flex-wrap: wrap");
+  });
+
+  it("a structured capture also shows the cited passage — the row's own fragment", () => {
+    const page = readFileSync(PAGE, "utf-8");
+    const structured = page.slice(
+      page.indexOf("{structured ? ("),
+      page.indexOf('data-testid="snapshot-flat-note"'),
+    );
+    const excerpt = structured.slice(structured.indexOf('data-testid="snapshot-structured-excerpt"'));
+    expect(structured.indexOf("<SnapshotDocumentView")).toBeLessThan(
+      structured.indexOf('data-testid="snapshot-structured-excerpt"'),
+    );
+    expect(structured).toContain("{snapshot.fragment && (");
+    expect(excerpt).toContain("dict.snapshot.relevantExcerpt");
+    expect(excerpt).toContain('<mark className="highlight">{snapshot.fragment}</mark>');
+  });
+
+  it("the highlighter mark is static", () => {
+    expect(rule(".highlight")).not.toMatch(/animation|transition/);
+    expect(rule(".source-quote")).not.toMatch(/animation|transition/);
+  });
+
+  it("a truncated capture is declared in neutral grey, never in a result colour", () => {
+    const page = codeOf(PAGE);
+    const note = page.slice(page.indexOf("{snapshot.truncated && ("));
+    expect(note.slice(0, 200)).toContain('className="source-note');
+    // Amber is a result colour (HANDOFF §1.5); truncation is not a finding.
+    expect(page).not.toMatch(/251,\s*191,\s*36|#fcd34d|amber/i);
+    expect(rule(".source-note")).toContain("148, 160, 179");
+  });
+
+  it("the technical record is still a native disclosure under both footer cells", () => {
+    const page = codeOf(PAGE);
+    const foot = page.slice(page.indexOf('className="source-foot"'));
+    expect(foot).toMatch(/<details className="source-tech-details" data-testid="snapshot-technical">/);
+    expect(foot.indexOf("<summary")).toBeLessThan(foot.indexOf("<dl"));
+    // "Open original" covers the left half; the summary takes the right.
+    expect(rule(".source-original")).toContain("width: 50%");
+    expect(rule(".source-tech-summary")).toContain("margin-left: 50%");
+    // Opening it plays the one entrance, which reduced motion removes.
+    expect(foot.slice(foot.indexOf("<dl"), foot.indexOf("</dl>"))).toContain("rise");
+  });
+});
