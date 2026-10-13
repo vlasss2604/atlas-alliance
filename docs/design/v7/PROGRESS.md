@@ -8,14 +8,14 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 - **Worktree:** `/home/user/src/atlas-proof-v7` (WSL). Not the main checkout.
 - **Branch:** `claude/v7-design`, created from `2f01c90` of
   `claude/phase-5-research-memory`. Unpushed.
-- **Last code commit:** `05f5324` (step 9, layout).
+- **Last code commit:** `aa3dea3` (step 10).
 - The main checkout `/home/user/src/atlas-proof` belongs to the engine chat
   (D-179). Never switch, reset, stash, clean, merge or pull it.
 - `node_modules` in the worktree is a hardlinked copy of the main repo's
   (gitignored). A Turbopack dev server cannot follow a symlink out of the
   project root.
 
-## Done — Phase 1, steps 1–9 (9: layout only)
+## Done — Phase 1, steps 1–10 (9: layout only)
 
 | Step | What | Commits |
 |---|---|---|
@@ -37,9 +37,10 @@ next session. Decisions here are the owner's (2026-10-12 … 2026-10-13).
 | 8 | Pulse, claim-led: title with a static heartbeat, info note, grey dashed sample notice; cards with source, X chip, tinted type, age, Claimed + claim verbatim, boxed verify question (new fixture field `verifyQuestion` EN/RU, the designer's `Q`), Verify with ATLAS; copy from §5a (Fresh, Project claim, Claimed, Verify with ATLAS) | `05faead` |
 | 8 | Review: Pulse → Verify prefills the card's verify question in the display language (`pulsePrefill`; the claim text when a card has none); the From Pulse pill shows the claim as context, folded to two lines (Show all / Show less) | `d4743ab` |
 | 9 | Profile layout: orb with static dotted ring + title, access-level panel (grey edge, existing access line unchanged), EN \| RU switch with a sliding thumb (transform, 0.28s), privacy panel, grey delete row with the existing two confirms, deleted notice. No Help row, no price, no subscription sheet | `05f5324` |
+| 10 | Motion and QA pass (§4.9, §8): the loading skeleton no longer shimmers; the working dot is the slow 2.4s opacity blink (`ap-blink`); no `box-shadow` in any transition (8 rules) and no animated width (onboarding dots); the ring's n/total is shown at once (no delayed pop); Proof bars and ring start sooner; a global reduced-motion rule; RU «подтверждено» fits the ring (10px label); `ui-v7-design-motion` checks the rules over every stylesheet rule and component | `aa3dea3` |
 
 Per step: typecheck, lint (0 errors) and every DB-free test green; last run
-520/520 in 22 files.
+531/531 in 23 files.
 
 ## Owner decisions
 
@@ -115,15 +116,15 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 - Library rows open to their questions and runs instead of linking
   straight to the latest result (owner decision).
 - Pulse: the `lockedNote` for Free users waits for 1b.
+- Proof entrance: the ring of N segments uses the spec's own timing (0.35s
+  per segment, 45ms step), so with 8 segments it closes at about 0.7s, not
+  0.4s; everything else on the screen settles by about 0.45s.
 - RU composer placeholder is clipped at the edge (no ellipsis); Pump.fun's
   avatar shows "PUM" (3-letter ticker rule); dates use the browser's
   format ("1 окт. 2026 г.").
 
 ## Deferred
 
-- **Step 10 (motion and QA pass):** RU "подтверждено" under the ring is a
-  little wider than the disc; the existing `atlas-shimmer` skeleton and
-  `atlas-pulse` dot to be checked against HANDOFF §4.9.
 - **`pulse-phase-a-v1`** (DB suite): its Home handoff assertions were
   updated to the verify-question prefill in step 8 review; not run yet.
 - **Tests with the `atlas_test` database:** only with the owner's explicit
@@ -174,5 +175,5 @@ Per step: typecheck, lint (0 errors) and every DB-free test green; last run
 
 ## Next
 
-**Step 10 — motion and QA pass** (HANDOFF §4.9 and §8 on every screen),
-then the Phase 1 report.
+Phase 1 (design) is done, apart from what is deferred above (D14 / Phase 1b,
+the DB-backed test run, D4 / D5 / D10). Next phases wait for the owner.
